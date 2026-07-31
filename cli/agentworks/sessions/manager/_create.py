@@ -108,8 +108,9 @@ def _preflight_and_resolve(
 
         # PREFLIGHT-ALL against the one command-start context: the
         # required-commands check probes a realized (existing) agent or
-        # the admin target NOW and defers on a pending one; each
-        # git-credential provider predicts its token's resolvability.
+        # the admin target NOW and defers on a pending one, and the sweep
+        # predicts each node's declared secrets (the git-credential
+        # tokens here) before that node's own preflight.
         # Then the boundary resolve: the walk-away point.
         preflight_all(
             graph.nodes,

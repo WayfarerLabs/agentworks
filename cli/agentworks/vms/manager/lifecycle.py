@@ -229,7 +229,7 @@ def create_vm(
     # leaves nothing behind.
     slug = _mgr._resolve_system_slug(db)
 
-    template_node = vm_template_node(vm_tmpl, registry)
+    template_node = vm_template_node(vm_tmpl)
     site_node = vm_site_node(registry, site)
     pending_vm = pending_vm_node(db, vm_name, template_node, site_node, cred_nodes)
     nodes = walk(pending_vm)

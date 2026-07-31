@@ -165,7 +165,6 @@ def test_rekey_graph_roots_the_template_beside_the_live_vm(
     from agentworks.bootstrap import build_registry
     from agentworks.orchestration.secrets import secret_union
     from agentworks.orchestration.walk import walk
-    from agentworks.secrets.resolver import Resolver
     from agentworks.vms.nodes import live_vm_node, vm_template_node
     from agentworks.vms.templates import resolve_template
 
@@ -174,9 +173,8 @@ def test_rekey_graph_roots_the_template_beside_the_live_vm(
     vm = db.get_vm("box")
     assert vm is not None
     registry = build_registry(config)
-    resolver = Resolver(config, registry)
 
-    tmpl_node = vm_template_node(resolve_template(registry, vm.template), resolver)
+    tmpl_node = vm_template_node(resolve_template(registry, vm.template))
     vm_node = live_vm_node(db, config, registry, vm)
     nodes = walk(tmpl_node, vm_node)
 

@@ -214,8 +214,8 @@ def require_predicted_refs(
                 f"{owner}: secret '{ref.name}' ({ref.usage}) is not resolvable by any active backend",
                 hint=(
                     f"`agw secret describe {ref.name}` shows how each "
-                    "backend looks the secret up; add a backend mapping "
-                    "or extend [secret_config].backends."
+                    "backend looks the secret up; set the env var, add a "
+                    "backend mapping, or extend [secret_config].backends."
                 ),
             )
 

@@ -280,16 +280,18 @@ class LiveVMNode:
 
 
 class VMTemplateNode:
-    """The resolved ``vm-template`` node: the template's readiness,
-    formerly the free function ``preflight_vm_template``, relocated
-    here so it has the same home every other readiness check has.
-    Built by :func:`vm_template_node`. Holds the registry because the
-    readiness check predicts centrally over the key's declaration.
+    """The resolved ``vm-template`` node: the template's graph identity
+    and its declared Tailscale auth key. Built by
+    :func:`vm_template_node`.
+
+    Holds no registry. It used to, solely so its ``preflight`` could
+    predict the auth key's resolvability over that key's declaration;
+    with prediction moved to the operation's preflight sweep, the node
+    declares the reference and nothing reads a registry through it.
     """
 
-    def __init__(self, tmpl: ResolvedVMTemplate, registry: Registry) -> None:
+    def __init__(self, tmpl: ResolvedVMTemplate) -> None:
         self._tmpl = tmpl
-        self._registry = registry
 
     @property
     def key(self) -> str:
@@ -312,45 +314,38 @@ class VMTemplateNode:
         return (self._tmpl.tailscale_auth_key,)
 
     def config_secret_refs(self) -> tuple[ResourceReference, ...]:
-        # None: the Tailscale key is a template FIELD, not a config-secret
-        # reference off a consuming resource's declared config, and this
-        # node predicts it itself in preflight (see below).
-        return ()
+        """The Tailscale auth key, as the reference the vm-template kind
+        itself publishes (:func:`~agentworks.vms.template
+        .tailscale_secret_reference`, single-sourced with what
+        ``dependencies`` emits at finalize).
+
+        The preflight sweep predicts resolvability over this; the node
+        does not, on the same rule the vm-site and git-credential nodes
+        follow. The key is still the TEMPLATE's responsibility rather
+        than the site's, and it still stays out of a reinit's boundary
+        (that command's graph deliberately excludes this node); what
+        moved is only who asks whether a declared name would resolve.
+        Conditionality is unchanged either way, because it was never
+        expressed in the check: the node either participates in the
+        command's graph or it does not.
+        """
+        from agentworks.vms.template import tailscale_secret_reference
+
+        return (tailscale_secret_reference(self._tmpl.tailscale_auth_key, self._tmpl.name),)
 
     def preflight(self, ctx: RunContext) -> None:
-        """The template's readiness: its Tailscale auth key must be
-        predicted resolvable, without prompting, via the central
-        prediction over its declaration. The key is the template's
-        responsibility, not the site's; the declaration lookup rides
-        ``secret_declarations``'s lookup-or-synthesize fallback (an
-        operator with no ``[secrets.*]`` sections still gets a
-        callable backend chain)."""
-        from agentworks.errors import ConfigError
-        from agentworks.orchestration.secrets import (
-            predict_resolution,
-            secret_declarations,
-        )
-        from agentworks.secrets.resolve import active_backends
+        """No-op. The template's one readiness concern was its auth key's
+        resolvability, which is now the preflight sweep's
+        (:meth:`config_secret_refs` is what it predicts over).
 
-        if ctx.config is None:
-            raise ConfigError(
-                f"vm-template '{self._tmpl.name}': cannot predict the "
-                f"Tailscale auth key's resolvability without config on "
-                f"the context (assembled for inspection?)"
-            )
-        (decl,) = secret_declarations([self._tmpl.tailscale_auth_key], self._registry)
-        predicted = predict_resolution((decl,), active_backends(ctx.config, self._registry))
-        if predicted[decl.name] is None:
-            raise ConfigError(
-                f"vm-template '{self._tmpl.name}': the Tailscale auth key "
-                f"secret '{decl.name}' is not resolvable by any active "
-                f"backend",
-                hint=(
-                    f"`agw secret describe {decl.name}` shows how each "
-                    "backend looks the secret up; set the env var, add a "
-                    "backend mapping, or extend [secret_config].backends."
-                ),
-            )
+        Deliberately no intactness check either, unlike the vm-site and
+        git-credential nodes: those verify their declared names reach
+        real registry rows, but the auth key rides
+        ``secret_declarations``'s lookup-or-synthesize fallback on
+        purpose, so an operator with no ``[secrets.*]`` sections at all
+        still gets a callable backend chain. Requiring a row here would
+        retire that fallback as a side effect.
+        """
 
     def runup(self, ctx: RunContext) -> None: ...
 
@@ -480,11 +475,11 @@ def live_vm_node(
     return LiveVMNode(db, config, registry, row, site)
 
 
-def vm_template_node(tmpl: ResolvedVMTemplate, registry: Registry) -> VMTemplateNode:
+def vm_template_node(tmpl: ResolvedVMTemplate) -> VMTemplateNode:
     """Build the ``vm-template/<name>`` node from the RESOLVED template
     (inheritance already applied; the resolved object is the backing
     data, the way a row backs a live node)."""
-    return VMTemplateNode(tmpl, registry)
+    return VMTemplateNode(tmpl)
 
 
 def pending_vm_node(

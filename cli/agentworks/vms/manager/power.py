@@ -502,9 +502,8 @@ def rekey_vm(
     VM node, because the new auth key IS this command's planned op
     (the contrast with reinit, whose graph deliberately excludes the
     template: there the key belongs only to the gate's conditional
-    repair path). The template's readiness (predict the key
-    resolvable) runs in the preflight sweep and the key joins the ONE
-    boundary resolve, mirroring HEAD's interleaved
+    repair path). The sweep predicts the template's declared key and
+    the key joins the ONE boundary resolve, mirroring HEAD's interleaved
     preflight-then-single-resolve exactly; this migration is what
     retired the ``preflight_vm_template`` delegate. The running check
     stays past the boundary (a backend status read; on proxmox it
@@ -533,9 +532,10 @@ def rekey_vm(
     _guard_failed_vm(vm)
 
     # The composition root: construct (registers the site's config
-    # secrets), preflight both participating resources (the vm-template
-    # predicts the new auth key can resolve; the platform checks its
-    # world), then the operation's one resolve pass: the new auth key
+    # secrets), preflight both participating resources (the sweep
+    # predicts the new auth key can resolve over the vm-template's
+    # declaration; the platform checks its world), then the operation's
+    # one resolve pass: the new auth key
     # and any site secret (proxmox's API token) in a single prompt
     # session. The template node roots FIRST so the sweep keeps HEAD's
     # precedence (template readiness before the platform preflight).
@@ -548,7 +548,7 @@ def rekey_vm(
     resolver = Resolver(config, registry)
     vm_node = live_vm_node(db, config, registry, vm)
     rekey_vm_tmpl = resolve_template(registry, vm.template)
-    tmpl_node = vm_template_node(rekey_vm_tmpl, registry)
+    tmpl_node = vm_template_node(rekey_vm_tmpl)
     nodes = walk(tmpl_node, vm_node)
     for secret_name in secret_union(nodes):
         resolver.register_name(secret_name)

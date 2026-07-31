@@ -273,13 +273,14 @@ When does it run? The starting policy: **every service-layer operation runs pref
 resources it will use, before doing anything real** (before any mutation, and before any secret
 prompt). That means the capability instances, and also the declarable resources with readiness
 concerns of their own: basically everything has a preflight. `vm create` preflights both the
-vm-template (which predicts that its Tailscale auth key can resolve; that key is the template's
-responsibility, not the site's) and the site's platform instance, in either order, before the
-resolve pass. Within one service-layer operation, multiple ops on the same instance incur preflight
-once, not once per op. This is a real latency tax on routine commands, and it is accepted: failing
-clearly before work starts is worth more than the round-trip it costs, and there is room to refine
-(caching, per-op opt-outs) once real usage shows where it hurts. Doctor calls the same preflights
-for its per-resource health rows.
+vm-template and the site's platform instance, in either order, before the resolve pass, and the
+sweep predicts each node's declared secrets alongside (the template's Tailscale auth key is the
+template's declaration, not the site's, even though neither node is what asks whether it resolves).
+Within one service-layer operation, multiple ops on the same instance incur preflight once, not once
+per op. This is a real latency tax on routine commands, and it is accepted: failing clearly before
+work starts is worth more than the round-trip it costs, and there is room to refine (caching, per-op
+opt-outs) once real usage shows where it hurts. Doctor calls the same preflights for its
+per-resource health rows.
 
 ### 4. `runup` (confirm readiness; post-resolve, authenticated, read-only)
 

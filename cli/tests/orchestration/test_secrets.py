@@ -297,7 +297,7 @@ def test_require_predicted_refs_refuses_with_owner_usage_framing(
     )
     assert exc.value.hint == (
         "`agw secret describe proxmox-token` shows how each backend "
-        "looks the secret up; add a backend mapping or extend "
+        "looks the secret up; set the env var, add a backend mapping, or extend "
         "[secret_config].backends."
     )
 

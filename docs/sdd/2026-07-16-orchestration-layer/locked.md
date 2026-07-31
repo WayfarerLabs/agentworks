@@ -187,13 +187,20 @@ this directory can be deleted per the SDD lifecycle once its history stops infor
 - **2026-07-31 (issue #199 branch, post-lock):** resolvability prediction moved the last step it was
   always meant to take. The FRD says construct-time registration and preflight-time prediction "move
   to the orchestrator, which owns the graph and can predict over it centrally", and centralization
-  did land, but the INVOKER stopped one level short: the two nodes holding a config secret
-  (`VMSiteNode`, `GitCredentialNode`) called `require_predicted_refs` from their own `preflight`.
-  Prediction now runs in `orchestration.readiness.preflight_all`, once per node, over a new
-  `Node.config_secret_refs()` surface (full references, since the owner/usage framing needs the
-  `usage` prose that bare `secret_refs()` names drop). Nodes keep reference INTACTNESS
+  did land, but the INVOKER stopped one level short: three nodes predicted a declared secret's
+  resolvability from their own `preflight`. `VMSiteNode` and `GitCredentialNode` called
+  `require_predicted_refs`; `VMTemplateNode` did the same thing inline for its Tailscale auth key (a
+  `predict_resolution` call in its own `preflight`), which is why the first cut of this move, scoped
+  to the two `require_predicted_refs` callers, missed it. Prediction now runs in
+  `orchestration.readiness.preflight_all`, once per node, over a new `Node.config_secret_refs()`
+  surface (full references, since the owner/usage framing needs the `usage` prose that bare
+  `secret_refs()` names drop); all three nodes expose their declared config secret there and none
+  predicts. `VMSiteNode` and `GitCredentialNode` keep reference INTACTNESS in their `preflight`
   (`require_declared_refs`: do the declared names reach real registry rows), which is registry
-  consistency and genuinely theirs.
+  consistency and genuinely theirs. `VMTemplateNode` deliberately keeps no intactness check: its
+  auth key rides `secret_declarations`' lookup-or-synthesize fallback so an operator with no
+  `[secrets.*]` sections still gets a callable chain, and requiring a row would retire that
+  fallback. `VMTemplateNode` also stopped holding the registry it only needed for that prediction.
 
   The operator's ruling behind it: a resource must not assume a concern that is not its own, and
   whether a declared secret can be resolved is a property of the operation's runtime world (the

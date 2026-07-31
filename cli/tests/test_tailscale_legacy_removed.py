@@ -90,8 +90,8 @@ def test_vm_manager_does_not_read_legacy_env_for_tailscale_in_collect() -> None:
         "found legacy env-var fallback in create_vm; the create path must resolve Tailscale via the framework"
     )
     # The framework call shape is what we DO expect: the vm-template
-    # node's preflight (run by the sweep) registers + predicts the key
-    # on the resolver, the one boundary pass resolves it, and the value
+    # node declares the key (registered on the resolver), the preflight
+    # sweep predicts it, the one boundary pass resolves it, and the value
     # comes from the cache via scoped delivery.
     assert "vm_template_node" in src
     assert "preflight_all" in src

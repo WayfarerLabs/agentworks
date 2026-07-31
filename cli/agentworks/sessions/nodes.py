@@ -95,14 +95,16 @@ class LiveSessionNode:
         return self._harness.secret_refs()
 
     def config_secret_refs(self) -> tuple[ResourceReference, ...]:
-        # Empty on purpose, and NOT because a harness declares nothing:
-        # a session template's harness_config can name secrets, which is
-        # why secret_refs above delegates to the harness. The harness
-        # exposes only NAMES, so there is no `usage` prose to frame a
-        # prediction failure with, and handing the bare names over would
-        # silently widen what the preflight sweep predicts. Threading the
-        # references through the harness surface is the honest fix; it is
-        # deferred rather than smuggled in here.
+        # DEFERRED, deliberately, and not because a harness declares
+        # nothing: a session template's harness_config can name secrets,
+        # which is why secret_refs above delegates to the harness. Two
+        # reasons to leave them out for now. The harness surface exposes
+        # only NAMES, so there is no `usage` prose to frame a prediction
+        # failure with; and these refs were never predicted in node
+        # preflight either, so returning them here would WIDEN what the
+        # sweep refuses rather than relocate an existing check. Threading
+        # usage-bearing references through the harness surface is the
+        # honest fix, and it is tracked as separate work.
         return ()
 
     def preflight(self, ctx: RunContext) -> None:
@@ -163,14 +165,16 @@ class PendingSessionNode:
         return self._harness.secret_refs()
 
     def config_secret_refs(self) -> tuple[ResourceReference, ...]:
-        # Empty on purpose, and NOT because a harness declares nothing:
-        # a session template's harness_config can name secrets, which is
-        # why secret_refs above delegates to the harness. The harness
-        # exposes only NAMES, so there is no `usage` prose to frame a
-        # prediction failure with, and handing the bare names over would
-        # silently widen what the preflight sweep predicts. Threading the
-        # references through the harness surface is the honest fix; it is
-        # deferred rather than smuggled in here.
+        # DEFERRED, deliberately, and not because a harness declares
+        # nothing: a session template's harness_config can name secrets,
+        # which is why secret_refs above delegates to the harness. Two
+        # reasons to leave them out for now. The harness surface exposes
+        # only NAMES, so there is no `usage` prose to frame a prediction
+        # failure with; and these refs were never predicted in node
+        # preflight either, so returning them here would WIDEN what the
+        # sweep refuses rather than relocate an existing check. Threading
+        # usage-bearing references through the harness surface is the
+        # honest fix, and it is tracked as separate work.
         return ()
 
     def preflight(self, ctx: RunContext) -> None:

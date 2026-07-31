@@ -86,7 +86,6 @@ def test_create_graph_derives_from_declared_resources(make_config, db: Database)
     from agentworks.orchestration.secrets import secret_union
     from agentworks.orchestration.walk import walk
     from agentworks.resources.access import admin_template
-    from agentworks.secrets.resolver import Resolver
     from agentworks.vms.nodes import (
         pending_vm_node,
         vm_site_node,
@@ -102,12 +101,11 @@ def test_create_graph_derives_from_declared_resources(make_config, db: Database)
         + '[secrets.api-key]\ndescription = "runtime only"\n'
     )
     registry = build_registry(config)
-    resolver = Resolver(config, registry)
     admin = admin_template(registry)
     assert admin.git_credentials == ["gh"]
 
     creds = tuple(git_credential_node(registry, name) for name in admin.git_credentials)
-    template = vm_template_node(resolve_template(registry, None), resolver)
+    template = vm_template_node(resolve_template(registry, None))
     site = vm_site_node(registry, "proxmox")
     pending = pending_vm_node(db, "nvm", template, site, creds)
     nodes = walk(pending)
