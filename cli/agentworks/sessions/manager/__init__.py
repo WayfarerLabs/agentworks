@@ -28,6 +28,9 @@ from ._env import (
     _display_registry as _display_registry,
 )
 from ._env import (
+    _merge_harness_env as _merge_harness_env,
+)
+from ._env import (
     _resolve_session_env as _resolve_session_env,
 )
 from ._env import (

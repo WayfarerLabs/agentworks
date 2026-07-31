@@ -34,6 +34,7 @@ if TYPE_CHECKING:
     from agentworks.orchestration.unwind import RealizationLog
     from agentworks.resources.registry import Registry
     from agentworks.sessions.tmux import RunCommand
+    from agentworks.ssh import SSHLogger
     from agentworks.transports import Transport
 
     from ._create_types import SessionGraph, SessionPlan
@@ -116,6 +117,7 @@ def _start_session_slice(
     run_command: RunCommand,
     agent_target: Transport | None,
     secret_values: dict[str, str],
+    logger: SSHLogger,
 ) -> None:
     """The session's own realizing slice: the grant, the DB row, the tmux
     launch, and the completion bookkeeping.
@@ -178,7 +180,11 @@ def _start_session_slice(
             from agentworks.agents.manager import _assert_agent_ssh_works
             from agentworks.transports import agent_transport
 
-            agent_target = agent_transport(vm, config, agent_row)
+            # Logger attached for the same reason as the existing-agent
+            # build in _preflight_and_resolve: logged commands plus redacted
+            # error text on the secret-bearing launch below. The SAME logger
+            # object the redactions were registered on.
+            agent_target = agent_transport(vm, config, agent_row, logger=logger)
             _assert_agent_ssh_works(agent_target, agent_row)
     else:
         mode = SessionMode.ADMIN
@@ -230,8 +236,8 @@ def _start_session_slice(
 
             # Op-start RunContext for the harness's start op: mirrors
             # the runup readiness ctx above (targets), plus the scoped
-            # secrets (the session node's declared union, empty for the
-            # built-in shell harness; ScopedSecrets never delivers).
+            # secrets (the session node's declared union: empty for
+            # shell, claude-code's OAuth token when enabled).
             # Template-var substitution lifts OUT of the harness and
             # wraps its returned string. The op runs BEFORE the insert
             # so a freshly minted harness_state (claude-code's session
@@ -280,6 +286,16 @@ def _start_session_slice(
                 mode=mode,
                 agent_name=resolved_agent_name,
                 linux_user=linux_user,
+            )
+            # Merge the harness's env contributions (e.g. claude-code's
+            # CLAUDE_CODE_OAUTH_TOKEN) over the composed env, reusing the
+            # op-start ctx assembled for the start op above so the token
+            # value comes from the same graph-scoped secrets.
+            _mgr._merge_harness_env(
+                session_env,
+                harness=session_node.harness,
+                ctx=start_ctx,
+                session_name=name,
             )
             # Pick the SSH transport for tmux operations:
             # - admin sessions: admin's run_command (unchanged)
@@ -361,6 +377,7 @@ def _roll_forward(
     run_command: RunCommand,
     agent_target: Transport | None,
     secret_values: dict[str, str],
+    logger: SSHLogger,
 ) -> None:
     """Realize the ephemerals then the session slice, unwinding the
     realized ephemerals on any failure (rollback level 2)."""
@@ -395,6 +412,7 @@ def _roll_forward(
             run_command=run_command,
             agent_target=agent_target,
             secret_values=secret_values,
+            logger=logger,
         )
     except KeyboardInterrupt:
         output.warn(f"Cancelling session create '{plan.name}'... rolling back.")

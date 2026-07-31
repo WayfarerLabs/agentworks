@@ -35,7 +35,36 @@ if TYPE_CHECKING:
     from agentworks.resources.reference import ConfigReference
     from agentworks.transports import Transport
 
-_CLAUDE_CODE_FIELDS = {"permission_mode", "model", "extra_args"}
+_CLAUDE_CODE_FIELDS = {
+    "permission_mode",
+    "model",
+    "extra_args",
+    "pass_oauth_token",
+    "oauth_token_secret",
+}
+
+# The env var Claude Code reads a long-lived OAuth token from
+# (``claude setup-token``, one-year lifetime). Exact spelling, per
+# code.claude.com/docs/en/authentication.
+_OAUTH_TOKEN_ENV_VAR = "CLAUDE_CODE_OAUTH_TOKEN"
+
+# The declared secret the token maps to when ``oauth_token_secret`` is
+# not set explicitly.
+_DEFAULT_OAUTH_TOKEN_SECRET = "claude-code-oauth-token"
+
+
+def _oauth_secret_name(config: Mapping[str, object]) -> str:
+    """The secret name the OAuth token is mapped to: the explicit
+    ``oauth_token_secret`` when set to a non-empty string, else the
+    default. Shared by :meth:`ClaudeCodeHarness.dependencies` (which
+    DECLARES the reference) and the instance's
+    :meth:`ClaudeCodeHarness.env_contributions` (which READS the value),
+    so both name the same secret.
+    """
+    name = config.get("oauth_token_secret")
+    if isinstance(name, str) and name:
+        return name
+    return _DEFAULT_OAUTH_TOKEN_SECRET
 
 # The transcript's config root. ``CLAUDE_CONFIG_DIR`` is the CLI's own
 # override env var (confirmed present in the v2.1.205 binary); the default
@@ -56,9 +85,29 @@ class ClaudeCodeHarness(Harness):
 
     @classmethod
     def dependencies(cls, owner: str, config: Mapping[str, object]) -> tuple[ConfigReference, ...]:
-        """``claude-code`` implies no resource reference, so its edge set
-        is empty (total, non-throwing per the ``dependencies`` contract)."""
-        return ()
+        """The config-implied resource references (total, non-throwing per
+        the ``dependencies`` contract; the throwing shape check is
+        :meth:`validate`). When ``pass_oauth_token`` is enabled, a single
+        secret reference for the (defaulted) token secret; otherwise
+        ``()``. The conditionality is automatic, because the declaration
+        derives from config, so an unmapped token secret fails at preflight
+        for free (issue #220).
+        """
+        if config.get("pass_oauth_token") is not True:
+            return ()
+        # Function-local runtime import (the layering pattern the other
+        # secret-declaring capabilities use, e.g. proxmox): importing the
+        # resources package at module load would pull sessions in
+        # transitively and trip the capability-layer import guard.
+        from agentworks.resources.reference import ConfigReference
+
+        return (
+            ConfigReference(
+                kind="secret",
+                name=_oauth_secret_name(config),
+                usage=f"the {_OAUTH_TOKEN_ENV_VAR} env var",
+            ),
+        )
 
     @classmethod
     def validate(cls, owner: str, config: Mapping[str, object]) -> None:
@@ -67,6 +116,12 @@ class ClaudeCodeHarness(Harness):
         CHOICE sets are Claude-owned and drift between releases, so the
         VALUE is forwarded unvalidated (an invalid one surfaces as Claude's
         own startup error in the pane).
+
+        The OAuth fields (issue #220) are validated here; :meth:`dependencies`
+        turns them into the declared secret reference. ``pass_oauth_token``
+        must be a bool and ``oauth_token_secret`` a non-empty string, and an
+        orphan ``oauth_token_secret`` without ``pass_oauth_token: true`` in
+        the SAME block is a misconfiguration surfaced loudly.
         """
         unknown = sorted(set(config) - _CLAUDE_CODE_FIELDS)
         if unknown:
@@ -80,6 +135,47 @@ class ClaudeCodeHarness(Harness):
             not isinstance(extra_args, list) or not all(isinstance(item, str) for item in extra_args)
         ):
             raise ConfigError(f"{owner}.extra_args must be a list of strings")
+        pass_oauth_token = config.get("pass_oauth_token")
+        if pass_oauth_token is not None and not isinstance(pass_oauth_token, bool):
+            raise ConfigError(f"{owner}.pass_oauth_token must be a boolean")
+        oauth_token_secret = config.get("oauth_token_secret")
+        if oauth_token_secret is not None and not isinstance(oauth_token_secret, str):
+            raise ConfigError(f"{owner}.oauth_token_secret must be a string")
+        # An empty or whitespace-only name is not a valid secret reference:
+        # left to the silent ``_oauth_secret_name`` fallback it would map the
+        # token to the DEFAULT secret behind the operator's back, exactly the
+        # kind of misconfiguration this feature surfaces loudly rather than
+        # papering over. Reject it here (the co-occurrence guard below only
+        # checks the field is PRESENT, not that it names something).
+        if isinstance(oauth_token_secret, str) and not oauth_token_secret.strip():
+            raise ConfigError(
+                f"{owner}.oauth_token_secret is empty; give a secret name or "
+                f"drop the field to use the default ('{_DEFAULT_OAUTH_TOKEN_SECRET}')."
+            )
+        # An orphan secret name (a name with nothing consuming it) is a
+        # misconfiguration, surfaced loudly. This also catches the
+        # child-wins inheritance wrinkle: a child setting
+        # ``pass_oauth_token = false`` over a parent that set
+        # ``oauth_token_secret`` yields exactly this error on the merged
+        # blob (issue #220), which is honest, intended behavior.
+        #
+        # Because this classmethod also fires per DECLARED blob at load
+        # (``SessionTemplate.validate``), before inheritance merging, the
+        # two fields must co-occur in the SAME declaration: a child
+        # overriding only ``oauth_token_secret`` must restate
+        # ``pass_oauth_token = true``, even when a parent already set it.
+        # The message spells that out so the inherited-true case is not a
+        # dead end.
+        if "oauth_token_secret" in config and pass_oauth_token is not True:
+            raise ConfigError(
+                f"{owner}.oauth_token_secret is set but pass_oauth_token is "
+                f"not true in the same harness_config block; a token secret "
+                f"name with nothing consuming it is a misconfiguration. Set "
+                f"pass_oauth_token = true alongside it (required even when a "
+                f"parent template already enables it; this check runs per "
+                f"declaration, before inheritance merging), or drop "
+                f"oauth_token_secret."
+            )
 
     def start(self, ctx: RunContext) -> str:
         """The pane command for ``session create``: resume the stored
@@ -101,6 +197,26 @@ class ClaudeCodeHarness(Harness):
             if self._resumed
             else "No existing Claude Code session. Starting a new one..."
         )
+
+    def env_contributions(self, ctx: RunContext) -> dict[str, str]:
+        """When ``pass_oauth_token`` is enabled, deliver the mapped
+        secret's value as ``CLAUDE_CODE_OAUTH_TOKEN`` so a harness-launched
+        Claude skips the interactive login step. Empty otherwise.
+
+        The value was already resolved by the graph's boundary pass;
+        ``ctx.secret`` reads it from the scoped view (the name was declared
+        by :meth:`dependencies`, so the session node's ``secret_refs()``
+        covers it, and the hook never touches a resolver). The token rides
+        the env channel like every other session secret, never baked into
+        the persistent pane command string (which would sit readable in
+        tmux's ``pane_start_command`` for the session's whole lifetime); it
+        shares exactly the exposure class of existing secret-backed env
+        directives, and like theirs its resolved value is registered for
+        redaction from agentworks's own op logs and error output.
+        """
+        if self.config.get("pass_oauth_token") is not True:
+            return {}
+        return {_OAUTH_TOKEN_ENV_VAR: ctx.secret(_oauth_secret_name(self.config))}
 
     def _resume_or_launch(self, ctx: RunContext) -> str:
         """Read (or mint) the stored session id, probe the launch target

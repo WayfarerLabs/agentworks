@@ -170,8 +170,9 @@ def _build_session_graph(
     # Gate a disabled plugin harness at USE (R14, the secret model): the
     # session-template lists ready, but constructing a session on a disabled
     # harness is a typed error naming the plugin to enable. The gate lives at
-    # this call site (not inside ``pending_session_node``, which threads no
-    # registry); a drift guard pins that every caller of the node factory gates.
+    # this call site (the factory takes a registry only for the harness's
+    # secret-prediction preflight, issue #220, not for enablement); a drift
+    # guard pins that every caller of the node factory gates.
     from agentworks.capabilities.harness import ensure_harness_enabled
     from agentworks.resources.access import ensure_recipe_enabled
 
@@ -196,6 +197,7 @@ def _build_session_graph(
         admin=plan.is_admin_mode,
         workspace=workspace_node,
         vm=vm_node,
+        registry=registry,
     )
     nodes = walk(session_node)
 

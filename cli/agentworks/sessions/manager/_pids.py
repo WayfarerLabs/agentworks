@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, SessionRow, VMRow
     from agentworks.sessions.tmux import RunCommand
+    from agentworks.ssh import SSHLogger
     from agentworks.transports import Transport
 
 
@@ -58,6 +59,7 @@ def _build_session_target(
     config: Config,
     db: Database,
     admin_target: Transport,
+    logger: SSHLogger | None = None,
 ) -> Transport:
     """Pick the SSH transport for destructive operations on a single session.
 
@@ -66,6 +68,12 @@ def _build_session_target(
     an agent ``Transport`` and probes it; raises StateError with a reinit hint
     if the agent's authorized_keys aren't provisioned.
     For admin sessions, returns the admin target unchanged.
+
+    ``logger`` (when the operation keeps one, e.g. restart) rides into a
+    freshly built agent transport so its commands, from the SSH probe
+    onward, land in the op log and its error text passes the logger's
+    redactions; the admin branch returns ``admin_target`` as-is, which
+    already carries the op logger at those call sites.
 
     Single-session paths use this to make kill / restart operations
     consistent with create: every destructive step on an agent session
@@ -94,7 +102,7 @@ def _build_session_target(
     from agentworks.agents.manager import _assert_agent_ssh_works
     from agentworks.transports import agent_transport
 
-    agent_target = agent_transport(vm, config, agent)
+    agent_target = agent_transport(vm, config, agent, logger=logger)
     _assert_agent_ssh_works(agent_target, agent)
     return agent_target
 

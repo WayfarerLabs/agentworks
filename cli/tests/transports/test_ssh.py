@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from agentworks.ssh import SSHError, SSHResult
+from agentworks.ssh import SSHError, SSHLogger, SSHResult
 from agentworks.transports import SSHTransport
 from tests.transports.conftest import fail_completed as _fail_completed
 from tests.transports.conftest import ok_completed as _ok_completed
@@ -104,6 +104,65 @@ def test_run_check_false_returns_nonzero_result() -> None:
         result = t.run("false", check=False)
         assert isinstance(result, SSHResult)
         assert result.returncode == 42
+
+
+def _tmp_logger(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SSHLogger:
+    """A real ``SSHLogger`` rooted in ``tmp_path`` (not the user's config
+    dir) with one registered secret, for the redaction contract tests."""
+    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
+    logger = SSHLogger("vm1", "test-op")
+    logger.add_redaction("sk-supersecret")
+    return logger
+
+
+def test_run_error_text_is_sanitized_when_logger_attached(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The SSHError raised on nonzero exit embeds the command and stderr,
+    which propagate to the console; with a logger attached, both take the
+    logger's redaction pass (secrets ride the command string via the tmux
+    ``-e KEY=VAL`` env flags)."""
+    t = SSHTransport(host="vm1", user="agentworks", logger=_tmp_logger(tmp_path, monkeypatch))
+    with patch("agentworks.transports.ssh.subprocess.run") as mock_run:
+        mock_run.return_value = _fail_completed(returncode=1, stderr="bad sk-supersecret")
+        with pytest.raises(SSHError) as excinfo:
+            t.run("tmux new-session -e TOKEN=sk-supersecret")
+    assert "sk-supersecret" not in str(excinfo.value)
+    assert str(excinfo.value).count("[REDACTED]") == 2  # command + stderr
+
+
+def test_run_timeout_error_text_is_sanitized_when_logger_attached(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import subprocess as _subprocess
+
+    t = SSHTransport(
+        host="vm1",
+        user="agentworks",
+        retries=1,
+        logger=_tmp_logger(tmp_path, monkeypatch),
+    )
+    with (
+        patch(
+            "agentworks.transports.ssh.subprocess.run",
+            side_effect=_subprocess.TimeoutExpired(cmd=["ssh"], timeout=1),
+        ),
+        pytest.raises(SSHError) as excinfo,
+    ):
+        t.run("tmux new-session -e TOKEN=sk-supersecret")
+    assert "sk-supersecret" not in str(excinfo.value)
+    assert "[REDACTED]" in str(excinfo.value)
+
+
+def test_run_error_text_unchanged_without_logger() -> None:
+    """No logger means no registered redactions: the raised message keeps
+    the raw command (the pre-existing contract for logger-less
+    transports)."""
+    t = SSHTransport(host="vm1", user="agentworks")
+    with patch("agentworks.transports.ssh.subprocess.run") as mock_run:
+        mock_run.return_value = _fail_completed(returncode=1)
+        with pytest.raises(SSHError, match="TOKEN=sk-supersecret"):
+            t.run("tmux new-session -e TOKEN=sk-supersecret")
 
 
 def test_run_default_timeout_applies_when_call_omits_timeout() -> None:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, NamedTuple
 
+from agentworks import output
 from agentworks.db import SessionMode
 from agentworks.errors import (
     AgentworksError,
@@ -15,6 +16,8 @@ if TYPE_CHECKING:
     import re
     from collections.abc import Mapping
 
+    from agentworks.capabilities.base import RunContext
+    from agentworks.capabilities.harness import Harness
     from agentworks.config import Config
     from agentworks.db import AgentRow, Database, VMRow, WorkspaceRow
     from agentworks.env import EnvEntry
@@ -352,3 +355,43 @@ def _resolve_session_env(
         agent=scopes.agent,
         session=scopes.session,
     )
+
+
+def _merge_harness_env(
+    session_env: dict[str, str],
+    *,
+    harness: Harness,
+    ctx: RunContext,
+    session_name: str,
+) -> dict[str, str]:
+    """Merge the harness's env contributions over the composed session
+    env, in place, and return it. The ONE shared helper both launch sites
+    (create and restart) route through.
+
+    Precedence (operator ruling, issue #220): a harness contribution is
+    the more specific, workload-owned setting, so it WINS a key collision
+    with an operator env directive; the collision emits a warning naming
+    the variable and the winning source. The contributions are
+    value-level (already resolved via ``ctx.secret``), so this merge
+    touches neither the env-chain resolve nor ``compose_env``'s drift
+    guard. Identity vars (``AGENTWORKS_*``) need no carve-out: a harness
+    contributes none, so the merge never shadows one.
+
+    A secret contribution (claude-code's OAuth token) lands in the session
+    env here, so it reaches the pane over the same env channel as every
+    other session secret rather than being baked into the pane command
+    string; it shares the exposure class of the existing secret-backed env
+    directives, no better and no worse. Both launch sites register every
+    resolved secret value on the op logger before the launch, so the
+    command text carrying the env (the tmux ``-e`` flags) is redacted from
+    the op log and from a failing command's SSHError text.
+    """
+    for key, value in harness.env_contributions(ctx).items():
+        if key in session_env:
+            output.warn(
+                f"session '{session_name}': the '{harness.name}' harness "
+                f"sets {key}, overriding the operator-configured env value "
+                f"for it."
+            )
+        session_env[key] = value
+    return session_env

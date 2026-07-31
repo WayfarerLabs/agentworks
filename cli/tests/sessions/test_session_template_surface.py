@@ -320,6 +320,111 @@ def test_multi_parent_silent_parent_does_not_wipe(tmp_path: Path) -> None:
     assert resolved.env["FOO"].value == "bar"
 
 
+def test_child_false_over_parent_oauth_secret_is_a_merged_blob_error() -> None:
+    """The inheritance wrinkle (issue #220): under the default child-wins
+    shallow merge, a child setting ``pass_oauth_token = false`` over a
+    parent that set ``oauth_token_secret`` yields exactly the orphan
+    config error on the merged blob. Honest, intended behavior: a token
+    secret name with nothing consuming it is a misconfiguration."""
+    templates = {
+        "base": SessionTemplate(
+            name="base",
+            harness="claude-code",
+            harness_config={
+                "pass_oauth_token": True,
+                "oauth_token_secret": "prod-token",
+            },
+        ),
+        "child": SessionTemplate(
+            name="child",
+            inherits=["base"],
+            harness="claude-code",
+            harness_config={"pass_oauth_token": False},
+        ),
+    }
+    with pytest.raises(ConfigError, match="nothing consuming it"):
+        resolve_from_dict(templates, "child")
+
+
+def test_child_overriding_only_the_oauth_secret_fails_per_declaration(
+    tmp_path: Path,
+) -> None:
+    """Pins a known wart (issue #220, surfaced in review): the harness's
+    ``validate`` fires per DECLARED blob at registry finalize
+    (``SessionTemplate.validate``), before inheritance merging, so a child
+    that overrides only ``oauth_token_secret`` while
+    inheriting ``pass_oauth_token = true`` from its parent fails at
+    config load even though the MERGED blob would be valid. The two
+    fields must co-occur in the same declaration; the error says so.
+    Whether the cross-field rule should instead hold only on the merged
+    blob is an open design question for the lead."""
+    with pytest.raises(ConfigError, match="same harness_config block"):
+        build_registry(
+            _config(
+                tmp_path,
+                """
+                [session_templates.base]
+                harness = "claude-code"
+                [session_templates.base.harness_config]
+                pass_oauth_token = true
+
+                [session_templates.claude-prod]
+                inherits = ["base"]
+                harness = "claude-code"
+                [session_templates.claude-prod.harness_config]
+                oauth_token_secret = "prod-token"
+                """,
+            )
+        )
+
+
+def test_child_restating_pass_with_its_own_secret_loads_and_resolves() -> None:
+    """The documented workaround for the wart above: the child restates
+    ``pass_oauth_token = true`` alongside its ``oauth_token_secret``, and
+    both the declaration and the merged blob validate."""
+    templates = {
+        "base": SessionTemplate(
+            name="base",
+            harness="claude-code",
+            harness_config={"pass_oauth_token": True},
+        ),
+        "child": SessionTemplate(
+            name="child",
+            inherits=["base"],
+            harness="claude-code",
+            harness_config={
+                "pass_oauth_token": True,
+                "oauth_token_secret": "prod-token",
+            },
+        ),
+    }
+    resolved = resolve_from_dict(templates, "child")
+    assert resolved.harness_config["oauth_token_secret"] == "prod-token"
+    # The per-declaration check passes too (both fields co-occur).
+    assert templates["child"].dependencies(BuildContext())
+
+
+def test_child_inheriting_oauth_pass_and_secret_resolves_cleanly() -> None:
+    """The benign counterpart: a child that leaves ``pass_oauth_token``
+    enabled (silent) inherits the parent's token secret, and the merged
+    blob validates and declares the reference."""
+    templates = {
+        "base": SessionTemplate(
+            name="base",
+            harness="claude-code",
+            harness_config={
+                "pass_oauth_token": True,
+                "oauth_token_secret": "prod-token",
+            },
+        ),
+        "child": SessionTemplate(name="child", inherits=["base"]),
+    }
+    resolved = resolve_from_dict(templates, "child")
+    assert resolved.harness == "claude-code"
+    assert resolved.harness_config["pass_oauth_token"] is True
+    assert resolved.harness_config["oauth_token_secret"] == "prod-token"
+
+
 def test_undeclared_default_resolves_to_shell_empty() -> None:
     resolved = resolve_from_dict({}, None)
     assert resolved.name == "default"

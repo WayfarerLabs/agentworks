@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from agentworks.capabilities.base import OperationScope, RunContext
+    from agentworks.resources.reference import ConfigReference
     from agentworks.transports import Transport
 
     # Structural, TYPE_CHECKING-only: the harness satisfies Readiness and
@@ -173,11 +174,22 @@ class Harness(Capability):
         Mirrors how :class:`GitCredentialProvider` exposes ``secret_name``
         to its holder, so the node consumes a public accessor rather than
         reaching into the base ``Capability._secret_refs`` private field.
-        Empty for both built-ins (``shell`` / ``claude-code`` declare no
-        secrets); the plumbing is here for a future secret-declaring
-        harness.
+        Empty for ``shell`` and for ``claude-code`` in its default shape;
+        ``claude-code`` declares the OAuth token secret when
+        ``pass_oauth_token`` is enabled (issue #220), the first
+        secret-declaring harness.
         """
         return tuple(ref.name for ref in self._secret_refs)
+
+    def config_secret_refs(self) -> tuple[ConfigReference, ...]:
+        """The full secret-kind config references (name AND usage) this
+        harness declared, for the holding node to run central
+        resolvability prediction over at preflight (``secret_refs`` is the
+        names-only view of the same set). Sourceless by design: the
+        session template hosting the harness config is the implicit
+        source, so the node runs prediction without re-attaching it.
+        """
+        return self._secret_refs
 
     @classmethod
     def merge_config(cls, base: Mapping[str, object], child: Mapping[str, object]) -> dict[str, object]:
@@ -198,6 +210,31 @@ class Harness(Capability):
         resumed an existing session or started a new one.
         """
         return None
+
+    def env_contributions(self, ctx: RunContext) -> dict[str, str]:
+        """Environment variables this harness injects into the session's
+        shell-open env. The session manager merges the result over the
+        composed env at BOTH launch sites (create / restart), with harness
+        contributions winning a key collision (the workload-owned setting
+        is the more specific one; issue #220).
+
+        Value-level by design, NOT ``EnvEntry``-level: the values are
+        already resolved (a secret value comes from ``ctx.secret``, filled
+        by the graph's boundary resolve), so this never touches a resolver
+        and never entangles the env-chain resolve or ``compose_env``'s
+        drift guard. A secret value delivered here rides the env channel,
+        never baked into the pane command string (which would sit readable
+        in tmux's ``pane_start_command`` for the session's whole lifetime);
+        it shares the exposure class of every other secret-backed env
+        directive, and the session manager registers every resolved secret
+        value on the op logger so agentworks's own logs and error output
+        redact it.
+
+        Default: no contributions. ``shell`` does not override it;
+        ``claude-code`` overrides it to pass an OAuth token when
+        configured.
+        """
+        return {}
 
     @abstractmethod
     def start(self, ctx: RunContext) -> str:

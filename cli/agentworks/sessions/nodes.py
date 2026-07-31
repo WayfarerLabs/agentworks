@@ -23,7 +23,9 @@ makes explicit (``capabilities/harness/base.py``):
 The node is the rich consuming resource of ``capabilities/README.md``:
 its ``preflight`` / ``runup`` fan into the held harness's, and the
 harness's declared secrets fold into the node's ``secret_refs`` (empty
-for the built-ins, plumbing present).
+for ``shell`` and for ``claude-code`` in its default shape;
+``claude-code`` declares an OAuth token secret when ``pass_oauth_token``
+is enabled, issue #220).
 """
 
 from __future__ import annotations
@@ -38,6 +40,7 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, SessionRow
     from agentworks.orchestration.node import Node
+    from agentworks.resources.registry import Registry
     from agentworks.vms.nodes import LiveVMNode
     from agentworks.workspaces.nodes import LiveWorkspaceNode, PendingWorkspaceNode
 
@@ -61,12 +64,14 @@ class LiveSessionNode:
         agent: AgentNode | None,
         workspace: WorkspaceNode,
         vm: LiveVMNode,
+        registry: Registry,
     ) -> None:
         self._row = row
         self._harness = harness
         self._agent = agent
         self._workspace = workspace
         self._vm = vm
+        self._registry = registry
 
     @property
     def key(self) -> str:
@@ -94,6 +99,15 @@ class LiveSessionNode:
         return self._harness.secret_refs()
 
     def preflight(self, ctx: RunContext) -> None:
+        # Central prediction over the harness's declared config secrets
+        # (empty for the built-ins; the OAuth token when claude-code's
+        # pass_oauth_token is on), matching the git-credential / vm nodes,
+        # then the held harness's own readiness.
+        from agentworks.orchestration.secrets import require_predicted_refs
+
+        require_predicted_refs(
+            self.key, self._harness.config_secret_refs(), ctx.config, self._registry
+        )
         self._harness.preflight(ctx)
 
     def runup(self, ctx: RunContext) -> None:
@@ -115,6 +129,7 @@ class PendingSessionNode:
         agent: AgentNode | None,
         workspace: WorkspaceNode,
         vm: LiveVMNode,
+        registry: Registry,
     ) -> None:
         self._db = db
         self._config = config
@@ -123,6 +138,7 @@ class PendingSessionNode:
         self._agent = agent
         self._workspace = workspace
         self._vm = vm
+        self._registry = registry
         self._realized = False
 
     @property
@@ -151,6 +167,15 @@ class PendingSessionNode:
         return self._harness.secret_refs()
 
     def preflight(self, ctx: RunContext) -> None:
+        # Central prediction over the harness's declared config secrets
+        # (empty for the built-ins; the OAuth token when claude-code's
+        # pass_oauth_token is on), matching the git-credential / vm nodes,
+        # then the held harness's own readiness.
+        from agentworks.orchestration.secrets import require_predicted_refs
+
+        require_predicted_refs(
+            self.key, self._harness.config_secret_refs(), ctx.config, self._registry
+        )
         self._harness.preflight(ctx)
 
     def runup(self, ctx: RunContext) -> None:
@@ -274,6 +299,7 @@ def pending_session_node(
     admin: bool,
     workspace: WorkspaceNode,
     vm: LiveVMNode,
+    registry: Registry,
 ) -> PendingSessionNode:
     """Build the pending ``session/<name>`` node.
 
@@ -283,11 +309,12 @@ def pending_session_node(
     orchestrator's ``mark_realized`` flip. Exactly one of ``agent`` /
     ``admin`` must be given (the session-scope invariant).
 
-    HARNESS ENABLEMENT GATE (R14): this factory threads no registry, so it
-    cannot check whether the template's harness is a disabled plugin. Every
-    caller MUST call ``ensure_harness_enabled(registry, template.harness)``
-    first; the drift guard ``test_every_session_factory_caller_gates_the_harness``
-    pins that a future caller cannot silently bypass it."""
+    HARNESS ENABLEMENT GATE (R14): the ``registry`` here is threaded only for
+    the harness's secret-prediction preflight (issue #220); this factory does
+    NOT gate plugin enablement. Every caller MUST call
+    ``ensure_harness_enabled(registry, template.harness)`` first; the drift
+    guard ``test_every_session_factory_caller_gates_the_harness`` pins that a
+    future caller cannot silently bypass it."""
     if (agent is not None) == admin:
         raise StateError(
             f"session '{name}': exactly one of an agent node or "
@@ -302,7 +329,9 @@ def pending_session_node(
         workspace=workspace,
         state={},  # fresh create: no row yet, so the harness starts blank
     )
-    return PendingSessionNode(db, config, name, harness, agent, workspace, vm)
+    return PendingSessionNode(
+        db, config, name, harness, agent, workspace, vm, registry
+    )
 
 
 def live_session_node(
@@ -312,6 +341,7 @@ def live_session_node(
     agent: AgentNode | None,
     workspace: WorkspaceNode,
     vm: LiveVMNode,
+    registry: Registry,
 ) -> LiveSessionNode:
     """Build the live ``session/<name>`` node from its row, with the
     same one-object target wiring as the pending factory.
@@ -323,11 +353,12 @@ def live_session_node(
     admin user instead of raising). The factory cross-checks both
     directions and raises on mismatch.
 
-    HARNESS ENABLEMENT GATE (R14): this factory threads no registry, so it
-    cannot check whether the template's harness is a disabled plugin. Every
-    caller MUST call ``ensure_harness_enabled(registry, template.harness)``
-    first; the drift guard ``test_every_session_factory_caller_gates_the_harness``
-    pins that a future caller cannot silently bypass it."""
+    HARNESS ENABLEMENT GATE (R14): the ``registry`` here is threaded only for
+    the harness's secret-prediction preflight (issue #220); this factory does
+    NOT gate plugin enablement. Every caller MUST call
+    ``ensure_harness_enabled(registry, template.harness)`` first; the drift
+    guard ``test_every_session_factory_caller_gates_the_harness`` pins that a
+    future caller cannot silently bypass it."""
     if row.agent_name is not None:
         if agent is None:
             raise StateError(
@@ -355,4 +386,4 @@ def live_session_node(
         workspace=workspace,
         state=row.harness_state,  # the stored blob: a create-minted id survives here
     )
-    return LiveSessionNode(row, harness, agent, workspace, vm)
+    return LiveSessionNode(row, harness, agent, workspace, vm, registry)

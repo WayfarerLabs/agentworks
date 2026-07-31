@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
     from agentworks.sessions.tmux import RunCommand
+    from agentworks.ssh import SSHLogger
     from agentworks.transports import Transport
 
     from ._create_types import SessionGraph, SessionPlan
@@ -44,14 +45,20 @@ def _reload_vm(db: Database, target_vm_name: str) -> VMRow:
     return refreshed_vm
 
 
-def _build_live_transport(vm: VMRow, config: Config) -> tuple[Transport, RunCommand]:
-    """Build the admin SSH transport for the live VM and its run command."""
+def _build_live_transport(vm: VMRow, config: Config) -> tuple[Transport, RunCommand, SSHLogger]:
+    """Build the admin SSH transport for the live VM, its run command, and
+    the op logger they share.
+
+    The logger is returned explicitly (not read back off ``target.logger``)
+    so the create flow can thread the SAME object into every agent
+    transport it builds and register resolved secret values on it for
+    redaction, before any secret-bearing command runs."""
     from agentworks.ssh import SSHLogger
 
     logger = SSHLogger(vm.name, "session-create")
     target = _mgr.transport(vm, config, logger=logger)
     run_command: RunCommand = target.run
-    return target, run_command
+    return target, run_command, logger
 
 
 def _preflight_and_resolve(
@@ -61,6 +68,7 @@ def _preflight_and_resolve(
     graph: SessionGraph,
     vm: VMRow,
     target: Transport,
+    logger: SSHLogger,
 ) -> tuple[dict[str, str], Transport | None]:
     """Run the Preflight sweep and the Resolving-Secrets boundary resolve.
 
@@ -103,7 +111,11 @@ def _preflight_and_resolve(
             from agentworks.transports import agent_transport
 
             assert plan.existing_agent is not None
-            agent_target = agent_transport(vm, config, plan.existing_agent)
+            # The op logger rides along so the agent-side commands (including
+            # the secret-bearing tmux launch later) are logged AND their
+            # error text passes the redaction pass. It is the SAME object the
+            # redactions are registered on after the resolve below.
+            agent_target = agent_transport(vm, config, plan.existing_agent, logger=logger)
             _assert_agent_ssh_works(agent_target, plan.existing_agent)
 
         # PREFLIGHT-ALL against the one command-start context: the
@@ -123,7 +135,17 @@ def _preflight_and_resolve(
 
     with output.section("Resolving Secrets"):
         graph.resolver.resolve()
-    return graph.resolver.values, agent_target
+    secret_values = graph.resolver.values
+    # Register every resolved secret VALUE for redaction before any
+    # transport command can carry one: the session env (secret-backed env
+    # directives, the harness's OAuth token) is embedded in the ``tmux
+    # new-session`` command string as ``-e KEY=VAL`` flags, which the
+    # transport writes to the op log and, on failure, embeds in the raised
+    # SSHError. ``add_redaction`` skips empty values. This is the same
+    # ``logger`` threaded into every agent transport this create builds.
+    for secret_value in secret_values.values():
+        logger.add_redaction(secret_value)
+    return secret_values, agent_target
 
 
 def create_session(
@@ -230,9 +252,11 @@ def create_session(
     # the boundary resolver so nothing resolves or prompts twice.
     with activation_gate(graph.vm_node, gate_secret_resolver(config, registry, graph.resolver)):
         vm = _reload_vm(db, plan.target_vm_name)
-        target, run_command = _build_live_transport(vm, config)
+        target, run_command, logger = _build_live_transport(vm, config)
 
-        secret_values, agent_target = _preflight_and_resolve(config, plan=plan, graph=graph, vm=vm, target=target)
+        secret_values, agent_target = _preflight_and_resolve(
+            config, plan=plan, graph=graph, vm=vm, target=target, logger=logger
+        )
 
         # ===== Dependency-ordered roll-forward (S11) ========================
         #
@@ -251,4 +275,5 @@ def create_session(
             run_command=run_command,
             agent_target=agent_target,
             secret_values=secret_values,
+            logger=logger,
         )

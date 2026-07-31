@@ -304,9 +304,10 @@ def restart_session(
         agent_node = live_agent_node(agent_row, vm_node)
     # Gate a disabled plugin harness at USE (R14, the secret model): a live
     # session on a disabled harness refuses to restart / reattach with the
-    # enable-plugin error. The gate lives at this call site (not inside
-    # ``live_session_node``, which threads no registry); a drift guard pins that
-    # every caller of the node factory gates.
+    # enable-plugin error. The gate lives at this call site (the factory takes
+    # a registry only for the harness's secret-prediction preflight, issue
+    # #220, not for enablement); a drift guard pins that every caller of the
+    # node factory gates.
     from agentworks.capabilities.harness import ensure_harness_enabled
     from agentworks.resources.access import ensure_recipe_enabled
 
@@ -321,13 +322,14 @@ def restart_session(
         agent=agent_node,
         workspace=workspace_node,
         vm=vm_node,
+        registry=registry,
     )
     nodes = walk(session_node)
-    # The walk supplies the boundary union (the site's config secrets;
-    # live nodes declare nothing else). The session's env chain is
-    # deliberately NOT part of this boundary: it resolves after the
-    # BROKEN/confirm gates below, the recorded bail-before-prompt
-    # exception.
+    # The walk supplies the boundary union (the site's config secrets,
+    # plus the harness's declared secrets: claude-code's OAuth token when
+    # pass_oauth_token is on). The session's env chain is deliberately
+    # NOT part of this boundary: it resolves after the BROKEN/confirm
+    # gates below, the recorded bail-before-prompt exception.
     for secret_name in secret_union(nodes):
         resolver.register_name(secret_name)
 
@@ -389,7 +391,14 @@ def restart_session(
             # direct agent SSH. _build_session_target always returns a
             # same-uid target, so no sudo is needed for kill.
             is_admin = session.mode == SessionMode.ADMIN.value
-            session_target = _mgr._build_session_target(session, vm=vm, config=config, db=db, admin_target=admin_target)
+            # The op logger rides into the target (an agent transport for
+            # agent sessions; ``admin_target`` already carries it): its
+            # commands, from the SSH probe through the secret-bearing tmux
+            # launch below, land in the op log and its error text passes
+            # the redactions. Mirrors the create-path builds.
+            session_target = _mgr._build_session_target(
+                session, vm=vm, config=config, db=db, admin_target=admin_target, logger=logger
+            )
             session_run_command: RunCommand = session_target.run
             kill_sudo = False
 
@@ -440,10 +449,10 @@ def restart_session(
             # Capture the graph boundary union for the harness's op-start
             # context (matching the create path, which captures
             # ``resolver.values`` at its boundary). Inert for the built-in
-            # shell harness (empty ``secret_refs()``), but keeps the restart
-            # op ctx shape-correct for a future secret-declaring harness; the
-            # env-chain resolve (``resolve_for_command`` below) is a SEPARATE
-            # pass, not this graph union.
+            # shell harness (empty ``secret_refs()``); this is how a
+            # secret-declaring harness (claude-code's OAuth token) receives
+            # its values. The env-chain resolve (``resolve_for_command``
+            # below) is a SEPARATE pass, not this graph union.
             graph_secret_values = resolver.values
 
             # Eager-prompting orchestration (pass 2): resolve every secret
@@ -477,6 +486,18 @@ def restart_session(
                 config,
                 registry,
             )
+
+            # Register every resolved secret VALUE from BOTH passes for
+            # redaction before any transport command can carry one: the
+            # session env is embedded in the ``tmux new-session`` command
+            # string as ``-e KEY=VAL`` flags, which the transport writes
+            # to the op log and, on failure, embeds in the raised
+            # SSHError. ``add_redaction`` skips empty values.
+            for secret_value in (
+                *graph_secret_values.values(),
+                *secret_values.values(),
+            ):
+                logger.add_redaction(secret_value)
 
         with output.section("Starting Session"):
             output.info(f"Restarting session '{name}'...")
@@ -565,6 +586,15 @@ def restart_session(
                 mode=SessionMode(session.mode),
                 agent_name=session.agent_name,
                 linux_user=linux_user,
+            )
+            # Merge the harness's env contributions over the composed env,
+            # reusing the post-kill restart ctx so the token value comes from
+            # the graph-scoped secrets (NOT the env-chain secret_values).
+            _mgr._merge_harness_env(
+                session_env,
+                harness=session_node.harness,
+                ctx=restart_ctx,
+                session_name=name,
             )
 
             try:
