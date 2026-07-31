@@ -66,6 +66,37 @@ def test_prompt_converts_vendored_abort_to_user_abort(monkeypatch: pytest.Monkey
         TyperHandler().prompt("Name", level=0)
 
 
+def test_confirm_also_converts_real_click_abort_to_user_abort(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The widened tuple also catches a REAL click Abort at this typer-vendored
+    # site, so narrowing the catch back to typer.Abort alone would fail here.
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
+
+    def _raise(*_a: object, **_k: object) -> bool:
+        raise click.exceptions.Abort()
+
+    monkeypatch.setattr(typer, "confirm", _raise)
+    with pytest.raises(UserAbort):
+        TyperHandler().confirm("Proceed?", level=0)
+
+
+def test_choose_also_converts_real_click_abort_to_user_abort(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _raise(*_a: object, **_k: object) -> str:
+        raise click.exceptions.Abort()
+
+    monkeypatch.setattr(typer, "prompt", _raise)
+    with pytest.raises(UserAbort):
+        TyperHandler().choose("Pick one", ["a", "b"], level=0)
+
+
+def test_prompt_also_converts_real_click_abort_to_user_abort(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _raise(*_a: object, **_k: object) -> str:
+        raise click.exceptions.Abort()
+
+    monkeypatch.setattr(typer, "prompt", _raise)
+    with pytest.raises(UserAbort):
+        TyperHandler().prompt("Name", level=0)
+
+
 def test_prompt_secret_converts_real_click_abort_to_user_abort(monkeypatch: pytest.MonkeyPatch) -> None:
     # prompt_secret uses the REAL click.prompt, so a real Ctrl-C raises
     # the real click.exceptions.Abort there; this guards that site.
