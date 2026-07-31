@@ -132,9 +132,14 @@ declared.
 What differs between stages is timing, not shape. `preflight` gets the command-start slice (existing
 targets only, no resolved secrets, which is what makes it structurally dependency-blind); `runup`
 and the ops get the op-start slice (current targets, resolved secrets). Central secret-resolvability
-prediction happens above the platform, in the `vm-site` node that holds the instance
-(`agentworks.vms.nodes`), which is why `VMPlatform.preflight`/`runup` never touch secret machinery
-themselves.
+prediction happens above the platform AND above the `vm-site` node that holds it, in the operation's
+preflight sweep (`orchestration.readiness.preflight_all`), which is why neither
+`VMPlatform.preflight`/`runup` nor the node touches secret machinery. Whether a declared secret can
+be resolved depends on the run (the active backend chain, whether this run can prompt), not on the
+platform that named it. One visible consequence, and it is the intended one: `agw doctor` invokes
+the node's preflight per row without a sweep, so a site whose credential is only obtainable by
+prompting reads ok in the VM sites group, and resolvability is reported once, on that secret's own
+row in the Secrets group.
 
 **The pattern for a backend client:** memoize the _derived client_, never the raw secret. Proxmox's
 `_api(ctx)` builds a `ProxmoxAPI` from `ctx.secret(token_secret)` on first need and caches the

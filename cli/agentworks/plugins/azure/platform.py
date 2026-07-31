@@ -389,13 +389,15 @@ class AzureVMPlatform(VMPlatform):
         self._resource_cached: dict[str, ResourceManagementClient] = {}
 
     # No preflight override, on either credential path. A site with a
-    # ``service_principal`` DOES declare a config secret, so the base's
-    # central prediction pass over the site's declared references is
-    # real work now (an unresolvable client secret fails the sweep with
-    # the usual owner/usage framing, without this class touching the
-    # secret machinery); a site without one declares nothing and that
-    # pass stays vacuous. What is missing either way is an
-    # unauthenticated readiness check worth making. A credential probe
+    # ``service_principal`` DOES declare a config secret, and an
+    # unresolvable client secret does fail before any prompt or
+    # mutation, but that check is the OPERATION's preflight sweep
+    # predicting over the site's declared references, not this class's
+    # and not its node's: whether a secret can be resolved is a property
+    # of the run, not of the platform that named it. Nothing here (or in
+    # the vm-site node) touches the secret machinery either way. What is
+    # missing on both paths is an unauthenticated readiness check worth
+    # making, which is why there is no override at all. A credential probe
     # is deliberately NOT one: verifying credentials before the
     # resolve/credential stage forks behavior on where they happen to
     # come from (a non-interactive chain passes, the browser-login

@@ -184,3 +184,29 @@ this directory can be deleted per the SDD lifecycle once its history stops infor
   `tests/vms/test_ensure_active.py` was deleted (every case has an orchestrated twin in
   `tests/vms/test_vm_nodes.py`); the gate-stub leak sentinel and its `_GATE_MODULES` machinery went
   with the pair they guarded.
+- **2026-07-31 (issue #199 branch, post-lock):** resolvability prediction moved the last step it was
+  always meant to take. The FRD says construct-time registration and preflight-time prediction "move
+  to the orchestrator, which owns the graph and can predict over it centrally", and centralization
+  did land, but the INVOKER stopped one level short: the two nodes holding a config secret
+  (`VMSiteNode`, `GitCredentialNode`) called `require_predicted_refs` from their own `preflight`.
+  Prediction now runs in `orchestration.readiness.preflight_all`, once per node, over a new
+  `Node.config_secret_refs()` surface (full references, since the owner/usage framing needs the
+  `usage` prose that bare `secret_refs()` names drop). Nodes keep reference INTACTNESS
+  (`require_declared_refs`: do the declared names reach real registry rows), which is registry
+  consistency and genuinely theirs.
+
+  The operator's ruling behind it: a resource must not assume a concern that is not its own, and
+  whether a declared secret can be resolved is a property of the operation's runtime world (the
+  active backend chain, whether this run can prompt), not of the resource that named it. Operation
+  semantics are unchanged, verbatim: same pre-prompt timing, same `output.is_interactive()`
+  run-reality (the #202 fail-fast), same `ConfigError` with the same `<kind>/<name>` owner, usage,
+  and `agw secret describe` hint, and the per-node interleaving preserves the failure ORDER too.
+
+  What changes is doctor, and that was the point. Doctor invokes `node.preflight` per row and
+  deliberately runs no sweep, so it no longer predicts: a site whose credential is only obtainable
+  by prompting now reads ok in the VM sites group, and resolvability renders once, on the secret's
+  own row in the Secrets group, with no doctor-side code at all. The accepted consequence is that a
+  secret NOTHING can resolve shows its warning only on that secret's row while the site row stays
+  ok; the operation still fails fast at the sweep, before any prompt or mutation. This also narrows
+  the FRD's "doctor keeps its per-resource rows without needing a command plan": doctor keeps
+  per-resource READINESS rows, and resolvability was never one of them.

@@ -176,5 +176,15 @@ records and are not edited in place, so this addendum is authoritative.
   `gated_vm_boundary` now yields `(vm_node, resolver, ops_ctx)` so gated commands have the same
   op-start context the no-gate ones already got. `vm_active` deliberately did NOT change: every hold
   that exists is local and makes no backend call.
+- **`VMSiteNode.preflight` no longer predicts its declared secrets' resolvability.** The plan's
+  "Proxmox's preflight is the base's token prediction only" and the FRD's readiness narration
+  describe a placement that has now moved twice: out of the capability instance (the orchestration
+  layer, already covered by the 2026-07-18 entry above) and now out of the holding node too, into
+  the operation's preflight sweep. The site node keeps reference INTACTNESS (its declared names must
+  reach real registry rows) and composes its platform's world checks; whether those secrets would
+  RESOLVE belongs to the operation, and doctor, which invokes the node's preflight per row without a
+  sweep, therefore reports a prompt-only site credential as a healthy site plus one Secrets-group
+  row. See the 2026-07-31 entry in `docs/sdd/2026-07-16-orchestration-layer/locked.md` for the full
+  note; that SDD owns the prediction placement.
 
 The living contract remains `base.py` plus `cli/agentworks/capabilities/vm_platform/README.md`.

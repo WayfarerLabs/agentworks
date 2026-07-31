@@ -451,8 +451,8 @@ The shared surface is real (it is a lifecycle, not a boilerplate default), so it
   accepts no config) and the standing NOTE that this invoked-validation API may later be superseded
   by capabilities declaring their config schema at registration time;
 - the construct, `preflight`, and `runup` instance contract (both readiness stages no-op by default:
-  resolvability prediction is the holding node's, central, and the capabilities with nothing to
-  check or authenticate get the right behavior for free);
+  resolvability prediction belongs to the operation's preflight sweep, not to the instance or its
+  node, and the capabilities with nothing to check or authenticate get the right behavior for free);
 - the capability's identity (`name`, `description`) as the registry sees it.
 
 Subclasses add their ops. `GitHubCredentialProvider`, `VMPlatform`, `Harness` extend it. Consuming
@@ -465,13 +465,14 @@ machinery, not framework machinery.
 
 A capability's config may name secrets (a Proxmox API token, a git PAT, an AWS client secret).
 Nothing special happens: the secret is an ordinary `ConfigReference` returned by `dependencies`. The
-framework owns everything after the declaration: non-prompting _prediction_ in preflight (is this
-resolvable at all?, computed centrally over the declarations by the node holding the instance),
-_resolution_ at the preflight boundary (everything the command declared, one batched prompt session,
-cached), and _delivery_ through the context, scoped to the declared names. The default secret name
-is the capability's to choose: a per-consumer default (`git-token-<name>`, derived from `owner`)
-where credentials are many, a shared well-known name (`proxmox-token`) where one is typical. Either
-way the capability owns the default; the framework only resolves what was declared.
+framework owns everything after the declaration: non-prompting _prediction_ during the operation's
+preflight sweep (is this resolvable on this run?, computed centrally over the declarations by
+`orchestration.readiness.preflight_all`, never by the instance or the node holding it), _resolution_
+at the preflight boundary (everything the command declared, one batched prompt session, cached), and
+_delivery_ through the context, scoped to the declared names. The default secret name is the
+capability's to choose: a per-consumer default (`git-token-<name>`, derived from `owner`) where
+credentials are many, a shared well-known name (`proxmox-token`) where one is typical. Either way
+the capability owns the default; the framework only resolves what was declared.
 
 ### Declare, then receive: the contract that keeps a capability forward-compatible
 
@@ -480,8 +481,8 @@ framework owning everything in between:
 
 1. **Declare, purely.** Name every secret (and every other resource reference) in `dependencies`: no
    resolver, no I/O, no resolution. This is the capability's _entire_ input side. The framework
-   reads those references to build the resolvability prediction preflight uses and to scope the one
-   batched resolve pass.
+   reads those references to build the resolvability prediction the preflight sweep runs and to
+   scope the one batched resolve pass.
 2. **Receive, from the context.** Read resolved secret values only via `ctx.secret(name)`, in
    `runup` and in ops (their signatures converged on `RunContext`; a VM platform's power ops take
    the op-start context beside the row). There is no other value source: the instance holds no
