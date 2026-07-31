@@ -135,7 +135,12 @@ class TyperHandler:
             typer.echo(_MOUSE_TRACKING_DISABLE, nl=False)
         try:
             return typer.confirm(f"{_pad(level)}{message}", default=default)
-        except click.exceptions.Abort:
+        except (click.exceptions.Abort, typer.Abort):
+            # typer.confirm/typer.prompt raise typer's vendored Abort (a
+            # different class from the top-level click's), so catching only
+            # click.exceptions.Abort misses a Ctrl-C at those prompts.
+            # Catching typer.Abort too covers both, and is robust if a
+            # site's underlying click (vendored vs real) ever changes.
             raise UserAbort("interrupted") from None
 
     def choose(self, message: str, options: list[str], level: int) -> int:
@@ -147,7 +152,7 @@ class TyperHandler:
                 choice = int(typer.prompt(f"{_pad(level)}Choice", type=int))
                 if 1 <= choice <= len(options):
                     return choice - 1
-            except click.exceptions.Abort:
+            except (click.exceptions.Abort, typer.Abort):
                 raise UserAbort("interrupted") from None
             except ValueError:
                 pass
@@ -171,7 +176,7 @@ class TyperHandler:
                     show_default=bool(default),
                 )
             )
-        except click.exceptions.Abort:
+        except (click.exceptions.Abort, typer.Abort):
             raise UserAbort("interrupted") from None
 
     def prompt_secret(self, label: str, level: int, hint: str | None = None) -> str:
@@ -186,7 +191,7 @@ class TyperHandler:
                     break
                 typer.echo("(empty, try again)", err=True)
             return value
-        except click.exceptions.Abort:
+        except (click.exceptions.Abort, typer.Abort):
             raise UserAbort("interrupted") from None
 
     def progress(self, label: str, level: int, total: int | None = None) -> Progress:
