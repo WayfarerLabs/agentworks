@@ -558,7 +558,7 @@ def rekey_vm(
     ts_decl = resolver.register_name(rekey_vm_tmpl.tailscale_auth_key)
     scope = _vm_scope(db, name)
     with _mask_env_var_backend_for(ts_decl, masked=ignore_env):
-        preflight_all(nodes, RunContext(config=config, operation_scope=scope))
+        preflight_all(nodes, RunContext(config=config, operation_scope=scope), registry=registry)
         resolver.resolve()
     ts_auth_key = resolver.get(rekey_vm_tmpl.tailscale_auth_key)
 

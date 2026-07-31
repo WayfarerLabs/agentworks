@@ -306,6 +306,42 @@ def test_template_node_preflight_predicts_the_key(tmp_path: Path, monkeypatch: p
         node.preflight(RunContext(config=config))
 
 
+# -- the vm-site node's own preflight ----------------------------------------
+
+
+def test_site_node_preflight_refuses_a_dangling_secret_reference(tmp_path: Path) -> None:
+    """The site's preflight verifies its declarations are INTACT: a
+    reference naming no registry row is a typed error, not a KeyError
+    and not a silent pass on a synthesized declaration.
+
+    This is the half that stayed the node's concern when resolvability
+    prediction moved to the operation's preflight sweep. Whether the
+    registry agrees with the site's own config is registry consistency;
+    whether a declared secret would resolve is the operation's runtime
+    world, and the site does not speak to it.
+    """
+    from agentworks.bootstrap import build_registry
+    from agentworks.capabilities.base import RunContext
+    from agentworks.errors import ConfigError
+    from agentworks.resources.reference import SecretReference
+    from tests.orchestrated_fixtures import write_operator_config
+
+    config = write_operator_config(tmp_path)
+    registry = build_registry(config)
+    dangling = SecretReference(
+        name="never-declared",
+        kind="secret",
+        usage="the Proxmox API token",
+        source=("vm-site", "stub"),
+    )
+    site = VMSiteNode("stub", cast("VMPlatform", _GatePlatform()), (dangling,), registry)
+
+    with pytest.raises(ConfigError) as exc:
+        site.preflight(RunContext(config=config))
+    assert "vm-site/stub" in str(exc.value)
+    assert "never-declared" in str(exc.value)
+
+
 # -- the pending VM node -----------------------------------------------------
 
 

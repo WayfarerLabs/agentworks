@@ -256,7 +256,7 @@ def create_vm(
         output.info(f"Checking vm-site/{site}...")
         output.info(f"Checking vm-template/{vm_tmpl.name}...")
         _mgr.announce_git_credentials(providers)
-        preflight_all(nodes, RunContext(config=config, operation_scope=scope))
+        preflight_all(nodes, RunContext(config=config, operation_scope=scope), registry=registry)
 
     with output.section("Resolving Secrets"):
         resolver.resolve()
@@ -612,7 +612,7 @@ def reinit_vm(
         with output.section("Preflight"):
             output.info(f"Checking vm-site/{vm.site}...")
             _mgr.announce_git_credentials(providers)
-            preflight_all(nodes, RunContext(config=config, operation_scope=scope))
+            preflight_all(nodes, RunContext(config=config, operation_scope=scope), registry=registry)
 
         with output.section("Resolving Secrets"):
             resolver.resolve()

@@ -5,15 +5,26 @@ Replaces the per-instance bound resolver's orchestration-shaped jobs:
 the union of a command's secrets comes from the plan's
 declared ``secret_refs`` (not construct-time registration), and
 resolvability prediction is computed centrally over declarations (not
-by each instance). Prediction is
-:func:`~agentworks.secrets.resolve.preview_resolution` applied per
-declaration (a prompt backend is reported without probing; probing
-would BE the prompt), with the preflight caller gating the interactive
+by each instance, and not by the nodes that declare them either).
+Prediction is :func:`~agentworks.secrets.resolve.preview_resolution`
+applied per declaration (a prompt backend is reported without probing;
+probing would BE the prompt), with the caller gating the interactive
 answer on ``output.is_interactive()`` so a prompt-only secret fails
-fast at preflight under ``--non-interactive`` rather than at resolve
-end (issue #202). Doctor's all-resources sweep and a command's union
-are two callers of the same computation, which is why the prediction
-helper takes declarations, not a walk.
+fast under ``--non-interactive`` rather than at resolve end (issue
+#202). Doctor's all-resources sweep and a command's preflight sweep are
+two callers of the same computation, which is why the prediction helper
+takes declarations, not a walk.
+
+WHO predicts is load-bearing, not incidental. Resolvability is a
+property of the operation's runtime world, so the OPERATION asks: the
+preflight sweep (:func:`~agentworks.orchestration.readiness
+.preflight_all`) runs :func:`require_predicted_refs` per node. A node
+asks only :func:`require_declared_refs`, whether its declarations point
+at rows that exist, which is registry consistency and genuinely its
+own. Doctor, which invokes node preflight per row without a sweep,
+lands on the right side of that split for free: it reports resolvability
+once, on the secret's own row, instead of smearing it across every
+resource that names the secret.
 
 Resolution itself is untouched here: the single resolve pass at the
 preflight boundary stays :class:`~agentworks.secrets.resolver
@@ -88,12 +99,19 @@ def predict_resolution(decls: Iterable[SecretDecl], backends: list[ActiveBackend
 
     :func:`~agentworks.secrets.resolve.preview_resolution` per
     declaration; the semantics (non-prompting, a non-interactive backend
-    must actually produce a value) are that function's. This is the
-    PREFLIGHT prediction, so it must match resolve-time reality: an
-    interactive backend counts as resolving only when interactive input
-    is actually available this run (``output.is_interactive()``), so a
-    prompt-only secret fails fast at preflight under ``--non-interactive``
-    rather than reaching a resolve-end failure (issue #202).
+    must actually produce a value) are that function's. It must match
+    resolve-time reality: an interactive backend counts as resolving
+    only when interactive input is actually available this run
+    (``output.is_interactive()``), so a prompt-only secret fails fast at
+    the preflight sweep under ``--non-interactive`` rather than reaching
+    a resolve-end failure (issue #202).
+
+    That run-reality gating is honest because only OPERATIONS invoke
+    this: an operation is the thing that would do the prompting, so
+    "could this run resolve it" is the question it is actually asking.
+    Doctor deliberately does not reach here (it reports on secrets
+    through its own Secrets group, whose optimistic semantics answer a
+    different question: could this secret resolve under some run).
     """
     from agentworks import output
     from agentworks.secrets.resolve import preview_resolution
@@ -104,21 +122,76 @@ def predict_resolution(decls: Iterable[SecretDecl], backends: list[ActiveBackend
     }
 
 
+def require_declared_refs(owner: str, refs: Iterable[ResourceReference], registry: Registry) -> None:
+    """Reference INTACTNESS: every declared secret reference must name a
+    row that actually exists in the registry.
+
+    This is registry consistency, and it IS the holding node's concern:
+    the node's own config named these secrets, so a name that reaches no
+    row means the node's declarations and the registry disagree. Nodes
+    call it from ``preflight``.
+
+    It deliberately says nothing about whether a declared secret would
+    RESOLVE, which is the operation's concern and lives in the preflight
+    sweep (:func:`~agentworks.orchestration.readiness.preflight_all`).
+    Doctor, which invokes node preflight per row and never runs a sweep,
+    therefore gets the intactness check and not the prediction, which is
+    exactly right: an operator's secret being prompt-only makes a site
+    row no less healthy.
+
+    A dangling reference is normally unreachable (a referenced secret is
+    auto-declared at finalize), so this catches the one case that is
+    not: the readiness-gated materialization pass (R12) leaves a
+    not-ready or disabled node's secrets unmaterialized on purpose.
+    Reaching preflight in that state means something upstream let a
+    not-ready resource through, and a clear typed error beats the
+    ``KeyError`` or the silently-synthesized bare declaration that would
+    otherwise follow.
+    """
+    from agentworks.errors import ConfigError
+    from agentworks.secrets.kinds import SECRET_KIND_NAME
+
+    for ref in refs:
+        try:
+            registry.lookup(SECRET_KIND_NAME, ref.name)
+        except KeyError:
+            raise ConfigError(
+                f"{owner}: declared secret '{ref.name}' ({ref.usage}) has no declaration in the registry",
+                hint=(
+                    "A referenced secret is normally auto-declared, so this "
+                    "usually means the declaring resource is not ready and its "
+                    "secrets were never materialized. `agw doctor` shows the "
+                    "resource's readiness."
+                ),
+            ) from None
+
+
 def require_predicted_refs(
     owner: str,
     refs: Iterable[ResourceReference],
     config: Config | None,
     registry: Registry,
 ) -> None:
-    """The node-preflight half of central prediction: every declared
-    secret reference must be predicted resolvable by some active
+    """Central resolvability prediction over one node's declared config
+    secrets: every reference must be predicted resolvable by some active
     backend, without prompting (an unresolvable secret is fatal and
-    knowable pre-resolve; a prompt-only secret's value check defers
-    past preflight). The holding node runs this for its held
-    instance's declared config secrets, with the same owner/usage
-    error framing the per-instance prediction produced; ``owner`` is
-    the node's ``<kind>/<name>`` key, which IS the instance's owner
-    display.
+    knowable pre-resolve; a prompt-only secret's value check defers past
+    preflight).
+
+    Invoked by the preflight sweep
+    (:func:`~agentworks.orchestration.readiness.preflight_all`), once
+    per node, NOT by the nodes themselves. Whether a declared secret can
+    be resolved is a property of the operation's runtime world (the
+    active backend chain, this run's interactivity), not of the resource
+    that named it, so the resource must not assume the concern. The
+    practical consequence is doctor: it invokes node preflight per row
+    and never sweeps, so it never predicts, and a prompt-only secret
+    leaves a site row healthy while the Secrets group reports on the
+    secret itself.
+
+    ``owner`` is the node's ``<kind>/<name>`` key, which IS the owner
+    display of the instance whose config named the secret, so the error
+    keeps the owner/usage framing the per-instance prediction produced.
     """
     from agentworks.errors import ConfigError
     from agentworks.secrets.resolve import active_backends

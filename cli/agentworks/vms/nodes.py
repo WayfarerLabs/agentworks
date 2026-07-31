@@ -83,14 +83,21 @@ class VMSiteNode:
     def secret_refs(self) -> tuple[str, ...]:
         return tuple(ref.name for ref in self._secret_refs)
 
-    def preflight(self, ctx: RunContext) -> None:
-        # Central prediction over the site's declared config secrets
-        # (the platform API credential), with the old per-instance
-        # owner/usage error framing; then the held instance's own
-        # world checks.
-        from agentworks.orchestration.secrets import require_predicted_refs
+    def config_secret_refs(self) -> tuple[ResourceReference, ...]:
+        # The platform's API credential, as declared. The preflight
+        # sweep predicts resolvability over these; the site itself does
+        # not, because how a secret gets a value is the operation's
+        # concern and not the site's.
+        return self._secret_refs
 
-        require_predicted_refs(self.key, self._secret_refs, ctx.config, self._registry)
+    def preflight(self, ctx: RunContext) -> None:
+        # The site checks that its own declarations are INTACT (the
+        # names its config named reach real registry rows), which is
+        # registry consistency and legitimately its concern; then the
+        # held instance's own world checks.
+        from agentworks.orchestration.secrets import require_declared_refs
+
+        require_declared_refs(self.key, self._secret_refs, self._registry)
         self._platform.preflight(ctx)
 
     def runup(self, ctx: RunContext) -> None:
@@ -146,6 +153,9 @@ class LiveVMNode:
         return (self._site,)
 
     def secret_refs(self) -> tuple[str, ...]:
+        return ()
+
+    def config_secret_refs(self) -> tuple[ResourceReference, ...]:
         return ()
 
     def preflight(self, ctx: RunContext) -> None: ...
@@ -301,6 +311,12 @@ class VMTemplateNode:
         # roots), never in a provisioning command's boundary pass.
         return (self._tmpl.tailscale_auth_key,)
 
+    def config_secret_refs(self) -> tuple[ResourceReference, ...]:
+        # None: the Tailscale key is a template FIELD, not a config-secret
+        # reference off a consuming resource's declared config, and this
+        # node predicts it itself in preflight (see below).
+        return ()
+
     def preflight(self, ctx: RunContext) -> None:
         """The template's readiness: its Tailscale auth key must be
         predicted resolvable, without prompting, via the central
@@ -377,6 +393,9 @@ class PendingVMNode:
         return (self._template, self._site, *self._credentials)
 
     def secret_refs(self) -> tuple[str, ...]:
+        return ()
+
+    def config_secret_refs(self) -> tuple[ResourceReference, ...]:
         return ()
 
     def preflight(self, ctx: RunContext) -> None: ...

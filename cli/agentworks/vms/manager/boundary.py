@@ -114,7 +114,7 @@ def gated_vm_boundary(
     if scope is None:
         scope = _vm_scope(db, vm.name)
     with activation_gate(vm_node, gate_secret_resolver(config, registry, resolver)):
-        preflight_all(nodes, RunContext(config=config, operation_scope=scope))
+        preflight_all(nodes, RunContext(config=config, operation_scope=scope), registry=registry)
         resolver.resolve()
         yield vm_node, resolver, _platform_ops_ctx(config, scope, vm_node, resolver)
 
@@ -161,6 +161,6 @@ def _live_vm_boundary(
     for secret_name in secret_union(nodes):
         resolver.register_name(secret_name)
     scope = _vm_scope(db, vm.name)
-    preflight_all(nodes, RunContext(config=config, operation_scope=scope))
+    preflight_all(nodes, RunContext(config=config, operation_scope=scope), registry=registry)
     resolver.resolve()
     return vm_node, _platform_ops_ctx(config, scope, vm_node, resolver)

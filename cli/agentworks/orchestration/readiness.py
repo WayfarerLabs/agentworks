@@ -23,11 +23,12 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
 
     from agentworks.capabilities.base import RunContext
+    from agentworks.resources.registry import Registry
 
     from .node import Node, Readiness
 
 
-def preflight_all(nodes: Iterable[Node], ctx: RunContext) -> None:
+def preflight_all(nodes: Iterable[Node], ctx: RunContext, *, registry: Registry) -> None:
     """The preflight-all sweep: every participating node, against the
     one command-start context, before any prompt or mutation (the
     walk-away invariant's first half).
@@ -37,8 +38,34 @@ def preflight_all(nodes: Iterable[Node], ctx: RunContext) -> None:
     deterministic order keeps operator-facing check output stable. The
     first failure propagates: nothing has been touched yet, so there
     is nothing to unwind.
+
+    The sweep owns SECRET-RESOLVABILITY PREDICTION, running
+    :func:`~agentworks.orchestration.secrets.require_predicted_refs`
+    over each node's declared config-secret references just before that
+    node's own ``preflight``. It lives here rather than in the nodes
+    because it is a question about the OPERATION's runtime world (which
+    backends are active, whether this run can prompt), not about the
+    resource that happens to name the secret. A resource must not
+    assume a concern that is not its own.
+
+    The placement is what makes doctor come out right without doctor
+    knowing anything about it: doctor invokes ``node.preflight`` per row
+    and never sweeps, so a prompt-only secret leaves a site's row
+    healthy while the Secrets group reports on the secret itself, once,
+    where it belongs. The accepted consequence is that a secret nothing
+    can resolve shows up only on its own doctor row; the operation
+    still fails fast, here, before any prompt or mutation.
+
+    Predicting per node, interleaved with that node's ``preflight``
+    rather than as a separate pass, keeps the operator-facing failure
+    order identical to when the nodes ran the prediction themselves.
+    ``registry`` is what prediction reads declarations from; every
+    caller builds its nodes from one already.
     """
+    from agentworks.orchestration.secrets import require_predicted_refs
+
     for node in nodes:
+        require_predicted_refs(node.key, node.config_secret_refs(), ctx.config, registry)
         node.preflight(ctx)
 
 

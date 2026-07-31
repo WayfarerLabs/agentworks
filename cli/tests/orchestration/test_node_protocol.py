@@ -15,6 +15,7 @@ from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.git_credential.github import GitHubCredentialProvider
 from agentworks.orchestration.node import CreatableNode, Node, Readiness
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
+from agentworks.resources.reference import ResourceReference
 
 _PROXMOX_CONFIG = {
     "api_url": "https://pve:8006",
@@ -31,12 +32,16 @@ class _FakeNode:
     key: str
     _deps: tuple[_FakeNode, ...] = ()
     _secret_refs: tuple[str, ...] = ()
+    _config_secret_refs: tuple[ResourceReference, ...] = ()
 
     def deps(self) -> tuple[_FakeNode, ...]:
         return self._deps
 
     def secret_refs(self) -> tuple[str, ...]:
         return self._secret_refs
+
+    def config_secret_refs(self) -> tuple[ResourceReference, ...]:
+        return self._config_secret_refs
 
     def preflight(self, ctx: RunContext) -> None: ...
 

@@ -151,7 +151,7 @@ def create_agent(
         with output.section("Preflight"):
             output.info(f"Checking agent-template/{agent_tmpl.name}...")
             announce_git_credentials(providers)
-            preflight_all(nodes, RunContext(config=config, operation_scope=scope))
+            preflight_all(nodes, RunContext(config=config, operation_scope=scope), registry=registry)
 
         with output.section("Resolving Secrets"):
             resolver.resolve()
@@ -492,7 +492,7 @@ def reinit_agent(
         with output.section("Preflight"):
             output.info(f"Checking agent-template/{agent_tmpl.name}...")
             announce_git_credentials(providers)
-            preflight_all(nodes, RunContext(config=config, operation_scope=scope))
+            preflight_all(nodes, RunContext(config=config, operation_scope=scope), registry=registry)
 
         with output.section("Resolving Secrets"):
             resolver.resolve()

@@ -465,3 +465,89 @@ bogus_key = 1
     # The TOML unknown-key warn row still rendered after the fail.
     assert any(c.name == "Config" and c.status == Status.WARN and "bogus_key" in (c.message or "") for c in g.checks)
     assert not any(c.name == "Config is valid" for c in g.checks)
+
+
+# ---------------------------------------------------------------------------
+# Where resolvability renders: the Secrets group, and not every resource
+# that names a secret
+# ---------------------------------------------------------------------------
+
+
+_AZURE_SP_SITE = """\
+apiVersion: agentworks/v1
+kind: vm-site
+metadata:
+  name: azure-dev
+spec:
+  platform: azure-vm
+  platform_config:
+    subscription_id: "0000"
+    resource_group: agw-dev
+    region: eastus
+    service_principal:
+      tenant_id: tenant-1
+      client_id: client-1
+      secret: az-sp
+"""
+
+
+def _sp_site_config(tmp_path: Path) -> Path:
+    """An operator config declaring an azure site with a service
+    principal, whose client secret only the prompt backend could
+    supply."""
+    cfg = _write_config(
+        tmp_path,
+        extras="""
+[plugins]
+system = ["azure"]
+
+[secret_config]
+backends = ["env-var", "prompt"]
+""",
+    )
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    (resources / "site.yaml").write_text(_AZURE_SP_SITE)
+    return cfg
+
+
+def test_prompt_only_site_secret_leaves_the_site_row_ok(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A site whose credential is obtainable only by prompting is a
+    HEALTHY site, and doctor says so.
+
+    Resolvability is a property of the operation's runtime world, not of
+    the site, so it is predicted by the operation's preflight sweep and
+    not by the node. Doctor invokes ``node.preflight`` per row and never
+    sweeps, which is what keeps this row clean with no doctor-side
+    wording machinery at all.
+    """
+    from agentworks.doctor import _check_vm_sites
+
+    monkeypatch.delenv("AW_SECRET_AZ_SP", raising=False)
+    config = load_config(_sp_site_config(tmp_path), warn_issues=False)
+    registry = build_registry(config)
+
+    g = _check_vm_sites(config, registry)
+    row = next(c for c in g.checks if c.name == "azure-dev")
+    assert row.status is Status.OK, (row.status, row.message)
+    assert "azure-vm" in (row.message or "")
+
+
+def test_prompt_only_site_secret_still_renders_on_its_own_secret_row(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The other half: resolvability renders ONCE, on the secret's own
+    row in the Secrets group, where an operator can act on it, rather
+    than being smeared across every resource that names it."""
+    monkeypatch.delenv("AW_SECRET_AZ_SP", raising=False)
+    config = load_config(_sp_site_config(tmp_path), warn_issues=False)
+    registry = build_registry(config)
+
+    g = _check_secrets(config, registry)
+    row = next(c for c in g.checks if "az-sp" in c.name)
+    assert row.status is Status.OK
+    assert "would resolve via prompt" in (row.message or "")

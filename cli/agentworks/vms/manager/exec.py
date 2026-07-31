@@ -332,7 +332,7 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
     with activation_gate(vm_node, gate_secret_resolver(config, registry, resolver)):
         # PREFLIGHT-ALL against the one command-start context, then the
         # boundary resolve: the walk-away point.
-        preflight_all(nodes, RunContext(config=config, operation_scope=scope))
+        preflight_all(nodes, RunContext(config=config, operation_scope=scope), registry=registry)
         resolver.resolve()
 
         def scoped_ctx(node_secret_refs: tuple[str, ...]) -> RunContext:

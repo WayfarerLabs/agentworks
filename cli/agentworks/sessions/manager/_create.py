@@ -119,6 +119,7 @@ def _preflight_and_resolve(
                 admin_target=target,
                 agent_target=agent_target,
             ),
+            registry=graph.registry,
         )
 
     with output.section("Resolving Secrets"):

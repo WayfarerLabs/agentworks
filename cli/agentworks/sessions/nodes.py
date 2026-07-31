@@ -38,6 +38,7 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, SessionRow
     from agentworks.orchestration.node import Node
+    from agentworks.resources.reference import ResourceReference
     from agentworks.vms.nodes import LiveVMNode
     from agentworks.workspaces.nodes import LiveWorkspaceNode, PendingWorkspaceNode
 
@@ -92,6 +93,17 @@ class LiveSessionNode:
 
     def secret_refs(self) -> tuple[str, ...]:
         return self._harness.secret_refs()
+
+    def config_secret_refs(self) -> tuple[ResourceReference, ...]:
+        # Empty on purpose, and NOT because a harness declares nothing:
+        # a session template's harness_config can name secrets, which is
+        # why secret_refs above delegates to the harness. The harness
+        # exposes only NAMES, so there is no `usage` prose to frame a
+        # prediction failure with, and handing the bare names over would
+        # silently widen what the preflight sweep predicts. Threading the
+        # references through the harness surface is the honest fix; it is
+        # deferred rather than smuggled in here.
+        return ()
 
     def preflight(self, ctx: RunContext) -> None:
         self._harness.preflight(ctx)
@@ -149,6 +161,17 @@ class PendingSessionNode:
 
     def secret_refs(self) -> tuple[str, ...]:
         return self._harness.secret_refs()
+
+    def config_secret_refs(self) -> tuple[ResourceReference, ...]:
+        # Empty on purpose, and NOT because a harness declares nothing:
+        # a session template's harness_config can name secrets, which is
+        # why secret_refs above delegates to the harness. The harness
+        # exposes only NAMES, so there is no `usage` prose to frame a
+        # prediction failure with, and handing the bare names over would
+        # silently widen what the preflight sweep predicts. Threading the
+        # references through the harness surface is the honest fix; it is
+        # deferred rather than smuggled in here.
+        return ()
 
     def preflight(self, ctx: RunContext) -> None:
         self._harness.preflight(ctx)
