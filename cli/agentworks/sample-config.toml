@@ -2,16 +2,17 @@
 # Copy to ~/.config/agentworks/config.toml and edit to match your setup.
 #
 # Required fields are uncommented. Everything else shows the default value
-# commented out -- uncomment and change only what you need.
+# commented out; uncomment and change only what you need.
 #
-# RESOURCES ARE YAML-FIRST: declare secrets, templates, git credentials, and
-# apt / install-command entries as YAML manifests in the resources/ directory
-# next to this file (`agw resource sample <kind>` prints a commented starter;
-# --all for every kind).
-# The TOML resource sections below keep working, but they are deprecated --
-# they load with a deprecation warning, and `agw resource migrate` moves them to
-# YAML whenever you're ready. This file remains the permanent home for
-# SETTINGS: operator identity, paths, defaults, and the secret backend chain.
+# RESOURCES ARE DECLARED AS YAML MANIFESTS, NOT HERE: secrets, templates,
+# git credentials, vm-sites, and apt / install-command entries live in the
+# resources/ directory next to this file (`agw resource sample <kind>`
+# prints a commented starter; --all for every kind). Declaring resources
+# in config.toml is deprecated and will be removed: existing TOML
+# declarations keep loading with a deprecation warning, and
+# `agw resource migrate` moves them to YAML. This file is the permanent
+# home for SETTINGS: operator identity, paths, defaults, enabled plugins,
+# and the secret backend chain.
 #
 # Comment convention: examples are written as `#key = "value"` (no space
 # after `#`), so you can uncomment a line in place by deleting one `#`.
@@ -20,11 +21,11 @@
 #
 # Naming conventions:
 #   - Framework keys (section names, field names) use snake_case:
-#     [vm_templates.foo], ssh_public_key, mise_activate, backend_mappings.
-#   - Operator-typed identifiers (entity names, backend names, secret names)
-#     use kebab-case: [vm_templates.dev-host], `secret = "github-token"`,
-#     `backends = ["env-var", "prompt"]`. The validator is permissive so
-#     legacy names continue to load, but new names should follow kebab.
+#     [secret_config], ssh_public_key, runup_git_credentials.
+#   - Operator-typed identifiers (site names, backend names, secret names)
+#     use kebab-case: `site = "lima-local"`, `backends = ["env-var",
+#     "prompt"]`. The validator is permissive so legacy names continue to
+#     load, but new names should follow kebab.
 
 # =============================================================================
 # Operator identity and platform settings
@@ -58,9 +59,10 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # enabled in-repo system plugins. System plugins bundle capability
 # implementations (VM platforms, harnesses, git-credential providers, secret
 # backends) and optional resource manifests that ship with agentworks but are
-# separable and opt-in. This is a primary opt-in you set early, since later
-# sections (secret backends, git credentials, vm-sites, session templates)
-# reference the plugins enabled here. List the plugins you want enabled by name.
+# separable and opt-in. This is a primary opt-in you set early, since other
+# settings and resources (the secret backend chain, git credentials, vm-sites,
+# session templates) reference the plugins enabled here. List the plugins you
+# want enabled by name.
 # A plugin NOT listed here still publishes its capability rows AND its bundled
 # manifests, but they are disabled: a resource referencing one is not-ready (or
 # refused at use) with an "enable plugin <name>" hint, never an unknown-name
@@ -87,121 +89,58 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
                                             # token against its provider API before it is
                                             # written (false for airgapped setups)
 
-# --- Named-console settings ---
-# Scope: this section applies only to named multi-session consoles created
-# via `agw console create`. The legacy `vm console` and the
-# workspace-console template generator do NOT read these values.
+# --- Named consoles ---
+# The layout template for named multi-session consoles (created via
+# `agw console create`) is a named-console-template RESOURCE:
+# `agw resource sample named-console-template` prints a commented starter
+# including the tmux_layout vocabulary. A legacy [named_console] TOML
+# section still loads but is deprecated; `agw resource migrate
+# named-console-template` moves it to YAML.
+
+# --- Git credentials ---
+# Git credential providers (how to obtain git tokens, referenced by name
+# from admin and agent templates) are git-credential RESOURCES:
+# `agw resource sample git-credential` prints commented starters for the
+# github and azdo providers, including scoped GitHub credentials
+# (fine-grained PATs pinned to a repo or org). Legacy [git_credentials.*]
+# TOML sections still load but are deprecated; `agw resource migrate
+# git-credential` moves them to YAML.
+
+# =============================================================================
+# Secrets
+# =============================================================================
 #
-# tmux_layout: layout applied to every multi-pane session window in a named
-# console. Most values map 1:1 to tmux's built-in select-layout names so the
-# same value can be applied on the fly via `tmux select-layout` key bindings;
-# the `aw-session-vertical` value is an agentworks-specific layout computed
-# per-window from live tmux dimensions. Re-read on every build / recreate /
-# add-shell / restore-session, so changing this value and running
-# `agw console attach <name> --recreate` (or adding/restoring a shell on a
-# live console) is enough to switch layouts.
-
-#[named_console]
-#description = "Default console layout"     # optional, shown in prompts and logs
-#tmux_layout = "aw-session-vertical"
-# Valid values:
-#   aw-session-vertical  - single column; session pane takes the top 50%
-#                          and shell panes stack vertically in the bottom 50%
-#                          with equal heights. The default -- this is the
-#                          layout the Named Console feature was designed
-#                          around (one privileged session pane, helper
-#                          shells underneath).
-#   tiled                - roughly-equal grid
-#   even-vertical        - all panes as equal-height rows (one column)
-#   even-horizontal      - all panes as equal-width columns (one row)
-#   main-vertical        - session pane on the left, helper shells stacked right
-#   main-horizontal      - session pane on top, helper shells laid out below
-# The "main" layouts treat the first pane (the session attach itself) as
-# the primary; the remaining shell panes become the secondary stack.
-
-# --- Git credential providers ---
-# Define how to obtain git tokens. Referenced by name in admin.config and
-# agent_templates. Each entry's `token` field names a secret (default
-# `git-token-<name>`) that the framework resolves through the backend chain
-# (env-var, prompt, ...) at VM-init time; the resolved value is written to
-# `~/.git-credentials` and served by the agentworks-managed credential
-# helper (which replaces git's credential-store).
-
-# Scoped GitHub credentials (fine-grained PATs pinned to a repo or org)
-# are declared in YAML manifests, not TOML: see
-# `agw resource sample git-credential`.
-#[git_credentials.github]
-#provider = "github"                              # `type` is accepted as a legacy alias
-#description = "GitHub full access"               # optional, shown in prompts and logs
-#token = "git-token-github"                       # optional; default is `git-token-<name>` (bare secret name; no { secret = "..." } polymorphism)
-# Resolved secret value is the PAT (create at https://github.com/settings/tokens, repo scope).
-
-#[git_credentials.azdo]
-#provider = "azdo"                                # `type` is accepted as a legacy alias
-#org = "my-org"
-#description = "Azure DevOps for my-org"          # optional, shown in prompts and logs
-#token = "git-token-azdo"                         # optional; default is `git-token-<name>`
-# Resolved secret value is the PAT (create at https://dev.azure.com/{org}/_usersSettings/tokens).
-# The `azdo` provider ships in the opt-in `azure` system plugin: an azdo
-# credential is not-ready and refused at use with an "enable plugin `azure`"
-# hint until you add `[plugins] system = ["azure"]` above.
-
-# --- Secrets ---
-# A pluggable, named-secret system used by env tables on resources below.
-# Anywhere a value can be a string, it can also be `{ secret = "<name>" }`,
-# which references a declaration here. Backends produce the value at command
-# time; agentworks never persists secret values to disk.
+# A pluggable, named-secret system. Anywhere a value can be a string, it can
+# also be `{ secret = "<name>" }`, referencing a declared secret. Backends
+# produce the value at command time; agentworks never persists secret values
+# to disk.
+#
+# Secret DECLARATIONS (name, description, per-backend mappings) are
+# RESOURCES: `agw resource sample secret` prints a commented starter,
+# including `backend_mappings` overrides such as the onepassword
+# `op://vault/item/field` address form. Legacy [secrets.*] TOML sections
+# still load but are deprecated; `agw resource migrate secret` moves them
+# to YAML.
 #
 # Use `agw secret list` to see how each active backend would look up each
 # declared secret. Use `agw secret describe <name>` for a full view including
-# which env entries reference the secret (or `Referenced by: (none recorded)`
-# for an unused declaration). `agw doctor` reports one row per secret with
-# the runtime resolution outcome (ok / warn / fail).
+# which env entries reference the secret. `agw doctor` reports one row per
+# secret with the runtime resolution outcome (ok / warn / fail).
 
-# Secret declarations -- one per `{ secret = "<name>" }` reference used anywhere
-# in your config. `description` is required and shown in prompts and
-# `agw doctor`; `hint` (optional) is shown alongside the prompt.
-# `backend_mappings.<backend>` (optional, keyed by BACKEND NAME) overrides that
-# backend's default identifier for this one secret, or sets `false` to opt out
-# of that backend entirely.
-
-#[secrets.npm-token]
-#description = "npm registry token"
-#hint = "Generate at https://www.npmjs.com/settings/<user>/tokens"
-
-#[secrets.openai-api-key]
-#description = "OpenAI API key"
-#backend_mappings.env-var = "OPENAI_API_KEY"    # override default convention
-
-#[secrets.registry-password]
-#description = "container registry password"
-# onepassword ships as an opt-in system plugin: enable it with
-# `[plugins] system = ["onepassword"]` (see System plugins above) before these
-# mappings resolve; while the plugin is disabled the backend is dormant.
-# onepassword needs an explicit per-secret address (no name-based default).
-# The address is the `op://vault/item/field` reference 1Password's
-# "Copy Secret Reference" produces (an optional `.../section/field` segment
-# is allowed). This uses op's signed-in account (or the one named by
-# OP_ACCOUNT):
-#backend_mappings.onepassword = "op://Work/registry/password"
-# To pin a specific account, use the table form: `reference` is the same
-# op:// string, `account` is an op account selector (shorthand, sign-in
-# address, account ID, or user ID). Only needed to override the default
-# account:
-#   backend_mappings.onepassword = { account = "my.1password.com", reference = "op://Work/registry/password" }
-
-# Backends are activated by listing them in `[secret_config].backends` in
-# precedence order. The built-in backends ship with agentworks:
+# The backend CHAIN below is a setting and lives here. Backends are activated
+# by listing them in `[secret_config].backends` in precedence order. The
+# built-in backends ship with agentworks:
 #   env-var     : reads from process env. Default convention is
 #                 AW_SECRET_<UPPER_SNAKE_CASE>, so secret "npm-token" reads
-#                 from AW_SECRET_NPM_TOKEN unless overridden via
-#                 `[secrets.<name>].backend_mappings.env-var`.
+#                 from AW_SECRET_NPM_TOKEN unless overridden via the secret
+#                 declaration's `backend_mappings.env-var`.
 #   onepassword : ships as the opt-in `onepassword` system plugin (enable it in
 #                 [plugins] above); while disabled it is dormant (dropped from
 #                 the chain). Once enabled it reads via the 1Password CLI
 #                 (`op read op://...`). Requires
-#                 a per-secret `backend_mappings.onepassword` address (string
-#                 or table, above); unmapped secrets are skipped. `op` must be
+#                 a per-secret `backend_mappings.onepassword` address (see
+#                 `agw resource sample secret`); unmapped secrets are skipped.
+#                 `op` must be
 #                 able to read at command time (the 1Password app's CLI
 #                 integration enabled, or `op signin`); a mapping that points
 #                 at a missing item is a hard error, not a fall-through.
@@ -246,222 +185,26 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # Templates
 # =============================================================================
 #
-# Agentworks uses templates for VMs, workspaces, agents, and tasks. Each
-# template type supports a "default" entry used when --template is not
-# specified. Templates support inheritance via the "inherits" key:
-# child values override parents, depth-first left-to-right.
+# Agentworks uses templates for VMs, the admin user, agents, workspaces,
+# sessions, and named consoles. Templates are RESOURCES, declared as YAML
+# manifests in the resources/ directory; `agw resource sample <kind>`
+# prints a commented, ready-to-edit starter for each kind:
 #
-# Each resource type below has an optional `.env` table next to its
-# definition for environment variable overrides. Env tables merge in this
-# precedence order (highest wins; identity vars win over everything):
+#   agw resource sample vm-template          # hardware, apt packages, system tools
+#   agw resource sample admin-template       # the admin (operator) user on VMs
+#   agw resource sample agent-template       # per-agent-user settings
+#   agw resource sample workspace-template   # repo, tmuxinator, git identity
+#   agw resource sample session-template     # harness (shell, claude-code, ...)
 #
-#     session > (agent | admin) > workspace > vm    (AGENTWORKS_* overrides all)
+# Each template kind supports a "default" entry used when --template is not
+# specified, inheritance via `inherits`, and an `env` table (plaintext values
+# or `{ secret = "<name>" }` references; `agw env show` previews the merged
+# value at any scope).
 #
-# Admin and agent scopes are mutually exclusive: a shell opened as the admin
-# user (e.g. `agw vm shell`) sees admin scope; an agent-mode session sees
-# agent scope. Each env-table key is either a plaintext string or an inline
-# `{ secret = "<name>" }` reference to a declaration in the "Secrets"
-# section above. Use `agw env show` to preview the merged value at any scope.
-
-# --- VM templates ---
-# System-level VM configuration: hardware resources, system packages, and
-# system-wide tools. Selected at vm create time with --template.
-#
-# Agentworks always installs system packages (git, tmux, tmuxinator, acl, jq,
-# unzip) during init, in addition to provisioning packages (openssh-server,
-# curl, sudo, ca-certificates, gnupg) installed at VM create time.
-
-#[vm_templates.default]
-#description = "Default VM template"        # optional, shown in prompts and logs
-# -- Provisioning (set once at create time) --
-# (Templates carry no `site`: placement is per-host; use `--site` or
-# defaults.site above.)
-#cpus = 4                                   # number of vCPUs
-#memory = 8                                 # memory in GiB
-#disk = 50                                  # disk size in GiB
-#swap = 4                                   # swap file size in GiB (0 to disable)
-# On Azure, cpus + memory select the smallest fitting VM size from the
-# site's catalog (built-in B-series, or platform_config.vm_sizes); an
-# off-ratio request rounds up to the nearest fitting size and warns.
-# -- Provisioning-time secret references --
-# Name of the secret declaration whose value is used as the Tailscale
-# auth key during `vm create` / `vm reinit`. Default: "tailscale-auth-key".
-# Resolved via the framework's backend chain (operator-declared
-# [secrets.<name>] or auto-declared via miss policy). Bare string only;
-# no { secret = "..." } polymorphism.
-#tailscale_auth_key = "tailscale-auth-key"
-# -- System-wide initialization (applied on create and reinit) --
-#apt = [                                    # direct apt packages
-#    "zsh",
-#    "unzip",
-#    "build-essential",
-#    "ripgrep",
-#    "fzf",
-#    "fd-find",
-#]
-#apt_packages = ["gh", "docker"]            # named apt-package entries from the registry
-#snap = []                                  # direct snap packages
-#system_install_commands = ["az-cli"]       # system-install-command entries from the registry (az-cli ships in the opt-in `azure` plugin; enable it above)
-
-#[vm_templates.heavy]
-#inherits = ["default"]
-#cpus = 16
-#memory = 64
-#disk = 200
-
-#[vm_templates.default.env]
-#HTTP_PROXY = "http://proxy:3128"            # plaintext
-#NPM_TOKEN = { secret = "npm-token" }        # secret reference (see Secrets section above)
-
-# --- Admin user configuration ---
-# Per-user settings for the admin (operator) user on VMs. Applied during
-# init/reinit. This is not a template; there is one admin config.
-
-#[admin.config]
-#description = "Default admin template"     # optional, shown in prompts and logs
-#username = "agentworks"                    # admin username on VMs (default: agentworks)
-#shell = "bash"                             # admin shell (default: bash, matches Debian's user-default; "zsh" also supported)
-#git_credentials = ["github"]              # git credential providers to configure
-#user_install_commands = ["bun"]             # user-install-command entries from the registry
-# -- Dotfiles (source refs: local path or git::, see docs/guides/source-refs.md) --
-#dotfiles_source = "git::https://github.com/user/dotfiles"
-#dotfiles_destination = "~/.dotfiles"       # where to put them on the VM
-#dotfiles_install_cmd = "./install.sh"      # command to run after clone/copy
-# -- Mise (see docs/guides/mise.md) --
-#mise_activate = true                       # add mise activate to shell profile
-#mise_packages = ["terraform@1.14.5", "adr-tools@3.0.0"]  # name@version tool declarations
-#mise_lockfile = "~/.config/agentworks/mise.lock"   # source ref (wins over dotfiles)
-#mise_allow_unlocked = false                # install packages not in lockfile (with warning)
-#mise_install_before = "7d"                 # reject versions newer than this
-#mise_prune_on_reinit = true                # remove stale tool versions on reinit
-# -- Git --
-#git_force_safe_directory = true              # set safe.directory '*' for admin and agents
-# -- Claude Code (requires the claude CLI on PATH; the `claude` install-command
-#    ships with the opt-in `claude` system plugin, so `user_install_commands =
-#    ["claude"]` needs `[plugins] system = ["claude"]`) --
-#claude_marketplaces = ["https://github.com/WayfarerLabs/nerftools#4.1.0"]
-#claude_plugins = ["nerftools-default@nerftools"]
-
-#[admin.env]
-#EDITOR = "nvim"
-
-# --- Agent templates ---
-# Per-user settings for agent users. Selected at agent create time with
-# --template. Agents default to nothing unless explicitly configured.
-
-#[agent_templates.default]
-#description = "Default agent template"     # optional, shown in prompts and logs
-#shell = "bash"                             # agent shell (default: bash)
-#git_credentials = []                       # git credential providers (default: none)
-#user_install_commands = []                 # user-install-command entries from the registry
-# -- Dotfiles --
-#dotfiles_source = "git::https://github.com/user/agent-dotfiles"
-#dotfiles_destination = "~/.dotfiles"
-#dotfiles_install_cmd = "./install.sh"
-# -- Mise --
-#mise_activate = true                       # add mise activate to agent shell profile
-#mise_packages = ["terraform@1.14.5"]              # name@version tool declarations
-#mise_lockfile = "~/.config/agentworks/agent-mise.lock"
-#mise_allow_unlocked = false
-#mise_install_before = "7d"
-#mise_prune_on_reinit = true
-# -- Claude Code (requires the claude CLI on PATH; the `claude` install-command
-#    ships with the opt-in `claude` system plugin, so `user_install_commands =
-#    ["claude"]` needs `[plugins] system = ["claude"]`) --
-#claude_marketplaces = ["https://github.com/WayfarerLabs/nerftools#4.1.0"]
-#claude_plugins = ["nerftools-default@nerftools"]
-
-#[agent_templates.restricted]
-#inherits = ["default"]
-#user_install_commands = []
-#mise_packages = []
-
-#[agent_templates.default.env]
-#OPENAI_API_KEY = { secret = "openai-api-key" }
-
-# --- Workspace templates ---
-# Selected at workspace create time with --template. The "default" template
-# is used when --template is not specified.
-#
-# Repo URLs: use HTTPS format. Git credentials configured in admin.config
-# provide authentication via personal access tokens. Public repos work
-# without credentials.
-
-#[workspace_templates.default]
-#description = "Default workspace template" # optional, shown in prompts and logs
-#repo = "https://github.com/org/repo.git"  # git repo to clone into workspace
-#tmuxinator = true                          # generate tmuxinator config
-#inherits = []                              # list of parent template names
-# Optional git identity stamped into the cloned repo (repo-local config, so
-# it applies to any agent, the admin, or a human editing over VS Code Remote).
-# Only takes effect when `repo` is set. Omit to leave identity unset.
-#git_user_name = "Ada Lovelace"
-#git_user_email = "ada@example.com"
-
-#[workspace_templates.myproject]
-#repo = "https://github.com/org/myproject.git"
-#tmuxinator = false
-#inherits = ["default"]
-
-#[workspace_templates.default.env]
-#REPO_REGION = "us-east-1"
-
-# --- Session templates ---
-# A session is a specification to run a specific HARNESS as an agent in a
-# workspace on a VM. The harness owns start/restart and the launch-target
-# readiness check. A template with no harness runs the built-in "default"
-# (a plain login shell via the `shell` harness). Templates support
-# inheritance via "inherits".
-#
-# The flat command fields below are the `shell` harness's config vocabulary.
-# They keep working here and are hoisted to `harness = "shell"` internally;
-# YAML manifests spell them under `harness_config` instead (the primary
-# authoring surface; run `agw resource sample session-template`):
-#
-# command:           the pane command; supports {{session_name}} and
-#                     {{workspace_name}} variables (empty = login shell).
-# restart_command:   used by `agw session restart`; falls back to command.
-#                     Useful when a tool needs a different invocation on
-#                     restart. (For Claude Code, prefer the dedicated
-#                     `claude-code` harness below, which resumes on its own.)
-# required_commands: executables the command needs; checked on the launch
-#                     target (the agent, or the VM admin for admin sessions)
-#                     BEFORE the session is created, so a missing binary fails
-#                     fast with a clear error instead of a cryptic tmux
-#                     failure. Unioned during inheritance (de-duplicated).
-#
-# The flat fields cannot combine with a non-`shell` `harness` or an explicit
-# `harness_config` table (one spelling per declaration). env maps merge during
-# inheritance (child wins on key collision).
-
-#[session_templates.htop]                  # a shell session running one command
-#command = "htop"
-#required_commands = ["htop"]
-#description = "Live process monitor"
-
-#[session_templates.custom-tool]
-#command = "my-tool --flag"
-#required_commands = ["my-tool"]
-#description = "Custom tool"
-#
-#[session_templates.custom-tool.env]
-#MY_VAR = "value"
-
-# A non-`shell` harness is selected with the nested `harness` key, and its
-# block is a `harness_config` table (never the flat fields above). The
-# `claude-code` harness runs Claude Code, resuming the session's previous
-# conversation on `agw session restart`. Its config is three optional fields:
-# permission_mode / model (forwarded to `claude`) and extra_args (raw tokens).
-# `claude-code` ships as the opt-in `claude` system plugin: enable it with
-# `[plugins] system = ["claude"]` (see System plugins above), otherwise
-# creating a session on this template is refused with the enable hint.
-#[session_templates.claude]
-#harness = "claude-code"
-#description = "Claude Code session"
-#
-#[session_templates.claude.harness_config]
-#permission_mode = "acceptEdits"
-#model = "opus"
+# The legacy TOML template sections ([vm_templates.*], [admin.config],
+# [agent_templates.*], [workspace_templates.*], [session_templates.*]) still
+# load but are deprecated; `agw resource migrate <kind>` (or `--all`) moves
+# them to YAML.
 
 # --- Session configuration ---
 # Non-template session settings.
@@ -470,54 +213,15 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 #history_limit = 50000                     # tmux scrollback buffer lines per session
 
 # =============================================================================
-# Apt / install-command extensions (deprecated TOML surface)
+# Apt / install-command extensions
 # =============================================================================
 #
-# Operator-defined entries extend the built-in apt-source, apt-package,
-# system-install-command, and user-install-command entries. Entries with the
-# same name as a built-in entry override it. Run `agw resource list --kind
-# apt-package` (or apt-source / system-install-command /
-# user-install-command) to see all available entries (built-in and
-# operator-defined).
-
-# --- Custom apt sources ---
-# Third-party apt repositories.
-# Use {arch} as a placeholder for the VM architecture (amd64 or arm64).
-
-#[apt_sources.my-repo]
-#description = "My internal apt repository"
-#key_url = "https://apt.example.com/key.gpg"
-#key_path = "/etc/apt/keyrings/my-repo.gpg"
-#source = "deb [arch={arch} signed-by=/etc/apt/keyrings/my-repo.gpg] https://apt.example.com/debian bookworm main"
-#source_file = "my-repo.list"
-
-# --- Custom apt packages ---
-# Named package sets with optional apt source dependencies.
-
-#[apt_packages.my-tool]
-#description = "My internal tool"
-#apt_sources = ["my-repo"]
-#apt = ["my-tool"]
-
-# --- Custom system install commands ---
-# Shell commands that install system-wide tooling (run during vm init/reinit).
-# These may be re-run (e.g. during reinit) so they should be idempotent.
-# Optional checks short-circuit installation if the tool is already present.
-# Use only one of: test_exec, test_file, or test_dir.
-
-#[system_install_commands.my-system-tool]
-#description = "Custom system-wide tool"
-#command = "curl -fsSL https://example.com/install.sh | sudo bash"
-#test_exec = "my-system-tool"            # skip if command is on PATH
-
-# --- Custom user install commands ---
-# Shell commands that install per-user tooling (run for admin and agents).
-# These may be re-run so they should be idempotent.
-# Use only one of: test_exec, test_file, or test_dir.
-# For test_file/test_dir, ~ resolves to the target user's home.
-
-#[user_install_commands.my-tool]
-#description = "Custom per-user tool"
-#command = "curl -fsSL https://example.com/install.sh | bash"
-#path = ["~/.my-tool/bin"]
-#test_exec = "my-tool"                   # skip if command is on PATH
+# Operator-defined apt-source, apt-package, system-install-command, and
+# user-install-command entries extend (or, on a name collision, override) the
+# built-in entries. They are RESOURCES: `agw resource sample apt-source`
+# (or apt-package / system-install-command / user-install-command) prints a
+# commented starter, and `agw resource list --kind <kind>` shows all
+# available entries (built-in and operator-defined). The legacy TOML
+# sections ([apt_sources.*], [apt_packages.*], [system_install_commands.*],
+# [user_install_commands.*]) still load but are deprecated;
+# `agw resource migrate <kind>` moves them to YAML.

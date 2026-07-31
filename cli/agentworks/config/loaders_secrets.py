@@ -133,11 +133,14 @@ def _warn_deprecated_resource_sections(
     present (aggregated at maintainer direction; a warning
     per section was obnoxious on real configs).
 
-    Dual-path is permanent policy short of a future major release: these
-    sections keep loading with exactly today's semantics. The warning is
-    the nudge toward the YAML manifest surface. ``[secret_backends.*]``
-    is excluded -- it has its own no-op message above -- and
-    ``[secret_config]`` is config, not a resource section.
+    The TOML resource-declaration path is being sunset: these sections
+    keep loading with exactly today's semantics for now, but they WILL
+    be removed, and this warning is the nudge toward the YAML manifest
+    surface (the detection set is ``KIND_SECTIONS``, the same shared
+    table the migrator plans from, so the warning and
+    ``agw resource migrate`` cannot disagree about what counts).
+    ``[secret_backends.*]`` is excluded (it has its own no-op message
+    above), and ``[secret_config]`` is config, not a resource section.
 
     Returns the display shapes of the sections found, so surfaces with
     their own rendering (doctor's tidy one-line row) can compose from
@@ -171,12 +174,12 @@ def _warn_deprecated_resource_sections(
         else ""
     )
     deprecations.append(
-        f"deprecated TOML resource {noun}: {', '.join(present)}. Move "
-        f"these with `agw resource migrate <kind>` or `--all`{site_hint}, "
-        f"declare new resources as YAML manifests "
-        f"(`agw resource sample <kind>`), or silence this warning with "
-        f"--no-deprecations. TOML resource support will likely be removed "
-        f"in a future major release."
+        f"deprecated TOML resource {noun}: {', '.join(present)}. "
+        f"Declaring resources in config.toml is deprecated and will be "
+        f"removed in a future release. Move these with "
+        f"`agw resource migrate <kind>` or `--all`{site_hint}, declare "
+        f"new resources as YAML manifests (`agw resource sample <kind>`), "
+        f"or silence this warning with --no-deprecations."
     )
     return tuple(present)
 

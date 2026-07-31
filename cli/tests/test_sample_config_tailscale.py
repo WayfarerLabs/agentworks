@@ -1,6 +1,6 @@
-"""Tests that the updated sample-config.toml parses cleanly through the
-framework's finalize pass and that the Tailscale auth-key secret
-auto-declares from the VM-template requirement.
+"""Tests that the shipped sample-config.toml (settings-only) parses
+cleanly through the framework's finalize pass and that the Tailscale
+auth-key secret auto-declares from the default VM template's requirement.
 """
 
 from __future__ import annotations
@@ -36,11 +36,9 @@ def sample_config(tmp_path: Path) -> Path:
     return cfg
 
 
-def test_sample_config_parses_with_phase_1c_field(sample_config: Path) -> None:
-    """The sample config -- including the new (commented-out)
-    ``tailscale_auth_key`` field in the vm_templates.default section --
-    parses cleanly through ``load_config`` and the framework's
-    ``build_registry`` finalize pass.
+def test_sample_config_builds_registry(sample_config: Path) -> None:
+    """The sample config parses cleanly through ``load_config`` and the
+    framework's ``build_registry`` finalize pass.
     """
     config = load_config(sample_config, warn_issues=False)
     registry = build_registry(config)
