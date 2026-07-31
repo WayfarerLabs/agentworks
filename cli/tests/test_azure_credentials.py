@@ -1,7 +1,16 @@
-"""Azure credential and SDK-client caching: one credential build (one
-live ``get_token`` probe) per platform instance, reused across ops, with
-the browser-fallback decision preserved and paid once (perf fix for the
-fresh-credential-per-method-call cost).
+"""Which Azure credential a site gets, and the caching around it.
+
+Two concerns, one subject:
+
+- SELECTION (issue #199): a site declaring a ``service_principal`` gets
+  exactly that credential, built from the client secret the RunContext
+  delivers, and NEVER falls back to the ambient chain or a browser
+  prompt when it fails. A site declaring none gets today's ambient
+  ``DefaultAzureCredential`` with its browser fallback, unchanged.
+- CACHING: one credential build (one live ``get_token`` probe) per
+  platform instance on either path, reused across ops, with the
+  browser-fallback decision preserved and paid once (perf fix for the
+  fresh-credential-per-method-call cost).
 
 Azure is a real dependency in the test env, so the fakes are installed
 by patching the SDK symbols the azure_vm module imports function-locally
@@ -17,13 +26,15 @@ import pytest
 
 from agentworks.capabilities.base import RunContext
 from agentworks.db import VMStatus
-from agentworks.plugins.azure.platform import AzureVMPlatform
+from agentworks.errors import ConfigError
+from agentworks.plugins.azure.platform import DEFAULT_CLIENT_SECRET, AzureError, AzureVMPlatform
 
 if TYPE_CHECKING:
     from agentworks.db import VMRow
 
 _RESOURCE_ID = "/subscriptions/sub-A/resourceGroups/rg1/providers/Microsoft.Compute/virtualMachines/vm1"
 _CONFIG = {"subscription_id": "sub-A", "resource_group": "rg1", "region": "eastus"}
+_SP = {"tenant_id": "tenant-A", "client_id": "client-A", "secret": "az-sp"}
 
 
 def _fake_vm(resource_id: str = _RESOURCE_ID) -> Any:
@@ -69,16 +80,25 @@ class _FakeNics:
         return _Poller(None)
 
 
-def _install_fakes(monkeypatch: pytest.MonkeyPatch, *, auth_fails: bool = False) -> dict[str, int]:
+def _install_fakes(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    auth_fails: bool = False,
+    sp_auth_fails: bool = False,
+) -> dict[str, int]:
     """Patch the Azure SDK symbols azure_vm imports, returning a counter
     dict the tests assert on. ``auth_fails`` drives the DefaultAzureCredential
-    probe down the ClientAuthenticationError browser-fallback path."""
+    probe down the ClientAuthenticationError browser-fallback path;
+    ``sp_auth_fails`` makes the ClientSecretCredential probe reject (a bad
+    or expired client secret)."""
     from azure.core.exceptions import ClientAuthenticationError
 
     counters = {
         "cred_build": 0,
         "get_token": 0,
         "browser_build": 0,
+        "sp_build": 0,
+        "sp_get_token": 0,
         "compute_build": 0,
         "network_build": 0,
         "resource_build": 0,
@@ -97,6 +117,20 @@ def _install_fakes(monkeypatch: pytest.MonkeyPatch, *, auth_fails: bool = False)
     class _FakeBrowserCred:
         def __init__(self) -> None:
             counters["browser_build"] += 1
+
+    class _FakeClientSecretCred:
+        def __init__(self, tenant_id: str, client_id: str, client_secret: str) -> None:
+            counters["sp_build"] += 1
+            # Recorded on the instance so a test can pin exactly what the
+            # platform passed the SDK (the config's identifiers and the
+            # DELIVERED secret value, never a name).
+            _sp_args.append((tenant_id, client_id, client_secret))
+
+        def get_token(self, *_scopes: str, **_kw: object) -> object:
+            counters["sp_get_token"] += 1
+            if sp_auth_fails:
+                raise ClientAuthenticationError("AADSTS7000215: Invalid client secret provided")
+            return SimpleNamespace(token="sp-tok", expires_on=0)
 
     class _FakeCompute:
         def __init__(self, credential: object, subscription_id: str) -> None:
@@ -118,14 +152,48 @@ def _install_fakes(monkeypatch: pytest.MonkeyPatch, *, auth_fails: bool = False)
 
     monkeypatch.setattr("azure.identity.DefaultAzureCredential", _FakeDefaultCred)
     monkeypatch.setattr("azure.identity.InteractiveBrowserCredential", _FakeBrowserCred)
+    monkeypatch.setattr("azure.identity.ClientSecretCredential", _FakeClientSecretCred)
     monkeypatch.setattr("azure.mgmt.compute.ComputeManagementClient", _FakeCompute)
     monkeypatch.setattr("azure.mgmt.network.NetworkManagementClient", _FakeNetwork)
     monkeypatch.setattr("azure.mgmt.resource.resources.ResourceManagementClient", _FakeResource)
     return counters
 
 
+# Every (tenant_id, client_id, client_secret) triple handed to the faked
+# ClientSecretCredential, in order. Module-level so _install_fakes's inner
+# class can append to it; cleared by the fixture below.
+_sp_args: list[tuple[str, str, str]] = []
+
+
+@pytest.fixture(autouse=True)
+def _clear_sp_args() -> None:
+    _sp_args.clear()
+
+
 def _platform() -> AzureVMPlatform:
     return AzureVMPlatform("az-site", dict(_CONFIG))
+
+
+def _sp_platform(secret_key: str | None = "secret") -> AzureVMPlatform:
+    """A platform bound to a site that declares a service principal.
+    ``secret_key=None`` omits the ``secret`` field so the default name
+    applies."""
+    sp = dict(_SP) if secret_key else {k: v for k, v in _SP.items() if k != "secret"}
+    return AzureVMPlatform("az-site", {**_CONFIG, "service_principal": sp})
+
+
+class _Secrets:
+    """A SecretReader over a fixed mapping, as the boundary delivers."""
+
+    def __init__(self, values: dict[str, str]) -> None:
+        self._values = values
+
+    def get(self, name: str) -> str:
+        return self._values[name]
+
+
+def _sp_ctx(name: str = "az-sp", value: str = "sp-secret-value") -> RunContext:
+    return RunContext(secrets=_Secrets({name: value}))  # type: ignore[arg-type]
 
 
 class TestCredentialCaching:
@@ -140,7 +208,7 @@ class TestCredentialCaching:
         platform = _platform()
         assert platform.status(vm, RunContext()) is VMStatus.RUNNING
         platform.start(vm, RunContext())
-        assert platform.attach_public_ip(vm) == "203.0.113.5"
+        assert platform.attach_public_ip(vm, RunContext()) == "203.0.113.5"
 
         # One credential build (one live probe), reused across all three ops;
         # one build of each client (compute is shared by status/start and the
@@ -164,8 +232,8 @@ class TestCredentialCaching:
         vm: VMRow = _fake_vm()  # type: ignore[assignment]
         platform = _platform()
 
-        first = platform._get_credential()
-        again = platform._get_credential()
+        first = platform._get_credential(RunContext())
+        again = platform._get_credential(RunContext())
         platform.status(vm, RunContext())
         platform.start(vm, RunContext())
 
@@ -188,8 +256,8 @@ class TestCredentialCaching:
 
         assert platform.status(vm_a, RunContext()) is VMStatus.RUNNING
         assert platform.status(vm_b, RunContext()) is VMStatus.RUNNING
-        platform.attach_public_ip(vm_a)
-        platform.attach_public_ip(vm_b)
+        platform.attach_public_ip(vm_a, RunContext())
+        platform.attach_public_ip(vm_b, RunContext())
 
         # One compute and one network client per subscription, keyed by
         # subscription (the accessor passes the key to the constructor,
@@ -220,12 +288,12 @@ class TestCredentialCaching:
         az_b = SimpleNamespace(subscription_id="sub-B")
 
         # First need for sub-A builds one client; the repeat reuses the cache.
-        first = platform._resource_client(az_a)
-        assert platform._resource_client(az_a) is first
+        first = platform._resource_client(az_a, RunContext())
+        assert platform._resource_client(az_a, RunContext()) is first
         assert counters["resource_build"] == 1
 
         # A second subscription builds its own, keyed by subscription.
-        second = platform._resource_client(az_b)
+        second = platform._resource_client(az_b, RunContext())
         assert second is not first
         assert counters["resource_build"] == 2
         assert set(platform._resource_cached) == {"sub-A", "sub-B"}
@@ -245,13 +313,127 @@ class TestCredentialCaching:
         vm: VMRow = _fake_vm()  # type: ignore[assignment]
         platform = _platform()
 
-        cred = platform._get_credential()
+        cred = platform._get_credential(RunContext())
         # The browser credential is the decision, and it is what got cached.
         assert counters["browser_build"] == 1
-        assert platform._get_credential() is cred
+        assert platform._get_credential(RunContext()) is cred
 
         # Ops reuse the cached browser credential: no re-probe, no re-decide.
         platform.status(vm, RunContext())
         assert counters["cred_build"] == 1
         assert counters["get_token"] == 1
         assert counters["browser_build"] == 1
+
+
+class TestCredentialSelection:
+    """Issue #199: the site's config decides WHICH credential, and a
+    configured service principal never degrades into another identity."""
+
+    def test_no_service_principal_uses_the_ambient_chain(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The unchanged default: a site that declares no service
+        principal authenticates exactly as before, and the
+        ClientSecretCredential is never constructed. The zero-SP-build
+        assertion is the regression tripwire for existing operators."""
+        counters = _install_fakes(monkeypatch)
+        vm: VMRow = _fake_vm()  # type: ignore[assignment]
+
+        assert _platform().status(vm, RunContext()) is VMStatus.RUNNING
+
+        assert counters["cred_build"] == 1
+        assert counters["sp_build"] == 0
+        assert _sp_args == []
+
+    def test_service_principal_builds_from_the_delivered_secret(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A declared service principal is built from the site's
+        identifiers plus the client secret ``ctx.secret`` DELIVERS (the
+        declare/receive contract: the config carries the secret's name,
+        the context carries its value), and the ambient chain is never
+        touched."""
+        counters = _install_fakes(monkeypatch)
+        vm: VMRow = _fake_vm()  # type: ignore[assignment]
+
+        assert _sp_platform().status(vm, _sp_ctx()) is VMStatus.RUNNING
+
+        assert _sp_args == [("tenant-A", "client-A", "sp-secret-value")]
+        assert counters["sp_build"] == 1
+        # The whole ambient path stayed cold: no DefaultAzureCredential,
+        # no browser prompt.
+        assert counters["cred_build"] == 0
+        assert counters["browser_build"] == 0
+
+    def test_service_principal_secret_name_defaults(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Omitting ``service_principal.secret`` reads the well-known
+        default name, so the common case needs two config lines."""
+        _install_fakes(monkeypatch)
+        vm: VMRow = _fake_vm()  # type: ignore[assignment]
+
+        platform = _sp_platform(secret_key=None)
+        platform.status(vm, _sp_ctx(name=DEFAULT_CLIENT_SECRET, value="default-named"))
+
+        assert _sp_args == [("tenant-A", "client-A", "default-named")]
+
+    def test_service_principal_rejection_is_fatal_and_never_falls_back(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The load-bearing one: when the configured service principal
+        cannot authenticate, the op FAILS with a typed error naming the
+        site and the secret. It must never quietly fall through to the
+        ambient chain or a browser prompt, which would run the operator's
+        command as a different identity than they configured."""
+        counters = _install_fakes(monkeypatch, sp_auth_fails=True)
+        platform = _sp_platform()
+
+        with pytest.raises(AzureError) as exc:
+            platform._get_credential(_sp_ctx())
+
+        message = str(exc.value)
+        assert "az-site" in message
+        assert "az-sp" in message
+        assert exc.value.entity_kind == "vm-site"
+        assert exc.value.entity_name == "az-site"
+        assert exc.value.hint is not None and "expired" in exc.value.hint
+        # No fallback, of any kind.
+        assert counters["cred_build"] == 0
+        assert counters["browser_build"] == 0
+        # And nothing bad got cached: a retry re-probes rather than
+        # handing back a credential that never authenticated.
+        assert platform._credential_cached is None
+
+    def test_service_principal_rejection_surfaces_through_the_ops(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The rejection reaches the operator through a real op, not only
+        through the private accessor: the client build is where the
+        credential is first needed."""
+        _install_fakes(monkeypatch, sp_auth_fails=True)
+        vm: VMRow = _fake_vm()  # type: ignore[assignment]
+
+        with pytest.raises(AzureError, match="service principal"):
+            _sp_platform().start(vm, _sp_ctx())
+
+    def test_service_principal_without_delivered_secrets_is_typed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A context assembled before the resolve boundary (or for
+        inspection) is the accessor's typed ConfigError, the same refusal
+        every capability gets, rather than a crash or a silent ambient
+        fallback."""
+        counters = _install_fakes(monkeypatch)
+
+        with pytest.raises(ConfigError, match="resolved secrets"):
+            _sp_platform()._get_credential(RunContext())
+
+        assert counters["sp_build"] == 0
+        assert counters["cred_build"] == 0
+
+    def test_service_principal_credential_caches_per_instance(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The SP path caches like the ambient one: the identity is fixed
+        by the bound config, so one build and one probe serve every op on
+        the instance."""
+        counters = _install_fakes(monkeypatch)
+        vm: VMRow = _fake_vm()  # type: ignore[assignment]
+        platform = _sp_platform()
+        ctx = _sp_ctx()
+
+        first = platform._get_credential(ctx)
+        assert platform._get_credential(ctx) is first
+        platform.status(vm, ctx)
+        platform.start(vm, ctx)
+        platform.attach_public_ip(vm, ctx)
+
+        assert counters["sp_build"] == 1
+        assert counters["sp_get_token"] == 1

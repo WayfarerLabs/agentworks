@@ -10,8 +10,10 @@ The azure-vm platform's runup is an authenticated, read-only
 resource-group existence check (issue #198 follow-up): the site's
 configured resource group either exists (pass silently) or does not (a
 definitive ``NotFoundError`` raised before ``create`` provisions
-anything). The credential is ambient today, so the tests fake the cached
-resource client on the class rather than building one.
+anything). Most of these tests fake the cached resource client on the
+class, so no credential is built at all; the service-principal tests at
+the end (issue #199) deliberately do NOT, because on that path building
+the credential IS what runup makes happen first.
 """
 
 from __future__ import annotations
@@ -122,7 +124,7 @@ def _wire_rg(monkeypatch: pytest.MonkeyPatch, *, exists: bool) -> None:
     """Fake the cached resource client so ``check_existence`` returns
     ``exists`` without building a credential or touching Azure."""
     fake_resource = SimpleNamespace(resource_groups=SimpleNamespace(check_existence=lambda *a, **k: exists))
-    monkeypatch.setattr(AzureVMPlatform, "_resource_client", lambda self, az: fake_resource)
+    monkeypatch.setattr(AzureVMPlatform, "_resource_client", lambda self, az, ctx: fake_resource)
 
 
 def test_azure_runup_ok_when_group_exists(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -162,7 +164,7 @@ def _wire_rg_raises(monkeypatch: pytest.MonkeyPatch, exc: Exception) -> None:
         raise exc
 
     fake_resource = SimpleNamespace(resource_groups=SimpleNamespace(check_existence=_raise))
-    monkeypatch.setattr(AzureVMPlatform, "_resource_client", lambda self, az: fake_resource)
+    monkeypatch.setattr(AzureVMPlatform, "_resource_client", lambda self, az, ctx: fake_resource)
 
 
 def _auth_error() -> Exception:
@@ -203,3 +205,64 @@ def test_azure_runup_sdk_failure_wraps_not_masquerades_as_missing(
     # to share a type: runup chains it via ``raise _wrap_azure_error(exc) from
     # exc``, so the raised object is the wrapped error's cause.
     assert exc.value.__cause__ is raised
+
+
+# -- Azure with an explicit service principal (issue #199) -------------------
+
+_AZURE_SP_CONFIG = {
+    **_AZURE_CONFIG,
+    "service_principal": {"tenant_id": "tenant-1", "client_id": "client-1", "secret": "az-sp"},
+}
+
+
+class _Secrets:
+    def __init__(self, values: dict[str, str]) -> None:
+        self._values = values
+
+    def get(self, name: str) -> str:
+        return self._values[name]
+
+
+def _sp_ctx() -> RunContext:
+    return RunContext(secrets=_Secrets({"az-sp": "sp-value"}))  # type: ignore[arg-type]
+
+
+def test_azure_runup_rejects_a_bad_service_principal_before_create(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The point of running this ahead of ``create``: a bad or expired
+    client secret aborts here, with a typed error naming the site and the
+    secret, while nothing has been provisioned and no DB row exists.
+
+    No client is faked, deliberately. Building the resource client is what
+    forces the credential, so the failure has to come from the credential
+    probe, not from the existence check (which never runs)."""
+    from azure.core.exceptions import ClientAuthenticationError
+
+    from agentworks.plugins.azure.platform import AzureError as _AzureError
+
+    class _RejectingCred:
+        def __init__(self, tenant_id: str, client_id: str, client_secret: str) -> None: ...
+
+        def get_token(self, *_scopes: str, **_kw: object) -> object:
+            raise ClientAuthenticationError("AADSTS7000215: Invalid client secret provided")
+
+    monkeypatch.setattr("azure.identity.ClientSecretCredential", _RejectingCred)
+
+    with pytest.raises(_AzureError) as exc:
+        AzureVMPlatform("az", _AZURE_SP_CONFIG).runup(_sp_ctx())
+
+    assert exc.value.entity_kind == "vm-site"
+    assert "az-sp" in str(exc.value)
+    # Not a "group missing" verdict: a credential failure must never
+    # masquerade as an absent resource group.
+    assert not isinstance(exc.value, NotFoundError)
+
+
+def test_azure_runup_without_the_client_secret_is_typed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """runup runs post-resolve; a context with no resolved secrets is the
+    accessor's typed ConfigError, exactly as for proxmox above."""
+    from agentworks.errors import ConfigError
+
+    with pytest.raises(ConfigError, match="resolved secrets"):
+        AzureVMPlatform("az", _AZURE_SP_CONFIG).runup(RunContext())

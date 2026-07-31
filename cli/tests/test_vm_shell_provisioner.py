@@ -391,11 +391,11 @@ def test_provisioner_shell_target_attaches_and_registers_detach_for_azure(
                 {"subscription_id": "sub", "resource_group": "rg", "region": "eastus"},
             )
 
-        def attach_public_ip(self, vm: object) -> str:
+        def attach_public_ip(self, vm: object, ctx: object) -> str:
             attach_calls.append(getattr(vm, "name", "?"))
             return "203.0.113.42"
 
-        def detach_public_ip(self, vm: object) -> None:
+        def detach_public_ip(self, vm: object, ctx: object) -> None:
             detach_calls.append(getattr(vm, "name", "?"))
 
         def native_transport(self, vm: object, ctx: object, *, config: object | None = None) -> Transport:
@@ -464,10 +464,10 @@ def test_provisioner_shell_target_detaches_on_exception_for_azure(
                 {"subscription_id": "sub", "resource_group": "rg", "region": "eastus"},
             )
 
-        def attach_public_ip(self, vm: object) -> str:
+        def attach_public_ip(self, vm: object, ctx: object) -> str:
             return "203.0.113.42"
 
-        def detach_public_ip(self, vm: object) -> None:
+        def detach_public_ip(self, vm: object, ctx: object) -> None:
             detach_calls.append(getattr(vm, "name", "?"))
 
         def native_transport(self, vm: object, ctx: object, *, config: object | None = None) -> Transport:

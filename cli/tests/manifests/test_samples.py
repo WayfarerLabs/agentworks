@@ -135,7 +135,13 @@ def test_uncommented_samples_build_a_registry(tmp_path: Path) -> None:
     full registry -- its cross-references (admin-template ->
     git-credential github, apt-package -> apt-source my-repo, secrets
     auto-declare) resolve at finalize. No exclusions: the prose-only
-    secret-backend sample contributes zero documents by design."""
+    secret-backend sample contributes zero documents by design.
+
+    The azure and proxmox plugins are enabled here so the vm-site
+    sample's `platform_config` blocks reach their platform's `validate`
+    (a disabled platform's site never does), which is what makes the
+    sample's field names and shapes actually checked rather than merely
+    parsed as YAML."""
     from agentworks.bootstrap import build_registry
     from agentworks.config import load_config
 
@@ -149,6 +155,9 @@ def test_uncommented_samples_build_a_registry(tmp_path: Path) -> None:
 [operator]
 ssh_public_key = "{pub.as_posix()}"
 ssh_private_key = "{priv.as_posix()}"
+
+[plugins]
+system = ["azure", "proxmox"]
 """
     )
     resources = tmp_path / "resources"

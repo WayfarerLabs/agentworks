@@ -241,6 +241,21 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # azure-vm likewise ships as the opt-in `azure` system plugin: an azure site
 # (declared or legacy) is not-ready with an "enable plugin `azure`" hint until
 # you add `[plugins] system = ["azure"]` above.
+# An azure site authenticates with AMBIENT credentials by default (whatever
+# `az login`, the AZURE_* env vars, or a managed identity provide, with a
+# browser login as the last resort). To pin it to an explicit service principal
+# instead, add a `service_principal` table to the site's platform_config:
+#
+#   [sites.azure-dev.platform_config.service_principal]
+#   tenant_id = "00000000-0000-0000-0000-000000000000"
+#   client_id = "00000000-0000-0000-0000-000000000000"
+#   secret = "azure-client-secret"    # optional; this is the default name
+#
+# `secret` is the NAME of a secret, never the client secret's value: the value
+# resolves through the backend chain like any other (default env var:
+# AW_SECRET_AZURE_CLIENT_SECRET). With a service principal configured the site
+# uses it and nothing else: a rejected or expired client secret fails the
+# command outright rather than quietly falling back to ambient credentials.
 
 # =============================================================================
 # Templates

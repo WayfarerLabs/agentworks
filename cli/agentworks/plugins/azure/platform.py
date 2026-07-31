@@ -50,10 +50,24 @@ class AzureError(ProvisioningError):
     Attributes:
         summary: A concise, user-facing error message.
         detail: The full error details (for logs).
+
+    The optional entity / hint keywords are the base ``AgentworksError``
+    ones, forwarded so a failure that KNOWS which resource it is about
+    can say so (the service-principal credential names its site and its
+    secret). ``_wrap_azure_error``, which converts an arbitrary SDK
+    exception, has no such knowledge and passes none.
     """
 
-    def __init__(self, summary: str, detail: str) -> None:
-        super().__init__(summary)
+    def __init__(
+        self,
+        summary: str,
+        detail: str,
+        *,
+        entity_kind: str | None = None,
+        entity_name: str | None = None,
+        hint: str | None = None,
+    ) -> None:
+        super().__init__(summary, entity_kind=entity_kind, entity_name=entity_name, hint=hint)
         self.summary = summary
         self.detail = detail
 
@@ -88,8 +102,14 @@ def _trim_message(message: str) -> str:
     return message
 
 
-def _build_credential() -> object:
-    """Build the Azure credential to use, deciding the interactive-browser
+# The token scope every credential below is probed against: Azure
+# Resource Manager, which is the only API surface this platform talks to.
+_ARM_SCOPE = "https://management.azure.com/.default"
+
+
+def _build_ambient_credential() -> object:
+    """Build the AMBIENT Azure credential (the path taken when the site
+    declares no ``service_principal``), deciding the interactive-browser
     fallback with a single live probe.
 
     Tries DefaultAzureCredential first (picks up az login, env vars,
@@ -114,15 +134,131 @@ def _build_credential() -> object:
 
     cred = DefaultAzureCredential()
     try:
-        cred.get_token("https://management.azure.com/.default")
+        cred.get_token(_ARM_SCOPE)
         return cred
     except ClientAuthenticationError:
         output.info("No Azure credentials found, opening browser for login...")
         return InteractiveBrowserCredential()
 
 
+def _build_service_principal_credential(sp: _ServicePrincipal, client_secret: str, site_name: str) -> object:
+    """Build the EXPLICIT service-principal credential from the site's
+    configured tenant / client and the resolved client secret, probed
+    once against ARM.
+
+    The probe mirrors the ambient path's, but for a different reason:
+    there is no fallback to decide here (an operator who configured a
+    service principal means that credential and no other, so falling
+    through to ambient or to a browser prompt would silently authenticate
+    as the wrong identity). It exists purely to turn a bad credential
+    into a clear, site-and-secret-named error at the point of
+    construction, rather than a raw SDK exception surfacing from
+    whichever network call happened to be first.
+
+    That failure is FATAL and is deliberately not classified any finer.
+    azure-identity's ``wrap_exceptions`` converts everything a token
+    request can hit, an Entra rejection and an unreachable STS alike,
+    into ``ClientAuthenticationError``, so the "definitive rejection vs.
+    transient outage" split that proxmox's runup makes (its API answers
+    401/403 distinguishably) is not available to us. Given the choice
+    between calling a network blip a rejection and letting a genuinely
+    bad credential through as a warning, this refuses; the hint names
+    both possibilities so the operator can tell them apart.
+    """
+    from azure.core.exceptions import ClientAuthenticationError
+    from azure.identity import ClientSecretCredential
+
+    cred = ClientSecretCredential(sp.tenant_id, sp.client_id, client_secret)
+    try:
+        cred.get_token(_ARM_SCOPE)
+    except ClientAuthenticationError as exc:
+        raise AzureError(
+            f"could not authenticate the Azure service principal for "
+            f"vm-site '{site_name}' (client {sp.client_id} in tenant "
+            f"{sp.tenant_id}, secret '{sp.secret_name}')",
+            detail=str(exc),
+            entity_kind="vm-site",
+            entity_name=site_name,
+            hint=(
+                f"Check service_principal.tenant_id / client_id and the "
+                f"value of the '{sp.secret_name}' secret (an expired client "
+                f"secret is the usual cause; `az ad app credential list` "
+                f"shows expiry). If Entra ID is simply unreachable this "
+                f"fails the same way, because azure-identity reports both "
+                f"as an authentication failure."
+            ),
+        ) from exc
+    return cred
+
+
+# The well-known secret name the service_principal.secret field defaults
+# to, mirroring proxmox's DEFAULT_TOKEN_SECRET. The default env-var
+# backend convention reads AW_SECRET_AZURE_CLIENT_SECRET. The config
+# field is `secret`, NOT `client_secret`: it names a secret in the
+# framework's secret system, and a field called client_secret would
+# invite operators to paste the literal value into plaintext config.
+DEFAULT_CLIENT_SECRET = "azure-client-secret"
+
 _AZURE_REQUIRED_KEYS = ("subscription_id", "resource_group", "region")
-_AZURE_OPTIONAL_KEYS = ("vm_sizes",)
+_AZURE_OPTIONAL_KEYS = ("vm_sizes", "service_principal")
+
+_SP_REQUIRED_KEYS = ("tenant_id", "client_id")
+_SP_OPTIONAL_KEYS = ("secret",)
+
+
+class _ServicePrincipal(NamedTuple):
+    """A site's explicit Azure service-principal credential: the two
+    plain-config identifiers plus the NAME of the framework secret
+    holding the client secret. Never the secret's value: the platform
+    instance holds no value source, and the value arrives per call
+    through ``ctx.secret``."""
+
+    tenant_id: str
+    client_id: str
+    secret_name: str
+
+
+def _parse_service_principal(config: Mapping[str, object], owner: str) -> _ServicePrincipal | None:
+    """The site's explicit service principal, or ``None`` when the
+    optional ``service_principal`` table is absent (the ambient
+    credential path, which is what every azure-vm site did before issue
+    #199 and what every site that omits the table still does).
+
+    Raises ``ConfigError`` on a malformed table so the shape is validated
+    at registry build time (the finalize ``validate`` pass), not at first
+    ``vm create``. Mirrors :func:`_parse_size_catalog`: one parser, called
+    from ``validate`` for the check and from the credential build for the
+    value.
+
+    The nested-table shape is deliberate. A future certificate-based
+    variant (``service_principal.certificate``) slots in beside
+    ``secret`` without touching the top-level ``platform_config``
+    namespace or breaking a declared site.
+    """
+    raw = config.get("service_principal")
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ConfigError(f"{owner}.service_principal must be a table of {{tenant_id, client_id, secret}}")
+    parsed: dict[str, str] = {}
+    for key in _SP_REQUIRED_KEYS:
+        value = raw.get(key)
+        if not isinstance(value, str) or not value:
+            raise ConfigError(
+                f"{owner}.service_principal.{key} is required and must be a non-empty string; "
+                f"omit the whole service_principal table to use ambient Azure credentials"
+            )
+        parsed[key] = value
+    secret_name = raw.get("secret", DEFAULT_CLIENT_SECRET)
+    if not isinstance(secret_name, str) or not secret_name:
+        raise ConfigError(
+            f"{owner}.service_principal.secret must be a bare secret name (string), "
+            f"not the client secret's value; omit the key to use the default '{DEFAULT_CLIENT_SECRET}'"
+        )
+    unknown = sorted(set(raw) - set(_SP_REQUIRED_KEYS) - set(_SP_OPTIONAL_KEYS))
+    if unknown:
+        raise ConfigError(f"{owner}.service_principal: unknown field(s): {', '.join(unknown)}")
+    return _ServicePrincipal(parsed["tenant_id"], parsed["client_id"], secret_name)
 
 
 class _VMSize(NamedTuple):
@@ -218,7 +354,9 @@ class AzureVMPlatform(VMPlatform):
         super().__init__(owner_name, config)
         # Azure credential and SDK clients, built on FIRST need by the
         # accessors below and reused for the instance's remaining ops.
-        # The credential is subscription-independent, so it caches once
+        # The credential is subscription-independent AND its identity is
+        # fixed by the bound config (the site's service_principal, or
+        # the ambient chain when it declares none), so it caches once
         # per instance (one live get_token probe per command, given the
         # vms/nodes.py site memo shares one instance per site). The
         # clients are keyed by subscription_id: the site's config names
@@ -232,22 +370,53 @@ class AzureVMPlatform(VMPlatform):
         self._network_cached: dict[str, NetworkManagementClient] = {}
         self._resource_cached: dict[str, ResourceManagementClient] = {}
 
-    # No preflight override: azure has no config secrets (the base's
-    # prediction pass is a no-op) and no unauthenticated readiness
-    # check worth making. A credential probe is deliberately NOT one:
-    # verifying credentials before the resolve/credential stage forks
-    # behavior on where they happen to come from (a non-interactive
-    # chain passes, the browser-login fallback can't be probed without
-    # BEING the interaction). Credential and reachability failures
-    # surface at the op with typed errors (``_wrap_azure_error``),
-    # which is the contract: preflight is capped at what it can check
-    # without resolved credentials.
+    # No preflight override, on either credential path. A site with a
+    # ``service_principal`` DOES declare a config secret, so the base's
+    # central prediction pass over the site's declared references is
+    # real work now (an unresolvable client secret fails the sweep with
+    # the usual owner/usage framing, without this class touching the
+    # secret machinery); a site without one declares nothing and that
+    # pass stays vacuous. What is missing either way is an
+    # unauthenticated readiness check worth making. A credential probe
+    # is deliberately NOT one: verifying credentials before the
+    # resolve/credential stage forks behavior on where they happen to
+    # come from (a non-interactive chain passes, the browser-login
+    # fallback can't be probed without BEING the interaction, and a
+    # service principal's secret is not resolved yet). Credential and
+    # reachability failures surface at runup and at the op with typed
+    # errors, which is the contract: preflight is capped at what it can
+    # check without resolved credentials.
 
     @classmethod
     def dependencies(cls, owner: str, config: Mapping[str, object]) -> tuple[ConfigReference, ...]:
-        """``azure-vm`` implies no resource reference, so its edge set is
-        empty (total, non-throwing per the ``dependencies`` contract)."""
-        return ()
+        """The client-secret reference a declared ``service_principal``
+        implies: its ``secret`` field names it (default
+        ``azure-client-secret``). A site with no ``service_principal``
+        authenticates ambiently and implies no reference, so its edge
+        set is empty, as every azure-vm site's was before issue #199.
+
+        Total and non-throwing: the edge's identity is the secret name
+        alone, so it emits even when the table's OTHER fields are absent
+        or malformed (their absence does not change what the edge points
+        at), and is omitted only when the table itself, or the ``secret``
+        field that names the edge, is malformed. ``validate`` is where
+        those shape errors surface.
+        """
+        raw = config.get("service_principal")
+        if not isinstance(raw, dict):
+            return ()
+        secret_name = raw.get("secret", DEFAULT_CLIENT_SECRET)
+        if not isinstance(secret_name, str) or not secret_name:
+            return ()
+        from agentworks.resources.reference import ConfigReference
+
+        return (
+            ConfigReference(
+                kind="secret",
+                name=secret_name,
+                usage="the Azure service-principal client secret",
+            ),
+        )
 
     @classmethod
     def validate(cls, owner: str, config: Mapping[str, object]) -> None:
@@ -258,9 +427,11 @@ class AzureVMPlatform(VMPlatform):
         unknown = sorted(set(config) - set(_AZURE_REQUIRED_KEYS) - set(_AZURE_OPTIONAL_KEYS))
         if unknown:
             raise ConfigError(f"{owner}: unknown azure-vm platform field(s): {', '.join(unknown)}")
-        # Validate the optional size-catalog override's shape here so a
-        # malformed vm_sizes fails at config load, not first vm create.
+        # Validate the optional blocks' shapes here so a malformed
+        # vm_sizes or service_principal fails at config load, not first
+        # vm create.
         _parse_size_catalog(config, owner)
+        _parse_service_principal(config, owner)
 
     @classmethod
     def legacy_platform_metadata(cls, row: Mapping[str, Any], legacy: Mapping[str, Any]) -> dict[str, str]:
@@ -268,17 +439,39 @@ class AzureVMPlatform(VMPlatform):
             return {"resource_id": str(row["azure_resource_id"])}
         return {}
 
-    def _get_credential(self) -> object:
-        """The Azure credential, built on first need (one live probe, one
-        browser-fallback decision) and reused for the instance's remaining
-        ops. See :func:`_build_credential` for the decision itself."""
+    def _get_credential(self, ctx: RunContext) -> object:
+        """The Azure credential, built on first need (one live probe) and
+        reused for the instance's remaining ops.
+
+        Which credential is a config decision, not a runtime one: a site
+        that declares a ``service_principal`` gets exactly that
+        credential, built from the client secret ``ctx.secret`` delivers
+        (the declare/receive contract: the instance never holds a
+        resolver or a raw reader, only the credential derived from the
+        delivered value), and NEVER falls back to the ambient chain or a
+        browser prompt if it fails; a site that declares none gets the
+        ambient chain with its browser fallback, byte-for-byte as before.
+        Falling back would authenticate as a different identity than the
+        operator configured, which is worse than failing.
+
+        Caching stays correct under the fork because the fork's inputs
+        are fixed per instance: the site's tenant, client, and secret
+        NAME come from the bound ``platform_config``, so a given instance
+        resolves the same credential every time. See
+        :func:`_build_ambient_credential` and
+        :func:`_build_service_principal_credential`.
+        """
         cred = self._credential_cached
         if cred is None:
-            cred = _build_credential()
+            sp = _parse_service_principal(self.platform_config, self._owner_display)
+            if sp is None:
+                cred = _build_ambient_credential()
+            else:
+                cred = _build_service_principal_credential(sp, ctx.secret(sp.secret_name), self.site_name)
             self._credential_cached = cred
         return cred
 
-    def _compute_client(self, az: _HasSubscriptionId) -> ComputeManagementClient:
+    def _compute_client(self, az: _HasSubscriptionId, ctx: RunContext) -> ComputeManagementClient:
         """The compute client for ``az``'s subscription, built on first
         need from the cached credential and reused for the instance's
         remaining ops against that subscription (see ``__init__`` for why
@@ -289,11 +482,11 @@ class AzureVMPlatform(VMPlatform):
         if compute is None:
             # _get_credential() returns a TokenCredential-compatible object;
             # the cast avoids a hard azure.core import at module load time.
-            compute = ComputeManagementClient(self._get_credential(), az.subscription_id)  # type: ignore[arg-type]
+            compute = ComputeManagementClient(self._get_credential(ctx), az.subscription_id)  # type: ignore[arg-type]
             self._compute_cached[az.subscription_id] = compute
         return compute
 
-    def _network_client(self, az: _HasSubscriptionId) -> NetworkManagementClient:
+    def _network_client(self, az: _HasSubscriptionId, ctx: RunContext) -> NetworkManagementClient:
         """The network client for ``az``'s subscription, built on first
         need from the cached credential and reused for the instance's
         remaining ops against that subscription (see ``__init__`` for why
@@ -303,11 +496,11 @@ class AzureVMPlatform(VMPlatform):
         network = self._network_cached.get(az.subscription_id)
         if network is None:
             # Same as _compute_client: credential is TokenCredential-compatible at runtime.
-            network = NetworkManagementClient(self._get_credential(), az.subscription_id)  # type: ignore[arg-type]
+            network = NetworkManagementClient(self._get_credential(ctx), az.subscription_id)  # type: ignore[arg-type]
             self._network_cached[az.subscription_id] = network
         return network
 
-    def _resource_client(self, az: _HasSubscriptionId) -> ResourceManagementClient:
+    def _resource_client(self, az: _HasSubscriptionId, ctx: RunContext) -> ResourceManagementClient:
         """The resource-management client for ``az``'s subscription, built
         on first need from the cached credential and reused for the
         instance's remaining ops against that subscription (see
@@ -322,7 +515,7 @@ class AzureVMPlatform(VMPlatform):
         resource = self._resource_cached.get(az.subscription_id)
         if resource is None:
             # Same as _compute_client: credential is TokenCredential-compatible at runtime.
-            resource = ResourceManagementClient(self._get_credential(), az.subscription_id)  # type: ignore[arg-type]
+            resource = ResourceManagementClient(self._get_credential(ctx), az.subscription_id)  # type: ignore[arg-type]
             self._resource_cached[az.subscription_id] = resource
         return resource
 
@@ -337,23 +530,33 @@ class AzureVMPlatform(VMPlatform):
         on): every azure-vm site targets a resource group.
 
         Post-resolve and authenticated: the credential is whatever
-        :meth:`_get_credential` resolves (ambient ``DefaultAzureCredential``
-        today; issue #199 will make it a framework secret and plug it in
-        here, which is why runup declares no secret of its own). The
-        existence probe (``resource_groups.check_existence``) is read-only
-        and mutates nothing. A credential or reachability failure is NOT a
-        "group missing" verdict: those surface through
-        :func:`_wrap_azure_error` exactly as the ops report them, so a bad
-        or absent credential never masquerades as an absent resource group.
+        :meth:`_get_credential` resolves off the site's config, and this
+        is where BOTH paths first pay for it. On a site with a declared
+        ``service_principal`` that means the client secret is read from
+        the context here and the credential is probed here, so a bad or
+        expired one aborts ``vm create`` with a typed, secret-naming
+        error before the DB row or any Azure resource exists, which is
+        the whole point of running this ahead of ``create``. The
+        existence probe (``resource_groups.check_existence``) is
+        read-only and mutates nothing. A credential or reachability
+        failure is NOT a "group missing" verdict: those surface through
+        :func:`_wrap_azure_error` exactly as the ops report them, so a
+        bad or absent credential never masquerades as an absent resource
+        group.
 
         Reachability failures are fatal here, which diverges from the
-        proxmox runup on purpose. Proxmox warns and continues unverified on
-        a transient outage because its token check is incidental (the op
-        uses the token directly regardless). Azure's ``create`` makes many
-        Resource Manager calls, so an unreachable RM at runup means the
-        whole create cannot proceed anyway; aborting cleanly here, with
-        nothing realized, beats warning past it into a cryptic mid-provision
-        failure.
+        proxmox runup on purpose, for two independent reasons. First,
+        Azure's ``create`` makes many Resource Manager calls, so an
+        unreachable RM at runup means the whole create cannot proceed
+        anyway; aborting cleanly here, with nothing realized, beats
+        warning past it into a cryptic mid-provision failure. (Proxmox
+        warns and continues unverified because its token check is
+        incidental: the op uses the token directly regardless.) Second,
+        on the service-principal path the warn-vs-fail classification is
+        not available even in principle: azure-identity reports an Entra
+        rejection and an unreachable Entra identically, as
+        ``ClientAuthenticationError`` (see
+        :func:`_build_service_principal_credential`).
         """
         from types import SimpleNamespace
 
@@ -363,8 +566,16 @@ class AzureVMPlatform(VMPlatform):
             region=str(self.platform_config["region"]),
         )
         output.info(f"Performing runup test for vm-site/{self.site_name}...")
+        # The client build sits OUTSIDE the try, here and at every op
+        # below: it is where the credential is resolved, and its typed
+        # failures (a context with no resolved secrets, a rejected
+        # service principal) are already the answer. Wrapping them as
+        # generic SDK errors would strip the hint that names the secret.
+        # The try covers the SDK CALL, which is what _wrap_azure_error is
+        # for.
+        resource = self._resource_client(az, ctx)
         try:
-            exists = self._resource_client(az).resource_groups.check_existence(az.resource_group)
+            exists = resource.resource_groups.check_existence(az.resource_group)
         except Exception as exc:
             raise _wrap_azure_error(exc) from exc
         if not exists:
@@ -422,8 +633,8 @@ class AzureVMPlatform(VMPlatform):
         vm_name = f"{request.system_slug}-{request.vm_name}" if request.system_slug else request.vm_name
 
         output.detail("Connecting to Azure...")
-        compute = self._compute_client(az)
-        network = self._network_client(az)
+        compute = self._compute_client(az, ctx)
+        network = self._network_client(az, ctx)
 
         if self._vm_exists(compute, az.resource_group, vm_name):
             raise StateError(
@@ -670,8 +881,8 @@ class AzureVMPlatform(VMPlatform):
         # begin_start operation no-ops on an already-running VM.
         output.info(f"Starting Azure VM '{vm.name}'...")
         rg, name, az_cfg = _parse_resource_id(_resource_id(vm))
+        compute = self._compute_client(az_cfg, ctx)
         try:
-            compute = self._compute_client(az_cfg)
             compute.virtual_machines.begin_start(rg, name).result()
         except Exception as exc:
             raise _wrap_azure_error(exc) from exc
@@ -682,8 +893,8 @@ class AzureVMPlatform(VMPlatform):
         # begin_deallocate operation no-ops on a deallocated VM.
         output.info(f"Deallocating Azure VM '{vm.name}'...")
         rg, name, az_cfg = _parse_resource_id(_resource_id(vm))
+        compute = self._compute_client(az_cfg, ctx)
         try:
-            compute = self._compute_client(az_cfg)
             compute.virtual_machines.begin_deallocate(rg, name).result()
         except Exception as exc:
             raise _wrap_azure_error(exc) from exc
@@ -696,8 +907,8 @@ class AzureVMPlatform(VMPlatform):
             return
 
         rg, name, az_cfg = _parse_resource_id(_resource_id(vm))
-        compute = self._compute_client(az_cfg)
-        network = self._network_client(az_cfg)
+        compute = self._compute_client(az_cfg, ctx)
+        network = self._network_client(az_cfg, ctx)
 
         # Delete VM first (must complete before dependent resources)
         with contextlib.suppress(Exception):
@@ -707,10 +918,11 @@ class AzureVMPlatform(VMPlatform):
 
         output.info(f"Azure VM '{vm.name}' deleted")
 
-    def attach_public_ip(self, vm: VMRow) -> str:
+    def attach_public_ip(self, vm: VMRow, ctx: RunContext) -> str:
         """Attach a temporary public IP to the VM's NIC. Returns the IP address."""
         rg, name, az_cfg = _parse_resource_id(_resource_id(vm))
-        network = self._network_client(az_cfg)
+        network = self._network_client(az_cfg, ctx)
+        compute = self._compute_client(az_cfg, ctx)
 
         try:
             # Create (or re-create) the public IP
@@ -719,7 +931,7 @@ class AzureVMPlatform(VMPlatform):
                 rg,
                 f"{name}-ip",
                 {
-                    "location": _get_vm_location(self._compute_client(az_cfg), vm),
+                    "location": _get_vm_location(compute, vm),
                     "sku": {"name": "Standard"},
                     "public_ip_allocation_method": "Static",
                     "tags": {"owner": "agentworks"},
@@ -743,10 +955,10 @@ class AzureVMPlatform(VMPlatform):
 
         return ip_result.ip_address or ""
 
-    def detach_public_ip(self, vm: VMRow) -> None:
+    def detach_public_ip(self, vm: VMRow, ctx: RunContext) -> None:
         """Detach and delete the public IP from the VM's NIC."""
         rg, name, az_cfg = _parse_resource_id(_resource_id(vm))
-        network = self._network_client(az_cfg)
+        network = self._network_client(az_cfg, ctx)
 
         output.info("Removing public IP...")
         # Detach from NIC
@@ -779,8 +991,9 @@ class AzureVMPlatform(VMPlatform):
         config: Config | None = None,
     ) -> Transport | None:
         rg, name, az_cfg = _parse_resource_id(_resource_id(vm))
+        compute = self._compute_client(az_cfg, ctx)
+        network = self._network_client(az_cfg, ctx)
         try:
-            compute = self._compute_client(az_cfg)
             vm_info = compute.virtual_machines.get(
                 rg,
                 name,
@@ -795,7 +1008,7 @@ class AzureVMPlatform(VMPlatform):
         # StateError; on the canonical path this method is reached only
         # inside the transient_route context manager which guarantees a
         # public IP is attached, so the empty case is a defensive guard.
-        public_ip = _get_vm_public_ip(self._network_client(az_cfg), vm_info)
+        public_ip = _get_vm_public_ip(network, vm_info)
         import sys
 
         # Include identity file if config is available (needed for SSH auth
@@ -819,7 +1032,7 @@ class AzureVMPlatform(VMPlatform):
         Tailscale-ready point inside ``bootstrap_vm`` (Phase A) to close the
         public-exposure window.
         """
-        self.detach_public_ip(vm)
+        self.detach_public_ip(vm, ctx)
 
     @contextlib.contextmanager
     def transient_route(self, vm: VMRow, ctx: RunContext) -> Iterator[None]:
@@ -832,18 +1045,22 @@ class AzureVMPlatform(VMPlatform):
         this around the per-platform :meth:`native_transport` call so
         the lifecycle stays polymorphic.
         """
-        self.attach_public_ip(vm)
+        self.attach_public_ip(vm, ctx)
         try:
             yield
         finally:
-            self.detach_public_ip(vm)
+            self.detach_public_ip(vm, ctx)
 
     def status(self, vm: VMRow, ctx: RunContext) -> VMStatus:
         if not vm.platform_metadata.get("resource_id"):
             return VMStatus.UNKNOWN
         rg, name, az_cfg = _parse_resource_id(_resource_id(vm))
+        # Outside the degrade-to-UNKNOWN catch on purpose: a status probe
+        # tolerating an unreachable backend is one thing, but silently
+        # reporting UNKNOWN because the site's credential is rejected
+        # would hide a misconfiguration behind a plausible-looking answer.
+        compute = self._compute_client(az_cfg, ctx)
         try:
-            compute = self._compute_client(az_cfg)
             instance = compute.virtual_machines.instance_view(rg, name)
         except Exception:
             return VMStatus.UNKNOWN

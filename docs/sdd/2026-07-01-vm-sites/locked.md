@@ -150,3 +150,31 @@ is not edited in place; this addendum is authoritative):
   (`64 - 20 - 1 - 5 = 38`). The vnet sink binds (its `-vnet` suffix costs 5 more characters than the
   bare hostname), so the cap is 38, NOT the 63-char hostname and NOT Azure's 64-char computer-name.
   See the resource-manifests lockfile's 2026-07-27 entry for the full per-kind cap rationale.
+
+## Addendum: 2026-07-30 (issue #199, Azure service-principal credentials)
+
+Two statements in this SDD's artifacts are superseded as-built; the artifacts are point-in-time
+records and are not edited in place, so this addendum is authoritative.
+
+- **"Azure, Lima, and WSL2 declare no config secrets today" (`hla.md`) is now only true of Lima and
+  WSL2.** An `azure-vm` site may declare an optional `platform_config.service_principal` table whose
+  `secret` field names the secret holding the client secret (default `azure-client-secret`), and
+  `AzureVMPlatform.dependencies` emits the corresponding `ConfigReference` when it is present. A
+  site that omits the table still declares nothing and authenticates ambiently, so the sentence
+  holds for every pre-existing site. The HLA's follow-on, "AWS later rides the same rails for client
+  secrets", is now literally true: the Azure block is the documented reference shape for it (see the
+  "Credentials on a cloud platform" section of `cli/agentworks/capabilities/vm_platform/README.md`).
+- **The `VMPlatform` signature block in `frd.md`, and the matching one in `hla.md`, no longer match
+  the ABC.** Beyond the `ctx: RunContext` the orchestration layer added to the ops (already covered
+  generically by the 2026-07-18 entry above), the three transport hooks now take it too:
+  `native_transport(vm, ctx, *, config=None)`, `transient_route(vm, ctx)`, and
+  `post_tailscale_ready(vm, ctx)`. Opening a route to a cloud VM is a backend call, and without a
+  context a credentialed platform had no delivery surface on the one path that reaches it first: a
+  cold `vm shell --platform` on a running VM, where the activation gate's happy path is a pure
+  Tailscale reachability probe and the transport build is the command's first platform call.
+  `agentworks.transports.native_transport` gained a matching keyword-only `ctx`, and
+  `gated_vm_boundary` now yields `(vm_node, resolver, ops_ctx)` so gated commands have the same
+  op-start context the no-gate ones already got. `vm_active` deliberately did NOT change: every hold
+  that exists is local and makes no backend call.
+
+The living contract remains `base.py` plus `cli/agentworks/capabilities/vm_platform/README.md`.

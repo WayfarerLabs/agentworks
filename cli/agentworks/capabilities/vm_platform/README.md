@@ -141,6 +141,57 @@ themselves.
 client (`self._api_cached`), never the token. Any future platform with an API token (a hypothetical
 GCP or AWS backend) should follow that shape.
 
+## Credentials on a cloud platform: the reference shape
+
+Azure is the worked example, and a new cloud platform (AWS EC2 is the expected next one) should copy
+it rather than invent a variant. Four rules, in `plugins/azure/platform.py`:
+
+**1. Explicit credentials are an OPTIONAL nested table naming a secret.** The site's
+`platform_config` may carry a `service_principal` table:
+
+```yaml
+platform_config:
+  subscription_id: "..."
+  service_principal:
+    tenant_id: "..." # plain config: an identifier, not a secret
+    client_id: "..." # plain config
+    secret: azure-client-secret # the NAME of a secret, and the default
+```
+
+Three deliberate choices. The identifiers are plain config because they are identifiers, not
+credentials. The field is `secret` and holds a NAME, not `client_secret` holding a value, so nothing
+invites an operator to paste a live credential into a plaintext file; the value resolves through the
+framework secret system like proxmox's `token_secret`. And the table is nested rather than flattened
+into three top-level keys so a future variant (a certificate instead of a client secret) slots in
+beside `secret` without a breaking change to declared sites. The AWS analogue writes itself: a
+`credentials` (or `access_key`) table with the plain key id and a `secret` naming the secret-access
+key.
+
+**2. Declare the edge from `dependencies`, validate the shape in `validate`.** `dependencies` is
+total and non-throwing, so it emits the edge whenever it can derive the secret NAME (even if the
+table's other fields are malformed) and omits it only when the name itself is underivable.
+`validate` is where every shape error surfaces, including unknown keys inside the table. Declaring
+the edge is what puts the secret in the site node's `secret_refs`, which is what gets it into the
+boundary resolve and therefore delivered to `ctx.secret`.
+
+**3. Explicit credentials never fall back.** `_get_credential(ctx)` forks on config, not on runtime
+luck: with the table present it builds exactly that credential and a failure is fatal; without it,
+the ambient chain (`DefaultAzureCredential` plus the browser fallback) runs as before. Falling back
+from a configured identity to an ambient one would run the operator's command as somebody else,
+which is worse than failing. Cache the credential per instance: its identity is fixed by the bound
+config, so one build and one probe serve every op.
+
+**4. Probe once at build, and let runup pay for it.** Both credential paths make one live token
+request when built, so a bad credential becomes a typed error naming the site and the secret at the
+point of construction rather than a raw SDK exception from whichever call happened to be first. The
+platform's `runup` is where that lands on the provisioning path, ahead of `create`, so a wrong
+credential aborts `vm create` with nothing realized. Keep the client construction OUTSIDE the `try`
+that wraps SDK calls in a platform error type; a typed credential failure is already the answer, and
+re-wrapping it strips the hint.
+
+Read `_parse_service_principal`, `_build_service_principal_credential`, and `_get_credential`
+together: that trio is the whole pattern.
+
 ## The provisioning timeline: create-time bootstrap vs. initialization
 
 Standing up a VM splits into two stages with different owners and, crucially, different re-run
