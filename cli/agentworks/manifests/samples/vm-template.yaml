@@ -13,9 +13,15 @@
 #  cpus: 8
 #  memory: 16
 #  disk: 100
+#  swap: 4                          # swap file size in GiB (0 to disable)
 #  apt: [zsh, ripgrep]
 #  apt_packages: [gh]
+#  # snap: [go]                     # direct snap packages
 #  system_install_commands: [az-cli]
+#  # Name of the secret whose value is used as the Tailscale auth key
+#  # during `vm create` / `vm reinit`, resolved through the backend
+#  # chain. Bare secret name only; the default is tailscale-auth-key.
+#  # tailscale_auth_key: tailscale-auth-key
 #  env:
 #    HTTP_PROXY: http://proxy:3128
 #    NPM_TOKEN: {secret: npm-token}

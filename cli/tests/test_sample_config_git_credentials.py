@@ -1,7 +1,7 @@
-"""Tests that the updated sample-config.toml parses cleanly through the
-framework's finalize pass and that each ``[git_credentials.<name>]``
-stanza's token secret auto-declares (or stays at its default
-``git-token-<name>`` name when the operator doesn't override).
+"""Tests for the legacy ``[git_credentials.<name>]`` TOML loader's token
+handling: the token secret auto-declares (or stays at its default
+``git-token-<name>`` name when the operator doesn't override), and bad
+token shapes are rejected at load.
 """
 
 from __future__ import annotations

@@ -1,6 +1,8 @@
 ## kind: agent-template -- per-user settings for agent users on VMs.
 ## Selected at `agw agent create` time with --template. Agents default
-## to nothing unless explicitly configured.
+## to nothing unless explicitly configured. The per-user dotfiles
+## fields (dotfiles_source / dotfiles_destination / dotfiles_install_cmd)
+## work here exactly as in the admin-template sample.
 ##
 #apiVersion: agentworks/v1
 #kind: agent-template

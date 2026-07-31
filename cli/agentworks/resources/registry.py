@@ -123,8 +123,8 @@ class Registry:
         - operator row over operator row: ``ConfigError`` citing both
           declaration locations. The manifest loader catches duplicates
           within its own set; this is the backstop that also catches a
-          resource declared in both TOML and a manifest (a permanent
-          dual-path condition).
+          resource declared in both TOML and a manifest (a dual-path
+          condition for as long as both sources load).
         - operator row over built-in row: consults the kind's
           ``builtin_override`` flag. ``"allow"`` keeps the operator
           override (operator row replaces the built-in); ``"reserved"``

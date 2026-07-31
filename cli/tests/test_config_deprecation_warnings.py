@@ -1,10 +1,10 @@
-"""Phase 5 deprecation warnings for TOML resource sections.
+"""Deprecation warnings for TOML resource sections.
 
-Dual-path is permanent policy short of a future major: TOML resource
-sections keep loading with today's semantics, but their presence emits
-ONE aggregated deprecation issue (aggregated at maintainer direction --
-a warning per section was obnoxious on real configs) naming every
-present section, the YAML surface, the mover, and the silencer.
+The TOML resource-declaration path is being sunset: the sections keep
+loading with today's semantics for now, but their presence emits ONE
+aggregated deprecation issue (aggregated at maintainer direction; a
+warning per section was obnoxious on real configs) naming every present
+section, the removal, the YAML surface, the mover, and the silencer.
 Deprecations travel on ``Config.deprecation_issues``, a separate channel
 from ``config_issues``, so real issues stay sharp and
 ``--no-deprecations`` can silence only these.
@@ -63,7 +63,7 @@ def test_present_sections_aggregate_into_one_warning(tmp_path: Path) -> None:
     )
     (issue,) = _deprecations(cfg)
     # Every present section is named once (grep-able header shapes),
-    # in one message -- not one warning per section.
+    # in one message, not one warning per section.
     assert "[secrets.*]" in issue
     assert "[vm_templates.*]" in issue
     assert "[named_console]" in issue
@@ -72,6 +72,8 @@ def test_present_sections_aggregate_into_one_warning(tmp_path: Path) -> None:
     assert "agw resource sample" in issue
     assert "agw resource migrate" in issue
     assert "--no-deprecations" in issue
+    # The message states the sunset plainly: deprecated AND removed.
+    assert "deprecated and will be removed" in issue
 
 
 def test_deprecations_do_not_pollute_config_issues(tmp_path: Path) -> None:
@@ -137,7 +139,7 @@ def test_shipped_sample_config_warns_nothing(tmp_path: Path) -> None:
 
 def test_cli_no_deprecations_flag_silences_the_warning(tmp_path: Path, monkeypatch) -> None:
     """`agw --no-deprecations <cmd>` suppresses the deprecation warning;
-    without the flag it prints. Only deprecations are silenced -- the
+    without the flag it prints. Only deprecations are silenced; the
     flag does not touch config_issues."""
     from typer.testing import CliRunner
 
@@ -197,7 +199,7 @@ def test_remediation_commands_do_not_nag(tmp_path: Path, monkeypatch) -> None:
 
 def test_settings_only_config_refuses_registry_build(tmp_path: Path) -> None:
     """load_config(resources=False) skips the resource sections, so
-    build_registry must refuse the resulting Config -- publishing it
+    build_registry must refuse the resulting Config: publishing it
     would silently drop every TOML-declared resource."""
     from agentworks.bootstrap import build_registry
     from agentworks.errors import StateError

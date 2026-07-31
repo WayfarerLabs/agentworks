@@ -68,43 +68,32 @@ def test_sample_config_examples_uncomment_cleanly() -> None:
             f"line (extra space) is the usual culprit.\n  {e}{ctx}"
         ) from e
 
-    # Spot-check the major sections all exist after uncommenting.
-    # (secret_backends is deliberately absent: those sections are
-    # deprecated no-ops and the sample no longer teaches them. The
-    # legacy [azure] / [proxmox] examples are gone too: vm-sites are
-    # resources now; the sample points at `agw resource sample vm-site`.)
+    # Spot-check the settings sections all exist after uncommenting. The
+    # sample is settings-only: resource sections are deliberately absent
+    # (pinned by test_sample_config_declares_no_resources below).
     expected_top = {
         "operator",
         "paths",
         "defaults",
-        "named_console",
-        "git_credentials",
-        "secrets",
         "secret_config",
         "plugins",
-        "vm_templates",
-        "admin",
-        "agent_templates",
-        "workspace_templates",
-        "session_templates",
         "session",
     }
     missing = expected_top - set(parsed.keys())
     assert not missing, f"missing top-level sections after uncomment: {missing}"
-    assert "azure" not in parsed
-    assert "proxmox" not in parsed
 
 
-def test_sample_config_env_tables_live_with_their_resources() -> None:
-    """Pin the layout choice: each ``[<resource>.env]`` example is colocated
-    with its parent resource (rather than gathered into a standalone env
-    section). The uncommented form has each env subtable as a child of
-    its resource definition."""
+def test_sample_config_declares_no_resources() -> None:
+    """The sample is settings-only: even fully uncommented it declares no
+    resources in TOML. The detection set is ``KIND_SECTIONS``, the same
+    shared table the migrator and the load-time deprecation warning use,
+    so a resource example sneaking back into the sample trips this test.
+    Resources are YAML manifests; the sample points at
+    `agw resource sample <kind>` instead."""
+    from agentworks.manifests.decode import KIND_SECTIONS
+
     src = SAMPLE_PATH.read_text()
     parsed = tomllib.loads(_uncomment_examples(src))
-
-    assert "env" in parsed["vm_templates"]["default"]
-    assert "env" in parsed["admin"]
-    assert "env" in parsed["agent_templates"]["default"]
-    assert "env" in parsed["workspace_templates"]["default"]
-    assert "env" in parsed["session_templates"]["custom-tool"]
+    resource_sections = {section for sections in KIND_SECTIONS.values() for section in sections}
+    present = resource_sections & set(parsed.keys())
+    assert not present, f"sample config declares resources in TOML: {sorted(present)}"

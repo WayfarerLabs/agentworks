@@ -197,3 +197,17 @@ agent 30 -> 28 and workspace 30 -> 29 is intended: the old 30 already produced o
 and groups. Separately, the `vm` / `agent` / `workspace` / `console` list tables gained NAME-cell
 display truncation (via `output.truncate`) so a long or legacy over-cap name cannot misalign the
 table; `--names-only` output is untouched and still emits full names for shell completion.
+
+## 2026-07-31: TOML resource sunset announced (PR #315)
+
+This SDD's dual-path stance ("deprecate, don't break"; removal deferred to a future major release
+and explicitly "not a transitional window") is now revised: declaring resources in config.toml is
+deprecated for removal in a future release, no longer gated on a major. PR #315 firmed the
+aggregated load-time warning to say so, stripped the resource-declaring examples from the sample
+config (settings sections remain), and re-homed the field documentation those examples carried into
+the bundled YAML samples. ADR 0016 carries a matching status note; a superseding ADR will come from
+the follow-on declarative-schema SDD (2026-07-31-declarative-schema), which plans the actual removal
+of the TOML resource path (this SDD's TOML loaders, the decode-through-TOML-loaders parity layer)
+and a registration-time schema model superseding the Phase 5.7 invoked-validation contract, as that
+contract's own docstrings anticipated. Future PRs advancing that effort will append further entries
+here as they retire pieces this SDD shipped.
