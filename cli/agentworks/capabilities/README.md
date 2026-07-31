@@ -232,12 +232,12 @@ toolkit, not a checklist, and a capability with nothing cheap to catch before th
 trivial (empty) preflight. Its defining property is that it is **read-only and side-effect-free**:
 
 - **Secret resolvability is predicted without prompting** at this stage, but centrally, not by the
-  instance: the node holding the instance predicts over its declared references
-  (`orchestration.secrets`), so a declared secret with no mapping at all is fatal and knowable here,
-  without prompting for the others, and the instance never touches the secret machinery. Value
-  checks defer to the op, uniformly. (An earlier draft let preflight read-and-verify
-  "non-interactively resolvable" values; that was ruled out: it forks readiness on where a secret
-  happens to come from.)
+  instance or its holding node: the operation's preflight sweep (`preflight_all`) predicts over each
+  node's declared references (`orchestration.secrets`), so a declared secret with no mapping at all
+  is fatal and knowable here, without prompting for the others, and neither the instance nor the
+  node touches the secret machinery. Value checks defer to the op, uniformly. (An earlier draft let
+  preflight read-and-verify "non-interactively resolvable" values; that was ruled out: it forks
+  readiness on where a secret happens to come from.)
 - It checks the rest of the world that needs **no credentials**: required tools present on the
   target, an unauthenticated endpoint reachable.
 - It does **not** mutate. In particular it does **not** mint or create anything.

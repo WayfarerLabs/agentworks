@@ -185,7 +185,7 @@ class LimaPlatform(VMPlatform):
         """Local sites: ``limactl`` must be on PATH. Remote sites defer
         to the ops (probing the vm_host over SSH is a real round trip;
         the first op's error is already clear). No config secrets, so
-        the holding node's central prediction has nothing to check.
+        the operation sweep's central prediction has nothing to check.
 
         The limactl check ordinarily never fires here: a limactl-less
         local site is not-ready (``not_ready``) before any op reaches
