@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from agentworks.errors import ConfigError, unknown_template_error
+from agentworks.errors import ConfigError, NotFoundError, unknown_template_error
 
 if TYPE_CHECKING:
     from agentworks.env import EnvEntry
@@ -61,6 +61,29 @@ def resolve_template(registry: Registry, template_name: str | None = None) -> Re
     from agentworks.resources.access import kind_dict
 
     return resolve_from_dict(kind_dict(registry, "workspace-template"), template_name)
+
+
+def resolve_ws_template_env_or_empty(
+    registry: Registry,
+    template_name: str | None,
+) -> dict[str, EnvEntry]:
+    """The workspace template's env, or an empty dict when the template
+    cannot be resolved.
+
+    A copied workspace records the synthetic ``template="copied"`` marker,
+    which is not a real template; a workspace's template may also have been
+    removed from config after the fact. Either way there is no template to
+    draw env from, so the workspace contributes an empty env scope rather
+    than raising ``unknown_template_error``. Shared by the vm-level
+    exec/shell env-scope resolver and ``env show`` so those two
+    env-resolution sites cannot drift. Note ``repair`` deliberately does NOT
+    use this: it resolves the same template for git identity, not ``.env``,
+    so it keeps its own guard.
+    """
+    try:
+        return resolve_template(registry, template_name).env
+    except (ValueError, ConfigError, NotFoundError):
+        return {}
 
 
 def _resolve(

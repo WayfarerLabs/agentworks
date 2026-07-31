@@ -28,7 +28,6 @@ if TYPE_CHECKING:
     from agentworks.resources.registry import Registry
     from agentworks.sessions.templates import ResolvedSessionTemplate
     from agentworks.vms.templates import ResolvedVMTemplate
-    from agentworks.workspaces.templates import ResolvedTemplate as ResolvedWorkspaceTemplate
 
 
 # Source scopes appear in this fixed order in the rendered output (most
@@ -266,7 +265,7 @@ def _resolve_scope_envs(
     from agentworks.resources.access import admin_template as _admin_template
     from agentworks.sessions.templates import resolve_template as _resolve_session_template
     from agentworks.vms.templates import resolve_template as _resolve_vm_template
-    from agentworks.workspaces.templates import resolve_template as _resolve_ws_template
+    from agentworks.workspaces.templates import resolve_ws_template_env_or_empty
 
     vm_template: ResolvedVMTemplate = _resolve_vm_template(
         registry,
@@ -276,11 +275,13 @@ def _resolve_scope_envs(
 
     workspace_env: dict[str, EnvEntry] | None = None
     if ctx.workspace is not None:
-        ws_template: ResolvedWorkspaceTemplate = _resolve_ws_template(
-            registry,
-            ctx.workspace.template,
-        )
-        workspace_env = ws_template.env
+        # A copied workspace's synthetic ``template="copied"`` marker (or a
+        # template later removed from config) resolves to an empty env scope
+        # rather than raising ``unknown_template_error``. This keeps ``env
+        # show --workspace <copied>`` (and ``--session`` whose workspace is
+        # copied) working, consistent with exec/shell; the other scopes below
+        # are unaffected.
+        workspace_env = resolve_ws_template_env_or_empty(registry, ctx.workspace.template)
 
     admin_env: dict[str, EnvEntry] | None = None
     agent_env: dict[str, EnvEntry] | None = None
