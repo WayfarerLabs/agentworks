@@ -491,9 +491,12 @@ class LimaPlatform(VMPlatform):
     def native_transport(
         self,
         vm: VMRow,
+        ctx: RunContext,
         *,
         config: Config | None = None,
     ) -> Transport | None:
+        # ctx is unused: limactl (local or over the vm_host SSH hop)
+        # needs no backend credential.
         return self._transport_for(self._instance_name(vm))
 
     def status(self, vm: VMRow, ctx: RunContext) -> VMStatus:

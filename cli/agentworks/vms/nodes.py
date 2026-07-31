@@ -250,6 +250,10 @@ class LiveVMNode:
                 self._config,
                 self._row,
                 platform,
+                # The same gate-scoped ops context the start above ran
+                # under: the rejoin's platform-native transport is a
+                # backend call too (Azure attaches a public IP for it).
+                self._gate_ops_ctx(gate_secrets),
                 auth_key_source=rejoin_auth_key,
             )
 

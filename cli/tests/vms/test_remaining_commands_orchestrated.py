@@ -283,7 +283,7 @@ def _fake_rekey_transports(
     native = SimpleNamespace(run=_run)
     monkeypatch.setattr(
         "agentworks.transports.native_transport",
-        lambda vm, platform, config, *, stack: native,
+        lambda vm, platform, config, *, ctx, stack: native,
     )
     monkeypatch.setattr(
         "agentworks.transports.transport",

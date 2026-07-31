@@ -228,7 +228,7 @@ class VMPlatform(Capability):
         proxmox ``vmid@node``). Reads ``vm.platform_metadata``.
         """
 
-    def native_transport(self, vm: VMRow, *, config: Config | None = None) -> Transport | None:
+    def native_transport(self, vm: VMRow, ctx: RunContext, *, config: Config | None = None) -> Transport | None:
         """Platform-native :class:`Transport` for bootstrap and
         ``vm shell --platform``, or ``None`` when the platform has no
         interactive native transport (proxmox: one-shot QEMU guest-agent
@@ -240,13 +240,20 @@ class VMPlatform(Capability):
         reachability probe, and raises a typed ``StateError`` (with the
         platform's console hint) on ``None``.
 
+        ``ctx`` is the op-start :class:`RunContext`, exactly as the ops
+        receive it (see :meth:`create`): building a native transport is
+        backend work like any other, and a platform whose backend API
+        needs a credential reads it here via ``ctx.secret(name)``. Azure
+        needs it (its network/compute clients resolve the transient
+        public IP); lima and wsl2 accept and ignore it.
+
         ``config`` carries OPERATOR settings (azure needs
         ``config.operator.ssh_private_key`` for the public-IP path),
         distinct from the bound ``platform_config``.
         """
         return None
 
-    def post_tailscale_ready(self, vm: VMRow) -> None:  # noqa: B027  # intentional concrete no-op
+    def post_tailscale_ready(self, vm: VMRow, ctx: RunContext) -> None:  # noqa: B027  # intentional concrete no-op
         """Hook called once the VM's Tailscale node is up during create.
 
         Default no-op. Azure overrides to detach the cloud-init public
@@ -257,9 +264,13 @@ class VMPlatform(Capability):
         the detach fires at an async Tailscale-ready point inside
         ``bootstrap_vm`` (Phase A), neither of which is an ExitStack-shaped
         lifecycle.
+
+        ``ctx`` is the op-start :class:`RunContext` (see
+        :meth:`create`): the detach is a backend call and reads any
+        credential it needs from it.
         """
 
-    def transient_route(self, vm: VMRow) -> AbstractContextManager[None]:
+    def transient_route(self, vm: VMRow, ctx: RunContext) -> AbstractContextManager[None]:
         """Hold any platform-native transient network state while the
         native transport is in use.
 
@@ -268,6 +279,10 @@ class VMPlatform(Capability):
         overrides to attach a public IP on enter and detach on exit so
         the transient state is bounded by the caller's
         :class:`contextlib.ExitStack` scope.
+
+        ``ctx`` is the op-start :class:`RunContext` (see
+        :meth:`create`): attaching and detaching are backend calls and
+        read any credential they need from it.
         """
         return nullcontext()
 
@@ -291,5 +306,11 @@ class VMPlatform(Capability):
         to anchor the distro against ``vmIdleTimeout``. ``config`` is
         reserved operator settings, available to a platform whose hold
         needs them (none does today).
+
+        No ``ctx`` here, unlike :meth:`transient_route`: every hold that
+        exists is local (wsl2 runs ``wsl.exe``), so none makes a backend
+        call and none needs a credential. A platform whose hold does
+        (a cloud API "keep this instance awake") threads ``ctx`` in the
+        same way the transport hooks did.
         """
         return nullcontext()

@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from agentworks.capabilities.base import RunContext
 from agentworks.db import Database
 from agentworks.errors import StateError
 from tests.conftest import empty_secret_target, stub_build_registry, stub_vm_gates
@@ -216,12 +217,12 @@ def test_shell_vm_provisioner_uses_native_transport(
         def preflight(self, ctx: object) -> None:
             return None
 
-        def native_transport(self, vm: object, *, config: object | None = None) -> object:
+        def native_transport(self, vm: object, ctx: object, *, config: object | None = None) -> object:
             provisioner_calls.append((getattr(vm, "name", "?"), config))
             return _stub_target()
 
         @contextlib.contextmanager  # type: ignore[arg-type]
-        def transient_route(self, vm: object):  # type: ignore[no-untyped-def]
+        def transient_route(self, vm: object, ctx: object):  # type: ignore[no-untyped-def]
             yield
 
         def vm_active(self, vm: object, *, config: object | None = None):  # type: ignore[no-untyped-def]
@@ -284,11 +285,11 @@ def test_provisioner_shell_target_wraps_missing_native_transport(
         name = "stub"
         no_native_transport_hint = "no interactive transport here"
 
-        def native_transport(self, vm: object, *, config: object | None = None) -> object | None:
+        def native_transport(self, vm: object, ctx: object, *, config: object | None = None) -> object | None:
             return None
 
         @contextlib.contextmanager  # type: ignore[arg-type]
-        def transient_route(self, vm: object):  # type: ignore[no-untyped-def]
+        def transient_route(self, vm: object, ctx: object):  # type: ignore[no-untyped-def]
             yield
 
     # The platform arrives already bound from the caller's composition
@@ -299,6 +300,7 @@ def test_provisioner_shell_target_wraps_missing_native_transport(
             vm,
             _UnsupportedProvisioner(),
             _make_config(),
+            ctx=RunContext(),
             stack=stack,
         )  # type: ignore[arg-type]
 
@@ -331,11 +333,11 @@ def test_provisioner_shell_target_proxmox_hint_points_at_web_console(
         # prose, so read it from the class rather than restating it.
         no_native_transport_hint = ProxmoxPlatform.no_native_transport_hint
 
-        def native_transport(self, vm: object, *, config: object | None = None) -> object | None:
+        def native_transport(self, vm: object, ctx: object, *, config: object | None = None) -> object | None:
             return None
 
         @contextlib.contextmanager  # type: ignore[arg-type]
-        def transient_route(self, vm: object):  # type: ignore[no-untyped-def]
+        def transient_route(self, vm: object, ctx: object):  # type: ignore[no-untyped-def]
             yield
 
     vm = vm_manager._require_vm(db, "vm1")
@@ -344,6 +346,7 @@ def test_provisioner_shell_target_proxmox_hint_points_at_web_console(
             vm,
             _ProxmoxProvisioner(),
             _make_config(),
+            ctx=RunContext(),
             stack=stack,
         )  # type: ignore[arg-type]
 
@@ -395,7 +398,7 @@ def test_provisioner_shell_target_attaches_and_registers_detach_for_azure(
         def detach_public_ip(self, vm: object) -> None:
             detach_calls.append(getattr(vm, "name", "?"))
 
-        def native_transport(self, vm: object, *, config: object | None = None) -> Transport:
+        def native_transport(self, vm: object, ctx: object, *, config: object | None = None) -> Transport:
             # The factory probes ``target.run('echo ok', ...)``; the real
             # SSHTransport.run would invoke a subprocess, so we wrap one
             # whose ``run`` is a stub. Subclass so isinstance(target,
@@ -415,6 +418,7 @@ def test_provisioner_shell_target_attaches_and_registers_detach_for_azure(
             vm,
             _FakeAzureProvisioner(),
             _make_config(),
+            ctx=RunContext(),
             stack=stack,
         )  # type: ignore[arg-type]
         # Attach must have run inside the stack scope.
@@ -466,7 +470,7 @@ def test_provisioner_shell_target_detaches_on_exception_for_azure(
         def detach_public_ip(self, vm: object) -> None:
             detach_calls.append(getattr(vm, "name", "?"))
 
-        def native_transport(self, vm: object, *, config: object | None = None) -> Transport:
+        def native_transport(self, vm: object, ctx: object, *, config: object | None = None) -> Transport:
             raise RuntimeError("simulated post-attach failure")
 
     vm = vm_manager._require_vm(db, "vm1")
@@ -476,6 +480,7 @@ def test_provisioner_shell_target_detaches_on_exception_for_azure(
                 vm,
                 _AzureRaisesAfterAttach(),
                 _make_config(),
+                ctx=RunContext(),
                 stack=stack,
             )  # type: ignore[arg-type]
         # ExitStack still open; detach fires on stack exit, not before.
@@ -524,13 +529,13 @@ def test_provisioner_shell_target_retries_reachability_probe(
     class _FlakyProvisioner:
         name = "stub"
 
-        def native_transport(self, vm: object, *, config: object | None = None) -> object:
+        def native_transport(self, vm: object, ctx: object, *, config: object | None = None) -> object:
             t = SSHTransport(host="203.0.113.42")
             t.run = flaky_run  # type: ignore[method-assign, assignment]
             return t
 
         @contextlib.contextmanager  # type: ignore[arg-type]
-        def transient_route(self, vm: object):  # type: ignore[no-untyped-def]
+        def transient_route(self, vm: object, ctx: object):  # type: ignore[no-untyped-def]
             yield
 
     vm = vm_manager._require_vm(db, "vm1")
@@ -539,6 +544,7 @@ def test_provisioner_shell_target_retries_reachability_probe(
             vm,
             _FlakyProvisioner(),
             _make_config(),
+            ctx=RunContext(),
             stack=stack,
         )  # type: ignore[arg-type]
 
@@ -572,11 +578,11 @@ def test_provisioner_shell_target_raises_defensively_on_empty_host(
     class _BrokenProvisioner:
         name = "stub"
 
-        def native_transport(self, vm: object, *, config: object | None = None) -> object:
+        def native_transport(self, vm: object, ctx: object, *, config: object | None = None) -> object:
             return SSHTransport(host="")
 
         @contextlib.contextmanager  # type: ignore[arg-type]
-        def transient_route(self, vm: object):  # type: ignore[no-untyped-def]
+        def transient_route(self, vm: object, ctx: object):  # type: ignore[no-untyped-def]
             yield
 
     vm = vm_manager._require_vm(db, "vm1")
@@ -585,6 +591,7 @@ def test_provisioner_shell_target_raises_defensively_on_empty_host(
             vm,
             _BrokenProvisioner(),
             _make_config(),
+            ctx=RunContext(),
             stack=stack,
         )  # type: ignore[arg-type]
 

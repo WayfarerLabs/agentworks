@@ -29,7 +29,7 @@ The authoritative contract is `base.py`. Implement the ops, override only the ho
 needs, and fill in the class-level contract methods the site decoder and DB migration consume.
 
 **Ops** (the mutation surface). Every op except `display_backend_name` takes the op-start
-`RunContext` as its last parameter (see the next section for what that is and how to read from it):
+`RunContext` after `vm` (see the next section for what that is and how to read from it):
 
 - `create(request, ctx) -> ProvisionResult` is deliberately **not** `@idempotent_op`: it runs a
   pre-flight collision check and raises `StateError` on a name that already exists, so a re-run is a
@@ -46,9 +46,12 @@ needs, and fill in the class-level contract methods the site decoder and DB migr
 
 **Transport and lifecycle hooks** (sensible defaults on `VMPlatform`; override only what your
 backend needs). All are entered by callers that gate first, so on entry the VM is running or was
-just started:
+just started. The three transport hooks take `ctx: RunContext` for the same reason the ops do:
+opening a route to a cloud VM is a backend call, so a platform reads any credential it needs from
+`ctx.secret(name)` here exactly as in an op. Lima and WSL2 accept and ignore it (their transports
+are local); Azure uses it:
 
-- `native_transport(vm, *, config=None) -> Transport | None` (default `None`). The
+- `native_transport(vm, ctx, *, config=None) -> Transport | None` (default `None`). The
   `agentworks.transports.native_transport` factory wraps the call in `transient_route`, probes
   reachability with an `echo ok` retry loop, and raises a typed `StateError` (using
   `no_native_transport_hint`) when a platform returns `None`. Lima returns a `limactl shell`
@@ -56,15 +59,25 @@ just started:
   transport. Proxmox deliberately returns the default `None` and sets `no_native_transport_hint` to
   point the operator at the Proxmox web-UI serial console, because its guest-agent exec is one-shot
   and cannot host an interactive shell.
-- `transient_route(vm) -> context manager` (default `nullcontext()`). Azure attaches a public IP on
-  enter and detaches it in a `finally`, bounding the exposure window to the transport's lifetime.
+- `transient_route(vm, ctx) -> context manager` (default `nullcontext()`). Azure attaches a public
+  IP on enter and detaches it in a `finally`, bounding the exposure window to the transport's
+  lifetime.
 - `vm_active(vm, *, config=None) -> context manager` (default `nullcontext()`). WSL2 returns a
   keepalive that holds the distro against Windows' idle-shutdown for the span of a command, with
-  Win32 Job-Object orphan-proofing for a hard-killed `agw`.
-- `post_tailscale_ready(vm) -> None` (default no-op). Azure detaches its public IP here, the instant
-  Tailscale is reachable. The asymmetry with `transient_route` is intentional: the attach happens
-  inside `create()` (cloud-init needs the IP to bootstrap), and neither that nor this detach point
-  is context-manager-shaped.
+  Win32 Job-Object orphan-proofing for a hard-killed `agw`. No `ctx`: every hold that exists is
+  local and makes no backend call. A cloud hold that did would thread it like the transport hooks.
+- `post_tailscale_ready(vm, ctx) -> None` (default no-op). Azure detaches its public IP here, the
+  instant Tailscale is reachable. The asymmetry with `transient_route` is intentional: the attach
+  happens inside `create()` (cloud-init needs the IP to bootstrap), and neither that nor this detach
+  point is context-manager-shaped.
+
+Callers must pass the context their composition root already built for the platform's ops
+(`gated_vm_boundary` and `_live_vm_boundary` in `agentworks.vms.manager.boundary` both hand one out;
+the activation gate builds its own from the gate's scoped reader), never a freshly constructed empty
+one. `vm shell --platform` is the case that makes this load-bearing: on a running VM the gate's
+happy path is a pure Tailscale reachability probe, so nothing has touched the platform with a
+context before the transport is built. A platform must never depend on an earlier op in the same
+process having warmed a credential cache.
 
 **Gates** (cheap, offline, distinct from preflight):
 
@@ -258,10 +271,10 @@ YAML block scalar, remote shell). Two traps that have already occurred:
 ## Adding a new platform
 
 1. Subclass `VMPlatform` and implement the ops. Every op except `display_backend_name` takes
-   `ctx: RunContext`; read declared secrets via `ctx.secret(name)` and never hold a resolver or raw
-   reader on the instance. If your backend has a persistent client, memoize the derived client, not
-   the secret (the Proxmox `_api` pattern). Remember `create` is intentionally not `@idempotent_op`;
-   the idempotent ops must land in-state themselves.
+   `ctx: RunContext`, as do the three transport hooks; read declared secrets via `ctx.secret(name)`
+   and never hold a resolver or raw reader on the instance. If your backend has a persistent client,
+   memoize the derived client, not the secret (the Proxmox `_api` pattern). Remember `create` is
+   intentionally not `@idempotent_op`; the idempotent ops must land in-state themselves.
 2. Implement `validate` to check your `platform_config` shape and `dependencies` to return a
    `ConfigReference` for each secret you read. Declaring a secret in `dependencies` is what
    authorizes the op to read it later.

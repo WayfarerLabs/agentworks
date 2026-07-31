@@ -719,9 +719,11 @@ class WSL2Platform(VMPlatform):
     def native_transport(
         self,
         vm: VMRow,
+        ctx: RunContext,
         *,
         config: Config | None = None,
     ) -> Transport | None:
+        # ctx is unused: wsl.exe is local and needs no backend credential.
         return WSL2Transport(distro_name=self._distro_name(vm), user=vm.admin_username)
 
     def status(self, vm: VMRow, ctx: RunContext) -> VMStatus:

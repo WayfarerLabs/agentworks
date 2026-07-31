@@ -36,6 +36,7 @@ from agentworks.transports.wsl2 import WSL2Transport
 if TYPE_CHECKING:
     import contextlib
 
+    from agentworks.capabilities.base import RunContext
     from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.config import Config
     from agentworks.db import AgentRow, VMRow
@@ -150,6 +151,7 @@ def native_transport(
     platform: VMPlatform,
     config: Config,
     *,
+    ctx: RunContext,
     stack: contextlib.ExitStack,
 ) -> Transport:
     """Platform-native transport for a VM. Used only at bootstrap and
@@ -161,6 +163,15 @@ def native_transport(
     needs (Azure attaches a public IP on enter and detaches on exit):
     the platform's :meth:`VMPlatform.transient_route` runs first; once
     that context is held, the per-platform transport builder runs.
+
+    ``ctx`` is the op-start :class:`RunContext` both platform calls
+    receive: building the route and the transport is backend work, so a
+    platform whose backend API needs a credential (Azure with an
+    explicit service principal) reads it through ``ctx.secret``. Callers
+    pass the context their composition root already built for the
+    platform's ops, never a fresh empty one: the credential has to
+    arrive by delivery, not by hoping an earlier op in the same process
+    warmed a cache.
 
     A ``None`` from :meth:`VMPlatform.native_transport` (proxmox: the
     one-shot QEMU guest-agent exec can't host an interactive shell)
@@ -178,8 +189,8 @@ def native_transport(
     from agentworks import output
     from agentworks.ssh import SSHError
 
-    stack.enter_context(platform.transient_route(vm))
-    target = platform.native_transport(vm, config=config)
+    stack.enter_context(platform.transient_route(vm, ctx))
+    target = platform.native_transport(vm, ctx, config=config)
     if target is None:
         raise StateError(
             f"No native transport for VM '{vm.name}' (platform '{platform.name}').",

@@ -264,10 +264,13 @@ def create_vm(
     # Polymorphic post-Tailscale-ready hook. Azure overrides to detach
     # the cloud-init public IP (closing the public-exposure window the
     # instant Tailscale becomes reachable); other platforms are no-op.
+    # It fires deep inside Phase A, so it closes over the same
+    # ``platform_obj`` / ``platform_ctx`` the create op ran with (both
+    # bound below, well before bootstrap_vm invokes this).
     def _on_tailscale_ready() -> None:
         refreshed = db.get_vm(vm_name)
         assert refreshed is not None
-        platform_obj.post_tailscale_ready(refreshed)
+        platform_obj.post_tailscale_ready(refreshed, platform_ctx)
 
     # The keepalive hold spans BOTH init phases: WSL2 anchors its distro
     # against idle shutdown between Phase A (wsl.exe transport) and Phase B

@@ -21,6 +21,29 @@ if TYPE_CHECKING:
     from agentworks.vms.nodes import LiveVMNode
 
 
+def _platform_ops_ctx(
+    config: Config,
+    scope: OperationScope,
+    vm_node: LiveVMNode,
+    resolver: Resolver,
+) -> RunContext:
+    """The OP-START context for driving a live VM's platform: the
+    boundary's resolved values, delivered SCOPED to the site's declared
+    secret names (the declare/receive contract), under the command's
+    scope.
+
+    One definition for both composition roots below, so the gated and
+    no-gate commands cannot drift on what a platform op is handed.
+    """
+    from agentworks.orchestration.secrets import ScopedSecrets
+
+    return RunContext(
+        config=config,
+        operation_scope=scope,
+        secrets=ScopedSecrets(resolver.values, vm_node.site.secret_refs()),
+    )
+
+
 @contextlib.contextmanager
 def gated_vm_boundary(
     db: Database,
@@ -30,7 +53,7 @@ def gated_vm_boundary(
     *,
     targets: Sequence[SecretTarget] = (),
     scope: OperationScope | None = None,
-) -> Iterator[tuple[LiveVMNode, Resolver]]:
+) -> Iterator[tuple[LiveVMNode, Resolver, RunContext]]:
     """The gate-opening commands' shared composition root (vm/agent
     shell and exec, console attach, the workspace lifecycle ops):
     commands that operate interactively on one existing VM. Build the
@@ -41,10 +64,16 @@ def gated_vm_boundary(
     before the
     preflight sweep (its just-in-time values seed the boundary
     resolver) and run the one boundary resolve inside it. Yields
-    ``(vm_node, resolver)`` within the held-active span: the body's
-    interactive or streaming work stays anchored (WSL2's keepalive)
-    for the command's duration, and callers read ``resolver.values``
-    for env composition.
+    ``(vm_node, resolver, ops_ctx)`` within the held-active span: the
+    body's interactive or streaming work stays anchored (WSL2's
+    keepalive) for the command's duration, callers read
+    ``resolver.values`` for env composition, and ``ops_ctx`` is the
+    OP-START context for driving the node's platform (secrets scoped to
+    the site's declared names), identical in shape to the one
+    :func:`_live_vm_boundary` returns. ``vm shell --platform`` is
+    today's only body that needs it; a command that touches the
+    platform must take it from here rather than assemble a secret-less
+    context of its own.
 
     ``scope`` is the command's :class:`OperationScope`; when None the
     default VM-level scope for this VM is built. THE RULE: pass the
@@ -84,7 +113,7 @@ def gated_vm_boundary(
     with activation_gate(vm_node, gate_secret_resolver(config, registry, resolver)):
         preflight_all(nodes, RunContext(config=config, operation_scope=scope))
         resolver.resolve()
-        yield vm_node, resolver
+        yield vm_node, resolver, _platform_ops_ctx(config, scope, vm_node, resolver)
 
 
 def _live_vm_boundary(
@@ -116,7 +145,7 @@ def _live_vm_boundary(
     """
     from agentworks.bootstrap import build_registry
     from agentworks.orchestration.readiness import preflight_all
-    from agentworks.orchestration.secrets import ScopedSecrets, secret_union
+    from agentworks.orchestration.secrets import secret_union
     from agentworks.orchestration.walk import walk
     from agentworks.secrets.resolver import Resolver
     from agentworks.vms.nodes import live_vm_node
@@ -131,9 +160,4 @@ def _live_vm_boundary(
     scope = _vm_scope(db, vm.name)
     preflight_all(nodes, RunContext(config=config, operation_scope=scope))
     resolver.resolve()
-    ops_ctx = RunContext(
-        config=config,
-        operation_scope=scope,
-        secrets=ScopedSecrets(resolver.values, vm_node.site.secret_refs()),
-    )
-    return vm_node, ops_ctx
+    return vm_node, _platform_ops_ctx(config, scope, vm_node, resolver)

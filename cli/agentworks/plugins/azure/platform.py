@@ -774,6 +774,7 @@ class AzureVMPlatform(VMPlatform):
     def native_transport(
         self,
         vm: VMRow,
+        ctx: RunContext,
         *,
         config: Config | None = None,
     ) -> Transport | None:
@@ -810,7 +811,7 @@ class AzureVMPlatform(VMPlatform):
             force_tty=sys.platform == "win32",
         )
 
-    def post_tailscale_ready(self, vm: VMRow) -> None:
+    def post_tailscale_ready(self, vm: VMRow, ctx: RunContext) -> None:
         """Detach the cloud-init public IP now that Tailscale is up.
 
         The attach happens inside :meth:`create` (Azure needs the IP to
@@ -821,7 +822,7 @@ class AzureVMPlatform(VMPlatform):
         self.detach_public_ip(vm)
 
     @contextlib.contextmanager
-    def transient_route(self, vm: VMRow) -> Iterator[None]:
+    def transient_route(self, vm: VMRow, ctx: RunContext) -> Iterator[None]:
         """Attach a transient public IP for the duration of the context.
 
         The native transport for Azure reaches the VM via a temporary

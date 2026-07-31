@@ -313,7 +313,7 @@ def start_vm(db: Database, config: Config, name: str) -> None:
     # internal late resolve (the documented conditional-need exception):
     # there is no gate here to hand a lazy reader through.
     with vm_node.hold_active():
-        _mgr._ensure_tailscale(db, config, vm, platform, already_running=status == VMStatus.RUNNING)
+        _mgr._ensure_tailscale(db, config, vm, platform, ops_ctx, already_running=status == VMStatus.RUNNING)
     # Only emit "is ready" on the path that actually started the VM. When
     # status was already RUNNING we already said so above, and Tailscale
     # verification is usually a no-op (handshake already valid), so an
@@ -452,7 +452,7 @@ def delete_vm(
         if vm.tailscale_host:
             try:
                 with vm_node.hold_active():
-                    _mgr._tailscale_logout(vm, config, platform)
+                    _mgr._tailscale_logout(vm, config, platform, ops_ctx)
             except UserAbort:
                 raise
             except Exception as e:
@@ -600,7 +600,7 @@ def rekey_vm(
         # transport builder and the 6-attempt reachability probe. The
         # caller-supplied ExitStack scopes the transient state to the
         # duration of the rekey.
-        exec_target = native_transport(vm, platform, config, stack=_stack)
+        exec_target = native_transport(vm, platform, config, ctx=ops_ctx, stack=_stack)
 
         # Restart, logout, login, restart. The initial restart clears any
         # stale daemon state (a previous interrupted rekey can leave the

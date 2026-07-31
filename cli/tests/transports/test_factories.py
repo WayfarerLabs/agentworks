@@ -16,6 +16,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from agentworks.capabilities.base import RunContext
 from agentworks.errors import StateError
 from agentworks.ssh import SSHError, SSHResult
 from agentworks.transports import (
@@ -179,6 +180,7 @@ def test_native_transport_invokes_transient_route_then_builder() -> None:
     runs, so polymorphism replaces the old isinstance check."""
     vm = _mock_vm(site="lima")
     config = _mock_config()
+    ctx = RunContext()
     platform = _fake_lima_platform()
     fake_target = platform.native_transport.return_value
 
@@ -187,10 +189,10 @@ def test_native_transport_invokes_transient_route_then_builder() -> None:
         contextlib.ExitStack() as stack,
     ):
         mock_run.return_value = SSHResult(returncode=0, stdout="ok\n", stderr="")
-        t = native_transport(vm, platform, config, stack=stack)
+        t = native_transport(vm, platform, config, ctx=ctx, stack=stack)
 
-    platform.transient_route.assert_called_once_with(vm)
-    platform.native_transport.assert_called_once_with(vm, config=config)
+    platform.transient_route.assert_called_once_with(vm, ctx)
+    platform.native_transport.assert_called_once_with(vm, ctx, config=config)
     assert t is fake_target
 
 
@@ -202,6 +204,7 @@ def test_native_transport_none_raises_typed_state_error() -> None:
 
     vm = _mock_vm(site="proxmox")
     config = _mock_config()
+    ctx = RunContext()
     platform = MagicMock()
     platform.name = "proxmox"
     platform.no_native_transport_hint = ProxmoxPlatform.no_native_transport_hint
@@ -212,7 +215,7 @@ def test_native_transport_none_raises_typed_state_error() -> None:
         contextlib.ExitStack() as stack,
         pytest.raises(StateError) as exc_info,
     ):
-        native_transport(vm, platform, config, stack=stack)
+        native_transport(vm, platform, config, ctx=ctx, stack=stack)
     assert exc_info.value.hint is not None
     assert "serial console" in exc_info.value.hint
 
@@ -222,6 +225,7 @@ def test_native_transport_empty_ssh_host_raises_typed_state_error() -> None:
     surfaces clearly rather than letting downstream calls hang on it."""
     vm = _mock_vm(site="azure")
     config = _mock_config()
+    ctx = RunContext()
     platform = MagicMock()
     platform.name = "azure-vm"
     platform.transient_route.return_value = contextlib.nullcontext()
@@ -231,7 +235,7 @@ def test_native_transport_empty_ssh_host_raises_typed_state_error() -> None:
         contextlib.ExitStack() as stack,
         pytest.raises(StateError, match="no host"),
     ):
-        native_transport(vm, platform, config, stack=stack)
+        native_transport(vm, platform, config, ctx=ctx, stack=stack)
 
 
 def test_native_transport_reachability_probe_retries_then_succeeds() -> None:
@@ -239,6 +243,7 @@ def test_native_transport_reachability_probe_retries_then_succeeds() -> None:
     succeeding; the 6th fail propagates."""
     vm = _mock_vm(site="lima")
     config = _mock_config()
+    ctx = RunContext()
     platform = _fake_lima_platform()
     fake_target = platform.native_transport.return_value
 
@@ -256,7 +261,7 @@ def test_native_transport_reachability_probe_retries_then_succeeds() -> None:
         patch("agentworks.transports.time.sleep"),
         contextlib.ExitStack() as stack,
     ):
-        t = native_transport(vm, platform, config, stack=stack)
+        t = native_transport(vm, platform, config, ctx=ctx, stack=stack)
     assert t is fake_target
     assert call_count == 3
 
@@ -264,6 +269,7 @@ def test_native_transport_reachability_probe_retries_then_succeeds() -> None:
 def test_native_transport_reachability_probe_gives_up_after_six() -> None:
     vm = _mock_vm(site="lima")
     config = _mock_config()
+    ctx = RunContext()
     platform = _fake_lima_platform()
     fake_target = platform.native_transport.return_value
 
@@ -273,7 +279,7 @@ def test_native_transport_reachability_probe_gives_up_after_six() -> None:
         contextlib.ExitStack() as stack,
         pytest.raises(SSHError),
     ):
-        native_transport(vm, platform, config, stack=stack)
+        native_transport(vm, platform, config, ctx=ctx, stack=stack)
 
 
 # ---------------------------------------------------------------------------
@@ -286,6 +292,7 @@ def test_native_transport_azure_transient_route_attaches_and_detaches() -> None:
     fire regardless of whether the downstream code raised."""
     vm = _mock_vm(site="azure")
     config = _mock_config()
+    ctx = RunContext()
 
     events: list[str] = []
 
@@ -293,7 +300,7 @@ def test_native_transport_azure_transient_route_attaches_and_detaches() -> None:
     platform.name = "azure-vm"
 
     @contextlib.contextmanager
-    def fake_route(_vm):  # type: ignore[no-untyped-def] # noqa: ANN001, ANN202
+    def fake_route(_vm, _ctx):  # type: ignore[no-untyped-def] # noqa: ANN001, ANN202
         events.append("attach")
         try:
             yield
@@ -308,7 +315,7 @@ def test_native_transport_azure_transient_route_attaches_and_detaches() -> None:
         patch.object(fake_target, "run", return_value=SSHResult(returncode=0, stdout="", stderr="")),
         contextlib.ExitStack() as stack,
     ):
-        native_transport(vm, platform, config, stack=stack)
+        native_transport(vm, platform, config, ctx=ctx, stack=stack)
         # Inside the stack: attach has fired, detach has NOT.
         assert events == ["attach"]
     # ExitStack unwinds at end-of-with: detach fires deterministically.
@@ -321,6 +328,7 @@ def test_native_transport_azure_detach_fires_on_downstream_exception() -> None:
     by the caller's ExitStack)."""
     vm = _mock_vm(site="azure")
     config = _mock_config()
+    ctx = RunContext()
 
     events: list[str] = []
 
@@ -328,7 +336,7 @@ def test_native_transport_azure_detach_fires_on_downstream_exception() -> None:
     platform.name = "azure-vm"
 
     @contextlib.contextmanager
-    def fake_route(_vm):  # type: ignore[no-untyped-def] # noqa: ANN001, ANN202
+    def fake_route(_vm, _ctx):  # type: ignore[no-untyped-def] # noqa: ANN001, ANN202
         events.append("attach")
         try:
             yield
@@ -342,7 +350,7 @@ def test_native_transport_azure_detach_fires_on_downstream_exception() -> None:
         contextlib.ExitStack() as stack,
         pytest.raises(SSHError),
     ):
-        native_transport(vm, platform, config, stack=stack)
+        native_transport(vm, platform, config, ctx=ctx, stack=stack)
 
     assert events == ["attach", "detach"]
 
