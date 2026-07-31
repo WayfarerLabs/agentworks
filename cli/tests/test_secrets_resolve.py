@@ -104,9 +104,11 @@ def test_hard_miss_halts_chain_via_secret_mapping_error() -> None:
 
 
 def test_nonconforming_secret_name_still_resolves() -> None:
-    """Issue #279: a secret whose NAME is non-conforming (the load path only
-    warns, never rejects it) must still resolve through the runtime chain. This
-    is the path the prior (rejected) raising approach would have broken."""
+    """Issue #279: resolve_secrets itself does not validate secret NAMES, so a
+    non-conforming name resolves normally (the load path only warns, never
+    rejects it). This is a unit check of the resolve loop, not an end-to-end
+    thread of any one reference site; it pins the general guarantee the prior
+    (rejected) raising approach would have broken."""
     backend = _FakeBackend("env-var", values={"GITHUB_TOKEN": "resolved-value"})
     resolved = resolve_secrets([_decl("GITHUB_TOKEN")], _chain(backend))
     assert resolved == {"GITHUB_TOKEN": "resolved-value"}
