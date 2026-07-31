@@ -88,19 +88,24 @@ Derived surfaces:
   including the capability unions, via a CLI surface; generated manifests and samples carry an
   editor association (yaml-language-server modeline) so operators get completions, hover docs, and
   diagnostics in schema-aware editors.
-- **FR10.** Bundled samples become generated artifacts: schema-derived field reference (every field,
-  type, required/optional, default, description; one union arm rendered with alternatives indicated)
-  merged with a hand-authored prose blurb per kind and per capability. A capability registered
-  without sample prose still yields a complete generated skeleton.
+- **FR10.** Samples are rendered live by the CLI from the registered schema, uniformly for bundled
+  kinds and plugin capabilities alike; no generated sample files are checked in. A rendered sample
+  is the schema-derived field reference (every field, type, required/optional, default,
+  description; one union arm rendered with alternatives indicated) merged with a hand-authored
+  prose blurb per kind and per capability. A capability registered without sample prose still
+  yields a complete generated skeleton. The bundled hand-authored sample files are retired, and
+  `agw resource sample` (including `--write`) keeps its interface over the new renderer.
 - **FR11.** An operator can ask the CLI to explain schema: `agw resource describe` (or a sibling
   surface; naming is HLA's call) renders the field reference for a kind or capability, including
   plugin-registered ones, from the same schema.
 - **FR12.** Error quality does not regress: validation errors keep owner-scoped framing
   (`<owner>.<field>: ...`) and file/position context at least as good as today's, and unknown keys
   remain errors for capability config.
-- **FR13.** Drift is structurally impossible or test-caught: samples and any checked-in generated
-  docs are pinned by tests that fail when regeneration would change them, and schema facts appear in
-  exactly one authored place (the model).
+- **FR13.** Drift is structurally impossible or test-caught: schema facts appear in exactly one
+  authored place (the model), samples and describe output are rendered from it (so they cannot
+  drift by construction), the renderer is pinned by tests over fixture schemas plus every bundled
+  kind (rendered samples load cleanly and build a registry), and any remaining checked-in derived
+  docs are pinned by tests that fail when regeneration would change them.
 
 Stretch (in scope only if phase 2 lands cleanly; may be descoped to a follow-up without
 renegotiating this FRD):
@@ -123,8 +128,9 @@ renegotiating this FRD):
 - A capability author adding a field touches exactly one file (the model) and `agw resource sample`,
   `agw resource describe`, emitted schema, validation, and reference extraction all reflect it with
   no further edits; a test proves this end to end for a fixture capability.
-- Zero hand-maintained duplication of schema facts remains for migrated kinds: the strip of
-  hand-authored field lists from samples is total, and the drift tests of FR13 are in place.
+- Zero hand-maintained duplication of schema facts remains for migrated kinds: the hand-authored
+  sample files are gone, prose blurbs carry no field lists, and the FR13 renderer tests are in
+  place.
 - The TOML resource loaders and the decoder shim layer are deleted (phase 1), with the full test
   suite green and the migrator verified working against a fixture config.
 - Operator-facing error output for the reworked validation passes review against a corpus of
@@ -140,13 +146,14 @@ renegotiating this FRD):
 - Frozen/immutable declaration objects remain the norm for the registry, matching the current
   frozen-dataclass discipline.
 
-## Open questions for review
+## Resolved questions
 
-- **Release sequencing.** Is one released warning version enough runway before the hard error, or
-  should phase 1 hold until a specific release milestone?
-- **FR14 commitment.** Include the config.toml settings schema in this effort's definition of done,
-  or accept it as a likely descope now?
-- **Generated samples in-repo vs at-runtime.** Samples could be generated at build/test time and
-  checked in (diffable, pinned) or rendered live by the CLI from the registered schema (always
-  current, includes plugins). FR10/FR13 assume checked-in for bundled kinds plus live rendering for
-  plugin capabilities; confirm that split is the desired behavior.
+Decided with the operator at FRD review (2026-07-31):
+
+- **Release sequencing.** One released warning version is enough runway: PR #315 ships in the next
+  release, and phase 1's hard error may land in the release after.
+- **FR14 commitment.** Stretch, as drafted: phase 2's definition of done excludes it, and it
+  descopes to a follow-up without renegotiating this FRD.
+- **Generated samples in-repo vs at-runtime.** All live-rendered: the CLI renders every sample from
+  the registered schema on demand, bundled kinds and plugin capabilities uniformly, with no
+  checked-in generated sample files. FR10 and FR13 state this.
