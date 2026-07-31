@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import os
 from collections.abc import Generator
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
@@ -18,6 +19,29 @@ from agentworks.output import Role, StatusStyle, _render_header
 # section, make_config, resolve_counter) lives in its own module so it
 # reads as the suites' vocabulary rather than universal machinery.
 pytest_plugins = ["tests.orchestrated_fixtures"]
+
+
+@pytest.fixture(autouse=True)
+def _restore_agw_debug() -> Generator[None, None, None]:
+    """Snapshot and restore ``AGW_DEBUG`` around every test.
+
+    A test that drives the CLI with ``--debug`` mirrors the flag into the
+    ``AGW_DEBUG`` env var (see ``cli/_app.py`` ``_set_debug``), a
+    process-global mutation pytest does not undo on its own. Without this,
+    such a test would leak ``AGW_DEBUG=1`` into every later test in the
+    process, silently flipping debug-gated behavior (the error wrapper's
+    traceback re-raise, the azure-identity logger suppression skip). This
+    keeps that contained.
+    """
+    had = "AGW_DEBUG" in os.environ
+    prior = os.environ.get("AGW_DEBUG", "")
+    try:
+        yield
+    finally:
+        if had:
+            os.environ["AGW_DEBUG"] = prior
+        else:
+            os.environ.pop("AGW_DEBUG", None)
 
 
 @pytest.fixture

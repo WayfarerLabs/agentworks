@@ -8,6 +8,7 @@ to be reachable from anywhere in the CLI -- the `--non-interactive` and
 
 from __future__ import annotations
 
+import os
 import sys
 from typing import Annotated
 
@@ -38,6 +39,27 @@ def debug_enabled() -> bool:
     return _debug
 
 
+def _set_debug(enabled: bool) -> None:
+    """Record the effective debug state for this invocation.
+
+    Both entry points that decide debug (the pre-callback and the Typer
+    callback) route through here so the two stay in step. When debug is on
+    we also mirror it into ``AGW_DEBUG`` so layers below the CLI can read a
+    single process-wide signal without importing this CLI module: the azure
+    plugin, for instance, quiets azure-identity's own credential-failure
+    logging only when debug is off, and reaching up into ``agentworks.cli``
+    from a plugin would invert the layering. ``debug_enabled`` already
+    treats ``--debug`` and ``AGW_DEBUG=1`` as equivalent inputs; this makes
+    ``--debug`` imply the env signal too, closing the gap. Only ever set
+    (never cleared): when ``enabled`` is False, ``AGW_DEBUG`` was not "1" to
+    begin with, so leaving it untouched keeps the two consistent.
+    """
+    global _debug  # noqa: PLW0603
+    _debug = enabled
+    if enabled:
+        os.environ["AGW_DEBUG"] = "1"
+
+
 def _seed_debug_from_pre_callback() -> None:
     """Set ``_debug`` from sys.argv / AGW_DEBUG *before* Click parses anything.
 
@@ -47,10 +69,7 @@ def _seed_debug_from_pre_callback() -> None:
     this pre-pass, the user's ``--debug`` flag would be silently ineffective
     in exactly the case they're most likely to need it.
     """
-    import os
-
-    global _debug  # noqa: PLW0603
-    _debug = "--debug" in sys.argv or os.environ.get("AGW_DEBUG") == "1"
+    _set_debug("--debug" in sys.argv or os.environ.get("AGW_DEBUG") == "1")
 
 
 @app.callback()
@@ -75,14 +94,11 @@ def _global_options(
     ] = False,
 ) -> None:
     """Global options for all commands."""
-    import os
-
     from agentworks import output
 
-    global _debug  # noqa: PLW0603
     output.set_non_interactive(non_interactive)
     output.set_suppress_deprecations(no_deprecations)
-    _debug = debug or os.environ.get("AGW_DEBUG") == "1"
+    _set_debug(debug or os.environ.get("AGW_DEBUG") == "1")
 
 
 # -- Interactivity gate ----------------------------------------------------
