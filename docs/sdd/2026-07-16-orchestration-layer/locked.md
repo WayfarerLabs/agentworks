@@ -205,9 +205,14 @@ this directory can be deleted per the SDD lifecycle once its history stops infor
   The operator's ruling behind it: a resource must not assume a concern that is not its own, and
   whether a declared secret can be resolved is a property of the operation's runtime world (the
   active backend chain, whether this run can prompt), not of the resource that named it. Operation
-  semantics are unchanged, verbatim: same pre-prompt timing, same `output.is_interactive()`
-  run-reality (the #202 fail-fast), same `ConfigError` with the same `<kind>/<name>` owner, usage,
-  and `agw secret describe` hint, and the per-node interleaving preserves the failure ORDER too.
+  semantics are unchanged: same pre-prompt timing, same `output.is_interactive()` run-reality (the
+  #202 fail-fast), same `ConfigError` with the same `<kind>/<name>` owner and usage, and the
+  per-node interleaving preserves the failure ORDER too. The one message change: the unresolvable
+  hint was unified across all three nodes onto a single shared, backend-agnostic form ("ensure
+  secret '<name>' is mapped to a backend. Run `agw secret describe <name>` for details."), replacing
+  the older backend-specific wording that named the env var / `[secret_config].backends`. Naming a
+  particular backend presumed the operator's chain, which is not the sweep's to assume;
+  `agw secret describe` is where the per-backend lookup lives.
 
   What changes is doctor, and that was the point. Doctor invokes `node.preflight` per row and
   deliberately runs no sweep, so it no longer predicts: a site whose credential is only obtainable

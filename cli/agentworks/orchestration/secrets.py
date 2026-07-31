@@ -213,9 +213,8 @@ def require_predicted_refs(
             raise ConfigError(
                 f"{owner}: secret '{ref.name}' ({ref.usage}) is not resolvable by any active backend",
                 hint=(
-                    f"`agw secret describe {ref.name}` shows how each "
-                    "backend looks the secret up; set the env var, add a "
-                    "backend mapping, or extend [secret_config].backends."
+                    f"ensure secret '{ref.name}' is mapped to a backend. "
+                    f"Run `agw secret describe {ref.name}` for details."
                 ),
             )
 

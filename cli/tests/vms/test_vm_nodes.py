@@ -324,10 +324,10 @@ def test_template_node_declares_the_key_and_the_sweep_predicts_it(
         "vm-template/default: secret 'tailscale-auth-key' (the Tailscale auth key) "
         "is not resolvable by any active backend"
     )
-    # The actionable hint the template's own message carried is preserved.
+    # The actionable hint is the shared, backend-agnostic one from the sweep.
     assert exc.value.hint is not None
     assert "agw secret describe tailscale-auth-key" in exc.value.hint
-    assert "set the env var" in exc.value.hint
+    assert "mapped to a backend" in exc.value.hint
 
 
 # -- the vm-site node's own preflight ----------------------------------------

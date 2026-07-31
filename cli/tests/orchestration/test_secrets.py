@@ -296,9 +296,7 @@ def test_require_predicted_refs_refuses_with_owner_usage_framing(
         "vm-site/px: secret 'proxmox-token' (the Proxmox API token) is not resolvable by any active backend"
     )
     assert exc.value.hint == (
-        "`agw secret describe proxmox-token` shows how each backend "
-        "looks the secret up; set the env var, add a backend mapping, or extend "
-        "[secret_config].backends."
+        "ensure secret 'proxmox-token' is mapped to a backend. Run `agw secret describe proxmox-token` for details."
     )
 
 
