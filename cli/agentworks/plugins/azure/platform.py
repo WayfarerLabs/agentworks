@@ -164,14 +164,32 @@ def _build_service_principal_credential(sp: _ServicePrincipal, client_secret: st
     between calling a network blip a rejection and letting a genuinely
     bad credential through as a warning, this refuses; the hint names
     both possibilities so the operator can tell them apart.
+
+    It raises ``AzureError`` (an ``ExternalError``) rather than
+    ``TokenRejectedError``, deliberately. That type promises a definitive
+    rejection, "distinct from network indeterminacy", and the paragraph
+    above is exactly why we cannot honestly make that promise here. The
+    cost is accepted knowingly: ``ExternalError`` renders noisier (the
+    full traceback goes to the error log), which is the right trade when
+    the failure class genuinely includes external outages.
+
+    CONSTRUCTION is inside the try too, not just the probe. The SDK
+    validates its arguments eagerly and raises a bare ``ValueError`` on
+    an empty client secret or a malformed tenant id, and an empty
+    RESOLVED secret is reachable in a way ``validate`` cannot catch (the
+    config names a secret; a backend hands back the value). Letting that
+    escape untyped would carry no site, secret, or hint, and would blow
+    past the ``AgentworksError`` degrade paths that `agw vm describe`
+    and the status probe rely on. The existing hint already covers both
+    causes.
     """
     from azure.core.exceptions import ClientAuthenticationError
     from azure.identity import ClientSecretCredential
 
-    cred = ClientSecretCredential(sp.tenant_id, sp.client_id, client_secret)
     try:
+        cred = ClientSecretCredential(sp.tenant_id, sp.client_id, client_secret)
         cred.get_token(_ARM_SCOPE)
-    except ClientAuthenticationError as exc:
+    except (ClientAuthenticationError, ValueError) as exc:
         raise AzureError(
             f"could not authenticate the Azure service principal for "
             f"vm-site '{site_name}' (client {sp.client_id} in tenant "

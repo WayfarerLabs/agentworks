@@ -121,10 +121,21 @@ def _install_fakes(
     class _FakeClientSecretCred:
         def __init__(self, tenant_id: str, client_id: str, client_secret: str) -> None:
             counters["sp_build"] += 1
-            # Recorded on the instance so a test can pin exactly what the
-            # platform passed the SDK (the config's identifiers and the
-            # DELIVERED secret value, never a name).
+            # Appended to the module-level ``_sp_args`` (cleared per test
+            # by the autouse fixture below) so a test can pin exactly
+            # what the platform passed the SDK: the config's identifiers
+            # and the DELIVERED secret value, never a name.
             _sp_args.append((tenant_id, client_id, client_secret))
+            # The real ClientSecretCredential validates eagerly and raises
+            # a bare ValueError (not ClientAuthenticationError) on an empty
+            # secret or tenant, BEFORE any token request. Mirrored here so
+            # the reachable "a backend resolved the secret to an empty
+            # string" case is exercised against the same exception type the
+            # SDK actually raises.
+            if not client_secret:
+                raise ValueError("secret should be a Microsoft Entra application's client secret")
+            if not tenant_id:
+                raise ValueError("tenant_id should be a Microsoft Entra tenant's id")
 
         def get_token(self, *_scopes: str, **_kw: object) -> object:
             counters["sp_get_token"] += 1
@@ -396,6 +407,29 @@ class TestCredentialSelection:
         # And nothing bad got cached: a retry re-probes rather than
         # handing back a credential that never authenticated.
         assert platform._credential_cached is None
+
+    def test_empty_resolved_client_secret_is_typed_not_a_bare_valueerror(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A backend that resolves the client secret to an empty string
+        makes the SDK constructor raise a bare ValueError before any
+        token request. That must still come out as the platform's typed
+        error with the site, the secret, and the hint.
+
+        Config validation cannot catch this one: the config names a
+        secret and the NAME is well-formed; only the resolved VALUE is
+        empty. And an untyped escape here would be worse than noisy,
+        because it would blow past the AgentworksError degrade paths
+        `agw vm describe` and the gate's status probe rely on."""
+        counters = _install_fakes(monkeypatch)
+
+        with pytest.raises(AzureError) as exc:
+            _sp_platform()._get_credential(_sp_ctx(value=""))
+
+        assert "az-site" in str(exc.value)
+        assert exc.value.hint is not None and "az-sp" in exc.value.hint
+        # Still no fallback: an unusable credential is not a licence to
+        # authenticate as somebody else.
+        assert counters["cred_build"] == 0
+        assert counters["browser_build"] == 0
 
     def test_service_principal_rejection_surfaces_through_the_ops(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The rejection reaches the operator through a real op, not only
