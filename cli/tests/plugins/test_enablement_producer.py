@@ -179,7 +179,7 @@ def _operator(name: str = "op.yaml") -> Origin:
 
 
 def _plugin_source(*enabled: str) -> EnablementSource:
-    config = cast("Config", SimpleNamespace(plugins_enabled=tuple(enabled)))
+    config = cast("Config", SimpleNamespace(enabled_system_plugins=tuple(enabled)))
     return plugin_enablement_source(config)
 
 

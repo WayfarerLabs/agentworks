@@ -6,7 +6,7 @@ plugin (no bundled manifests) that seats its ``OnePasswordBackend`` into
 ``SECRET_BACKEND_REGISTRY`` through the ``secret-backend`` adapter's
 instance path, and publishes a ``secret-backend`` row with a
 ``system-plugin`` origin. The row is present-but-disabled until an
-operator opts in with ``[plugins] enabled = ["onepassword"]``; while
+operator opts in with ``[plugins] system = ["onepassword"]``; while
 disabled it is excluded from the active backend chain and secret
 resolution, so a secret whose only mapping targets ``onepassword`` fails
 with the "enable plugin `onepassword`" hint (LLD b) rather than a generic

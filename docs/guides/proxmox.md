@@ -8,7 +8,7 @@ cloning a Debian 12 cloud-init template that you prepare once on your Proxmox no
 >
 > ```toml
 > [plugins]
-> enabled = ["proxmox"]
+> system = ["proxmox"]
 > ```
 >
 > Until you do, a proxmox `vm-site` is present-but-not-ready with an "enable plugin `proxmox`" hint
@@ -99,7 +99,7 @@ the site you declare next is not-ready and refused at use:
 
 ```toml
 [plugins]
-enabled = ["proxmox"]
+system = ["proxmox"]
 ```
 
 Then declare a `vm-site` resource for the cluster. Save this (any filename) under

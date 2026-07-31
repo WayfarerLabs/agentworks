@@ -137,7 +137,7 @@ def test_collect_git_tokens_batches_multiple_credentials(
         # azdo credential is ready and its token resolves.
         """\
         [plugins]
-        enabled = ["azure"]
+        system = ["azure"]
 
         [git_credentials.github]
         type = "github"

@@ -40,7 +40,7 @@ template_vmid = 9000
 # the disabled-by-default behavior live in ``tests/plugins/test_proxmox.py``.)
 PLUGINS_ENABLED = """
 [plugins]
-enabled = ["proxmox"]
+system = ["proxmox"]
 """
 
 

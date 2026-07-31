@@ -170,7 +170,7 @@ def load_config(
     noop_backend_sections = _load_secret_backends(resource_data, deprecations)
     deprecated_sections = _warn_deprecated_resource_sections(resource_data, deprecations)
     secret_config_data = _load_secret_config(data, issues, decls)
-    plugins_enabled = _load_plugins(data, issues, decls)
+    enabled_system_plugins = _load_plugins(data, issues, decls)
     # Env-block secret references no longer error at config load
     # when they don't match a [secrets.<name>] block; the framework
     # auto-declares them at finalize. Resolution runs through the active
@@ -196,7 +196,7 @@ def load_config(
         vm_sites=_load_vm_sites_legacy(resource_data, decls),
         secrets=secrets,
         secret_config_data=secret_config_data,
-        plugins_enabled=plugins_enabled,
+        enabled_system_plugins=enabled_system_plugins,
         config_issues=tuple(issues),
         deprecation_issues=tuple(deprecations),
         deprecated_sections=deprecated_sections,

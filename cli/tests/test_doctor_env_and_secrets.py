@@ -162,7 +162,7 @@ def test_secret_backends_group_reports_readiness(tmp_path: Path, monkeypatch: py
 
     monkeypatch.setattr("shutil.which", lambda name: None)  # op absent
     config = load_config(
-        _write_config(tmp_path, extras='[plugins]\nenabled = ["onepassword"]\n'),
+        _write_config(tmp_path, extras='[plugins]\nsystem = ["onepassword"]\n'),
         warn_issues=False,
     )
     g = _check_secret_backends(build_registry(config))
@@ -187,7 +187,7 @@ def test_secret_backends_group_skips_disabled_plugin_backend(tmp_path: Path, mon
     from agentworks.doctor import _check_plugins, _check_secret_backends
 
     monkeypatch.setattr("shutil.which", lambda name: None)  # op absent
-    config = load_config(_write_config(tmp_path), warn_issues=False)  # no [plugins] enabled
+    config = load_config(_write_config(tmp_path), warn_issues=False)  # no [plugins] system
     registry = build_registry(config)
 
     g = _check_secret_backends(registry)
@@ -201,7 +201,7 @@ def test_secret_backends_group_skips_disabled_plugin_backend(tmp_path: Path, mon
     # disabled backend's plugin as disabled.
     roster = {c.name: c for c in _check_plugins(config).checks}
     assert roster["plugin onepassword"].status is Status.INFO
-    assert "not enabled in [plugins]" in (roster["plugin onepassword"].message or "")
+    assert "not enabled in [plugins].system" in (roster["plugin onepassword"].message or "")
 
 
 def test_check_secrets_flags_a_not_ready_only_backend(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -213,7 +213,7 @@ def test_check_secrets_flags_a_not_ready_only_backend(tmp_path: Path, monkeypatc
         tmp_path,
         extras="""
 [plugins]
-enabled = ["onepassword"]
+system = ["onepassword"]
 
 [admin.env]
 TOKEN = { secret = "op-only" }
@@ -246,7 +246,7 @@ def test_r9_3_manifest_malformed_block_surfaces_under_resource_registry(
     azdo git-credential; azdo ships in the opt-in ``azure`` system plugin, whose
     validation is deferred while disabled, so the plugin is enabled here for the
     block to validate (host-independent, so it always validates once enabled)."""
-    cfg = _write_config(tmp_path, extras='[plugins]\nenabled = ["azure"]')
+    cfg = _write_config(tmp_path, extras='[plugins]\nsystem = ["azure"]')
     resources_dir = tmp_path / "resources"
     resources_dir.mkdir()
     (resources_dir / "res.yaml").write_text(

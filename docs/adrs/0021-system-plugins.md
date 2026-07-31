@@ -48,7 +48,7 @@ origin, so it has no kind to dispatch on.
 
 Opt-in is modeled as **enablement**, a distinct axis from readiness, produced at registry finalize
 by composing enablement sources. The plugin opt-in source is the first such producer: a
-`system-plugin`-origin row whose plugin is not listed in `[plugins] enabled` is marked `disabled`.
+`system-plugin`-origin row whose plugin is not listed in `[plugins].system` is marked `disabled`.
 
 The load-bearing choice is that **capability rows publish unconditionally**, opted in or not. A
 not-opted-in plugin's rows are therefore **present-but-disabled**, not absent. That is what lets a
@@ -92,7 +92,7 @@ project-level record of the stance: **a config section that gates behavior on it
 should reject unknown keys hard; a section that merely configures should follow the soft-warn
 convention.** Future config-section authors choose the precedent that matches their section's role.
 
-Consistently, an `[plugins] enabled` entry that is not an installed plugin is a typed config error
+Consistently, a `[plugins].system` entry that is not an installed plugin is a typed config error
 raised up front, before anything publishes, never a `KeyError` from deep in publication.
 
 **Degradation contract.** A `[plugins]` (or any) config error that breaks `build_registry` fails
@@ -150,7 +150,7 @@ completes with a summary.
   migration shipped real plugins (azure's `az-cli`, claude's `claude` install-commands) with
   name-referenced bundled manifests, at which point the asymmetry became operator-reachable.
 - Migrating the four bundles is a **breaking change for existing operators**: an azure/proxmox/
-  1Password/Claude-Code user's working config now needs the matching `[plugins] enabled` entry, or
+  1Password/Claude-Code user's working config now needs the matching `[plugins].system` entry, or
   the resource is not-ready (or refused at use) with an "enable plugin `<name>`" hint. This is
   deliberate (the whole point is that world-specific functionality is opt-in), guided (the hint
   names the exact fix, never a silent failure or an unknown-name dead end), and bounded (the default

@@ -9,13 +9,13 @@ drives ``build_registry`` on real config (no fixture plugin injected via
 
 - the ``claude-code`` HARNESS: present-but-disabled with a ``system-plugin``
   origin, a ``session-template`` naming it stays ready, and
-  ``ensure_harness_enabled`` refuses it at use until ``[plugins] enabled``;
+  ``ensure_harness_enabled`` refuses it at use until ``[plugins] system``;
 - the ``claude`` INSTALL-COMMAND (a bundled ``user-install-command``):
   present-but-disabled (weak), so a template's ``user_install_commands =
   ["claude"]`` finalizes cleanly (never an unknown-name error) and is refused
   at use by the recipe gate with the enable hint until enabled.
 
-Enabling ``[plugins] enabled = ["claude"]`` makes both consumable.
+Enabling ``[plugins] system = ["claude"]`` makes both consumable.
 """
 
 from __future__ import annotations
@@ -40,13 +40,13 @@ if TYPE_CHECKING:
 
 
 def _config(tmp_path: Path, body: str = "", *, enabled: bool = False) -> Config:
-    """A real operator config; ``enabled`` toggles ``[plugins] enabled =
+    """A real operator config; ``enabled`` toggles ``[plugins] system =
     ["claude"]`` and ``body`` appends resource declarations."""
     pub = tmp_path / "id.pub"
     priv = tmp_path / "id"
     pub.write_text("ssh-ed25519 AAAA...")
     priv.write_text("-----BEGIN OPENSSH PRIVATE KEY-----")
-    plugins = '[plugins]\nenabled = ["claude"]\n\n' if enabled else ""
+    plugins = '[plugins]\nsystem = ["claude"]\n\n' if enabled else ""
     cfg = tmp_path / "config.toml"
     cfg.write_text(
         dedent(f"""\
@@ -211,7 +211,7 @@ def test_doctor_roster_lists_the_claude_plugin(tmp_path: Path) -> None:
     disabled = _check_plugins(_config(tmp_path))
     row = next(c for c in disabled.checks if c.name == "plugin claude")
     assert row.status is Status.INFO
-    assert "not enabled in [plugins]" in (row.message or "")
+    assert "not enabled in [plugins].system" in (row.message or "")
 
     enabled = _check_plugins(_config(tmp_path, enabled=True))
     row_on = next(c for c in enabled.checks if c.name == "plugin claude")

@@ -250,7 +250,7 @@ def test_validate_chain_surfaces_malformed_mapping_at_build_registry(
         tmp_path,
         """
         [plugins]
-        enabled = ["onepassword"]
+        system = ["onepassword"]
 
         [secret_config]
         backends = ["onepassword", "prompt"]
@@ -269,7 +269,7 @@ def test_valid_mapping_passes_build_registry(tmp_path: Path) -> None:
         tmp_path,
         """
         [plugins]
-        enabled = ["onepassword"]
+        system = ["onepassword"]
 
         [secret_config]
         backends = ["onepassword", "prompt"]
@@ -504,7 +504,7 @@ def _op_only_body(*, enabled: bool) -> str:
     """A config whose only path to ``op-only`` is the onepassword backend
     (env-var opted out), with onepassword in the chain; ``enabled`` toggles the
     [plugins] opt-in."""
-    plugins = '[plugins]\nenabled = ["onepassword"]\n\n' if enabled else ""
+    plugins = '[plugins]\nsystem = ["onepassword"]\n\n' if enabled else ""
     return (
         plugins
         + """
@@ -648,8 +648,8 @@ def test_doctor_roster_lists_the_onepassword_plugin(tmp_path: Path) -> None:
     disabled = _check_plugins(_config(tmp_path))
     op = next(c for c in disabled.checks if c.name == "plugin onepassword")
     assert op.status is Status.INFO
-    assert "not enabled in [plugins]" in (op.message or "")
+    assert "not enabled in [plugins].system" in (op.message or "")
 
-    enabled = _check_plugins(_config(tmp_path, '[plugins]\nenabled = ["onepassword"]\n'))
+    enabled = _check_plugins(_config(tmp_path, '[plugins]\nsystem = ["onepassword"]\n'))
     op_on = next(c for c in enabled.checks if c.name == "plugin onepassword")
     assert op_on.status is Status.OK

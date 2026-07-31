@@ -1,19 +1,19 @@
 """Config loader tests for ``[plugins]`` (Phase 3 of the system-plugins SDD,
 R4).
 
-``[plugins].enabled`` is the operator's opt-in gate for system plugins:
-nothing consumes ``Config.plugins_enabled`` yet (that starts in Phase 5),
-this only covers the loader and its config-model surface:
+``[plugins].system`` is the operator's opt-in gate for system plugins:
 
-- Absent [plugins] table, or absent ``enabled`` key, parses to ``()``.
-- A present ``enabled`` list of strings parses to the equivalent tuple.
-- [plugins] not a table, or ``enabled`` not a list of strings, is a
+- Absent [plugins] table, or absent ``system`` key, parses to ``()``.
+- A present ``system`` list of strings parses to the equivalent tuple.
+- [plugins] not a table, or ``system`` not a list of strings, is a
   ``ConfigError``.
 - Unknown keys in [plugins] are a HARD ``ConfigError`` naming the section
   and the offending key(s): a deliberate divergence from the soft
   ``_warn_unexpected_keys`` convention ``[secret_config]`` uses (see the
-  in-code rationale on ``_load_plugins``).
-- ``plugins_enabled`` reaches ``Config`` identically on both
+  in-code rationale on ``_load_plugins``). The pre-rename ``enabled`` key
+  is now one such unknown key, so a stale config fails loudly rather than
+  silently leaving its plugins un-enabled.
+- ``enabled_system_plugins`` reaches ``Config`` identically on both
   ``load_config(resources=True)`` (the default) and
   ``load_config(resources=False)`` (the settings-only path), mirroring
   ``secret_config_data``'s both-paths behavior.
@@ -49,10 +49,10 @@ def _config(tmp_path: Path, extras: str = "") -> Path:
 def test_plugins_section_absent_is_empty(tmp_path: Path) -> None:
     cfg = _config(tmp_path)
     config = load_config(cfg, warn_issues=False)
-    assert config.plugins_enabled == ()
+    assert config.enabled_system_plugins == ()
 
 
-def test_plugins_enabled_key_absent_is_empty(tmp_path: Path) -> None:
+def test_plugins_system_key_absent_is_empty(tmp_path: Path) -> None:
     cfg = _config(
         tmp_path,
         """
@@ -60,19 +60,19 @@ def test_plugins_enabled_key_absent_is_empty(tmp_path: Path) -> None:
         """,
     )
     config = load_config(cfg, warn_issues=False)
-    assert config.plugins_enabled == ()
+    assert config.enabled_system_plugins == ()
 
 
-def test_plugins_enabled_list_parses(tmp_path: Path) -> None:
+def test_plugins_system_list_parses(tmp_path: Path) -> None:
     cfg = _config(
         tmp_path,
         """
         [plugins]
-        enabled = ["a", "b"]
+        system = ["a", "b"]
         """,
     )
     config = load_config(cfg, warn_issues=False)
-    assert config.plugins_enabled == ("a", "b")
+    assert config.enabled_system_plugins == ("a", "b")
 
 
 def test_plugins_section_not_a_table_raises(tmp_path: Path) -> None:
@@ -98,32 +98,32 @@ def test_plugins_section_not_a_table_raises(tmp_path: Path) -> None:
         load_config(cfg, warn_issues=False)
 
 
-def test_plugins_enabled_not_a_list_of_strings_raises(tmp_path: Path) -> None:
+def test_plugins_system_not_a_list_of_strings_raises(tmp_path: Path) -> None:
     cfg = _config(
         tmp_path,
         """
         [plugins]
-        enabled = "a"
+        system = "a"
         """,
     )
-    with pytest.raises(ConfigError, match=r"\[plugins\]\.enabled must be a list of strings"):
+    with pytest.raises(ConfigError, match=r"\[plugins\]\.system must be a list of strings"):
         load_config(cfg, warn_issues=False)
 
 
-def test_plugins_enabled_list_with_non_string_element_raises(tmp_path: Path) -> None:
+def test_plugins_system_list_with_non_string_element_raises(tmp_path: Path) -> None:
     cfg = _config(
         tmp_path,
         """
         [plugins]
-        enabled = ["a", 1]
+        system = ["a", 1]
         """,
     )
-    with pytest.raises(ConfigError, match=r"\[plugins\]\.enabled must be a list of strings"):
+    with pytest.raises(ConfigError, match=r"\[plugins\]\.system must be a list of strings"):
         load_config(cfg, warn_issues=False)
 
 
 def test_plugins_unknown_key_is_a_hard_config_error(tmp_path: Path) -> None:
-    """A typo'd key (e.g. ``enabeld``) must fail loudly at load time, not
+    """A typo'd key (e.g. ``sytsem``) must fail loudly at load time, not
     accumulate as a soft ``config_issues`` warning the operator could miss:
     [plugins] is an opt-in gate, so a silently-ignored typo would leave a
     plugin un-enabled with no visible signal. This is the behavior that
@@ -132,43 +132,58 @@ def test_plugins_unknown_key_is_a_hard_config_error(tmp_path: Path) -> None:
         tmp_path,
         """
         [plugins]
-        enabeld = ["a"]
+        sytsem = ["a"]
         """,
     )
-    with pytest.raises(ConfigError, match=r"unexpected keys in \[plugins\]: enabeld"):
+    with pytest.raises(ConfigError, match=r"unexpected keys in \[plugins\]: sytsem"):
         # A hard error, not a collected issue: the raise prevents
         # load_config from ever returning a Config whose config_issues
         # could hide this behind a warning the operator may not read.
         load_config(cfg, warn_issues=False)
 
 
-def test_plugins_unknown_key_alongside_valid_enabled_still_raises(tmp_path: Path) -> None:
-    """A typo doesn't get masked just because the real ``enabled`` key is
-    also present and valid: the unknown-key check fires regardless."""
+def test_plugins_old_enabled_key_is_a_hard_config_error(tmp_path: Path) -> None:
+    """The pre-rename ``enabled`` key is now an unknown key, so a stale
+    config surfaces a hard ``ConfigError`` naming it rather than silently
+    ignoring the list and leaving those plugins un-enabled."""
     cfg = _config(
         tmp_path,
         """
         [plugins]
         enabled = ["a"]
-        enabeld = ["a"]
         """,
     )
-    with pytest.raises(ConfigError, match=r"unexpected keys in \[plugins\]: enabeld"):
+    with pytest.raises(ConfigError, match=r"unexpected keys in \[plugins\]: enabled"):
         load_config(cfg, warn_issues=False)
 
 
-def test_plugins_enabled_reaches_config_on_both_load_paths(tmp_path: Path) -> None:
+def test_plugins_unknown_key_alongside_valid_system_still_raises(tmp_path: Path) -> None:
+    """A typo doesn't get masked just because the real ``system`` key is
+    also present and valid: the unknown-key check fires regardless."""
     cfg = _config(
         tmp_path,
         """
         [plugins]
-        enabled = ["a", "b"]
+        system = ["a"]
+        sytsem = ["a"]
+        """,
+    )
+    with pytest.raises(ConfigError, match=r"unexpected keys in \[plugins\]: sytsem"):
+        load_config(cfg, warn_issues=False)
+
+
+def test_plugins_system_reaches_config_on_both_load_paths(tmp_path: Path) -> None:
+    cfg = _config(
+        tmp_path,
+        """
+        [plugins]
+        system = ["a", "b"]
         """,
     )
     with_resources = load_config(cfg, warn_issues=False, resources=True)
-    assert with_resources.plugins_enabled == ("a", "b")
+    assert with_resources.enabled_system_plugins == ("a", "b")
     assert with_resources.resources_loaded is True
 
     settings_only = load_config(cfg, warn_issues=False, resources=False)
-    assert settings_only.plugins_enabled == ("a", "b")
+    assert settings_only.enabled_system_plugins == ("a", "b")
     assert settings_only.resources_loaded is False

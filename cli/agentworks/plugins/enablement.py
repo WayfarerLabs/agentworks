@@ -28,16 +28,16 @@ if TYPE_CHECKING:
 
 
 def plugin_enablement_source(config: Config) -> EnablementSource:
-    """Build the plugin opt-in source bound to ``config.plugins_enabled``.
+    """Build the plugin opt-in source bound to ``config.enabled_system_plugins``.
 
     The returned source disables every ``system-plugin``-origin row whose
     ``origin.plugin`` is not in the enabled set, with the remediation reason
     ``enable plugin `<name>``` (the clause the dependent's hint appends; the
-    doctor roster renders the "not enabled in [plugins]" STATE phrasing
+    doctor roster renders the "not enabled in [plugins].system" STATE phrasing
     separately, off ``SYSTEM_PLUGINS`` vs config, so no mark carries it). A row
     with any other origin (built-in, operator, auto-declared) is untouched.
     """
-    enabled = frozenset(config.plugins_enabled)
+    enabled = frozenset(config.enabled_system_plugins)
 
     def _source(resources: Mapping[str, Mapping[str, object]]) -> dict[tuple[str, str], DisabledMark]:
         marks: dict[tuple[str, str], DisabledMark] = {}

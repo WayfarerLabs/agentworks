@@ -10,11 +10,11 @@ A capability-only migration (no bundled manifests), so this drives
   origin until the operator opts in (the core built-in platforms are untouched);
 - a ``vm-site`` on the ``proxmox`` platform: not-ready with the
   "enable plugin `proxmox`" hint, and ``resolve_site`` refuses it at use, until
-  ``[plugins] enabled = ["proxmox"]``. The deprecated legacy ``[proxmox]``
+  ``[plugins] system = ["proxmox"]``. The deprecated legacy ``[proxmox]``
   flat-section site gets the SAME hint, not an unknown-name hard error (a
   feature: legacy configs are guided, not broken).
 
-Enabling ``[plugins] enabled = ["proxmox"]`` makes the site ready and
+Enabling ``[plugins] system = ["proxmox"]`` makes the site ready and
 resolvable.
 """
 
@@ -49,13 +49,13 @@ template_vmid = 9000
 
 
 def _config(tmp_path: Path, body: str = "", *, enabled: bool = False) -> Config:
-    """A real operator config; ``enabled`` toggles ``[plugins] enabled =
+    """A real operator config; ``enabled`` toggles ``[plugins] system =
     ["proxmox"]`` and ``body`` appends resource declarations."""
     pub = tmp_path / "id.pub"
     priv = tmp_path / "id"
     pub.write_text("ssh-ed25519 AAAA...")
     priv.write_text("-----BEGIN OPENSSH PRIVATE KEY-----")
-    plugins = '[plugins]\nenabled = ["proxmox"]\n\n' if enabled else ""
+    plugins = '[plugins]\nsystem = ["proxmox"]\n\n' if enabled else ""
     cfg = tmp_path / "config.toml"
     cfg.write_text(
         dedent(f"""\
@@ -153,7 +153,7 @@ def test_legacy_proxmox_section_is_guided_not_broken(tmp_path: Path) -> None:
 
 
 def test_enabling_proxmox_makes_the_site_ready_and_resolvable(tmp_path: Path) -> None:
-    """With ``[plugins] enabled = ["proxmox"]`` the platform row enables, the
+    """With ``[plugins] system = ["proxmox"]`` the platform row enables, the
     site becomes ready, and ``resolve_site`` constructs the platform."""
     from agentworks.capabilities.vm_platform.base import VMPlatform
     from agentworks.vms.sites import resolve_site
@@ -178,7 +178,7 @@ def test_doctor_roster_lists_the_proxmox_plugin(tmp_path: Path) -> None:
     disabled = _check_plugins(_config(tmp_path))
     row = next(c for c in disabled.checks if c.name == "plugin proxmox")
     assert row.status is Status.INFO
-    assert "not enabled in [plugins]" in (row.message or "")
+    assert "not enabled in [plugins].system" in (row.message or "")
 
     enabled = _check_plugins(_config(tmp_path, enabled=True))
     row_on = next(c for c in enabled.checks if c.name == "plugin proxmox")

@@ -316,8 +316,8 @@ def _plugin_provenance(origin: Origin | None) -> str | None:
 def _disabled_line_text(origin: Origin | None) -> str:
     """The ``Disabled:`` line's text for a disabled row, derived from the row's
     origin plus config the same way the doctor roster derives its state phrase
-    (from provenance, not a node reason): ``"not enabled in [plugins] (plugin
-    <name>)"`` for a ``system-plugin`` row. The exact wording differs from the
+    (from provenance, not a node reason): ``"not enabled in [plugins].system
+    (plugin <name>)"`` for a ``system-plugin`` row. The exact wording differs from the
     roster's line because describe carries the plugin name inline while the
     roster row already labels its plugin.
 
@@ -328,7 +328,7 @@ def _disabled_line_text(origin: Origin | None) -> str:
     bare state word rather than a plugin phrase it cannot substantiate.
     """
     if origin is not None and origin.variant == "system-plugin" and origin.plugin:
-        return f"not enabled in [plugins] (plugin {origin.plugin})"
+        return f"not enabled in [plugins].system (plugin {origin.plugin})"
     return "disabled"
 
 

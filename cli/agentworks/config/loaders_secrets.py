@@ -215,36 +215,42 @@ def _load_plugins(
 ) -> tuple[str, ...]:
     """Load [plugins] with the opt-in list of enabled system plugin names (R4).
 
-    Absence of the [plugins] table, or of the ``enabled`` key within it,
+    Absence of the [plugins] table, or of the ``system`` key within it,
     means no plugins are enabled (``()``). ``issues``/``decls`` are unused
-    here (there is no soft-warn path and ``plugins_enabled`` is a bare
-    tuple with no wrapper to carry a ``declared_at``); the parameters are
-    kept to match the sibling settings loader ``_load_secret_config``'s
+    here (there is no soft-warn path and ``enabled_system_plugins`` is a
+    bare tuple with no wrapper to carry a ``declared_at``); the parameters
+    are kept to match the sibling settings loader ``_load_secret_config``'s
     shape.
+
+    ``system`` is the only recognized key. It is scoped deliberately: the
+    [plugins] table is the plugin-subsystem namespace, and ``system`` names
+    the enabled in-repo system plugins, leaving room for future
+    external-plugin keys to slot in as siblings without ambiguity.
 
     Unknown keys in [plugins] are a hard ``ConfigError``, NOT a collected
     soft issue via ``_warn_unexpected_keys`` (the convention
     ``_load_secret_config`` above uses). This is a deliberate departure:
-    [plugins] is an opt-in gate, so a typo'd key (``enabeld``, or a future
-    per-plugin key used a release too early) must fail loudly at load time
-    rather than silently leave plugins un-enabled behind a warning the
-    operator may miss. Do not "consistency-fix" this back to soft-warn.
+    [plugins] is an opt-in gate, so a typo'd key (``sytsem``, an old
+    ``enabled`` from before the rename, or a future per-plugin key used a
+    release too early) must fail loudly at load time rather than silently
+    leave plugins un-enabled behind a warning the operator may miss. Do not
+    "consistency-fix" this back to soft-warn.
     """
     if "plugins" not in data:
         return ()
     raw = data["plugins"]
     if not isinstance(raw, dict):
         raise ConfigError("[plugins] must be a table")
-    unexpected = set(raw.keys()) - {"enabled"}
+    unexpected = set(raw.keys()) - {"system"}
     if unexpected:
         keys = ", ".join(sorted(str(k) for k in unexpected))
         raise ConfigError(f"unexpected keys in [plugins]: {keys}")
-    if "enabled" not in raw:
+    if "system" not in raw:
         return ()
-    enabled_raw = raw["enabled"]
-    if not isinstance(enabled_raw, list) or not all(isinstance(e, str) for e in enabled_raw):
-        raise ConfigError("[plugins].enabled must be a list of strings")
-    return tuple(enabled_raw)
+    system_raw = raw["system"]
+    if not isinstance(system_raw, list) or not all(isinstance(e, str) for e in system_raw):
+        raise ConfigError("[plugins].system must be a list of strings")
+    return tuple(system_raw)
 
 
 # Secret resolution lives in ``agentworks.secrets.resolve`` (ADR 0016):

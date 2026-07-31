@@ -99,7 +99,7 @@ def _beta() -> Plugin:
 
 
 def _config(*enabled: str) -> Config:
-    return cast("Config", SimpleNamespace(plugins_enabled=tuple(enabled)))
+    return cast("Config", SimpleNamespace(enabled_system_plugins=tuple(enabled)))
 
 
 def _operator() -> Origin:
@@ -224,7 +224,7 @@ def test_describe_disabled_row_renders_with_disabled_line_and_provenance(
     assert desc.name == "beta-platform"
     # The Disabled line's text is derived from origin + config, exactly as the
     # roster phrases it, NOT from a per-node reason.
-    assert desc.disabled_reason == "not enabled in [plugins] (plugin beta)"
+    assert desc.disabled_reason == "not enabled in [plugins].system (plugin beta)"
 
 
 def test_describe_disabled_row_render_output(
@@ -236,7 +236,7 @@ def test_describe_disabled_row_render_output(
 
     render_resource_description(describe_resource(registry, "vm-platform", "beta-platform"))
     out = capsys.readouterr().out
-    assert "Disabled: not enabled in [plugins] (plugin beta)" in out
+    assert "Disabled: not enabled in [plugins].system (plugin beta)" in out
     assert "from plugin beta" in out
 
 
@@ -278,7 +278,7 @@ def test_full_fixture_end_to_end(monkeypatch: pytest.MonkeyPatch) -> None:
     by_name = {c.name: c for c in group.checks}
     assert by_name["plugin alpha"].status is Status.OK
     assert by_name["plugin beta"].status is Status.INFO
-    assert "not enabled in [plugins]" in (by_name["plugin beta"].message or "")
+    assert "not enabled in [plugins].system" in (by_name["plugin beta"].message or "")
 
 
 # -- The doctor plugin roster (LLD c section 7) ---------------------------------
@@ -297,7 +297,7 @@ def test_roster_lists_enabled_ok_and_disabled_info(monkeypatch: pytest.MonkeyPat
 
     assert by_name["plugin beta"].status is Status.INFO
     message = by_name["plugin beta"].message or ""
-    assert "disabled (not enabled in [plugins])" in message
+    assert "disabled (not enabled in [plugins].system)" in message
     # Roster only: it never enumerates a disabled plugin's contributions.
     assert "beta-platform" not in message
 
@@ -365,7 +365,7 @@ def test_reserved_fields_do_not_affect_publication(monkeypatch: pytest.MonkeyPat
 # -- Capstone: a default config builds green with zero plugins enabled ----------
 
 
-def test_default_config_builds_green_with_zero_plugins_enabled(tmp_path: Path) -> None:
+def test_default_config_builds_green_with_zero_enabled_system_plugins(tmp_path: Path) -> None:
     """The migration-strategy claim, pinned end to end against the REAL shipped
     plugin index (not the alpha/beta fixture): a DEFAULT config with no
     ``[plugins]`` section runs the whole ``build_registry`` path with no error,
@@ -385,7 +385,7 @@ def test_default_config_builds_green_with_zero_plugins_enabled(tmp_path: Path) -
     config_path = tmp_path / "config.toml"
     config_path.write_text(f'[operator]\nssh_public_key = "{key}.pub"\nssh_private_key = "{key}"\n')
     config = load_config(config_path, warn_issues=False, warn_deprecations=False)
-    assert config.plugins_enabled == ()  # no [plugins] section at all
+    assert config.enabled_system_plugins == ()  # no [plugins] section at all
 
     # build_registry succeeds (no raise) on the zero-plugins default.
     registry = build_registry(config)
@@ -419,4 +419,4 @@ def test_default_config_builds_green_with_zero_plugins_enabled(tmp_path: Path) -
         assert plugin_name in SYSTEM_PLUGINS
         entry = roster[f"plugin {plugin_name}"]
         assert entry.status is Status.INFO
-        assert "not enabled in [plugins]" in (entry.message or "")
+        assert "not enabled in [plugins].system" in (entry.message or "")

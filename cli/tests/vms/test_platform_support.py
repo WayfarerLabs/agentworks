@@ -286,7 +286,7 @@ def test_doctor_shows_enabled_plugin_platform_with_real_readiness(make_config, m
     from agentworks import doctor
 
     _support(monkeypatch, wsl2="Windows only", lima_local="limactl not installed")
-    registry = build_registry(make_config('[plugins]\nenabled = ["proxmox"]\n'))
+    registry = build_registry(make_config('[plugins]\nsystem = ["proxmox"]\n'))
 
     group = doctor._check_vm_platforms(registry)
     by_name = {c.name: c for c in group.checks}

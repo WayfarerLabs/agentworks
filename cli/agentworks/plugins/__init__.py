@@ -15,7 +15,7 @@ way to obtain a ``module.PLUGIN``", not a new authoring contract.
 ``claude``, ``proxmox``, ``azure``, R11); importing this package registers
 each, seating its capability impls into the core code registries, and indexes
 it into ``SYSTEM_PLUGINS``. A shipped plugin's rows publish present-but-disabled
-until an operator opts in via ``[plugins] enabled``.
+until an operator opts in via ``[plugins].system``.
 """
 
 from __future__ import annotations

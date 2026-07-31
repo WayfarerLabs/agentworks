@@ -34,7 +34,7 @@ def _config(tmp_path: Path, body: str = "", *, enabled: bool = False) -> Any:
     priv = tmp_path / "k"
     pub.write_text("ssh-ed25519 AAAA test")
     priv.write_text("key")
-    plugins = '[plugins]\nenabled = ["azure"]\n\n' if enabled else ""
+    plugins = '[plugins]\nsystem = ["azure"]\n\n' if enabled else ""
     cfg = tmp_path / "config.toml"
     cfg.write_text(
         dedent(f"""\

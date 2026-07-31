@@ -2,7 +2,7 @@
 # system-install-command (system-wide, run once per VM as root; consumed by VM
 # init). Moved out of manifests/builtin/install-commands.yaml when the azure
 # bundle migrated to a system plugin (Phase 11). Published present-but-disabled
-# until an operator opts in with `[plugins] enabled = ["azure"]`; a vm-template
+# until an operator opts in with `[plugins] system = ["azure"]`; a vm-template
 # that references it while azure is not enabled is gated with the enable hint,
 # not an unknown-name error (Phase 7 manifest parity).
 apiVersion: agentworks/v1

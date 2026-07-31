@@ -2,7 +2,7 @@
 # a user-install-command (per-user, run for each user). Moved out of
 # manifests/builtin/install-commands.yaml when the claude bundle migrated to
 # a system plugin (Phase 9). Published present-but-disabled until an operator
-# opts in with `[plugins] enabled = ["claude"]`; a template that references it
+# opts in with `[plugins] system = ["claude"]`; a template that references it
 # while claude is not enabled is gated with the enable hint, not an
 # unknown-name error (Phase 7 manifest parity).
 apiVersion: agentworks/v1

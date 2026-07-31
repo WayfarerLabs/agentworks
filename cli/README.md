@@ -600,7 +600,7 @@ session and `session restart` resumes the same conversation when its transcript 
 (launching fresh when Claude never wrote one). It ships as the opt-in `claude` system plugin (see
 [System Plugins](#system-plugins)), disabled by default: a session-template naming it still lists
 ready, but creating a session on it is refused with an "enable plugin `claude`" hint until you add
-`claude` to `[plugins] enabled`. (The built-in `shell` harness stays the default and needs no
+`claude` to `[plugins].system`. (The built-in `shell` harness stays the default and needs no
 opt-in.) Once enabled, it needs only that `claude` is installed on the launch target, and announces
 the chosen action (resume vs new session) in the pane, so the decision is never silent. Its
 `harness_config` vocabulary is three optional fields:
@@ -731,7 +731,8 @@ Settings sections (`config.toml`, permanent):
 - `[session.config]` -- session defaults (history limit)
 - `[secret_config]` -- active secret backend chain (`[secret_backends.*]` sections are deprecated
   no-ops; see Secret Backends below)
-- `[plugins]`: opt-in list of enabled system plugins (see [System Plugins](#system-plugins) below)
+- `[plugins]`: the plugin-subsystem namespace; its `system` key is the opt-in list of enabled system
+  plugins (see [System Plugins](#system-plugins) below)
 
 Resource kinds (YAML manifests; the deprecated TOML section is noted for each):
 
@@ -927,7 +928,7 @@ Opt in by name in `config.toml`:
 
 ```toml
 [plugins]
-enabled = ["azure", "proxmox", "onepassword", "claude"]   # only the ones you use
+system = ["azure", "proxmox", "onepassword", "claude"]   # only the ones you use
 ```
 
 A resource that references a not-enabled plugin's contribution (an `azure-vm` vm-site, a

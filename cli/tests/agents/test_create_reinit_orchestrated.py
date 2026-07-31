@@ -418,7 +418,7 @@ def test_reinit_update_template_persists_before_convergence_so_a_mid_failure_kee
 # ``ensure_recipe_enabled`` actually refuses on a live registry with the right
 # kind-string, before any DB / VM / mutation work. The fixture plugin ships a
 # disabled agent-template (referencing a disabled user-install-command) via a
-# bundled manifest; it is NOT in ``[plugins] enabled``, so its rows are
+# bundled manifest; it is NOT in ``[plugins] system``, so its rows are
 # present-but-disabled.
 
 _DECLARABLE_ANCHOR = "tests.plugins._manifest_declarable_fixture"
@@ -431,7 +431,7 @@ def _install_disabled_fixture(monkeypatch: pytest.MonkeyPatch) -> None:
     # Merge alongside the real shipped plugins (proxmox, which the shared config
     # enables and this suite's VM runs on, plus claude / onepassword) rather than
     # replacing them: replacing would drop proxmox's row and fail the enabled-name
-    # check. decl-plugin ships present-but-disabled (not in [plugins] enabled), so
+    # check. decl-plugin ships present-but-disabled (not in [plugins] system), so
     # its bundled recipe refuses with the enable hint.
     monkeypatch.setattr("agentworks.plugins.SYSTEM_PLUGINS", {**SYSTEM_PLUGINS, plugin.name: plugin})
 

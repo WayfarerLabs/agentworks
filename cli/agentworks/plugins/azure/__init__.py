@@ -20,7 +20,7 @@ whole model.
   ``manifests/`` subdirectory).
 
 All three rows are present-but-disabled until an operator opts in with
-``[plugins] enabled = ["azure"]``:
+``[plugins] system = ["azure"]``:
 
 - the ``azure-vm`` platform row publishes with a ``system-plugin`` origin; a
   ``vm-site`` on it is not-ready with the "enable plugin `azure`" hint and

@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 # proxmox operator would.
 PROXMOX_SECTION = """
 [plugins]
-enabled = ["proxmox"]
+system = ["proxmox"]
 
 [proxmox]
 api_url = "https://pve:8006"

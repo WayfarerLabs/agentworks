@@ -12,7 +12,7 @@ when this file lands on `main`; pre-merge edits on the branch remain ordinary in
 
 **System plugins**: in-repo, in-release units that bundle capability implementations (of the four
 existing core-fixed kinds) and declarable resources (YAML manifests), strictly opt-in via
-`[plugins] enabled = [...]`. The plugin work is the **first producer** of the registry's enablement
+`[plugins] system = [...]`. The plugin work is the **first producer** of the registry's enablement
 axis: a not-opted-in plugin's contributions are **present-but-disabled**, so a reference to one is
 cleanly not-ready (a capability) or refused-at-use (a bundled declarable) with an "enable plugin
 `<name>`" hint, never an unknown-name error.
@@ -54,12 +54,21 @@ All satisfied and test-pinned (capstone-verified). Highlights:
   `git mv` into the plugin package; the core `publish_to` skips the `plugin_seated_names(kind)` so a
   migrated impl publishes once with a `system-plugin` origin, applied to all four kinds).
 - **R11.1** the guided opt-in **breaking change**: a config using a migrated bundle now needs the
-  matching `[plugins] enabled` entry, or the resource is not-ready / refused-at-use with the enable
+  matching `[plugins] system` entry, or the resource is not-ready / refused-at-use with the enable
   hint (never a silent failure). The default local path is unaffected.
 - **R14** all four capability kinds gated through their real consumer: vm-platform (vm-site
   propagates), secret-backend (excluded at resolution + the enable-plugin hint on the failure path),
   git-credential-provider (git-credential propagates + use-refusal), harness (session-template stays
   ready, `ensure_harness_enabled` gates at use).
+
+**Config-key note.** The opt-in list ships as `[plugins]`'s `system` key
+(`Config.enabled_system_plugins`), not the `enabled` key the design docs (FRD R4, HLA, LLD c) and
+the completed Phase-3 plan checkbox describe. It was renamed during PR review to reserve the
+`[plugins]` table as the whole plugin-subsystem namespace, so a future external-plugin config slots
+in as a sibling key/subtable without `[plugins].enabled` reading as "all plugins". The design docs
+keep the design-time `enabled`/`plugins_enabled` name as their historical record; the permanent
+operator and contributor docs (`sample-config.toml`, `docs/guides/resources.md`, `cli/README.md`,
+`cli/agentworks/plugins/README.md`, ADR 0021) all use the shipped `[plugins].system`.
 
 ## Where the load-bearing content lives (SDD is deletable)
 
@@ -69,7 +78,7 @@ Nothing operator- or contributor-facing depends on `docs/sdd/` (grep-confirmed, 
   bundleable-kind allowlist): `cli/agentworks/plugins/README.md`.
 - **The operator model + the upgrade note** (the `system-plugin` origin, opt-in via `[plugins]`,
   disabled-hides / not-ready-shows, `--include-disabled`, the doctor roster, and "Azure/Proxmox/
-  1Password/Claude Code are now opt-in, add `[plugins] enabled`"): `docs/guides/resources.md`,
+  1Password/Claude Code are now opt-in, add `[plugins] system`"): `docs/guides/resources.md`,
   `cli/README.md` ("System Plugins"), `cli/agentworks/sample-config.toml` (`[plugins]`),
   `docs/guides/proxmox.md`.
 - **The decisions** (plugin-as-origin; enablement as a first-class multi-source axis; the
@@ -81,7 +90,7 @@ Nothing operator- or contributor-facing depends on `docs/sdd/` (grep-confirmed, 
 
 The migration is a **guided opt-in breaking change**: `azure-vm`, `azdo`, `proxmox`, `onepassword`,
 `claude-code`, and the `az-cli` / `claude` install-commands are disabled by default. An existing
-operator adds the matching plugin(s) to `[plugins] enabled` to restore them; the "enable plugin
+operator adds the matching plugin(s) to `[plugins] system` to restore them; the "enable plugin
 `<name>`" hint names the exact fix. The release carries a `BREAKING CHANGE` changelog entry
 (release-please, `cli/CHANGELOG.md`). The default local path (`lima`/`wsl2` + `shell` +
 `env-var`/`prompt` + `github`) is unaffected.

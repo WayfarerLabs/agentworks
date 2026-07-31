@@ -85,7 +85,7 @@ def test_agent_template_to_git_credentials_to_secret_walk(tmp_path: Path, ssh_ke
         # azdo credential is ready and the subgraph walk reaches its secret.
         """\
         [plugins]
-        enabled = ["azure"]
+        system = ["azure"]
 
         [git_credentials.azdo]
         type = "azdo"
@@ -121,7 +121,7 @@ def test_collect_secrets_for_walks_admin_subgraph(tmp_path: Path, ssh_keys: tupl
         # azdo credential is ready and the admin subgraph walk reaches its secret.
         """\
         [plugins]
-        enabled = ["azure"]
+        system = ["azure"]
 
         [git_credentials.github]
         type = "github"

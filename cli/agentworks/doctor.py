@@ -117,7 +117,7 @@ def run_checks(*, completion_version: str | None = None) -> HealthReport:
         report.groups.append(_check_vm_platforms(registry))
     else:
         report.groups.append(_skipped_group("VM platforms", "Installed platforms"))
-    # The plugin roster reads config.plugins_enabled against SYSTEM_PLUGINS; it
+    # The plugin roster reads config.enabled_system_plugins against SYSTEM_PLUGINS; it
     # needs no registry (a plugin is an origin, not a resource kind, R12), so it
     # sits beside VM platforms and skips only when config is unavailable.
     if config is not None:
@@ -265,7 +265,7 @@ def _check_vm_platforms(registry: Registry) -> HealthGroup:
 def _check_plugins(config: Config) -> HealthGroup:
     """The system-plugin roster (R9, R10, R12): every installed plugin, its
     description, and its opt-in state, read from ``SYSTEM_PLUGINS`` against
-    ``config.plugins_enabled``.
+    ``config.enabled_system_plugins``.
 
     A BESPOKE surface, not a ``KIND_REGISTRY``-dispatched hook: a plugin is an
     origin, not a resource kind (R12). Roster only (existence, description,
@@ -285,15 +285,15 @@ def _check_plugins(config: Config) -> HealthGroup:
         g.info("No system plugins installed.")
         return g
 
-    enabled = set(config.plugins_enabled)
+    enabled = set(config.enabled_system_plugins)
     for name, plugin in sorted(SYSTEM_PLUGINS.items()):
         if name in enabled:
             g.ok(f"plugin {name}", plugin.description or None)
         else:
-            # The doctor renders the "not enabled in [plugins]" STATE phrasing
-            # (the enablement mark carries only the "enable plugin <name>"
-            # remediation clause, never this state string).
-            message = "disabled (not enabled in [plugins])"
+            # The doctor renders the "not enabled in [plugins].system" STATE
+            # phrasing (the enablement mark carries only the "enable plugin
+            # <name>" remediation clause, never this state string).
+            message = "disabled (not enabled in [plugins].system)"
             if plugin.description:
                 message = f"{message}; {plugin.description}"
             g.info(f"plugin {name}", message)

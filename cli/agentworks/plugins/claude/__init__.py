@@ -9,7 +9,7 @@ package's ``manifests/`` subdirectory). It exercises Phase 7's manifest
 present-but-disabled parity end to end with a real plugin.
 
 Both rows are present-but-disabled until an operator opts in with
-``[plugins] enabled = ["claude"]``:
+``[plugins] system = ["claude"]``:
 
 - The harness row publishes with a ``system-plugin`` origin; a
   ``session-template`` naming ``harness = "claude-code"`` STAYS ready (it

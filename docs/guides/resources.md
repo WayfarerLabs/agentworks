@@ -151,10 +151,10 @@ spec:
   the `proxmox-token` secret (override with `token_secret`), auto-declared and resolved through the
   backend chain like any other. The `proxmox` platform ships as the opt-in `proxmox` system plugin,
   so a proxmox site (declared or legacy) is not-ready with an "enable plugin `proxmox`" hint and
-  refused at use until you set `[plugins] enabled = ["proxmox"]`. The `azure-vm` platform likewise
+  refused at use until you set `[plugins] system = ["proxmox"]`. The `azure-vm` platform likewise
   ships as the opt-in `azure` system plugin (which also provides the `azdo` git-credential provider
   and the `az-cli` install-command), so the `azure-dev` example above is not-ready with an "enable
-  plugin `azure`" hint until you set `[plugins] enabled = ["azure"]`.
+  plugin `azure`" hint until you set `[plugins] system = ["azure"]`.
 - The legacy flat `[azure]` / `[proxmox]` TOML sections keep loading as deprecated vm-site
   declarations; `agw resource migrate vm-site` moves them to manifests.
 
@@ -197,8 +197,8 @@ spec:
 The `claude-code` harness runs Claude Code as the session. It ships as the opt-in `claude` system
 plugin (see "System plugins" below), so a `session-template` naming it still lists ready, but
 creating a session on it is refused with an "enable plugin `claude`" hint until you set
-`[plugins] enabled = ["claude"]`. It selects the launch-and-resume conventions in one line instead
-of restating command strings: `session create` starts a new Claude session, and `session restart`
+`[plugins] system = ["claude"]`. It selects the launch-and-resume conventions in one line instead of
+restating command strings: `session create` starts a new Claude session, and `session restart`
 resumes the same conversation when its transcript still exists (and launches fresh when Claude never
 wrote one), so a restart continues where the session left off:
 
@@ -268,7 +268,7 @@ Plugins are off by default. Opt in by name in `config.toml`:
 
 ```toml
 [plugins]
-enabled = ["azure"]
+system = ["azure"]
 ```
 
 - An unknown name here (a typo, or a plugin that is not installed) is a hard error, and so is an
@@ -301,7 +301,7 @@ all disabled until opted in. Authoring a system plugin is documented in the plug
 **Config errors in a not-enabled plugin's resources surface only once you enable it.** Validation
 runs over enabled, reachable resources, so a mistake in a disabled plugin's config (for example a
 typo in a legacy `[proxmox]` platform_config while the `proxmox` plugin is not enabled) is not
-reported until you add the plugin to `[plugins] enabled`. The first thing you see is the actionable
+reported until you add the plugin to `[plugins].system`. The first thing you see is the actionable
 "enable plugin `<name>`" hint; the config error surfaces on the next build once enabled, still
 before any real work runs. This is the same rule that defers validation for any not-ready resource,
 applied to the opt-in axis.
@@ -309,11 +309,11 @@ applied to the opt-in axis.
 **Upgrading: Azure, Proxmox, 1Password, and Claude Code are now opt-in.** These vendor- and
 tool-specific capabilities used to be built in and always available; they now ship as the `azure`,
 `proxmox`, `onepassword`, and `claude` system plugins, disabled by default. If your config used any
-of them, add the plugin to `[plugins] enabled` to restore it:
+of them, add the plugin to `[plugins].system` to restore it:
 
 ```toml
 [plugins]
-enabled = ["azure", "proxmox", "onepassword", "claude"]  # only the ones you use
+system = ["azure", "proxmox", "onepassword", "claude"]  # only the ones you use
 ```
 
 Concretely, enable `onepassword` if a secret maps the `onepassword` backend; `proxmox` if a
@@ -337,8 +337,8 @@ Two layers, one rule each:
   store addressing like `{ account = "my.1password.com", reference = "op://Work/npm/password" }`,
   and opt-outs) lives in each secret's `backend_mappings.<backend>`. The `onepassword` backend now
   ships as the opt-in `onepassword` system plugin (see [System plugins](#system-plugins)): its row
-  is present but disabled until you add `onepassword` to `[plugins] enabled`, so a secret mapped
-  only to it stays inert (and, if it is the sole path, fails resolve with an "enable plugin
+  is present but disabled until you add `onepassword` to `[plugins].system`, so a secret mapped only
+  to it stays inert (and, if it is the sole path, fails resolve with an "enable plugin
   `onepassword`" hint) until you opt in. Once enabled it reads via the 1Password CLI
   (`op read op://vault/item/field`); it needs a per-secret `backend_mappings.onepassword` address in
   one of two forms: a bare `op://vault/item/field` string (using op's default account, or
@@ -358,7 +358,7 @@ so should you when reading them:
   an uninstalled unit.
 - **enabled / disabled**: the opt-in axis (turned on or off). "enabled" and "disabled" mean this and
   only this; they never describe host readiness. A system plugin's contributions are disabled until
-  the operator opts in via `[plugins] enabled` (for example the `onepassword` backend is disabled by
+  the operator opts in via `[plugins].system` (for example the `onepassword` backend is disabled by
   default); the core backends (`env-var`, `prompt`) are always enabled.
 - **ready / not-ready**: whether the backend can run on THIS host right now, checked offline (e.g.
   `onepassword` is not-ready when the `op` CLI is not on `PATH`). Readiness is not resolvability: a

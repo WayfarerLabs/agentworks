@@ -42,7 +42,7 @@ def _plugin(name: str) -> Origin:
 
 
 def _config(*enabled: str) -> Config:
-    return cast("Config", SimpleNamespace(plugins_enabled=tuple(enabled)))
+    return cast("Config", SimpleNamespace(enabled_system_plugins=tuple(enabled)))
 
 
 # -- Weak incoming never displaces an occupant (any variant), no error ----------

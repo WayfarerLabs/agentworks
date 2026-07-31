@@ -81,7 +81,7 @@ def _finalized_with_proxmox(
     proxmox ships in the ``proxmox`` system plugin, so its ``vm-platform`` row
     comes from ``publish_plugins`` (with a ``system-plugin`` origin), not the
     core publisher. The real ``plugin_enablement_source`` bound to
-    ``plugins_enabled=("proxmox",)`` keeps proxmox enabled while disabling the
+    ``enabled_system_plugins=("proxmox",)`` keeps proxmox enabled while disabling the
     other shipped plugins' rows (including claude's weak install-command row, so
     no weak row survives finalize unmarked). ``extra_disabled`` layers a stub
     source on top for a case that disables a specific node directly."""
@@ -95,7 +95,7 @@ def _finalized_with_proxmox(
 
     registry = Registry.empty()
     vp.publish_to(registry)
-    config = cast("Config", SimpleNamespace(plugins_enabled=("proxmox",)))
+    config = cast("Config", SimpleNamespace(enabled_system_plugins=("proxmox",)))
     publish_plugins(registry, config)
     for decl in sites:
         registry.add("vm-site", decl.name, decl, Origin.operator_declared(file=Path("sites.yaml"), line=1))
@@ -198,7 +198,7 @@ def test_disabled_secret_backend_is_excluded_from_the_active_chain() -> None:
     # onepassword ships as a system plugin now (its built-in row is gone), so
     # publish its capability row through the plugin path; the stub source below
     # then disables it, exactly as the plugin opt-in source would.
-    publish_plugins(registry, cast("Config", SimpleNamespace(plugins_enabled=())))
+    publish_plugins(registry, cast("Config", SimpleNamespace(enabled_system_plugins=())))
     # ``publish_plugins`` also emits the claude plugin's weak install-command
     # row and the azure plugin's weak az-cli install-command row; disable them
     # too so no weak row survives finalize unmarked (the weak-implies-disabled
@@ -244,7 +244,7 @@ def test_r9_9_mapping_to_disabled_backend_is_inert_until_enabled() -> None:
         registry = Registry.empty()
         secret_backends.publish_to(registry)
         # onepassword's row now comes from the plugin path, not a built-in.
-        publish_plugins(registry, cast("Config", SimpleNamespace(plugins_enabled=())))
+        publish_plugins(registry, cast("Config", SimpleNamespace(enabled_system_plugins=())))
         registry.add(
             "secret",
             "vaulted",

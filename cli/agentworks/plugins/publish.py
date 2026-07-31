@@ -90,7 +90,7 @@ def publish_plugins(registry: Registry, config: Config) -> None:
     installed system plugin (a typo or an uninstalled plugin, R4) is a single
     typed ``ConfigError`` raised BEFORE any row is added, so the post-finalize
     validate block never sees an unknown enabled name. Set-membership against
-    ``SYSTEM_PLUGINS`` also carries the degenerate ``[plugins] enabled``
+    ``SYSTEM_PLUGINS`` also carries the degenerate ``[plugins].system``
     entries the Phase 3 loader does not normalize: an empty name is an unknown
     (``ConfigError``), and a duplicate resolves to the same plugin, which
     publication (iterating ``SYSTEM_PLUGINS``, not the enabled list) cannot
@@ -102,11 +102,11 @@ def publish_plugins(registry: Registry, config: Config) -> None:
     # the package is fully initialized, and tests can monkeypatch the index.
     from agentworks.plugins import SYSTEM_PLUGINS
 
-    unknown = {name for name in config.plugins_enabled if name not in SYSTEM_PLUGINS}
+    unknown = {name for name in config.enabled_system_plugins if name not in SYSTEM_PLUGINS}
     if unknown:
         known = ", ".join(sorted(SYSTEM_PLUGINS)) or "(none installed)"
         raise ConfigError(
-            f"[plugins] enabled names that are not installed system plugins: "
+            f"[plugins].system names that are not installed system plugins: "
             f"{', '.join(sorted(unknown))} (installed system plugins: {known})"
         )
 
@@ -127,7 +127,7 @@ def publish_plugins(registry: Registry, config: Config) -> None:
     # a not-enabled plugin's manifest rows publish weak (add-if-absent), an
     # enabled plugin's publish strong. Iterate SYSTEM_PLUGINS (not the enabled
     # list) so a duplicate enabled name cannot double-publish.
-    enabled = frozenset(config.plugins_enabled)
+    enabled = frozenset(config.enabled_system_plugins)
     for plugin in SYSTEM_PLUGINS.values():
         anchor = plugin.manifests
         if anchor is None:

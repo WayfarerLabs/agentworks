@@ -13,7 +13,7 @@ contract it relies on (validate / construct / preflight / runup / ops) is docume
 > Note (2026-07-30): the harness capability MODEL described here is unchanged, but the `claude-code`
 > harness no longer ships in the core. It moved into the opt-in `claude` system plugin (the
 > plugin-system effort); `shell` remains the built-in default harness, and `claude-code` is
-> present-but-disabled until an operator sets `[plugins] enabled = ["claude"]`. Where this record
+> present-but-disabled until an operator sets `[plugins] system = ["claude"]`. Where this record
 > calls `claude-code` a "built-in", read "shipped harness": it is now a system-plugin capability,
 > not a core one.
 

@@ -20,7 +20,7 @@ plugin injected via ``SYSTEM_PLUGINS``) and pins every contribution:
   (never an unknown-name error) and is refused at use by the Phase 7 recipe gate
   with the enable hint.
 
-Enabling ``[plugins] enabled = ["azure"]`` makes all three consumable, from the
+Enabling ``[plugins] system = ["azure"]`` makes all three consumable, from the
 ONE plugin.
 """
 
@@ -70,13 +70,13 @@ system_install_commands = ["az-cli"]
 
 
 def _config(tmp_path: Path, body: str = "", *, enabled: bool = False) -> Config:
-    """A real operator config; ``enabled`` toggles ``[plugins] enabled =
+    """A real operator config; ``enabled`` toggles ``[plugins] system =
     ["azure"]`` and ``body`` appends resource declarations."""
     pub = tmp_path / "id.pub"
     priv = tmp_path / "id"
     pub.write_text("ssh-ed25519 AAAA...")
     priv.write_text("-----BEGIN OPENSSH PRIVATE KEY-----")
-    plugins = '[plugins]\nenabled = ["azure"]\n\n' if enabled else ""
+    plugins = '[plugins]\nsystem = ["azure"]\n\n' if enabled else ""
     cfg = tmp_path / "config.toml"
     cfg.write_text(
         dedent(f"""\
@@ -276,7 +276,7 @@ def test_operator_override_of_az_cli_wins(tmp_path: Path) -> None:
 
 
 def test_enabling_azure_makes_all_three_work(tmp_path: Path) -> None:
-    """With ``[plugins] enabled = ["azure"]`` all three contributions enable:
+    """With ``[plugins] system = ["azure"]`` all three contributions enable:
     the vm-site becomes ready and resolvable, the git-credential becomes ready
     and constructible, and the vm-template's az-cli reference passes the recipe
     gate. One opt-in, three kinds."""
@@ -316,7 +316,7 @@ def test_doctor_roster_lists_the_azure_plugin(tmp_path: Path) -> None:
     disabled = _check_plugins(_config(tmp_path))
     row = next(c for c in disabled.checks if c.name == "plugin azure")
     assert row.status is Status.INFO
-    assert "not enabled in [plugins]" in (row.message or "")
+    assert "not enabled in [plugins].system" in (row.message or "")
 
     enabled = _check_plugins(_config(tmp_path, enabled=True))
     row_on = next(c for c in enabled.checks if c.name == "plugin azure")

@@ -131,7 +131,7 @@ def test_build_registry_validates_the_blob_via_the_capability(tmp_path: Path) ->
     cfg = tmp_path / "config.toml"
     cfg.write_text(
         f'[operator]\nssh_public_key = "{pub.as_posix()}"\nssh_private_key = "{priv.as_posix()}"\n'
-        '[plugins]\nenabled = ["azure"]\n'
+        '[plugins]\nsystem = ["azure"]\n'
     )
     resources = tmp_path / "resources"
     resources.mkdir()

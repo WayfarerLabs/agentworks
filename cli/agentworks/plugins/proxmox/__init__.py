@@ -5,7 +5,7 @@ A capability-only migration (Phase 10, no bundled manifests): the plugin
 seats its ``ProxmoxPlatform`` into ``VM_PLATFORM_REGISTRY`` through the
 ``vm-platform`` adapter and publishes a ``vm-platform`` row with a
 ``system-plugin`` origin. The row is present-but-disabled until an operator
-opts in with ``[plugins] enabled = ["proxmox"]``; while disabled a
+opts in with ``[plugins] system = ["proxmox"]``; while disabled a
 ``vm-site`` on the ``proxmox`` platform is not-ready with the "enable plugin
 `proxmox`" hint and ``resolve_site`` refuses it. The deprecated legacy
 ``[proxmox]`` flat-section site gets the same hint (a feature: legacy configs

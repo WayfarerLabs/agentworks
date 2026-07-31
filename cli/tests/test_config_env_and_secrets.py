@@ -500,7 +500,7 @@ def test_reachability_keying_is_would_attempt_readiness_blind(tmp_path: Path, mo
         cfg_file,
         extras="""
         [plugins]
-        enabled = ["onepassword"]
+        system = ["onepassword"]
 
         [secrets.vaulted]
         description = "only resolvable via onepassword"

@@ -26,7 +26,7 @@
 #    TERM: xterm-256color
 ##
 ## The `claude-code` harness runs Claude Code as the session. It ships as the
-## opt-in `claude` system plugin, so enable it with `[plugins] enabled =
+## opt-in `claude` system plugin, so enable it with `[plugins] system =
 ## ["claude"]` (otherwise creating a session on this template is refused with an
 ## "enable plugin `claude`" hint). It selects the launch/resume conventions with
 ## one line (harness: claude-code) instead of restating command strings:

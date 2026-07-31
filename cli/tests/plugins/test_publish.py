@@ -89,7 +89,7 @@ def _fixture_plugin(name: str = PLUGIN, *, with_manifests: bool = True) -> Plugi
 
 
 def _config(*enabled: str) -> Config:
-    return cast("Config", SimpleNamespace(plugins_enabled=tuple(enabled)))
+    return cast("Config", SimpleNamespace(enabled_system_plugins=tuple(enabled)))
 
 
 def _operator() -> Origin:

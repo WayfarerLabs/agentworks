@@ -30,7 +30,7 @@ PLUGIN = Plugin(
 Fields:
 
 - **`name`** (required): the plugin's identity. Non-empty and `/`-free. It is the name an operator
-  writes in `[plugins] enabled` and the name the surfaces attribute rows to
+  writes in `[plugins].system` and the name the surfaces attribute rows to
   (`from plugin example-cloud`).
 - **`description`**: shown in the doctor roster.
 - **`capabilities`**: a mapping keyed by capability kind, each value a tuple of impl **classes**,
@@ -78,7 +78,7 @@ A plugin is **off by default**. An operator opts in by listing the plugin name i
 
 ```toml
 [plugins]
-enabled = ["azure"]
+system = ["azure"]
 ```
 
 Enablement is a first-class axis, distinct from readiness (whether a capability can run on this
@@ -103,7 +103,7 @@ host). What "opted in" versus "not opted in" changes:
   whose consumption sites are gated, and may not bundle a kind's reserved auto-declared name (such
   as a `default` template), so the opt-in guarantee holds by construction (see ADR 0021).
 
-An `[plugins] enabled` entry that is not an installed plugin (a typo, or an uninstalled plugin) is a
+A `[plugins].system` entry that is not an installed plugin (a typo, or an uninstalled plugin) is a
 config error raised up front, before anything publishes. Unknown keys in the `[plugins]` table are
 **also** a hard config error, not a soft warning: because `[plugins]` is an opt-in gate, a typo'd
 key must fail loudly rather than silently leave plugins un-enabled. (This is a deliberate departure

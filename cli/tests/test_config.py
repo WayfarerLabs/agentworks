@@ -419,7 +419,7 @@ def test_proxmox_config(tmp_path: Path, case: dict) -> None:
         ssh_private_key = "{priv.as_posix()}"
 
         [plugins]
-        enabled = ["proxmox"]
+        system = ["proxmox"]
 
         {dedent(case["toml"])}
     """)

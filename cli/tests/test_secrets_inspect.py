@@ -351,7 +351,7 @@ def _readiness_grid_config(tmp_path: Path) -> Path:
         cfg_file,
         extras="""
         [plugins]
-        enabled = ["onepassword"]
+        system = ["onepassword"]
 
         [admin.env]
         A = { secret = "mapped-op" }

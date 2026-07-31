@@ -44,7 +44,7 @@ def _plugin(name: str = PLUGIN, *, anchor: str = _DECLARABLE_ANCHOR) -> Plugin:
 
 
 def _config(*enabled: str) -> Config:
-    return cast("Config", SimpleNamespace(plugins_enabled=tuple(enabled)))
+    return cast("Config", SimpleNamespace(enabled_system_plugins=tuple(enabled)))
 
 
 def _operator() -> Origin:
