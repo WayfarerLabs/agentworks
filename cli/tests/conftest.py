@@ -29,9 +29,11 @@ def _restore_agw_debug() -> Generator[None, None, None]:
     ``AGW_DEBUG`` env var (see ``cli/_app.py`` ``_set_debug``), a
     process-global mutation pytest does not undo on its own. Without this,
     such a test would leak ``AGW_DEBUG=1`` into every later test in the
-    process, silently flipping debug-gated behavior (the error wrapper's
-    traceback re-raise, the azure-identity logger suppression skip). This
-    keeps that contained.
+    process. That env var is the propagation vector for debug state: the CLI
+    re-seeds its internal ``_debug`` flag from ``AGW_DEBUG`` on every
+    invocation, and the azure-identity logger suppression reads it directly, so
+    a leaked value would silently flip debug-gated behavior in later tests.
+    Restoring it here keeps that contained.
     """
     had = "AGW_DEBUG" in os.environ
     prior = os.environ.get("AGW_DEBUG", "")
