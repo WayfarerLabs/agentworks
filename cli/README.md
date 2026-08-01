@@ -244,10 +244,10 @@ denies all inbound traffic at baseline; for the duration of the session an ephem
 scoped to your detected public IP is created, and removed again on exit (the public IP itself is
 permanent). If your SSH traffic egresses through a different address than the detection sees (VPN
 split tunnel, proxy, CGNAT), set `ssh_allow_cidrs` in the config's `[operator]` section to a list of
-IPs and/or CIDRs to allow additionally; if detection fails entirely, those entries are used alone.
-Proxmox isn't supported by this flag because the QEMU guest agent's exec interface is one-shot and
-non-interactive; use the Proxmox web UI's serial console (`VM > Console` in the Proxmox VE web UI)
-as the equivalent escape hatch.
+IPv4 addresses and/or CIDRs to allow additionally; if detection fails entirely, those entries are
+used alone. Proxmox isn't supported by this flag because the QEMU guest agent's exec interface is
+one-shot and non-interactive; use the Proxmox web UI's serial console (`VM > Console` in the Proxmox
+VE web UI) as the equivalent escape hatch.
 
 ### Workspaces
 

@@ -50,4 +50,6 @@ permanent deny-all-inbound baseline, with ephemeral IP-scoped allow rules poked 
 for transient native routes and deleted after; the consequences above reflect the amended behavior.
 The deny baseline also blocks direct inbound (hole-punched) UDP, so Tailscale peer-to-peer paths
 degrade to DERP relay (higher latency; reachability is unaffected). Cost consequence: a Standard SKU
-static public IP bills continuously, including while the VM is deallocated.
+static public IP bills continuously, including while the VM is deallocated. Accepted window: VMs
+created under the old scheme converge to this model only on their first native-route use, so a
+legacy VM whose old public-IP detach failed keeps its old posture until then.

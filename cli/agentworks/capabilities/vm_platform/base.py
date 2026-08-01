@@ -132,6 +132,15 @@ class VMPlatform(Capability):
     # their actual escape hatch.
     no_native_transport_hint: ClassVar[str] = "This platform has no interactive native transport."
 
+    # Operator guidance warned when every reachability probe of the
+    # native transport fails (the transports factory emits it just
+    # before the SSHError propagates). None means no extra guidance;
+    # platforms whose route setup can succeed while the transport still
+    # cannot connect override with prose naming the likely cause (azure:
+    # the ephemeral SSH allow is scoped to the DETECTED egress IP, which
+    # may not be where the operator's SSH traffic actually leaves).
+    probe_failure_hint: ClassVar[str | None] = None
+
     @property
     def site_name(self) -> str:
         """The bound site's name (the capability-generic ``owner_name``,

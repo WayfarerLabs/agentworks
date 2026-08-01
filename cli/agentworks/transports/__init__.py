@@ -176,9 +176,10 @@ def native_transport(
     time to apply a freshly-poked NSG allow (or a freshly-healed public
     IP) before the first real command lands. Local transports (Lima,
     WSL2) succeed on the first probe and skip the sleeps entirely. If
-    every probe fails on Azure, a warning notes that the allow was
-    scoped to the detected egress IP and names
-    ``operator.ssh_allow_cidrs`` before the SSHError propagates.
+    every probe fails, the platform's
+    :attr:`VMPlatform.probe_failure_hint` (azure: the allow was scoped
+    to the detected egress IP, see ``operator.ssh_allow_cidrs``) is
+    warned before the SSHError propagates.
     """
     from agentworks import output
     from agentworks.ssh import SSHError
@@ -223,17 +224,11 @@ def native_transport(
             if attempt == 0:
                 output.detail("Waiting for provisioning transport...")
             if attempt == 5:
-                if platform.name == "azure-vm":
-                    # The NSG allow is scoped to the DETECTED egress IP;
-                    # if the operator's SSH traffic leaves through a
-                    # different address (VPN split tunnel, proxy, CGNAT),
-                    # the hole does not match and every probe times out.
-                    output.warn(
-                        "The transient Azure SSH allow is scoped to your detected "
-                        "public IP; if your SSH traffic egresses elsewhere (VPN "
-                        "split tunnel, proxy, CGNAT), add your address(es) to "
-                        "operator.ssh_allow_cidrs in your agentworks config."
-                    )
+                # Give the platform's probe-failure guidance (azure: the
+                # scoped allow may not match the operator's real egress)
+                # before the typed error propagates.
+                if platform.probe_failure_hint:
+                    output.warn(platform.probe_failure_hint)
                 raise
             time.sleep(3)
     return target

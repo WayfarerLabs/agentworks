@@ -308,7 +308,12 @@ def remove_ssh_allow(
     hook, the ``transient_route`` exit) must keep unwinding, and the
     warning states the actual residual exposure: the rule's scoped
     source prefixes, not the world (pass ``prefixes`` when known so the
-    warning can name them exactly).
+    warning can name them exactly). The hook paths deliberately pass no
+    prefixes and settle for the generic phrasing: they can fire in
+    flows that never computed the allow's scope in-process (the rule
+    was created by an earlier create), and stashing per-VM prefix state
+    on the platform instance just to sharpen a warning string is not
+    worth the coupling.
     """
     from azure.core.exceptions import ResourceNotFoundError
 

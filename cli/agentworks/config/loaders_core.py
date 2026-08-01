@@ -262,9 +262,13 @@ def _load_operator(data: dict[str, object], issues: list[str]) -> OperatorConfig
     # hole; validated here so a typo fails at config load, not at the
     # first vm op that pokes the hole. Stored normalized (a bare IP
     # becomes its /32) so downstream consumers compare and poke
-    # canonical prefixes.
+    # canonical prefixes. The list guard keeps a scalar (a bare string
+    # would otherwise iterate per character) a typed error too.
+    raw_cidrs = raw.get("ssh_allow_cidrs", [])
+    if not isinstance(raw_cidrs, list):
+        raise ConfigError(f"{section_name}.ssh_allow_cidrs must be a list of IPv4 addresses and/or CIDRs")
     allow_cidrs: list[str] = []
-    for entry in raw.get("ssh_allow_cidrs", []):
+    for entry in raw_cidrs:
         text = str(entry).strip()
         try:
             allow_cidrs.append(str(ipaddress.IPv4Network(text, strict=False)))

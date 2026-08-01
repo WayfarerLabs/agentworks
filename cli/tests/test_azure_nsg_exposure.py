@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -46,6 +47,11 @@ _RESOURCE_ID = "/subscriptions/sub-A/resourceGroups/rg1/providers/Microsoft.Comp
 _CONFIG = {"subscription_id": "sub-A", "resource_group": "rg1", "region": "eastus"}
 _DETECTED = "198.18.0.7"
 _DETECTED_PREFIX = f"{_DETECTED}/32"
+
+# The real detector, captured at import time so TestDetectEgressIp can
+# exercise it even though the autouse fixture stubs the module attribute
+# for every test.
+_REAL_DETECT_EGRESS_IP = azure_network.detect_egress_ip
 
 
 @pytest.fixture(autouse=True)
@@ -339,7 +345,7 @@ class TestPrefixAssembly:
 class TestCloseProvisioningAccessHooks:
     def test_post_tailscale_ready_deletes_the_allow(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The success hook deletes the bootstrap allow; the deny
-        baseline is never touched (nothing to arm)."""
+        baseline is permanent, so there is nothing to restore."""
         network = _install_fakes(monkeypatch)
         vm: VMRow = _fake_vm()  # type: ignore[assignment]
 
@@ -455,6 +461,38 @@ class TestTransientRoute:
             ALLOW_SSH_RULE_NAME,
         ]
 
+    def test_poke_result_failure_still_removes_allow(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A client-side failure AFTER a server-side-successful allow
+        create (the poller's ``.result()`` raising) must not leave the
+        ephemeral allow standing: the poke sits inside the try, so the
+        finally still deletes it before the wrapped error propagates."""
+        from agentworks.plugins.azure.network import AzureError
+
+        network = _install_fakes(monkeypatch)
+        rules: _FakeSecurityRules = network.security_rules
+        real_create = rules.begin_create_or_update
+
+        class _ExplodingPoller(_Poller):
+            def result(self) -> object:
+                raise RuntimeError("client-side poll failure")
+
+        def _create(rg: str, nsg: str, rule_name: str, rule: object) -> _Poller:
+            # Record first (the server-side create succeeded), then hand
+            # back a poller whose result() dies client-side.
+            poller = real_create(rg, nsg, rule_name, rule)
+            if rule_name == ALLOW_SSH_RULE_NAME:
+                return _ExplodingPoller(rule)
+            return poller
+
+        monkeypatch.setattr(rules, "begin_create_or_update", _create)
+        vm: VMRow = _fake_vm()  # type: ignore[assignment]
+
+        with pytest.raises(AzureError), _platform().transient_route(vm):
+            pytest.fail("the body must not run when the poke fails")
+
+        # The allow was created server-side and then removed by the finally.
+        assert rules.deletes()[-1] == ("rg1", "vm1-nsg", ALLOW_SSH_RULE_NAME)
+
     def test_exit_removes_allow_when_body_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The allow removal is a finally: it fires however the caller
         unwinds."""
@@ -486,6 +524,54 @@ class TestTransientRoute:
         assert "vm1-nsg" in warning
         assert _DETECTED_PREFIX in warning
         assert "198.51.100.0/24" in warning
+
+
+def _ip_response(body: bytes) -> MagicMock:
+    """A mock urllib response context manager (the proxmox API suite's
+    pattern) whose read() yields ``body``."""
+    resp = MagicMock()
+    resp.read.return_value = body
+    resp.__enter__ = lambda s: s
+    resp.__exit__ = MagicMock(return_value=False)
+    return resp
+
+
+class TestDetectEgressIp:
+    """The real detector (via the import-time alias, bypassing the
+    autouse stub), with ``urllib.request.urlopen`` patched: no test
+    performs live network IO. The autouse fixture resets the per-process
+    cache between tests."""
+
+    @patch("urllib.request.urlopen")
+    def test_garbage_body_raises_and_never_caches(self, mock_urlopen: MagicMock) -> None:
+        """An HTML error page (or any non-IPv4 body) is a detection
+        failure, never a prefix: the strict parse raises and nothing is
+        cached for a later call to reuse."""
+        mock_urlopen.return_value = _ip_response(b"<html>rate limited</html>")
+        with pytest.raises(ValueError):
+            _REAL_DETECT_EGRESS_IP()
+        assert azure_network._egress_ip_cache is None
+
+    @patch("urllib.request.urlopen")
+    def test_whitespace_padded_ipv4_parses(self, mock_urlopen: MagicMock) -> None:
+        mock_urlopen.return_value = _ip_response(b"  198.51.100.7\n")
+        assert _REAL_DETECT_EGRESS_IP() == "198.51.100.7"
+
+    @patch("urllib.request.urlopen")
+    def test_second_call_serves_from_cache(self, mock_urlopen: MagicMock) -> None:
+        """One probe per process: the second call never re-opens."""
+        mock_urlopen.return_value = _ip_response(b"198.51.100.7\n")
+        assert _REAL_DETECT_EGRESS_IP() == "198.51.100.7"
+        assert _REAL_DETECT_EGRESS_IP() == "198.51.100.7"
+        assert mock_urlopen.call_count == 1
+
+    @patch("urllib.request.urlopen")
+    def test_probe_uses_bounded_timeout(self, mock_urlopen: MagicMock) -> None:
+        """The what's-my-ip probe carries the 5-second timeout: a hung
+        service must not hang every azure op behind it."""
+        mock_urlopen.return_value = _ip_response(b"198.51.100.7")
+        _REAL_DETECT_EGRESS_IP()
+        assert mock_urlopen.call_args.kwargs["timeout"] == 5
 
 
 class TestEnsureDenyRaises:

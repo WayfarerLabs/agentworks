@@ -265,6 +265,9 @@ def test_native_transport_reachability_probe_gives_up_after_six() -> None:
     vm = _mock_vm(site="lima")
     config = _mock_config()
     platform = _fake_lima_platform()
+    # The base-class default: no probe-failure guidance (a MagicMock
+    # auto-attribute would read as a truthy hint and mis-drive the warn).
+    platform.probe_failure_hint = None
     fake_target = platform.native_transport.return_value
 
     with (
@@ -274,6 +277,30 @@ def test_native_transport_reachability_probe_gives_up_after_six() -> None:
         pytest.raises(SSHError),
     ):
         native_transport(vm, platform, config, stack=stack)
+
+
+def test_native_transport_probe_exhaustion_warns_platform_hint(captured_output) -> None:  # type: ignore[no-untyped-def] # noqa: ANN001
+    """A platform that declares ``probe_failure_hint`` gets it warned
+    when every probe fails (azure: the scoped allow may not match the
+    operator's real egress), just before the SSHError propagates."""
+    vm = _mock_vm(site="azure")
+    config = _mock_config()
+    platform = MagicMock()
+    platform.name = "azure-vm"
+    platform.probe_failure_hint = "scoped allow guidance"
+    platform.transient_route.return_value = contextlib.nullcontext()
+    fake_target = SSHTransport(host="1.2.3.4", user="agentworks")
+    platform.native_transport.return_value = fake_target
+
+    with (
+        patch.object(fake_target, "run", side_effect=SSHError("always")),
+        patch("agentworks.transports.time.sleep"),
+        contextlib.ExitStack() as stack,
+        pytest.raises(SSHError),
+    ):
+        native_transport(vm, platform, config, stack=stack)
+
+    assert "scoped allow guidance" in captured_output.warnings
 
 
 # ---------------------------------------------------------------------------

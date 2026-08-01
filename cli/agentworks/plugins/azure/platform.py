@@ -246,6 +246,18 @@ class AzureVMPlatform(VMPlatform):
     name: ClassVar[str] = "azure-vm"
     description: ClassVar[str] = "Azure Virtual Machines (subscription + resource group)"
 
+    # Warned by the transports factory when every reachability probe
+    # fails: the ephemeral NSG allow is scoped to the DETECTED egress
+    # IP, so an operator whose SSH traffic leaves through a different
+    # address (VPN split tunnel, proxy, CGNAT) gets a hole that does
+    # not match and every probe times out.
+    probe_failure_hint: ClassVar[str | None] = (
+        "The transient Azure SSH allow is scoped to your detected "
+        "public IP; if your SSH traffic egresses elsewhere (VPN "
+        "split tunnel, proxy, CGNAT), add your address(es) to "
+        "operator.ssh_allow_cidrs in your agentworks config."
+    )
+
     def __init__(self, owner_name: str, config: Mapping[str, object]) -> None:
         super().__init__(owner_name, config)
         # Quiet azure-identity's own credential-failure WARNING (unless
@@ -278,7 +290,7 @@ class AzureVMPlatform(VMPlatform):
     # behavior on where they happen to come from (a non-interactive
     # chain passes, the browser-login fallback can't be probed without
     # BEING the interaction). Credential and reachability failures
-    # surface at the op with typed errors (``_wrap_azure_error``),
+    # surface at the op with typed errors (``network.wrap_azure_error``),
     # which is the contract: preflight is capped at what it can check
     # without resolved credentials.
 
@@ -382,8 +394,9 @@ class AzureVMPlatform(VMPlatform):
         existence probe (``resource_groups.check_existence``) is read-only
         and mutates nothing. A credential or reachability failure is NOT a
         "group missing" verdict: those surface through
-        :func:`_wrap_azure_error` exactly as the ops report them, so a bad
-        or absent credential never masquerades as an absent resource group.
+        :func:`agentworks.plugins.azure.network.wrap_azure_error` exactly
+        as the ops report them, so a bad or absent credential never
+        masquerades as an absent resource group.
 
         Reachability failures are fatal here, which diverges from the
         proxmox runup on purpose. Proxmox warns and continues unverified on
@@ -914,10 +927,15 @@ class AzureVMPlatform(VMPlatform):
         dropped), then pokes the ephemeral allow rule scoped to the
         operator's egress prefixes (widened by
         ``config.operator.ssh_allow_cidrs`` when a config is threaded
-        in). Exit deletes the allow regardless of how the caller
-        unwinds, restoring zero inbound exposure (the deny baseline is
-        never touched); a removal failure warns loudly naming the exact
-        prefixes that remain allowed (see
+        in). The poke itself sits INSIDE the try: a client-side failure
+        after a server-side-successful create (a poller ``.result()``
+        error) must not leave the allow standing, so the finally removes
+        it on every unwind path, including a failed poke (where the
+        delete is a tolerated 404 no-op if nothing was created). Exit
+        deletes the allow regardless of how the caller unwinds,
+        restoring zero inbound exposure (the deny baseline is never
+        touched); a removal failure warns loudly naming the exact
+        prefixes that remain allowed when the poke completed (see
         :func:`agentworks.plugins.azure.network.remove_ssh_allow`). The
         :func:`agentworks.transports.native_transport` factory wraps
         this around the per-platform :meth:`native_transport` call so
@@ -925,8 +943,9 @@ class AzureVMPlatform(VMPlatform):
         """
         self._ensure_public_ip(vm)
         self._converge_nsg(vm)
-        prefixes = self._poke_ssh_allow(vm, self._config_allow_cidrs(config))
+        prefixes: list[str] | None = None
         try:
+            prefixes = self._poke_ssh_allow(vm, self._config_allow_cidrs(config))
             yield
         finally:
             self._remove_ssh_allow(vm, prefixes)
