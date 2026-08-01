@@ -2,8 +2,8 @@
 ## user on VMs, applied during init/reinit. There is exactly one; the
 ## envelope accepts only the name `default`.
 ## The `git_credentials: [github]` reference pairs with the
-## git-credential sample -- declare that resource too (or drop the
-## field) or loading will fail on the missing reference.
+## git-credential sample. Declare that resource too (or drop the field),
+## or loading will fail on the missing reference.
 ## The commented claude_marketplaces / claude_plugins lines install
 ## Claude Code marketplace plugins for this user (needs the `claude`
 ## CLI on PATH); see "Claude Code Plugins" in cli/README.md.
