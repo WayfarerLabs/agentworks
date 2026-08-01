@@ -188,6 +188,22 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # azure-vm likewise ships as the opt-in `azure` system plugin: an azure site
 # (declared or legacy) is not-ready with an "enable plugin `azure`" hint until
 # you add `[plugins] system = ["azure"]` above.
+# An azure site authenticates with AMBIENT credentials by default (whatever
+# `az login`, the AZURE_* env vars, or a managed identity provide, with a
+# browser login as the last resort). It can instead be pinned to an explicit
+# service principal, via an optional `service_principal` block in the site's
+# platform_config carrying tenant_id, client_id, and `secret`: the NAME of the
+# secret holding the client secret, never its value (default
+# `azure-client-secret`, read by the env-var backend from
+# AW_SECRET_AZURE_CLIENT_SECRET). Once set, the site uses that identity and
+# nothing else: a rejected or expired client secret fails the command outright
+# rather than quietly falling back to ambient credentials. Run
+# `agw resource sample vm-site` for the block to copy.
+# The service principal is MANIFEST-ONLY: the legacy flat [azure] section
+# hoists only subscription_id / resource_group / region into the site's
+# platform_config and silently drops every other key, so a legacy azure site
+# must be migrated to a vm-site manifest (`agw resource migrate vm-site`)
+# before it can carry one.
 
 # =============================================================================
 # Templates

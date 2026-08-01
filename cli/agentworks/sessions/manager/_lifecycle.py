@@ -408,6 +408,7 @@ def restart_session(
                     admin_target=admin_target,
                     agent_target=None if is_admin else session_target,
                 ),
+                registry=registry,
             )
 
             # Bail-before-prompt: refuse the operation up front in the cases

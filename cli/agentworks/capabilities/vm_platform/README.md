@@ -29,7 +29,7 @@ The authoritative contract is `base.py`. Implement the ops, override only the ho
 needs, and fill in the class-level contract methods the site decoder and DB migration consume.
 
 **Ops** (the mutation surface). Every op except `display_backend_name` takes the op-start
-`RunContext` as its last parameter (see the next section for what that is and how to read from it):
+`RunContext` after `vm` (see the next section for what that is and how to read from it):
 
 - `create(request, ctx) -> ProvisionResult` is deliberately **not** `@idempotent_op`: it runs a
   pre-flight collision check and raises `StateError` on a name that already exists, so a re-run is a
@@ -46,9 +46,12 @@ needs, and fill in the class-level contract methods the site decoder and DB migr
 
 **Transport and lifecycle hooks** (sensible defaults on `VMPlatform`; override only what your
 backend needs). All are entered by callers that gate first, so on entry the VM is running or was
-just started:
+just started. The three transport hooks take `ctx: RunContext` for the same reason the ops do:
+opening a route to a cloud VM is a backend call, so a platform reads any credential it needs from
+`ctx.secret(name)` here exactly as in an op. Lima and WSL2 accept and ignore it (their transports
+are local); Azure uses it:
 
-- `native_transport(vm, *, config=None) -> Transport | None` (default `None`). The
+- `native_transport(vm, ctx, *, config=None) -> Transport | None` (default `None`). The
   `agentworks.transports.native_transport` factory wraps the call in `transient_route`, probes
   reachability with an `echo ok` retry loop, and raises a typed `StateError` (using
   `no_native_transport_hint`) when a platform returns `None`. Lima returns a `limactl shell`
@@ -56,26 +59,42 @@ just started:
   WSL2 a `wsl.exe`-backed transport. Proxmox deliberately returns the default `None` and sets
   `no_native_transport_hint` to point the operator at the Proxmox web-UI serial console, because its
   guest-agent exec is one-shot and cannot host an interactive shell.
-- `transient_route(vm) -> context manager` (default `nullcontext()`). Azure opens a scoped SSH route
-  on enter (heals a missing public IP, converges the NSG onto the baseline-deny model, pokes this
-  operation's own ephemeral allow rule scoped to the operator's egress prefixes) and deletes exactly
-  that rule in a `finally`, bounding the exposure window to the transport's lifetime; concurrent
-  native ops on one VM each own an independent rule, so they never cross-remove.
+- `transient_route(vm, ctx, *, config=None) -> context manager` (default `nullcontext()`). Azure
+  opens a scoped SSH route on enter (heals a missing public IP, converges the NSG onto the
+  baseline-deny model, pokes this operation's own ephemeral allow rule scoped to the operator's
+  egress prefixes) and deletes exactly that rule in a `finally`, bounding the exposure window to the
+  transport's lifetime; concurrent native ops on one VM each own an independent rule, so they never
+  cross-remove. Those NSG calls read the credential from `ctx`, so a service-principal site
+  authenticates as itself with no ambient fallback.
 - `vm_active(vm, *, config=None) -> context manager` (default `nullcontext()`). WSL2 returns a
   keepalive that holds the distro against Windows' idle-shutdown for the span of a command, with
-  Win32 Job-Object orphan-proofing for a hard-killed `agw`.
-- `post_tailscale_ready(vm) -> None` (default no-op). The contract is "close provisioning access":
-  it fires the instant Tailscale is reachable. Azure deletes the ephemeral bootstrap SSH allow rule
-  here, leaving the VM with zero inbound exposure behind its permanent deny-all-inbound baseline
-  (the public IP itself stays attached for the VM's whole lifetime). The asymmetry with
+  Win32 Job-Object orphan-proofing for a hard-killed `agw`. No `ctx`: every hold that exists is
+  local and makes no backend call. A cloud hold that did would thread it like the transport hooks.
+- `post_tailscale_ready(vm, ctx) -> None` (default no-op). The contract is "close provisioning
+  access": it fires the instant Tailscale is reachable. Azure deletes the ephemeral bootstrap SSH
+  allow rule here, leaving the VM with zero inbound exposure behind its permanent deny-all-inbound
+  baseline (the public IP itself stays attached for the VM's whole lifetime). The asymmetry with
   `transient_route` is intentional: the bootstrap ingress opens inside `create()` (cloud-init needs
   inbound SSH from the operator), and neither that nor this closing point is context-manager-shaped.
-- `secure_failed_vm(vm) -> None` (default no-op). Same contract as `post_tailscale_ready`, for the
-  paths where a create is kept without completing Phase A: the bootstrap or Tailscale verification
-  died (row marked FAILED) or the operator interrupted it mid-bootstrap (row status untouched); the
-  success-only hook never fired on either. Azure deletes the fixed-name bootstrap allow so the VM
-  defaults to zero inbound exposure; debugging survives via `vm shell --platform` (a fresh
-  per-operation allow) and the serial console (not NSG-gated).
+- `secure_failed_vm(vm, ctx) -> None` (default no-op). Same contract as `post_tailscale_ready`, for
+  the paths where a create is kept without completing Phase A: the bootstrap or Tailscale
+  verification died (row marked FAILED) or the operator interrupted it mid-bootstrap (row status
+  untouched); the success-only hook never fired on either. Azure deletes the fixed-name bootstrap
+  allow so the VM defaults to zero inbound exposure; debugging survives via `vm shell --platform` (a
+  fresh per-operation allow) and the serial console (not NSG-gated).
+
+The two closing hooks and `transient_route` take `ctx` because closing or opening the NSG route is a
+backend call; the caller (Phase A's `bootstrap_vm` for the two closing hooks, the transports factory
+for `transient_route`) passes the create/op's own scoped context, whose secrets are already resolved
+before Phase A begins, so even the interrupt path never resolves a secret for the first time.
+
+Callers must pass the context their composition root already built for the platform's ops
+(`gated_vm_boundary` and `_live_vm_boundary` in `agentworks.vms.manager.boundary` both hand one out;
+the activation gate builds its own from the gate's scoped reader), never a freshly constructed empty
+one. `vm shell --platform` is the case that makes this load-bearing: on a running VM the gate's
+happy path is a pure Tailscale reachability probe, so nothing has touched the platform with a
+context before the transport is built. A platform must never depend on an earlier op in the same
+process having warmed a credential cache.
 
 **Gates** (cheap, offline, distinct from preflight):
 
@@ -130,14 +149,79 @@ declared.
 What differs between stages is timing, not shape. `preflight` gets the command-start slice (existing
 targets only, no resolved secrets, which is what makes it structurally dependency-blind); `runup`
 and the ops get the op-start slice (current targets, resolved secrets). Central secret-resolvability
-prediction happens above the platform, in the `vm-site` node that holds the instance
-(`agentworks.vms.nodes`), which is why `VMPlatform.preflight`/`runup` never touch secret machinery
-themselves.
+prediction happens above the platform AND above the `vm-site` node that holds it, in the operation's
+preflight sweep (`orchestration.readiness.preflight_all`), which is why neither
+`VMPlatform.preflight`/`runup` nor the node touches secret machinery. Whether a declared secret can
+be resolved depends on the run (the active backend chain, whether this run can prompt), not on the
+platform that named it. One visible consequence, and it is the intended one: `agw doctor` invokes
+the node's preflight per row without a sweep, so a site whose credential is only obtainable by
+prompting reads ok in the VM sites group, and resolvability is reported once, on that secret's own
+row in the Secrets group.
 
 **The pattern for a backend client:** memoize the _derived client_, never the raw secret. Proxmox's
 `_api(ctx)` builds a `ProxmoxAPI` from `ctx.secret(token_secret)` on first need and caches the
 client (`self._api_cached`), never the token. Any future platform with an API token (a hypothetical
 GCP or AWS backend) should follow that shape.
+
+## Credentials on a cloud platform: the reference shape
+
+Azure is the worked example, and a new cloud platform (AWS EC2 is the expected next one) should copy
+it rather than invent a variant. Four rules, in `plugins/azure/platform.py`:
+
+**1. Explicit credentials are an OPTIONAL nested table naming a secret.** The site's
+`platform_config` may carry a `service_principal` table:
+
+```yaml
+platform_config:
+  subscription_id: "..."
+  service_principal:
+    tenant_id: "..." # plain config: an identifier, not a secret
+    client_id: "..." # plain config
+    secret: azure-client-secret # the NAME of a secret, and the default
+```
+
+Three deliberate choices. The identifiers are plain config because they are identifiers, not
+credentials. The field is `secret` and holds a NAME, not `client_secret` holding a value, so nothing
+invites an operator to paste a live credential into a plaintext file; the value resolves through the
+framework secret system like proxmox's `token_secret`. And the table is nested rather than flattened
+into three top-level keys so a future variant (a certificate instead of a client secret) slots in
+beside `secret` without a breaking change to declared sites. The AWS analogue writes itself: a
+`credentials` (or `access_key`) table with the plain key id and a `secret` naming the secret-access
+key.
+
+**2. Declare the edge from `dependencies`, validate the shape in `validate`.** `dependencies` is
+total and non-throwing, so it emits the edge whenever it can derive the secret NAME (even if the
+table's other fields are malformed) and omits it only when the name itself is underivable.
+`validate` is where every shape error surfaces, including unknown keys inside the table. Declaring
+the edge is what puts the secret in the site node's `secret_refs`, which is what gets it into the
+boundary resolve and therefore delivered to `ctx.secret`.
+
+**3. Explicit credentials never fall back.** `_get_credential(ctx)` forks on config, not on runtime
+luck: with the table present it builds exactly that credential and a failure is fatal; without it,
+the ambient chain (`DefaultAzureCredential` plus the browser fallback) runs as before. Falling back
+from a configured identity to an ambient one would run the operator's command as somebody else,
+which is worse than failing. Cache the credential per instance: its identity is fixed by the bound
+config, so one build and one probe serve every op.
+
+**4. Probe once at build, and let runup pay for it.** Both credential paths make one live token
+request when built, but they answer a failed probe differently, and the difference is the point. On
+the EXPLICIT path the probe is purely diagnostic: there is no fallback to choose, so a failure
+becomes a typed error naming the site and the secret at the point of construction, rather than a raw
+SDK exception from whichever call happened to be first. On the AMBIENT path the probe is the
+fallback DECISION: a failure means nothing in the chain can authenticate, so it answers with an
+unprobed interactive-browser credential and raises nothing. The platform's `runup` is where the
+explicit path's error lands on the provisioning timeline, ahead of `create`, so a wrong credential
+aborts `vm create` with nothing realized.
+
+Two placement rules go with it. Keep the client construction OUTSIDE the `try` that wraps SDK calls
+in your platform error type: a typed credential failure is already the answer, and re-wrapping it
+strips the hint (worse, a `status()` that degrades to UNKNOWN on any exception would swallow it
+entirely). But keep the credential's own construction INSIDE the try that produces that typed error,
+alongside its probe: SDKs validate constructor arguments eagerly, and a resolved secret that comes
+back empty is reachable in a way config validation cannot catch.
+
+Read `_parse_service_principal`, `_build_service_principal_credential`, and `_get_credential`
+together: that trio is the whole pattern.
 
 ## The provisioning timeline: create-time bootstrap vs. initialization
 
@@ -269,10 +353,10 @@ YAML block scalar, remote shell). Two traps that have already occurred:
 ## Adding a new platform
 
 1. Subclass `VMPlatform` and implement the ops. Every op except `display_backend_name` takes
-   `ctx: RunContext`; read declared secrets via `ctx.secret(name)` and never hold a resolver or raw
-   reader on the instance. If your backend has a persistent client, memoize the derived client, not
-   the secret (the Proxmox `_api` pattern). Remember `create` is intentionally not `@idempotent_op`;
-   the idempotent ops must land in-state themselves.
+   `ctx: RunContext`, as do the three transport hooks; read declared secrets via `ctx.secret(name)`
+   and never hold a resolver or raw reader on the instance. If your backend has a persistent client,
+   memoize the derived client, not the secret (the Proxmox `_api` pattern). Remember `create` is
+   intentionally not `@idempotent_op`; the idempotent ops must land in-state themselves.
 2. Implement `validate` to check your `platform_config` shape and `dependencies` to return a
    `ConfigReference` for each secret you read. Declaring a secret in `dependencies` is what
    authorizes the op to read it later.

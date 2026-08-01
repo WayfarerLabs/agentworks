@@ -16,6 +16,7 @@ from .boundary import gated_vm_boundary
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from agentworks.capabilities.base import RunContext
     from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
@@ -191,13 +192,17 @@ def _ensure_tailscale(
     config: Config,
     vm: VMRow,
     platform: VMPlatform,
+    ctx: RunContext,
     *,
     auth_key_source: Callable[[], str] | None = None,
     already_running: bool = False,
 ) -> None:
     """After starting a VM, verify Tailscale connectivity and rejoin if
     needed. ``platform`` is the caller's bound platform (the gates never
-    bind, and a re-bind here would re-run the resolve pass).
+    bind, and a re-bind here would re-run the resolve pass), and ``ctx``
+    the op-start context that platform's calls read from: the rejoin
+    path builds the platform-native transport, which on a cloud backend
+    is itself an authenticated call.
 
     ``auth_key_source`` supplies the rejoin auth key when the caller
     owns its resolution: the orchestrated activation gate passes its
@@ -271,7 +276,7 @@ def _ensure_tailscale(
         # ``.rejoin_tailscale`` (the same two names ``create_vm`` /
         # ``reinit_vm`` call in ``lifecycle.py``) affect this call site too.
         _mgr.verify_tailscale_available()
-        exec_target = native_transport(vm, platform, config, stack=_stack)
+        exec_target = native_transport(vm, platform, config, ctx=ctx, stack=_stack)
         _mgr.rejoin_tailscale(db, vm.name, exec_target, auth_key=auth_key)
 
     # After the stack unwinds (Azure has removed its transient SSH
@@ -288,20 +293,23 @@ def _ensure_tailscale(
     sync_ssh_config(config, db)
 
 
-def _tailscale_logout(vm: VMRow, config: Config, platform: VMPlatform) -> None:
+def _tailscale_logout(vm: VMRow, config: Config, platform: VMPlatform, ctx: RunContext) -> None:
     """Best-effort: deregister from Tailscale via the provisioning transport.
 
-    Uses ``native_transport(vm, platform, config, stack=...)`` so the
-    Azure route open/close lifecycle and the reachability probe are
-    composed polymorphically. Platforms whose factory raises (Proxmox)
-    are surfaced as a typed StateError, which we catch and warn.
+    Uses ``native_transport(vm, platform, config, ctx=..., stack=...)``
+    so the Azure route open/close lifecycle and the reachability probe
+    are composed polymorphically; ``ctx`` is the caller's op-start
+    context, which that lifecycle's NSG calls read their credential from
+    (an SP site authenticates as itself, no ambient fallback). Platforms
+    whose factory raises (Proxmox) are surfaced as a typed StateError,
+    which we catch and warn.
     """
     from agentworks.transports import native_transport
 
     output.info("Deregistering from Tailscale...")
     try:
         with contextlib.ExitStack() as stack:
-            exec_target = native_transport(vm, platform, config, stack=stack)
+            exec_target = native_transport(vm, platform, config, ctx=ctx, stack=stack)
 
             # Fire and forget: tailscale down + logout can disrupt
             # networking on the VM, killing SSH-based transports before

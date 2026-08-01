@@ -86,7 +86,7 @@ def shell_agent(
         vm,
         targets=[_mgr._agent_direct_secret_target(scopes, label=f"agent-shell={agent.name}")],
         scope=agent_scope(db, vm.name, agent.name),
-    ) as (_vm_node, resolver):
+    ) as (_vm_node, resolver, _ops_ctx):
         from agentworks.vms.sites import site_platform_name
 
         ctx = ResourceContext(
@@ -193,7 +193,7 @@ def exec_agent(
         vm,
         targets=[_mgr._agent_direct_secret_target(scopes, label=f"agent-exec={agent.name}")],
         scope=agent_scope(db, vm.name, agent.name),
-    ) as (_vm_node, resolver):
+    ) as (_vm_node, resolver, _ops_ctx):
         from agentworks.vms.sites import site_platform_name
 
         ctx = ResourceContext(

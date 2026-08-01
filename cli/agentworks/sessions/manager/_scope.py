@@ -278,7 +278,7 @@ def _batch_vm_boundary(db: Database, config: Config, vms: Sequence[VMRow]) -> It
         level=ScopeLevel.SYSTEM,
         system_slug=db.get_setting(SYSTEM_SLUG_KEY) or None,
     )
-    preflight_all(nodes, RunContext(config=config, operation_scope=scope))
+    preflight_all(nodes, RunContext(config=config, operation_scope=scope), registry=registry)
     resolver.resolve()
 
     covered = set(union)

@@ -38,6 +38,7 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, SessionRow
     from agentworks.orchestration.node import Node
+    from agentworks.resources.reference import ResourceReference
     from agentworks.vms.nodes import LiveVMNode
     from agentworks.workspaces.nodes import LiveWorkspaceNode, PendingWorkspaceNode
 
@@ -92,6 +93,19 @@ class LiveSessionNode:
 
     def secret_refs(self) -> tuple[str, ...]:
         return self._harness.secret_refs()
+
+    def config_secret_refs(self) -> tuple[ResourceReference, ...]:
+        # DEFERRED, deliberately, and not because a harness declares
+        # nothing: a session template's harness_config can name secrets,
+        # which is why secret_refs above delegates to the harness. Two
+        # reasons to leave them out for now. The harness surface exposes
+        # only NAMES, so there is no `usage` prose to frame a prediction
+        # failure with; and these refs were never predicted in node
+        # preflight either, so returning them here would WIDEN what the
+        # sweep refuses rather than relocate an existing check. Threading
+        # usage-bearing references through the harness surface is the
+        # honest fix, and it is tracked as separate work.
+        return ()
 
     def preflight(self, ctx: RunContext) -> None:
         self._harness.preflight(ctx)
@@ -149,6 +163,19 @@ class PendingSessionNode:
 
     def secret_refs(self) -> tuple[str, ...]:
         return self._harness.secret_refs()
+
+    def config_secret_refs(self) -> tuple[ResourceReference, ...]:
+        # DEFERRED, deliberately, and not because a harness declares
+        # nothing: a session template's harness_config can name secrets,
+        # which is why secret_refs above delegates to the harness. Two
+        # reasons to leave them out for now. The harness surface exposes
+        # only NAMES, so there is no `usage` prose to frame a prediction
+        # failure with; and these refs were never predicted in node
+        # preflight either, so returning them here would WIDEN what the
+        # sweep refuses rather than relocate an existing check. Threading
+        # usage-bearing references through the harness surface is the
+        # honest fix, and it is tracked as separate work.
+        return ()
 
     def preflight(self, ctx: RunContext) -> None:
         self._harness.preflight(ctx)

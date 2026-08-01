@@ -113,7 +113,7 @@ def shell_vm(
     scopes = _mgr._resolve_vm_admin_env_scopes(registry, vm, ws=ws)
 
     with contextlib.ExitStack() as stack:
-        vm_node, resolver = stack.enter_context(
+        vm_node, resolver, ops_ctx = stack.enter_context(
             gated_vm_boundary(
                 db,
                 config,
@@ -141,8 +141,12 @@ def shell_vm(
             admin=scopes.admin,
         )
 
+        # --platform builds the platform-native transport, which on a
+        # cloud backend is an authenticated call: it gets the boundary's
+        # op-start context (site secrets scoped to the site's declared
+        # names), the same one the no-gate power commands hand their ops.
         target = (
-            native_transport(vm, vm_node.site.platform, config, stack=stack)
+            native_transport(vm, vm_node.site.platform, config, ctx=ops_ctx, stack=stack)
             if platform_transport
             else transport(vm, config)
         )
@@ -219,7 +223,7 @@ def exec_vm(
         registry,
         vm,
         targets=[_mgr._vm_secret_target(scopes, label=f"vm-exec={vm.name}")],
-    ) as (_vm_node, resolver):
+    ) as (_vm_node, resolver, _ops_ctx):
         from agentworks.vms.sites import site_platform_name
 
         ctx = ResourceContext(
@@ -328,7 +332,7 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
     with activation_gate(vm_node, gate_secret_resolver(config, registry, resolver)):
         # PREFLIGHT-ALL against the one command-start context, then the
         # boundary resolve: the walk-away point.
-        preflight_all(nodes, RunContext(config=config, operation_scope=scope))
+        preflight_all(nodes, RunContext(config=config, operation_scope=scope), registry=registry)
         resolver.resolve()
 
         def scoped_ctx(node_secret_refs: tuple[str, ...]) -> RunContext:
