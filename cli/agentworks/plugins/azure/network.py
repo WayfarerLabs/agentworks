@@ -11,13 +11,28 @@ caching. Azure SDK imports stay function-local, matching
 ``platform.py``, so azure modules never load at CLI startup.
 
 Exposure model (baseline deny, ephemeral scoped allows): every VM's NSG
-carries a permanent ``deny-all-inbound`` rule, and no standing
-allow-from-anywhere rule ever exists. SSH access happens through one
-ephemeral ``allow-ssh-transient`` rule scoped to the operator's egress
-IP (plus the ``operator.ssh_allow_cidrs`` config extras): created for
-cloud-init bootstrap at provisioning, deleted the moment Tailscale is
-confirmed (or the create fails), and poked/removed around each
-native-transport session by ``transient_route``.
+carries a permanent ``deny-all-inbound`` rule at priority 200, and no
+standing allow-from-anywhere rule ever exists. SSH access happens
+through ephemeral allow rules scoped to the operator's egress IP (plus
+the ``operator.ssh_allow_cidrs`` config extras), all living in the
+priority band [100, 199] under the deny:
+
+- ``allow-ssh-bootstrap`` (fixed name, slot 100): created with the NSG
+  at provisioning (the fresh NSG makes slot 100 free by construction)
+  so cloud-init can be reached, deleted the moment Tailscale is
+  confirmed or the create fails/aborts. The fixed name is what lets the
+  close hooks delete it without any in-process state.
+- ``allow-ssh-transient-<nonce>`` (per operation): poked by
+  ``transient_route`` at the lowest free slot in the band and removed
+  by name on exit. Per-operation rules are what make concurrent native
+  ops on one VM safe: the old single well-known rule meant one op's
+  exit could remove the allow another op still relied on; now each op
+  owns its rule, and duplicate source prefixes across concurrent rules
+  are fine and expected (the rules are independent). The band gives 100
+  concurrent operations of headroom; each rule's description carries a
+  created-at timestamp for a future doctor check to flag stale rules
+  leaked by killed processes (never auto-pruned by age here: a
+  legitimate shell session can live for days).
 """
 
 from __future__ import annotations
@@ -46,22 +61,39 @@ VNET_NAME_SUFFIX = "-vnet"
 # The permanent NSG baseline: deny all inbound traffic. The VM's public
 # IP stays attached for its whole lifetime (Azure is retiring default
 # outbound access, so a VM whose public IP is removed simply goes
-# offline); exposure is controlled purely by NSG rules. The deny sits at
-# priority 200 so the ephemeral allow below (at 100, Azure's minimum
-# custom priority) always outranks it and no custom rule can be inserted
-# above the allow; 200 still far outranks Azure's 65000-range defaults.
+# offline); exposure is controlled purely by NSG rules. The final
+# priority layout: the ephemeral allows live in the band [100, 199]
+# (100 is Azure's minimum custom priority), the deny sits at 200, so
+# every allow outranks the deny, no custom rule can be inserted above
+# the band, and 200 still far outranks Azure's 65000-range defaults.
 # Tailscale is unaffected by the deny (the overlay rides outbound flows,
 # though direct inbound hole-punched UDP is blocked, so peer-to-peer
 # paths degrade to DERP relay).
 DENY_ALL_INBOUND_RULE_NAME = "deny-all-inbound"
 DENY_ALL_INBOUND_RULE_PRIORITY = 200
 
-# The single ephemeral SSH allow: TCP/22 from the operator's egress
-# prefixes only, created when a route is needed (cloud-init bootstrap,
-# a native-transport session) and deleted after. One well-known name so
-# create/update/delete all converge on the same rule.
-ALLOW_SSH_RULE_NAME = "allow-ssh-transient"
-ALLOW_SSH_RULE_PRIORITY = 100
+# The ephemeral SSH allows: TCP/22 from the operator's egress prefixes
+# only, created when a route is needed and deleted after. Bootstrap uses
+# the FIXED name (one bootstrap per VM, and the close hooks must know
+# the name without in-process state); every native-transport session
+# pokes its own PREFIX+nonce rule so concurrent ops cannot cross-remove.
+# Both allocate priorities from the band below (bootstrap takes 100 by
+# construction: the NSG is created fresh with it).
+BOOTSTRAP_ALLOW_RULE_NAME = "allow-ssh-bootstrap"
+TRANSIENT_ALLOW_RULE_PREFIX = "allow-ssh-transient-"
+ALLOW_PRIORITY_BAND_START = 100
+ALLOW_PRIORITY_BAND_END = 199
+
+# Stamped into every ephemeral allow's description, with a created-at
+# timestamp: the future doctor stale-rule sweep keys off it to flag
+# rules leaked by killed processes.
+ALLOW_RULE_DESCRIPTION_MARKER = "agentworks transient SSH allow"
+
+# Bounded retry for the poke's slot-allocation race: Azure enforces
+# priority uniqueness per direction, so two concurrent allocations of
+# the same slot surface as a create error; the loser re-lists and takes
+# the next free slot.
+_POKE_ALLOCATION_ATTEMPTS = 5
 
 # The old scheme's standing world-open SSH allow, deleted on
 # convergence (see converge_nsg).
@@ -211,29 +243,41 @@ def _deny_all_inbound_rule() -> SecurityRule:
     )
 
 
-def _allow_ssh_rule(prefixes: list[str]) -> SecurityRule:
-    """The ephemeral scoped allow rule model: TCP/22 from ``prefixes``."""
+def _allow_ssh_rule(rule_name: str, prefixes: list[str], priority: int) -> SecurityRule:
+    """An ephemeral scoped allow rule model: TCP/22 from ``prefixes`` at
+    ``priority``, with the marker+timestamp description the future
+    doctor stale-rule sweep keys off."""
+    from datetime import UTC, datetime
+
     from azure.mgmt.network.models import SecurityRule
 
+    created_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     return SecurityRule(
-        name=ALLOW_SSH_RULE_NAME,
+        name=rule_name,
+        description=f"{ALLOW_RULE_DESCRIPTION_MARKER} (created {created_at})",
         protocol="Tcp",
         source_port_range="*",
         destination_port_range="22",
         source_address_prefixes=list(prefixes),
         destination_address_prefix="*",
         access="Allow",
-        priority=ALLOW_SSH_RULE_PRIORITY,
+        priority=priority,
         direction="Inbound",
     )
 
 
 def initial_security_rules(prefixes: list[str]) -> list[SecurityRule]:
     """The NSG rule set a fresh VM provisions with: the permanent
-    deny-all baseline plus the scoped bootstrap allow (cloud-init needs
-    inbound SSH from the operator; ``post_tailscale_ready`` deletes the
-    allow once Tailscale is confirmed)."""
-    return [_deny_all_inbound_rule(), _allow_ssh_rule(prefixes)]
+    deny-all baseline plus the fixed-name scoped bootstrap allow
+    (cloud-init needs inbound SSH from the operator; the close hooks
+    delete it by its fixed name once Tailscale is confirmed or the
+    create fails). The NSG is created fresh with exactly these rules,
+    so the bootstrap allow's slot at the band start (100) is free by
+    construction."""
+    return [
+        _deny_all_inbound_rule(),
+        _allow_ssh_rule(BOOTSTRAP_ALLOW_RULE_NAME, prefixes, ALLOW_PRIORITY_BAND_START),
+    ]
 
 
 def converge_nsg(network: NetworkManagementClient, rg: str, name: str) -> None:
@@ -279,54 +323,125 @@ def converge_nsg(network: NetworkManagementClient, rg: str, name: str) -> None:
         )
 
 
-def poke_ssh_allow(network: NetworkManagementClient, rg: str, name: str, prefixes: list[str]) -> None:
-    """Create (or update) the ephemeral SSH allow scoped to ``prefixes``."""
-    output.info(f"Opening SSH route (allow scoped to {', '.join(prefixes)})...")
+def _lowest_free_allow_priority(network: NetworkManagementClient, rg: str, name: str) -> int:
+    """The lowest free inbound priority in the allow band [100, 199].
+
+    Lists the NSG's current rules and takes the first unoccupied slot
+    (Azure enforces priority uniqueness per direction, so occupancy is
+    exactly the listed inbound priorities). A full band is a typed
+    error: either 100 genuinely concurrent operations, or stale
+    transient rules leaked by killed processes.
+    """
+    from agentworks.errors import StateError
+
     try:
-        network.security_rules.begin_create_or_update(
-            rg,
-            f"{name}-nsg",
-            ALLOW_SSH_RULE_NAME,
-            _allow_ssh_rule(prefixes),
-        ).result()
+        rules = network.security_rules.list(rg, f"{name}-nsg")
+        # list() returns a lazy ItemPaged: the HTTP requests happen
+        # during iteration, so the wrap must cover the comprehension,
+        # not just the call.
+        used = {rule.priority for rule in rules if rule.direction == "Inbound"}
     except Exception as exc:
         raise wrap_azure_error(exc) from exc
+    for priority in range(ALLOW_PRIORITY_BAND_START, ALLOW_PRIORITY_BAND_END + 1):
+        if priority not in used:
+            return priority
+    raise StateError(
+        f"no free NSG priority in the transient SSH allow band "
+        f"[{ALLOW_PRIORITY_BAND_START}, {ALLOW_PRIORITY_BAND_END}] on NSG '{name}-nsg'",
+        entity_kind="vm",
+        entity_name=name,
+        hint=(
+            f"delete stale '{TRANSIENT_ALLOW_RULE_PREFIX}*' rules on the NSG "
+            f"(leaked by killed processes; their descriptions carry a created-at timestamp)"
+        ),
+    )
+
+
+def poke_ssh_allow(network: NetworkManagementClient, rg: str, name: str, prefixes: list[str]) -> str:
+    """Create this operation's own ephemeral SSH allow scoped to
+    ``prefixes``, returning the rule's name for the caller's exit
+    removal.
+
+    Each poke creates a fresh ``allow-ssh-transient-<nonce>`` rule at
+    the lowest free priority in the band, so concurrent native ops on
+    the same VM each own an independent rule (duplicate prefixes across
+    them are fine and expected) and one op's exit can never remove an
+    allow another op still relies on.
+
+    Allocation is optimistic with a bounded retry: Azure enforces
+    priority uniqueness per direction, so losing a slot race to a
+    concurrent allocation surfaces as a create error; the loser re-lists
+    and takes the next free slot. After the attempts are exhausted the
+    last error raises wrapped. A failed attempt cleans up its own rule
+    name (via :func:`remove_ssh_allow`: 404-tolerant, and a cleanup
+    failure warns naming the rule, NSG, and prefixes rather than being
+    swallowed) before moving on: the create may have succeeded
+    server-side even though the client-side wait failed, and only this
+    function knows the nonce name, so the cleanup cannot be left to the
+    caller's exit path.
+    """
+    from uuid import uuid4
+
+    output.info(f"Opening SSH route (allow scoped to {', '.join(prefixes)})...")
+    last_exc: Exception | None = None
+    for _attempt in range(_POKE_ALLOCATION_ATTEMPTS):
+        priority = _lowest_free_allow_priority(network, rg, name)
+        rule_name = f"{TRANSIENT_ALLOW_RULE_PREFIX}{uuid4().hex[:8]}"
+        try:
+            network.security_rules.begin_create_or_update(
+                rg,
+                f"{name}-nsg",
+                rule_name,
+                _allow_ssh_rule(rule_name, prefixes, priority),
+            ).result()
+        except Exception as exc:
+            remove_ssh_allow(network, rg, name, rule_name, prefixes)
+            last_exc = exc
+            continue
+        return rule_name
+    assert last_exc is not None  # the loop only falls through via the except arm
+    raise wrap_azure_error(last_exc) from last_exc
 
 
 def remove_ssh_allow(
     network: NetworkManagementClient,
     rg: str,
     name: str,
+    rule_name: str,
     prefixes: list[str] | None = None,
 ) -> None:
-    """Delete the ephemeral SSH allow rule, restoring zero inbound
-    exposure (the deny-all baseline stays).
+    """Delete one ephemeral SSH allow rule by name, restoring zero
+    inbound exposure through it (the deny-all baseline stays, and other
+    operations' transient rules are untouched).
 
-    A 404 is fine (the rule was already gone: a converged hook re-run,
-    or a VM that never had it). Any other failure warns instead of
-    raising: every call site (the post-Tailscale hook, the kept-FAILED
-    hook, the ``transient_route`` exit) must keep unwinding, and the
-    warning states the actual residual exposure: the rule's scoped
-    source prefixes, not the world (pass ``prefixes`` when known so the
-    warning can name them exactly). The hook paths deliberately pass no
-    prefixes and settle for the generic phrasing: they can fire in
-    flows that never computed the allow's scope in-process (the rule
-    was created by an earlier create), and stashing per-VM prefix state
-    on the platform instance just to sharpen a warning string is not
-    worth the coupling.
+    ``rule_name`` is the fixed ``allow-ssh-bootstrap`` on the hook paths
+    and the poke's nonce name on the ``transient_route`` exit and the
+    poke's own attempt cleanup. A 404 is fine (the rule was already
+    gone: a hook re-run, a VM that never had it, or a create that never
+    landed server-side). Any other failure warns instead of raising:
+    every call site must keep unwinding, and the warning names the rule
+    and states the actual residual exposure: the rule's scoped source
+    prefixes, not the world (pass ``prefixes`` when known so the warning
+    can name them exactly). The hook paths deliberately pass no prefixes
+    and settle for the generic scope phrasing: they can fire in flows
+    that never computed the allow's scope in-process (the rule was
+    created by an earlier create), and stashing per-VM prefix state on
+    the platform instance just to sharpen a warning string is not worth
+    the coupling; the rule NAME, by contrast, is always known (fixed for
+    bootstrap, returned by the poke), so it is always named.
     """
     from azure.core.exceptions import ResourceNotFoundError
 
-    output.info("Closing SSH route (removing the transient allow rule)...")
+    output.info(f"Closing SSH route (removing allow rule '{rule_name}')...")
     try:
-        network.security_rules.begin_delete(rg, f"{name}-nsg", ALLOW_SSH_RULE_NAME).result()
+        network.security_rules.begin_delete(rg, f"{name}-nsg", rule_name).result()
     except ResourceNotFoundError:
         pass
     except Exception as exc:
         err = wrap_azure_error(exc)
         scope = f"source(s) {', '.join(prefixes)}" if prefixes else "the rule's scoped source addresses"
         output.warn(
-            f"could not remove the '{ALLOW_SSH_RULE_NAME}' rule on NSG "
+            f"could not remove the '{rule_name}' rule on NSG "
             f"'{name}-nsg': {err.summary}. The VM's SSH port stays open to "
             f"{scope}; delete the rule manually to restore zero inbound exposure."
         )

@@ -272,9 +272,11 @@ class VMPlatform(Capability):
         """
 
     def secure_failed_vm(self, vm: VMRow) -> None:  # noqa: B027  # intentional concrete no-op
-        """Hook called when a create is kept in the FAILED state: Phase A
-        bootstrap or Tailscale verification died, and the VM is kept for
-        debugging rather than rolled back.
+        """Hook called when a create is kept without completing Phase A:
+        the bootstrap or Tailscale verification died (the row is marked
+        FAILED) or the operator interrupted it mid-bootstrap (the row
+        keeps its in-flight status), and the VM is kept for debugging
+        rather than rolled back.
 
         Default no-op. Same contract as :meth:`post_tailscale_ready`
         (which only fires on success): close provisioning access. Azure

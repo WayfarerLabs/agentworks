@@ -20,6 +20,7 @@ from agentworks.errors import ConfigError, NotFoundError, StateError
 # the sibling network module; this module keeps the VMPlatform
 # capability surface.
 from agentworks.plugins.azure.network import (
+    BOOTSTRAP_ALLOW_RULE_NAME,
     VNET_NAME_SUFFIX,
     cleanup_vm_resources,
     converge_nsg,
@@ -800,8 +801,7 @@ class AzureVMPlatform(VMPlatform):
     # module (which owns the mechanics and full docstrings). They stay
     # as methods because the platform object is the seam callers and
     # tests compose against: transient_route and the hooks call them on
-    # self, and the shell-provisioner tests spy on them as platform
-    # attributes.
+    # self, and the shell-provisioner tests spy on them as attributes.
 
     def _ensure_public_ip(self, vm: VMRow) -> None:
         """Heal the VM's public IP if its NIC has none. See
@@ -825,23 +825,23 @@ class AzureVMPlatform(VMPlatform):
         operator = getattr(config, "operator", None)
         return list(getattr(operator, "ssh_allow_cidrs", None) or [])
 
-    def _poke_ssh_allow(self, vm: VMRow, extra_cidrs: list[str] | None = None) -> list[str]:
-        """Create (or update) the ephemeral SSH allow scoped to the
+    def _poke_ssh_allow(self, vm: VMRow, extra_cidrs: list[str] | None = None) -> tuple[str, list[str]]:
+        """Create this operation's own ephemeral SSH allow scoped to the
         operator's current egress prefixes plus ``extra_cidrs``,
-        returning the prefixes used (the exit path names them if the
-        removal fails). See
-        :func:`agentworks.plugins.azure.network.poke_ssh_allow`."""
+        returning the created rule's name (the exit path removes exactly
+        that rule) and the prefixes used (named if the removal fails).
+        See :func:`agentworks.plugins.azure.network.poke_ssh_allow`."""
         rg, name, az_cfg = _parse_resource_id(_resource_id(vm))
         prefixes = operator_ssh_prefixes(extra_cidrs or ())
-        poke_ssh_allow(self._network_client(az_cfg), rg, name, prefixes)
-        return prefixes
+        rule_name = poke_ssh_allow(self._network_client(az_cfg), rg, name, prefixes)
+        return rule_name, prefixes
 
-    def _remove_ssh_allow(self, vm: VMRow, prefixes: list[str] | None = None) -> None:
-        """Delete the ephemeral SSH allow rule, restoring zero inbound
-        exposure. See
+    def _remove_ssh_allow(self, vm: VMRow, rule_name: str, prefixes: list[str] | None = None) -> None:
+        """Delete one ephemeral SSH allow rule by name, restoring zero
+        inbound exposure through it. See
         :func:`agentworks.plugins.azure.network.remove_ssh_allow`."""
         rg, name, az_cfg = _parse_resource_id(_resource_id(vm))
-        remove_ssh_allow(self._network_client(az_cfg), rg, name, prefixes)
+        remove_ssh_allow(self._network_client(az_cfg), rg, name, rule_name, prefixes)
 
     def display_backend_name(self, vm: VMRow) -> str:
         resource_id = vm.platform_metadata.get("resource_id")
@@ -896,59 +896,58 @@ class AzureVMPlatform(VMPlatform):
         ephemeral bootstrap allow rule (SSH scoped to the operator's
         egress prefixes; the deny-all-inbound baseline is permanent).
         This hook fires at the async Tailscale-ready point inside
-        ``bootstrap_vm`` (Phase A) and deletes that allow rule, leaving
-        the VM with zero inbound exposure. The public IP stays attached
-        for the VM's whole lifetime (see the network module).
+        ``bootstrap_vm`` (Phase A) and deletes that allow by its fixed
+        name (no in-process state needed), leaving zero inbound
+        exposure; the public IP stays for the VM's whole lifetime.
         """
-        self._remove_ssh_allow(vm)
+        self._remove_ssh_allow(vm, BOOTSTRAP_ALLOW_RULE_NAME)
 
     def secure_failed_vm(self, vm: VMRow) -> None:
-        """Fail closed: close provisioning access on a kept-FAILED VM.
+        """Fail closed: close provisioning access on a kept, not-completed VM.
 
         Mirrors :meth:`post_tailscale_ready`, which only fires on
-        success: a VM whose bootstrap or Tailscale verification died is
-        kept for debugging, and this hook deletes the ephemeral
-        bootstrap allow so it defaults to zero inbound exposure.
-        Debugging and recovery stay possible: ``vm shell --platform``
-        and ``vm delete`` poke a fresh transient allow via
-        :meth:`transient_route`, and the Azure serial console is not
-        NSG-gated.
+        success: a VM whose bootstrap or Tailscale verification died
+        (marked FAILED) or was interrupted mid-bootstrap (row status
+        untouched by the abort) is kept for debugging, and this hook
+        deletes the fixed-name bootstrap allow so it defaults to zero
+        inbound exposure. Debugging and recovery stay possible: ``vm
+        shell --platform`` and ``vm delete`` poke a fresh transient
+        allow via :meth:`transient_route`, and the Azure serial console
+        is not NSG-gated.
         """
-        self._remove_ssh_allow(vm)
+        self._remove_ssh_allow(vm, BOOTSTRAP_ALLOW_RULE_NAME)
 
     @contextlib.contextmanager
     def transient_route(self, vm: VMRow, *, config: Config | None = None) -> Iterator[None]:
         """Open a scoped SSH route to the VM for the context's duration.
 
-        Enter heals the public IP (see :meth:`_ensure_public_ip`; VMs
-        created under the old detach scheme converge here), converges
-        the NSG onto the baseline-deny model (see :meth:`_converge_nsg`;
-        deny re-pin before the allow poke, legacy standing SSH rule
-        dropped), then pokes the ephemeral allow rule scoped to the
-        operator's egress prefixes (widened by
-        ``config.operator.ssh_allow_cidrs`` when a config is threaded
-        in). The poke itself sits INSIDE the try: a client-side failure
-        after a server-side-successful create (a poller ``.result()``
-        error) must not leave the allow standing, so the finally removes
-        it on every unwind path, including a failed poke (where the
-        delete is a tolerated 404 no-op if nothing was created). Exit
-        deletes the allow regardless of how the caller unwinds,
-        restoring zero inbound exposure (the deny baseline is never
-        touched); a removal failure warns loudly naming the exact
-        prefixes that remain allowed when the poke completed (see
-        :func:`agentworks.plugins.azure.network.remove_ssh_allow`). The
+        Enter heals the public IP (:meth:`_ensure_public_ip`; legacy
+        detach-scheme VMs converge here), converges the NSG
+        (:meth:`_converge_nsg`; deny re-pin before any allow
+        allocation), then pokes this operation's own nonce-named allow
+        scoped to the operator's egress prefixes (widened by
+        ``config.operator.ssh_allow_cidrs``). The poke sits INSIDE the
+        try and the finally removes exactly the poked rule by name on
+        every unwind path, so concurrent native ops never cross-remove
+        each other's allows; a poke that fails without returning a name
+        has already cleaned up its own attempt, and a removal failure
+        warns naming the rule and prefixes (both per the network
+        module's ``poke_ssh_allow`` / ``remove_ssh_allow``, which carry
+        the full contracts). The
         :func:`agentworks.transports.native_transport` factory wraps
         this around the per-platform :meth:`native_transport` call so
         the lifecycle stays polymorphic.
         """
         self._ensure_public_ip(vm)
         self._converge_nsg(vm)
+        rule_name: str | None = None
         prefixes: list[str] | None = None
         try:
-            prefixes = self._poke_ssh_allow(vm, self._config_allow_cidrs(config))
+            rule_name, prefixes = self._poke_ssh_allow(vm, self._config_allow_cidrs(config))
             yield
         finally:
-            self._remove_ssh_allow(vm, prefixes)
+            if rule_name is not None:
+                self._remove_ssh_allow(vm, rule_name, prefixes)
 
     def status(self, vm: VMRow, ctx: RunContext) -> VMStatus:
         if not vm.platform_metadata.get("resource_id"):

@@ -7,7 +7,9 @@ bootstrap SSH allow on the happy path). Failure: the kept-FAILED path
 calls the platform's ``secure_failed_vm`` hook best-effort (fail closed:
 without it a failed Azure VM would keep its bootstrap ingress
 indefinitely), and the original error keeps propagating even when the
-hook itself fails.
+hook itself fails. The same fail-closed contract holds for an operator
+interrupt (KeyboardInterrupt escapes the Exception arm but still
+secures, without touching the row's status).
 
 ``_phase_a_bootstrap`` is stubbed (its internals are exercised
 elsewhere); the real ``bootstrap_vm`` body runs over a real Database row.
@@ -127,3 +129,57 @@ def test_failed_path_hook_failure_does_not_mask(
         _call_bootstrap(db, platform, lambda: None)
 
     assert any("could not secure the failed VM" in w for w in captured_output.warnings)
+
+
+def test_interrupt_during_bootstrap_secures_and_reraises(
+    db: Database, monkeypatch: pytest.MonkeyPatch, _hermetic_driver: None
+) -> None:
+    """Ctrl-C during the minutes-long bootstrap escapes the Exception arm
+    (KeyboardInterrupt is a BaseException), but the kept VM must still be
+    secured best-effort before the interrupt propagates: without it the
+    Azure bootstrap allow would stand indefinitely. The row's status is
+    left as the abort found it (nothing marks FAILED on this path), and
+    the success callback never fires."""
+    from agentworks.db import ProvisioningStatus
+
+    db.insert_vm("hookvm", site="stub", hostname="hookvm")
+    row_before = db.get_vm("hookvm")
+    assert row_before is not None
+
+    def _interrupt(*_a: object, **_k: object) -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(driver, "_phase_a_bootstrap", _interrupt)
+
+    fired: list[bool] = []
+    platform = _SpyPlatform()
+    with pytest.raises(KeyboardInterrupt):
+        _call_bootstrap(db, platform, lambda: fired.append(True))
+
+    assert platform.secured == ["hookvm"]
+    assert fired == []
+    row_after = db.get_vm("hookvm")
+    assert row_after is not None
+    # Status untouched by the interrupt path: in particular, never FAILED.
+    assert row_after.provisioning_status == row_before.provisioning_status
+    assert row_after.provisioning_status != ProvisioningStatus.FAILED.value
+
+
+def test_interrupt_hook_failure_does_not_mask_the_interrupt(
+    db: Database, monkeypatch: pytest.MonkeyPatch, _hermetic_driver: None, captured_output: Any
+) -> None:
+    """A secure_failed_vm failure on the interrupt path warns and the
+    KeyboardInterrupt still propagates (never the hook's error)."""
+    db.insert_vm("hookvm", site="stub", hostname="hookvm")
+
+    def _interrupt(*_a: object, **_k: object) -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(driver, "_phase_a_bootstrap", _interrupt)
+
+    platform = _SpyPlatform()
+    platform.secure_error = RuntimeError("hook exploded")
+    with pytest.raises(KeyboardInterrupt):
+        _call_bootstrap(db, platform, lambda: None)
+
+    assert any("could not secure the interrupted VM" in w for w in captured_output.warnings)

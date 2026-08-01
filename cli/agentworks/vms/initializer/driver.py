@@ -93,7 +93,11 @@ def bootstrap_vm(
     best-effort ``secure_failed_vm`` hook (Azure deletes its ephemeral
     bootstrap SSH allow so a failed VM defaults to zero inbound
     exposure), closes the log, points at it, and re-raises for
-    ``create_vm`` to map to a ProvisioningError (delete guidance). The
+    ``create_vm`` to map to a ProvisioningError (delete guidance). An
+    operator interrupt (KeyboardInterrupt) escapes that Exception arm but
+    still secures the kept VM best-effort before propagating; the row's
+    status is left as the abort found it (the caller's cancel handler
+    owns the messaging). The
     connectivity cleanup and the SSH-config sync are non-fatal: they cannot
     make an already-bootstrapped VM unhealthy, so a failure there warns and
     continues into Phase B rather than stranding a reachable VM as FAILED.
@@ -171,6 +175,23 @@ def bootstrap_vm(
             output.warn(f"could not secure the failed VM: {secure_error}")
         logger.close()
         output.warn(f"Log: {logger.path}")
+        raise
+    except BaseException:
+        # An operator interrupt (KeyboardInterrupt) or another
+        # non-Exception unwind during the minutes-long bootstrap. The
+        # row keeps whatever status the abort left (the caller's cancel
+        # handler owns the messaging; nothing here marks FAILED), but
+        # provisioning access must still close best-effort: without
+        # this, Ctrl-C would leave the Azure bootstrap allow standing
+        # indefinitely, since the Exception arm above never runs.
+        # UserAbort does NOT take this path (it is an AgentworksError,
+        # an Exception, so the arm above secures it); this arm exists
+        # for what genuinely escapes ``except Exception``. The hook
+        # failure warns and never masks the interrupt.
+        try:
+            platform.secure_failed_vm(vm_row)
+        except Exception as secure_error:
+            output.warn(f"could not secure the interrupted VM: {secure_error}")
         raise
 
     # Tailscale is up; the platform hook closes provisioning access

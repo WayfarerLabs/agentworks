@@ -395,11 +395,11 @@ def test_provisioner_shell_target_opens_route_and_registers_close_for_azure(
         def _converge_nsg(self, vm: object) -> None:
             open_calls.append(f"converge:{getattr(vm, 'name', '?')}")
 
-        def _poke_ssh_allow(self, vm: object, extra_cidrs: list[str] | None = None) -> list[str]:
+        def _poke_ssh_allow(self, vm: object, extra_cidrs: list[str] | None = None) -> tuple[str, list[str]]:
             open_calls.append(f"poke:{getattr(vm, 'name', '?')}")
-            return ["203.0.113.9/32"]
+            return ("allow-ssh-transient-cafe0123", ["203.0.113.9/32"])
 
-        def _remove_ssh_allow(self, vm: object, prefixes: list[str] | None = None) -> None:
+        def _remove_ssh_allow(self, vm: object, rule_name: str, prefixes: list[str] | None = None) -> None:
             close_calls.append(getattr(vm, "name", "?"))
 
         def native_transport(self, vm: object, *, config: object | None = None) -> Transport:
@@ -473,10 +473,10 @@ def test_provisioner_shell_target_closes_allow_on_exception_for_azure(
         def _converge_nsg(self, vm: object) -> None:
             return None
 
-        def _poke_ssh_allow(self, vm: object, extra_cidrs: list[str] | None = None) -> list[str]:
-            return ["203.0.113.9/32"]
+        def _poke_ssh_allow(self, vm: object, extra_cidrs: list[str] | None = None) -> tuple[str, list[str]]:
+            return ("allow-ssh-transient-cafe0123", ["203.0.113.9/32"])
 
-        def _remove_ssh_allow(self, vm: object, prefixes: list[str] | None = None) -> None:
+        def _remove_ssh_allow(self, vm: object, rule_name: str, prefixes: list[str] | None = None) -> None:
             close_calls.append(getattr(vm, "name", "?"))
 
         def native_transport(self, vm: object, *, config: object | None = None) -> Transport:
