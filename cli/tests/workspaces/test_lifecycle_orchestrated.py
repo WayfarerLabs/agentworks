@@ -1658,6 +1658,47 @@ def test_copy_without_grant_all_agents_makes_no_grant_calls(
     assert not any("grant-all" in d for d in captured_output.detail)
 
 
+def test_copy_closes_the_ssh_logger_exactly_once_on_cancellation(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """The destination-VM mutation span holds an open ``SSHLogger``, and
+    ``materialize_grant_all_agents``'s sanctioned SIGINT arm re-raises
+    ``KeyboardInterrupt`` through it (every ``dest_target.run`` in the
+    span shares the exposure). The close sits in a ``finally`` (mirroring
+    realize.py's), so a cancellation mid-span still lands the footer and
+    exception section in the per-VM log, exactly once: ``close()`` is not
+    idempotent, each call appends a footer."""
+    from agentworks.ssh import SSHLogger
+
+    config = make_config()
+    _seed(db)
+    _reachable(monkeypatch, True)
+    events: list[str] = []
+    _wire_copy_fakes(monkeypatch, events)
+
+    closes: list[str] = []
+    real_close = SSHLogger.close
+
+    def _spying_close(self: SSHLogger) -> None:
+        closes.append(str(self.path))
+        real_close(self)
+
+    monkeypatch.setattr(SSHLogger, "close", _spying_close)
+
+    def _cancelled(*args: object, **kwargs: object) -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(agent_grants, "materialize_grant_all_agents", _cancelled)
+
+    with pytest.raises(KeyboardInterrupt):
+        workspace_manager.copy_workspace(db, config, "ws1", dest_name="ws2", vm_name="box")
+
+    assert len(closes) == 1  # the finally ran, and no second call site remains
+
+
 # -- #263: copy and rehome route through the shared canonical ACL helper -------
 
 
