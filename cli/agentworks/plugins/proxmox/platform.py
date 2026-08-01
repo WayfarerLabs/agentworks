@@ -12,7 +12,7 @@ from agentworks.capabilities.vm_platform.base import ProvisionRequest, Provision
 from agentworks.capabilities.vm_platform.bootstrap_script import generate_bootstrap_script
 from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
 from agentworks.db import VMStatus
-from agentworks.errors import ConfigError, StateError
+from agentworks.errors import ConfigError, ProvisioningError, StateError
 from agentworks.plugins.proxmox.api import ProxmoxAPI, ProxmoxAPIError
 from agentworks.plugins.proxmox.teardown import (
     rollback_create_on_interrupt,
@@ -441,11 +441,10 @@ class ProxmoxPlatform(VMPlatform):
             except ProxmoxAPIError:
                 pass  # guest agent not ready yet
             time.sleep(3)
-        # Typed like every other proxmox failure (a ProvisioningError),
-        # not a bare RuntimeError: create's Exception arm rolls back and
-        # re-raises, and the operator should see the platform's error
-        # shape either way.
-        raise ProxmoxAPIError(f"Timed out waiting for guest agent IP on VMID {vmid}")
+        # ProvisioningError, not ProxmoxAPIError: every API call above
+        # succeeded (or was tolerated), so this is the backend VM failing
+        # to reach readiness during provisioning, not an API failure.
+        raise ProvisioningError(f"Timed out waiting for guest agent IP on VMID {vmid}")
 
     def _run_bootstrap_via_agent(self, node: str, vmid: int, script: str, ctx: RunContext) -> str | None:
         """Write and run the bootstrap script via the guest agent.

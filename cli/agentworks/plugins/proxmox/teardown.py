@@ -17,7 +17,13 @@ wrappers therefore contain ALL non-interrupt exceptions, each with an
 operator warning naming the node and VMID: a rollback failure must
 never mask the original error (the Exception arm) or replace the
 original interrupt (the interrupt arm). ``stop_and_delete_vm`` itself
-keeps the delete op's original narrow suppression unchanged.
+keeps the delete op's original narrow suppression unchanged, which is
+why the wrappers add a post-teardown existence check: a delete that
+failed at the task/HTTP level (likeliest: the VMID still locked by a
+clone that did not settle within the bound) is suppressed silently in
+there, and Proxmox has no azure-style tag sweep to catch the orphan
+later, so the wrappers probe the VMID afterwards and warn when it
+still exists.
 """
 
 from __future__ import annotations
@@ -79,6 +85,30 @@ def _settle_and_teardown(api: ProxmoxAPI, node: str, vmid: int, pending_upid: st
     stop_and_delete_vm(api, node, vmid)
 
 
+def _warn_if_vm_remains(api: ProxmoxAPI, node: str, vmid: int) -> None:
+    """Post-teardown backstop against a SILENT orphan: probe the VMID
+    and warn with the manual-cleanup pointer when it still exists.
+
+    ``stop_and_delete_vm`` suppresses API failures per the delete op's
+    pinned contract, so a delete that failed at the task/HTTP level
+    (likeliest: the VMID still locked by a clone that did not settle
+    within :data:`_SETTLE_TIMEOUT`) would otherwise leave the VM behind
+    without a word, the exact #340 symptom, and Proxmox has no
+    azure-style tag sweep to catch it later. The suppression is
+    deliberately narrow (``ProxmoxAPIError`` only, mirroring
+    ``stop_and_delete_vm``): an HTTP-level error is the normal "VM is
+    gone" answer and stays quiet, while a transport failure propagates
+    to the calling wrapper, whose containment warning then fires;
+    swallowing it here would just move the silent orphan one layer up.
+    A ``KeyboardInterrupt`` mid-probe escapes to the calling wrapper's
+    containment the same way."""
+    try:
+        api.vm_status(node, vmid)
+    except ProxmoxAPIError:
+        return
+    output.warn(f"Proxmox VM {vmid} may remain on node '{node}'; delete it there manually.")
+
+
 def rollback_partial_create(api: ProxmoxAPI, node: str, vmid: int, *, pending_upid: str | None = None) -> None:
     """Tear down whatever a failed ``create`` made: the cloned VM under
     ``vmid``, and nothing else.
@@ -89,10 +119,14 @@ def rollback_partial_create(api: ProxmoxAPI, node: str, vmid: int, *, pending_up
     would mask that original error. A ``KeyboardInterrupt`` during this
     rollback is NOT contained: it escapes to ``create``'s outer
     interrupt arm, which restarts the cleanup under the full two-Ctrl-C
-    interrupt protocol (:func:`rollback_create_on_interrupt`).
+    interrupt protocol (:func:`rollback_create_on_interrupt`). A
+    teardown that returns without raising still ends in the
+    :func:`_warn_if_vm_remains` existence check, so a delete suppressed
+    inside ``stop_and_delete_vm`` never leaves a silent orphan.
     """
     try:
         _settle_and_teardown(api, node, vmid, pending_upid)
+        _warn_if_vm_remains(api, node, vmid)
     except Exception:
         output.warn(f"Rollback incomplete: Proxmox VM {vmid} may remain on node '{node}'; delete it there manually.")
 
@@ -108,7 +142,10 @@ def rollback_create_on_interrupt(api: ProxmoxAPI, node: str, vmid: int, *, pendi
     absorbed once and abandons the remaining cleanup, and a non-interrupt
     failure (e.g. the host became unreachable) is absorbed the same way;
     both warn naming the node and VMID so the operator can finish the
-    removal in the Proxmox web UI. Either way the caller re-raises the
+    removal in the Proxmox web UI. A cleanup that completes without
+    raising still ends in the :func:`_warn_if_vm_remains` existence
+    check, so a delete suppressed inside ``stop_and_delete_vm`` never
+    leaves a silent orphan. Either way the caller re-raises the
     ORIGINAL interrupt, which propagates to ``create_vm``, whose unwind
     then deletes the DB row it no longer needs.
     """
@@ -118,5 +155,10 @@ def rollback_create_on_interrupt(api: ProxmoxAPI, node: str, vmid: int, *, pendi
     )
     try:
         _settle_and_teardown(api, node, vmid, pending_upid)
+        _warn_if_vm_remains(api, node, vmid)
     except (KeyboardInterrupt, Exception):
+        # Both types on purpose (azure's absorber catches only the
+        # interrupt): _settle_and_teardown lets transport-level errors
+        # escape, and they must be absorbed HERE too, or they would
+        # replace the original interrupt mid-propagation.
         output.warn(f"Cleanup abandoned: Proxmox VM {vmid} may remain on node '{node}'; delete it there manually.")
