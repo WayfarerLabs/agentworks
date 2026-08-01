@@ -156,12 +156,19 @@ spec:
   `site`. Templates deliberately carry no site: placement is per-host, never template state.
 - Site config secrets ride the standard secret machinery: a Proxmox site references its API token as
   the `proxmox-token` secret (override with the `token_secret` key), auto-declared and resolved
-  through the backend chain like any other. The `proxmox` platform ships as the opt-in `proxmox`
-  system plugin, so a proxmox site (declared or legacy) is not-ready with an "enable plugin
-  `proxmox`" hint and refused at use until you set `[plugins] system = ["proxmox"]`. The `azure-vm`
-  platform likewise ships as the opt-in `azure` system plugin (which also provides the `azdo`
-  git-credential provider and the `az-cli` install-command), so the `azure-dev` example above is
-  not-ready with an "enable plugin `azure`" hint until you set `[plugins] system = ["azure"]`.
+  through the backend chain like any other. An Azure site can do the same, optionally: it
+  authenticates with ambient credentials (`az login`, `AZURE_*` env vars, managed identity, browser
+  fallback) unless a `service_principal` table inside the platform table declares an explicit one,
+  in which case its `tenant_id` / `client_id` are plain config and its `secret` field names the
+  secret holding the client secret (default `azure-client-secret`). A site with a service principal
+  uses that identity and only that one: a rejected or expired client secret fails the command
+  rather than falling back to ambient credentials. `agw resource sample vm-site` shows the block.
+  The `proxmox` platform ships as the opt-in `proxmox` system plugin, so a proxmox site (declared
+  or legacy) is not-ready with an "enable plugin `proxmox`" hint and refused at use until you set
+  `[plugins] system = ["proxmox"]`. The `azure-vm` platform likewise ships as the opt-in `azure`
+  system plugin (which also provides the `azdo` git-credential provider and the `az-cli`
+  install-command), so the `azure-dev` example above is not-ready with an "enable plugin `azure`"
+  hint until you set `[plugins] system = ["azure"]`.
 - The legacy flat `[azure]` / `[proxmox]` TOML sections keep loading as deprecated vm-site
   declarations; `agw resource migrate vm-site` moves them to manifests.
 

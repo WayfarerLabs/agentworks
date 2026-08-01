@@ -229,7 +229,7 @@ def create_vm(
     # leaves nothing behind.
     slug = _mgr._resolve_system_slug(db)
 
-    template_node = vm_template_node(vm_tmpl, registry)
+    template_node = vm_template_node(vm_tmpl)
     site_node = vm_site_node(registry, site)
     pending_vm = pending_vm_node(db, vm_name, template_node, site_node, cred_nodes)
     nodes = walk(pending_vm)
@@ -256,7 +256,7 @@ def create_vm(
         output.info(f"Checking vm-site/{site}...")
         output.info(f"Checking vm-template/{vm_tmpl.name}...")
         _mgr.announce_git_credentials(providers)
-        preflight_all(nodes, RunContext(config=config, operation_scope=scope))
+        preflight_all(nodes, RunContext(config=config, operation_scope=scope), registry=registry)
 
     with output.section("Resolving Secrets"):
         resolver.resolve()
@@ -264,11 +264,15 @@ def create_vm(
     # Polymorphic post-Tailscale-ready hook. Azure overrides to delete
     # its ephemeral bootstrap SSH allow rule (closing provisioning
     # access the instant Tailscale becomes reachable); other platforms
-    # are no-op.
+    # are no-op. It fires deep inside Phase A, so it closes over the same
+    # ``platform_obj`` / ``platform_ctx`` the create op ran with (both
+    # bound below, well before bootstrap_vm invokes this), which is what
+    # delivers the SP credential to the NSG call with no ambient
+    # fallback.
     def _on_tailscale_ready() -> None:
         refreshed = db.get_vm(vm_name)
         assert refreshed is not None
-        platform_obj.post_tailscale_ready(refreshed)
+        platform_obj.post_tailscale_ready(refreshed, platform_ctx)
 
     # The keepalive hold spans BOTH init phases: WSL2 anchors its distro
     # against idle shutdown between Phase A (wsl.exe transport) and Phase B
@@ -283,14 +287,17 @@ def create_vm(
 
     with ExitStack() as init_stack:
         with output.section("Provisioning"):
-            # Provisioning-phase runup: authenticate the platform's own
-            # credential (proxmox API token) before create() mutates anything. A
+            # Provisioning-phase runup: the platform's own authenticated
+            # pre-check before create() mutates anything (proxmox authenticates
+            # its API token; azure resolves its credential, which on a site with
+            # a configured service principal means reading and probing the
+            # client secret, and confirms the resource group exists). A
             # definitive rejection aborts here, before the DB row or any backend
             # resource exists (the FATAL policy: nothing realized, nothing to
             # unwind). Runup is deferred and announced inline (no phase of its
-            # own); lima/wsl2/azure have no token, so this is a silent no-op for
-            # them. The credentials' write-step runup stays deferred into
-            # initialization, under the skip-and-degrade policy.
+            # own); lima and wsl2 have nothing to authenticate, so it is a
+            # silent no-op for them. The credentials' write-step runup stays
+            # deferred into initialization, under the skip-and-degrade policy.
             site_node.runup(scoped_ctx(site_node.secret_refs()))
             tailscale_auth_key = scoped_ctx(template_node.secret_refs()).secret(vm_tmpl.tailscale_auth_key)
             # Each credential's token, read through its node's SCOPED delivery.
@@ -416,6 +423,7 @@ def create_vm(
                     vm_name,
                     result.native_transport,
                     platform_obj,
+                    platform_ctx,
                     admin_username=resolved_admin_username,
                     tailscale_auth_key=tailscale_auth_key,
                     git_tokens=git_tokens,
@@ -614,7 +622,7 @@ def reinit_vm(
         with output.section("Preflight"):
             output.info(f"Checking vm-site/{vm.site}...")
             _mgr.announce_git_credentials(providers)
-            preflight_all(nodes, RunContext(config=config, operation_scope=scope))
+            preflight_all(nodes, RunContext(config=config, operation_scope=scope), registry=registry)
 
         with output.section("Resolving Secrets"):
             resolver.resolve()

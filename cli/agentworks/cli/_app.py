@@ -114,7 +114,7 @@ def _global_options(
         bool,
         typer.Option(
             "--no-deprecations",
-            help="Suppress deprecation warnings (e.g. TOML resource sections)",
+            help="Silence the ambient per-command deprecation banner (agw doctor always reports deprecation health)",
         ),
     ] = False,
 ) -> None:

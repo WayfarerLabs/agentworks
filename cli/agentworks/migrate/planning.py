@@ -487,14 +487,12 @@ def _emit_document(doc: tomlkit.TOMLDocument, unit: MigrationUnit) -> str:
 
     if unit.kind == "git-credential":
         # TOML accepts type (legacy) or provider (alias); the manifest
-        # surface only ever has spec.provider. Pop BOTH before
+        # surface emits one tagged spec.provider table. Pop BOTH before
         # rebuilding so the precedence (provider wins, matching the TOML
         # loader) is explicit rather than an artifact of dict-literal
-        # ordering. Kind-owned token stays top-level; everything else
-        # (azdo's org) is provider-owned and nests under
-        # provider_config -- the YAML shape diverges from flat TOML by
-        # design, and the post-run registry-equivalence verification
-        # proves the divergence is shape-only.
+        # ordering. The YAML shape diverges from flat TOML by design,
+        # and the post-run registry-equivalence verification proves the
+        # divergence is shape-only.
         legacy = spec.pop("type", None)
         provider = spec.pop("provider", None) or legacy
         # token is provider config now: it nests with everything else

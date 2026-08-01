@@ -95,7 +95,7 @@ agw console delete my-console              # Extra shells are lost but sessions 
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | `--non-interactive` | Disable all interactive prompts                                                                                                             |
 | `--debug`           | Print the full traceback on unhandled errors, and show the Azure SDK's own log lines that are otherwise suppressed (also via `AGW_DEBUG=1`) |
-| `--no-deprecations` | Suppress deprecation warnings (e.g. the TOML resource-section nudge)                                                                        |
+| `--no-deprecations` | Silence the ambient per-command deprecation banner (`agw doctor` always reports deprecation health)                                         |
 
 When `--non-interactive` is set (or stdin is not a TTY), commands that would normally prompt for
 missing values (VM selection, workspace selection, name generation) will fail with a clear error
@@ -126,10 +126,12 @@ can roll back (e.g. `vm create` during the provisioning phase, `workspace create
 `session create`) it undoes the partial DB / on-VM state and prints `Cancelling X... rolling back.`.
 On Azure, the `vm create` provisioning-phase rollback also deletes the partially created cloud
 resources (VM, NIC, public IP, NSG, vnet, disk), which can take a minute or two; a second Ctrl-C
-abandons that cleanup, printing the resource group and name prefix to remove manually. Where
-rollback isn't possible (`vm reinit`, `agent reinit`, the init phase of `vm create`) it prints a
-recovery hint: the next command to run (`vm reinit`, `vm delete --force`, ...). Every cancellation
-exits with the conventional SIGINT exit code (130).
+abandons that cleanup, printing the resource group and name prefix to remove manually. On Proxmox it
+likewise stops and deletes the partially cloned VM (cancelling a still-running clone task first); a
+second Ctrl-C abandons that cleanup, printing the node and VMID to delete manually. Where rollback
+isn't possible (`vm reinit`, `agent reinit`, the init phase of `vm create`) it prints a recovery
+hint: the next command to run (`vm reinit`, `vm delete --force`, ...). Every cancellation exits with
+the conventional SIGINT exit code (130).
 
 ## Commands
 
@@ -757,7 +759,9 @@ Resource kinds (YAML manifests; the deprecated TOML section is noted for each):
 
 - `vm-site` (`[azure]` / `[proxmox]`, flat legacy shape): a configured place to create VMs.
   `spec.platform` is one tagged table: its `name` key selects the backing platform and the remaining
-  keys are its settings (Azure subscription/resource-group/region, Proxmox API endpoint + token
+  keys are its settings (Azure subscription/resource-group/region plus an optional
+  `service_principal` block to authenticate as a specific service principal instead of with ambient
+  credentials, Proxmox API endpoint + token
   secret, remote-Lima `vm_host`). The `lima-local` and `wsl2` sites ship built in (on hosts where
   their platform can run) and their names are reserved
 - `vm-platform`: read-only capability rows for the VM platforms (`lima`, `wsl2` built in; `azure-vm`

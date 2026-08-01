@@ -566,7 +566,7 @@ def test_shell_platform_transport_routes_through_the_node_platform(
     _reachable(monkeypatch, True)
     seen: list[object] = []
 
-    def _fake_native(vm: object, platform: object, cfg: object, *, stack: object) -> object:
+    def _fake_native(vm: object, platform: object, cfg: object, *, ctx: object, stack: object) -> object:
         seen.append(platform)
         return SimpleNamespace(interactive=lambda cmd, **k: 0)
 
@@ -581,3 +581,45 @@ def test_shell_platform_transport_routes_through_the_node_platform(
 
     (platform,) = seen
     assert isinstance(platform, ProxmoxPlatform)
+
+
+def test_shell_platform_transport_hands_a_secret_bearing_ctx(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """--platform hands the native-transport factory the BOUNDARY's
+    op-start context, not a fresh empty one.
+
+    This is the load-bearing half of the ctx threading: a cold
+    ``vm shell --platform`` on a running VM never touches the platform
+    with a context first (the gate's happy path is a pure Tailscale
+    reachability probe), so if this call site handed over a secret-less
+    context, a platform whose transport needs a credential would have
+    no delivery surface at all and could only work by accident, off a
+    cache some earlier op happened to warm. The pin: the delivered
+    context can read the site's declared secret.
+    """
+    from agentworks.errors import StateError
+
+    config = make_config()
+    _seed_vm(db)
+    _reachable(monkeypatch, True)
+    seen: list[RunContext] = []
+
+    def _fake_native(vm: object, platform: object, cfg: object, *, ctx: RunContext, stack: object) -> object:
+        seen.append(ctx)
+        return SimpleNamespace(interactive=lambda cmd, **k: 0)
+
+    monkeypatch.setattr("agentworks.transports.native_transport", _fake_native)
+    monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: None)
+
+    assert vm_manager.shell_vm(db, config, "box", platform_transport=True) == 0
+
+    (ctx,) = seen
+    assert ctx.secret("proxmox-token") == "pve-token"
+    # And scoped: a name the site never declared is refused, so the
+    # delivery is the site's own, not the whole boundary's values.
+    with pytest.raises(StateError, match="not declared by this node"):
+        ctx.secret("vm-env-secret")

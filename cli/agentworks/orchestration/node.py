@@ -53,6 +53,7 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
+    from agentworks.resources.reference import ResourceReference
 
 
 @runtime_checkable
@@ -86,7 +87,10 @@ class Node(Readiness, Protocol):
     names this node's readiness and ops consume, including those of any
     held capability instances (secrets are inputs the orchestrator
     resolves, never nodes). A node never calls another node's lifecycle
-    stages and never resolves a secret.
+    stages and never resolves a secret, and it never PREDICTS whether
+    one would resolve: how a declared secret gets a value is the
+    operation's concern, handled in the preflight sweep
+    (:func:`~agentworks.orchestration.readiness.preflight_all`).
     """
 
     @property
@@ -98,6 +102,26 @@ class Node(Readiness, Protocol):
     def deps(self) -> tuple[Node, ...]: ...
 
     def secret_refs(self) -> tuple[str, ...]: ...
+
+    def config_secret_refs(self) -> tuple[ResourceReference, ...]:
+        """This node's declared CONFIG-secret references, as full
+        references rather than the bare names ``secret_refs`` returns.
+
+        The two surfaces answer different questions and are not
+        redundant. ``secret_refs`` is the resolve union: every name this
+        node's readiness and ops consume, whatever their origin
+        (a template field, a runtime env block, a held instance's
+        config). This one is narrower and richer: only the references
+        that came from a consuming resource's declared config, carrying
+        the ``usage`` prose that makes an operator-facing error say what
+        the secret is FOR. The preflight sweep predicts resolvability
+        over exactly these, which is why the type has to survive.
+
+        Most node kinds declare no config secrets and return ``()``;
+        today ``vm-site`` (its platform's API credential) and
+        ``git-credential`` (its provider's token) are the two that do.
+        """
+        ...
 
 
 @runtime_checkable

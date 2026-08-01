@@ -25,7 +25,7 @@ from ._helpers import (
     _require_vm,
     _vm_scope,
 )
-from .boundary import _live_vm_boundary
+from .boundary import _live_vm_boundary, _platform_ops_ctx
 
 if TYPE_CHECKING:
     from agentworks.config import Config
@@ -313,7 +313,7 @@ def start_vm(db: Database, config: Config, name: str) -> None:
     # internal late resolve (the documented conditional-need exception):
     # there is no gate here to hand a lazy reader through.
     with vm_node.hold_active():
-        _mgr._ensure_tailscale(db, config, vm, platform, already_running=status == VMStatus.RUNNING)
+        _mgr._ensure_tailscale(db, config, vm, platform, ops_ctx, already_running=status == VMStatus.RUNNING)
     # Only emit "is ready" on the path that actually started the VM. When
     # status was already RUNNING we already said so above, and Tailscale
     # verification is usually a no-op (handshake already valid), so an
@@ -452,7 +452,7 @@ def delete_vm(
         if vm.tailscale_host:
             try:
                 with vm_node.hold_active():
-                    _mgr._tailscale_logout(vm, config, platform)
+                    _mgr._tailscale_logout(vm, config, platform, ops_ctx)
             except UserAbort:
                 raise
             except Exception as e:
@@ -502,9 +502,8 @@ def rekey_vm(
     VM node, because the new auth key IS this command's planned op
     (the contrast with reinit, whose graph deliberately excludes the
     template: there the key belongs only to the gate's conditional
-    repair path). The template's readiness (predict the key
-    resolvable) runs in the preflight sweep and the key joins the ONE
-    boundary resolve, mirroring HEAD's interleaved
+    repair path). The sweep predicts the template's declared key and
+    the key joins the ONE boundary resolve, mirroring HEAD's interleaved
     preflight-then-single-resolve exactly; this migration is what
     retired the ``preflight_vm_template`` delegate. The running check
     stays past the boundary (a backend status read; on proxmox it
@@ -533,9 +532,10 @@ def rekey_vm(
     _guard_failed_vm(vm)
 
     # The composition root: construct (registers the site's config
-    # secrets), preflight both participating resources (the vm-template
-    # predicts the new auth key can resolve; the platform checks its
-    # world), then the operation's one resolve pass: the new auth key
+    # secrets), preflight both participating resources (the sweep
+    # predicts the new auth key can resolve over the vm-template's
+    # declaration; the platform checks its world), then the operation's
+    # one resolve pass: the new auth key
     # and any site secret (proxmox's API token) in a single prompt
     # session. The template node roots FIRST so the sweep keeps HEAD's
     # precedence (template readiness before the platform preflight).
@@ -548,7 +548,7 @@ def rekey_vm(
     resolver = Resolver(config, registry)
     vm_node = live_vm_node(db, config, registry, vm)
     rekey_vm_tmpl = resolve_template(registry, vm.template)
-    tmpl_node = vm_template_node(rekey_vm_tmpl, registry)
+    tmpl_node = vm_template_node(rekey_vm_tmpl)
     nodes = walk(tmpl_node, vm_node)
     for secret_name in secret_union(nodes):
         resolver.register_name(secret_name)
@@ -558,20 +558,14 @@ def rekey_vm(
     ts_decl = resolver.register_name(rekey_vm_tmpl.tailscale_auth_key)
     scope = _vm_scope(db, name)
     with _mask_env_var_backend_for(ts_decl, masked=ignore_env):
-        preflight_all(nodes, RunContext(config=config, operation_scope=scope))
+        preflight_all(nodes, RunContext(config=config, operation_scope=scope), registry=registry)
         resolver.resolve()
     ts_auth_key = resolver.get(rekey_vm_tmpl.tailscale_auth_key)
 
     # The running check is an op (a backend status read), so it sits
     # past the boundary: on proxmox it needs the API token, delivered
     # scoped to the site's declared names.
-    from agentworks.orchestration.secrets import ScopedSecrets
-
-    ops_ctx = RunContext(
-        config=config,
-        operation_scope=scope,
-        secrets=ScopedSecrets(resolver.values, vm_node.site.secret_refs()),
-    )
+    ops_ctx = _platform_ops_ctx(config, scope, vm_node, resolver)
     platform = vm_node.site.platform
     status = platform.status(vm, ops_ctx)
     if status != VMStatus.RUNNING:
@@ -599,8 +593,10 @@ def rekey_vm(
         # scoped ephemeral SSH allow on enter and deletes it on exit)
         # with the platform-native transport builder and the 6-attempt
         # reachability probe. The caller-supplied ExitStack scopes the
-        # transient state to the duration of the rekey.
-        exec_target = native_transport(vm, platform, config, stack=_stack)
+        # transient state to the duration of the rekey; ``ops_ctx``
+        # delivers the SP credential to those NSG calls with no ambient
+        # fallback.
+        exec_target = native_transport(vm, platform, config, ctx=ops_ctx, stack=_stack)
 
         # Restart, logout, login, restart. The initial restart clears any
         # stale daemon state (a previous interrupted rekey can leave the

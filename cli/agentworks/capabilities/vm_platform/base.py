@@ -192,8 +192,8 @@ class VMPlatform(Capability):
           an operator interrupt (``KeyboardInterrupt``) propagate: the
           caller's unwind deletes only the DB row, so any backend
           resource left behind is orphaned with nothing to target it.
-          Azure implements both arms (see #338); the other in-tree
-          platforms do not roll back partial backend state yet (#340).
+          Azure (see #338) and proxmox implement both arms; Lima and
+          WSL2 do not roll back partial backend state yet (#340).
         - Return ``ProvisionResult`` with ``platform_metadata``
           capturing whatever identifiers subsequent ops need, without
           relying on live configuration (e.g. proxmox records the node
@@ -243,7 +243,7 @@ class VMPlatform(Capability):
         proxmox ``vmid@node``). Reads ``vm.platform_metadata``.
         """
 
-    def native_transport(self, vm: VMRow, *, config: Config | None = None) -> Transport | None:
+    def native_transport(self, vm: VMRow, ctx: RunContext, *, config: Config | None = None) -> Transport | None:
         """Platform-native :class:`Transport` for bootstrap and
         ``vm shell --platform``, or ``None`` when the platform has no
         interactive native transport (proxmox: one-shot QEMU guest-agent
@@ -255,13 +255,20 @@ class VMPlatform(Capability):
         reachability probe, and raises a typed ``StateError`` (with the
         platform's console hint) on ``None``.
 
+        ``ctx`` is the op-start :class:`RunContext`, exactly as the ops
+        receive it (see :meth:`create`): building a native transport is
+        backend work like any other, and a platform whose backend API
+        needs a credential reads it here via ``ctx.secret(name)``. Azure
+        needs it (its network/compute clients resolve the transient
+        public IP); lima and wsl2 accept and ignore it.
+
         ``config`` carries OPERATOR settings (azure needs
         ``config.operator.ssh_private_key`` for the public-IP path),
         distinct from the bound ``platform_config``.
         """
         return None
 
-    def post_tailscale_ready(self, vm: VMRow) -> None:  # noqa: B027  # intentional concrete no-op
+    def post_tailscale_ready(self, vm: VMRow, ctx: RunContext) -> None:  # noqa: B027  # intentional concrete no-op
         """Hook called once the VM's Tailscale node is up during create.
 
         Default no-op. The hook's contract is "close provisioning
@@ -275,9 +282,15 @@ class VMPlatform(Capability):
         (cloud-init needs inbound SSH) and closes at an async
         Tailscale-ready point inside ``bootstrap_vm`` (Phase A),
         neither of which is an ExitStack-shaped lifecycle.
+
+        ``ctx`` is the op-start :class:`RunContext` (see
+        :meth:`create`): closing the ingress is a backend call and
+        reads any credential it needs from it. With a service principal
+        configured there is no ambient fallback, so the caller must hand
+        the real scoped context (the create op's own).
         """
 
-    def secure_failed_vm(self, vm: VMRow) -> None:  # noqa: B027  # intentional concrete no-op
+    def secure_failed_vm(self, vm: VMRow, ctx: RunContext) -> None:  # noqa: B027  # intentional concrete no-op
         """Hook called when a create is kept without completing Phase A:
         the bootstrap or Tailscale verification died (the row is marked
         FAILED) or the operator interrupted it mid-bootstrap (the row
@@ -295,9 +308,20 @@ class VMPlatform(Capability):
         --platform`` pokes a fresh transient allow via
         :meth:`transient_route`, and platform consoles outside the
         firewalled path (Azure's serial console) are unaffected.
+
+        ``ctx`` is the op-start :class:`RunContext` (see
+        :meth:`create`): closing the ingress is a backend call and
+        reads any credential it needs from it. The caller passes the
+        create op's own scoped context, whose secrets are already
+        resolved (the boundary resolve ran before Phase A began), so
+        even the interrupt path never resolves a secret here for the
+        first time; with a service principal configured there is no
+        ambient fallback.
         """
 
-    def transient_route(self, vm: VMRow, *, config: Config | None = None) -> AbstractContextManager[None]:
+    def transient_route(
+        self, vm: VMRow, ctx: RunContext, *, config: Config | None = None
+    ) -> AbstractContextManager[None]:
         """Hold any platform-native transient network state while the
         native transport is in use.
 
@@ -309,8 +333,12 @@ class VMPlatform(Capability):
         state is bounded by the caller's :class:`contextlib.ExitStack`
         scope.
 
-        ``config`` carries OPERATOR settings, mirroring
-        :meth:`native_transport` and :meth:`vm_active` (azure reads
+        ``ctx`` is the op-start :class:`RunContext` (see
+        :meth:`create`): opening and closing the route are backend calls
+        and read any credential they need from it, with no ambient
+        fallback when a service principal is configured. ``config``
+        carries OPERATOR settings, mirroring :meth:`native_transport`
+        and :meth:`vm_active` (azure reads
         ``config.operator.ssh_allow_cidrs`` to widen the allow's scope),
         distinct from the bound ``platform_config``.
         """
@@ -336,5 +364,11 @@ class VMPlatform(Capability):
         to anchor the distro against ``vmIdleTimeout``. ``config`` is
         reserved operator settings, available to a platform whose hold
         needs them (none does today).
+
+        No ``ctx`` here, unlike :meth:`transient_route`: every hold that
+        exists is local (wsl2 runs ``wsl.exe``), so none makes a backend
+        call and none needs a credential. A platform whose hold does
+        (a cloud API "keep this instance awake") threads ``ctx`` in the
+        same way the transport hooks did.
         """
         return nullcontext()

@@ -83,14 +83,21 @@ class VMSiteNode:
     def secret_refs(self) -> tuple[str, ...]:
         return tuple(ref.name for ref in self._secret_refs)
 
-    def preflight(self, ctx: RunContext) -> None:
-        # Central prediction over the site's declared config secrets
-        # (the platform API credential), with the old per-instance
-        # owner/usage error framing; then the held instance's own
-        # world checks.
-        from agentworks.orchestration.secrets import require_predicted_refs
+    def config_secret_refs(self) -> tuple[ResourceReference, ...]:
+        # The platform's API credential, as declared. The preflight
+        # sweep predicts resolvability over these; the site itself does
+        # not, because how a secret gets a value is the operation's
+        # concern and not the site's.
+        return self._secret_refs
 
-        require_predicted_refs(self.key, self._secret_refs, ctx.config, self._registry)
+    def preflight(self, ctx: RunContext) -> None:
+        # The site checks that its own declarations are INTACT (the
+        # names its config named reach real registry rows), which is
+        # registry consistency and legitimately its concern; then the
+        # held instance's own world checks.
+        from agentworks.orchestration.secrets import require_declared_refs
+
+        require_declared_refs(self.key, self._secret_refs, self._registry)
         self._platform.preflight(ctx)
 
     def runup(self, ctx: RunContext) -> None:
@@ -146,6 +153,9 @@ class LiveVMNode:
         return (self._site,)
 
     def secret_refs(self) -> tuple[str, ...]:
+        return ()
+
+    def config_secret_refs(self) -> tuple[ResourceReference, ...]:
         return ()
 
     def preflight(self, ctx: RunContext) -> None: ...
@@ -205,6 +215,14 @@ class LiveVMNode:
         self._observed = observed
         # RUNNING or UNKNOWN proceeds: a transient status failure must
         # not trigger a spurious start; the real op surfaces the error.
+        # That degrade covers the BACKEND read only. A failure in the
+        # credential layer beneath it does not reach here as UNKNOWN: a
+        # platform with explicitly configured credentials (an azure site
+        # with a service_principal) raises a typed error instead, and
+        # deliberately so, since its identity layer cannot distinguish a
+        # rejected credential from an unreachable one and reporting
+        # UNKNOWN would hide a misconfiguration behind a plausible
+        # answer. Same stance as that platform's fatal runup.
         return observed in (VMStatus.STOPPED, VMStatus.DEALLOCATED)
 
     def auto_start(self, gate_secrets: SecretReader) -> None:
@@ -250,6 +268,10 @@ class LiveVMNode:
                 self._config,
                 self._row,
                 platform,
+                # The same gate-scoped ops context the start above ran
+                # under: the rejoin's platform-native transport is a
+                # backend call too (Azure attaches a public IP for it).
+                self._gate_ops_ctx(gate_secrets),
                 auth_key_source=rejoin_auth_key,
             )
 
@@ -258,16 +280,18 @@ class LiveVMNode:
 
 
 class VMTemplateNode:
-    """The resolved ``vm-template`` node: the template's readiness,
-    formerly the free function ``preflight_vm_template``, relocated
-    here so it has the same home every other readiness check has.
-    Built by :func:`vm_template_node`. Holds the registry because the
-    readiness check predicts centrally over the key's declaration.
+    """The resolved ``vm-template`` node: the template's graph identity
+    and its declared Tailscale auth key. Built by
+    :func:`vm_template_node`.
+
+    Holds no registry. It used to, solely so its ``preflight`` could
+    predict the auth key's resolvability over that key's declaration;
+    with prediction moved to the operation's preflight sweep, the node
+    declares the reference and nothing reads a registry through it.
     """
 
-    def __init__(self, tmpl: ResolvedVMTemplate, registry: Registry) -> None:
+    def __init__(self, tmpl: ResolvedVMTemplate) -> None:
         self._tmpl = tmpl
-        self._registry = registry
 
     @property
     def key(self) -> str:
@@ -289,40 +313,39 @@ class VMTemplateNode:
         # roots), never in a provisioning command's boundary pass.
         return (self._tmpl.tailscale_auth_key,)
 
-    def preflight(self, ctx: RunContext) -> None:
-        """The template's readiness: its Tailscale auth key must be
-        predicted resolvable, without prompting, via the central
-        prediction over its declaration. The key is the template's
-        responsibility, not the site's; the declaration lookup rides
-        ``secret_declarations``'s lookup-or-synthesize fallback (an
-        operator with no ``[secrets.*]`` sections still gets a
-        callable backend chain)."""
-        from agentworks.errors import ConfigError
-        from agentworks.orchestration.secrets import (
-            predict_resolution,
-            secret_declarations,
-        )
-        from agentworks.secrets.resolve import active_backends
+    def config_secret_refs(self) -> tuple[ResourceReference, ...]:
+        """The Tailscale auth key, as the reference the vm-template kind
+        itself publishes (:func:`~agentworks.vms.template
+        .tailscale_secret_reference`, single-sourced with what
+        ``dependencies`` emits at finalize).
 
-        if ctx.config is None:
-            raise ConfigError(
-                f"vm-template '{self._tmpl.name}': cannot predict the "
-                f"Tailscale auth key's resolvability without config on "
-                f"the context (assembled for inspection?)"
-            )
-        (decl,) = secret_declarations([self._tmpl.tailscale_auth_key], self._registry)
-        predicted = predict_resolution((decl,), active_backends(ctx.config, self._registry))
-        if predicted[decl.name] is None:
-            raise ConfigError(
-                f"vm-template '{self._tmpl.name}': the Tailscale auth key "
-                f"secret '{decl.name}' is not resolvable by any active "
-                f"backend",
-                hint=(
-                    f"`agw secret describe {decl.name}` shows how each "
-                    "backend looks the secret up; set the env var, add a "
-                    "backend mapping, or extend [secret_config].backends."
-                ),
-            )
+        The preflight sweep predicts resolvability over this; the node
+        does not, on the same rule the vm-site and git-credential nodes
+        follow. The key is still the TEMPLATE's responsibility rather
+        than the site's, and it still stays out of a reinit's boundary
+        (that command's graph deliberately excludes this node); what
+        moved is only who asks whether a declared name would resolve.
+        Conditionality is unchanged either way, because it was never
+        expressed in the check: the node either participates in the
+        command's graph or it does not.
+        """
+        from agentworks.vms.template import tailscale_secret_reference
+
+        return (tailscale_secret_reference(self._tmpl.tailscale_auth_key, self._tmpl.name),)
+
+    def preflight(self, ctx: RunContext) -> None:
+        """No-op. The template's one readiness concern was its auth key's
+        resolvability, which is now the preflight sweep's
+        (:meth:`config_secret_refs` is what it predicts over).
+
+        Deliberately no intactness check either, unlike the vm-site and
+        git-credential nodes: those verify their declared names reach
+        real registry rows, but the auth key rides
+        ``secret_declarations``'s lookup-or-synthesize fallback on
+        purpose, so an operator with no ``[secrets.*]`` sections at all
+        still gets a callable backend chain. Requiring a row here would
+        retire that fallback as a side effect.
+        """
 
     def runup(self, ctx: RunContext) -> None: ...
 
@@ -365,6 +388,9 @@ class PendingVMNode:
         return (self._template, self._site, *self._credentials)
 
     def secret_refs(self) -> tuple[str, ...]:
+        return ()
+
+    def config_secret_refs(self) -> tuple[ResourceReference, ...]:
         return ()
 
     def preflight(self, ctx: RunContext) -> None: ...
@@ -449,11 +475,11 @@ def live_vm_node(
     return LiveVMNode(db, config, registry, row, site)
 
 
-def vm_template_node(tmpl: ResolvedVMTemplate, registry: Registry) -> VMTemplateNode:
+def vm_template_node(tmpl: ResolvedVMTemplate) -> VMTemplateNode:
     """Build the ``vm-template/<name>`` node from the RESOLVED template
     (inheritance already applied; the resolved object is the backing
     data, the way a row backs a live node)."""
-    return VMTemplateNode(tmpl, registry)
+    return VMTemplateNode(tmpl)
 
 
 def pending_vm_node(

@@ -12,6 +12,19 @@ issues, on Windows it's gated off (OpenSSH bug).
 See [plan.md](plan.md) for the full per-phase detail. These specs are accurate as of this date and
 are now locked.
 
+## Addendum: 2026-07-30 (issue #199)
+
+The two hooks this SDD introduced now take the op-start `RunContext`:
+`transient_route(vm, ctx, *, config=None)` and `post_tailscale_ready(vm, ctx)`, alongside
+`native_transport(vm, ctx, *, config=None)` and a matching keyword-only `ctx` on the
+`agentworks.transports.native_transport` factory. (The `#341` `secure_failed_vm` hook, added the day
+after this and covered in the next entry, takes `ctx` for the same reason.) The hooks' shape,
+lifecycle, and the `transient_route` / `post_tailscale_ready` asymmetry this SDD's HLA argues for
+are otherwise unchanged; only the parameter list moved. The reason is that Azure's route open/close
+and its transport builder are backend calls, so on a site with explicitly configured credentials
+they need the same scoped secret delivery every op gets, with no ambient fallback. See the
+2026-07-30 addendum in `docs/sdd/2026-07-01-vm-sites/locked.md` for the full note.
+
 ## 2026-07-31: Azure attach/detach mechanism retired
 
 The Azure public-IP detach mechanism described in `frd.md`, `hla.md`, and `plan.md`
@@ -20,7 +33,8 @@ retired. Driver: Microsoft is retiring default outbound access, which made VMs w
 public IP go offline. Azure VMs now keep their public IP for the VM's whole lifetime; the NSG
 carries a permanent deny-all-inbound baseline, and SSH ingress happens only through an ephemeral
 allow rule scoped to the operator's egress IP, opened for bootstrap and for each native route
-(`transient_route`) and deleted after (post-Tailscale, on create failure, and on route exit). The
-hook and route seams this SDD introduced are unchanged; only Azure's implementation behind them
-changed. Living reference: `cli/agentworks/plugins/azure/platform.py`,
-`cli/agentworks/plugins/azure/network.py`, and ADR 0003.
+(`transient_route`) and deleted after (post-Tailscale, on create failure via the new
+`secure_failed_vm` hook, and on route exit). The hook and route seams this SDD introduced are
+unchanged; only Azure's implementation behind them changed, and the `ctx` threading from the
+2026-07-30 addendum above carries through to the NSG calls. Living reference:
+`cli/agentworks/plugins/azure/platform.py`, `cli/agentworks/plugins/azure/network.py`, and ADR 0003.

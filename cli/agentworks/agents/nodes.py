@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     from agentworks.db import AgentRow, Database
     from agentworks.git_credentials.nodes import GitCredentialNode
     from agentworks.orchestration.node import Node
+    from agentworks.resources.reference import ResourceReference
     from agentworks.resources.registry import Registry
     from agentworks.vms.nodes import LiveVMNode
 
@@ -73,6 +74,9 @@ class AgentTemplateNode:
         # the token secrets ride the credential nodes' own secret_refs.
         return ()
 
+    def config_secret_refs(self) -> tuple[ResourceReference, ...]:
+        return ()
+
     def preflight(self, ctx: RunContext) -> None: ...
 
     def runup(self, ctx: RunContext) -> None: ...
@@ -114,6 +118,9 @@ class LiveAgentNode:
         return (self._vm,)
 
     def secret_refs(self) -> tuple[str, ...]:
+        return ()
+
+    def config_secret_refs(self) -> tuple[ResourceReference, ...]:
         return ()
 
     def preflight(self, ctx: RunContext) -> None: ...
@@ -185,6 +192,9 @@ class PendingAgentNode:
         return (self._template, self._vm)
 
     def secret_refs(self) -> tuple[str, ...]:
+        return ()
+
+    def config_secret_refs(self) -> tuple[ResourceReference, ...]:
         return ()
 
     def preflight(self, ctx: RunContext) -> None: ...

@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from agentworks.capabilities.base import OperationScope
     from agentworks.db import AgentRow, VMRow, WorkspaceRow
     from agentworks.orchestration.node import Node
+    from agentworks.resources.registry import Registry
     from agentworks.secrets.resolver import Resolver
     from agentworks.sessions.nodes import PendingSessionNode
     from agentworks.sessions.templates import ResolvedSessionTemplate
@@ -98,6 +99,7 @@ class SessionGraph:
     workspace_tmpl: ResolvedWorkspaceTemplate | None
     agent_tmpl: ResolvedAgentTemplate | None
     resolver: Resolver
+    registry: Registry
     scope: OperationScope
     template: ResolvedSessionTemplate
     nodes: tuple[Node, ...]

@@ -84,7 +84,7 @@ def _stop_the_vms(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> None:
     monkeypatch.setattr(
         vm_manager,
         "_ensure_tailscale",
-        lambda db, config, vm, platform, **k: events.append(f"tailscale:{vm.name}"),
+        lambda db, config, vm, platform, ctx, **k: events.append(f"tailscale:{vm.name}"),
     )
 
 
@@ -400,6 +400,7 @@ def test_batch_repair_path_resolves_the_rejoin_key_late(
         config_: object,
         vm: object,
         platform: object,
+        ctx: object,
         *,
         auth_key_source=None,  # noqa: ANN001
     ) -> None:

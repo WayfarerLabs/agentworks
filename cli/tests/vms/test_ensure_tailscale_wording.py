@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks import output
+from agentworks.capabilities.base import RunContext
 from agentworks.db import VMStatus
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.vms import manager as vm_manager
@@ -77,7 +78,7 @@ def test_already_running_probe_says_verifying_not_reconnect(
     vm = _seed_vm(db)
     _reachable(monkeypatch)
 
-    vm_manager._ensure_tailscale(db, config, vm, _bound_platform(db, config, vm), already_running=True)
+    vm_manager._ensure_tailscale(db, config, vm, _bound_platform(db, config, vm), RunContext(), already_running=True)
 
     assert any("Verifying Tailscale connectivity" in line for line in captured_output.detail)
     assert any("Tailscale SSH reachable" in line for line in captured_output.detail)
@@ -97,7 +98,7 @@ def test_cold_start_probe_keeps_reconnect_wording(
     vm = _seed_vm(db)
     _reachable(monkeypatch)
 
-    vm_manager._ensure_tailscale(db, config, vm, _bound_platform(db, config, vm))
+    vm_manager._ensure_tailscale(db, config, vm, _bound_platform(db, config, vm), RunContext())
 
     assert any("Waiting for Tailscale to reconnect" in line for line in captured_output.detail)
     assert any("several minutes" in line for line in captured_output.detail)
