@@ -205,6 +205,22 @@ def _select_vm_size(catalog: tuple[_VMSize, ...], *, cpus: int, memory_gib: int)
     return min(fits, key=lambda s: (s.cpus, s.memory_gib))
 
 
+# The marketplace image every VM is provisioned from. These feed the single
+# ImageReference in create(); keep them here so the OS-disk floor below stays
+# visibly coupled to the exact image it describes.
+IMAGE_PUBLISHER = "Debian"
+IMAGE_OFFER = "debian-12"
+IMAGE_SKU = "12-gen2"
+IMAGE_VERSION = "latest"
+
+# Minimum OS-disk size (GiB) baked into the image above. Azure rejects a VM
+# whose OS disk is smaller than the image's own disk, so a vm-template disk
+# below this is clamped up to it (see create()). This is not exposed on the
+# marketplace VirtualMachineImage model, so it is pinned by hand: keep it in
+# sync if IMAGE_SKU/IMAGE_VERSION change (a test asserts the pairing).
+IMAGE_OS_DISK_FLOOR_GIB = 30
+
+
 class AzureVMPlatform(VMPlatform):
     """Runs VMs on the Azure Virtual Machines service via the Azure
     Python SDK. Named ``azure-vm``, not ``azure``: the capability is
@@ -410,7 +426,13 @@ class AzureVMPlatform(VMPlatform):
                 f"({selected.cpus} vCPU / {selected.memory_gib} GiB) "
                 f"for requested {req_cpus} vCPU / {req_memory} GiB."
             )
-        disk = request.disk_gib if request.disk_gib is not None else 50
+        requested_disk = request.disk_gib if request.disk_gib is not None else 50
+        # Clamp the OS disk up to the image's minimum, mirroring the cpu/memory
+        # round-up above: Azure rejects a VM whose OS disk is smaller than the
+        # disk baked into the image, so a below-floor template disk grows to it.
+        disk = max(requested_disk, IMAGE_OS_DISK_FLOOR_GIB)
+        if disk != requested_disk:
+            output.warn(f"Rounded up to {disk} GiB OS disk (image minimum) for requested {requested_disk} GiB.")
         swap = request.swap_gib if request.swap_gib is not None else 0
         admin_username = request.admin_username
         tailscale_auth_key = request.tailscale_auth_key
@@ -586,10 +608,10 @@ class AzureVMPlatform(VMPlatform):
                     hardware_profile=HardwareProfile(vm_size=azure_vm_size),
                     storage_profile=StorageProfile(
                         image_reference=ImageReference(
-                            publisher="Debian",
-                            offer="debian-12",
-                            sku="12-gen2",
-                            version="latest",
+                            publisher=IMAGE_PUBLISHER,
+                            offer=IMAGE_OFFER,
+                            sku=IMAGE_SKU,
+                            version=IMAGE_VERSION,
                         ),
                         os_disk=OSDisk(
                             create_option="FromImage",
