@@ -30,7 +30,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from agentworks.capabilities.base import RunContext
-from agentworks.capabilities.vm_platform import ProvisionRequest
+from agentworks.capabilities.vm_platform import ProvisionRequest, ssh_exposure
 from agentworks.errors import ConfigError, ConnectivityError
 from agentworks.plugins.azure import network as azure_network
 from agentworks.plugins.azure.network import (
@@ -61,8 +61,10 @@ _DETECTED_PREFIX = f"{_DETECTED}/32"
 
 # The real detector, captured at import time so TestDetectEgressIp can
 # exercise it even though the autouse fixture stubs the module attribute
-# for every test.
-_REAL_DETECT_EGRESS_IP = azure_network.detect_egress_ip
+# for every test. Detection and its cache now live in the shared
+# ssh_exposure home (hoisted for aws reuse); the stubs target it there,
+# since operator_ssh_prefixes resolves the detector in that namespace.
+_REAL_DETECT_EGRESS_IP = ssh_exposure.detect_egress_ip
 
 
 @pytest.fixture(autouse=True)
@@ -70,15 +72,15 @@ def _stub_egress_detection(monkeypatch: pytest.MonkeyPatch) -> None:
     """Every test runs with detection stubbed (never a live probe) and a
     clean per-process cache; individual tests override the stub to drive
     the failure branches."""
-    monkeypatch.setattr(azure_network, "_egress_ip_cache", None)
-    monkeypatch.setattr(azure_network, "detect_egress_ip", lambda: _DETECTED)
+    monkeypatch.setattr(ssh_exposure, "_egress_ip_cache", None)
+    monkeypatch.setattr(ssh_exposure, "detect_egress_ip", lambda: _DETECTED)
 
 
 def _fail_detection(monkeypatch: pytest.MonkeyPatch) -> None:
     def _boom() -> str:
         raise OSError("no route to checkip")
 
-    monkeypatch.setattr(azure_network, "detect_egress_ip", _boom)
+    monkeypatch.setattr(ssh_exposure, "detect_egress_ip", _boom)
 
 
 def _fake_vm() -> Any:
@@ -598,7 +600,7 @@ class TestDetectEgressIp:
         mock_urlopen.return_value = _ip_response(b"<html>rate limited</html>")
         with pytest.raises(ValueError):
             _REAL_DETECT_EGRESS_IP()
-        assert azure_network._egress_ip_cache is None
+        assert ssh_exposure._egress_ip_cache is None
 
     @patch("urllib.request.urlopen")
     def test_whitespace_padded_ipv4_parses(self, mock_urlopen: MagicMock) -> None:
