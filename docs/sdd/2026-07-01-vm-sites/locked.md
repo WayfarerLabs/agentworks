@@ -222,3 +222,36 @@ references are superseded by this entry. See the resource-manifests lockfile's 2
 the full cross-kind revision (git-credential's provider and session-template's harness change
 identically). The 2026-07-30 addendum's `service_principal` block moves with the shape: it is now a
 nested table inside the tagged `spec.platform` table, same keys, same semantics.
+
+## Addendum: 2026-08-01 (the EC2 platform's transport, lead-ruled)
+
+The `ec2` platform (the `aws` system plugin, `cli/agentworks/plugins/aws/platform.py` and its
+`network.py`) ships as the second cloud platform. This SDD's `hla.md` sketched a prospective AWS
+platform reached over AWS Systems Manager (SSM Session Manager); the shipped platform deliberately
+does NOT use SSM. This addendum is authoritative over that sketch; the artifact is a point-in-time
+record and is not edited in place.
+
+The lead-settled decision: EC2 mirrors azure's redesigned exposure model rather than SSM. Tailscale
+is the steady-state transport on every platform, so the only thing a create-time transport must do
+is carry the bootstrap that joins Tailscale over a window that closes the moment Tailscale is up.
+EC2 keeps a permanent auto-assigned public IP (read live per use, since EC2 reassigns it across
+stop/start, never cached), and controls exposure entirely through security-group ingress rules: the
+baseline is the group's natural empty (deny-all-inbound) state, and SSH happens only through
+ephemeral rules on TCP/22 scoped to the operator's detected egress prefix plus
+`operator.ssh_allow_cidrs`, opened for bootstrap and each native route and revoked after
+(post-Tailscale, on create failure via `secure_failed_vm`, and on `transient_route` exit). This is
+the same deny-baseline / ephemeral-scoped-allow shape azure adopted in the 2026-07-31 addendum, so
+the two cloud platforms share the operator-egress detection (hoisted to
+`cli/agentworks/capabilities/vm_platform/ssh_exposure.py`) and the `create` rollback-on-failure-and-
+interrupt contract. SSM would add real prerequisites (an enrolled agent, an instance profile, VPC
+endpoints or NAT) for no steady-state benefit; it remains a plausible FUTURE alternative transport
+behind the same `native_transport` / `transient_route` hooks, out of scope here but not foreclosed.
+
+Two EC2-native divergences from azure are recorded in the vm-platform README and the code: an EC2
+security group needs no explicit deny rule (its empty state IS the baseline), and an EC2 ingress
+rule is identified by its `(protocol, port, cidr)` tuple rather than a name, so concurrent routes
+from one operator egress share one rule and the poke/remove are idempotent/tolerant and fail closed.
+The runup and status classify a definitive credential rejection apart from an unreachable endpoint
+(botocore can; azure-identity cannot), so EC2 follows proxmox's honest split there. Living
+reference: `cli/agentworks/plugins/aws/platform.py`, `cli/agentworks/plugins/aws/network.py`, and
+`cli/agentworks/capabilities/vm_platform/README.md`.
