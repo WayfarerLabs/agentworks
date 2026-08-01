@@ -8,6 +8,7 @@ to be reachable from anywhere in the CLI -- the `--non-interactive` and
 
 from __future__ import annotations
 
+import os
 import sys
 from typing import Annotated
 
@@ -38,19 +39,62 @@ def debug_enabled() -> bool:
     return _debug
 
 
+def _set_debug(enabled: bool) -> None:
+    """Record the effective debug state for this invocation (``_debug`` only).
+
+    Deliberately does NOT touch ``AGW_DEBUG``. Mirroring the env signal is a
+    separate step (:func:`_mirror_debug_to_env`) that fires only from the real
+    Typer callback, after Click's authoritative parse. Both debug entry points
+    (the pre-callback and the Typer callback) route through here so ``_debug``
+    is set the same way, but only the authoritative one is allowed to write the
+    env: the pre-callback's decision rests on an argv heuristic (see
+    :func:`_seed_debug_from_pre_callback`) that must never feed back into the
+    env the real callback later reads, or a false positive could not
+    self-correct.
+    """
+    global _debug  # noqa: PLW0603
+    _debug = enabled
+
+
+def _mirror_debug_to_env() -> None:
+    """Mirror the (authoritative) debug state into ``AGW_DEBUG``.
+
+    Called only from the real Typer callback, after ``_set_debug`` has recorded
+    the canonical debug state from Click's parsed ``--debug`` flag or the
+    ambient ``AGW_DEBUG``. Layers below the CLI then read one process-wide
+    signal without importing ``agentworks.cli`` (which would invert the
+    layering): the azure plugin, for instance, quiets azure-identity's own
+    credential-failure logging only when debug is off. ``debug_enabled``
+    already treats ``--debug`` and ``AGW_DEBUG=1`` as equivalent inputs; this
+    makes ``--debug`` imply the env signal too, closing the gap.
+
+    Only ever set, never cleared: when ``_debug`` is False the ambient
+    ``AGW_DEBUG`` was not "1" to begin with, so leaving it untouched keeps the
+    two consistent.
+    """
+    if _debug:
+        os.environ["AGW_DEBUG"] = "1"
+
+
 def _seed_debug_from_pre_callback() -> None:
     """Set ``_debug`` from sys.argv / AGW_DEBUG *before* Click parses anything.
 
     The typer callback below also sets ``_debug``, but it only fires after
     Click's own arg parsing succeeds. If the user passes ``--debug --bogus``,
-    Click raises BadParameter before the callback ever runs -- so without
+    Click raises BadParameter before the callback ever runs, so without
     this pre-pass, the user's ``--debug`` flag would be silently ineffective
     in exactly the case they're most likely to need it.
-    """
-    import os
 
-    global _debug  # noqa: PLW0603
-    _debug = "--debug" in sys.argv or os.environ.get("AGW_DEBUG") == "1"
+    The ``"--debug" in sys.argv`` match is a HEURISTIC: a literal ``--debug``
+    token that Click will not bind to the flag (a positional after ``--``, a
+    future passthrough arg) trips it too. That is acceptable for its only
+    consumer, the parse-error traceback path, which reads ``_debug`` directly.
+    Crucially this pre-pass sets ``_debug`` ONLY and never mirrors to
+    ``AGW_DEBUG`` (that is the real callback's job): otherwise the heuristic's
+    write would become the env value the real callback reads back, and a false
+    positive would stick instead of self-correcting against Click's parse.
+    """
+    _set_debug("--debug" in sys.argv or os.environ.get("AGW_DEBUG") == "1")
 
 
 @app.callback()
@@ -75,14 +119,15 @@ def _global_options(
     ] = False,
 ) -> None:
     """Global options for all commands."""
-    import os
-
     from agentworks import output
 
-    global _debug  # noqa: PLW0603
     output.set_non_interactive(non_interactive)
     output.set_suppress_deprecations(no_deprecations)
-    _debug = debug or os.environ.get("AGW_DEBUG") == "1"
+    # Authoritative: Click has parsed, so `debug` is the real flag. Recompute
+    # the canonical state (flag OR ambient AGW_DEBUG), then mirror it to the
+    # env for layers below the CLI. Only this callback writes AGW_DEBUG.
+    _set_debug(debug or os.environ.get("AGW_DEBUG") == "1")
+    _mirror_debug_to_env()
 
 
 # -- Interactivity gate ----------------------------------------------------
