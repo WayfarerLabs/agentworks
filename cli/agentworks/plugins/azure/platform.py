@@ -205,6 +205,22 @@ def _select_vm_size(catalog: tuple[_VMSize, ...], *, cpus: int, memory_gib: int)
     return min(fits, key=lambda s: (s.cpus, s.memory_gib))
 
 
+# The marketplace image every VM is provisioned from. These feed the single
+# ImageReference in create(); keep them here so the OS-disk floor below stays
+# visibly coupled to the exact image it describes.
+IMAGE_PUBLISHER = "Debian"
+IMAGE_OFFER = "debian-12"
+IMAGE_SKU = "12-gen2"
+IMAGE_VERSION = "latest"
+
+# Minimum OS-disk size (GiB) baked into the image above. Azure rejects a VM
+# whose OS disk is smaller than the image's own disk, so a vm-template disk
+# below this is clamped up to it (see create()). This is not exposed on the
+# marketplace VirtualMachineImage model, so it is pinned by hand: keep it in
+# sync if IMAGE_SKU/IMAGE_VERSION change (a test asserts the pairing).
+IMAGE_OS_DISK_FLOOR_GIB = 30
+
+
 class AzureVMPlatform(VMPlatform):
     """Runs VMs on the Azure Virtual Machines service via the Azure
     Python SDK. Named ``azure-vm``, not ``azure``: the capability is
@@ -410,7 +426,13 @@ class AzureVMPlatform(VMPlatform):
                 f"({selected.cpus} vCPU / {selected.memory_gib} GiB) "
                 f"for requested {req_cpus} vCPU / {req_memory} GiB."
             )
-        disk = request.disk_gib if request.disk_gib is not None else 50
+        requested_disk = request.disk_gib if request.disk_gib is not None else 50
+        # Clamp the OS disk up to the image's minimum, mirroring the cpu/memory
+        # round-up above: Azure rejects a VM whose OS disk is smaller than the
+        # disk baked into the image, so a below-floor template disk grows to it.
+        disk = max(requested_disk, IMAGE_OS_DISK_FLOOR_GIB)
+        if disk != requested_disk:
+            output.warn(f"Rounded up to {disk} GiB OS disk (image minimum) for requested {requested_disk} GiB.")
         swap = request.swap_gib if request.swap_gib is not None else 0
         admin_username = request.admin_username
         tailscale_auth_key = request.tailscale_auth_key
@@ -458,44 +480,76 @@ class AzureVMPlatform(VMPlatform):
             cloud_init = "#cloud-config\npackage_update: true\npackages:\n  - openssh-server\n"
         cloud_init_b64 = base64.b64encode(cloud_init.encode()).decode()
 
+        # SDK model classes are imported function-locally like the SDK
+        # clients so azure modules never load at CLI startup. They are what
+        # make the ARM request bodies serialize correctly: the models map
+        # flattened snake_case attributes (e.g. public_ip_allocation_method)
+        # into the nested ``properties`` envelope ARM expects, which raw
+        # dicts do not.
+        from azure.mgmt.compute.models import (
+            HardwareProfile,
+            ImageReference,
+            LinuxConfiguration,
+            ManagedDiskParameters,
+            NetworkInterfaceReference,
+            NetworkProfile,
+            OSDisk,
+            OSProfile,
+            SshConfiguration,
+            SshPublicKey,
+            StorageProfile,
+            VirtualMachine,
+        )
+        from azure.mgmt.network.models import (
+            AddressSpace,
+            NetworkInterface,
+            NetworkInterfaceIPConfiguration,
+            NetworkSecurityGroup,
+            PublicIPAddress,
+            PublicIPAddressSku,
+            SecurityRule,
+            Subnet,
+            VirtualNetwork,
+        )
+
         try:
             # Create public IP
             output.detail("Creating public IP...")
-            ip_poller = network.public_ip_addresses.begin_create_or_update(  # type: ignore[call-overload]
+            ip_poller = network.public_ip_addresses.begin_create_or_update(
                 az.resource_group,
                 f"{vm_name}-ip",
-                {
-                    "location": az.region,
-                    "sku": {"name": "Standard"},
-                    "public_ip_allocation_method": "Static",
-                    "tags": {"owner": "agentworks"},
-                },
+                PublicIPAddress(
+                    location=az.region,
+                    sku=PublicIPAddressSku(name="Standard"),
+                    public_ip_allocation_method="Static",
+                    tags={"owner": "agentworks"},
+                ),
             )
             ip_result = ip_poller.result()
             public_ip = ip_result.ip_address or ""
 
             # Create NSG with SSH rule
             output.detail("Creating network security group...")
-            nsg_poller = network.network_security_groups.begin_create_or_update(  # type: ignore[call-overload]
+            nsg_poller = network.network_security_groups.begin_create_or_update(
                 az.resource_group,
                 f"{vm_name}-nsg",
-                {
-                    "location": az.region,
-                    "security_rules": [
-                        {
-                            "name": "SSH",
-                            "protocol": "Tcp",
-                            "source_port_range": "*",
-                            "destination_port_range": "22",
-                            "source_address_prefix": "*",
-                            "destination_address_prefix": "*",
-                            "access": "Allow",
-                            "priority": 1000,
-                            "direction": "Inbound",
-                        }
+                NetworkSecurityGroup(
+                    location=az.region,
+                    security_rules=[
+                        SecurityRule(
+                            name="SSH",
+                            protocol="Tcp",
+                            source_port_range="*",
+                            destination_port_range="22",
+                            source_address_prefix="*",
+                            destination_address_prefix="*",
+                            access="Allow",
+                            priority=1000,
+                            direction="Inbound",
+                        )
                     ],
-                    "tags": {"owner": "agentworks"},
-                },
+                    tags={"owner": "agentworks"},
+                ),
             )
             nsg_result = nsg_poller.result()
 
@@ -505,84 +559,87 @@ class AzureVMPlatform(VMPlatform):
             # Need a subnet: use default VNet or create one
             vnet_name = f"{vm_name}{VNET_NAME_SUFFIX}"
             subnet_name = "default"
-            vnet_poller = network.virtual_networks.begin_create_or_update(  # type: ignore[call-overload]
+            vnet_poller = network.virtual_networks.begin_create_or_update(
                 az.resource_group,
                 vnet_name,
-                {
-                    "location": az.region,
-                    "address_space": {"address_prefixes": ["10.0.0.0/16"]},
-                    "subnets": [
-                        {
-                            "name": subnet_name,
-                            "address_prefix": "10.0.0.0/24",
-                        }
+                VirtualNetwork(
+                    location=az.region,
+                    address_space=AddressSpace(address_prefixes=["10.0.0.0/16"]),
+                    subnets=[
+                        Subnet(
+                            name=subnet_name,
+                            address_prefix="10.0.0.0/24",
+                        )
                     ],
-                    "tags": {"owner": "agentworks"},
-                },
+                    tags={"owner": "agentworks"},
+                ),
             )
             vnet_result = vnet_poller.result()
+            # The vnet was just created with exactly the one subnet above, so
+            # the returned resource always carries it back.
+            assert vnet_result.subnets is not None
             subnet_id = vnet_result.subnets[0].id
 
-            nic_poller = network.network_interfaces.begin_create_or_update(  # type: ignore[call-overload]
+            nic_poller = network.network_interfaces.begin_create_or_update(
                 az.resource_group,
                 f"{vm_name}-nic",
-                {
-                    "location": az.region,
-                    "ip_configurations": [
-                        {
-                            "name": "default",
-                            "subnet": {"id": subnet_id},
-                            "public_ip_address": {"id": ip_result.id},
-                        }
+                NetworkInterface(
+                    location=az.region,
+                    ip_configurations=[
+                        NetworkInterfaceIPConfiguration(
+                            name="default",
+                            subnet=Subnet(id=subnet_id),
+                            public_ip_address=PublicIPAddress(id=ip_result.id),
+                        )
                     ],
-                    "network_security_group": {"id": nsg_result.id},
-                    "tags": {"owner": "agentworks"},
-                },
+                    network_security_group=NetworkSecurityGroup(id=nsg_result.id),
+                    tags={"owner": "agentworks"},
+                ),
             )
             nic_result = nic_poller.result()
 
             # Create VM
             output.detail("Creating VM...")
-            vm_poller = compute.virtual_machines.begin_create_or_update(  # type: ignore[call-overload]
+            vm_poller = compute.virtual_machines.begin_create_or_update(
                 az.resource_group,
                 vm_name,
-                {
-                    "location": az.region,
-                    "hardware_profile": {"vm_size": azure_vm_size},
-                    "storage_profile": {
-                        "image_reference": {
-                            "publisher": "Debian",
-                            "offer": "debian-12",
-                            "sku": "12-gen2",
-                            "version": "latest",
-                        },
-                        "os_disk": {
-                            "create_option": "FromImage",
-                            "disk_size_gb": disk,
-                            "managed_disk": {"storage_account_type": "StandardSSD_LRS"},
-                        },
-                    },
-                    "os_profile": {
-                        "computer_name": vm_name,
-                        "admin_username": admin_username,
-                        "custom_data": cloud_init_b64,
-                        "linux_configuration": {
-                            "disable_password_authentication": True,
-                            "ssh": {
-                                "public_keys": [
-                                    {
-                                        "path": f"/home/{admin_username}/.ssh/authorized_keys",
-                                        "key_data": ssh_pub_key,
-                                    }
+                VirtualMachine(
+                    location=az.region,
+                    hardware_profile=HardwareProfile(vm_size=azure_vm_size),
+                    storage_profile=StorageProfile(
+                        image_reference=ImageReference(
+                            publisher=IMAGE_PUBLISHER,
+                            offer=IMAGE_OFFER,
+                            sku=IMAGE_SKU,
+                            version=IMAGE_VERSION,
+                        ),
+                        os_disk=OSDisk(
+                            create_option="FromImage",
+                            disk_size_gb=disk,
+                            managed_disk=ManagedDiskParameters(storage_account_type="StandardSSD_LRS"),
+                        ),
+                    ),
+                    os_profile=OSProfile(
+                        computer_name=vm_name,
+                        admin_username=admin_username,
+                        custom_data=cloud_init_b64,
+                        linux_configuration=LinuxConfiguration(
+                            disable_password_authentication=True,
+                            ssh=SshConfiguration(
+                                public_keys=[
+                                    SshPublicKey(
+                                        path=f"/home/{admin_username}/.ssh/authorized_keys",
+                                        key_data=ssh_pub_key,
+                                    )
                                 ]
-                            },
-                        },
-                    },
-                    "network_profile": {
-                        "network_interfaces": [{"id": nic_result.id}],
-                    },
-                    "tags": {"owner": "agentworks"},
-                },
+                            ),
+                        ),
+                    ),
+                    network_profile=NetworkProfile(
+                        network_interfaces=[NetworkInterfaceReference(id=nic_result.id)],
+                    ),
+                    tags={"owner": "agentworks"},
+                ),
             )
             vm_result = vm_poller.result()
             resource_id = vm_result.id or ""
@@ -709,29 +766,30 @@ class AzureVMPlatform(VMPlatform):
 
     def attach_public_ip(self, vm: VMRow) -> str:
         """Attach a temporary public IP to the VM's NIC. Returns the IP address."""
+        from azure.mgmt.network.models import PublicIPAddress, PublicIPAddressSku
+
         rg, name, az_cfg = _parse_resource_id(_resource_id(vm))
         network = self._network_client(az_cfg)
 
         try:
             # Create (or re-create) the public IP
             output.info("Attaching temporary public IP...")
-            ip_poller = network.public_ip_addresses.begin_create_or_update(  # type: ignore[call-overload]
+            ip_poller = network.public_ip_addresses.begin_create_or_update(
                 rg,
                 f"{name}-ip",
-                {
-                    "location": _get_vm_location(self._compute_client(az_cfg), vm),
-                    "sku": {"name": "Standard"},
-                    "public_ip_allocation_method": "Static",
-                    "tags": {"owner": "agentworks"},
-                },
+                PublicIPAddress(
+                    location=_get_vm_location(self._compute_client(az_cfg), vm),
+                    sku=PublicIPAddressSku(name="Standard"),
+                    public_ip_allocation_method="Static",
+                    tags={"owner": "agentworks"},
+                ),
             )
             ip_result = ip_poller.result()
 
             # Attach to NIC
             nic = network.network_interfaces.get(rg, f"{name}-nic")
             if nic.ip_configurations:
-                # Azure SDK accepts dict for PublicIPAddress at runtime despite type stubs
-                nic.ip_configurations[0].public_ip_address = {"id": ip_result.id}  # type: ignore[assignment]
+                nic.ip_configurations[0].public_ip_address = PublicIPAddress(id=ip_result.id)
             network.network_interfaces.begin_create_or_update(
                 rg,
                 f"{name}-nic",
