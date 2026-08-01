@@ -220,5 +220,5 @@ in-place manifest upgrade mode for `agw resource migrate` are deferred to the de
 effort (in progress, PR #316). The HLA is not edited in place (a point-in-time record); its shape
 references are superseded by this entry. See the resource-manifests lockfile's 2026-08-01 entry for
 the full cross-kind revision (git-credential's provider and session-template's harness change
-identically). The 2026-07-30 addendum's `service_principal` block moves with the shape: it is now
-a nested table inside the tagged `spec.platform` table, same keys, same semantics.
+identically). The 2026-07-30 addendum's `service_principal` block moves with the shape: it is now a
+nested table inside the tagged `spec.platform` table, same keys, same semantics.

@@ -161,10 +161,10 @@ spec:
   fallback) unless a `service_principal` table inside the platform table declares an explicit one,
   in which case its `tenant_id` / `client_id` are plain config and its `secret` field names the
   secret holding the client secret (default `azure-client-secret`). A site with a service principal
-  uses that identity and only that one: a rejected or expired client secret fails the command
-  rather than falling back to ambient credentials. `agw resource sample vm-site` shows the block.
-  The `proxmox` platform ships as the opt-in `proxmox` system plugin, so a proxmox site (declared
-  or legacy) is not-ready with an "enable plugin `proxmox`" hint and refused at use until you set
+  uses that identity and only that one: a rejected or expired client secret fails the command rather
+  than falling back to ambient credentials. `agw resource sample vm-site` shows the block. The
+  `proxmox` platform ships as the opt-in `proxmox` system plugin, so a proxmox site (declared or
+  legacy) is not-ready with an "enable plugin `proxmox`" hint and refused at use until you set
   `[plugins] system = ["proxmox"]`. The `azure-vm` platform likewise ships as the opt-in `azure`
   system plugin (which also provides the `azdo` git-credential provider and the `az-cli`
   install-command), so the `azure-dev` example above is not-ready with an "enable plugin `azure`"
