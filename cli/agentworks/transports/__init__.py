@@ -158,8 +158,9 @@ def native_transport(
     ``platform`` is the VM's bound platform, resolved at the caller's
     composition root (the node factories via ``resolve_site``). ``stack``
     bounds the lifetime of any transient network state the platform
-    needs (Azure attaches a public IP on enter and detaches on exit):
-    the platform's :meth:`VMPlatform.transient_route` runs first; once
+    needs (Azure lifts its deny-all-inbound NSG rule on enter, healing
+    a missing public IP first, and re-arms the rule on exit): the
+    platform's :meth:`VMPlatform.transient_route` runs first; once
     that context is held, the per-platform transport builder runs.
 
     A ``None`` from :meth:`VMPlatform.native_transport` (proxmox: the
@@ -171,9 +172,9 @@ def native_transport(
     Probes the resulting transport with ``echo ok`` and retries up to
     six times with a 3-second sleep between attempts (total budget ~15s
     of sleeps plus the per-attempt 10s timeout) so the Azure SDN has
-    time to propagate a freshly-attached public IP before the first
-    real command lands. Local transports (Lima, WSL2) succeed on the
-    first probe and skip the sleeps entirely.
+    time to apply a freshly-lifted NSG rule (or a freshly-healed public
+    IP) before the first real command lands. Local transports (Lima,
+    WSL2) succeed on the first probe and skip the sleeps entirely.
     """
     from agentworks import output
     from agentworks.ssh import SSHError
@@ -190,10 +191,10 @@ def native_transport(
 
     # Defensive: any SSH-backed native transport that returns an empty
     # host gets the same typed-error treatment. Azure is today's only
-    # such case (host="" when the public IP attach silently failed); a
+    # such case (host="" when the NIC unexpectedly has no public IP); a
     # future SSH-backed platform would inherit the guard. After
-    # transient_route this shouldn't happen on Azure (the context
-    # manager attaches before yielding). If it does, surface clearly
+    # transient_route this shouldn't happen on Azure (enter heals a
+    # missing public IP before yielding). If it does, surface clearly
     # rather than letting downstream calls hang on an empty hostname.
     if isinstance(target, SSHTransport) and not target.host:
         raise StateError(
@@ -202,10 +203,10 @@ def native_transport(
             entity_kind="vm",
             entity_name=vm.name,
             hint=(
-                "For Azure: the temporary public IP attach may have silently "
-                "failed; check the Azure portal for the VM's network "
-                "configuration, or use the serial console (Connect > Serial "
-                "console on the VM resource page)."
+                "For Azure: the VM's NIC has no public IP and the heal may "
+                "have silently failed; check the Azure portal for the VM's "
+                "network configuration, or use the serial console (Connect > "
+                "Serial console on the VM resource page)."
             ),
         )
 

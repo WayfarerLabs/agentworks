@@ -36,6 +36,17 @@ if TYPE_CHECKING:
 # 64 at the cap. Keep the two in sync (the test fails if this suffix grows).
 VNET_NAME_SUFFIX = "-vnet"
 
+# The NSG rule that firewalls all inbound traffic once Tailscale is
+# confirmed. Priority 100 sits numerically below the SSH allow rule
+# created at priority 1000, so it outranks it: while the rule exists the
+# VM's public IP accepts nothing from the internet. Tailscale is
+# unaffected (the overlay rides outbound flows). The public IP itself
+# stays attached for the VM's whole lifetime: Azure is retiring default
+# outbound access, so a VM whose public IP is removed simply goes
+# offline; public exposure is controlled by this rule instead.
+DENY_ALL_INBOUND_RULE_NAME = "deny-all-inbound"
+DENY_ALL_INBOUND_RULE_PRIORITY = 100
+
 
 class _HasSubscriptionId(Protocol):
     """Structural protocol for anything with subscription_id (AzureConfig or _MinimalAzureConfig)."""
@@ -764,16 +775,28 @@ class AzureVMPlatform(VMPlatform):
 
         output.info(f"Azure VM '{vm.name}' deleted")
 
-    def attach_public_ip(self, vm: VMRow) -> str:
-        """Attach a temporary public IP to the VM's NIC. Returns the IP address."""
+    def _ensure_public_ip(self, vm: VMRow) -> None:
+        """Attach the VM's public IP if its NIC has none.
+
+        The IP (``{name}-ip``) is created by :meth:`create` and kept for
+        the VM's whole lifetime, so the steady state is a single NIC
+        read that finds it already attached. VMs created under the old
+        scheme (public IP detached once Tailscale came up) converge
+        here: any time the NIC has no public IP, one is created
+        (idempotent ``begin_create_or_update``, same shape as create)
+        and attached.
+        """
         from azure.mgmt.network.models import PublicIPAddress, PublicIPAddressSku
 
         rg, name, az_cfg = _parse_resource_id(_resource_id(vm))
         network = self._network_client(az_cfg)
 
         try:
-            # Create (or re-create) the public IP
-            output.info("Attaching temporary public IP...")
+            nic = network.network_interfaces.get(rg, f"{name}-nic")
+            if nic.ip_configurations and nic.ip_configurations[0].public_ip_address is not None:
+                return
+
+            output.info("Restoring missing public IP...")
             ip_poller = network.public_ip_addresses.begin_create_or_update(
                 rg,
                 f"{name}-ip",
@@ -786,8 +809,6 @@ class AzureVMPlatform(VMPlatform):
             )
             ip_result = ip_poller.result()
 
-            # Attach to NIC
-            nic = network.network_interfaces.get(rg, f"{name}-nic")
             if nic.ip_configurations:
                 nic.ip_configurations[0].public_ip_address = PublicIPAddress(id=ip_result.id)
             network.network_interfaces.begin_create_or_update(
@@ -799,28 +820,69 @@ class AzureVMPlatform(VMPlatform):
         except Exception as exc:
             raise _wrap_azure_error(exc) from exc
 
-        return ip_result.ip_address or ""
+    def _lift_deny_all_inbound(self, vm: VMRow) -> None:
+        """Delete the deny-all-inbound rule so the SSH allow rule applies.
 
-    def detach_public_ip(self, vm: VMRow) -> None:
-        """Detach and delete the public IP from the VM's NIC."""
+        A missing rule (404) is fine and expected on a legacy VM (created
+        under the old detach scheme) or in the pre-Tailscale window
+        before :meth:`post_tailscale_ready` armed it. Any other failure
+        warns and continues: if the rule is genuinely still armed, the
+        caller's transport attempt surfaces the unreachability.
+        """
+        from azure.core.exceptions import ResourceNotFoundError
+
         rg, name, az_cfg = _parse_resource_id(_resource_id(vm))
         network = self._network_client(az_cfg)
 
-        output.info("Removing public IP...")
-        # Detach from NIC
-        with contextlib.suppress(Exception):
-            nic = network.network_interfaces.get(rg, f"{name}-nic")
-            if nic.ip_configurations:
-                nic.ip_configurations[0].public_ip_address = None
-            network.network_interfaces.begin_create_or_update(
-                rg,
-                f"{name}-nic",
-                nic,
-            ).result()
+        output.info("Opening SSH route (lifting deny-all-inbound rule)...")
+        try:
+            network.security_rules.begin_delete(rg, f"{name}-nsg", DENY_ALL_INBOUND_RULE_NAME).result()
+        except ResourceNotFoundError:
+            pass
+        except Exception as exc:
+            err = _wrap_azure_error(exc)
+            output.warn(f"could not lift the '{DENY_ALL_INBOUND_RULE_NAME}' rule on NSG '{name}-nsg': {err.summary}")
 
-        # Delete the public IP resource
-        with contextlib.suppress(Exception):
-            network.public_ip_addresses.begin_delete(rg, f"{name}-ip").result()
+    def _arm_deny_all_inbound(self, vm: VMRow) -> None:
+        """Create (or update) the deny-all-inbound rule on the VM's NSG.
+
+        Shared by :meth:`post_tailscale_ready` (the first arming, closing
+        the create-time exposure window) and the :meth:`transient_route`
+        exit re-arm. A failure warns instead of raising: both call sites
+        must keep unwinding, and silence would hide that the VM's SSH
+        port remains open to the internet, so the warning names the NSG
+        and tells the operator to restore the rule manually.
+        """
+        from azure.mgmt.network.models import SecurityRule
+
+        rg, name, az_cfg = _parse_resource_id(_resource_id(vm))
+        network = self._network_client(az_cfg)
+
+        output.info("Blocking inbound traffic (arming deny-all-inbound rule)...")
+        try:
+            network.security_rules.begin_create_or_update(
+                rg,
+                f"{name}-nsg",
+                DENY_ALL_INBOUND_RULE_NAME,
+                SecurityRule(
+                    name=DENY_ALL_INBOUND_RULE_NAME,
+                    protocol="*",
+                    source_port_range="*",
+                    destination_port_range="*",
+                    source_address_prefix="*",
+                    destination_address_prefix="*",
+                    access="Deny",
+                    priority=DENY_ALL_INBOUND_RULE_PRIORITY,
+                    direction="Inbound",
+                ),
+            ).result()
+        except Exception as exc:
+            err = _wrap_azure_error(exc)
+            output.warn(
+                f"could not arm the '{DENY_ALL_INBOUND_RULE_NAME}' rule on NSG "
+                f"'{name}-nsg': {err.summary}. The VM's SSH port remains exposed "
+                f"to the internet; restore the rule manually."
+            )
 
     def display_backend_name(self, vm: VMRow) -> str:
         resource_id = vm.platform_metadata.get("resource_id")
@@ -846,12 +908,12 @@ class AzureVMPlatform(VMPlatform):
         except Exception as exc:
             raise _wrap_azure_error(exc) from exc
 
-        # Walk NICs to find the public IP (may not exist if detached). An
-        # empty string here propagates to ``SSHTransport(host="")`` which
-        # the transports.native_transport factory catches with a typed
-        # StateError; on the canonical path this method is reached only
-        # inside the transient_route context manager which guarantees a
-        # public IP is attached, so the empty case is a defensive guard.
+        # Walk NICs to find the public IP, read live off the NIC (never
+        # persisted). The IP is permanent for the VM's lifetime and
+        # transient_route heals absence on enter, so an empty string here
+        # is a genuinely defensive corner; it propagates to
+        # ``SSHTransport(host="")`` which the transports.native_transport
+        # factory catches with a typed StateError.
         public_ip = _get_vm_public_ip(self._network_client(az_cfg), vm_info)
         import sys
 
@@ -869,31 +931,38 @@ class AzureVMPlatform(VMPlatform):
         )
 
     def post_tailscale_ready(self, vm: VMRow) -> None:
-        """Detach the cloud-init public IP now that Tailscale is up.
+        """Firewall inbound traffic now that Tailscale is up.
 
-        The attach happens inside :meth:`create` (Azure needs the IP to
-        drive cloud-init bootstrap); this hook fires at the async
-        Tailscale-ready point inside ``bootstrap_vm`` (Phase A) to close the
-        public-exposure window.
+        The VM comes out of :meth:`create` publicly reachable (cloud-init
+        bootstrap needs inbound SSH); this hook fires at the async
+        Tailscale-ready point inside ``bootstrap_vm`` (Phase A) and
+        closes the exposure window by arming the deny-all-inbound NSG
+        rule, not by removing the route: the public IP stays attached
+        for the VM's whole lifetime (see the rule constants above).
         """
-        self.detach_public_ip(vm)
+        self._arm_deny_all_inbound(vm)
 
     @contextlib.contextmanager
     def transient_route(self, vm: VMRow) -> Iterator[None]:
-        """Attach a transient public IP for the duration of the context.
+        """Open the VM's public SSH route for the duration of the context.
 
-        The native transport for Azure reaches the VM via a temporary
-        public IP. Attach on enter, detach on exit (regardless of how
-        the caller unwinds). The
+        Enter first heals the public IP (see :meth:`_ensure_public_ip`;
+        VMs created under the old detach scheme converge here), then
+        lifts the deny-all-inbound rule so the SSH allow rule applies.
+        Exit re-arms the rule regardless of how the caller unwinds; a
+        re-arm failure warns loudly instead of raising (see
+        :meth:`_arm_deny_all_inbound`), because it leaves the VM's SSH
+        port exposed. The
         :func:`agentworks.transports.native_transport` factory wraps
         this around the per-platform :meth:`native_transport` call so
         the lifecycle stays polymorphic.
         """
-        self.attach_public_ip(vm)
+        self._ensure_public_ip(vm)
+        self._lift_deny_all_inbound(vm)
         try:
             yield
         finally:
-            self.detach_public_ip(vm)
+            self._arm_deny_all_inbound(vm)
 
     def status(self, vm: VMRow, ctx: RunContext) -> VMStatus:
         if not vm.platform_metadata.get("resource_id"):

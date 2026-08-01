@@ -249,14 +249,14 @@ class VMPlatform(Capability):
     def post_tailscale_ready(self, vm: VMRow) -> None:  # noqa: B027  # intentional concrete no-op
         """Hook called once the VM's Tailscale node is up during create.
 
-        Default no-op. Azure overrides to detach the cloud-init public
-        IP at the moment Tailscale becomes reachable, minimizing the
-        window the VM is exposed to the internet. The asymmetry vs.
-        :meth:`transient_route` is genuine: the matching attach lives
-        inside :meth:`create` (cloud-init bootstrap needs the IP) and
-        the detach fires at an async Tailscale-ready point inside
-        ``bootstrap_vm`` (Phase A), neither of which is an ExitStack-shaped
-        lifecycle.
+        Default no-op. Azure overrides to arm a deny-all-inbound rule on
+        the VM's network security group at the moment Tailscale becomes
+        reachable, minimizing the window the VM is exposed to the
+        internet. The asymmetry vs. :meth:`transient_route` is genuine:
+        the VM leaves :meth:`create` publicly reachable (cloud-init
+        bootstrap needs inbound SSH) and the exposure window closes at
+        an async Tailscale-ready point inside ``bootstrap_vm``
+        (Phase A), neither of which is an ExitStack-shaped lifecycle.
         """
 
     def transient_route(self, vm: VMRow) -> AbstractContextManager[None]:
@@ -265,8 +265,9 @@ class VMPlatform(Capability):
 
         Default no-op (:func:`contextlib.nullcontext`) for platforms
         whose native transport works without setup (lima, wsl2). Azure
-        overrides to attach a public IP on enter and detach on exit so
-        the transient state is bounded by the caller's
+        overrides to open its public SSH route on enter (heal a missing
+        public IP, lift the deny-all-inbound NSG rule) and re-arm the
+        rule on exit so the transient state is bounded by the caller's
         :class:`contextlib.ExitStack` scope.
         """
         return nullcontext()

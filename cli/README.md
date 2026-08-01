@@ -235,14 +235,14 @@ platform-native transports (`limactl shell`, `wsl.exe`) drop the `env=` kwarg by
 `--platform` as a transport-repair escape hatch, not a routine combination.
 
 `agw vm shell --platform` (legacy alias `--provisioner`, one release) opens the same shell over the
-platform-native transport (`limactl shell` for Lima, `wsl.exe` for WSL2, SSH via a
-temporarily-attached public IP for Azure) instead of Tailscale. Useful when Tailscale itself is the
-thing you need to reach the VM to fix (the issue #117 latched DNS state is the canonical case: its
-heal involves restarting tailscaled, which would terminate a Tailscale-SSH session mid-sequence). On
-Azure, a public IP is attached for the duration of the session and detached on exit. Proxmox isn't
-supported by this flag because the QEMU guest agent's exec interface is one-shot and
-non-interactive; use the Proxmox web UI's serial console (`VM > Console` in the Proxmox VE web UI)
-as the equivalent escape hatch.
+platform-native transport (`limactl shell` for Lima, `wsl.exe` for WSL2, SSH via the VM's public IP
+for Azure) instead of Tailscale. Useful when Tailscale itself is the thing you need to reach the VM
+to fix (the issue #117 latched DNS state is the canonical case: its heal involves restarting
+tailscaled, which would terminate a Tailscale-SSH session mid-sequence). On Azure, the inbound SSH
+firewall rule is opened for the duration of the session and closed again on exit (the public IP
+itself is permanent). Proxmox isn't supported by this flag because the QEMU guest agent's exec
+interface is one-shot and non-interactive; use the Proxmox web UI's serial console (`VM > Console`
+in the Proxmox VE web UI) as the equivalent escape hatch.
 
 ### Workspaces
 

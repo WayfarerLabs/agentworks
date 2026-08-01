@@ -261,8 +261,8 @@ def create_vm(
     with output.section("Resolving Secrets"):
         resolver.resolve()
 
-    # Polymorphic post-Tailscale-ready hook. Azure overrides to detach
-    # the cloud-init public IP (closing the public-exposure window the
+    # Polymorphic post-Tailscale-ready hook. Azure overrides to arm a
+    # deny-all-inbound NSG rule (closing the public-exposure window the
     # instant Tailscale becomes reachable); other platforms are no-op.
     def _on_tailscale_ready() -> None:
         refreshed = db.get_vm(vm_name)

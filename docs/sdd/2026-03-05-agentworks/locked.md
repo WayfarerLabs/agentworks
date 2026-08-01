@@ -111,3 +111,12 @@ mid-flight.
 The symmetric "Azure auto-deallocate when idle" feature listed under "Remaining future items" maps
 to the same activity-counter primitive that the WSL2 keepalive hints at. A future design document
 will treat both as instances of "per-VM activity tracking + platform-specific lifecycle reaction."
+
+## Revision: 2026-07-31 (Azure public IP kept for life)
+
+`vm-provisioning-lld.md`'s statement that the Azure public IP "can optionally be removed after
+Tailscale is up" (and the detach mechanism later built on it) is superseded. Driver: Microsoft is
+retiring default outbound access, which made VMs with a detached public IP go offline. Azure VMs now
+keep their public IP for the VM's whole lifetime; exposure is controlled by an NSG deny-all-inbound
+rule armed once Tailscale is confirmed and lifted transiently for native routes. Living reference:
+`cli/agentworks/plugins/azure/platform.py` and ADR 0003.

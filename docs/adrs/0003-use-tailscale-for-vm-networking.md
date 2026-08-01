@@ -25,14 +25,21 @@ platform-specific transports), all subsequent access goes over SSH via Tailscale
 
 - Zero-config mesh networking: VMs are reachable by Tailscale IP from the operator's workstation
   regardless of platform, NAT, firewall, or network topology.
-- Secure by default: no public IPs, no open ports, encrypted traffic. Access is controlled via
-  Tailscale ACLs and auth keys. VMs that need public IPs (e.g. cloud VMs) have that removed as soon
-  as Tailscale is up.
+- Secure by default: no open ports, encrypted traffic. Access is controlled via Tailscale ACLs and
+  auth keys. Cloud VMs keep their public IP for outbound connectivity (Azure is retiring default
+  outbound access, so removing the IP would take the VM offline), but a deny-all-inbound firewall
+  rule is armed as soon as Tailscale is up, so nothing reaches the VM from the internet.
 - Ephemeral key support: VMs can use ephemeral Tailscale keys that auto-deregister on stop, with
   automatic rejoin on start.
 - Cross-platform consistency: the same SSH workflow works for local Lima, remote Lima, Azure, and
   WSL2 VMs.
 - Dependency: requires Tailscale account and auth keys. This is a hard dependency for VM workspaces
   (local workspaces do not require Tailscale).
-- Network disruptions: Azure public IP changes can temporarily destabilize Tailscale connectivity.
-  Mitigated by a reconnect wait after IP changes.
+- Network disruptions: Azure network changes (firewall-rule toggles, healing a missing public IP)
+  can temporarily destabilize Tailscale connectivity. Mitigated by a reconnect wait after network
+  changes.
+
+Amended 2026-07-31: this ADR originally said cloud VMs have their public IP removed as soon as
+Tailscale is up. Azure's retirement of default outbound access made detached VMs go offline, so the
+public IP is now kept for the VM's whole lifetime and exposure is controlled by an NSG
+deny-all-inbound rule instead; the consequences above reflect the amended behavior.

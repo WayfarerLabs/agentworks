@@ -157,17 +157,18 @@ def bootstrap_vm(
         output.warn(f"Log: {logger.path}")
         raise
 
-    # Tailscale is up; caller can clean up provisioning-only resources
-    # (e.g., detach Azure public IP since Phase B uses Tailscale SSH).
-    # Removing the public IP can destabilize the network stack briefly,
-    # so we wait for Tailscale SSH to be reliably reachable before
-    # proceeding. Already non-fatal (its own try / a bounded wait); kept
-    # outside the FAILED-marking span above, as in the pre-split driver.
+    # Tailscale is up; the platform hook closes any provisioning-only
+    # exposure (Azure arms its deny-all-inbound NSG rule since Phase B
+    # uses Tailscale SSH). A route change can destabilize the network
+    # stack briefly, so we wait for Tailscale SSH to be reliably
+    # reachable before proceeding. Already non-fatal (its own try / a
+    # bounded wait); kept outside the FAILED-marking span above, as in
+    # the pre-split driver.
     if on_tailscale_ready is not None:
         try:
             on_tailscale_ready()
         except Exception as e:
-            output.warn(f"post-provisioning cleanup failed: {e}")
+            output.warn(f"post-Tailscale-ready hook failed: {e}")
 
         # Wait for Tailscale SSH to reconnect after network changes
         from agentworks.transports import wait_for_reconnect

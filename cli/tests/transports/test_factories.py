@@ -281,9 +281,10 @@ def test_native_transport_reachability_probe_gives_up_after_six() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_native_transport_azure_transient_route_attaches_and_detaches() -> None:
-    """``transient_route`` calls attach on enter and detach on exit; both
-    fire regardless of whether the downstream code raised."""
+def test_native_transport_azure_transient_route_opens_and_closes() -> None:
+    """``transient_route`` opens the route on enter and closes it (Azure:
+    re-arms the deny-all-inbound rule) on exit; both fire regardless of
+    whether the downstream code raised."""
     vm = _mock_vm(site="azure")
     config = _mock_config()
 
@@ -294,11 +295,11 @@ def test_native_transport_azure_transient_route_attaches_and_detaches() -> None:
 
     @contextlib.contextmanager
     def fake_route(_vm):  # type: ignore[no-untyped-def] # noqa: ANN001, ANN202
-        events.append("attach")
+        events.append("open")
         try:
             yield
         finally:
-            events.append("detach")
+            events.append("close")
 
     platform.transient_route.side_effect = fake_route
     fake_target = SSHTransport(host="1.2.3.4", user="agentworks")
@@ -309,16 +310,16 @@ def test_native_transport_azure_transient_route_attaches_and_detaches() -> None:
         contextlib.ExitStack() as stack,
     ):
         native_transport(vm, platform, config, stack=stack)
-        # Inside the stack: attach has fired, detach has NOT.
-        assert events == ["attach"]
-    # ExitStack unwinds at end-of-with: detach fires deterministically.
-    assert events == ["attach", "detach"]
+        # Inside the stack: the route is open, the close has NOT fired.
+        assert events == ["open"]
+    # ExitStack unwinds at end-of-with: the close fires deterministically.
+    assert events == ["open", "close"]
 
 
-def test_native_transport_azure_detach_fires_on_downstream_exception() -> None:
+def test_native_transport_azure_close_fires_on_downstream_exception() -> None:
     """If the per-platform builder raises after ``transient_route``
-    attaches, the detach still runs (context-manager cleanup is bounded
-    by the caller's ExitStack)."""
+    opened the route, the close still runs (context-manager cleanup is
+    bounded by the caller's ExitStack)."""
     vm = _mock_vm(site="azure")
     config = _mock_config()
 
@@ -329,11 +330,11 @@ def test_native_transport_azure_detach_fires_on_downstream_exception() -> None:
 
     @contextlib.contextmanager
     def fake_route(_vm):  # type: ignore[no-untyped-def] # noqa: ANN001, ANN202
-        events.append("attach")
+        events.append("open")
         try:
             yield
         finally:
-            events.append("detach")
+            events.append("close")
 
     platform.transient_route.side_effect = fake_route
     platform.native_transport.side_effect = SSHError("kaboom")
@@ -344,7 +345,7 @@ def test_native_transport_azure_detach_fires_on_downstream_exception() -> None:
     ):
         native_transport(vm, platform, config, stack=stack)
 
-    assert events == ["attach", "detach"]
+    assert events == ["open", "close"]
 
 
 # ---------------------------------------------------------------------------
