@@ -134,15 +134,24 @@ echo "##SUCCESS## SSH host key preservation configured"
 # be idempotent: append only when the exact line is not already present.
 # grep -qxF matches the whole line as a fixed string; 2>/dev/null and the ||
 # cover the first boot, where authorized_keys does not exist yet.
+# The install is skipped when SSH_PUBLIC_KEY is empty: a platform that installs
+# the key out of band (EC2 via the cloud-init users block, to avoid embedding
+# the key literal a second time in its size-capped user-data) passes an empty
+# key here so it appears exactly once in the payload. Every other platform
+# passes the real key and this step runs unchanged.
 echo "##STEP## SSH public key"
-HOME_DIR="/home/$VM_USER"
-mkdir -p "$HOME_DIR/.ssh"
-grep -qxF "$SSH_PUBLIC_KEY" "$HOME_DIR/.ssh/authorized_keys" 2>/dev/null \
-    || echo "$SSH_PUBLIC_KEY" >> "$HOME_DIR/.ssh/authorized_keys"
-chown -R "$VM_USER:$VM_USER" "$HOME_DIR/.ssh"
-chmod 700 "$HOME_DIR/.ssh"
-chmod 600 "$HOME_DIR/.ssh/authorized_keys"
-echo "##SUCCESS## SSH key installed"
+if [ -n "$SSH_PUBLIC_KEY" ]; then
+    HOME_DIR="/home/$VM_USER"
+    mkdir -p "$HOME_DIR/.ssh"
+    grep -qxF "$SSH_PUBLIC_KEY" "$HOME_DIR/.ssh/authorized_keys" 2>/dev/null \
+        || echo "$SSH_PUBLIC_KEY" >> "$HOME_DIR/.ssh/authorized_keys"
+    chown -R "$VM_USER:$VM_USER" "$HOME_DIR/.ssh"
+    chmod 700 "$HOME_DIR/.ssh"
+    chmod 600 "$HOME_DIR/.ssh/authorized_keys"
+    echo "##SUCCESS## SSH key installed"
+else
+    echo "##SUCCESS## SSH key provisioned out of band"
+fi
 
 # -- Step 4: Swap file --
 echo "##STEP## Swap file"

@@ -12,6 +12,7 @@ from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
 from agentworks.capabilities.vm_platform.lima import LimaPlatform
 from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
 from agentworks.errors import ConfigError
+from agentworks.plugins.aws.platform import EC2Platform
 from agentworks.plugins.azure.platform import DEFAULT_CLIENT_SECRET, AzureVMPlatform
 from agentworks.plugins.proxmox.platform import (
     DEFAULT_TOKEN_SECRET,
@@ -43,6 +44,7 @@ def test_registry_names_match_classes() -> None:
         "wsl2": WSL2Platform,
         "azure-vm": AzureVMPlatform,
         "proxmox": ProxmoxPlatform,
+        "ec2": EC2Platform,
     } == VM_PLATFORM_REGISTRY
     for name, cls in VM_PLATFORM_REGISTRY.items():
         assert cls.name == name
