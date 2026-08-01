@@ -27,6 +27,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
+from urllib.parse import urlparse
 
 import pytest
 
@@ -258,9 +259,14 @@ def _stub_registry(monkeypatch: pytest.MonkeyPatch, blob: _BlobResp) -> None:
     ``manifests`` list, so no second manifest fetch), then the blob."""
 
     def _fake_urlopen(url_or_req: object) -> _JsonResp:
-        url = url_or_req if isinstance(url_or_req, str) else getattr(url_or_req, "full_url", "")
-        if "auth.docker.io" in url:
+        url = url_or_req if isinstance(url_or_req, str) else str(getattr(url_or_req, "full_url", ""))
+        # Exact-hostname dispatch (not substring): parse the URL the way
+        # the code under test builds it, so a hostname that merely
+        # contains the registry name can never satisfy the check.
+        host = urlparse(url).hostname
+        if host == "auth.docker.io":
             return _JsonResp({"token": "t"})
+        assert host == "registry-1.docker.io", url
         return _JsonResp({"layers": [{"digest": "sha256:abc", "size": 8}]})
 
     monkeypatch.setattr("urllib.request.urlopen", _fake_urlopen)

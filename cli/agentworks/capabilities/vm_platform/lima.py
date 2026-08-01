@@ -472,14 +472,24 @@ class LimaPlatform(VMPlatform):
 
                 ssh_logger.log_error(f"limactl failed (exit {result.exit_code})")
                 ssh_logger.log_error(result.output)
-                ssh_logger.close()
                 raise SSHError(
                     f"limactl create/start failed (exit {result.exit_code})\n"
                     f"SSH log: {ssh_logger.path}\n"
                     f"Last output:\n{result.output[-1000:]}"
                 )
-            ssh_logger.close()
         finally:
+            # Exactly-once close, covering the paths where run_detached
+            # itself raises (a transport failure, or the interrupt from
+            # the poll) that used to skip it and leave the per-op log
+            # without its footer. close() is not idempotent (each call
+            # appends a footer), hence one call here rather than one per
+            # branch; called with an exception in flight it also lands
+            # the traceback in the per-op log (its documented behavior).
+            # Suppressed so a local log-write failure (disk full,
+            # permissions) cannot skip the remote rm below or mask the
+            # original error.
+            with contextlib.suppress(OSError):
+                ssh_logger.close()
             # Clean up the remote temp file on success, failure, AND
             # interrupt (these were accumulating in /tmp on the VM host
             # after failures; an interrupt inside run_detached used to

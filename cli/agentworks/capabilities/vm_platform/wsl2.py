@@ -350,8 +350,11 @@ def _download_debian_rootfs(tarball_path: Path) -> None:
         # BaseException: a Ctrl-C must not leave the partial file behind
         # any more than a network failure may, whether it lands
         # mid-download or in the rename window (after a successful
-        # rename the unlink is a missing_ok no-op).
-        partial_path.unlink(missing_ok=True)
+        # rename the unlink is a missing_ok no-op). The unlink itself is
+        # best-effort: a transient Windows lock (PermissionError) must
+        # not replace the original error or interrupt.
+        with contextlib.suppress(OSError):
+            partial_path.unlink(missing_ok=True)
         raise
 
 
