@@ -165,6 +165,14 @@ class ProxmoxAPI:
 
     # -- Tasks -----------------------------------------------------------------
 
+    def stop_task(self, node: str, upid: str) -> None:
+        """Stop a running task (DELETE /nodes/{node}/tasks/{upid}).
+
+        Used by create's rollback to cancel an in-flight clone so the
+        target VMID unlocks in seconds instead of after the full clone."""
+        encoded_upid = urllib.parse.quote(upid, safe="")
+        self._request("DELETE", f"/nodes/{node}/tasks/{encoded_upid}")
+
     def wait_for_task(
         self,
         node: str,

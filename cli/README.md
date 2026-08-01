@@ -126,10 +126,12 @@ can roll back (e.g. `vm create` during the provisioning phase, `workspace create
 `session create`) it undoes the partial DB / on-VM state and prints `Cancelling X... rolling back.`.
 On Azure, the `vm create` provisioning-phase rollback also deletes the partially created cloud
 resources (VM, NIC, public IP, NSG, vnet, disk), which can take a minute or two; a second Ctrl-C
-abandons that cleanup, printing the resource group and name prefix to remove manually. Where
-rollback isn't possible (`vm reinit`, `agent reinit`, the init phase of `vm create`) it prints a
-recovery hint: the next command to run (`vm reinit`, `vm delete --force`, ...). Every cancellation
-exits with the conventional SIGINT exit code (130).
+abandons that cleanup, printing the resource group and name prefix to remove manually. On Proxmox it
+likewise stops and deletes the partially cloned VM (cancelling a still-running clone task first); a
+second Ctrl-C abandons that cleanup, printing the node and VMID to delete manually. Where rollback
+isn't possible (`vm reinit`, `agent reinit`, the init phase of `vm create`) it prints a recovery
+hint: the next command to run (`vm reinit`, `vm delete --force`, ...). Every cancellation exits with
+the conventional SIGINT exit code (130).
 
 ## Commands
 
