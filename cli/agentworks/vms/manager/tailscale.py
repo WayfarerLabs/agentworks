@@ -320,6 +320,13 @@ def _tailscale_logout(vm: VMRow, config: Config, platform: VMPlatform, ctx: RunC
                 sudo=True,
                 timeout=10,
             )
-        output.info("Tailscale node deregistered")
+            # Reported here, at the point of the action, so the transcript
+            # keeps real order: the stack exit below closes Azure's
+            # transient SSH route (its own "Closing SSH route..." line),
+            # and nothing after the dispatch confirms the deregistration
+            # any further, so printing after the close would misorder the
+            # story (#350). Other platforms' transient_route is a
+            # nullcontext, so their output is unchanged.
+            output.info("Tailscale node deregistered")
     except Exception as e:
         output.warn(f"Tailscale logout failed (node may remain in admin console): {e}")
