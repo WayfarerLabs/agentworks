@@ -106,6 +106,11 @@ Derived surfaces:
 - **FR11.** An operator can ask the CLI to explain schema: `agw resource describe` (or a sibling
   surface; naming is HLA's call) renders the field reference for a kind or capability, including
   plugin-registered ones, from the same schema.
+- **FR16.** The canonical schema surfaces are discoverable from where operators already are: a
+  one-time sweep adds pointers to the rendered sample and describe surfaces wherever guides, command
+  help, and remediation text discuss a config shape, and any hand-stated field list the sweep passes
+  is either deleted in favor of the pointer or left only where narrative genuinely needs it.
+  Pointers, not generated content, are what guides carry (see non-goals).
 - **FR12.** Error quality does not regress: validation errors keep owner-scoped framing
   (`<owner>.<field>: ...`) and file/position context at least as good as today's, and unknown keys
   remain errors for capability config.
@@ -128,8 +133,10 @@ renegotiating this FRD):
   protocol changes beyond how config schema is declared.
 - Removing `agw resource migrate` or `agw config` compatibility surfaces beyond FR1.
 - Publishing schemas externally (SchemaStore or hosted URLs); emitted schemas are local artifacts.
-- Backfilling generated docs into every existing guide; guides adopt generated field references
-  opportunistically, with the samples and describe surface as the canonical reference.
+- Generating doc content inside the prose guides (embedded generated field tables, a guide
+  generation pipeline, drift tests over prose). Guides defer to the rendered samples and describe
+  surface as the canonical field reference and carry pointers to them (the FR16 sweep); their
+  remaining hand-stated field lists shed opportunistically as they are touched.
 
 ## Success criteria
 
