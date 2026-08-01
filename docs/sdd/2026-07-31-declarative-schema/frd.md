@@ -121,16 +121,22 @@ Derived surfaces:
   help, and remediation text discuss a config shape, and any hand-stated field list the sweep passes
   is either deleted in favor of the pointer or left only where narrative genuinely needs it.
   Pointers, not generated content, are what guides carry (see non-goals).
-- **FR12.** Invalid schema anywhere is a hard, helpful error. Every modeled surface is closed-world:
-  unknown keys, wrong types, and missing required fields are load errors for kind specs and
-  capability config alike (today's warn-and-load-anyway handling of unknown kind fields is retired;
-  silent no-op config is a footgun, not a kindness). A blob bound to a registered capability
-  validates regardless of that capability's enablement, retiring the not-validated-until-enabled
-  seam. The single surviving tolerance is a capability name with no registration on this host (there
-  is no model to validate against): that resource registers and self-disables LOUDLY (marked in
-  list, reason in describe, doctor warning), preserving resources dirs shared across hosts with
-  different plugin sets. Error quality does not regress: errors keep owner-scoped framing
-  (`<owner>.<field>: ...`) and file/position context at least as good as today's.
+- **FR12.** Invalid schema on any surface that can run here is a hard, helpful error. Every modeled
+  surface is closed-world: unknown keys, wrong types, and missing required fields are load errors
+  for kind specs and capability config alike (today's warn-and-load-anyway handling of unknown kind
+  fields is retired; silent no-op config is a footgun, not a kindness). Hard validation follows the
+  registry's finalize order, which this effort preserves: dependencies are extracted first, totally
+  and never raising (a blob the extractor cannot make sense of just contributes no edges);
+  enablement and readiness are then computed without validating (the fold is non-constructing); and
+  the throwing validate pass runs on the resources that emerge READY and ENABLED. A resource that
+  emerges disabled or not-ready skips hard validation at load, so a broken blob on a disabled-plugin
+  resource can never sink the whole config; its problems become hard errors the moment it is enabled
+  or used, when finalize validates it like any other. A capability name with no registration on this
+  host (no model to validate against) is the same story one step earlier: the resource registers and
+  self-disables LOUDLY (marked in list, reason in describe, doctor warning), preserving resources
+  dirs shared across hosts with different plugin sets. Error quality does not regress: errors keep
+  owner-scoped framing (`<owner>.<field>: ...`) and file/position context at least as good as
+  today's.
 - **FR13.** Drift is structurally impossible or test-caught: schema facts appear in exactly one
   authored place (the model), samples and describe output are rendered from it (so they cannot drift
   by construction), the renderer is pinned by tests over fixture schemas plus every bundled kind
@@ -198,9 +204,12 @@ Decided with the operator at FRD review (2026-07-31):
 Decided with the operator on 2026-08-01:
 
 - **Strictness.** Hard, helpful errors across the board, including unknown keys on every modeled
-  surface and blobs bound to disabled capabilities; FR12 states the full posture and its single
-  tolerance (unregistered capability names self-disable loudly, since no model exists to validate
-  against).
+  surface; FR12 states the full posture. Refined later the same day: hard validation keys on the
+  finalize fold's verdict, matching the registry's shipped pass order (dependencies totally
+  extracted first, enablement computed without validating, then the throwing pass over READY and
+  ENABLED resources), so a resource that emerges disabled or not-ready skips hard validation at load
+  and its config problems bite at enable/use instead. Unregistered capability names self-disable
+  loudly, since no model exists to validate against.
 - **Tagged-union shape break.** The naming-field-plus-blob pair collapses into one
-  `type`-discriminated table (FR8), accepted as a breaking manifest change now, shipped with hard
+  `name`-discriminated table (FR8), accepted as a breaking manifest change now, shipped with hard
   actionable errors on the old shape plus a manifest-upgrade mode in `agw resource migrate`.
