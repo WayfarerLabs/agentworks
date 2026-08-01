@@ -12,7 +12,9 @@ opts in with ``[plugins] system = ["proxmox"]``; while disabled a
 are guided, not broken with an unknown-name error).
 
 The platform's REST client (``api.py``, formerly the ``proxmox_api.py``
-sibling in the core capability package) ships alongside as a package sibling.
+sibling in the core capability package) ships alongside as a package sibling,
+as does the teardown plumbing (``teardown.py``, the stop-then-delete sequence
+shared by the delete op and create's rollback arms).
 ``base`` / ``bootstrap_script`` / ``cloud_init`` stay in the core
 ``vm-platform`` capability package: ``base`` is the platform contract every
 platform extends, and ``bootstrap_script`` / ``cloud_init`` are shared with

@@ -12,8 +12,13 @@ from agentworks.capabilities.vm_platform.base import ProvisionRequest, Provision
 from agentworks.capabilities.vm_platform.bootstrap_script import generate_bootstrap_script
 from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
 from agentworks.db import VMStatus
-from agentworks.errors import ConfigError, StateError
+from agentworks.errors import ConfigError, ProvisioningError, StateError
 from agentworks.plugins.proxmox.api import ProxmoxAPI, ProxmoxAPIError
+from agentworks.plugins.proxmox.teardown import (
+    rollback_create_on_interrupt,
+    rollback_partial_create,
+    stop_and_delete_vm,
+)
 from agentworks.transports import SSHTransport
 
 if TYPE_CHECKING:
@@ -227,76 +232,108 @@ class ProxmoxPlatform(VMPlatform):
         newid = self._api(ctx).next_id()
         output.detail(f"Allocated VMID: {newid}")
 
-        # 2. Clone template into the agentworks pool
-        output.detail(f"Cloning template {template_vmid}...")
-        upid = self._api(ctx).clone_vm(
-            node,
-            template_vmid,
-            newid,
-            backend_name,
-            storage=storage,
-            pool=pool,
-        )
-        self._api(ctx).wait_for_task(node, upid)
-        output.detail("Clone complete")
+        # Rollback spans everything from the clone POST through the
+        # bootstrap wait: the clone is the first call that mutates PVE
+        # state, and the caller's unwind deletes only the DB row, so a
+        # cloned VM left behind on ANY unwind (failure or interrupt)
+        # would be orphaned with nothing to target it (the create
+        # contract; #340). The arms nest like azure's: the outer
+        # interrupt arm wraps the inner failure arm, so a Ctrl-C landing
+        # DURING the failure arm's rollback still gets the full
+        # interrupt treatment. ``pending_upid`` tracks the task whose
+        # wait_for_task has not returned, so the rollback can cancel an
+        # in-flight clone instead of waiting it out; an interrupt inside
+        # the clone POST itself, before the UPID returns, is an accepted
+        # sub-second window (azure's begin_* poller race is the analog)
+        # where the rollback cannot cancel a task it never learned of
+        # and falls back to the best-effort delete alone.
+        pending_upid: str | None = None
+        try:
+            try:
+                # 2. Clone template into the agentworks pool
+                output.detail(f"Cloning template {template_vmid}...")
+                pending_upid = self._api(ctx).clone_vm(
+                    node,
+                    template_vmid,
+                    newid,
+                    backend_name,
+                    storage=storage,
+                    pool=pool,
+                )
+                self._api(ctx).wait_for_task(node, pending_upid)
+                pending_upid = None
+                output.detail("Clone complete")
 
-        # 3. Configure VM resources
-        vm_config: dict[str, object] = {}
-        if request.cpus is not None:
-            vm_config["cores"] = request.cpus
-        if request.memory_gib is not None:
-            vm_config["memory"] = request.memory_gib * 1024  # GiB -> MiB
+                # 3. Configure VM resources
+                vm_config: dict[str, object] = {}
+                if request.cpus is not None:
+                    vm_config["cores"] = request.cpus
+                if request.memory_gib is not None:
+                    vm_config["memory"] = request.memory_gib * 1024  # GiB -> MiB
 
-        # Cloud-init: user, SSH key, network
-        vm_config["ciuser"] = request.admin_username
-        vm_config["sshkeys"] = urllib.parse.quote(request.ssh_public_key, safe="")
-        vm_config["ipconfig0"] = "ip=dhcp"
+                # Cloud-init: user, SSH key, network
+                vm_config["ciuser"] = request.admin_username
+                vm_config["sshkeys"] = urllib.parse.quote(request.ssh_public_key, safe="")
+                vm_config["ipconfig0"] = "ip=dhcp"
 
-        # Boot order, guest agent, and CPU type (host passthrough exposes
-        # AVX/AVX2 which tools like Bun require)
-        vm_config["boot"] = "order=scsi0"
-        vm_config["agent"] = "enabled=1"
-        vm_config["cpu"] = "host"
+                # Boot order, guest agent, and CPU type (host passthrough exposes
+                # AVX/AVX2 which tools like Bun require)
+                vm_config["boot"] = "order=scsi0"
+                vm_config["agent"] = "enabled=1"
+                vm_config["cpu"] = "host"
 
-        output.detail("Configuring VM...")
-        self._api(ctx).configure_vm(node, newid, **vm_config)
+                output.detail("Configuring VM...")
+                self._api(ctx).configure_vm(node, newid, **vm_config)
 
-        # 4. Resize disk if requested
-        if request.disk_gib is not None:
-            output.detail(f"Resizing disk to {request.disk_gib}G...")
-            self._api(ctx).resize_disk(node, newid, "scsi0", f"{request.disk_gib}G")
+                # 4. Resize disk if requested
+                if request.disk_gib is not None:
+                    output.detail(f"Resizing disk to {request.disk_gib}G...")
+                    self._api(ctx).resize_disk(node, newid, "scsi0", f"{request.disk_gib}G")
 
-        # 5. Start VM
-        output.detail("Starting VM...")
-        upid = self._api(ctx).start_vm(node, newid)
-        self._api(ctx).wait_for_task(node, upid)
+                # 5. Start VM
+                output.detail("Starting VM...")
+                pending_upid = self._api(ctx).start_vm(node, newid)
+                self._api(ctx).wait_for_task(node, pending_upid)
+                pending_upid = None
 
-        # 6. Wait for guest agent and get VM IP
-        output.detail("Waiting for guest agent...")
-        ip = self._wait_for_guest_ip(node, newid, ctx)
-        output.detail(f"VM IP: {ip}")
+                # 6. Wait for guest agent and get VM IP
+                output.detail("Waiting for guest agent...")
+                ip = self._wait_for_guest_ip(node, newid, ctx)
+                output.detail(f"VM IP: {ip}")
 
-        # 7. Wait for cloud-init to finish (releases apt lock)
-        output.detail("Waiting for cloud-init...")
-        self._wait_for_cloud_init(node, newid, ctx)
+                # 7. Wait for cloud-init to finish (releases apt lock)
+                output.detail("Waiting for cloud-init...")
+                self._wait_for_cloud_init(node, newid, ctx)
 
-        # 8. Run bootstrap script via guest agent
-        bootstrap_complete = False
-        tailscale_ip: str | None = None
-        if request.tailscale_auth_key:
-            output.detail("Running bootstrap via guest agent...")
-            bootstrap = generate_bootstrap_script(
-                admin_username=request.admin_username,
-                ssh_public_key=request.ssh_public_key,
-                provisioning_packages=PROVISIONING_PACKAGES,
-                tailscale_auth_key=request.tailscale_auth_key,
-                hostname=request.hostname,
-                swap=request.swap_gib if request.swap_gib is not None else 0,
-            )
-            tailscale_ip = self._run_bootstrap_via_agent(node, newid, bootstrap, ctx)
-            bootstrap_complete = tailscale_ip is not None
-            if tailscale_ip:
-                output.detail(f"Tailscale IP: {tailscale_ip}")
+                # 8. Run bootstrap script via guest agent
+                bootstrap_complete = False
+                tailscale_ip: str | None = None
+                if request.tailscale_auth_key:
+                    output.detail("Running bootstrap via guest agent...")
+                    bootstrap = generate_bootstrap_script(
+                        admin_username=request.admin_username,
+                        ssh_public_key=request.ssh_public_key,
+                        provisioning_packages=PROVISIONING_PACKAGES,
+                        tailscale_auth_key=request.tailscale_auth_key,
+                        hostname=request.hostname,
+                        swap=request.swap_gib if request.swap_gib is not None else 0,
+                    )
+                    tailscale_ip = self._run_bootstrap_via_agent(node, newid, bootstrap, ctx)
+                    bootstrap_complete = tailscale_ip is not None
+                    if tailscale_ip:
+                        output.detail(f"Tailscale IP: {tailscale_ip}")
+            except Exception:
+                # Re-raised unwrapped after the rollback: the manager's
+                # create arm wraps EVERY escaping exception in
+                # ProvisioningError (lifecycle.py), ProxmoxAPIError
+                # included, so wrapping here would only nest a redundant
+                # layer around the already-typed API error.
+                output.detail("Cleaning up the partial VM...")
+                rollback_partial_create(self._api(ctx), node, newid, pending_upid=pending_upid)
+                raise
+        except KeyboardInterrupt:
+            rollback_create_on_interrupt(self._api(ctx), node, newid, pending_upid=pending_upid)
+            raise
 
         host = tailscale_ip or ip
         target = SSHTransport(
@@ -341,24 +378,9 @@ class ProxmoxPlatform(VMPlatform):
         self._api(ctx).wait_for_task(node, upid)
 
     def delete(self, vm: VMRow, ctx: RunContext) -> None:
-        vmid = self._vmid(vm)
-        node = self._vm_node(vm)
-
-        # Stop if running
-        try:
-            status = self._api(ctx).vm_status(node, vmid)
-            if status.get("status") == "running":
-                upid = self._api(ctx).stop_vm(node, vmid)
-                self._api(ctx).wait_for_task(node, upid)
-        except ProxmoxAPIError:
-            pass  # VM may already be gone
-
-        # Delete VM
-        try:
-            upid = self._api(ctx).delete_vm(node, vmid)
-            self._api(ctx).wait_for_task(node, upid)
-        except ProxmoxAPIError:
-            pass  # best-effort
+        # The stop-then-delete sequence lives in the teardown module,
+        # shared with create's rollback arms.
+        stop_and_delete_vm(self._api(ctx), self._vm_node(vm), self._vmid(vm))
 
     def status(self, vm: VMRow, ctx: RunContext) -> VMStatus:
         try:
@@ -419,7 +441,10 @@ class ProxmoxPlatform(VMPlatform):
             except ProxmoxAPIError:
                 pass  # guest agent not ready yet
             time.sleep(3)
-        raise RuntimeError(f"Timed out waiting for guest agent IP on VMID {vmid}")
+        # ProvisioningError, not ProxmoxAPIError: every API call above
+        # succeeded (or was tolerated), so this is the backend VM failing
+        # to reach readiness during provisioning, not an API failure.
+        raise ProvisioningError(f"Timed out waiting for guest agent IP on VMID {vmid}")
 
     def _run_bootstrap_via_agent(self, node: str, vmid: int, script: str, ctx: RunContext) -> str | None:
         """Write and run the bootstrap script via the guest agent.
