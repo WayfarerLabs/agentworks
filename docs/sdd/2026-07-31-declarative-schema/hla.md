@@ -62,12 +62,11 @@ Small architecture, mostly deletion. Components:
 
 A new `resources/schema/` package owning the framework-wide model vocabulary:
 
-- **Base model.** A shared Pydantic v2 base (strict mode, frozen) that all spec and capability
-  config models extend, with unknown-key policy set per surface to preserve today's contract:
-  capability config models are closed-world (`extra="forbid"`, unknown keys are errors, per FR12),
-  while kind spec models keep today's warn-on-unknown-keys behavior (unknown keys surface as issues,
-  the manifest still loads). Tightening kinds to errors is a deliberate future decision, not a side
-  effect of this effort. Strict mypy stays authoritative; the pydantic mypy plugin is enabled.
+- **Base model.** A shared Pydantic v2 base (strict mode, frozen, `extra="forbid"`) that all spec
+  and capability config models extend. Closed-world is universal per FR12: unknown keys are hard
+  errors on every modeled surface, kind specs included, retiring today's warn-and-load-anyway
+  handling (an operator decision, 2026-08-01). Strict mypy stays authoritative; the pydantic mypy
+  plugin is enabled.
 - **Agentworks field metadata.** `Annotated` markers carrying the semantics JSON Schema does not
   have natively:
   - `SecretRef(default_template=...)`: the field names a secret; the template (e.g.
@@ -105,37 +104,39 @@ The capability contract changes from invoked validation to declared schema:
 
 ### Component 3: capability config dispatch, and when it validates
 
-The capability-hosting surfaces (`platform_config` beside `platform`, `provider_config` beside
-`provider`, `harness_config` beside `harness`, secret backend mappings keyed by backend name) are
-conceptually discriminated unions, but the discriminator is a SIBLING field or a map key, not a
-field inside the blob, so runtime dispatch is framework-side rather than Pydantic-internal: after
-plugin registration (the boundary `build_registry` already provides; plugin impls seat at import),
-each capability kind's registry entry carries a name-to-model map, the framework selects the model
-by the naming field or map key, and validates the blob against it directly. Pydantic's
-discriminated-union machinery is used where it fits the artifact, the emitted JSON Schema (`oneOf`
-plus discriminator over the enclosing object), not for runtime dispatch.
+Capability-embedded config is a real tagged union (FR8, operator decision 2026-08-01): the naming
+field and its blob collapse into one table with an internal `type` discriminator
+(`spec.platform: {type: lima, vm_host: ...}`), so Pydantic's native discriminated-union machinery
+serves both runtime validation and the emitted schema, with no sibling-field indirection. Each
+capability's model carries its registered name as a `Literal` tag; after plugin registration (the
+boundary `build_registry` already provides; plugin impls seat at import), the framework assembles
+one union per capability kind from the registered models and caches it on the kind's registry entry.
+Secret `backend_mappings` keeps its map-keyed-by-backend shape; the map key dispatches to the
+backend's `mapping_model` and the emitted schema expresses it as per-key properties.
+
+The old sibling shape (`platform` plus `platform_config` and kin) is a hard error naming the exact
+rewrite, and `agw resource migrate` gains a manifest-upgrade mode that rewrites YAML files in place
+under its existing backup-first discipline. The phase 1 migrator emits the old shape (the only one
+that loads in phase 1); phase 2 flips its emission to the tagged shape in the same change that lands
+the upgrade mode.
+
+One case is intercepted before union validation: a `type` naming a capability with no registration
+on this host. There is no model to validate against, so the resource registers and self-disables
+LOUDLY (marked in list, reason in describe, doctor warning), preserving resources dirs shared across
+hosts with different plugin sets. Everything else about validation is strict: a blob whose `type` IS
+registered validates fully regardless of the capability's enablement, retiring the
+not-validated-until-enabled seam for backend mappings and plugin capabilities alike (samples and
+describe render for disabled capabilities too; rendering reads the model, not the operator's blob).
 
 Timing preserves today's deliberate two-pass shape (capability blobs validate at finalize, never at
 decode, so graph construction never depends on a blob being valid):
 
 - **Decode** validates only kind-owned fields; the capability blob passes through as a raw mapping,
   exactly as now.
-- **Finalize** validates each blob against the model selected by the naming field, raising through
-  the error bridge with owner framing.
-- **Reference extraction** runs the total walker over the raw blob at graph-construction time,
+- **Finalize** validates each tagged table through the assembled union, raising through the error
+  bridge with owner framing.
+- **Reference extraction** runs the total walker over the raw table at graph-construction time,
   independent of validity, preserving the `dependencies` totality contract.
-
-Two existing tolerance seams are preserved, not reversed:
-
-- **Unknown capability names keep tolerate-and-self-disable.** A manifest naming a capability that
-  is not registered here (a plugin not installed on this host) still registers its resource, which
-  self-disables with a reason naming the missing capability; a resources dir shared across hosts
-  degrades gracefully. Dispatch simply has no model to select; the miss is handled by the existing
-  readiness/enablement semantics, never by a load failure.
-- **Blobs bound to disabled capabilities stay inert.** A mapping to a present-but-disabled backend
-  (or a blob for a not-enabled plugin's capability) is not validated until the capability is
-  enabled, matching the secrets contract today. Samples and describe still render for disabled
-  capabilities, since rendering reads the model, not the operator's blob.
 
 ### Component 4: kind spec models and decode replacement
 
@@ -210,7 +211,9 @@ defaulting locally.
 1. Phase 1 in full (removal, hard error, migrator rework, ADR).
 2. Schema foundation + error bridge, proven on capability config models (all shipped capabilities
    and plugins), retiring `validate` / `dependencies` / `validate_mapping`.
-3. Kind spec models, kind by kind, behind the stable decode entry points.
+3. Kind spec models, kind by kind, behind the stable decode entry points. The tagged-union shape
+   break lands here, with the hard old-shape error, the migrator's manifest-upgrade mode, and the
+   flip of migrator emission to the tagged shape in one change.
 4. Emission, renderer, describe; delete bundled samples; completions update.
 5. FR15 defaulting sweep, then FR16 pointer sweep, then permanent-doc promotion (capabilities
    README, resources guide, ADR cross-references) and lockfile entries.

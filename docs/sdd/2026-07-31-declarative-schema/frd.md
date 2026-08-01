@@ -86,9 +86,15 @@ Declaration:
   model should have resolved, that is an error, not a silent local default. Today's scattered
   consumer-side fallbacks (hard-coded literals in platform code re-inventing system-wide defaults)
   are enumerated and removed by the HLA and plan, not here.
-- **FR8.** Capability-embedded config is modeled as a discriminated union keyed on the naming field
-  (`platform`, `provider`, `harness`, backend name), assembled from the capability registry so
-  plugin-registered capabilities join the union automatically.
+- **FR8.** Capability-embedded config is a true tagged union: the naming field and its config table
+  merge into one table carrying an internal discriminator (working name `type`), so
+  `spec.platform: {type: lima, ...}` replaces `platform` plus `platform_config`, and likewise for
+  `provider` and `harness`. Secret `backend_mappings` keeps its map-keyed-by-backend shape (the map
+  key is already the discriminator). Unions are assembled from the capability registry so
+  plugin-registered capabilities join automatically. This is a deliberate breaking manifest schema
+  change, made now because the schema model makes it cheapest now: the old shape is a hard error
+  naming the exact rewrite, and `agw resource migrate` gains a manifest-upgrade mode that rewrites
+  YAML files in place under its existing backup-first discipline.
 
 Derived surfaces:
 
@@ -111,9 +117,16 @@ Derived surfaces:
   help, and remediation text discuss a config shape, and any hand-stated field list the sweep passes
   is either deleted in favor of the pointer or left only where narrative genuinely needs it.
   Pointers, not generated content, are what guides carry (see non-goals).
-- **FR12.** Error quality does not regress: validation errors keep owner-scoped framing
-  (`<owner>.<field>: ...`) and file/position context at least as good as today's, and unknown keys
-  remain errors for capability config.
+- **FR12.** Invalid schema anywhere is a hard, helpful error. Every modeled surface is closed-world:
+  unknown keys, wrong types, and missing required fields are load errors for kind specs and
+  capability config alike (today's warn-and-load-anyway handling of unknown kind fields is retired;
+  silent no-op config is a footgun, not a kindness). A blob bound to a registered capability
+  validates regardless of that capability's enablement, retiring the not-validated-until-enabled
+  seam. The single surviving tolerance is a capability name with no registration on this host (there
+  is no model to validate against): that resource registers and self-disables LOUDLY (marked in
+  list, reason in describe, doctor warning), preserving resources dirs shared across hosts with
+  different plugin sets. Error quality does not regress: errors keep owner-scoped framing
+  (`<owner>.<field>: ...`) and file/position context at least as good as today's.
 - **FR13.** Drift is structurally impossible or test-caught: schema facts appear in exactly one
   authored place (the model), samples and describe output are rendered from it (so they cannot drift
   by construction), the renderer is pinned by tests over fixture schemas plus every bundled kind
@@ -174,3 +187,13 @@ Decided with the operator at FRD review (2026-07-31):
 - **Generated samples in-repo vs at-runtime.** All live-rendered: the CLI renders every sample from
   the registered schema on demand, bundled kinds and plugin capabilities uniformly, with no
   checked-in generated sample files. FR10 and FR13 state this.
+
+Decided with the operator on 2026-08-01:
+
+- **Strictness.** Hard, helpful errors across the board, including unknown keys on every modeled
+  surface and blobs bound to disabled capabilities; FR12 states the full posture and its single
+  tolerance (unregistered capability names self-disable loudly, since no model exists to validate
+  against).
+- **Tagged-union shape break.** The naming-field-plus-blob pair collapses into one
+  `type`-discriminated table (FR8), accepted as a breaking manifest change now, shipped with hard
+  actionable errors on the old shape plus a manifest-upgrade mode in `agw resource migrate`.
