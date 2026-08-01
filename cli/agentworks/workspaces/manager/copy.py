@@ -47,7 +47,7 @@ def copy_workspace(
     import tempfile
     from pathlib import Path
 
-    from agentworks.agents.grants import workspace_group
+    from agentworks.agents.grants import materialize_grant_all_agents, workspace_group
     from agentworks.bootstrap import build_registry
     from agentworks.ssh import SSHLogger
     from agentworks.transports import SSHTransport, transport
@@ -197,6 +197,14 @@ def copy_workspace(
                 template="copied",
                 linux_group=ws_group,
             )
+
+            # Materialize grant_all agents on the destination VM onto the new
+            # workspace, exactly as workspace create's realization body does
+            # after ITS row insert (issue #321): every workspace-inserting
+            # path runs this pass, or grant_all agents silently lack access
+            # to the copied workspace and reinit's row-driven reconcile
+            # (#280) can never restore it.
+            materialize_grant_all_agents(db, config, dest_vm, dest_name, logger=lg)
 
             # Generate tmuxinator config and VS Code workspace
             from agentworks.workspaces.backends.vm import generate_vscode_workspace

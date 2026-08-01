@@ -8,9 +8,10 @@ prompts, zero resolves, zero gate events), rehome's inherently
 post-gate directory checks and confirm (they need SSH), delete's two
 paths (its own ``gated_vm_boundary`` composition when standalone; the
 caller's bound platform held verbatim on the nested-teardown path; no
-boundary at all without a VM row), and copy's sequential two-boundary
+boundary at all without a VM row), copy's sequential two-boundary
 composition (one per VM, nested holds; exactly one on the same-VM
-path).
+path), and copy's grant-all materialization onto the destination VM
+(issue #321).
 
 Real config, registry, resolver, and backend loop (env-var backend);
 the platform's backend power ops, the reachability probe, the admin
@@ -26,6 +27,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from agentworks.agents import grants as agent_grants
 from agentworks.capabilities.base import RunContext
 from agentworks.db import InitStatus, VMStatus
 from agentworks.errors import (
@@ -1583,6 +1585,77 @@ def test_copy_refusals_fail_with_zero_resolves_and_zero_gate(
         workspace_manager.copy_workspace(db, config, "ws1", dest_name="ws2", vm_name="box")
 
     assert resolve_counter == []
+
+
+# -- copy materializes grant-all agents on the dest VM (issue #321) -----------
+
+
+def test_copy_materializes_grant_all_agents_on_the_dest_vm(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """Regression for issue #321: copy inserts a workspace row, so it must
+    run the same grant-all materialization pass as workspace create's
+    realization body: one explicit grant row plus the on-VM group add per
+    grant_all agent on the DESTINATION VM. Without it, the invariant that
+    a grant_all agent has a grant row for every workspace on its VM breaks
+    on a normal path, and reinit's row-driven reconcile (#280) can never
+    restore the lost access. Pins both halves (the DB row with its
+    'explicit' grant_type, and the group call) and the dest-VM scoping
+    (the source VM's grant_all agent gains nothing)."""
+    config = make_config()
+    _seed(db)
+    db.insert_vm("box2", site="proxmox", hostname="box2")
+    db.update_vm_tailscale("box2", "100.64.0.10")
+    db.update_vm_init_status("box2", InitStatus.COMPLETE)
+    # A grant_all agent on each VM: only the dest VM's is materialized.
+    db.insert_agent("dev", "box2", "agt-dev", template="default", grant_all=True)
+    db.insert_agent("src", "box", "agt-src", template="default", grant_all=True)
+    db.insert_agent_grant("src", "ws1", "explicit")  # src's invariant pre-copy
+    _reachable(monkeypatch, True)
+    events: list[str] = []
+    _wire_copy_fakes(monkeypatch, events)
+    group_adds: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        agent_grants,
+        "add_to_workspace_group",
+        lambda vm, config_, db_, linux_user, ws, **k: group_adds.append((linux_user, ws)),
+    )
+
+    workspace_manager.copy_workspace(db, config, "ws1", dest_name="ws2", vm_name="box2")
+
+    assert group_adds == [("agt-dev", "ws2")]  # the on-VM half, dest agent only
+    grants = {(g.workspace_name, g.grant_type) for g in db.list_agent_grants("dev")}
+    assert grants == {("ws2", "explicit")}  # the DB half, the type grant_all writes
+    src_grants = {g.workspace_name for g in db.list_agent_grants("src")}
+    assert src_grants == {"ws1"}  # the source VM's agent gained nothing
+    assert "Added 1 grant-all agent(s) to workspace" in captured_output.detail
+
+
+def test_copy_without_grant_all_agents_makes_no_grant_calls(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """A dest VM whose agents carry no grant_all: the materialization pass
+    is a no-op: no group calls, no grant rows, no summary line."""
+    config = make_config()
+    _seed(db)
+    db.insert_agent("dev", "box", "agt-dev", template="default")
+    _reachable(monkeypatch, True)
+    events: list[str] = []
+    _wire_copy_fakes(monkeypatch, events)
+    calls: list[object] = []
+    monkeypatch.setattr(agent_grants, "add_to_workspace_group", lambda *a, **k: calls.append(a))
+
+    workspace_manager.copy_workspace(db, config, "ws1", dest_name="ws2", vm_name="box")
+
+    assert calls == []
+    assert db.list_agent_grants("dev") == []
+    assert not any("grant-all" in d for d in captured_output.detail)
 
 
 # -- #263: copy and rehome route through the shared canonical ACL helper -------
