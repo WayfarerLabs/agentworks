@@ -78,6 +78,14 @@ Declaration:
   hand-rolled decoders, so capability config and resource fields form one regime. Secret backends'
   `validate_mapping` unifies onto the same mechanism, dissolving the classmethod-vs-instance
   inconsistency.
+- **FR15.** Defaulting is entirely a model-layer concern. Every defaulted field's value, static or
+  derived (the owner-templated secret names of FR6 are the derived case), is declared exactly once
+  in the model and applied when the declaration is decoded and validated, so everything downstream
+  of the model (platform ops, capability code, the service layer) receives fully-resolved values and
+  never supplies a fallback of its own. Where a consumer can still observe an unset field that the
+  model should have resolved, that is an error, not a silent local default. Today's scattered
+  consumer-side fallbacks (hard-coded literals in platform code re-inventing system-wide defaults)
+  are enumerated and removed by the HLA and plan, not here.
 - **FR8.** Capability-embedded config is modeled as a discriminated union keyed on the naming field
   (`platform`, `provider`, `harness`, backend name), assembled from the capability registry so
   plugin-registered capabilities join the union automatically.
@@ -136,6 +144,8 @@ renegotiating this FRD):
 - Operator-facing error output for the reworked validation passes review against a corpus of
   representative mistakes (unknown key, wrong type, missing required field, bad capability name)
   with file/position framing preserved.
+- No consumer-side default fallbacks remain for modeled fields (FR15): the instances the plan
+  enumerates are gone, and the values consumers receive are fully resolved by the model layer.
 
 ## Dependencies and constraints
 
