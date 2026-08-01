@@ -17,10 +17,15 @@ Test shape mirrors ``test_azure_create_interrupt.py``. The fake below
 is a recording ``ProxmoxAPI`` stand-in injected through the platform's
 ``_api`` accessor; the API-client wire tests live in
 ``test_proxmox_api.py``; no test here touches the network.
+
+``TestProvisionResultTransport`` rides along as the one happy-path
+``create`` test (#345): the fake is the only full create harness, so
+the pin on the returned transport lives here too.
 """
 
 from __future__ import annotations
 
+import sys
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
 
@@ -30,6 +35,7 @@ from agentworks.capabilities.base import RunContext
 from agentworks.capabilities.vm_platform import ProvisionRequest
 from agentworks.plugins.proxmox.api import ProxmoxAPIError
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
+from agentworks.transports import SSHTransport
 
 if TYPE_CHECKING:
     from agentworks.db import VMRow
@@ -514,6 +520,29 @@ class TestPlainFailure:
 
         for op in ("clone_vm", "stop_vm", "delete_vm", "stop_task"):
             assert op not in fake.ops()
+
+
+class TestProvisionResultTransport:
+    """The transport a successful ``create`` hands back (#345): every
+    guest-facing ``SSHTransport`` construction passes
+    ``force_tty=sys.platform == "win32"`` (the Windows-zsh workaround
+    documented on the class); Proxmox's provisioning transport omitted
+    it, so interactive use from a Windows host misbehaved."""
+
+    @pytest.mark.parametrize(("host_platform", "expected"), [("win32", True), ("linux", False)])
+    def test_provisioning_transport_forces_tty_on_windows_hosts_only(
+        self, monkeypatch: pytest.MonkeyPatch, host_platform: str, expected: bool
+    ) -> None:
+        platform, _fake = _platform_with_fake(monkeypatch)
+        monkeypatch.setattr(sys, "platform", host_platform)
+
+        result = platform.create(_request(tailscale=False), RunContext())
+
+        target = result.native_transport
+        assert isinstance(target, SSHTransport)
+        assert target.host == "10.0.0.5"
+        assert target.user == "agentworks"
+        assert target.force_tty is expected
 
 
 class TestDeleteOpUnchanged:

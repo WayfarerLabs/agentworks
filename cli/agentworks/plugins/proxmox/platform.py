@@ -3,6 +3,7 @@ via the Proxmox REST API."""
 
 from __future__ import annotations
 
+import sys
 import time
 import urllib.parse
 from typing import TYPE_CHECKING, Any, ClassVar
@@ -340,6 +341,7 @@ class ProxmoxPlatform(VMPlatform):
             host=host,
             user=request.admin_username,
             identity_file=request.ssh_private_key,
+            force_tty=sys.platform == "win32",
         )
 
         return ProvisionResult(
