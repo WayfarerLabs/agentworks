@@ -132,11 +132,12 @@ Derived surfaces:
   emerges disabled or not-ready skips hard validation at load, so a broken blob on a disabled-plugin
   resource can never sink the whole config; its problems become hard errors the moment it is enabled
   or used, when finalize validates it like any other. A capability name with no registration on this
-  host (no model to validate against) is the same story one step earlier: the resource registers and
-  self-disables LOUDLY (marked in list, reason in describe, doctor warning), preserving resources
-  dirs shared across hosts with different plugin sets. Error quality does not regress: errors keep
-  owner-scoped framing (`<owner>.<field>: ...`) and file/position context at least as good as
-  today's.
+  host stays what it is today: a hard finalize error (the registry-readiness refactor's R9.2/R9.11
+  rulings, preserved). Every host registers every shipped plugin's capabilities, enablement being a
+  separate axis, so an unregistered name can only be a typo, and the cross-host sharing story rides
+  the enablement axis above, not name tolerance. Revisit only if out-of-tree plugins ever make
+  unregistered-but-real names possible. Error quality does not regress: errors keep owner-scoped
+  framing (`<owner>.<field>: ...`) and file/position context at least as good as today's.
 - **FR13.** Drift is structurally impossible or test-caught: schema facts appear in exactly one
   authored place (the model), samples and describe output are rendered from it (so they cannot drift
   by construction), the renderer is pinned by tests over fixture schemas plus every bundled kind
@@ -208,8 +209,12 @@ Decided with the operator on 2026-08-01:
   finalize fold's verdict, matching the registry's shipped pass order (dependencies totally
   extracted first, enablement computed without validating, then the throwing pass over READY and
   ENABLED resources), so a resource that emerges disabled or not-ready skips hard validation at load
-  and its config problems bite at enable/use instead. Unregistered capability names self-disable
-  loudly, since no model exists to validate against.
+  and its config problems bite at enable/use instead. Corrected once more after plan review:
+  unregistered capability names stay hard finalize errors (R9.2/R9.11 preserved). The earlier
+  self-disable answer was taken against a false baseline (a stale decode.py comment described
+  tolerate-and-self-disable; the shipped, locked behavior is the hard error), and since every host
+  registers every shipped plugin's capabilities, such a name can only be a typo; cross-host sharing
+  rides the enablement axis.
 - **Tagged-union shape break.** The naming-field-plus-blob pair collapses into one
   `name`-discriminated table (FR8), accepted as a breaking manifest change now, shipped with hard
   actionable errors on the old shape plus a manifest-upgrade mode in `agw resource migrate`.

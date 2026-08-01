@@ -43,7 +43,8 @@ Status: DRAFT (authored alongside the FRD and HLA; implementation gated, see pre
   - What happens to the `--no-deprecations` channel contents (the TOML nudge becomes an error and
     leaves the channel; the #349 tagged-shape warning remains on it).
   - The fate of every consumer of the deleted loaders (decode shims, `resource edit`'s TOML pointer
-    text, DB-migration snippet printers, doctor rows naming TOML sections).
+    text, DB-migration snippet printers, doctor rows naming TOML sections, and the
+    `tests/resources/test_graph_guard.py` allowlist that hardcodes `config/loaders_secrets.py`).
 
 ### 1.2 Hard error and loader removal
 
@@ -68,6 +69,9 @@ Status: DRAFT (authored alongside the FRD and HLA; implementation gated, see pre
       (sample-config's pointer comments already do; sweep for stragglers).
 - [ ] Dated lockfile entries: resource-manifests (TOML path removed; which shipped machinery from
       that SDD is retired) and any other locked SDD whose stance this revises.
+- [ ] The removal commit carries the breaking-change marker (`!` / BREAKING CHANGE footer) so
+      release-please surfaces it, and an operator upgrade note (run `agw resource migrate` before
+      upgrading, or after via the escape hatch) is written for the release notes.
 - [ ] Reviewer pass on the whole phase; findings fixed.
 
 ## Phase 2: the declarative schema model
@@ -93,11 +97,17 @@ Status: DRAFT (authored alongside the FRD and HLA; implementation gated, see pre
       severity plumbing for fold-gated validation (FR12: the bridge raises for READY+ENABLED
       resources; the same rendering is reusable as diagnostic text elsewhere).
 - [ ] Bridge implemented with the FRD's representative-mistakes corpus as a pinned test: unknown
-      key, wrong type, missing required field, bad capability name, old sibling shape, each
-      asserting owner framing and file/position context at least as good as today's.
+      key, wrong type, missing required field, bad capability name, each asserting owner framing and
+      file/position context at least as good as today's. (The old-sibling-shape corpus entry lands
+      in 2.4, where its bespoke error exists to pin.)
 
 ### 2.3 Capability config models (the contract flip)
 
+- [ ] `capability-contract-lld.md` written and reviewed: the registration surface, the interim
+      tagged-table synthesis while decode still routes through the phase-1 decoders, the typed-ops
+      migration per capability (the hidden bulk), and retirement of the stale
+      tolerate-and-self-disable comment in `manifests/decode.py` (~298-301), which misstates the
+      shipped R9.2 hard-error behavior.
 - [ ] Per-capability models declared and registered via `config_model` (empty-config shared model
       where applicable). Inventory at authoring time, re-enumerated at implementation: vm-platform
       lima, wsl2, azure-vm (including the nested `service_principal` model), proxmox;
@@ -113,25 +123,36 @@ Status: DRAFT (authored alongside the FRD and HLA; implementation gated, see pre
       per-capability migration: azure and proxmox ops currently read `self.platform_config[...]`
       dict keys; each capability's op code moves to model attributes with mypy enforcing it).
 - [ ] Fold-gated severity proven by tests: broken blob on a disabled plugin's resource loads with
-      the row marked, errors on enable/use; broken blob on an enabled resource is a load error;
-      unregistered name still self-disables loudly.
+      the row marked, errors on enable/use; broken blob on an enabled resource is a load error; an
+      unregistered capability name remains a hard finalize error (R9.2/R9.11 preserved, operator
+      decision 2026-08-01; the cross-host story rides the enablement axis, not name tolerance).
 - [ ] `test_capability_config_contract.py` and `test_capability_base.py` reworked to pin the new
       contract (declare-and-receive: models in, typed instances out).
 
 ### 2.4 Tagged-shape hardening
 
+- [ ] `tagged-hardening-lld.md` written and reviewed: the old-shape detection and error text, the
+      manifest-upgrade mode's in-place YAML rewrite mechanics and comment-handling policy, and how
+      the old-shape error survives 2.5's decoder-to-model swap.
 - [ ] Old sibling shape (`platform` + `platform_config` and kin) becomes a hard error naming the
       exact rewrite; #349's dual-shape normalization, its aggregated warning channel
       (`ManifestSet.deprecation_issues` for shape), and the bundle-gate special case are removed
       (the hard error makes the gate redundant).
-- [ ] `agw resource migrate` gains the manifest-upgrade mode (LLD decides the in-place YAML rewrite
-      mechanics and comment handling; backup-first discipline reused; completions updated for any
-      new flag/subcommand).
+- [ ] The old-sibling-shape entry joins the representative-mistakes corpus here, pinned end to end
+      so 2.5's swap cannot degrade it to a generic unknown-key error (in the model regime the old
+      shape would otherwise surface as exactly that on `platform` plus `platform_config`).
+- [ ] `agw resource migrate` gains the manifest-upgrade mode (backup-first discipline reused;
+      completions updated for any new flag/subcommand).
 - [ ] Upgrade mode proven on a fixture resources dir authored in the old shape (comments preserved
       per the LLD's decided policy; result loads clean; idempotent re-run is a no-op).
+- [ ] The hardening commit carries the breaking-change marker and an operator upgrade note (run the
+      manifest-upgrade mode) for release-please.
 
 ### 2.5 Kind spec models replace the decoders
 
+- [ ] `kind-spec-models-lld.md` written and reviewed: the per-kind model-vs-thin-wrapper calls,
+      semantic-validator placement (name/length caps, cross-field rules), and the decode entry point
+      contract the swap preserves.
 - [ ] Kind-by-kind migration behind the stable decode entry points, smallest first to bed in the
       pattern: apt-package, apt-source, system/user-install-command, workspace-template,
       named-console-template, admin-template, agent-template, vm-template, secret, git-credential,
@@ -147,9 +168,11 @@ Status: DRAFT (authored alongside the FRD and HLA; implementation gated, see pre
 
 ### 2.6 Model-layer defaulting (FR15)
 
-- [ ] Sweep and enumerate every consumer-side fallback for modeled fields
-      (`is not None else     <literal>`, `or <literal>` on request/config reads). Known at authoring
-      time: azure cpus=4 / memory=8 / disk=50 / swap=0, proxmox swap=0; the sweep is the authority.
+- [ ] Sweep and enumerate every consumer-side fallback for modeled fields (the
+      is-not-None-else-literal and or-literal idioms on request/config reads). Known at authoring
+      time: azure cpus=4 / memory=8 / disk=50 / swap=0, lima cpus=4 / memory=8 / disk=50 / swap=0
+      (`capabilities/vm_platform/lima.py` ~220), wsl2 swap=0 (`wsl2.py` ~545), proxmox swap=0; the
+      sweep is the authority and the in-tree platforms carry the same literals as the plugins.
 - [ ] Defaults declared on the models; post-decode types non-optional where defaulted; every
       enumerated fallback deleted; consumers observing an unexpectedly-unset modeled field raise
       (DB-sourced legacy rows included: raise, never locally default).
@@ -170,15 +193,19 @@ Status: DRAFT (authored alongside the FRD and HLA; implementation gated, see pre
 
 ### 2.8 Live-rendered samples and describe
 
+- [ ] `emission-and-renderer-lld.md` (shared with 2.7 if the seams overlap) written and reviewed:
+      renderer output contract, blurb registration surface, and the describe surface's naming.
 - [ ] Renderer over `iter_field_docs`: commented-YAML skeleton per kind and capability arm (one
       union arm rendered, alternatives listed), merged with registered prose blurbs (kind-level and
-      capability-level; blurbs carry no field lists).
+      capability-level; blurbs carry no field lists). Disabled capabilities render too (rendering
+      reads the model, not the operator's blob), pinned by a test.
 - [ ] `agw resource sample` (and `--write`) rendering live from the registry, plugins included;
       bundled sample YAML files deleted; `samples.py`'s bundled-file machinery retired;
       sample-pinning tests replaced by renderer tests (every kind renders, loads through the
       manifest path, and builds a registry; fixture-schema renderer unit tests).
 - [ ] `agw resource describe` (or the sibling surface the LLD names) renders the field reference for
-      kinds and capabilities from the same stream.
+      kinds and capabilities from the same stream; completions updated for any new command or
+      argument surface.
 - [ ] Prose blurbs authored for every bundled kind and capability (content lifted from today's
       samples' narrative lines, field lists dropped).
 
@@ -189,6 +216,7 @@ Status: DRAFT (authored alongside the FRD and HLA; implementation gated, see pre
       (narrative-necessary ones may stay).
 - [ ] Permanent-doc promotion: `capabilities/README.md` rewritten for the declare-schema contract
       (the invoked-validation sections and their standing deprecation notes retire);
+      `cli/agentworks/plugins/README.md` documents `config_model` for plugin capability authors;
       `docs/guides/resources.md` updated; the superseding ADR extended or a sibling ADR added for
       the schema model if the phase 1 ADR did not already cover it.
 - [ ] Dated lockfile entries: resource-manifests (Phase 5.7 invoked-validation contract retired;
@@ -226,5 +254,10 @@ Status: DRAFT (authored alongside the FRD and HLA; implementation gated, see pre
 - The github scope rules (repos/owner mutually exclusive, list shapes) exercise model validators
   beyond field types on day one of 2.3.
 - Deleting bundled samples (2.8) also retires the strip-one-`#` sample test convention; the renderer
-  tests replace that coverage, and `agw resource sample`'s CLI contract (kind selection, `--all`,
-  `--write` append-only behavior) must be pinned before the swap so the interface provably survives.
+  tests replace that coverage. `agw resource sample`'s CLI contract (kind selection, `--all`,
+  `--write` append-only behavior) is already pinned by `tests/manifests/test_samples.py`; the 2.8
+  work is carrying those pins through the renderer swap intact, not writing them.
+- The unregistered-capability-name question was re-decided with the operator (2026-08-01) after
+  review showed the shipped behavior is R9.2's hard finalize error, not the stale
+  tolerate-and-self-disable a decode.py comment described: the hard error stays, and cross-host
+  sharing rides the enablement axis.

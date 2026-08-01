@@ -123,19 +123,21 @@ is the hardening: the old sibling shape (`platform` plus `platform_config` and k
 error naming the exact rewrite, and `agw resource migrate` gains a manifest-upgrade mode that
 rewrites YAML files in place under its existing backup-first discipline.
 
-One case is intercepted before union validation: a `name` tag naming a capability with no
-registration on this host. There is no model to validate against, so the resource registers and
-self-disables LOUDLY (marked in list, reason in describe, doctor warning), preserving resources dirs
-shared across hosts with different plugin sets. For everything registered, hard validation keys on
-the finalize fold's verdict, exactly as the registry's shipped pass order already works:
-dependencies are extracted first (the total walker, enablement-blind by construction), the fold
-computes enablement and readiness without validating (non-constructing, total over unvalidated
-config), and the throwing validate pass then runs over the resources that emerged READY and ENABLED.
-A disabled or not-ready resource skips hard validation at load; its blob is validated the moment it
-is enabled or used, and doctor/describe already mark such rows with their reasons, so nothing is
-silent. This preserves the secrets contract's disabled-backend seam as a consequence of the general
-rule rather than a special case. Samples and describe render for disabled capabilities too:
-rendering reads the model, not the operator's blob.
+A `name` tag naming a capability with no registration on this host is a hard finalize error, exactly
+as shipped today (the registry-readiness refactor's R9.2/R9.11 rulings, preserved by operator
+decision after plan review): the union has no arm to select, and the bridge renders the error naming
+the registered options. Every host registers every shipped plugin's capabilities, so such a name can
+only be a typo; the cross-host sharing story is carried by the enablement axis below, not by name
+tolerance. For everything registered, hard validation keys on the finalize fold's verdict, exactly
+as the registry's shipped pass order already works: dependencies are extracted first (the total
+walker, enablement-blind by construction), the fold computes enablement and readiness without
+validating (non-constructing, total over unvalidated config), and the throwing validate pass then
+runs over the resources that emerged READY and ENABLED. A disabled or not-ready resource skips hard
+validation at load; its blob is validated the moment it is enabled or used, and doctor/describe
+already mark such rows with their reasons, so nothing is silent. This preserves the secrets
+contract's disabled-backend seam as a consequence of the general rule rather than a special case.
+Samples and describe render for disabled capabilities too: rendering reads the model, not the
+operator's blob.
 
 Timing preserves today's deliberate two-pass shape (capability blobs validate at finalize, never at
 decode, so graph construction never depends on a blob being valid):
