@@ -116,11 +116,12 @@ it on the kind's registry entry. Secret `backend_mappings` keeps its map-keyed-b
 map key dispatches to the backend's `mapping_model` and the emitted schema expresses it as per-key
 properties.
 
-The old sibling shape (`platform` plus `platform_config` and kin) is a hard error naming the exact
-rewrite, and `agw resource migrate` gains a manifest-upgrade mode that rewrites YAML files in place
-under its existing backup-first discipline. The phase 1 migrator emits the old shape (the only one
-that loads in phase 1); phase 2 flips its emission to the tagged shape in the same change that lands
-the upgrade mode.
+Pre-support already shipped ahead of this SDD (PR #349): manifest decode accepts both shapes and
+warns once, aggregated, on the old one, and `agw resource migrate` emits the tagged form (so the
+phase 1 migrator work inherits tagged emission; there is no shape flip to schedule). What lands here
+is the hardening: the old sibling shape (`platform` plus `platform_config` and kin) becomes a hard
+error naming the exact rewrite, and `agw resource migrate` gains a manifest-upgrade mode that
+rewrites YAML files in place under its existing backup-first discipline.
 
 One case is intercepted before union validation: a `name` tag naming a capability with no
 registration on this host. There is no model to validate against, so the resource registers and
@@ -214,9 +215,9 @@ defaulting locally.
 1. Phase 1 in full (removal, hard error, migrator rework, ADR).
 2. Schema foundation + error bridge, proven on capability config models (all shipped capabilities
    and plugins), retiring `validate` / `dependencies` / `validate_mapping`.
-3. Kind spec models, kind by kind, behind the stable decode entry points. The tagged-union shape
-   break lands here, with the hard old-shape error, the migrator's manifest-upgrade mode, and the
-   flip of migrator emission to the tagged shape in one change.
+3. Kind spec models, kind by kind, behind the stable decode entry points. The tagged-union hardening
+   lands here: the old sibling shape (accepted-with-warning since PR #349) becomes a hard error, and
+   the migrator's manifest-upgrade mode arrives in the same change.
 4. Emission, renderer, describe; delete bundled samples; completions update.
 5. FR15 defaulting sweep, then FR16 pointer sweep, then permanent-doc promotion (capabilities
    README, resources guide, ADR cross-references) and lockfile entries.

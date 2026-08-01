@@ -93,10 +93,12 @@ Declaration:
   `platform_config`, and likewise for `provider` and `harness`. Secret `backend_mappings` keeps its
   map-keyed-by-backend shape (the map key is already the discriminator). Unions are assembled from
   the capability registry so plugin-registered capabilities join automatically. This is a deliberate
-  breaking manifest schema change, made now because the schema model makes it cheapest now: the old
-  shape is a hard error naming the exact rewrite, and `agw resource migrate` gains a
-  manifest-upgrade mode that rewrites YAML files in place under its existing backup-first
-  discipline.
+  breaking manifest schema change, made now because the schema model makes it cheapest now.
+  Pre-support shipped ahead of this SDD (PR #349): decode accepts both shapes with an aggregated
+  deprecation warning on the old one, and `agw resource migrate` already emits the tagged form. This
+  effort's remaining job is hardening: the old shape becomes a hard error naming the exact rewrite,
+  and `agw resource migrate` gains a manifest-upgrade mode that rewrites YAML files in place under
+  its existing backup-first discipline.
 
 Derived surfaces:
 
@@ -172,7 +174,10 @@ renegotiating this FRD):
 ## Dependencies and constraints
 
 - The deprecation warning pre-work (PR #315) ships in a release before phase 1 merges, so operators
-  get at least one released version that warns before the version that errors.
+  get at least one released version that warns before the version that errors. The tagged-shape
+  pre-support (PR #349: dual-shape decode with an aggregated warning, migrator emitting the tagged
+  form) plays the same role for FR8's hardening: it ships in a release before the old shape becomes
+  an error.
 - Pydantic v2 becomes a runtime dependency (latest stable at implementation time), and models must
   hold up under the repo's strict mypy configuration.
 - Frozen/immutable declaration objects remain the norm for the registry, matching the current
