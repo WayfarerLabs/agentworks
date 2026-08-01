@@ -105,15 +105,16 @@ The capability contract changes from invoked validation to declared schema:
 ### Component 3: capability config dispatch, and when it validates
 
 Capability-embedded config is a real tagged union (FR8, operator decision 2026-08-01): the naming
-field and its blob collapse into one table with an internal `capability` discriminator
-(`spec.platform: {capability: lima, vm_host: ...}`, the key matching the capability model's own term
-for what the value names), so Pydantic's native discriminated-union machinery serves both runtime
-validation and the emitted schema, with no sibling-field indirection. Each capability's model
-carries its registered name as a `Literal` tag; after plugin registration (the boundary
-`build_registry` already provides; plugin impls seat at import), the framework assembles one union
-per capability kind from the registered models and caches it on the kind's registry entry. Secret
-`backend_mappings` keeps its map-keyed-by-backend shape; the map key dispatches to the backend's
-`mapping_model` and the emitted schema expresses it as per-key properties.
+field and its blob collapse into one table with an internal `name` discriminator
+(`spec.platform: {name: lima, vm_host: ...}`; `name` is the resource model's standard term for the
+second half of a `kind/name` address, and the hosting surface already fixes the kind), so Pydantic's
+native discriminated-union machinery serves both runtime validation and the emitted schema, with no
+sibling-field indirection. Each capability's model carries its registered name as a `Literal` tag;
+after plugin registration (the boundary `build_registry` already provides; plugin impls seat at
+import), the framework assembles one union per capability kind from the registered models and caches
+it on the kind's registry entry. Secret `backend_mappings` keeps its map-keyed-by-backend shape; the
+map key dispatches to the backend's `mapping_model` and the emitted schema expresses it as per-key
+properties.
 
 The old sibling shape (`platform` plus `platform_config` and kin) is a hard error naming the exact
 rewrite, and `agw resource migrate` gains a manifest-upgrade mode that rewrites YAML files in place
@@ -121,13 +122,14 @@ under its existing backup-first discipline. The phase 1 migrator emits the old s
 that loads in phase 1); phase 2 flips its emission to the tagged shape in the same change that lands
 the upgrade mode.
 
-One case is intercepted before union validation: a `capability` tag naming a capability with no
+One case is intercepted before union validation: a `name` tag naming a capability with no
 registration on this host. There is no model to validate against, so the resource registers and
 self-disables LOUDLY (marked in list, reason in describe, doctor warning), preserving resources dirs
 shared across hosts with different plugin sets. Everything else about validation is strict: a blob
-whose `type` IS registered validates fully regardless of the capability's enablement, retiring the
-not-validated-until-enabled seam for backend mappings and plugin capabilities alike (samples and
-describe render for disabled capabilities too; rendering reads the model, not the operator's blob).
+whose named capability IS registered validates fully regardless of the capability's enablement,
+retiring the not-validated-until-enabled seam for backend mappings and plugin capabilities alike
+(samples and describe render for disabled capabilities too; rendering reads the model, not the
+operator's blob).
 
 Timing preserves today's deliberate two-pass shape (capability blobs validate at finalize, never at
 decode, so graph construction never depends on a blob being valid):

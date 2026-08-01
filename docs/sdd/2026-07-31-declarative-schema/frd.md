@@ -87,15 +87,16 @@ Declaration:
   consumer-side fallbacks (hard-coded literals in platform code re-inventing system-wide defaults)
   are enumerated and removed by the HLA and plan, not here.
 - **FR8.** Capability-embedded config is a true tagged union: the naming field and its config table
-  merge into one table carrying an internal discriminator (working name `capability`, matching the
-  capability model's own term for the concrete implementation being named), so
-  `spec.platform: {capability: lima, ...}` replaces `platform` plus `platform_config`, and likewise
-  for `provider` and `harness`. Secret `backend_mappings` keeps its map-keyed-by-backend shape (the
-  map key is already the discriminator). Unions are assembled from the capability registry so
-  plugin-registered capabilities join automatically. This is a deliberate breaking manifest schema
-  change, made now because the schema model makes it cheapest now: the old shape is a hard error
-  naming the exact rewrite, and `agw resource migrate` gains a manifest-upgrade mode that rewrites
-  YAML files in place under its existing backup-first discipline.
+  merge into one table carrying an internal `name` discriminator, `name` being the resource model's
+  standard term for the second half of a `kind/name` address (the hosting surface fixes the kind,
+  the tag supplies the name), so `spec.platform: {name: lima, ...}` replaces `platform` plus
+  `platform_config`, and likewise for `provider` and `harness`. Secret `backend_mappings` keeps its
+  map-keyed-by-backend shape (the map key is already the discriminator). Unions are assembled from
+  the capability registry so plugin-registered capabilities join automatically. This is a deliberate
+  breaking manifest schema change, made now because the schema model makes it cheapest now: the old
+  shape is a hard error naming the exact rewrite, and `agw resource migrate` gains a
+  manifest-upgrade mode that rewrites YAML files in place under its existing backup-first
+  discipline.
 
 Derived surfaces:
 
