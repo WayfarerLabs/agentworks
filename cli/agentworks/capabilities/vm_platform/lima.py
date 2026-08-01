@@ -3,6 +3,7 @@ site's ``platform_config`` declares a ``vm_host``."""
 
 from __future__ import annotations
 
+import contextlib
 import json
 import shlex
 import tempfile
@@ -32,6 +33,7 @@ if TYPE_CHECKING:
     from agentworks.db import VMRow
     from agentworks.resources.graph import Readiness
     from agentworks.resources.reference import ConfigReference
+    from agentworks.ssh import SSHLogger
     from agentworks.transports import Transport
 
 # Markers the restart-sentinel probe echoes on stdout. The probe exits 0
@@ -270,44 +272,69 @@ class LimaPlatform(VMPlatform):
             provision_script=indented_script,
         )
 
-        if self.is_remote:
-            self._create_remote(instance_name, rendered)
-        else:
-            self._create_local(instance_name, rendered)
-
-        output.detail(f"Lima VM '{instance_name}' created.")
-
-        # Some bootstrap steps (currently the Apple-vz SVE mask, see
-        # bootstrap_script) only take effect after a reboot, and rebooting
-        # mid-provision is unreliable (lima-vm/lima#4867). Such steps drop a
-        # restart sentinel; restart the instance from the host when we see it.
-        # The probe stays generic: the host cannot cheaply tell which guest
-        # shape it is, so a bare failure is phrased for what it does know.
+        # Rollback: spans every step from the first backend mutation
+        # (limactl create) through the post-start steps (restart
+        # sentinel, Tailscale IP). The caller's unwind deletes only the
+        # DB row on failure OR interrupt, so an instance left behind
+        # here would be orphaned with nothing to target it (#340; the
+        # azure precedent is #338). Everything before this try mutates
+        # nothing, so no arm ever fires a cleanup call for an instance
+        # that was never made.
         try:
-            restart_pending = self._restart_sentinel_present(instance_name)
-        except SSHError as e:
-            output.warn(f"could not check whether '{instance_name}' needs a restart to finish provisioning: {e}")
-            output.warn(
-                f"if the VM misbehaves, 'limactl restart {instance_name}' reapplies any deferred bootstrap step."
-            )
-            restart_pending = False
-        if restart_pending:
-            output.detail(f"A bootstrap step needs a reboot; restarting '{instance_name}'...")
-            self._run_lima(f"limactl restart {instance_name}")
-
-        # If Tailscale was provisioned via the provision block, extract the IP
-        tailscale_ip = None
-        bootstrap_complete = False
-        if request.tailscale_auth_key:
-            output.detail("Retrieving Tailscale IP...")
             try:
-                ip_output = self._run_lima(f"limactl shell {instance_name} sudo tailscale ip -4")
-                tailscale_ip = ip_output.strip()
-                bootstrap_complete = True
-                output.detail(f"Tailscale IP: {tailscale_ip}")
-            except SSHError as e:
-                output.warn(f"could not retrieve Tailscale IP: {e}")
-                output.warn("Tailscale will be set up during Phase A bootstrap.")
+                if self.is_remote:
+                    self._create_remote(instance_name, rendered)
+                else:
+                    self._create_local(instance_name, rendered)
+
+                output.detail(f"Lima VM '{instance_name}' created.")
+
+                # Some bootstrap steps (currently the Apple-vz SVE mask, see
+                # bootstrap_script) only take effect after a reboot, and rebooting
+                # mid-provision is unreliable (lima-vm/lima#4867). Such steps drop a
+                # restart sentinel; restart the instance from the host when we see it.
+                # The probe stays generic: the host cannot cheaply tell which guest
+                # shape it is, so a bare failure is phrased for what it does know.
+                try:
+                    restart_pending = self._restart_sentinel_present(instance_name)
+                except SSHError as e:
+                    output.warn(
+                        f"could not check whether '{instance_name}' needs a restart to finish provisioning: {e}"
+                    )
+                    output.warn(
+                        f"if the VM misbehaves, 'limactl restart {instance_name}' "
+                        "reapplies any deferred bootstrap step."
+                    )
+                    restart_pending = False
+                if restart_pending:
+                    output.detail(f"A bootstrap step needs a reboot; restarting '{instance_name}'...")
+                    self._run_lima(f"limactl restart {instance_name}")
+
+                # If Tailscale was provisioned via the provision block, extract the IP
+                tailscale_ip = None
+                bootstrap_complete = False
+                if request.tailscale_auth_key:
+                    output.detail("Retrieving Tailscale IP...")
+                    try:
+                        ip_output = self._run_lima(f"limactl shell {instance_name} sudo tailscale ip -4")
+                        tailscale_ip = ip_output.strip()
+                        bootstrap_complete = True
+                        output.detail(f"Tailscale IP: {tailscale_ip}")
+                    except SSHError as e:
+                        output.warn(f"could not retrieve Tailscale IP: {e}")
+                        output.warn("Tailscale will be set up during Phase A bootstrap.")
+            except Exception:
+                # Lima's error convention holds: SSHError / StateError
+                # propagate unwrapped; the only new obligation is the
+                # teardown. _create_local has already surfaced the
+                # provision log by the time this runs, so nothing here
+                # reads from the instance after it is gone.
+                output.detail(f"Cleaning up the partial Lima instance '{instance_name}'...")
+                self._cleanup_partial_create(instance_name)
+                raise
+        except KeyboardInterrupt:
+            self._rollback_create_on_interrupt(instance_name)
+            raise
 
         return ProvisionResult(
             native_transport=self._transport_for(instance_name),
@@ -377,6 +404,25 @@ class LimaPlatform(VMPlatform):
         finally:
             Path(template_path).unlink(missing_ok=True)
 
+    def _host_transport(self, logger: SSHLogger | None = None) -> SSHTransport:
+        """An exec transport to the site's vm_host (remote sites only):
+        the create path's run_detached target, and the interrupt
+        rollback's kill target."""
+        assert self._vm_host_ssh is not None
+        return SSHTransport(
+            host=self._vm_host_ssh,
+            user=None,
+            login_shell=True,
+            logger=logger,
+        )
+
+    @staticmethod
+    def _remote_base_path(instance_name: str) -> str:
+        """run_detached's file identity for this instance's create; the
+        interrupt rollback derives the same path to kill the detached
+        limactl before deleting the instance."""
+        return f"/tmp/agentworks-lima-{instance_name}"
+
     def _create_remote(self, instance_name: str, lima_yaml: str) -> None:
         """Create and start a Lima VM on the site's vm_host."""
         assert self._vm_host_ssh is not None
@@ -388,38 +434,35 @@ class LimaPlatform(VMPlatform):
             local_template = f.name
 
         remote_template = f"/tmp/agentworks-{instance_name}.yaml"
-        copy_to(target, local_template, remote_template)
-        Path(local_template).unlink()
+        try:
+            copy_to(target, local_template, remote_template)
+        finally:
+            Path(local_template).unlink(missing_ok=True)
 
         # Run limactl create + start as a single detached operation
         from agentworks.remote_exec import run_detached
         from agentworks.ssh import SSHLogger
 
         ssh_logger = SSHLogger(instance_name, "vm-provision")
-        host_target = SSHTransport(
-            host=self._vm_host_ssh,
-            user=None,
-            login_shell=True,
-            logger=ssh_logger,
-        )
+        host_target = self._host_transport(logger=ssh_logger)
         lima_cmd = (
             f"limactl create --name {instance_name} --tty=false {remote_template} && limactl start {instance_name}"
         )
         output.detail("Starting and provisioning VM via Lima (this may take several minutes)...")
-        # reuse_completed=False: creation is one-shot, so a leftover
-        # status file can only be stale garbage from an interrupted
-        # attempt; consuming it would report a phantom result for a
-        # limactl run that never happened.
-        result = run_detached(
-            host_target,
-            lima_cmd,
-            label=f"Lima ({instance_name})",
-            base_path=f"/tmp/agentworks-lima-{instance_name}",
-            timeout=600,
-            quiet=True,
-            reuse_completed=False,
-        )
         try:
+            # reuse_completed=False: creation is one-shot, so a leftover
+            # status file can only be stale garbage from an interrupted
+            # attempt; consuming it would report a phantom result for a
+            # limactl run that never happened.
+            result = run_detached(
+                host_target,
+                lima_cmd,
+                label=f"Lima ({instance_name})",
+                base_path=self._remote_base_path(instance_name),
+                timeout=600,
+                quiet=True,
+                reuse_completed=False,
+            )
             if result.exit_code != 0:
                 # Parse structured markers from provision script output if present
                 bootstrap = parse_bootstrap_output(result.output, result.exit_code)
@@ -437,9 +480,71 @@ class LimaPlatform(VMPlatform):
                 )
             ssh_logger.close()
         finally:
-            # Clean up the remote temp file on success AND failure (these
-            # were accumulating in /tmp on the VM host after failures).
-            ssh_run(target, f"rm -f {remote_template}", check=False)
+            # Clean up the remote temp file on success, failure, AND
+            # interrupt (these were accumulating in /tmp on the VM host
+            # after failures; an interrupt inside run_detached used to
+            # skip this entirely). Suppressed so a transport hiccup on
+            # the unwind can never mask the original error or interrupt.
+            with contextlib.suppress(SSHError):
+                ssh_run(target, f"rm -f {remote_template}", check=False)
+
+    def _cleanup_partial_create(self, instance_name: str) -> None:
+        """Best-effort teardown of the instance a failed ``create`` made
+        (only ever an instance this create named: the pre-flight
+        collision check guarantees the name was free when we started).
+
+        Never raises a cleanup failure over the original error; it
+        warns with the manual removal command instead. An operator's
+        second Ctrl-C (``KeyboardInterrupt``) deliberately escapes so
+        :meth:`_rollback_create_on_interrupt` can abandon the cleanup.
+        """
+        try:
+            self._delete_instance(instance_name)
+        except Exception as e:
+            output.warn(f"could not clean up the partial Lima instance '{instance_name}': {e}")
+            output.warn(self._manual_removal_hint(instance_name))
+
+    def _rollback_create_on_interrupt(self, instance_name: str) -> None:
+        """Roll back the partially created instance after an operator
+        interrupt inside :meth:`create` (the azure precedent:
+        ``rollback_create_on_interrupt``, #338).
+
+        A SECOND interrupt during the cleanup abandons it cleanly
+        instead of wedging, warning with the exact removal command; it
+        is absorbed so the caller re-raises the ORIGINAL interrupt,
+        which then reaches ``create_vm``, whose unwind deletes the DB
+        row it no longer needs."""
+        output.warn(
+            f"Interrupted: cleaning up the partial Lima instance '{instance_name}', "
+            "please wait (Ctrl-C again to abandon it)..."
+        )
+        try:
+            if self.is_remote:
+                # This locally raised interrupt stopped nothing on the
+                # vm_host: run_detached nohups the remote limactl
+                # precisely so it survives this process. Kill the
+                # detached wrapper before deleting, or the delete races
+                # a create/start still mutating the same instance. The
+                # kill targets the wrapper PID, not the process group,
+                # so an in-flight limactl child may briefly survive it;
+                # severing the wrapper stops the && chain from
+                # advancing, and the limactl delete --force below stops
+                # the instance's own processes. (Local creates need no
+                # equivalent: the terminal delivers the SIGINT to the
+                # foreground limactl itself.)
+                from agentworks.remote_exec import kill_detached
+
+                kill_detached(self._host_transport(), self._remote_base_path(instance_name))
+            self._cleanup_partial_create(instance_name)
+        except KeyboardInterrupt:
+            output.warn(
+                f"Cleanup abandoned: the Lima instance '{instance_name}' may remain; "
+                + self._manual_removal_hint(instance_name)
+            )
+
+    def _manual_removal_hint(self, instance_name: str) -> str:
+        where = f" on '{self._vm_host_ssh}'" if self.is_remote else ""
+        return f"remove it manually with 'limactl delete --force {instance_name}'{where}."
 
     def _log_provision_errors(self, instance_name: str) -> None:
         """Attempt to surface provision script errors from Lima logs."""
@@ -477,9 +582,17 @@ class LimaPlatform(VMPlatform):
         self._run_lima(f"limactl stop {self._instance_name(vm)}")
         output.info(f"Lima VM '{vm.name}' stopped")
 
+    def _delete_instance(self, instance_name: str) -> None:
+        """The one place the teardown command lives: shared by the
+        delete op and the create rollback. ``--force`` stops a running
+        instance first; ``check=False`` makes it a no-op for an
+        instance that is already gone or only partially exists
+        (created but never started)."""
+        self._run_lima(f"limactl delete --force {instance_name}", check=False)
+
     def delete(self, vm: VMRow, ctx: RunContext) -> None:
         output.info(f"Deleting Lima VM '{vm.name}'...")
-        self._run_lima(f"limactl delete --force {self._instance_name(vm)}", check=False)
+        self._delete_instance(self._instance_name(vm))
         output.info(f"Lima VM '{vm.name}' deleted")
 
     def display_backend_name(self, vm: VMRow) -> str:

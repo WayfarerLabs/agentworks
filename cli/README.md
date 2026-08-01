@@ -126,7 +126,11 @@ can roll back (e.g. `vm create` during the provisioning phase, `workspace create
 `session create`) it undoes the partial DB / on-VM state and prints `Cancelling X... rolling back.`.
 On Azure, the `vm create` provisioning-phase rollback also deletes the partially created cloud
 resources (VM, NIC, public IP, NSG, vnet, disk), which can take a minute or two; a second Ctrl-C
-abandons that cleanup, printing the resource group and name prefix to remove manually. Where
+abandons that cleanup, printing the resource group and name prefix to remove manually. On Lima and
+WSL2 the same rollback removes the partially created instance (local, or on the site's `vm_host` for
+a remote-Lima site) or distro plus its install directory; a second Ctrl-C likewise abandons it,
+printing the exact removal command (`limactl delete --force <name>`, run on the `vm_host` for a
+remote site, or `wsl --unregister <name>` plus deleting the install directory it names). Where
 rollback isn't possible (`vm reinit`, `agent reinit`, the init phase of `vm create`) it prints a
 recovery hint: the next command to run (`vm reinit`, `vm delete --force`, ...). Every cancellation
 exits with the conventional SIGINT exit code (130).

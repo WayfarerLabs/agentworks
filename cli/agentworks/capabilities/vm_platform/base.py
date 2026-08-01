@@ -192,8 +192,9 @@ class VMPlatform(Capability):
           an operator interrupt (``KeyboardInterrupt``) propagate: the
           caller's unwind deletes only the DB row, so any backend
           resource left behind is orphaned with nothing to target it.
-          Azure implements both arms (see #338); the other in-tree
-          platforms do not roll back partial backend state yet (#340).
+          Azure (see #338), lima, and wsl2 (#340) implement both
+          arms; proxmox does not roll back partial backend state
+          yet (#340).
         - Return ``ProvisionResult`` with ``platform_metadata``
           capturing whatever identifiers subsequent ops need, without
           relying on live configuration (e.g. proxmox records the node
