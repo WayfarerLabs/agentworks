@@ -174,6 +174,33 @@ def run_detached(
     return DetachedResult(exit_code=exit_code, output=captured)
 
 
+def _kill_by_pid_file(target: Transport, pid_file: str) -> None:
+    """Best-effort kill of the detached wrapper process recorded in
+    ``pid_file``. A no-op when the PID file is absent (the process never
+    started, already finished and was reaped, or the files were cleaned
+    up); suppresses transport failures so callers on an unwind path
+    never mask their original error."""
+    with contextlib.suppress(SSHError):
+        target.run(
+            f"test -f {pid_file} && kill $(cat {pid_file}) 2>/dev/null",
+            check=False,
+        )
+
+
+def kill_detached(target: Transport, base_path: str) -> None:
+    """Kill the still-running command a ``run_detached`` with this
+    ``base_path`` started, if any (the same PID-file mechanism the
+    hard-timeout path uses; best-effort, never raises over a transport
+    failure).
+
+    For callers whose interrupt handling must stop the remote command
+    before tearing down what it was building: ``run_detached`` nohups
+    the command precisely so it SURVIVES the workstation process, so a
+    locally raised ``KeyboardInterrupt`` stops nothing remotely
+    (LimaPlatform's create-interrupt rollback is the motivating case)."""
+    _kill_by_pid_file(target, f"{base_path}.pid")
+
+
 def _is_running(target: Transport, pid_file: str) -> bool:
     """Check if a detached process is still running."""
     # Check PID file exists
@@ -214,14 +241,10 @@ def _poll_until_done(
     while True:
         time.sleep(poll_interval)
 
-        # Hard timeout -- kill the remote process to avoid orphans
+        # Hard timeout: kill the remote process to avoid orphans
         if timeout is not None and (time.monotonic() - start_time) > timeout:
             output.warn(f"{label}: timed out after {timeout}s, killing remote process")
-            with contextlib.suppress(SSHError):
-                target.run(
-                    f"test -f {pid_file} && kill $(cat {pid_file}) 2>/dev/null",
-                    check=False,
-                )
+            _kill_by_pid_file(target, pid_file)
             break
 
         # All polling commands go through SSH which may be temporarily

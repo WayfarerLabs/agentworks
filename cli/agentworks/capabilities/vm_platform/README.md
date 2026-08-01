@@ -329,15 +329,19 @@ concrete need: it is an attack surface and a portability trap. Lima defaults to 
 home; `LIMA_TEMPLATE` sets `mounts: []` explicitly to guarantee none. Hold the same line on any new
 platform, and prefer an explicit "no sharing" over relying on a backend default.
 
-### Your own cleanup on failure is not the orchestrator's unwind
+### Your own cleanup on failure or interrupt is not the orchestrator's unwind
 
 A platform's `create()` may build several backend resources before one fails. Clean up your own
 partial work in a best-effort sweep and re-raise (Azure's `create()` wraps NIC / IP / NSG / VNet /
-disk creation and calls `_cleanup_vm_resources` on any exception). That is distinct from, and
-composes under, the orchestrator's DB-row unwind (ADR 0019's `RealizationLog` / node `teardown`),
-which rolls back the persisted VM row. Keep the two separate in your head: your sweep undoes
-backend-side resources you created inside `create()`; the orchestrator undoes the agentworks-side
-record on top of it.
+disk creation and calls `cleanup_vm_resources` on any exception). The same obligation covers an
+operator interrupt (`KeyboardInterrupt`) across the whole create span, including any inline
+readiness or bootstrap wait: warn with "Ctrl-C again to abandon" guidance, tear down what this
+create made, and re-raise the ORIGINAL interrupt; a second Ctrl-C abandons the cleanup loudly,
+naming the exact manual removal (Azure's `rollback_create_on_interrupt`; Proxmox, Lima, and WSL2 do
+the same over their single VM / instance / distro). That is distinct from, and composes under, the
+orchestrator's DB-row unwind (ADR 0019's `RealizationLog` / node `teardown`), which rolls back the
+persisted VM row. Keep the two separate in your head: your sweep undoes backend-side resources you
+created inside `create()`; the orchestrator undoes the agentworks-side record on top of it.
 
 ### Quoting and escaping when you embed scripts
 

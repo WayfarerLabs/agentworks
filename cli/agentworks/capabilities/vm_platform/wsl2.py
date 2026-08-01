@@ -318,27 +318,44 @@ def _download_debian_rootfs(tarball_path: Path) -> None:
     digest = manifest["layers"][0]["digest"]
     total_bytes = manifest["layers"][0].get("size", 0)
 
-    # 3. Download the rootfs layer with progress
+    # 3. Download the rootfs layer with progress. Write to a temp name
+    #    and rename into place on completion so an interrupted or failed
+    #    download can never leave a truncated tarball at the cache path
+    #    (a corrupt cache would poison every retried create with a
+    #    baffling `wsl --import` error). os.replace is atomic within the
+    #    directory (same filesystem by construction).
     blob_url = f"{_DOCKER_BLOBS_URL}/{digest}"
     req = urllib.request.Request(blob_url, headers=auth_header)
     p = output.progress("Downloading Debian rootfs", total=total_bytes or None)
 
-    with _blob_opener.open(req) as resp, tarball_path.open("wb") as f:
-        downloaded = 0
-        chunk_size = 256 * 1024
-        last_update = 0
-        while True:
-            chunk = resp.read(chunk_size)
-            if not chunk:
-                break
-            f.write(chunk)
-            downloaded += len(chunk)
-            # Update every ~1MB to avoid flooding
-            if downloaded - last_update >= 1024 * 1024:
-                p.update(downloaded)
-                last_update = downloaded
-
-    p.done()
+    partial_path = tarball_path.with_name(tarball_path.name + ".partial")
+    try:
+        with _blob_opener.open(req) as resp, partial_path.open("wb") as f:
+            downloaded = 0
+            chunk_size = 256 * 1024
+            last_update = 0
+            while True:
+                chunk = resp.read(chunk_size)
+                if not chunk:
+                    break
+                f.write(chunk)
+                downloaded += len(chunk)
+                # Update every ~1MB to avoid flooding
+                if downloaded - last_update >= 1024 * 1024:
+                    p.update(downloaded)
+                    last_update = downloaded
+        p.done()
+        os.replace(partial_path, tarball_path)
+    except BaseException:
+        # BaseException: a Ctrl-C must not leave the partial file behind
+        # any more than a network failure may, whether it lands
+        # mid-download or in the rename window (after a successful
+        # rename the unlink is a missing_ok no-op). The unlink itself is
+        # best-effort: a transient Windows lock (PermissionError) must
+        # not replace the original error or interrupt.
+        with contextlib.suppress(OSError):
+            partial_path.unlink(missing_ok=True)
+        raise
 
 
 @contextlib.contextmanager
@@ -547,131 +564,217 @@ class WSL2Platform(VMPlatform):
         output.info(f"Provisioning WSL2 VM '{vm_name}'...")
 
         install_path = _wsl_base_path() / vm_name
-        _powershell(f"New-Item -ItemType Directory -Force -Path {_ps_quote(install_path)}")
 
-        # Download Debian rootfs if not cached
-        cache_dir = _cache_dir()
-        tarball = cache_dir / f"debian-bookworm-{_oci_arch()}-rootfs.tar.gz"
-        _powershell(f"New-Item -ItemType Directory -Force -Path {_ps_quote(cache_dir)}")
+        # Rollback: spans every step from the first local mutation (the
+        # install-directory New-Item) through the systemd restart at the
+        # end. The caller's unwind deletes only the DB row on failure OR
+        # interrupt, so a distro or install directory left behind here
+        # would be orphaned with nothing to target it (#340; the azure
+        # precedent is #338). Everything before this try mutates
+        # nothing, so no arm ever fires a cleanup call for state that
+        # was never made. The rootfs cache under _cache_dir() is
+        # deliberately NOT rolled back: it is shared across creates
+        # (delete() keeps it too) and is exactly what makes a retried
+        # create fast; keeping it is safe because the download is
+        # atomic (temp name + rename), so the cache path only ever
+        # holds a complete tarball.
+        try:
+            try:
+                _powershell(f"New-Item -ItemType Directory -Force -Path {_ps_quote(install_path)}")
 
-        if not tarball.exists():
-            _download_debian_rootfs(tarball)
-        else:
-            output.detail("Using cached Debian rootfs.")
+                # Download Debian rootfs if not cached
+                cache_dir = _cache_dir()
+                tarball = cache_dir / f"debian-bookworm-{_oci_arch()}-rootfs.tar.gz"
+                _powershell(f"New-Item -ItemType Directory -Force -Path {_ps_quote(cache_dir)}")
 
-        # Import and configure the distro
-        output.info("Importing rootfs into WSL2...")
-        _wsl(["--import", vm_name, str(install_path), str(tarball)])
+                if not tarball.exists():
+                    _download_debian_rootfs(tarball)
+                else:
+                    output.detail("Using cached Debian rootfs.")
 
-        # Strip Docker-image minimization hooks before we run any apt-get.
-        # The official debian:bookworm Docker rootfs ships /usr/sbin/policy-rc.d
-        # that returns 101 to refuse all service starts during image build;
-        # without removing it, apt-installed daemons (e.g. tailscaled) never
-        # start, leaving us with an "installed but inert" service.
-        output.info("Removing Docker minimization hooks...")
-        _wsl(
-            [
-                "--distribution",
-                vm_name,
-                "--user",
-                "root",
-                "--",
-                "rm",
-                "-f",
-                "/usr/sbin/policy-rc.d",
-            ]
-        )
+                # Import and configure the distro
+                output.info("Importing rootfs into WSL2...")
+                _wsl(["--import", vm_name, str(install_path), str(tarball)])
 
-        # The Docker rootfs is minimal. Install packages to bring it up to
-        # parity with the Lima/Azure cloud images.
-        output.info("Installing base packages...")
-        _wsl(
-            [
-                "--distribution",
-                vm_name,
-                "--user",
-                "root",
-                "--",
-                "bash",
-                "-c",
-                "DEBIAN_FRONTEND=noninteractive apt-get update -qq"
-                " && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -o Dpkg::Options::=--force-confnew"
-                " bash bash-completion sudo passwd"
-                " openssh-server curl git ca-certificates"
-                " tmux tmuxinator"
-                " locales procps iproute2 iputils-ping"
-                " less vim-tiny man-db"
-                " > /dev/null",
-            ]
-        )
+                # Strip Docker-image minimization hooks before we run any apt-get.
+                # The official debian:bookworm Docker rootfs ships /usr/sbin/policy-rc.d
+                # that returns 101 to refuse all service starts during image build;
+                # without removing it, apt-installed daemons (e.g. tailscaled) never
+                # start, leaving us with an "installed but inert" service.
+                output.info("Removing Docker minimization hooks...")
+                _wsl(
+                    [
+                        "--distribution",
+                        vm_name,
+                        "--user",
+                        "root",
+                        "--",
+                        "rm",
+                        "-f",
+                        "/usr/sbin/policy-rc.d",
+                    ]
+                )
 
-        # Configure swap file
-        if swap > 0:
-            swap_mb = swap * 1024
-            output.info(f"Setting up {swap} GiB swap file...")
-            _wsl(
-                [
-                    "--distribution",
-                    vm_name,
-                    "--user",
-                    "root",
-                    "--",
-                    "bash",
-                    "-c",
-                    f"fallocate -l {swap_mb}M /swapfile"
-                    " && chmod 600 /swapfile"
-                    " && mkswap /swapfile"
-                    " && swapon /swapfile"
-                    " && echo '/swapfile none swap sw 0 0' >> /etc/fstab",
-                ]
-            )
+                # The Docker rootfs is minimal. Install packages to bring it up to
+                # parity with the Lima/Azure cloud images.
+                output.info("Installing base packages...")
+                _wsl(
+                    [
+                        "--distribution",
+                        vm_name,
+                        "--user",
+                        "root",
+                        "--",
+                        "bash",
+                        "-c",
+                        "DEBIAN_FRONTEND=noninteractive apt-get update -qq"
+                        " && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq"
+                        " -o Dpkg::Options::=--force-confnew"
+                        " bash bash-completion sudo passwd"
+                        " openssh-server curl git ca-certificates"
+                        " tmux tmuxinator"
+                        " locales procps iproute2 iputils-ping"
+                        " less vim-tiny man-db"
+                        " > /dev/null",
+                    ]
+                )
 
-        # Create user account
-        output.info(f"Creating user '{admin_username}'...")
-        _wsl(["--distribution", vm_name, "--user", "root", "--", "useradd", "-m", "-s", "/bin/bash", admin_username])
-        _wsl(["--distribution", vm_name, "--user", "root", "--", "usermod", "-aG", "sudo", admin_username])
-        import shlex
+                # Configure swap file
+                if swap > 0:
+                    swap_mb = swap * 1024
+                    output.info(f"Setting up {swap} GiB swap file...")
+                    _wsl(
+                        [
+                            "--distribution",
+                            vm_name,
+                            "--user",
+                            "root",
+                            "--",
+                            "bash",
+                            "-c",
+                            f"fallocate -l {swap_mb}M /swapfile"
+                            " && chmod 600 /swapfile"
+                            " && mkswap /swapfile"
+                            " && swapon /swapfile"
+                            " && echo '/swapfile none swap sw 0 0' >> /etc/fstab",
+                        ]
+                    )
 
-        _wsl(
-            [
-                "--distribution",
-                vm_name,
-                "--user",
-                "root",
-                "--",
-                "bash",
-                "-c",
-                f"echo {shlex.quote(f'{admin_username} ALL=(ALL) NOPASSWD:ALL')}"
-                f" > /etc/sudoers.d/{shlex.quote(admin_username)}",
-            ]
-        )
+                # Create user account
+                output.info(f"Creating user '{admin_username}'...")
+                _wsl(
+                    [
+                        "--distribution",
+                        vm_name,
+                        "--user",
+                        "root",
+                        "--",
+                        "useradd",
+                        "-m",
+                        "-s",
+                        "/bin/bash",
+                        admin_username,
+                    ]
+                )
+                _wsl(["--distribution", vm_name, "--user", "root", "--", "usermod", "-aG", "sudo", admin_username])
+                import shlex
 
-        # Configure wsl.conf: default user + systemd
-        output.info("Enabling systemd...")
-        _wsl(
-            [
-                "--distribution",
-                vm_name,
-                "--user",
-                "root",
-                "--",
-                "bash",
-                "-c",
-                f"printf '[user]\\ndefault={shlex.quote(admin_username)}"
-                f"\\n\\n[boot]\\nsystemd=true\\n' > /etc/wsl.conf",
-            ]
-        )
+                _wsl(
+                    [
+                        "--distribution",
+                        vm_name,
+                        "--user",
+                        "root",
+                        "--",
+                        "bash",
+                        "-c",
+                        f"echo {shlex.quote(f'{admin_username} ALL=(ALL) NOPASSWD:ALL')}"
+                        f" > /etc/sudoers.d/{shlex.quote(admin_username)}",
+                    ]
+                )
 
-        # Restart the distro so systemd takes effect
-        output.info("Restarting distro...")
-        _wsl(["--terminate", vm_name])
-        # Run a command to trigger the distro to start with systemd
-        _wsl(["--distribution", vm_name, "--user", "root", "--", "bash", "-c", "echo ok"])
+                # Configure wsl.conf: default user + systemd
+                output.info("Enabling systemd...")
+                _wsl(
+                    [
+                        "--distribution",
+                        vm_name,
+                        "--user",
+                        "root",
+                        "--",
+                        "bash",
+                        "-c",
+                        f"printf '[user]\\ndefault={shlex.quote(admin_username)}"
+                        f"\\n\\n[boot]\\nsystemd=true\\n' > /etc/wsl.conf",
+                    ]
+                )
+
+                # Restart the distro so systemd takes effect
+                output.info("Restarting distro...")
+                _wsl(["--terminate", vm_name])
+                # Run a command to trigger the distro to start with systemd
+                _wsl(["--distribution", vm_name, "--user", "root", "--", "bash", "-c", "echo ok"])
+            except Exception:
+                # WSL2's error convention holds: the RuntimeErrors from
+                # _wsl / _powershell propagate unwrapped; the only new
+                # obligation is the teardown.
+                output.detail(f"Cleaning up the partial WSL2 distro '{vm_name}'...")
+                self._cleanup_partial_create(vm_name)
+                raise
+        except KeyboardInterrupt:
+            self._rollback_create_on_interrupt(vm_name)
+            raise
 
         output.detail(f"WSL2 VM '{vm_name}' provisioned.")
         return ProvisionResult(
             native_transport=WSL2Transport(distro_name=distro_name, user=admin_username),
             platform_metadata={"distro_name": distro_name},
+        )
+
+    def _cleanup_partial_create(self, distro_name: str) -> None:
+        """Best-effort teardown of the distro / install directory a
+        failed ``create`` made (only ever state this create named: the
+        pre-flight collision check guarantees the name was free when we
+        started).
+
+        Never raises a cleanup failure over the original error; it
+        warns with the manual removal command instead. An operator's
+        second Ctrl-C (``KeyboardInterrupt``) deliberately escapes so
+        :meth:`_rollback_create_on_interrupt` can abandon the cleanup.
+        """
+        try:
+            self._teardown_distro(distro_name)
+        except Exception as e:
+            output.warn(f"could not clean up the partial WSL2 distro '{distro_name}': {e}")
+            output.warn(self._manual_removal_hint(distro_name))
+
+    def _rollback_create_on_interrupt(self, distro_name: str) -> None:
+        """Roll back the partially created distro after an operator
+        interrupt inside :meth:`create` (the azure precedent:
+        ``rollback_create_on_interrupt``, #338).
+
+        A SECOND interrupt during the cleanup abandons it cleanly
+        instead of wedging, warning with the exact removal command; it
+        is absorbed so the caller re-raises the ORIGINAL interrupt,
+        which then reaches ``create_vm``, whose unwind deletes the DB
+        row it no longer needs."""
+        output.warn(
+            f"Interrupted: cleaning up the partial WSL2 distro '{distro_name}', "
+            "please wait (Ctrl-C again to abandon it)..."
+        )
+        try:
+            self._cleanup_partial_create(distro_name)
+        except KeyboardInterrupt:
+            output.warn(
+                f"Cleanup abandoned: the WSL2 distro '{distro_name}' may remain; "
+                + self._manual_removal_hint(distro_name)
+            )
+
+    @staticmethod
+    def _manual_removal_hint(distro_name: str) -> str:
+        return (
+            f"remove it manually with 'wsl --unregister {distro_name}' "
+            f"and by deleting '{_wsl_base_path() / distro_name}'."
         )
 
     @staticmethod
@@ -701,16 +804,25 @@ class WSL2Platform(VMPlatform):
         _wsl(["--terminate", self._distro_name(vm)])
         output.info(f"WSL2 distro '{vm.name}' terminated")
 
-    def delete(self, vm: VMRow, ctx: RunContext) -> None:
-        distro_name = self._distro_name(vm)
-        output.info(f"Unregistering WSL2 distro '{vm.name}'...")
+    @staticmethod
+    def _teardown_distro(distro_name: str) -> None:
+        """The one place the teardown sequence lives: shared by the
+        delete op and the create rollback. Unregister the distro (which
+        discards its virtual disk), then remove the install directory.
+        Both steps are no-ops on absent state (``check=False`` /
+        ``SilentlyContinue``), which is what the rollback's partial
+        states need: an install directory without a registered distro,
+        or a registered distro whose in-guest setup never finished."""
         _wsl(["--unregister", distro_name], check=False)
-        # Clean up install directory
         install_path = _wsl_base_path() / distro_name
         _powershell(
             f"Remove-Item -Recurse -Force -Path {_ps_quote(install_path)} -ErrorAction SilentlyContinue",
             check=False,
         )
+
+    def delete(self, vm: VMRow, ctx: RunContext) -> None:
+        output.info(f"Unregistering WSL2 distro '{vm.name}'...")
+        self._teardown_distro(self._distro_name(vm))
         output.info(f"WSL2 distro '{vm.name}' deleted")
 
     def display_backend_name(self, vm: VMRow) -> str:
