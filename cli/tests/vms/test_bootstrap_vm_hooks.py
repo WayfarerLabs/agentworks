@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from agentworks.capabilities.base import RunContext
 from agentworks.vms.initializer import driver
 
 if TYPE_CHECKING:
@@ -39,7 +40,7 @@ class _SpyPlatform:
         self.secured: list[str] = []
         self.secure_error: Exception | None = None
 
-    def secure_failed_vm(self, vm: object) -> None:
+    def secure_failed_vm(self, vm: object, ctx: object) -> None:
         if self.secure_error is not None:
             raise self.secure_error
         self.secured.append(getattr(vm, "name", "?"))
@@ -69,6 +70,7 @@ def _call_bootstrap(db: Database, platform: _SpyPlatform, on_ready: Any) -> tupl
         "hookvm",
         _stub_exec_target(),
         platform,  # type: ignore[arg-type]
+        RunContext(),
         tailscale_auth_key="tskey-test",
         git_tokens={},
         on_tailscale_ready=on_ready,

@@ -60,13 +60,21 @@ class GitCredentialNode:
     def secret_refs(self) -> tuple[str, ...]:
         return tuple(ref.name for ref in self._secret_refs)
 
-    def preflight(self, ctx: RunContext) -> None:
-        # Central prediction over the credential's declared token
-        # secret, with the old per-instance owner/usage error framing;
-        # then the held instance's own world checks.
-        from agentworks.orchestration.secrets import require_predicted_refs
+    def config_secret_refs(self) -> tuple[ResourceReference, ...]:
+        # The provider's token secret, as declared. The preflight sweep
+        # predicts resolvability over these; the credential itself does
+        # not, because how a secret gets a value is the operation's
+        # concern and not the credential's.
+        return self._secret_refs
 
-        require_predicted_refs(self.key, self._secret_refs, ctx.config, self._registry)
+    def preflight(self, ctx: RunContext) -> None:
+        # The credential checks that its own declarations are INTACT
+        # (the names its config named reach real registry rows), which
+        # is registry consistency and legitimately its concern; then the
+        # held instance's own world checks.
+        from agentworks.orchestration.secrets import require_declared_refs
+
+        require_declared_refs(self.key, self._secret_refs, self._registry)
         self._provider.preflight(ctx)
 
     def runup(self, ctx: RunContext) -> None:

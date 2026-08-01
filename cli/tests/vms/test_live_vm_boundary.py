@@ -122,6 +122,7 @@ def test_env_targets_join_the_site_secret_pass(
     with vm_manager.gated_vm_boundary(db, config, registry, _seed_vm(db, "proxmox"), targets=[target]) as (
         _vm_node,
         resolver,
+        _ops_ctx,
     ):
         pass
 

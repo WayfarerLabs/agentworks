@@ -415,11 +415,19 @@ class Capability(ABC):
         yet. Pre-resolve concerns still read ``self`` (``self.config``).
 
         Resolvability prediction for the declared secret references is
-        NOT the instance's job: it is central, run by the holding node
-        over the declarations (``orchestration.secrets``), so an
-        unresolvable secret still fails the sweep with the same
-        owner/usage framing without the instance touching the secret
-        machinery.
+        NOT the instance's job, and not the holding node's either: it is
+        the OPERATION's, run centrally over the declarations by the
+        preflight sweep (:func:`~agentworks.orchestration.readiness
+        .preflight_all`). Whether a declared secret can be resolved is a
+        property of the runtime world the operation is running in (the
+        active backend chain, this run's interactivity), not of the
+        resource that named it, and a resource must not assume a concern
+        that is not its own. An unresolvable secret still fails the sweep
+        with the same owner/usage framing, without this instance or its
+        node touching the secret machinery. The visible consequence is
+        doctor, which invokes ``preflight`` per row without a sweep: it
+        reports resolvability once, on the secret's own row, rather than
+        on every resource that names it.
 
         Base behavior: no-op. Subclasses extend
         (``super().preflight()``) with their world checks: required

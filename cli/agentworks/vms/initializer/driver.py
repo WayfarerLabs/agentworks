@@ -57,6 +57,7 @@ from .ssh_keys import _apply_sve_mask, _preserve_ssh_host_keys, _reconcile_autho
 from .workspaces_dir import _setup_workspaces_directory
 
 if TYPE_CHECKING:
+    from agentworks.capabilities.base import RunContext
     from agentworks.capabilities.git_credential.base import GitCredentialProvider
     from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.config import Config
@@ -73,6 +74,7 @@ def bootstrap_vm(
     vm_name: str,
     exec_target: Transport,
     platform: VMPlatform,
+    ctx: RunContext,
     *,
     admin_username: str = "agentworks",
     tailscale_auth_key: str,
@@ -109,6 +111,14 @@ def bootstrap_vm(
     rides along for the WSL2 swap check; both ``tailscale_auth_key`` and
     ``git_tokens`` are required (``create_vm`` resolves them via the framework
     and threads them in), the latter only to seed the log's redactions.
+
+    ``ctx`` is the create op's own scoped :class:`RunContext`, threaded
+    in so the ``secure_failed_vm`` hook (a backend NSG call on Azure)
+    reads its credential from it with no ambient fallback. It carries
+    already-resolved secrets: ``create_vm``'s boundary resolve ran, and
+    the ``platform_ctx`` it built, before this function is called, so
+    even the interrupt arm below never resolves a secret for the first
+    time.
     """
     from agentworks.ssh import SSHLogger
 
@@ -170,7 +180,7 @@ def bootstrap_vm(
         # (a fresh transient allow) or the platform's serial console
         # (not NSG-gated).
         try:
-            platform.secure_failed_vm(vm_row)
+            platform.secure_failed_vm(vm_row, ctx)
         except Exception as secure_error:
             output.warn(f"could not secure the failed VM: {secure_error}")
         logger.close()
@@ -189,7 +199,7 @@ def bootstrap_vm(
         # for what genuinely escapes ``except Exception``. The hook
         # failure warns and never masks the interrupt.
         try:
-            platform.secure_failed_vm(vm_row)
+            platform.secure_failed_vm(vm_row, ctx)
         except Exception as secure_error:
             output.warn(f"could not secure the interrupted VM: {secure_error}")
         raise

@@ -276,34 +276,94 @@ def test_template_node_declares_only_the_tailscale_key() -> None:
         name="default",
         env={"API_KEY": EnvEntry(key="API_KEY", secret="api-key")},
     )
-    node = vm_template_node(tmpl, cast("Registry", object()))
+    node = vm_template_node(tmpl)
     assert node.key == "vm-template/default"
     assert node.secret_refs() == ("tailscale-auth-key",)
     assert node.deps() == ()
 
 
-def test_template_node_preflight_predicts_the_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The relocated readiness check predicts CENTRALLY over the key's
-    declaration (the held-resolver prediction seam is closed): with the
-    env-var backend alone, a set variable predicts resolvable and an
-    unset one raises the delegate's old typed error."""
+def test_template_node_declares_the_key_and_the_sweep_predicts_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The auth key's resolvability check moved off this node and into
+    the operation's preflight sweep, on the same rule the vm-site and
+    git-credential nodes follow: a node declares, the operation predicts.
+
+    The node's own preflight is now a no-op even when nothing can
+    resolve the key (which is what keeps doctor-shaped callers honest),
+    while the sweep over the same node still refuses, with the template
+    named by the owner key and the key identified by its usage prose.
+    """
     from agentworks.bootstrap import build_registry
     from agentworks.capabilities.base import RunContext
     from agentworks.errors import ConfigError
+    from agentworks.orchestration.readiness import preflight_all
     from agentworks.vms.nodes import vm_template_node
     from agentworks.vms.templates import ResolvedVMTemplate
     from tests.orchestrated_fixtures import write_operator_config
 
     config = write_operator_config(tmp_path, '[secret_config]\nbackends = ["env-var"]\n')
     registry = build_registry(config)
-    node = vm_template_node(ResolvedVMTemplate(name="default"), registry)
+    node = vm_template_node(ResolvedVMTemplate(name="default"))
+    ctx = RunContext(config=config)
+
+    # The node declares the key as the reference the vm-template kind
+    # itself publishes, usage prose included.
+    (ref,) = node.config_secret_refs()
+    assert (ref.kind, ref.name, ref.usage) == ("secret", "tailscale-auth-key", "the Tailscale auth key")
 
     monkeypatch.setenv("AW_SECRET_TAILSCALE_AUTH_KEY", "tskey")
-    node.preflight(RunContext(config=config))  # no error
+    preflight_all([node], ctx, registry=registry)  # resolvable: no error
 
     monkeypatch.delenv("AW_SECRET_TAILSCALE_AUTH_KEY")
-    with pytest.raises(ConfigError, match="not resolvable"):
-        node.preflight(RunContext(config=config))
+    # The node alone stays silent; only the sweep refuses.
+    node.preflight(ctx)
+    with pytest.raises(ConfigError) as exc:
+        preflight_all([node], ctx, registry=registry)
+    assert str(exc.value) == (
+        "vm-template/default: secret 'tailscale-auth-key' (the Tailscale auth key) "
+        "is not resolvable by any active backend"
+    )
+    # The actionable hint is the shared, backend-agnostic one from the sweep.
+    assert exc.value.hint is not None
+    assert "agw secret describe tailscale-auth-key" in exc.value.hint
+    assert "mapped to a backend" in exc.value.hint
+
+
+# -- the vm-site node's own preflight ----------------------------------------
+
+
+def test_site_node_preflight_refuses_a_dangling_secret_reference(tmp_path: Path) -> None:
+    """The site's preflight verifies its declarations are INTACT: a
+    reference naming no registry row is a typed error, not a KeyError
+    and not a silent pass on a synthesized declaration.
+
+    This is the half that stayed the node's concern when resolvability
+    prediction moved to the operation's preflight sweep. Whether the
+    registry agrees with the site's own config is registry consistency;
+    whether a declared secret would resolve is the operation's runtime
+    world, and the site does not speak to it.
+    """
+    from agentworks.bootstrap import build_registry
+    from agentworks.capabilities.base import RunContext
+    from agentworks.errors import ConfigError
+    from agentworks.resources.reference import SecretReference
+    from tests.orchestrated_fixtures import write_operator_config
+
+    config = write_operator_config(tmp_path)
+    registry = build_registry(config)
+    dangling = SecretReference(
+        name="never-declared",
+        kind="secret",
+        usage="the Proxmox API token",
+        source=("vm-site", "stub"),
+    )
+    site = VMSiteNode("stub", cast("VMPlatform", _GatePlatform()), (dangling,), registry)
+
+    with pytest.raises(ConfigError) as exc:
+        site.preflight(RunContext(config=config))
+    assert "vm-site/stub" in str(exc.value)
+    assert "never-declared" in str(exc.value)
 
 
 # -- the pending VM node -----------------------------------------------------
@@ -313,7 +373,7 @@ def _pending(db: Database):
     from agentworks.vms.nodes import pending_vm_node, vm_template_node
     from agentworks.vms.templates import ResolvedVMTemplate
 
-    template = vm_template_node(ResolvedVMTemplate(name="default"), cast("Registry", object()))
+    template = vm_template_node(ResolvedVMTemplate(name="default"))
     site = VMSiteNode("stub", cast("VMPlatform", _GatePlatform()), (), cast("Registry", object()))
     return pending_vm_node(db, "nvm", template, site, ()), template, site
 

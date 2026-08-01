@@ -21,7 +21,7 @@ from agentworks.orchestration.secrets import (
     secret_declarations,
     secret_union,
 )
-from agentworks.resources.reference import SecretReference
+from agentworks.resources.reference import ResourceReference, SecretReference
 from agentworks.secrets.base import SecretDecl
 
 if TYPE_CHECKING:
@@ -43,6 +43,9 @@ class _N:
 
     def secret_refs(self) -> tuple[str, ...]:
         return self._secret_refs
+
+    def config_secret_refs(self) -> tuple[ResourceReference, ...]:
+        return ()
 
     def preflight(self, ctx: RunContext) -> None: ...
 
@@ -293,9 +296,7 @@ def test_require_predicted_refs_refuses_with_owner_usage_framing(
         "vm-site/px: secret 'proxmox-token' (the Proxmox API token) is not resolvable by any active backend"
     )
     assert exc.value.hint == (
-        "`agw secret describe proxmox-token` shows how each backend "
-        "looks the secret up; add a backend mapping or extend "
-        "[secret_config].backends."
+        "ensure secret 'proxmox-token' is mapped to a backend. Run `agw secret describe proxmox-token` for details."
     )
 
 
@@ -350,3 +351,74 @@ def test_scoped_reader_satisfies_the_secret_reader_protocol() -> None:
     assert ctx.secret("a") == "1"
     with pytest.raises(StateError, match="not declared"):
         ctx.secret("b")
+
+
+def _px_site_setup(tmp_path: Path, chain: str = '"env-var"') -> tuple[Config, Registry]:
+    """A real config DECLARING the proxmox site, so its ``proxmox-token``
+    reference is auto-declared into the registry at finalize. The
+    prediction helpers above do not need this (they are handed a
+    reference directly); intactness does, because it asks the registry."""
+    from agentworks.bootstrap import build_registry
+    from tests.orchestrated_fixtures import PLUGINS_ENABLED, PROXMOX_SECTION, write_operator_config
+
+    config = write_operator_config(
+        tmp_path, PLUGINS_ENABLED + PROXMOX_SECTION + f"[secret_config]\nbackends = [{chain}]\n"
+    )
+    return config, build_registry(config)
+
+
+# -- require_declared_refs (reference intactness) ----------------------------
+
+
+def test_require_declared_refs_passes_for_a_declared_secret(tmp_path: Path) -> None:
+    """The normal case: a referenced secret is auto-declared at finalize,
+    so its row exists and intactness holds."""
+    from agentworks.orchestration.secrets import require_declared_refs
+
+    _config, registry = _px_site_setup(tmp_path)
+    require_declared_refs("vm-site/proxmox", (_px_ref(),), registry)
+
+
+def test_require_declared_refs_refuses_a_dangling_reference(tmp_path: Path) -> None:
+    """A reference naming no registry row is a typed error, not a
+    ``KeyError`` and not a silently synthesized bare declaration.
+
+    This is the half of the old node preflight that STAYS the node's
+    concern: whether the node's own declarations and the registry agree
+    is registry consistency. It reaches no backend and asks nothing
+    about how the secret would get a value."""
+    from agentworks.orchestration.secrets import require_declared_refs
+
+    _config, registry = _px_site_setup(tmp_path)
+    dangling = SecretReference(
+        name="never-declared",
+        kind="secret",
+        usage="the Proxmox API token",
+        source=("vm-site", "px"),
+    )
+    with pytest.raises(ConfigError) as exc:
+        require_declared_refs("vm-site/px", (dangling,), registry)
+    assert "vm-site/px" in str(exc.value)
+    assert "never-declared" in str(exc.value)
+    assert "the Proxmox API token" in str(exc.value)
+
+
+def test_require_declared_refs_says_nothing_about_resolvability(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The load-bearing separation: a declared secret that NOTHING can
+    resolve still passes intactness. Resolvability is the operation's
+    question, asked by the preflight sweep; a node asking it would make
+    every resource that names a secret carry a verdict about the
+    operator's backend chain."""
+    from agentworks import output
+    from agentworks.orchestration.secrets import require_declared_refs
+
+    config, registry = _px_site_setup(tmp_path, '"env-var", "prompt"')
+    monkeypatch.delenv("AW_SECRET_PROXMOX_TOKEN", raising=False)
+    monkeypatch.setattr(output, "is_interactive", lambda: False)
+
+    require_declared_refs("vm-site/px", (_px_ref(),), registry)  # no raise
+    # ... while the prediction the SWEEP runs over the same reference does refuse.
+    with pytest.raises(ConfigError, match="not resolvable"):
+        require_predicted_refs("vm-site/px", (_px_ref(),), config, registry)

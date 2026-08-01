@@ -232,12 +232,12 @@ toolkit, not a checklist, and a capability with nothing cheap to catch before th
 trivial (empty) preflight. Its defining property is that it is **read-only and side-effect-free**:
 
 - **Secret resolvability is predicted without prompting** at this stage, but centrally, not by the
-  instance: the node holding the instance predicts over its declared references
-  (`orchestration.secrets`), so a declared secret with no mapping at all is fatal and knowable here,
-  without prompting for the others, and the instance never touches the secret machinery. Value
-  checks defer to the op, uniformly. (An earlier draft let preflight read-and-verify
-  "non-interactively resolvable" values; that was ruled out: it forks readiness on where a secret
-  happens to come from.)
+  instance or its holding node: the operation's preflight sweep (`preflight_all`) predicts over each
+  node's declared references (`orchestration.secrets`), so a declared secret with no mapping at all
+  is fatal and knowable here, without prompting for the others, and neither the instance nor the
+  node touches the secret machinery. Value checks defer to the op, uniformly. (An earlier draft let
+  preflight read-and-verify "non-interactively resolvable" values; that was ruled out: it forks
+  readiness on where a secret happens to come from.)
 - It checks the rest of the world that needs **no credentials**: required tools present on the
   target, an unauthenticated endpoint reachable.
 - It does **not** mutate. In particular it does **not** mint or create anything.
@@ -273,13 +273,14 @@ When does it run? The starting policy: **every service-layer operation runs pref
 resources it will use, before doing anything real** (before any mutation, and before any secret
 prompt). That means the capability instances, and also the declarable resources with readiness
 concerns of their own: basically everything has a preflight. `vm create` preflights both the
-vm-template (which predicts that its Tailscale auth key can resolve; that key is the template's
-responsibility, not the site's) and the site's platform instance, in either order, before the
-resolve pass. Within one service-layer operation, multiple ops on the same instance incur preflight
-once, not once per op. This is a real latency tax on routine commands, and it is accepted: failing
-clearly before work starts is worth more than the round-trip it costs, and there is room to refine
-(caching, per-op opt-outs) once real usage shows where it hurts. Doctor calls the same preflights
-for its per-resource health rows.
+vm-template and the site's platform instance, in either order, before the resolve pass, and the
+sweep predicts each node's declared secrets alongside (the template's Tailscale auth key is the
+template's declaration, not the site's, even though neither node is what asks whether it resolves).
+Within one service-layer operation, multiple ops on the same instance incur preflight once, not once
+per op. This is a real latency tax on routine commands, and it is accepted: failing clearly before
+work starts is worth more than the round-trip it costs, and there is room to refine (caching, per-op
+opt-outs) once real usage shows where it hurts. Doctor calls the same preflights for its
+per-resource health rows.
 
 ### 4. `runup` (confirm readiness; post-resolve, authenticated, read-only)
 
@@ -451,8 +452,8 @@ The shared surface is real (it is a lifecycle, not a boilerplate default), so it
   accepts no config) and the standing NOTE that this invoked-validation API may later be superseded
   by capabilities declaring their config schema at registration time;
 - the construct, `preflight`, and `runup` instance contract (both readiness stages no-op by default:
-  resolvability prediction is the holding node's, central, and the capabilities with nothing to
-  check or authenticate get the right behavior for free);
+  resolvability prediction belongs to the operation's preflight sweep, not to the instance or its
+  node, and the capabilities with nothing to check or authenticate get the right behavior for free);
 - the capability's identity (`name`, `description`) as the registry sees it.
 
 Subclasses add their ops. `GitHubCredentialProvider`, `VMPlatform`, `Harness` extend it. Consuming
@@ -465,13 +466,14 @@ machinery, not framework machinery.
 
 A capability's config may name secrets (a Proxmox API token, a git PAT, an AWS client secret).
 Nothing special happens: the secret is an ordinary `ConfigReference` returned by `dependencies`. The
-framework owns everything after the declaration: non-prompting _prediction_ in preflight (is this
-resolvable at all?, computed centrally over the declarations by the node holding the instance),
-_resolution_ at the preflight boundary (everything the command declared, one batched prompt session,
-cached), and _delivery_ through the context, scoped to the declared names. The default secret name
-is the capability's to choose: a per-consumer default (`git-token-<name>`, derived from `owner`)
-where credentials are many, a shared well-known name (`proxmox-token`) where one is typical. Either
-way the capability owns the default; the framework only resolves what was declared.
+framework owns everything after the declaration: non-prompting _prediction_ during the operation's
+preflight sweep (is this resolvable on this run?, computed centrally over the declarations by
+`orchestration.readiness.preflight_all`, never by the instance or the node holding it), _resolution_
+at the preflight boundary (everything the command declared, one batched prompt session, cached), and
+_delivery_ through the context, scoped to the declared names. The default secret name is the
+capability's to choose: a per-consumer default (`git-token-<name>`, derived from `owner`) where
+credentials are many, a shared well-known name (`proxmox-token`) where one is typical. Either way
+the capability owns the default; the framework only resolves what was declared.
 
 ### Declare, then receive: the contract that keeps a capability forward-compatible
 
@@ -480,8 +482,8 @@ framework owning everything in between:
 
 1. **Declare, purely.** Name every secret (and every other resource reference) in `dependencies`: no
    resolver, no I/O, no resolution. This is the capability's _entire_ input side. The framework
-   reads those references to build the resolvability prediction preflight uses and to scope the one
-   batched resolve pass.
+   reads those references to build the resolvability prediction the preflight sweep runs and to
+   scope the one batched resolve pass.
 2. **Receive, from the context.** Read resolved secret values only via `ctx.secret(name)`, in
    `runup` and in ops (their signatures converged on `RunContext`; a VM platform's power ops take
    the op-start context beside the row). There is no other value source: the instance holds no

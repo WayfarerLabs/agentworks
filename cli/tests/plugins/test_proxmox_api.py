@@ -204,6 +204,21 @@ class TestVMOperations:
         assert "/resize" in req.full_url
 
 
+class TestTaskOperations:
+    """Test task control methods build correct requests."""
+
+    @patch("urllib.request.urlopen")
+    def test_stop_task(self, mock_urlopen: MagicMock, api: ProxmoxAPI) -> None:
+        mock_urlopen.return_value = _mock_response(None)
+        api.stop_task("pve", "UPID:pve:00001234:root@pam:")
+        req = mock_urlopen.call_args[0][0]
+        assert req.get_method() == "DELETE"
+        # The UPID is percent-encoded in the path, matching wait_for_task.
+        assert req.full_url == (
+            "https://pve.example.com:8006/api2/json/nodes/pve/tasks/UPID%3Apve%3A00001234%3Aroot%40pam%3A"
+        )
+
+
 class TestSSLConfig:
     """Test SSL configuration."""
 

@@ -246,6 +246,7 @@ def _build_session_graph(
         workspace_tmpl=workspace_tmpl,
         agent_tmpl=agent_tmpl,
         resolver=resolver,
+        registry=registry,
         scope=scope,
         template=template,
         nodes=nodes,

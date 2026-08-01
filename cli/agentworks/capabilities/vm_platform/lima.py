@@ -187,7 +187,7 @@ class LimaPlatform(VMPlatform):
         """Local sites: ``limactl`` must be on PATH. Remote sites defer
         to the ops (probing the vm_host over SSH is a real round trip;
         the first op's error is already clear). No config secrets, so
-        the holding node's central prediction has nothing to check.
+        the operation sweep's central prediction has nothing to check.
 
         The limactl check ordinarily never fires here: a limactl-less
         local site is not-ready (``not_ready``) before any op reaches
@@ -604,9 +604,12 @@ class LimaPlatform(VMPlatform):
     def native_transport(
         self,
         vm: VMRow,
+        ctx: RunContext,
         *,
         config: Config | None = None,
     ) -> Transport | None:
+        # ctx is unused: limactl (local or over the vm_host SSH hop)
+        # needs no backend credential.
         return self._transport_for(self._instance_name(vm))
 
     def status(self, vm: VMRow, ctx: RunContext) -> VMStatus:

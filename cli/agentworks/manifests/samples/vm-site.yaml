@@ -43,6 +43,19 @@
 #      - {cpus: 2, memory: 8, size: Standard_D2s_v5}
 #      - {cpus: 4, memory: 16, size: Standard_D4s_v5}
 #      - {cpus: 8, memory: 32, size: Standard_D8s_v5}
+#    # Optional: authenticate as a specific service principal instead of
+#    # with ambient credentials (`az login`, AZURE_* env vars, managed
+#    # identity, browser fallback). Omit the whole table to keep the
+#    # ambient default. `secret` is the NAME of the secret holding the
+#    # client secret, never its value: it resolves through the backend
+#    # chain like any other (default env var:
+#    # AW_SECRET_AZURE_CLIENT_SECRET). Once set, this site uses this
+#    # identity and nothing else: a rejected client secret fails the
+#    # command rather than falling back.
+#    service_principal:
+#      tenant_id: 00000000-0000-0000-0000-000000000000
+#      client_id: 00000000-0000-0000-0000-000000000000
+#      secret: azure-client-secret
 ##
 ## Proxmox VE. The API token value is the `proxmox-token` secret
 ## (override the name with platform_config.token_secret), resolved

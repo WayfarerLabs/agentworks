@@ -158,8 +158,8 @@ class TestCreateProvisioningOutput:
         # The SDK clients are per-instance cached accessors (keyed by
         # subscription); patch them on the class so the fakes are returned
         # without building a credential or touching Azure.
-        monkeypatch.setattr(AzureVMPlatform, "_compute_client", lambda self, az: fake_compute)
-        monkeypatch.setattr(AzureVMPlatform, "_network_client", lambda self, az: fake_network)
+        monkeypatch.setattr(AzureVMPlatform, "_compute_client", lambda self, az, ctx: fake_compute)
+        monkeypatch.setattr(AzureVMPlatform, "_network_client", lambda self, az, ctx: fake_network)
         monkeypatch.setattr(AzureVMPlatform, "_vm_exists", lambda self, compute, rg, name: False)
 
     @staticmethod
@@ -274,8 +274,8 @@ class TestCreateOSDiskClamp:
         vms = self._RecordingVMs()
         fake_compute = SimpleNamespace(virtual_machines=vms)
         fake_network = self._fake_network()
-        monkeypatch.setattr(AzureVMPlatform, "_compute_client", lambda self, az: fake_compute)
-        monkeypatch.setattr(AzureVMPlatform, "_network_client", lambda self, az: fake_network)
+        monkeypatch.setattr(AzureVMPlatform, "_compute_client", lambda self, az, ctx: fake_compute)
+        monkeypatch.setattr(AzureVMPlatform, "_network_client", lambda self, az, ctx: fake_network)
         monkeypatch.setattr(AzureVMPlatform, "_vm_exists", lambda self, compute, rg, name: False)
         request = ProvisionRequest(
             vm_name="dev",

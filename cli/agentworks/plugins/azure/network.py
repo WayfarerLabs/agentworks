@@ -115,10 +115,24 @@ class AzureError(ProvisioningError):
     Attributes:
         summary: A concise, user-facing error message.
         detail: The full error details (for logs).
+
+    The optional entity / hint keywords are the base ``AgentworksError``
+    ones, forwarded so a failure that KNOWS which resource it is about
+    can say so (the service-principal credential build names its site and
+    its secret). :func:`wrap_azure_error`, which converts an arbitrary SDK
+    exception, has no such knowledge and passes none.
     """
 
-    def __init__(self, summary: str, detail: str) -> None:
-        super().__init__(summary)
+    def __init__(
+        self,
+        summary: str,
+        detail: str,
+        *,
+        entity_kind: str | None = None,
+        entity_name: str | None = None,
+        hint: str | None = None,
+    ) -> None:
+        super().__init__(summary, entity_kind=entity_kind, entity_name=entity_name, hint=hint)
         self.summary = summary
         self.detail = detail
 

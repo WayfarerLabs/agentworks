@@ -95,7 +95,7 @@ agw console delete my-console              # Extra shells are lost but sessions 
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | `--non-interactive` | Disable all interactive prompts                                                                                                             |
 | `--debug`           | Print the full traceback on unhandled errors, and show the Azure SDK's own log lines that are otherwise suppressed (also via `AGW_DEBUG=1`) |
-| `--no-deprecations` | Suppress deprecation warnings (e.g. the TOML resource-section nudge)                                                                        |
+| `--no-deprecations` | Silence the ambient per-command deprecation banner (`agw doctor` always reports deprecation health)                                         |
 
 When `--non-interactive` is set (or stdin is not a TTY), commands that would normally prompt for
 missing values (VM selection, workspace selection, name generation) will fail with a clear error
@@ -124,16 +124,17 @@ presence) to opt out of color even on a terminal.
 Pressing Ctrl-C during a long-running operation triggers best-effort cleanup. Where the operation
 can roll back (e.g. `vm create` during the provisioning phase, `workspace create`, `agent create`,
 `session create`) it undoes the partial DB / on-VM state and prints `Cancelling X... rolling back.`.
-On Azure, the `vm create` provisioning-phase rollback also deletes the partially created cloud
-resources (VM, NIC, public IP, NSG, vnet, disk), which can take a minute or two; a second Ctrl-C
-abandons that cleanup, printing the resource group and name prefix to remove manually. On Lima and
-WSL2 the same rollback removes the partially created instance (local, or on the site's `vm_host` for
-a remote-Lima site) or distro plus its install directory; a second Ctrl-C likewise abandons it,
-printing the exact removal command (`limactl delete --force <name>`, run on the `vm_host` for a
-remote site, or `wsl --unregister <name>` plus deleting the install directory it names). Where
-rollback isn't possible (`vm reinit`, `agent reinit`, the init phase of `vm create`) it prints a
-recovery hint: the next command to run (`vm reinit`, `vm delete --force`, ...). Every cancellation
-exits with the conventional SIGINT exit code (130).
+On every platform the `vm create` provisioning-phase rollback also deletes the partially created
+backend state: Azure the cloud resource set (VM, NIC, public IP, NSG, vnet, disk), which can take a
+minute or two; Proxmox the partially cloned VM (cancelling a still-running clone task first); Lima
+the instance (local, or on the site's `vm_host` for a remote site); WSL2 the distro plus its install
+directory. A second Ctrl-C abandons that cleanup, printing what to remove manually: the resource
+group and name prefix, the node and VMID, or the exact removal command
+(`limactl delete --force <name>`, run on the `vm_host` for a remote site, or
+`wsl --unregister <name>` plus deleting the install directory it names). Where rollback isn't
+possible (`vm reinit`, `agent reinit`, the init phase of `vm create`) it prints a recovery hint: the
+next command to run (`vm reinit`, `vm delete --force`, ...). Every cancellation exits with the
+conventional SIGINT exit code (130).
 
 ## Commands
 
@@ -758,9 +759,10 @@ Resource kinds (YAML manifests; the deprecated TOML section is noted for each):
 
 - `vm-site` (`[azure]` / `[proxmox]`, flat legacy shape): a configured place to create VMs.
   `spec.platform` names the backing platform, `spec.platform_config` carries its settings (Azure
-  subscription/resource-group/region, Proxmox API endpoint + token secret, remote-Lima `vm_host`).
-  The `lima-local` and `wsl2` sites ship built in (on hosts where their platform can run) and their
-  names are reserved
+  subscription/resource-group/region plus an optional `service_principal` block to authenticate as a
+  specific service principal instead of with ambient credentials, Proxmox API endpoint + token
+  secret, remote-Lima `vm_host`). The `lima-local` and `wsl2` sites ship built in (on hosts where
+  their platform can run) and their names are reserved
 - `vm-platform`: read-only capability rows for the VM platforms (`lima`, `wsl2` built in; `azure-vm`
   and `proxmox` ship as the opt-in `azure` and `proxmox` system plugins, disabled by default, see
   [System Plugins](#system-plugins)); listed by `agw resource kinds`, never declared

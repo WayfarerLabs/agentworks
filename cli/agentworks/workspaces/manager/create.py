@@ -123,7 +123,7 @@ def create_workspace(
         # arrive pre-seeded from the gate). This command has never
         # framed phases, so no banners here; the realize body never
         # frames either.
-        preflight_all(nodes, RunContext(config=config, operation_scope=scope))
+        preflight_all(nodes, RunContext(config=config, operation_scope=scope), registry=registry)
         resolver.resolve()
 
         from agentworks.workspaces.realize import realize_workspace

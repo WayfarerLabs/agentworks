@@ -2,8 +2,11 @@
 ## user on VMs, applied during init/reinit. There is exactly one; the
 ## envelope accepts only the name `default`.
 ## The `git_credentials: [github]` reference pairs with the
-## git-credential sample -- declare that resource too (or drop the
-## field) or loading will fail on the missing reference.
+## git-credential sample. Declare that resource too (or drop the field),
+## or loading will fail on the missing reference.
+## The commented claude_marketplaces / claude_plugins lines install
+## Claude Code marketplace plugins for this user (needs the `claude`
+## CLI on PATH); see "Claude Code Plugins" in cli/README.md.
 ##
 #apiVersion: agentworks/v1
 #kind: admin-template
@@ -19,5 +22,7 @@
 #  # dotfiles_install_cmd: ./install.sh  # command to run after clone/copy
 #  mise_activate: true
 #  # git_force_safe_directory: true      # set safe.directory '*' for admin and agents (default true)
+#  # claude_marketplaces: ["https://github.com/WayfarerLabs/nerftools#4.1.0"]
+#  # claude_plugins: [nerftools-default@nerftools]
 #  env:
 #    EDITOR: nvim

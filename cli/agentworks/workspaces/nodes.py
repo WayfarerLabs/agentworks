@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, WorkspaceRow
     from agentworks.orchestration.node import Node
+    from agentworks.resources.reference import ResourceReference
     from agentworks.vms.nodes import LiveVMNode
 
 
@@ -48,6 +49,9 @@ class LiveWorkspaceNode:
         return (self._vm,)
 
     def secret_refs(self) -> tuple[str, ...]:
+        return ()
+
+    def config_secret_refs(self) -> tuple[ResourceReference, ...]:
         return ()
 
     def preflight(self, ctx: RunContext) -> None: ...
@@ -101,6 +105,9 @@ class PendingWorkspaceNode:
         return (self._vm,)
 
     def secret_refs(self) -> tuple[str, ...]:
+        return ()
+
+    def config_secret_refs(self) -> tuple[ResourceReference, ...]:
         return ()
 
     def preflight(self, ctx: RunContext) -> None: ...

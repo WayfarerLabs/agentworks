@@ -151,6 +151,48 @@ is not edited in place; this addendum is authoritative):
   bare hostname), so the cap is 38, NOT the 63-char hostname and NOT Azure's 64-char computer-name.
   See the resource-manifests lockfile's 2026-07-27 entry for the full per-kind cap rationale.
 
+## Addendum: 2026-07-30 (issue #199, Azure service-principal credentials)
+
+Two statements in this SDD's artifacts are superseded as-built; the artifacts are point-in-time
+records and are not edited in place, so this addendum is authoritative.
+
+- **"Azure, Lima, and WSL2 declare no config secrets today" (`hla.md`) is now only true of Lima and
+  WSL2.** An `azure-vm` site may declare an optional `platform_config.service_principal` table whose
+  `secret` field names the secret holding the client secret (default `azure-client-secret`), and
+  `AzureVMPlatform.dependencies` emits the corresponding `ConfigReference` when it is present. A
+  site that omits the table still declares nothing and authenticates ambiently, so the sentence
+  holds for every pre-existing site. The HLA's follow-on, "AWS later rides the same rails for client
+  secrets", is now literally true: the Azure block is the documented reference shape for it (see the
+  "Credentials on a cloud platform" section of `cli/agentworks/capabilities/vm_platform/README.md`).
+- **The `VMPlatform` signature block in `frd.md`, and the matching one in `hla.md`, no longer match
+  the ABC.** Beyond the `ctx: RunContext` the orchestration layer added to the ops (already covered
+  generically by the 2026-07-18 entry above), the transport and exposure hooks now take it too:
+  `native_transport(vm, ctx, *, config=None)`, `transient_route(vm, ctx, *, config=None)`,
+  `post_tailscale_ready(vm, ctx)`, and the `#341` `secure_failed_vm(vm, ctx)` hook (added in the
+  next entry's exposure-model work; it closes the bootstrap allow on a kept-but-not-completed
+  create, which is a backend NSG call). Opening or closing a route to a cloud VM is a backend call,
+  and without a context a credentialed platform had no delivery surface on the one path that reaches
+  it first: a cold `vm shell --platform` on a running VM, where the activation gate's happy path is
+  a pure Tailscale reachability probe and the transport build is the command's first platform call.
+  `agentworks.transports.native_transport` gained a matching keyword-only `ctx`, and
+  `gated_vm_boundary` now yields `(vm_node, resolver, ops_ctx)` so gated commands have the same
+  op-start context the no-gate ones already got. `secure_failed_vm` gets the create op's own
+  `platform_ctx` threaded through `bootstrap_vm`; its secrets are resolved before Phase A, so even
+  the interrupt path never resolves for the first time. `vm_active` deliberately did NOT change:
+  every hold that exists is local and makes no backend call.
+- **`VMSiteNode.preflight` no longer predicts its declared secrets' resolvability.** The plan's
+  "Proxmox's preflight is the base's token prediction only" and the FRD's readiness narration
+  describe a placement that has now moved twice: out of the capability instance (the orchestration
+  layer, already covered by the 2026-07-18 entry above) and now out of the holding node too, into
+  the operation's preflight sweep. The site node keeps reference INTACTNESS (its declared names must
+  reach real registry rows) and composes its platform's world checks; whether those secrets would
+  RESOLVE belongs to the operation, and doctor, which invokes the node's preflight per row without a
+  sweep, therefore reports a prompt-only site credential as a healthy site plus one Secrets-group
+  row. See the 2026-07-31 entry in `docs/sdd/2026-07-16-orchestration-layer/locked.md` for the full
+  note; that SDD owns the prediction placement.
+
+The living contract remains `base.py` plus `cli/agentworks/capabilities/vm_platform/README.md`.
+
 ## Addendum: 2026-07-31 (Azure public-IP detach retired)
 
 The Azure public-IP detach behavior quoted in `hla.md` (the old `post_tailscale_ready` /
@@ -159,7 +201,9 @@ attaching a temporary one for native routes) was retired. Driver: Microsoft is r
 outbound access, which made VMs with a detached public IP go offline. Azure VMs now keep their
 public IP for life; the NSG carries a permanent deny-all-inbound baseline, and SSH ingress happens
 only through an ephemeral allow rule scoped to the operator's egress IP, opened for bootstrap and
-for each native route and deleted after (post-Tailscale, on create failure, and on route exit). The
-2026-07-26 addendum's "Azure `native_transport()` public-IP rationale for `config`" still holds (the
-SSH-via-public-IP path remains; only how the route opens changed). Living reference:
-`cli/agentworks/plugins/azure/platform.py`, `cli/agentworks/plugins/azure/network.py`, and ADR 0003.
+for each native route and deleted after (post-Tailscale, on create failure via the new
+`secure_failed_vm` hook, and on route exit). The 2026-07-26 addendum's "Azure `native_transport()`
+public-IP rationale for `config`" still holds (the SSH-via-public-IP path remains; only how the
+route opens changed), and the ctx threading from the 2026-07-30 addendum carries through to the NSG
+calls. Living reference: `cli/agentworks/plugins/azure/platform.py`,
+`cli/agentworks/plugins/azure/network.py`, and ADR 0003.

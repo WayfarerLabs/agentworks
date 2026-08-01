@@ -12,16 +12,22 @@ from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
 from agentworks.capabilities.vm_platform.lima import LimaPlatform
 from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
 from agentworks.errors import ConfigError
-from agentworks.plugins.azure.platform import AzureVMPlatform
+from agentworks.plugins.azure.platform import DEFAULT_CLIENT_SECRET, AzureVMPlatform
 from agentworks.plugins.proxmox.platform import (
     DEFAULT_TOKEN_SECRET,
     ProxmoxPlatform,
 )
+from agentworks.resources.reference import ConfigReference
 
 AZURE_CONFIG = {
     "subscription_id": "0000",
     "resource_group": "agw",
     "region": "eastus",
+}
+AZURE_SP = {
+    "tenant_id": "tenant-0000",
+    "client_id": "client-0000",
+    "secret": "az-sp",
 }
 PROXMOX_CONFIG = {
     "api_url": "https://pve:8006",
@@ -74,6 +80,44 @@ def test_azure_requires_the_three_keys() -> None:
         AzureVMPlatform.validate("t", {**AZURE_CONFIG, "extra": "x"})
 
 
+def test_azure_service_principal_is_optional_and_shape_checked() -> None:
+    """The optional ``service_principal`` table: absent is the ambient
+    path (and stays valid), present must carry both identifiers, may
+    name its secret, and rejects anything else."""
+    assert AzureVMPlatform.validate("t", {**AZURE_CONFIG, "service_principal": AZURE_SP}) is None
+    # ``secret`` is optional (the default name applies).
+    assert (
+        AzureVMPlatform.validate(
+            "t",
+            {**AZURE_CONFIG, "service_principal": {k: v for k, v in AZURE_SP.items() if k != "secret"}},
+        )
+        is None
+    )
+    for missing in ("tenant_id", "client_id"):
+        broken = {k: v for k, v in AZURE_SP.items() if k != missing}
+        with pytest.raises(ConfigError, match=f"service_principal.{missing}"):
+            AzureVMPlatform.validate("t", {**AZURE_CONFIG, "service_principal": broken})
+
+
+@pytest.mark.parametrize(
+    ("sp", "match"),
+    [
+        pytest.param("not-a-table", "must be a table", id="not-a-table"),
+        pytest.param({**AZURE_SP, "tenant_id": ""}, "tenant_id", id="empty-tenant"),
+        pytest.param({**AZURE_SP, "client_id": 7}, "client_id", id="non-string-client"),
+        pytest.param({**AZURE_SP, "secret": ""}, "bare secret name", id="empty-secret-name"),
+        pytest.param({**AZURE_SP, "secret": 7}, "bare secret name", id="non-string-secret-name"),
+        # The field is deliberately named `secret` (a NAME), so the
+        # value-shaped spelling an operator might reach for is refused.
+        pytest.param({**AZURE_SP, "client_secret": "hunter2"}, "unknown field", id="client-secret-value"),
+        pytest.param({**AZURE_SP, "certificate": "x"}, "unknown field", id="future-variant-not-yet"),
+    ],
+)
+def test_azure_rejects_malformed_service_principal(sp: object, match: str) -> None:
+    with pytest.raises(ConfigError, match=match):
+        AzureVMPlatform.validate("t", {**AZURE_CONFIG, "service_principal": sp})
+
+
 def test_proxmox_validation_errors() -> None:
     with pytest.raises(ConfigError, match="node is required"):
         ProxmoxPlatform.validate("t", {k: v for k, v in PROXMOX_CONFIG.items() if k != "node"})
@@ -91,7 +135,44 @@ def test_proxmox_validation_errors() -> None:
 def test_config_free_platforms_imply_no_edges() -> None:
     assert LimaPlatform.dependencies("t", {"vm_host": "me@box"}) == ()
     assert WSL2Platform.dependencies("t", {}) == ()
+    # No service_principal: azure authenticates ambiently and implies no
+    # reference, exactly as every azure-vm site did before issue #199.
     assert AzureVMPlatform.dependencies("t", AZURE_CONFIG) == ()
+
+
+def test_azure_returns_the_client_secret_reference() -> None:
+    (ref,) = AzureVMPlatform.dependencies("t", {**AZURE_CONFIG, "service_principal": AZURE_SP})
+    assert (ref.kind, ref.name) == ("secret", "az-sp")
+    assert "service-principal" in ref.usage
+
+    # Omitting ``secret`` falls back to the well-known default name.
+    no_name = {k: v for k, v in AZURE_SP.items() if k != "secret"}
+    (ref,) = AzureVMPlatform.dependencies("t", {**AZURE_CONFIG, "service_principal": no_name})
+    assert ref.name == DEFAULT_CLIENT_SECRET
+
+
+def test_azure_dependencies_is_total_on_malformed_config() -> None:
+    """``dependencies`` never raises. The edge's identity is the secret
+    NAME, so it emits even when the table's other fields are missing or
+    malformed, and is omitted only when the table itself, or the field
+    naming the edge, is unusable."""
+    # Nothing but the secret name: the edge still emits.
+    (ref,) = AzureVMPlatform.dependencies("t", {"service_principal": {"secret": "az-sp"}})
+    assert ref.name == "az-sp"
+    # An empty table is still a declared service principal, so the
+    # default-named edge emits (validate is what rejects the shape).
+    (ref,) = AzureVMPlatform.dependencies("t", {**AZURE_CONFIG, "service_principal": {}})
+    assert ref.name == DEFAULT_CLIENT_SECRET
+    # A table whose OTHER fields are malformed still emits (their shape
+    # does not change what the edge points at).
+    assert AzureVMPlatform.dependencies("t", {**AZURE_CONFIG, "service_principal": {**AZURE_SP, "tenant_id": 3}}) == (
+        ConfigReference(kind="secret", name="az-sp", usage="the Azure service-principal client secret"),
+    )
+    # A malformed name, or a non-table, makes the edge underivable, so it
+    # is omitted (never raised).
+    assert AzureVMPlatform.dependencies("t", {**AZURE_CONFIG, "service_principal": {**AZURE_SP, "secret": ""}}) == ()
+    assert AzureVMPlatform.dependencies("t", {**AZURE_CONFIG, "service_principal": {**AZURE_SP, "secret": 3}}) == ()
+    assert AzureVMPlatform.dependencies("t", {**AZURE_CONFIG, "service_principal": "nope"}) == ()
 
 
 def test_proxmox_returns_the_token_secret_reference() -> None:

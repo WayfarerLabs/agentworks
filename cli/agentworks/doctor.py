@@ -320,11 +320,21 @@ def _check_vm_sites(config: Config, registry: Registry) -> HealthGroup:
     is not declared at all still FAILS with the paste-ready manifest
     snippet (the stranded remote-Lima case).
 
-    A ready site's row IS the site node's ``preflight`` (the same
-    central resolvability prediction plus the held platform instance's
-    world checks every service-layer operation sweeps): read-only by
-    contract, which is exactly what lets doctor call it. A failing row
-    here is the error the next command would hit.
+    A ready site's row IS the site node's ``preflight``: its declared
+    secrets reaching real registry rows, plus the held platform
+    instance's world checks. Read-only by contract, which is exactly
+    what lets doctor call it.
+
+    What that row does NOT cover is whether the site's declared secrets
+    would RESOLVE. That prediction belongs to an operation's runtime
+    world (which backends are active, whether this run can prompt), so
+    it lives in the operation's preflight sweep
+    (:func:`~agentworks.orchestration.readiness.preflight_all`), which
+    doctor does not run: doctor invokes ``node.preflight`` per row,
+    deliberately. Resolvability renders once, on the secret's own row in
+    the Secrets group, instead of being smeared across every resource
+    that names it, and a site whose credential is prompt-only reads ok
+    here, correctly, because nothing about that site is unhealthy.
     """
     from agentworks.db import Database
     from agentworks.vms.sites import (

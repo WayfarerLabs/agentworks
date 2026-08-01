@@ -9,6 +9,7 @@ import pytest
 
 from agentworks.errors import StateError
 from agentworks.orchestration.walk import walk
+from agentworks.resources.reference import ResourceReference
 
 if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
@@ -24,6 +25,9 @@ class _N:
         return self._deps
 
     def secret_refs(self) -> tuple[str, ...]:
+        return ()
+
+    def config_secret_refs(self) -> tuple[ResourceReference, ...]:
         return ()
 
     def preflight(self, ctx: RunContext) -> None: ...
