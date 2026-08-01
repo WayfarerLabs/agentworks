@@ -243,6 +243,46 @@ def test_azure_service_principal_secret_reaches_the_site_node(tmp_path: Path) ->
     assert vm_site_node(ambient, "azure-ambient").secret_refs() == ()
 
 
+def test_ec2_credentials_secret_reaches_the_site_node(tmp_path: Path) -> None:
+    """The same end-to-end hop the azure test pins, for the ec2 platform: an
+    aws site with a ``credentials`` block reaches
+    ``vm_site_node(...).secret_refs()`` carrying its secret access key.
+    """
+    from agentworks.bootstrap import build_registry
+    from agentworks.config import load_config
+    from agentworks.vms.nodes import vm_site_node
+
+    pub = tmp_path / "k.pub"
+    priv = tmp_path / "k"
+    pub.write_text("ssh-ed25519 AAAA test")
+    priv.write_text("key")
+    cfg = tmp_path / "config.toml"
+    cfg.write_text(
+        f'[operator]\nssh_public_key = "{pub.as_posix()}"\nssh_private_key = "{priv.as_posix()}"\n'
+        '[plugins]\nsystem = ["aws"]\n'
+    )
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    ec2_site = (
+        "apiVersion: agentworks/v1\nkind: vm-site\nmetadata:\n  name: aws-dev\nspec:\n"
+        "  platform:\n    name: ec2\n    region: us-east-1\n"
+        "    credentials:\n      access_key_id: AKIAEXAMPLE\n      secret: aws-secret\n"
+    )
+    (resources / "site.yaml").write_text(ec2_site)
+
+    registry = build_registry(load_config(cfg, warn_issues=False))
+    assert vm_site_node(registry, "aws-dev").secret_refs() == ("aws-secret",)
+
+    # A site WITHOUT the block declares nothing, so ambient-path sites stay
+    # edge-free.
+    (resources / "site.yaml").write_text(
+        "apiVersion: agentworks/v1\nkind: vm-site\nmetadata:\n  name: aws-ambient\nspec:\n"
+        "  platform:\n    name: ec2\n    region: us-east-1\n"
+    )
+    ambient = build_registry(load_config(cfg, warn_issues=False))
+    assert vm_site_node(ambient, "aws-ambient").secret_refs() == ()
+
+
 def test_host_unsupported_site_still_emits_its_edges(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
