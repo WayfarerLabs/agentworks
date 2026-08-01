@@ -11,7 +11,8 @@ from typing import TYPE_CHECKING, cast
 import pytest
 
 from agentworks.capabilities.base import OperationScope, RunContext, ScopeLevel
-from agentworks.errors import StateError
+from agentworks.capabilities.harness import Harness
+from agentworks.errors import ConfigError, StateError
 from agentworks.sessions.nodes import pending_session_node
 from agentworks.sessions.templates import ResolvedSessionTemplate
 from agentworks.vms.nodes import LiveVMNode, VMSiteNode
@@ -288,6 +289,153 @@ def test_session_create_graph_shares_one_vm_node(db: Database) -> None:
     from agentworks.orchestration.secrets import secret_union
 
     assert secret_union(nodes) == ("git-token-gh",)
+
+
+# -- the harness_config secret references (#305) -----------------------------
+
+
+class _SecretHarness(Harness):
+    """A registered secret-declaring harness double: both built-ins
+    declare no secrets, so pinning the reference derivation and the
+    sweep's prediction needs one that does."""
+
+    name = "scanner"
+    description = "test double harness that declares a config secret"
+
+    @classmethod
+    def dependencies(cls, owner, config):  # type: ignore[no-untyped-def]
+        from agentworks.resources.reference import ConfigReference
+
+        return (ConfigReference(kind="secret", name="scanner-api-key", usage="the scanner API key"),)
+
+    @classmethod
+    def validate(cls, owner, config):  # type: ignore[no-untyped-def]
+        return None
+
+    def start(self, ctx):  # type: ignore[no-untyped-def]
+        return ""
+
+    def restart(self, ctx):  # type: ignore[no-untyped-def]
+        return ""
+
+    def _probe_target(self, transport):  # type: ignore[no-untyped-def]
+        return None
+
+
+_EXPECTED_USAGE = "the scanner API key, from the harness_config of session-template 'scan'"
+
+
+def _scanner_session(db: Database, monkeypatch: pytest.MonkeyPatch):  # noqa: ANN202
+    """A pending admin session whose template selects the
+    secret-declaring harness double."""
+    from agentworks.capabilities.harness import HARNESS_REGISTRY
+    from agentworks.workspaces.nodes import pending_workspace_node
+
+    monkeypatch.setitem(HARNESS_REGISTRY, "scanner", _SecretHarness)
+    vm = _vm_node(db)
+    workspace = pending_workspace_node(db, cast("Config", object()), "ws1", vm, None)
+    template = ResolvedSessionTemplate(name="scan", harness="scanner")
+    return pending_session_node(
+        db,
+        cast("Config", object()),
+        "s1",
+        template,
+        agent=None,
+        admin=True,
+        workspace=workspace,
+        vm=vm,
+    )
+
+
+def test_session_node_exposes_the_harness_config_secret_refs(db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The #305 derivation pin: the held harness declares FULL
+    references (sourced to the session template, with the usage naming
+    the harness_config declaration site), the node exposes them as its
+    ``config_secret_refs``, and the bare-name ``secret_refs`` union
+    derives from them (one source, no duplicated list)."""
+    from agentworks.resources.reference import SecretReference
+
+    session = _scanner_session(db, monkeypatch)
+    (ref,) = session.config_secret_refs()
+    assert isinstance(ref, SecretReference)
+    assert ref.name == "scanner-api-key"
+    assert ref.kind == "secret"
+    assert ref.usage == _EXPECTED_USAGE
+    assert ref.source == ("session-template", "scan")
+    assert session.secret_refs() == ("scanner-api-key",)
+
+
+def test_live_session_node_exposes_the_same_harness_refs(db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The live half of the derivation pin: the live node's methods are
+    a separate code path from the pending node's, so both are held to
+    the same harness-declared references."""
+    from agentworks.capabilities.harness import HARNESS_REGISTRY
+    from agentworks.sessions.nodes import live_session_node
+
+    monkeypatch.setitem(HARNESS_REGISTRY, "scanner", _SecretHarness)
+    vm = _vm_node(db)
+    session = live_session_node(
+        _session_row(agent_name=None),  # type: ignore[arg-type]
+        ResolvedSessionTemplate(name="scan", harness="scanner"),
+        agent=None,
+        workspace=_live_workspace(db, vm),
+        vm=vm,
+    )
+    (ref,) = session.config_secret_refs()
+    assert (ref.name, ref.usage, ref.source) == (
+        "scanner-api-key",
+        _EXPECTED_USAGE,
+        ("session-template", "scan"),
+    )
+    assert session.secret_refs() == ("scanner-api-key",)
+
+
+def test_sweep_predicts_a_harness_config_secret_with_owner_usage_framing(
+    db: Database, tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The #305 fail-fast pin, the whole point of the threading: an
+    unresolvable harness_config secret fails at the preflight sweep,
+    before any prompt or mutation, with the same owner/usage framing
+    every other declared config secret gets, instead of surfacing at
+    resolve time."""
+    from agentworks.bootstrap import build_registry
+    from agentworks.orchestration.readiness import preflight_all
+    from tests.orchestrated_fixtures import write_operator_config
+
+    config = write_operator_config(tmp_path, '[secret_config]\nbackends = ["env-var"]\n')
+    registry = build_registry(config)
+    monkeypatch.delenv("AW_SECRET_SCANNER_API_KEY", raising=False)
+    session = _scanner_session(db, monkeypatch)
+
+    with pytest.raises(ConfigError) as exc:
+        preflight_all([session], RunContext(config=config), registry=registry)
+
+    assert str(exc.value) == (
+        f"session/s1: secret 'scanner-api-key' ({_EXPECTED_USAGE}) is not resolvable by any active backend"
+    )
+    assert "agw secret describe scanner-api-key" in (exc.value.hint or "")
+
+
+def test_sweep_passes_a_resolvable_harness_config_secret(
+    db: Database, tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The happy-path half: a resolvable harness_config secret passes
+    the sweep, and the name still joins the boundary union exactly as
+    before (prediction widened; resolution did not move)."""
+    from agentworks.bootstrap import build_registry
+    from agentworks.orchestration.readiness import preflight_all
+    from agentworks.orchestration.secrets import secret_union
+    from tests.orchestrated_fixtures import write_operator_config
+
+    config = write_operator_config(tmp_path, '[secret_config]\nbackends = ["env-var"]\n')
+    registry = build_registry(config)
+    monkeypatch.setenv("AW_SECRET_SCANNER_API_KEY", "sk-123")
+    session = _scanner_session(db, monkeypatch)
+    scope = OperationScope(level=ScopeLevel.SESSION, vm="box", workspace="ws1", session="s1", admin=True)
+
+    preflight_all([session], RunContext(config=config, operation_scope=scope), registry=registry)
+
+    assert secret_union([session]) == ("scanner-api-key",)
 
 
 # -- the relocated ephemeral teardown bodies ---------------------------------

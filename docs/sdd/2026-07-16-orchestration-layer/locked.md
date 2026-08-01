@@ -222,3 +222,20 @@ this directory can be deleted per the SDD lifecycle once its history stops infor
   ok; the operation still fails fast at the sweep, before any prompt or mutation. This also narrows
   the FRD's "doctor keeps its per-resource rows without needing a command plan": doctor keeps
   per-resource READINESS rows, and resolvability was never one of them.
+
+- **2026-08-01 (issue #305 branch, post-lock):** the `config_secret_refs()` prediction surface
+  gained a fourth declaring kind: the session nodes. The #199 amendment above recorded the first
+  three; the session nodes still returned `()` because the harness capability surface exposed only
+  bare secret names, with no usage prose to frame a prediction failure (a coverage gap the refactor
+  made visible, not a regression: node preflight never predicted these refs either). The harness
+  surface now declares full references (`Harness.config_secret_refs()`, converted from the bare-name
+  `secret_refs()`, whose only consumer was the session nodes): its `dependencies`-declared refs,
+  sourced to the owning session-template, with the usage prose extended to name the `harness_config`
+  declaration site (the sweep frames its error with the node key `session/<name>`, which does not
+  name the template). The session nodes expose them and derive their bare-name `secret_refs` union
+  from them, so a session template's `harness_config` secrets are now predicted by the preflight
+  sweep like every other declared config secret, with the #202 fail-fast and the standard
+  owner/usage framing; inert for both built-in harnesses (they declare no secrets). The session
+  nodes keep NO `require_declared_refs` intactness check, unlike vm-site and git-credential: the
+  dangling case it guards is refused at every factory call site by the recipe/harness enablement
+  gates, and the nodes thread no registry.

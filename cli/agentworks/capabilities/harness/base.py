@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from agentworks.capabilities.base import OperationScope, RunContext
+    from agentworks.resources.reference import ResourceReference
     from agentworks.transports import Transport
 
     # Structural, TYPE_CHECKING-only: the harness satisfies Readiness and
@@ -164,20 +165,39 @@ class Harness(Capability):
         """
         return self._state
 
-    def secret_refs(self) -> tuple[str, ...]:
-        """The secret names this harness declares (the secret-kind
-        references :meth:`dependencies` returned, bound at construct
-        into ``self._secret_refs``), for the holding session node to fold
-        into its own ``secret_refs`` union.
+    def config_secret_refs(self) -> tuple[ResourceReference, ...]:
+        """The full config-secret references this harness declares (the
+        secret-kind references :meth:`dependencies` returned, bound at
+        construct into ``self._secret_refs``), sourced to the owning
+        session-template, for the holding session node to expose as its
+        own ``config_secret_refs`` (what the preflight sweep predicts
+        resolvability over) and to derive its bare-name ``secret_refs``
+        union from.
 
-        Mirrors how :class:`GitCredentialProvider` exposes ``secret_name``
-        to its holder, so the node consumes a public accessor rather than
-        reaching into the base ``Capability._secret_refs`` private field.
-        Empty for both built-ins (``shell`` / ``claude-code`` declare no
-        secrets); the plumbing is here for a future secret-declaring
-        harness.
+        Full references rather than bare names because a prediction
+        failure needs the owner/usage framing every other declared
+        config secret gets (issue #305). The usage is the capability's
+        own prose plus the declaration site: the sweep frames its error
+        with the NODE's key (``session/<name>``), which names the
+        session but not the template whose ``harness_config`` named the
+        secret, so the reference carries that locating info itself. A
+        public accessor, so the node never reaches into the base
+        ``Capability._secret_refs`` private field. Empty for both
+        built-ins (``shell`` / ``claude-code`` declare no secrets); the
+        plumbing is here for a future secret-declaring harness.
         """
-        return tuple(ref.name for ref in self._secret_refs)
+        from dataclasses import replace
+
+        from agentworks.resources.reference import sourced_references
+
+        enriched = tuple(
+            replace(
+                ref,
+                usage=f"{ref.usage}, from the harness_config of {self.owner_kind} '{self.owner_name}'",
+            )
+            for ref in self._secret_refs
+        )
+        return tuple(sourced_references(enriched, (self.owner_kind, self.owner_name)))
 
     @classmethod
     def merge_config(cls, base: Mapping[str, object], child: Mapping[str, object]) -> dict[str, object]:

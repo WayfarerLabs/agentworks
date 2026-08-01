@@ -118,8 +118,10 @@ class Node(Readiness, Protocol):
         over exactly these, which is why the type has to survive.
 
         Most node kinds declare no config secrets and return ``()``;
-        today ``vm-site`` (its platform's API credential) and
-        ``git-credential`` (its provider's token) are the two that do.
+        today ``vm-site`` (its platform's API credential),
+        ``git-credential`` (its provider's token), ``vm-template`` (its
+        Tailscale auth key), and the session nodes (their harness's
+        ``harness_config`` secrets) are the ones that do.
         """
         ...
 

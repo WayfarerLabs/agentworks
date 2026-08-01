@@ -22,8 +22,10 @@ makes explicit (``capabilities/harness/base.py``):
 
 The node is the rich consuming resource of ``capabilities/README.md``:
 its ``preflight`` / ``runup`` fan into the held harness's, and the
-harness's declared secrets fold into the node's ``secret_refs`` (empty
-for the built-ins, plumbing present).
+harness's declared config-secret references surface through the node's
+``config_secret_refs`` (the preflight sweep's prediction input), with
+the bare-name ``secret_refs`` union derived from them (empty for the
+built-ins, plumbing present).
 """
 
 from __future__ import annotations
@@ -92,22 +94,31 @@ class LiveSessionNode:
         return deps
 
     def secret_refs(self) -> tuple[str, ...]:
-        return self._harness.secret_refs()
+        return tuple(ref.name for ref in self._harness.config_secret_refs())
 
     def config_secret_refs(self) -> tuple[ResourceReference, ...]:
-        # DEFERRED, deliberately, and not because a harness declares
-        # nothing: a session template's harness_config can name secrets,
-        # which is why secret_refs above delegates to the harness. Two
-        # reasons to leave them out for now. The harness surface exposes
-        # only NAMES, so there is no `usage` prose to frame a prediction
-        # failure with; and these refs were never predicted in node
-        # preflight either, so returning them here would WIDEN what the
-        # sweep refuses rather than relocate an existing check. Threading
-        # usage-bearing references through the harness surface is the
-        # honest fix, and it is tracked as separate work.
-        return ()
+        # The harness_config secrets, as the harness's declared full
+        # references (owner/usage-bearing, sourced to the session
+        # template). The preflight sweep predicts resolvability over
+        # these; the session itself does not, because how a secret gets
+        # a value is the operation's concern and not the session's.
+        return self._harness.config_secret_refs()
 
     def preflight(self, ctx: RunContext) -> None:
+        """Fan into the held harness's readiness fork.
+
+        Deliberately NO ``require_declared_refs`` intactness check over
+        the harness refs, unlike the vm-site and git-credential nodes:
+        the dangling-declaration case that check guards (a disabled
+        plugin's session-template, whose referenced secrets the R12
+        materialization pass leaves unmaterialized) is refused at every
+        factory call site by the drift-guard-pinned
+        ``ensure_recipe_enabled`` / ``ensure_harness_enabled`` gates,
+        before a node exists. The session nodes also thread no registry
+        (the R14 gate comments lean on that fact), so the check would
+        add a registry edge to guard a state the call-site gates
+        already make unreachable.
+        """
         self._harness.preflight(ctx)
 
     def runup(self, ctx: RunContext) -> None:
@@ -162,22 +173,31 @@ class PendingSessionNode:
         return deps
 
     def secret_refs(self) -> tuple[str, ...]:
-        return self._harness.secret_refs()
+        return tuple(ref.name for ref in self._harness.config_secret_refs())
 
     def config_secret_refs(self) -> tuple[ResourceReference, ...]:
-        # DEFERRED, deliberately, and not because a harness declares
-        # nothing: a session template's harness_config can name secrets,
-        # which is why secret_refs above delegates to the harness. Two
-        # reasons to leave them out for now. The harness surface exposes
-        # only NAMES, so there is no `usage` prose to frame a prediction
-        # failure with; and these refs were never predicted in node
-        # preflight either, so returning them here would WIDEN what the
-        # sweep refuses rather than relocate an existing check. Threading
-        # usage-bearing references through the harness surface is the
-        # honest fix, and it is tracked as separate work.
-        return ()
+        # The harness_config secrets, as the harness's declared full
+        # references (owner/usage-bearing, sourced to the session
+        # template). The preflight sweep predicts resolvability over
+        # these; the session itself does not, because how a secret gets
+        # a value is the operation's concern and not the session's.
+        return self._harness.config_secret_refs()
 
     def preflight(self, ctx: RunContext) -> None:
+        """Fan into the held harness's readiness fork.
+
+        Deliberately NO ``require_declared_refs`` intactness check over
+        the harness refs, unlike the vm-site and git-credential nodes:
+        the dangling-declaration case that check guards (a disabled
+        plugin's session-template, whose referenced secrets the R12
+        materialization pass leaves unmaterialized) is refused at every
+        factory call site by the drift-guard-pinned
+        ``ensure_recipe_enabled`` / ``ensure_harness_enabled`` gates,
+        before a node exists. The session nodes also thread no registry
+        (the R14 gate comments lean on that fact), so the check would
+        add a registry edge to guard a state the call-site gates
+        already make unreachable.
+        """
         self._harness.preflight(ctx)
 
     def runup(self, ctx: RunContext) -> None:
