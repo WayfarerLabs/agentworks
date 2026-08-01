@@ -361,7 +361,7 @@ def _select_vm_size(catalog: tuple[_VMSize, ...], *, cpus: int, memory_gib: int)
             f"{memory_gib} GiB (largest available is {largest.name}: "
             f"{largest.cpus} vCPU / {largest.memory_gib} GiB)",
             hint="shrink the vm-template's cpus/memory, or add a larger "
-            "entry to the site's platform_config.vm_sizes catalog",
+            "entry to the site's vm_sizes catalog (vm-site platform config)",
         )
     return min(fits, key=lambda s: (s.cpus, s.memory_gib))
 

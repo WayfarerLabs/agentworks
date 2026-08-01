@@ -176,6 +176,13 @@ def test_full_migration_golden(tmp_path: Path) -> None:
     # (execute_plan verified this; double-check the reload works).
     reloaded = load_config(cfg, warn_issues=False)
     build_registry(reloaded)
+    # The emitted manifests spell the tagged capability shape, so they
+    # load warning-free: no deprecated-shape aggregate.
+    from agentworks.manifests import load_manifests
+
+    emitted = load_manifests(tmp_path / "resources")
+    assert emitted.deprecation_issues == ()
+    assert not emitted.issues
 
     # Per-kind layout: one file per kind with the plural-s convention.
     resources = tmp_path / "resources"
@@ -189,8 +196,8 @@ def test_full_migration_golden(tmp_path: Path) -> None:
 
 def test_vm_site_sections_migrate_flat_to_nested(tmp_path: Path) -> None:
     """The legacy flat [azure] / [proxmox] sections emit as vm-site
-    manifests with the platform-owned keys nested under
-    spec.platform_config, the whole section comments out, and the
+    manifests with the platform-owned keys folded into the tagged
+    spec.platform table, the whole section comments out, and the
     post-run registry-equivalence verification passes."""
     cfg = _write_config(tmp_path)
     config, plan = _plan(cfg, ["vm-site"])
@@ -206,17 +213,18 @@ def test_vm_site_sections_migrate_flat_to_nested(tmp_path: Path) -> None:
     assert [d["metadata"]["name"] for d in docs] == ["azure", "proxmox"]
     azure, proxmox = docs
     # The migrated SITE keeps the section name "azure"; the platform
-    # underneath is the renamed azure-vm capability.
+    # underneath is the renamed azure-vm capability, emitted as the
+    # tagged table (name selects the capability, other keys are config).
     assert azure["spec"] == {
-        "platform": "azure-vm",
-        "platform_config": {
+        "platform": {
+            "name": "azure-vm",
             "subscription_id": "0000",
             "resource_group": "agw",
             "region": "eastus",
         },
     }
-    assert proxmox["spec"]["platform"] == "proxmox"
-    assert proxmox["spec"]["platform_config"]["template_vmid"] == 9000
+    assert proxmox["spec"]["platform"]["name"] == "proxmox"
+    assert proxmox["spec"]["platform"]["template_vmid"] == 9000
 
     after = cfg.read_text()
     assert "# migrated to resources/vm-sites.yaml" in after
@@ -269,15 +277,15 @@ def test_git_credential_type_becomes_provider(tmp_path: Path) -> None:
     config, plan = _plan(cfg, ["git-credential/github"])
     execute_plan(plan, config)
     (doc,) = _loaded_docs(tmp_path / "resources" / "git-credentials.yaml")
-    assert doc["spec"] == {"provider": "github"}
+    assert doc["spec"] == {"provider": {"name": "github"}}
     assert doc["metadata"]["description"] == "gh access"
 
 
 def test_git_credential_org_nests_in_emission(tmp_path: Path) -> None:
-    """The migrator emits the YAML shape (provider-owned org AND token
-    nested under provider_config); the run's own registry-equivalence
-    verification proves the divergence from the flat TOML is
-    shape-only."""
+    """The migrator emits the tagged YAML shape (provider-owned org AND
+    token folded into the spec.provider table); the run's own
+    registry-equivalence verification proves the divergence from the
+    flat TOML is shape-only."""
     cfg = _write_config(
         tmp_path,
         resources="""\
@@ -292,8 +300,7 @@ description = "AZDO access"
     execute_plan(plan, config)  # verification passes -> rows equivalent
     (doc,) = _loaded_docs(tmp_path / "resources" / "git-credentials.yaml")
     assert doc["spec"] == {
-        "provider": "azdo",
-        "provider_config": {"org": "my-org", "token": "git-token-ado"},
+        "provider": {"name": "azdo", "org": "my-org", "token": "git-token-ado"},
     }
     assert doc["metadata"]["description"] == "AZDO access"
 
@@ -301,11 +308,11 @@ description = "AZDO access"
 def test_session_template_flat_fields_nest_under_harness_config(
     tmp_path: Path,
 ) -> None:
-    """The migrator emits the clean YAML shape: flat command fields nest
-    under harness_config on the 'shell' harness (mirroring the
-    git-credential provider_config nesting); env stays kind-owned at the
-    spec top level, and the run's registry-equivalence verification
-    proves the hoist and the emission land on the identical value."""
+    """The migrator emits the tagged YAML shape: flat command fields
+    fold into the spec.harness table on the 'shell' harness (mirroring
+    the git-credential fold); env stays kind-owned at the spec top
+    level, and the run's registry-equivalence verification proves the
+    hoist and the emission land on the identical value."""
     cfg = _write_config(
         tmp_path,
         resources="""\
@@ -324,8 +331,8 @@ CLAUDE_LOG_LEVEL = "info"
     (doc,) = _loaded_docs(tmp_path / "resources" / "session-templates.yaml")
     assert doc["metadata"]["description"] == "Claude session"
     assert doc["spec"] == {
-        "harness": "shell",
-        "harness_config": {
+        "harness": {
+            "name": "shell",
             "command": "claude",
             "restart_command": "claude --resume",
             "required_commands": ["claude"],
@@ -335,8 +342,8 @@ CLAUDE_LOG_LEVEL = "info"
 
 
 def test_session_template_declared_pair_passes_through(tmp_path: Path) -> None:
-    """A TOML template already spelling the nested pair migrates
-    verbatim (harness + harness_config pass through, env stays
+    """A TOML template already spelling the nested pair migrates to the
+    tagged table (harness + harness_config fold together, env stays
     top-level)."""
     cfg = _write_config(
         tmp_path,
@@ -353,8 +360,7 @@ required_commands = ["htop"]
     execute_plan(plan, config)
     (doc,) = _loaded_docs(tmp_path / "resources" / "session-templates.yaml")
     assert doc["spec"] == {
-        "harness": "shell",
-        "harness_config": {"command": "htop", "required_commands": ["htop"]},
+        "harness": {"name": "shell", "command": "htop", "required_commands": ["htop"]},
     }
 
 

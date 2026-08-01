@@ -161,7 +161,7 @@ def site_manifest_hint(name: str, *, vm_host: str | None = None) -> str:
     """
     config_lines = ""
     if vm_host is not None:
-        config_lines = f"\n  platform_config:\n    vm_host: {vm_host}"
+        config_lines = f"\n    vm_host: {vm_host}"
     return (
         "declare it under ~/.config/agentworks/resources/ (any filename), "
         "e.g.:\n\n"
@@ -170,10 +170,11 @@ def site_manifest_hint(name: str, *, vm_host: str | None = None) -> str:
         "metadata:\n"
         f"  name: {name}\n"
         "spec:\n"
-        "  platform: lima"
+        "  platform:\n"
+        "    name: lima"
         f"{config_lines}\n\n"
-        "(adjust the platform and platform_config to match where this "
-        "site's VMs actually live; see `agw resource sample vm-site`)"
+        "(adjust the platform table's name and config keys to match where "
+        "this site's VMs actually live; see `agw resource sample vm-site`)"
     )
 
 

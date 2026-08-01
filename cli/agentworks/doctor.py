@@ -539,6 +539,12 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
             "Config has deprecated TOML resource declarations",
             "migrate to YAML with `agw resource migrate`",
         )
+    if manifests is not None and manifests.deprecated_shape_resources:
+        g.warn(
+            "Manifests use the deprecated capability config shape",
+            f"{', '.join(manifests.deprecated_shape_resources)}: fold the "
+            "sibling pair into one tagged table, e.g. platform: {name: lima, ...}",
+        )
     for section in config.noop_secret_backend_sections:
         g.warn(
             f"Config has a no-op {section} section",

@@ -1,9 +1,12 @@
 ## kind: session-template -- selects the harness that runs a session's workload.
 ## A session is a specification to run a specific harness as an agent in a
 ## workspace on a VM. The harness owns start/restart and the launch-target
-## readiness check; `harness_config` is the blob it validates. An undeclared
-## harness resolves to `shell` (a plain login shell), so a field-less template
-## is still a login shell.
+## readiness check. `spec.harness` is one tagged table: its `name` key selects
+## the harness capability and the remaining keys are the config that harness
+## validates. (The old sibling shape, `harness: <name>` plus a
+## `harness_config:` table, still loads but is deprecated for removal.) An
+## undeclared harness resolves to `shell` (a plain login shell), so a
+## field-less template is still a login shell.
 ##
 ## `shell`'s config vocabulary is the legacy command fields, now nested:
 ##   command:           the pane command (empty/omitted = login shell)
@@ -18,8 +21,8 @@
 #  name: htop
 #  description: Live process monitor
 #spec:
-#  harness: shell
-#  harness_config:
+#  harness:
+#    name: shell
 #    command: htop
 #    required_commands: [htop]
 #  env:
@@ -29,10 +32,10 @@
 ## opt-in `claude` system plugin, so enable it with `[plugins] system =
 ## ["claude"]` (otherwise creating a session on this template is refused with an
 ## "enable plugin `claude`" hint). It selects the launch/resume conventions with
-## one line (harness: claude-code) instead of restating command strings:
-## `session create` starts a new Claude session and `session restart` resumes
-## the same conversation when its transcript still exists. `harness_config` is
-## three optional fields:
+## one table (harness: {name: claude-code}) instead of restating command
+## strings: `session create` starts a new Claude session and `session restart`
+## resumes the same conversation when its transcript still exists. Its config
+## is three optional fields:
 ##   permission_mode: forwarded to `claude --permission-mode`
 ##   model:           forwarded to `claude --model`
 ##   extra_args:      raw argv tokens appended last (the escape hatch)
@@ -45,8 +48,8 @@
 #  name: claude
 #  description: Claude Code session
 #spec:
-#  harness: claude-code
-#  harness_config:
+#  harness:
+#    name: claude-code
 #    permission_mode: acceptEdits
 #    model: opus
 ##

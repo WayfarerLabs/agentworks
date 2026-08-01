@@ -210,7 +210,7 @@ def test_manifest_flat_field_is_rejected(tmp_path: Path) -> None:
           command: claude
         """,
     )
-    with pytest.raises(ConfigError, match="move them under spec.harness_config"):
+    with pytest.raises(ConfigError, match="move them into a spec.harness table"):
         load_manifests(root)
 
 

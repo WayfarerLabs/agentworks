@@ -67,12 +67,15 @@ declaring a resource in `$EDITOR` (YAML-declared resources only: TOML-declared o
 
 ## Scoped GitHub credentials (fine-grained PATs)
 
-A `git-credential` with `provider: github` may carry a scope in its `provider_config`:
-`repos: ["owner/name", ...]` pins the credential to specific repositories (always a list, even for
-one, matching a fine-grained PAT's selected repos), while `owner: "org"` covers every repository
-under that user or org, including repos an agent clones ad hoc that no workspace ever declared. The
-two are mutually exclusive; a credential with neither is the unscoped fallback. Scopes are
-manifest-only (the legacy flat TOML shape has no GitHub fields).
+A `git-credential`'s `spec.provider` is one tagged table: its `name` key selects the provider
+capability (`github`, or `azdo` from the `azure` plugin) and the remaining keys are that provider's
+configuration. (The old sibling shape, a `provider:` string plus a `provider_config:` table, still
+loads unchanged but is deprecated and will be removed; fold the pair into the tagged table.) A
+github credential may carry a scope there: `repos: ["owner/name", ...]` pins the credential to
+specific repositories (always a list, even for one, matching a fine-grained PAT's selected repos),
+while `owner: "org"` covers every repository under that user or org, including repos an agent clones
+ad hoc that no workspace ever declared. The two are mutually exclusive; a credential with neither is
+the unscoped fallback. Scopes are manifest-only (the legacy flat TOML shape has no GitHub fields).
 
 Selection lives in the agentworks credential helper: initialization sets `credential.useHttpPath`
 (via the managed include `~/.agentworks-git-scopes.gitconfig`), so git hands the helper the remote's
@@ -122,7 +125,7 @@ identical to the pre-migration one, rolling back if not.
 
 Where VMs are created is declared as `vm-site` resources: "a configured place to create VMs". A site
 pairs a **platform** (the capability: the code that runs VMs on one backend kind) with that
-backend's configuration:
+backend's configuration, as one tagged table:
 
 ```yaml
 apiVersion: agentworks/v1
@@ -130,17 +133,20 @@ kind: vm-site
 metadata:
   name: azure-dev
 spec:
-  platform: azure-vm
-  platform_config:
+  platform:
+    name: azure-vm
     subscription_id: "..."
     resource_group: agentworks-vms
     region: eastus2
 ```
 
-- `spec.platform` names a `vm-platform` capability row (`lima`, `wsl2`; `proxmox` and `azure-vm`
-  ship as the opt-in `proxmox` and `azure` system plugins, see [System plugins](#system-plugins));
-  `spec.platform_config` is validated by that platform (unknown keys are errors). Remote Lima is
-  just a lima site with `platform_config.vm_host: user@host`.
+- `spec.platform` is one table: its `name` key names a `vm-platform` capability row (`lima`, `wsl2`;
+  `proxmox` and `azure-vm` ship as the opt-in `proxmox` and `azure` system plugins, see
+  [System plugins](#system-plugins)), and the remaining keys are that platform's configuration,
+  validated by it (unknown keys are errors). A platform needing no config is just
+  `platform: {name: wsl2}`. Remote Lima is just a lima site with a `vm_host: user@host` key. The old
+  sibling shape (`platform: azure-vm` as a string plus a `platform_config:` table) still loads
+  unchanged but is deprecated and will be removed; fold the pair into the tagged table.
 - The `lima-local` and `wsl2` sites ship built in with empty config. Like every site they register
   on every host and report not-ready where this host lacks what they need (wsl2 is Windows-only; a
   local Lima site needs `limactl`); a not-ready site still lists and describes with its reason, and
@@ -149,20 +155,20 @@ spec:
 - Consumers name sites: `agw vm create --site`, `defaults.site` in config.toml, and each VM row's
   `site`. Templates deliberately carry no site: placement is per-host, never template state.
 - Site config secrets ride the standard secret machinery: a Proxmox site references its API token as
-  the `proxmox-token` secret (override with `token_secret`), auto-declared and resolved through the
-  backend chain like any other. An Azure site can do the same, optionally: it authenticates with
-  ambient credentials (`az login`, `AZURE_*` env vars, managed identity, browser fallback) unless
-  `platform_config.service_principal` declares an explicit one, in which case its `tenant_id` /
-  `client_id` are plain config and its `secret` field names the secret holding the client secret
-  (default `azure-client-secret`). A site with a service principal uses that identity and only that
-  one: a rejected or expired client secret fails the command rather than falling back to ambient
-  credentials. `agw resource sample vm-site` shows the block. The `proxmox` platform ships as the
-  opt-in `proxmox` system plugin, so a proxmox site (declared or legacy) is not-ready with an
-  "enable plugin `proxmox`" hint and refused at use until you set `[plugins] system = ["proxmox"]`.
-  The `azure-vm` platform likewise ships as the opt-in `azure` system plugin (which also provides
-  the `azdo` git-credential provider and the `az-cli` install-command), so the `azure-dev` example
-  above is not-ready with an "enable plugin `azure`" hint until you set
-  `[plugins] system = ["azure"]`.
+  the `proxmox-token` secret (override with the `token_secret` key), auto-declared and resolved
+  through the backend chain like any other. An Azure site can do the same, optionally: it
+  authenticates with ambient credentials (`az login`, `AZURE_*` env vars, managed identity, browser
+  fallback) unless a `service_principal` table inside the platform table declares an explicit one,
+  in which case its `tenant_id` / `client_id` are plain config and its `secret` field names the
+  secret holding the client secret (default `azure-client-secret`). A site with a service principal
+  uses that identity and only that one: a rejected or expired client secret fails the command rather
+  than falling back to ambient credentials. `agw resource sample vm-site` shows the block. The
+  `proxmox` platform ships as the opt-in `proxmox` system plugin, so a proxmox site (declared or
+  legacy) is not-ready with an "enable plugin `proxmox`" hint and refused at use until you set
+  `[plugins] system = ["proxmox"]`. The `azure-vm` platform likewise ships as the opt-in `azure`
+  system plugin (which also provides the `azdo` git-credential provider and the `az-cli`
+  install-command), so the `azure-dev` example above is not-ready with an "enable plugin `azure`"
+  hint until you set `[plugins] system = ["azure"]`.
 - The legacy flat `[azure]` / `[proxmox]` TOML sections keep loading as deprecated vm-site
   declarations; `agw resource migrate vm-site` moves them to manifests.
 
@@ -170,8 +176,8 @@ spec:
 
 What a session runs is declared as a **harness**: the capability (registered code) that knows how a
 particular tool is started, restarted, and what executables it needs. A session template pairs a
-harness with that harness's configuration, exactly the way a vm-site pairs a platform with its
-config:
+harness with that harness's configuration in one tagged table, exactly the way a vm-site pairs a
+platform with its config:
 
 ```yaml
 apiVersion: agentworks/v1
@@ -180,33 +186,35 @@ metadata:
   name: htop
   description: Live process monitor
 spec:
-  harness: shell
-  harness_config:
+  harness:
+    name: shell
     command: htop
     required_commands: [htop]
 ```
 
-- `spec.harness` names a `harness` capability row; `spec.harness_config` is the block that harness
-  owns and validates (unknown keys are errors). A template that names no harness resolves to the
-  built-in `shell` harness (a plain login shell, or an operator command), which is the built-in
-  `default` template.
+- `spec.harness` is one table: its `name` key names a `harness` capability row, and the remaining
+  keys are the config block that harness owns and validates (unknown keys are errors). A template
+  that names no harness resolves to the built-in `shell` harness (a plain login shell, or an
+  operator command), which is the built-in `default` template. The old sibling shape
+  (`harness: shell` as a string plus a `harness_config:` table) still loads unchanged but is
+  deprecated and will be removed; fold the pair into the tagged table.
 - The `shell` harness's config vocabulary is `command` (the pane command; empty is a login shell),
   `restart_command` (used by `session restart`, falling back to `command`), and `required_commands`
   (executables checked on the launch target before any state mutation). `command` /
   `restart_command` support the `{{session_name}}` and `{{workspace_name}}` variables.
-- The `(harness, harness_config)` pair inherits as a unit: a child restating the same harness merges
-  its block into the parent's (child wins per key; `shell` unions `required_commands`), while a
+- The harness-plus-config pair inherits as a unit: a child restating the same harness merges its
+  config keys into the parent's (child wins per key; `shell` unions `required_commands`), while a
   child naming a _different_ harness starts fresh. `env`, `inherits`, and the description merge as
   usual.
 - The legacy flat `command` / `restart_command` / `required_commands` keys keep loading in TOML
-  (hoisted onto `harness = "shell"`); YAML manifests spell them under `harness_config`.
+  (hoisted onto `harness = "shell"`); YAML manifests spell them inside the `harness` table.
   `agw resource describe harness/shell` shows the harness row and the templates that reference it.
 
 The `claude-code` harness runs Claude Code as the session. It ships as the opt-in `claude` system
 plugin (see "System plugins" below), so a `session-template` naming it still lists ready, but
 creating a session on it is refused with an "enable plugin `claude`" hint until you set
-`[plugins] system = ["claude"]`. It selects the launch-and-resume conventions in one line instead of
-restating command strings: `session create` starts a new Claude session, and `session restart`
+`[plugins] system = ["claude"]`. It selects the launch-and-resume conventions in one table instead
+of restating command strings: `session create` starts a new Claude session, and `session restart`
 resumes the same conversation when its transcript still exists (and launches fresh when Claude never
 wrote one), so a restart continues where the session left off:
 
@@ -217,14 +225,14 @@ metadata:
   name: claude
   description: Claude Code session
 spec:
-  harness: claude-code
-  harness_config:
+  harness:
+    name: claude-code
     permission_mode: acceptEdits # optional; forwarded to `claude --permission-mode`
     model: opus # optional; forwarded to `claude --model`
     extra_args: [--append-system-prompt, "session {{session_name}}"] # optional escape hatch
 ```
 
-- `harness_config` is three optional fields: `permission_mode` and `model` forward verbatim to
+- Its config is three optional fields: `permission_mode` and `model` forward verbatim to
   `claude --permission-mode` / `--model` (their choice sets are Claude's, not validated here), and
   `extra_args` is a list of raw argv tokens appended last, the escape hatch for any flag the harness
   does not model. Unknown fields are errors. `extra_args` elements support the `{{session_name}}` /
@@ -234,10 +242,10 @@ spec:
 
 `shell` is the built-in default harness; `claude-code` ships as the opt-in `claude` system plugin.
 Neither is the whole set the platform is built around. The `harness` kind is extensible: another
-tool or agent runtime, whatever the provider, is added as its own harness with its own
-`harness_config` vocabulary. `claude-code` above (and its Claude-specific `model` /
-`permission_mode` fields) is one worked example; the core assumes no particular runtime, and a
-session runs whatever harness its template selects.
+tool or agent runtime, whatever the provider, is added as its own harness with its own config
+vocabulary. `claude-code` above (and its Claude-specific `model` / `permission_mode` fields) is one
+worked example; the core assumes no particular runtime, and a session runs whatever harness its
+template selects.
 
 ## Built-ins and overrides
 
@@ -258,11 +266,11 @@ policy is per kind:
   the opt-in `azure` system plugin), and **session harnesses** (`shell`; `claude-code` ships as the
   opt-in `claude` system plugin, see below): registered capabilities, shown as read-only rows. You
   cannot declare or override them; secrets customize per secret via `backend_mappings`, platforms
-  configure per site via `platform_config`, and harnesses configure per session-template via
-  `harness_config`. Every installed platform publishes a row regardless of host support: a platform
-  whose host requirements are not met (e.g. `wsl2` off Windows) publishes a present, not-ready row
-  (`agw resource list` and `agw doctor` show it with the reason), and a site referencing it is
-  not-ready rather than erroring.
+  configure per site via the `spec.platform` table, and harnesses configure per session-template via
+  the `spec.harness` table. Every installed platform publishes a row regardless of host support: a
+  platform whose host requirements are not met (e.g. `wsl2` off Windows) publishes a present,
+  not-ready row (`agw resource list` and `agw doctor` show it with the reason), and a site
+  referencing it is not-ready rather than erroring.
 
 ## System plugins
 
@@ -308,11 +316,11 @@ all disabled until opted in. Authoring a system plugin is documented in the plug
 
 **Config errors in a not-enabled plugin's resources surface only once you enable it.** Validation
 runs over enabled, reachable resources, so a mistake in a disabled plugin's config (for example a
-typo in a legacy `[proxmox]` platform_config while the `proxmox` plugin is not enabled) is not
-reported until you add the plugin to `[plugins].system`. The first thing you see is the actionable
-"enable plugin `<name>`" hint; the config error surfaces on the next build once enabled, still
-before any real work runs. This is the same rule that defers validation for any not-ready resource,
-applied to the opt-in axis.
+typo in a legacy `[proxmox]` section's platform config while the `proxmox` plugin is not enabled) is
+not reported until you add the plugin to `[plugins].system`. The first thing you see is the
+actionable "enable plugin `<name>`" hint; the config error surfaces on the next build once enabled,
+still before any real work runs. This is the same rule that defers validation for any not-ready
+resource, applied to the opt-in axis.
 
 **Upgrading: Azure, Proxmox, 1Password, and Claude Code are now opt-in.** These vendor- and
 tool-specific capabilities used to be built in and always available; they now ship as the `azure`,

@@ -59,9 +59,7 @@ class DeprecatedField:
 # of them groups into one line, reproducing the single grouped message
 # the bespoke reject in ``_decode_session_template`` emitted before this
 # facility replaced it.
-_SHELL_FLAT_FIELD_MESSAGE = (
-    "are the 'shell' harness's config; set harness: shell and move them under spec.harness_config"
-)
+_SHELL_FLAT_FIELD_MESSAGE = "are the 'shell' harness's config; move them into a spec.harness table with name: shell"
 
 # Per-kind deprecated-field table, keyed by kind string. Seeding a new
 # entry is the whole authoring surface: no code changes elsewhere.

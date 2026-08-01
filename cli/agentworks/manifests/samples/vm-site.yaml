@@ -5,6 +5,11 @@
 ## disable themselves on hosts missing their requirements; declare
 ## sites for remote or cloud backends.
 ##
+## `spec.platform` is one tagged table: its `name` key selects the
+## platform capability and the remaining keys are that platform's
+## configuration. (The old sibling shape, `platform: <name>` plus a
+## `platform_config:` table, still loads but is deprecated for removal.)
+##
 ## Remote Lima over SSH:
 ##
 #apiVersion: agentworks/v1
@@ -13,8 +18,8 @@
 #  name: gpu-box
 #  description: Lima VMs on the shared GPU box
 #spec:
-#  platform: lima
-#  platform_config:
+#  platform:
+#    name: lima
 #    vm_host: me@gpu-box
 ##
 ## Azure, in one subscription + resource group (declare one site per
@@ -27,8 +32,8 @@
 #  name: azure-dev
 #  description: Dev subscription in eastus
 #spec:
-#  platform: azure-vm
-#  platform_config:
+#  platform:
+#    name: azure-vm
 #    subscription_id: 00000000-0000-0000-0000-000000000000
 #    # The resource group must already exist. `vm create` checks it at
 #    # runup (an authenticated, read-only probe) and fails cleanly before
@@ -58,7 +63,7 @@
 #      secret: azure-client-secret
 ##
 ## Proxmox VE. The API token value is the `proxmox-token` secret
-## (override the name with platform_config.token_secret), resolved
+## (override the name with the `token_secret` key), resolved
 ## through the backend chain like any other secret.
 ##
 #---
@@ -68,8 +73,8 @@
 #  name: proxmox
 #  description: The homelab Proxmox cluster
 #spec:
-#  platform: proxmox
-#  platform_config:
+#  platform:
+#    name: proxmox
 #    api_url: https://pve.example.net:8006
 #    node: pve1
 #    token_id: agentworks@pam!agw

@@ -162,8 +162,8 @@ site needs `limactl`; a platform may simply not be installed, or its plugin not 
 not-ready site still lists and describes, using it is an error naming the requirement, and
 `agw doctor` shows each platform's and site's state with the reason. Run
 `agw resource sample vm-site` for commented, ready-to-edit examples (an Azure site, a remote-Lima
-site with `platform_config.vm_host`). The former `agw vm-host` registry is gone: a remote Lima host
-is now just a vm-site.
+site with a `vm_host` key). The former `agw vm-host` registry is gone: a remote Lima host is now
+just a vm-site.
 
 > **Note on WSL2:** WSL2 distros share the Windows workstation's lifecycle. They idle-shut after
 > ~60s of no `wsl.exe` activity (`vmIdleTimeout` in `.wslconfig`) and do not survive workstation
@@ -207,10 +207,10 @@ stored on the VM row (NULL = `default`) and drives its admin user on every later
 or DB work. Hardware (`cpus`, `memory`, `disk`, `swap`) comes from the vm-template and the admin
 username from the admin-template; there are no per-create overrides, so to deviate you declare a new
 template. On Azure, `cpus` + `memory` select the smallest fitting VM size from the site's catalog
-(built-in B-series, or `platform_config.vm_sizes`); an off-ratio request rounds up and warns. These
-are immutable provisioning parameters stored in the database. All initialization behavior (packages,
-install commands, etc.) is driven by config. Templates carry no `site`: placement is per-host, so it
-never travels inside a shared template.
+(built-in B-series, or the site's `vm_sizes` platform key); an off-ratio request rounds up and
+warns. These are immutable provisioning parameters stored in the database. All initialization
+behavior (packages, install commands, etc.) is driven by config. Templates carry no `site`:
+placement is per-host, so it never travels inside a shared template.
 
 The first interactive `vm create` asks once for an optional **system slug** (3-20 chars, lowercase
 alphanumeric plus dash, no leading/trailing dash): a short identifier for this agentworks
@@ -578,10 +578,13 @@ via `--workspace <ws>`). Use these when you just need a terminal without the con
 
 A session template selects the **harness** that runs the session's workload. The harness is a
 [capability](../docs/guides/resources.md#session-harnesses) that owns starting/restarting the tool
-and checking its required executables; the template names one with `spec.harness` and hands it a
-`spec.harness_config` block it validates. A template that names no harness runs the built-in `shell`
-harness (a login shell, `$SHELL --login`, or an operator-supplied command), which is the built-in
-`default` template's behavior. Define custom templates as `session-template` resources:
+and checking its required executables; the template's `spec.harness` is one tagged table whose
+`name` key selects the harness and whose remaining keys are the config block that harness validates.
+(The old sibling shape, a `harness:` string plus a `harness_config:` table, still loads unchanged
+but is deprecated and will be removed; fold the pair into the tagged table.) A template that names
+no harness runs the built-in `shell` harness (a login shell, `$SHELL --login`, or an
+operator-supplied command), which is the built-in `default` template's behavior. Define custom
+templates as `session-template` resources:
 
 ```yaml
 apiVersion: agentworks/v1
@@ -590,14 +593,14 @@ metadata:
   name: htop
   description: Live process monitor
 spec:
-  harness: shell
-  harness_config:
+  harness:
+    name: shell
     command: htop
     required_commands: [htop]
 ```
 
-`shell`'s `harness_config` vocabulary is the command surface every template used to spell at the
-spec top level:
+`shell`'s config vocabulary is the command surface every template used to spell at the spec top
+level:
 
 - `command`: the pane command (empty/omitted is a plain login shell). Supports `{{session_name}}`
   and `{{workspace_name}}` variable substitution (double-brace syntax).
@@ -609,12 +612,12 @@ spec top level:
   tool is not installed fails fast with a clear error instead of a cryptic downstream tmux failure.
   Merged (de-duped, order-preserving) across template inheritance.
 
-In a YAML manifest these three keys live only under `harness_config`; spelling any of them at the
-`spec` top level is a load error that points you at the nested shape. That check is one instance of
-a general deprecated-field notice: any resource kind can flag retired or relocated spec fields with
-an actionable message (a hard load error when ignoring the field would change behavior, otherwise a
-warning that `agw doctor` also surfaces). It is separate from the TOML flat-field handling below,
-which is a permanent supported spelling, not a deprecation.
+In a YAML manifest these three keys live only inside the `harness` table; spelling any of them at
+the `spec` top level is a load error that points you at the nested shape. That check is one instance
+of a general deprecated-field notice: any resource kind can flag retired or relocated spec fields
+with an actionable message (a hard load error when ignoring the field would change behavior,
+otherwise a warning that `agw doctor` also surfaces). It is separate from the TOML flat-field
+handling below, which is a permanent supported spelling, not a deprecation.
 
 The `claude-code` harness runs Claude Code as the session: `session create` starts a new Claude
 session and `session restart` resumes the same conversation when its transcript still exists on disk
@@ -623,8 +626,8 @@ session and `session restart` resumes the same conversation when its transcript 
 ready, but creating a session on it is refused with an "enable plugin `claude`" hint until you add
 `claude` to `[plugins].system`. (The built-in `shell` harness stays the default and needs no
 opt-in.) Once enabled, it needs only that `claude` is installed on the launch target, and announces
-the chosen action (resume vs new session) in the pane, so the decision is never silent. Its
-`harness_config` vocabulary is three optional fields:
+the chosen action (resume vs new session) in the pane, so the decision is never silent. Its config
+vocabulary is three optional fields:
 
 - `permission_mode`: forwarded verbatim to `claude --permission-mode` (its choice set is Claude's,
   not validated here).
@@ -640,16 +643,16 @@ metadata:
   name: claude
   description: Claude Code session
 spec:
-  harness: claude-code
-  harness_config:
+  harness:
+    name: claude-code
     permission_mode: acceptEdits
     model: opus
 ```
 
-The `(harness, harness_config)` pair inherits as a unit: a child that restates the same harness
-merges its config block into the parent's (child wins per key; `shell` unions `required_commands`),
-while a child naming a _different_ harness starts from a fresh config (the parent's block was
-addressed to a different tool). `env`, `inherits`, and the description merge as usual.
+The harness-plus-config pair inherits as a unit: a child that restates the same harness merges its
+config block into the parent's (child wins per key; `shell` unions `required_commands`), while a
+child naming a _different_ harness starts from a fresh config (the parent's block was addressed to a
+different tool). `env`, `inherits`, and the description merge as usual.
 
 **TOML** (`[session_templates.<name>]` in `config.toml`, deprecated but supported): the same
 `harness` string and a nested `harness_config` table are accepted:
@@ -758,11 +761,11 @@ Settings sections (`config.toml`, permanent):
 Resource kinds (YAML manifests; the deprecated TOML section is noted for each):
 
 - `vm-site` (`[azure]` / `[proxmox]`, flat legacy shape): a configured place to create VMs.
-  `spec.platform` names the backing platform, `spec.platform_config` carries its settings (Azure
-  subscription/resource-group/region plus an optional `service_principal` block to authenticate as a
-  specific service principal instead of with ambient credentials, Proxmox API endpoint + token
-  secret, remote-Lima `vm_host`). The `lima-local` and `wsl2` sites ship built in (on hosts where
-  their platform can run) and their names are reserved
+  `spec.platform` is one tagged table: its `name` key selects the backing platform and the remaining
+  keys are its settings (Azure subscription/resource-group/region plus an optional
+  `service_principal` block to authenticate as a specific service principal instead of with ambient
+  credentials, Proxmox API endpoint + token secret, remote-Lima `vm_host`). The `lima-local` and
+  `wsl2` sites ship built in (on hosts where their platform can run) and their names are reserved
 - `vm-platform`: read-only capability rows for the VM platforms (`lima`, `wsl2` built in; `azure-vm`
   and `proxmox` ship as the opt-in `azure` and `proxmox` system plugins, disabled by default, see
   [System Plugins](#system-plugins)); listed by `agw resource kinds`, never declared

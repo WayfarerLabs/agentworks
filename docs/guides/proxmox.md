@@ -111,8 +111,8 @@ kind: vm-site
 metadata:
   name: proxmox
 spec:
-  platform: proxmox
-  platform_config:
+  platform:
+    name: proxmox
     api_url: "https://pve.example.com:8006"
     node: pve
     token_id: "agentworks@pam!agentworks"
@@ -139,7 +139,7 @@ spec:
 `config.toml` still loads as a deprecated declaration; `agw resource migrate vm-site` converts it.)
 
 The API token value is an ordinary agentworks secret named `proxmox-token` (auto-declared; rename
-per site via `platform_config.token_secret`). The default env-var backend reads it from:
+per site via the `token_secret` key). The default env-var backend reads it from:
 
 ```bash
 export AW_SECRET_PROXMOX_TOKEN="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
@@ -230,5 +230,5 @@ Check that all four ACLs are set (re-run the setup script if unsure):
 
 ### Self-signed certificate errors
 
-Set `verify_ssl: false` in the site's `platform_config`. This is common for homelab setups without a
+Set `verify_ssl: false` in the site's `platform` table. This is common for homelab setups without a
 trusted CA.

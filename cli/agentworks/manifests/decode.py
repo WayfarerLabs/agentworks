@@ -59,6 +59,81 @@ KIND_SECTIONS: dict[str, tuple[str, ...]] = {
 }
 
 
+# Kind identifier -> (naming field, sibling config field) for the three
+# hosting surfaces whose spec selects a capability and hands it a config
+# blob. The canonical manifest shape is one tagged table on the naming
+# field (``platform: {name: lima, vm_host: ...}``; ``name`` selects the
+# capability, the remaining keys are its config). The old sibling shape
+# (``platform: lima`` plus ``platform_config: {...}``) still loads but
+# is deprecated for removal; ``_normalize_capability_field`` folds the
+# tagged shape back into the sibling pair so the decoders and the shared
+# TOML loaders underneath them see one internal shape. The secret kind's
+# ``backend_mappings`` is not listed: its map key already names the
+# capability.
+CAPABILITY_FIELDS: dict[str, tuple[str, str]] = {
+    "vm-site": ("platform", "platform_config"),
+    "git-credential": ("provider", "provider_config"),
+    "session-template": ("harness", "harness_config"),
+}
+
+
+def _normalize_capability_field(kind: str, spec: dict[str, object]) -> bool:
+    """Fold the tagged capability table into the internal sibling pair.
+
+    Returns True when the document spelled the OLD (deprecated) sibling
+    shape: the naming field as a string, with or without the sibling
+    ``*_config`` table. Mixing the shapes (a tagged table plus a sibling
+    ``*_config``) is ambiguous and errors. Shapes this function does not
+    recognize (a missing or non-string, non-mapping naming field) pass
+    through untouched to the surface's own error paths.
+    """
+    pair = CAPABILITY_FIELDS.get(kind)
+    if pair is None:
+        return False
+    field, config_field = pair
+    value = spec.get(field)
+    if isinstance(value, dict):
+        if config_field in spec:
+            raise ConfigError(
+                f"spec.{field} is a tagged table (its 'name' key selects the "
+                f"capability and the other keys are its config), so a sibling "
+                f"spec.{config_field} is ambiguous; fold those keys into the "
+                f"spec.{field} table"
+            )
+        name = value.get("name")
+        if not isinstance(name, str) or not name:
+            raise ConfigError(
+                f"spec.{field} (table form) requires a 'name' key naming the capability",
+            )
+        config = {key: item for key, item in value.items() if key != "name"}
+        spec[field] = name
+        if config:
+            spec[config_field] = config
+        return False
+    return isinstance(value, str)
+
+
+def capability_shape_deprecation(resources: list[str]) -> str:
+    """The ONE aggregated deprecation message for old-shape documents.
+
+    ``resources`` are ``kind/name`` display tokens, in load order.
+    Aggregated for the same reason the TOML resource-section nudge is
+    (``_warn_deprecated_resource_sections``): one warning per document
+    would be obnoxious on real configs.
+    """
+    return (
+        f"deprecated capability config shape in: {', '.join(resources)}. "
+        f"Naming a capability as a string with its config in a sibling table "
+        f"(platform: lima plus platform_config:, and likewise "
+        f"provider/provider_config and harness/harness_config) is deprecated "
+        f"and will be removed in a future release. Fold the pair into one "
+        f"tagged table on the naming field, e.g. "
+        f"platform: {{name: <capability>, <config keys...>}} replacing "
+        f"platform: <capability> plus platform_config:. "
+        f"Silence this warning with --no-deprecations."
+    )
+
+
 class _FixedDecls:
     """Duck-typed stand-in for config's ``_SectionLineMap``: every lookup
     resolves to the manifest document's own location.
@@ -80,12 +155,16 @@ def _decls(location: SourceLocation) -> _SectionLineMap:
     return cast("_SectionLineMap", _FixedDecls(location))
 
 
-def decode_document(doc: Document, issues: list[str]) -> Any:
+def decode_document(doc: Document, issues: list[str], deprecated_shapes: list[str] | None = None) -> Any:
     """Decode one validated envelope into the kind's Resource instance.
 
     Spec-level warnings (unknown keys on warn-mode kinds, env hygiene)
     are appended to ``issues`` prefixed with the document location.
     Spec-level errors re-raise as ``ConfigError`` with the same prefix.
+    When the document spells the deprecated sibling capability-config
+    shape, its ``kind/name`` is appended to ``deprecated_shapes`` (when
+    given); the caller aggregates the collected tokens into the ONE
+    deprecation warning (``capability_shape_deprecation``).
     """
     decoder = _DECODERS[doc.kind]
     spec = dict(doc.spec)
@@ -112,6 +191,12 @@ def decode_document(doc: Document, issues: list[str]) -> Any:
         from agentworks.manifests.deprecated_fields import check_deprecated_fields
 
         local_issues.extend(check_deprecated_fields(doc.kind, spec))
+        # Capability-shape normalization (tagged table -> internal
+        # sibling pair) runs next, so every decoder and the shared TOML
+        # loaders underneath see exactly one shape. Old-shape usage is
+        # collected for the caller's aggregated deprecation warning.
+        if _normalize_capability_field(doc.kind, spec) and deprecated_shapes is not None:
+            deprecated_shapes.append(f"{doc.kind}/{doc.name}")
         resource = decoder(doc, spec, local_issues)
     except AgentworksError as exc:
         # A spec-level failure from any loader (the apt / install-command
@@ -185,10 +270,10 @@ def _decode_git_credential(doc: Document, spec: dict[str, object], issues: list[
             "git-credential requires spec.provider (github or azdo)",
         )
     # Kind-owned fields stay top-level; provider-owned configuration
-    # (azdo's org) nests under spec.provider_config. The YAML shape
-    # deliberately diverges from the flat TOML sections here -- the
-    # decoder flattens back into the shared loader's shape, so
-    # validation stays verbatim-shared with TOML.
+    # (azdo's org) rides the provider table (or the deprecated sibling
+    # provider_config). The YAML shape deliberately diverges from the
+    # flat TOML sections here: the decoder flattens back into the shared
+    # loader's shape, so validation stays verbatim-shared with TOML.
     raw_config = spec.pop("provider_config", {})
     if not isinstance(raw_config, dict):
         raise ConfigError("spec.provider_config must be a mapping")
@@ -200,13 +285,16 @@ def _decode_git_credential(doc: Document, spec: dict[str, object], issues: list[
     reserved = {"type", "provider", "description"} & set(raw_config)
     if reserved:
         names = ", ".join(sorted(reserved))
+        # Shape-neutral wording: the config arrives from the tagged
+        # provider table or the deprecated sibling provider_config, so
+        # the message names neither field.
         raise ConfigError(
-            f"spec.provider_config may not contain kind-owned field(s): {names}; they belong at the spec top level"
+            f"the provider config may not contain kind-owned field(s): {names}; they belong at the spec top level"
         )
     if "token" in spec:
         raise ConfigError(
-            "git-credential 'token' is provider config now: move it under "
-            "spec.provider_config (agw resource migrate rewrites it)"
+            "git-credential 'token' is provider config now: move it into "
+            "the spec.provider table (its 'name' key selects the provider)"
         )
     loader_spec: dict[str, object] = {"type": provider, **raw_config}
     if "description" in spec:
@@ -215,8 +303,8 @@ def _decode_git_credential(doc: Document, spec: dict[str, object], issues: list[
         extras = ", ".join(sorted(spec))
         raise ConfigError(
             f"unknown git-credential spec field(s): {extras}; "
-            "provider-specific configuration (e.g. azdo's org) goes under "
-            "spec.provider_config"
+            "provider-specific configuration (e.g. azdo's org) goes inside "
+            "the spec.provider table"
         )
     # The TRUE blob's shape is validated by the finalize ``validate``
     # pass (GitCredentialConfig.validate), not here: capability
@@ -276,21 +364,27 @@ def _decode_vm_site(doc: Document, spec: dict[str, object], issues: list[str]) -
 
     token_secret = raw_config.get("token_secret")
     if isinstance(token_secret, str) and token_secret:
-        _warn_nonconforming_secret_name(token_secret, location="platform_config.token_secret", issues=issues)
+        # Shape-neutral location: the key arrives from the tagged
+        # platform table or the deprecated sibling platform_config.
+        _warn_nonconforming_secret_name(token_secret, location="token_secret (platform config)", issues=issues)
     # The blob may not shadow kind-owned surface (the git-credential
     # precedent): platform/description in the blob would silently
     # re-pick the capability or override metadata.
     reserved = {"platform", "description"} & set(raw_config)
     if reserved:
         names = ", ".join(sorted(reserved))
+        # Shape-neutral wording: the config arrives from the tagged
+        # platform table or the deprecated sibling platform_config, so
+        # the message names neither field.
         raise ConfigError(
-            f"spec.platform_config may not contain kind-owned field(s): {names}; they belong at the spec top level"
+            f"the platform config may not contain kind-owned field(s): {names}; they belong at the spec top level"
         )
     description = spec.pop("description", None)
     if spec:
         extras = ", ".join(sorted(spec))
         raise ConfigError(
-            f"unknown vm-site spec field(s): {extras}; platform-specific configuration goes under spec.platform_config"
+            f"unknown vm-site spec field(s): {extras}; "
+            "platform-specific configuration goes inside the spec.platform table"
         )
     # The platform_config blob's shape is validated by the finalize
     # ``validate`` pass (VMSiteDecl.validate), not here: capability
