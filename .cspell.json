@@ -2,6 +2,8 @@
   "version": "0.2",
   "language": "en",
   "words": [
+    "CGNAT",
+    "DERP",
     "EACCES",
     "Liskov",
     "Plurify",
@@ -24,6 +26,7 @@
     "buildx",
     "bundleable",
     "burstable",
+    "checkip",
     "chokepoint",
     "chsh",
     "cidata",

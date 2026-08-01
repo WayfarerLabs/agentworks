@@ -52,19 +52,30 @@ just started:
   `agentworks.transports.native_transport` factory wraps the call in `transient_route`, probes
   reachability with an `echo ok` retry loop, and raises a typed `StateError` (using
   `no_native_transport_hint`) when a platform returns `None`. Lima returns a `limactl shell`
-  transport, Azure an `SSHTransport` against the transient public IP, WSL2 a `wsl.exe`-backed
-  transport. Proxmox deliberately returns the default `None` and sets `no_native_transport_hint` to
-  point the operator at the Proxmox web-UI serial console, because its guest-agent exec is one-shot
-  and cannot host an interactive shell.
-- `transient_route(vm) -> context manager` (default `nullcontext()`). Azure attaches a public IP on
-  enter and detaches it in a `finally`, bounding the exposure window to the transport's lifetime.
+  transport, Azure an `SSHTransport` against the VM's permanent public IP (read live off the NIC),
+  WSL2 a `wsl.exe`-backed transport. Proxmox deliberately returns the default `None` and sets
+  `no_native_transport_hint` to point the operator at the Proxmox web-UI serial console, because its
+  guest-agent exec is one-shot and cannot host an interactive shell.
+- `transient_route(vm) -> context manager` (default `nullcontext()`). Azure opens a scoped SSH route
+  on enter (heals a missing public IP, converges the NSG onto the baseline-deny model, pokes this
+  operation's own ephemeral allow rule scoped to the operator's egress prefixes) and deletes exactly
+  that rule in a `finally`, bounding the exposure window to the transport's lifetime; concurrent
+  native ops on one VM each own an independent rule, so they never cross-remove.
 - `vm_active(vm, *, config=None) -> context manager` (default `nullcontext()`). WSL2 returns a
   keepalive that holds the distro against Windows' idle-shutdown for the span of a command, with
   Win32 Job-Object orphan-proofing for a hard-killed `agw`.
-- `post_tailscale_ready(vm) -> None` (default no-op). Azure detaches its public IP here, the instant
-  Tailscale is reachable. The asymmetry with `transient_route` is intentional: the attach happens
-  inside `create()` (cloud-init needs the IP to bootstrap), and neither that nor this detach point
-  is context-manager-shaped.
+- `post_tailscale_ready(vm) -> None` (default no-op). The contract is "close provisioning access":
+  it fires the instant Tailscale is reachable. Azure deletes the ephemeral bootstrap SSH allow rule
+  here, leaving the VM with zero inbound exposure behind its permanent deny-all-inbound baseline
+  (the public IP itself stays attached for the VM's whole lifetime). The asymmetry with
+  `transient_route` is intentional: the bootstrap ingress opens inside `create()` (cloud-init needs
+  inbound SSH from the operator), and neither that nor this closing point is context-manager-shaped.
+- `secure_failed_vm(vm) -> None` (default no-op). Same contract as `post_tailscale_ready`, for the
+  paths where a create is kept without completing Phase A: the bootstrap or Tailscale verification
+  died (row marked FAILED) or the operator interrupted it mid-bootstrap (row status untouched); the
+  success-only hook never fired on either. Azure deletes the fixed-name bootstrap allow so the VM
+  defaults to zero inbound exposure; debugging survives via `vm shell --platform` (a fresh
+  per-operation allow) and the serial console (not NSG-gated).
 
 **Gates** (cheap, offline, distinct from preflight):
 

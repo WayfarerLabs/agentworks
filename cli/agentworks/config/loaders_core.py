@@ -8,6 +8,7 @@ Split out of the former monolithic ``agentworks/config.py`` (see
 
 from __future__ import annotations
 
+import ipaddress
 import re
 import sys
 from pathlib import Path
@@ -217,6 +218,7 @@ _OPERATOR_KEYS = {
     "ssh_host_prefix",
     "ssh_agent_host_prefix",
     "extra_ssh_public_keys",
+    "ssh_allow_cidrs",
 }
 
 
@@ -256,6 +258,25 @@ def _load_operator(data: dict[str, object], issues: list[str]) -> OperatorConfig
             raise ConfigError(f"{section_name}.extra_ssh_public_keys: file does not exist: {p}")
         extra_keys.append(p)
 
+    # Extra sources allowed through the transient cloud SSH firewall
+    # hole; validated here so a typo fails at config load, not at the
+    # first vm op that pokes the hole. Stored normalized (a bare IP
+    # becomes its /32) so downstream consumers compare and poke
+    # canonical prefixes. The list guard keeps a scalar (a bare string
+    # would otherwise iterate per character) a typed error too.
+    raw_cidrs = raw.get("ssh_allow_cidrs", [])
+    if not isinstance(raw_cidrs, list):
+        raise ConfigError(f"{section_name}.ssh_allow_cidrs must be a list of IPv4 addresses and/or CIDRs")
+    allow_cidrs: list[str] = []
+    for entry in raw_cidrs:
+        text = str(entry).strip()
+        try:
+            allow_cidrs.append(str(ipaddress.IPv4Network(text, strict=False)))
+        except ValueError as exc:
+            raise ConfigError(
+                f"{section_name}.ssh_allow_cidrs: invalid entry {text!r}: must be an IPv4 address or CIDR"
+            ) from exc
+
     host_prefix = str(raw.get("ssh_host_prefix", "awvm--"))
     if not SSH_HOST_PREFIX_RE.match(host_prefix):
         raise ConfigError(
@@ -278,6 +299,7 @@ def _load_operator(data: dict[str, object], issues: list[str]) -> OperatorConfig
         ssh_host_prefix=host_prefix,
         ssh_agent_host_prefix=agent_host_prefix,
         extra_ssh_public_keys=extra_keys,
+        ssh_allow_cidrs=allow_cidrs,
     )
 
 

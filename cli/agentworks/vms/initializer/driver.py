@@ -89,8 +89,15 @@ def bootstrap_vm(
     sync (the last line of the caller's ``Provisioning`` section). Only the
     bootstrap/verify is fatal to provisioning: a failure there means the VM is
     unreachable, so it marks provisioning ``failed``, records the
-    ``provisioning_failed`` event, closes the log, points at it, and re-raises
-    for ``create_vm`` to map to a ProvisioningError (delete guidance). The
+    ``provisioning_failed`` event, secures the kept VM via the platform's
+    best-effort ``secure_failed_vm`` hook (Azure deletes its ephemeral
+    bootstrap SSH allow so a failed VM defaults to zero inbound
+    exposure), closes the log, points at it, and re-raises for
+    ``create_vm`` to map to a ProvisioningError (delete guidance). An
+    operator interrupt (KeyboardInterrupt) escapes that Exception arm but
+    still secures the kept VM best-effort before propagating; the row's
+    status is left as the abort found it (the caller's cancel handler
+    owns the messaging). The
     connectivity cleanup and the SSH-config sync are non-fatal: they cannot
     make an already-bootstrapped VM unhealthy, so a failure there warns and
     continues into Phase B rather than stranding a reachable VM as FAILED.
@@ -153,21 +160,52 @@ def bootstrap_vm(
     except Exception as e:
         db.update_vm_provisioning_status(vm_name, ProvisioningStatus.FAILED)
         db.insert_vm_event(vm_name, "provisioning_failed", str(e))
+        # Fail closed: the VM is kept for debugging, so close its
+        # provisioning access now (Azure deletes the ephemeral bootstrap
+        # SSH allow; other platforms no-op). The success-path hook
+        # (on_tailscale_ready) never fired here, so without this a
+        # failed Azure VM would keep its bootstrap ingress indefinitely.
+        # Best-effort: the original failure must keep propagating, and
+        # the operator can still reach the VM via `vm shell --platform`
+        # (a fresh transient allow) or the platform's serial console
+        # (not NSG-gated).
+        try:
+            platform.secure_failed_vm(vm_row)
+        except Exception as secure_error:
+            output.warn(f"could not secure the failed VM: {secure_error}")
         logger.close()
         output.warn(f"Log: {logger.path}")
         raise
+    except BaseException:
+        # An operator interrupt (KeyboardInterrupt) or another
+        # non-Exception unwind during the minutes-long bootstrap. The
+        # row keeps whatever status the abort left (the caller's cancel
+        # handler owns the messaging; nothing here marks FAILED), but
+        # provisioning access must still close best-effort: without
+        # this, Ctrl-C would leave the Azure bootstrap allow standing
+        # indefinitely, since the Exception arm above never runs.
+        # UserAbort does NOT take this path (it is an AgentworksError,
+        # an Exception, so the arm above secures it); this arm exists
+        # for what genuinely escapes ``except Exception``. The hook
+        # failure warns and never masks the interrupt.
+        try:
+            platform.secure_failed_vm(vm_row)
+        except Exception as secure_error:
+            output.warn(f"could not secure the interrupted VM: {secure_error}")
+        raise
 
-    # Tailscale is up; caller can clean up provisioning-only resources
-    # (e.g., detach Azure public IP since Phase B uses Tailscale SSH).
-    # Removing the public IP can destabilize the network stack briefly,
-    # so we wait for Tailscale SSH to be reliably reachable before
-    # proceeding. Already non-fatal (its own try / a bounded wait); kept
-    # outside the FAILED-marking span above, as in the pre-split driver.
+    # Tailscale is up; the platform hook closes provisioning access
+    # (Azure deletes its ephemeral bootstrap SSH allow since Phase B
+    # uses Tailscale SSH). A route change can destabilize the network
+    # stack briefly, so we wait for Tailscale SSH to be reliably
+    # reachable before proceeding. Already non-fatal (its own try / a
+    # bounded wait); kept outside the FAILED-marking span above, as in
+    # the pre-split driver.
     if on_tailscale_ready is not None:
         try:
             on_tailscale_ready()
         except Exception as e:
-            output.warn(f"post-provisioning cleanup failed: {e}")
+            output.warn(f"post-Tailscale-ready hook failed: {e}")
 
         # Wait for Tailscale SSH to reconnect after network changes
         from agentworks.transports import wait_for_reconnect

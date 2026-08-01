@@ -13,7 +13,25 @@ from agentworks.capabilities.vm_platform.base import ProvisionRequest, Provision
 from agentworks.capabilities.vm_platform.bootstrap_script import generate_bootstrap_script
 from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES, generate_cloud_init
 from agentworks.db import VMStatus
-from agentworks.errors import ConfigError, NotFoundError, ProvisioningError, StateError
+from agentworks.errors import ConfigError, NotFoundError, StateError
+
+# The network-resource plumbing (public IP, the NSG exposure rules,
+# egress-IP discovery, cleanup) and the shared SDK-error wrapper live in
+# the sibling network module; this module keeps the VMPlatform
+# capability surface.
+from agentworks.plugins.azure.network import (
+    BOOTSTRAP_ALLOW_RULE_NAME,
+    VNET_NAME_SUFFIX,
+    cleanup_vm_resources,
+    converge_nsg,
+    ensure_public_ip,
+    get_vm_public_ip,
+    initial_security_rules,
+    operator_ssh_prefixes,
+    poke_ssh_allow,
+    remove_ssh_allow,
+    wrap_azure_error,
+)
 from agentworks.ssh import SSHError
 from agentworks.transports import SSHTransport
 
@@ -31,63 +49,11 @@ if TYPE_CHECKING:
     from agentworks.transports import Transport
 
 
-# Suffix appended to the VM hostname to name its virtual-network subresource:
-# {slug}-{vm}-vnet. This is the tightest sink bounding MAX_VM_NAME_LENGTH (the
-# vnet name limit is 64), so the length derivation in config/validation.py
-# mirrors this literal and a pinned test asserts the worst-case name is exactly
-# 64 at the cap. Keep the two in sync (the test fails if this suffix grows).
-VNET_NAME_SUFFIX = "-vnet"
-
-
 class _HasSubscriptionId(Protocol):
     """Structural protocol for anything with subscription_id (AzureConfig or _MinimalAzureConfig)."""
 
     @property
     def subscription_id(self) -> str: ...
-
-
-class AzureError(ProvisioningError):
-    """An Azure API operation failed.
-
-    Attributes:
-        summary: A concise, user-facing error message.
-        detail: The full error details (for logs).
-    """
-
-    def __init__(self, summary: str, detail: str) -> None:
-        super().__init__(summary)
-        self.summary = summary
-        self.detail = detail
-
-
-def _wrap_azure_error(exc: Exception) -> AzureError:
-    """Convert an Azure SDK exception into an AzureError."""
-    from azure.core.exceptions import HttpResponseError
-
-    if isinstance(exc, HttpResponseError):
-        # Walk inner errors to find the most specific message
-        code = exc.error.code if exc.error else None
-        message = exc.error.message if exc.error else str(exc)
-
-        if exc.error and exc.error.details:
-            inner = exc.error.details[0]
-            code = inner.code or code
-            message = inner.message or message
-
-        summary = f"{code}: {_trim_message(str(message))}" if code else _trim_message(str(message))
-        return AzureError(summary, detail=str(exc))
-
-    return AzureError(str(exc), detail=str(exc))
-
-
-def _trim_message(message: str) -> str:
-    """Trim an Azure error message to the first meaningful sentence."""
-    # Cut at first URL or "Learn more" / "Submit a request" noise
-    for marker in [". Setup Alerts", ". Learn more", ". Submit a request", " https://"]:
-        idx = message.find(marker)
-        if idx != -1:
-            return message[: idx + 1] if marker.startswith(".") else message[:idx]
-    return message
 
 
 # The azure-identity logger tree. Its ChainedTokenCredential emits a WARNING
@@ -281,6 +247,18 @@ class AzureVMPlatform(VMPlatform):
     name: ClassVar[str] = "azure-vm"
     description: ClassVar[str] = "Azure Virtual Machines (subscription + resource group)"
 
+    # Warned by the transports factory when every reachability probe
+    # fails: the ephemeral NSG allow is scoped to the DETECTED egress
+    # IP, so an operator whose SSH traffic leaves through a different
+    # address (VPN split tunnel, proxy, CGNAT) gets a hole that does
+    # not match and every probe times out.
+    probe_failure_hint: ClassVar[str | None] = (
+        "The transient Azure SSH allow is scoped to your detected "
+        "public IP; if your SSH traffic egresses elsewhere (VPN "
+        "split tunnel, proxy, CGNAT), add your address(es) to "
+        "operator.ssh_allow_cidrs in your agentworks config."
+    )
+
     def __init__(self, owner_name: str, config: Mapping[str, object]) -> None:
         super().__init__(owner_name, config)
         # Quiet azure-identity's own credential-failure WARNING (unless
@@ -313,7 +291,7 @@ class AzureVMPlatform(VMPlatform):
     # behavior on where they happen to come from (a non-interactive
     # chain passes, the browser-login fallback can't be probed without
     # BEING the interaction). Credential and reachability failures
-    # surface at the op with typed errors (``_wrap_azure_error``),
+    # surface at the op with typed errors (``network.wrap_azure_error``),
     # which is the contract: preflight is capped at what it can check
     # without resolved credentials.
 
@@ -417,8 +395,9 @@ class AzureVMPlatform(VMPlatform):
         existence probe (``resource_groups.check_existence``) is read-only
         and mutates nothing. A credential or reachability failure is NOT a
         "group missing" verdict: those surface through
-        :func:`_wrap_azure_error` exactly as the ops report them, so a bad
-        or absent credential never masquerades as an absent resource group.
+        :func:`agentworks.plugins.azure.network.wrap_azure_error` exactly
+        as the ops report them, so a bad or absent credential never
+        masquerades as an absent resource group.
 
         Reachability failures are fatal here, which diverges from the
         proxmox runup on purpose. Proxmox warns and continues unverified on
@@ -440,7 +419,7 @@ class AzureVMPlatform(VMPlatform):
         try:
             exists = self._resource_client(az).resource_groups.check_existence(az.resource_group)
         except Exception as exc:
-            raise _wrap_azure_error(exc) from exc
+            raise wrap_azure_error(exc) from exc
         if not exists:
             raise NotFoundError(
                 f"Azure resource group '{az.resource_group}' does not exist in "
@@ -500,6 +479,12 @@ class AzureVMPlatform(VMPlatform):
         # namespacing token; azure resource names are the primary
         # identifier, so a collision is an error.
         vm_name = f"{request.system_slug}-{request.vm_name}" if request.system_slug else request.vm_name
+
+        # Resolve the SSH allow scope BEFORE any resource exists: the
+        # bootstrap allow is poked at NSG creation, and a detection
+        # failure with no operator.ssh_allow_cidrs escape hatch is a
+        # typed error while there is still nothing to roll back.
+        ssh_allow_prefixes = operator_ssh_prefixes(self._config_allow_cidrs(ctx.config))
 
         output.detail("Connecting to Azure...")
         compute = self._compute_client(az)
@@ -565,7 +550,6 @@ class AzureVMPlatform(VMPlatform):
             NetworkSecurityGroup,
             PublicIPAddress,
             PublicIPAddressSku,
-            SecurityRule,
             Subnet,
             VirtualNetwork,
         )
@@ -586,26 +570,17 @@ class AzureVMPlatform(VMPlatform):
             ip_result = ip_poller.result()
             public_ip = ip_result.ip_address or ""
 
-            # Create NSG with SSH rule
+            # Create the NSG: the permanent deny-all-inbound baseline plus
+            # the ephemeral bootstrap allow scoped to the operator's egress
+            # prefixes (cloud-init needs inbound SSH from the operator;
+            # post_tailscale_ready deletes the allow once Tailscale is up).
             output.detail("Creating network security group...")
             nsg_poller = network.network_security_groups.begin_create_or_update(
                 az.resource_group,
                 f"{vm_name}-nsg",
                 NetworkSecurityGroup(
                     location=az.region,
-                    security_rules=[
-                        SecurityRule(
-                            name="SSH",
-                            protocol="Tcp",
-                            source_port_range="*",
-                            destination_port_range="22",
-                            source_address_prefix="*",
-                            destination_address_prefix="*",
-                            access="Allow",
-                            priority=1000,
-                            direction="Inbound",
-                        )
-                    ],
+                    security_rules=initial_security_rules(ssh_allow_prefixes),
                     tags={"owner": "agentworks"},
                 ),
             )
@@ -704,8 +679,8 @@ class AzureVMPlatform(VMPlatform):
 
         except Exception as exc:
             output.detail("Cleaning up resources...")
-            _cleanup_vm_resources(compute, network, az.resource_group, vm_name)
-            raise _wrap_azure_error(exc) from exc
+            cleanup_vm_resources(compute, network, az.resource_group, vm_name)
+            raise wrap_azure_error(exc) from exc
 
         output.detail(f"Azure VM '{vm_name}' provisioned (IP: {public_ip})")
 
@@ -789,7 +764,7 @@ class AzureVMPlatform(VMPlatform):
             compute = self._compute_client(az_cfg)
             compute.virtual_machines.begin_start(rg, name).result()
         except Exception as exc:
-            raise _wrap_azure_error(exc) from exc
+            raise wrap_azure_error(exc) from exc
         output.info(f"Azure VM '{vm.name}' started")
 
     def stop(self, vm: VMRow, ctx: RunContext) -> None:
@@ -801,7 +776,7 @@ class AzureVMPlatform(VMPlatform):
             compute = self._compute_client(az_cfg)
             compute.virtual_machines.begin_deallocate(rg, name).result()
         except Exception as exc:
-            raise _wrap_azure_error(exc) from exc
+            raise wrap_azure_error(exc) from exc
         output.info(f"Azure VM '{vm.name}' deallocated")
 
     def delete(self, vm: VMRow, ctx: RunContext) -> None:
@@ -818,67 +793,55 @@ class AzureVMPlatform(VMPlatform):
         with contextlib.suppress(Exception):
             compute.virtual_machines.begin_delete(rg, name).result()
 
-        _cleanup_vm_resources(compute, network, rg, name)
+        cleanup_vm_resources(compute, network, rg, name)
 
         output.info(f"Azure VM '{vm.name}' deleted")
 
-    def attach_public_ip(self, vm: VMRow) -> str:
-        """Attach a temporary public IP to the VM's NIC. Returns the IP address."""
-        from azure.mgmt.network.models import PublicIPAddress, PublicIPAddressSku
+    # The route-state helpers below are thin delegates into the network
+    # module (which owns the mechanics and full docstrings). They stay
+    # as methods because the platform object is the seam callers and
+    # tests compose against: transient_route and the hooks call them on
+    # self, and the shell-provisioner tests spy on them as attributes.
 
+    def _ensure_public_ip(self, vm: VMRow) -> None:
+        """Heal the VM's public IP if its NIC has none. See
+        :func:`agentworks.plugins.azure.network.ensure_public_ip`."""
         rg, name, az_cfg = _parse_resource_id(_resource_id(vm))
-        network = self._network_client(az_cfg)
+        ensure_public_ip(self._network_client(az_cfg), self._compute_client(az_cfg), rg, name)
 
-        try:
-            # Create (or re-create) the public IP
-            output.info("Attaching temporary public IP...")
-            ip_poller = network.public_ip_addresses.begin_create_or_update(
-                rg,
-                f"{name}-ip",
-                PublicIPAddress(
-                    location=_get_vm_location(self._compute_client(az_cfg), vm),
-                    sku=PublicIPAddressSku(name="Standard"),
-                    public_ip_allocation_method="Static",
-                    tags={"owner": "agentworks"},
-                ),
-            )
-            ip_result = ip_poller.result()
-
-            # Attach to NIC
-            nic = network.network_interfaces.get(rg, f"{name}-nic")
-            if nic.ip_configurations:
-                nic.ip_configurations[0].public_ip_address = PublicIPAddress(id=ip_result.id)
-            network.network_interfaces.begin_create_or_update(
-                rg,
-                f"{name}-nic",
-                nic,
-            ).result()
-
-        except Exception as exc:
-            raise _wrap_azure_error(exc) from exc
-
-        return ip_result.ip_address or ""
-
-    def detach_public_ip(self, vm: VMRow) -> None:
-        """Detach and delete the public IP from the VM's NIC."""
+    def _converge_nsg(self, vm: VMRow) -> None:
+        """Converge a pre-existing VM's NSG onto the baseline-deny model
+        (re-pin the deny, drop the legacy standing SSH allow). See
+        :func:`agentworks.plugins.azure.network.converge_nsg`."""
         rg, name, az_cfg = _parse_resource_id(_resource_id(vm))
-        network = self._network_client(az_cfg)
+        converge_nsg(self._network_client(az_cfg), rg, name)
 
-        output.info("Removing public IP...")
-        # Detach from NIC
-        with contextlib.suppress(Exception):
-            nic = network.network_interfaces.get(rg, f"{name}-nic")
-            if nic.ip_configurations:
-                nic.ip_configurations[0].public_ip_address = None
-            network.network_interfaces.begin_create_or_update(
-                rg,
-                f"{name}-nic",
-                nic,
-            ).result()
+    @staticmethod
+    def _config_allow_cidrs(config: Config | None) -> list[str]:
+        """The ``operator.ssh_allow_cidrs`` extras from an operator
+        config, or none when no config was threaded in. Same defensive
+        getattr chain as :meth:`native_transport`'s identity-file read
+        (callers may thread partial config stand-ins)."""
+        operator = getattr(config, "operator", None)
+        return list(getattr(operator, "ssh_allow_cidrs", None) or [])
 
-        # Delete the public IP resource
-        with contextlib.suppress(Exception):
-            network.public_ip_addresses.begin_delete(rg, f"{name}-ip").result()
+    def _poke_ssh_allow(self, vm: VMRow, extra_cidrs: list[str] | None = None) -> tuple[str, list[str]]:
+        """Create this operation's own ephemeral SSH allow scoped to the
+        operator's current egress prefixes plus ``extra_cidrs``,
+        returning the created rule's name (the exit path removes exactly
+        that rule) and the prefixes used (named if the removal fails).
+        See :func:`agentworks.plugins.azure.network.poke_ssh_allow`."""
+        rg, name, az_cfg = _parse_resource_id(_resource_id(vm))
+        prefixes = operator_ssh_prefixes(extra_cidrs or ())
+        rule_name = poke_ssh_allow(self._network_client(az_cfg), rg, name, prefixes)
+        return rule_name, prefixes
+
+    def _remove_ssh_allow(self, vm: VMRow, rule_name: str, prefixes: list[str] | None = None) -> None:
+        """Delete one ephemeral SSH allow rule by name, restoring zero
+        inbound exposure through it. See
+        :func:`agentworks.plugins.azure.network.remove_ssh_allow`."""
+        rg, name, az_cfg = _parse_resource_id(_resource_id(vm))
+        remove_ssh_allow(self._network_client(az_cfg), rg, name, rule_name, prefixes)
 
     def display_backend_name(self, vm: VMRow) -> str:
         resource_id = vm.platform_metadata.get("resource_id")
@@ -902,15 +865,15 @@ class AzureVMPlatform(VMPlatform):
                 expand="instanceView",
             )
         except Exception as exc:
-            raise _wrap_azure_error(exc) from exc
+            raise wrap_azure_error(exc) from exc
 
-        # Walk NICs to find the public IP (may not exist if detached). An
-        # empty string here propagates to ``SSHTransport(host="")`` which
-        # the transports.native_transport factory catches with a typed
-        # StateError; on the canonical path this method is reached only
-        # inside the transient_route context manager which guarantees a
-        # public IP is attached, so the empty case is a defensive guard.
-        public_ip = _get_vm_public_ip(self._network_client(az_cfg), vm_info)
+        # Walk NICs to find the public IP, read live off the NIC (never
+        # persisted). The IP is permanent for the VM's lifetime and
+        # transient_route heals absence on enter, so an empty string here
+        # is a genuinely defensive corner; it propagates to
+        # ``SSHTransport(host="")`` which the transports.native_transport
+        # factory catches with a typed StateError.
+        public_ip = get_vm_public_ip(self._network_client(az_cfg), vm_info)
         import sys
 
         # Include identity file if config is available (needed for SSH auth
@@ -927,31 +890,64 @@ class AzureVMPlatform(VMPlatform):
         )
 
     def post_tailscale_ready(self, vm: VMRow) -> None:
-        """Detach the cloud-init public IP now that Tailscale is up.
+        """Close provisioning access now that Tailscale is up.
 
-        The attach happens inside :meth:`create` (Azure needs the IP to
-        drive cloud-init bootstrap); this hook fires at the async
-        Tailscale-ready point inside ``bootstrap_vm`` (Phase A) to close the
-        public-exposure window.
+        The VM comes out of :meth:`create` reachable only through the
+        ephemeral bootstrap allow rule (SSH scoped to the operator's
+        egress prefixes; the deny-all-inbound baseline is permanent).
+        This hook fires at the async Tailscale-ready point inside
+        ``bootstrap_vm`` (Phase A) and deletes that allow by its fixed
+        name (no in-process state needed), leaving zero inbound
+        exposure; the public IP stays for the VM's whole lifetime.
         """
-        self.detach_public_ip(vm)
+        self._remove_ssh_allow(vm, BOOTSTRAP_ALLOW_RULE_NAME)
+
+    def secure_failed_vm(self, vm: VMRow) -> None:
+        """Fail closed: close provisioning access on a kept, not-completed VM.
+
+        Mirrors :meth:`post_tailscale_ready`, which only fires on
+        success: a VM whose bootstrap or Tailscale verification died
+        (marked FAILED) or was interrupted mid-bootstrap (row status
+        untouched by the abort) is kept for debugging, and this hook
+        deletes the fixed-name bootstrap allow so it defaults to zero
+        inbound exposure. Debugging and recovery stay possible: ``vm
+        shell --platform`` and ``vm delete`` poke a fresh transient
+        allow via :meth:`transient_route`, and the Azure serial console
+        is not NSG-gated.
+        """
+        self._remove_ssh_allow(vm, BOOTSTRAP_ALLOW_RULE_NAME)
 
     @contextlib.contextmanager
-    def transient_route(self, vm: VMRow) -> Iterator[None]:
-        """Attach a transient public IP for the duration of the context.
+    def transient_route(self, vm: VMRow, *, config: Config | None = None) -> Iterator[None]:
+        """Open a scoped SSH route to the VM for the context's duration.
 
-        The native transport for Azure reaches the VM via a temporary
-        public IP. Attach on enter, detach on exit (regardless of how
-        the caller unwinds). The
+        Enter heals the public IP (:meth:`_ensure_public_ip`; legacy
+        detach-scheme VMs converge here), converges the NSG
+        (:meth:`_converge_nsg`; deny re-pin before any allow
+        allocation), then pokes this operation's own nonce-named allow
+        scoped to the operator's egress prefixes (widened by
+        ``config.operator.ssh_allow_cidrs``). The poke sits INSIDE the
+        try and the finally removes exactly the poked rule by name on
+        every unwind path, so concurrent native ops never cross-remove
+        each other's allows; a poke that fails without returning a name
+        has already cleaned up its own attempt, and a removal failure
+        warns naming the rule and prefixes (both per the network
+        module's ``poke_ssh_allow`` / ``remove_ssh_allow``, which carry
+        the full contracts). The
         :func:`agentworks.transports.native_transport` factory wraps
         this around the per-platform :meth:`native_transport` call so
         the lifecycle stays polymorphic.
         """
-        self.attach_public_ip(vm)
+        self._ensure_public_ip(vm)
+        self._converge_nsg(vm)
+        rule_name: str | None = None
+        prefixes: list[str] | None = None
         try:
+            rule_name, prefixes = self._poke_ssh_allow(vm, self._config_allow_cidrs(config))
             yield
         finally:
-            self.detach_public_ip(vm)
+            if rule_name is not None:
+                self._remove_ssh_allow(vm, rule_name, prefixes)
 
     def status(self, vm: VMRow, ctx: RunContext) -> VMStatus:
         if not vm.platform_metadata.get("resource_id"):
@@ -974,65 +970,6 @@ class AzureVMPlatform(VMPlatform):
         return VMStatus.UNKNOWN
 
 
-def _get_vm_public_ip(network: NetworkManagementClient, vm_info: object) -> str:
-    """Resolve the public IP address for a VM from its NIC, using the
-    caller's (cached) network client."""
-    nic_refs = (
-        getattr(
-            getattr(vm_info, "network_profile", None),
-            "network_interfaces",
-            [],
-        )
-        or []
-    )
-    for nic_ref in nic_refs:
-        nic_id = nic_ref.id
-        if not nic_id:
-            continue
-        # Parse NIC resource group and name from ID
-        parts = nic_id.split("/")
-        rg_idx = next(i for i, p in enumerate(parts) if p.lower() == "resourcegroups")
-        nic_rg = parts[rg_idx + 1]
-        nic_name = parts[-1]
-
-        nic = network.network_interfaces.get(nic_rg, nic_name)
-        for ip_config in nic.ip_configurations or []:
-            pip_ref = ip_config.public_ip_address
-            if pip_ref and pip_ref.id:
-                pip_parts = pip_ref.id.split("/")
-                pip_rg_idx = next(i for i, p in enumerate(pip_parts) if p.lower() == "resourcegroups")
-                pip_rg = pip_parts[pip_rg_idx + 1]
-                pip_name = pip_parts[-1]
-                pip = network.public_ip_addresses.get(pip_rg, pip_name)
-                if pip.ip_address:
-                    return pip.ip_address
-    return ""
-
-
-def _cleanup_vm_resources(
-    compute: ComputeManagementClient,
-    network: NetworkManagementClient,
-    rg: str,
-    name: str,
-) -> None:
-    """Best-effort cleanup of all resources associated with a VM."""
-    for cleanup in [
-        lambda: network.network_interfaces.begin_delete(rg, f"{name}-nic").result(),
-        lambda: network.public_ip_addresses.begin_delete(rg, f"{name}-ip").result(),
-        lambda: network.network_security_groups.begin_delete(rg, f"{name}-nsg").result(),
-        lambda: network.virtual_networks.begin_delete(rg, f"{name}{VNET_NAME_SUFFIX}").result(),
-    ]:
-        with contextlib.suppress(Exception):
-            cleanup()  # type: ignore[no-untyped-call]
-
-    # OS disk name is generated by Azure, find by tag
-    with contextlib.suppress(Exception):
-        for disk in compute.disks.list_by_resource_group(rg):
-            disk_name = disk.name or ""
-            if disk.tags and disk.tags.get("owner") == "agentworks" and name in disk_name and disk_name:
-                compute.disks.begin_delete(rg, disk_name).result()
-
-
 def _resource_id(vm: VMRow) -> str:
     """The VM's Azure resource ID from platform metadata, or a typed error."""
     resource_id = vm.platform_metadata.get("resource_id")
@@ -1043,14 +980,6 @@ def _resource_id(vm: VMRow) -> str:
             entity_name=vm.name,
         )
     return str(resource_id)
-
-
-def _get_vm_location(compute: ComputeManagementClient, vm: VMRow) -> str:
-    """Get the Azure region for a VM by querying the compute API, using
-    the caller's (cached) compute client."""
-    rg, name, _az_cfg = _parse_resource_id(_resource_id(vm))
-    vm_info = compute.virtual_machines.get(rg, name)
-    return vm_info.location or "eastus"
 
 
 class _MinimalAzureConfig:

@@ -158,9 +158,11 @@ def native_transport(
     ``platform`` is the VM's bound platform, resolved at the caller's
     composition root (the node factories via ``resolve_site``). ``stack``
     bounds the lifetime of any transient network state the platform
-    needs (Azure attaches a public IP on enter and detaches on exit):
-    the platform's :meth:`VMPlatform.transient_route` runs first; once
-    that context is held, the per-platform transport builder runs.
+    needs (Azure pokes an ephemeral SSH allow scoped to the operator's
+    egress IP on enter, healing a missing public IP first, and deletes
+    the allow on exit): the platform's
+    :meth:`VMPlatform.transient_route` runs first; once that context is
+    held, the per-platform transport builder runs.
 
     A ``None`` from :meth:`VMPlatform.native_transport` (proxmox: the
     one-shot QEMU guest-agent exec can't host an interactive shell)
@@ -171,14 +173,18 @@ def native_transport(
     Probes the resulting transport with ``echo ok`` and retries up to
     six times with a 3-second sleep between attempts (total budget ~15s
     of sleeps plus the per-attempt 10s timeout) so the Azure SDN has
-    time to propagate a freshly-attached public IP before the first
-    real command lands. Local transports (Lima, WSL2) succeed on the
-    first probe and skip the sleeps entirely.
+    time to apply a freshly-poked NSG allow (or a freshly-healed public
+    IP) before the first real command lands. Local transports (Lima,
+    WSL2) succeed on the first probe and skip the sleeps entirely. If
+    every probe fails, the platform's
+    :attr:`VMPlatform.probe_failure_hint` (azure: the allow was scoped
+    to the detected egress IP, see ``operator.ssh_allow_cidrs``) is
+    warned before the SSHError propagates.
     """
     from agentworks import output
     from agentworks.ssh import SSHError
 
-    stack.enter_context(platform.transient_route(vm))
+    stack.enter_context(platform.transient_route(vm, config=config))
     target = platform.native_transport(vm, config=config)
     if target is None:
         raise StateError(
@@ -190,10 +196,10 @@ def native_transport(
 
     # Defensive: any SSH-backed native transport that returns an empty
     # host gets the same typed-error treatment. Azure is today's only
-    # such case (host="" when the public IP attach silently failed); a
+    # such case (host="" when the NIC unexpectedly has no public IP); a
     # future SSH-backed platform would inherit the guard. After
-    # transient_route this shouldn't happen on Azure (the context
-    # manager attaches before yielding). If it does, surface clearly
+    # transient_route this shouldn't happen on Azure (enter heals a
+    # missing public IP before yielding). If it does, surface clearly
     # rather than letting downstream calls hang on an empty hostname.
     if isinstance(target, SSHTransport) and not target.host:
         raise StateError(
@@ -202,10 +208,11 @@ def native_transport(
             entity_kind="vm",
             entity_name=vm.name,
             hint=(
-                "For Azure: the temporary public IP attach may have silently "
-                "failed; check the Azure portal for the VM's network "
-                "configuration, or use the serial console (Connect > Serial "
-                "console on the VM resource page)."
+                "For Azure: the VM's NIC has no public IP and the heal may "
+                "have silently failed; check the Azure portal for the VM's "
+                "network configuration (including the NSG's transient SSH "
+                "allow), or use the serial console (Connect > Serial console "
+                "on the VM resource page)."
             ),
         )
 
@@ -217,6 +224,11 @@ def native_transport(
             if attempt == 0:
                 output.detail("Waiting for provisioning transport...")
             if attempt == 5:
+                # Give the platform's probe-failure guidance (azure: the
+                # scoped allow may not match the operator's real egress)
+                # before the typed error propagates.
+                if platform.probe_failure_hint:
+                    output.warn(platform.probe_failure_hint)
                 raise
             time.sleep(3)
     return target

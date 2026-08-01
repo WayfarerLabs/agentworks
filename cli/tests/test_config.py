@@ -372,6 +372,75 @@ def test_extra_ssh_public_keys_defaults_empty(config_dir: Path) -> None:
     assert cfg.operator.extra_ssh_public_keys == []
 
 
+def test_ssh_allow_cidrs_normalized(tmp_path: Path) -> None:
+    """Valid entries load normalized: a bare IP becomes its /32, a CIDR
+    with host bits set collapses to its network."""
+    pub = tmp_path / "id.pub"
+    priv = tmp_path / "id"
+    pub.write_text("key")
+    priv.write_text("key")
+
+    config_file = tmp_path / "config.toml"
+    config_file.write_text(
+        dedent(f"""\
+        [operator]
+        ssh_public_key = "{pub.as_posix()}"
+        ssh_private_key = "{priv.as_posix()}"
+        ssh_allow_cidrs = ["203.0.113.7", "198.51.100.0/24", "10.0.0.1/16"]
+    """)
+    )
+    cfg = load_config(config_file)
+    assert cfg.operator.ssh_allow_cidrs == ["203.0.113.7/32", "198.51.100.0/24", "10.0.0.0/16"]
+
+
+def test_ssh_allow_cidrs_invalid_entry_rejected(tmp_path: Path) -> None:
+    """A garbage entry fails at config load with a typed error naming the
+    setting and the offending value, not at the first vm op."""
+    pub = tmp_path / "id.pub"
+    priv = tmp_path / "id"
+    pub.write_text("key")
+    priv.write_text("key")
+
+    config_file = tmp_path / "config.toml"
+    config_file.write_text(
+        dedent(f"""\
+        [operator]
+        ssh_public_key = "{pub.as_posix()}"
+        ssh_private_key = "{priv.as_posix()}"
+        ssh_allow_cidrs = ["not-an-ip"]
+    """)
+    )
+    with pytest.raises(ConfigError, match="ssh_allow_cidrs.*'not-an-ip'"):
+        load_config(config_file)
+
+
+def test_ssh_allow_cidrs_scalar_rejected(tmp_path: Path) -> None:
+    """A scalar value (a bare string would otherwise iterate per
+    character) is a typed error naming the setting, not a TypeError or a
+    per-character parse failure."""
+    pub = tmp_path / "id.pub"
+    priv = tmp_path / "id"
+    pub.write_text("key")
+    priv.write_text("key")
+
+    config_file = tmp_path / "config.toml"
+    config_file.write_text(
+        dedent(f"""\
+        [operator]
+        ssh_public_key = "{pub.as_posix()}"
+        ssh_private_key = "{priv.as_posix()}"
+        ssh_allow_cidrs = "203.0.113.7"
+    """)
+    )
+    with pytest.raises(ConfigError, match="ssh_allow_cidrs must be a list"):
+        load_config(config_file)
+
+
+def test_ssh_allow_cidrs_defaults_empty(config_dir: Path) -> None:
+    cfg = load_config(config_dir)
+    assert cfg.operator.ssh_allow_cidrs == []
+
+
 # -- Legacy [proxmox] vm-site tests (table-driven) ----------------------------
 # The section loads as the vm-site/proxmox resource (dual-path, vm-sites
 # semantics); the flat keys nest into platform_config at the boundary, and

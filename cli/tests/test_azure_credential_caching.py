@@ -130,21 +130,21 @@ def _platform() -> AzureVMPlatform:
 
 class TestCredentialCaching:
     def test_one_build_across_ops_and_per_instance(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Multiple ops on one instance (status + start + attach, which
-        together touch both SDK clients and the credential) build the
-        credential and each client exactly once; a second instance builds
-        its own rather than reusing the first's."""
+        """Multiple ops on one instance (status + start + the public-IP
+        heal, which together touch both SDK clients and the credential)
+        build the credential and each client exactly once; a second
+        instance builds its own rather than reusing the first's."""
         counters = _install_fakes(monkeypatch)
         vm: VMRow = _fake_vm()  # type: ignore[assignment]
 
         platform = _platform()
         assert platform.status(vm, RunContext()) is VMStatus.RUNNING
         platform.start(vm, RunContext())
-        assert platform.attach_public_ip(vm) == "203.0.113.5"
+        platform._ensure_public_ip(vm)
 
         # One credential build (one live probe), reused across all three ops;
         # one build of each client (compute is shared by status/start and the
-        # attach location lookup, network is built by attach).
+        # heal's location lookup, network is built by the heal).
         assert counters["cred_build"] == 1
         assert counters["get_token"] == 1
         assert counters["compute_build"] == 1
@@ -188,8 +188,8 @@ class TestCredentialCaching:
 
         assert platform.status(vm_a, RunContext()) is VMStatus.RUNNING
         assert platform.status(vm_b, RunContext()) is VMStatus.RUNNING
-        platform.attach_public_ip(vm_a)
-        platform.attach_public_ip(vm_b)
+        platform._ensure_public_ip(vm_a)
+        platform._ensure_public_ip(vm_b)
 
         # One compute and one network client per subscription, keyed by
         # subscription (the accessor passes the key to the constructor,

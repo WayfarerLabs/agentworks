@@ -44,6 +44,14 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 #extra_ssh_public_keys = [                  # additional public keys for VM authorized_keys
 #    "~/.ssh/other_key.pub",
 #]
+# Extra source addresses (IPv4 addresses and/or CIDRs) allowed through the
+# transient cloud SSH firewall hole, alongside your auto-detected public
+# IP. Useful when egress detection picks the wrong address: VPN split
+# tunnels, proxies, CGNAT.
+#ssh_allow_cidrs = [
+#    "203.0.113.7",
+#    "198.51.100.0/24",
+#]
 
 # --- Paths ---
 

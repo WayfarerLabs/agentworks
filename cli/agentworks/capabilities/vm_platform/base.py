@@ -132,6 +132,15 @@ class VMPlatform(Capability):
     # their actual escape hatch.
     no_native_transport_hint: ClassVar[str] = "This platform has no interactive native transport."
 
+    # Operator guidance warned when every reachability probe of the
+    # native transport fails (the transports factory emits it just
+    # before the SSHError propagates). None means no extra guidance;
+    # platforms whose route setup can succeed while the transport still
+    # cannot connect override with prose naming the likely cause (azure:
+    # the ephemeral SSH allow is scoped to the DETECTED egress IP, which
+    # may not be where the operator's SSH traffic actually leaves).
+    probe_failure_hint: ClassVar[str | None] = None
+
     @property
     def site_name(self) -> str:
         """The bound site's name (the capability-generic ``owner_name``,
@@ -249,25 +258,55 @@ class VMPlatform(Capability):
     def post_tailscale_ready(self, vm: VMRow) -> None:  # noqa: B027  # intentional concrete no-op
         """Hook called once the VM's Tailscale node is up during create.
 
-        Default no-op. Azure overrides to detach the cloud-init public
-        IP at the moment Tailscale becomes reachable, minimizing the
-        window the VM is exposed to the internet. The asymmetry vs.
-        :meth:`transient_route` is genuine: the matching attach lives
-        inside :meth:`create` (cloud-init bootstrap needs the IP) and
-        the detach fires at an async Tailscale-ready point inside
-        ``bootstrap_vm`` (Phase A), neither of which is an ExitStack-shaped
-        lifecycle.
+        Default no-op. The hook's contract is "close provisioning
+        access": whatever ingress the platform opened for bootstrap is
+        no longer needed once Tailscale carries the traffic. Azure
+        overrides to delete the ephemeral bootstrap SSH allow rule
+        (scoped to the operator's egress prefixes; a permanent
+        deny-all-inbound baseline remains), leaving the VM with zero
+        inbound exposure. The asymmetry vs. :meth:`transient_route` is
+        genuine: the bootstrap ingress opens inside :meth:`create`
+        (cloud-init needs inbound SSH) and closes at an async
+        Tailscale-ready point inside ``bootstrap_vm`` (Phase A),
+        neither of which is an ExitStack-shaped lifecycle.
         """
 
-    def transient_route(self, vm: VMRow) -> AbstractContextManager[None]:
+    def secure_failed_vm(self, vm: VMRow) -> None:  # noqa: B027  # intentional concrete no-op
+        """Hook called when a create is kept without completing Phase A:
+        the bootstrap or Tailscale verification died (the row is marked
+        FAILED) or the operator interrupted it mid-bootstrap (the row
+        keeps its in-flight status), and the VM is kept for debugging
+        rather than rolled back.
+
+        Default no-op. Same contract as :meth:`post_tailscale_ready`
+        (which only fires on success): close provisioning access. Azure
+        overrides to delete the ephemeral bootstrap SSH allow rule, so a
+        failed VM defaults to zero inbound exposure rather than keeping
+        its bootstrap ingress indefinitely. Implementations must not
+        assume the VM is reachable, and the caller treats the hook as
+        best-effort: the original failure keeps propagating regardless.
+        Operator debugging survives the fail-closed posture: ``vm shell
+        --platform`` pokes a fresh transient allow via
+        :meth:`transient_route`, and platform consoles outside the
+        firewalled path (Azure's serial console) are unaffected.
+        """
+
+    def transient_route(self, vm: VMRow, *, config: Config | None = None) -> AbstractContextManager[None]:
         """Hold any platform-native transient network state while the
         native transport is in use.
 
         Default no-op (:func:`contextlib.nullcontext`) for platforms
         whose native transport works without setup (lima, wsl2). Azure
-        overrides to attach a public IP on enter and detach on exit so
-        the transient state is bounded by the caller's
-        :class:`contextlib.ExitStack` scope.
+        overrides to open a scoped SSH route on enter (heal a missing
+        public IP, poke an ephemeral NSG allow scoped to the operator's
+        egress prefixes) and delete the allow on exit so the transient
+        state is bounded by the caller's :class:`contextlib.ExitStack`
+        scope.
+
+        ``config`` carries OPERATOR settings, mirroring
+        :meth:`native_transport` and :meth:`vm_active` (azure reads
+        ``config.operator.ssh_allow_cidrs`` to widen the allow's scope),
+        distinct from the bound ``platform_config``.
         """
         return nullcontext()
 
