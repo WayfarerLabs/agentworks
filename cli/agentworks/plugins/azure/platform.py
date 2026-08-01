@@ -800,6 +800,11 @@ class AzureVMPlatform(VMPlatform):
                 # the ephemeral bootstrap allow scoped to the operator's egress
                 # prefixes (cloud-init needs inbound SSH from the operator;
                 # post_tailscale_ready deletes the allow once Tailscale is up).
+                # The NSG create is what opens the bootstrap SSH route, so it
+                # announces the open with the transient poke's wording; the
+                # matching close line comes from the hooks' remove_ssh_allow
+                # (#350: the close was announced, the open was silent).
+                output.info(f"Opening SSH route (allow scoped to {', '.join(ssh_allow_prefixes)})...")
                 output.detail("Creating network security group...")
                 nsg_poller = network.network_security_groups.begin_create_or_update(
                     az.resource_group,

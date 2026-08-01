@@ -170,6 +170,22 @@ class TestCreate:
         # No per-rule create/delete during create; the hooks own the close.
         assert network.security_rules.events == []
 
+    def test_create_announces_the_bootstrap_route_open(
+        self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+    ) -> None:
+        """The NSG create is what opens the bootstrap SSH route, so
+        ``create`` announces it with the transient poke's wording, naming
+        the scoped prefixes (#350: the close hooks already announced
+        their side via ``remove_ssh_allow``; the open was silent)."""
+        _install_fakes(monkeypatch, vm_exists_lookup=False)
+
+        _platform().create(
+            self._request(),
+            RunContext(config=_operator_config(["198.51.100.0/24"])),
+        )
+
+        assert f"Opening SSH route (allow scoped to {_DETECTED_PREFIX}, 198.51.100.0/24)..." in captured_output.info
+
     def test_create_fails_typed_when_detection_fails_and_no_extras(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Detection failure with no configured extras is a typed error
         BEFORE any resource exists, hinting at operator.ssh_allow_cidrs."""
