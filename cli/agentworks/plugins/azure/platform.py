@@ -649,6 +649,14 @@ class AzureVMPlatform(VMPlatform):
                         os_disk=OSDisk(
                             create_option="FromImage",
                             disk_size_gb=disk,
+                            # Azure deletes the disk with the VM. This does not
+                            # replace the tag-based sweep in cleanup_vm_resources:
+                            # that covers the rollback window where create fails
+                            # before a VM exists to carry the disk away (#334),
+                            # and it is what deletes the disks of VMs created
+                            # before this option was set (their disks default
+                            # to Detach).
+                            delete_option="Delete",
                             managed_disk=ManagedDiskParameters(storage_account_type="StandardSSD_LRS"),
                         ),
                     ),
