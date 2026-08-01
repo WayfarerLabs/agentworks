@@ -176,6 +176,9 @@ def test_main_wrapper_lets_vendored_abort_through(
     [
         pytest.param(lambda: typer.Exit(code=5), 5, id="vendored-exit"),
         pytest.param(lambda: click.exceptions.Exit(code=3), 3, id="real-exit"),
+        # A clean Exit(0) must stay 0, not be coerced to a nonzero code.
+        pytest.param(lambda: typer.Exit(code=0), 0, id="vendored-exit-zero"),
+        pytest.param(lambda: click.exceptions.Exit(code=0), 0, id="real-exit-zero"),
     ],
 )
 def test_main_wrapper_maps_escaped_exit_to_its_carried_code(

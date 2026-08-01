@@ -122,8 +122,9 @@ def main() -> None:
         # SIGINT code; per-op rollback handlers fire inside the command, before
         # that conversion. Should an Exit escape anyway (a framework change, or
         # a raise from code running outside app()), exit with its carried code:
-        # a bare `raise` would land in typer's excepthook as a traceback with
-        # exit code 1, and falling through would hit the generic Exception
+        # by here we are outside app(), so a bare `raise` would propagate out of
+        # main() to Python's default unhandled-exception handler (a traceback,
+        # exit code 1), and falling through would hit the generic Exception
         # clause and pollute error.log. A deliberate exit is not a bug, so, as
         # in the ClickException clause, there is no debug-mode re-raise here.
         raise SystemExit(e.exit_code) from None
