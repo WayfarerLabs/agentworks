@@ -397,6 +397,7 @@ def test_default_config_builds_green_with_zero_enabled_system_plugins(tmp_path: 
         ("vm-platform", "proxmox"),  # proxmox plugin
         ("vm-platform", "azure-vm"),  # azure plugin
         ("git-credential-provider", "azdo"),  # azure plugin
+        ("harness", "codex"),  # codex plugin
     }
     for kind, name in disabled_rows:
         assert registry.graph.enablement_of(kind, name) is Enablement.disabled, (kind, name)
@@ -413,9 +414,9 @@ def test_default_config_builds_green_with_zero_enabled_system_plugins(tmp_path: 
     for kind, name in enabled_rows:
         assert registry.graph.enablement_of(kind, name) is Enablement.enabled, (kind, name)
 
-    # The roster reflects the same: all four shipped plugins present and disabled.
+    # The roster reflects the same: all five shipped plugins present and disabled.
     roster = {c.name: c for c in _check_plugins(config).checks}
-    for plugin_name in ("onepassword", "claude", "proxmox", "azure"):
+    for plugin_name in ("onepassword", "claude", "proxmox", "azure", "codex"):
         assert plugin_name in SYSTEM_PLUGINS
         entry = roster[f"plugin {plugin_name}"]
         assert entry.status is Status.INFO

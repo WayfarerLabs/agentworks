@@ -12,13 +12,18 @@ that to work. The session is the rich consuming resource: a session node HOLDS a
 composes its readiness, and the session manager invokes its ops. The harness never touches tmux, the
 database, or the CLI; it validates its config, probes its target, and returns pane command strings.
 
-Two harnesses ship today and serve as references:
+Three harnesses ship today and serve as references:
 
 - **`shell`** (`shell.py`): the core built-in and default. Operator-authored `command` /
   `restart_command` / `required_commands`. The minimal member: no state, no tool conventions.
 - **`claude-code`** (`agentworks/plugins/claude/harness.py`): the first tool harness, shipped as the
   opt-in `claude` system plugin. The reference for everything stateful: durable session identity,
   resume-vs-launch detection, tool flag mapping, and the plugin packaging.
+- **`codex`** (`agentworks/plugins/codex/harness.py`): the second tool harness, shipped as the
+  opt-in `codex` system plugin. The reference for the OTHER identity form: the tool mints its own
+  session ids, so the harness discovers the id from the tool's on-disk state (scoped by a stored
+  launch-marker anchor and the session's workspace cwd) and stores it, refusing to guess when
+  discovery is ambiguous.
 
 ## Where a harness sits
 
@@ -60,8 +65,8 @@ type-checked. Two rules with teeth:
 
 - **No completeness rules here.** `validate` runs per declared blob, and a child template may
   declare a partial blob that only becomes complete after the inheritance merge. Required-field and
-  cross-field rules belong in the second `validate` call the resolver makes on the merged blob
-  (neither shipped harness has any; the slot exists).
+  cross-field rules belong in the second `validate` call the resolver makes on the merged blob (no
+  shipped harness has any; the slot exists).
 - **Do not validate tool-owned choice sets.** `claude-code` forwards `permission_mode` and `model`
   values verbatim: the valid choices are the tool's and drift between its releases, so a stale
   harness-side enum would reject values a newer CLI accepts. An invalid value surfaces as the tool's
@@ -70,7 +75,7 @@ type-checked. Two rules with teeth:
 ### `dependencies` (classmethod): total and pure
 
 The resource references the config blob implies, secrets above all. Never raises (malformed fields
-just omit their edge; `validate` owns the raising). Both shipped harnesses return `()`; the plumbing
+just omit their edge; `validate` owns the raising). Every shipped harness returns `()`; the plumbing
 behind it (secret_refs folding into the session node, scoped delivery through `ctx.secret(name)`) is
 live and tested at the framework level, but no shipped harness declares a secret yet, so a
 secret-declaring harness should expect to be the first real exerciser of that path.
@@ -187,15 +192,17 @@ The wiring, so you know what you get for free and where to look when debugging:
 ### Session resume: the stateful-harness pattern
 
 The `claude-code` harness is the worked example; the pattern generalizes to any tool with resumable
-sessions (Codex and kin). Five rules, each earned:
+sessions. Five rules, each earned:
 
 1. **Own a durable identity; never derive it.** Mint the tool-side session id once (a v4 uuid where
    the tool accepts one) on the first `start`, store it in the state blob, and read it back verbatim
    forever after. If the tool will not accept a caller-supplied id, the same rule holds in its other
-   form: let the tool mint the id, discover it from the tool's own durable state, and store THAT.
-   The manager's persistence contract makes either survive restarts. Derivation schemes (from
-   session name, cwd, or the tool's own directory layout) are brittle against renames and
-   tool-version drift; a stored opaque value is not.
+   form: let the tool mint the id, discover it from the tool's own durable state, and store THAT
+   (`codex` is the shipped example: a STORED launch-marker anchor scopes discovery, filtered by the
+   session's workspace cwd, and an ambiguous candidate set raises rather than guesses). The
+   manager's persistence contract makes either survive restarts. Derivation schemes (from session
+   name, cwd, or the tool's own directory layout) are brittle against renames and tool-version
+   drift; a stored opaque value is not.
 2. **Decide resume-vs-launch at op time, on the launch target, from the tool's own durable state.**
    Probe for the stored id's artifact (for Claude, the transcript `<sid>.jsonl` under the projects
    dir) over the transport, with the same `$SHELL -lic` environment the pane will get. Do it per op,

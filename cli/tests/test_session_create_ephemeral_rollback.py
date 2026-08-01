@@ -91,7 +91,7 @@ def test_eager_resolve_fires_exactly_once_for_new_workspace_and_new_agent(
 
     monkeypatch.setattr("agentworks.sessions.manager._require_workspace", _stop_at_session_slice)
 
-    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000), paths=SimpleNamespace(vm_workspaces="/srv"))
 
     with pytest.raises(_Stop):
         create_session(
@@ -158,7 +158,7 @@ def test_session_create_frames_phases_like_a_plan(
         lambda *a, **k: (_ for _ in ()).throw(_Stop()),
     )
 
-    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000), paths=SimpleNamespace(vm_workspaces="/srv"))
     with pytest.raises(_Stop):
         create_session(
             db,
@@ -243,7 +243,7 @@ def test_realize_bodies_take_domain_shaped_kwargs_only(tmp_path: Path, monkeypat
         lambda *a, **k: (_ for _ in ()).throw(_Stop()),
     )
 
-    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000), paths=SimpleNamespace(vm_workspaces="/srv"))
     with pytest.raises(_Stop):
         create_session(
             db,
@@ -304,7 +304,7 @@ def test_failure_after_ephemeral_create_rolls_back_ephemerals(tmp_path: Path, mo
 
     monkeypatch.setattr("agentworks.sessions.manager._require_workspace", _explode)
 
-    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000), paths=SimpleNamespace(vm_workspaces="/srv"))
 
     with pytest.raises(RuntimeError, match="simulated"):
         create_session(
@@ -326,7 +326,7 @@ def test_new_agent_inherits_vm_from_existing_workspace(tmp_path: Path, monkeypat
     from agentworks.sessions.manager import create_session
 
     db = _seed_one_vm(tmp_path)  # vm1 + ws1
-    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000), paths=SimpleNamespace(vm_workspaces="/srv"))
 
     _install_session_prep_stubs(monkeypatch)
 
@@ -357,7 +357,7 @@ def test_validation_failure_does_not_trigger_rollback(tmp_path: Path, monkeypatc
     from agentworks.sessions.manager import create_session
 
     db = _seed_two_vms(tmp_path)
-    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000), paths=SimpleNamespace(vm_workspaces="/srv"))
 
     deletes: list[str] = []
     monkeypatch.setattr(

@@ -18,6 +18,16 @@ if TYPE_CHECKING:
     from agentworks.workspaces.templates import ResolvedTemplate
 
 
+def default_workspace_path(config: Config, ws_name: str) -> str:
+    """The VM-side path a workspace named ``ws_name`` is created at:
+    ``paths.vm_workspaces/<name>``. The single home of that convention,
+    shared by the create/copy backends and the pending workspace node
+    (which must know the path before the row exists); the ROW stays the
+    source of truth for a live workspace (``workspace rehome`` can move
+    one anywhere)."""
+    return f"{config.paths.vm_workspaces}/{ws_name}"
+
+
 def create_vm_workspace(
     vm: VMRow,
     config: Config,
@@ -43,7 +53,7 @@ def create_vm_workspace(
     assert vm.tailscale_host is not None
     target = transport(vm, config, logger=logger)
 
-    workspace_path = f"{config.paths.vm_workspaces}/{ws_name}"
+    workspace_path = default_workspace_path(config, ws_name)
     ws_group = workspace_group(ws_name)
 
     # Refuse to create if directory already exists

@@ -203,9 +203,9 @@ class ClaudeCodeHarness(Harness):
     def _transcript_exists(self, transport: Transport, sid: str) -> bool:
         """True iff the stored session's transcript (``<sid>.jsonl``) exists
         under the projects dir on the launch target. Slug-independent
-        (``find`` matches under ANY project directory); shell-neutral
-        (``find ... -print -quit | grep -q .`` has no glob-nomatch
-        divergence). Runs through ``$SHELL -lic`` like the readiness probe.
+        (``find`` matches under ANY project directory); shell-neutral (no
+        glob reaches the shell). Runs through ``$SHELL -lic`` like the
+        readiness probe.
 
         On restart the orchestrator has already killed the old session, but
         no flush wait is needed: Claude writes transcript turns to the
@@ -213,14 +213,23 @@ class ClaudeCodeHarness(Harness):
         killed session's history is already on disk when this probe runs.
 
         The exit code is read, not just ``.ok``, to keep a probe that could
-        not EXECUTE from masquerading as "no transcript": ``grep -q`` exits
-        0 for a match and 1 for none, so any other exit (an SSH failure's
-        255, a shell that could not start) means the probe never ran. Guessing
-        "fresh" there would launch ``--session-id <reserved-uuid>``, which
-        Claude rejects as already-in-use on a real session's restart and the
-        pane fails to start, so a probe failure raises instead of guessing."""
+        not EXECUTE from masquerading as "no transcript". The inner command
+        keeps find's own failure distinguishable from a clean no-match: a
+        missing projects dir (Claude never ran here) exits 1 up front; a
+        printed match exits 0 (a found transcript is definitive even if
+        find also stumbled elsewhere); a find that FAILED without printing
+        one (an unreadable subdir, not a mere no-match) exits 6 rather
+        than folding into "no transcript". Anything but {0, 1} (the 6, an
+        SSH failure's 255, a shell that could not start) raises: guessing
+        "fresh" would launch ``--session-id <reserved-uuid>``, which
+        Claude rejects as already-in-use on a real session's restart and
+        the pane fails to start."""
         needle = shlex.quote(f"{sid}.jsonl")
-        inner = f"find {_PROJECTS_DIR} -name {needle} -print -quit 2>/dev/null | grep -q ."
+        inner = (
+            f'[ -d "{_PROJECTS_DIR}" ] || exit 1; '
+            f'out=$(find "{_PROJECTS_DIR}" -name {needle} -print -quit 2>/dev/null); rc=$?; '
+            f'[ -n "$out" ] && exit 0; [ "$rc" -eq 0 ] || exit 6; exit 1'
+        )
         result = transport.run(f'"$SHELL" -lic {shlex.quote(inner)}', check=False)
         if result.returncode == 0:
             return True  # transcript on disk: resume

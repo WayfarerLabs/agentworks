@@ -29,6 +29,10 @@ mechanics, so implementation never relies on recalled flags.
   `sessions/<YYYY>/<MM>/<DD>/rollout-<timestamp>-<session-uuid>.jsonl`; the filename embeds the
   session id verbatim. `codex archive` moves the file to `archived_sessions/`. A `state_5.sqlite`
   `threads` table indexes sessions but is a cache, not the source of truth.
+- **The rollout's first JSONL line is its `session_meta`**, serialized as compact JSON (no spaces),
+  and its `"cwd"` key records the PHYSICAL working directory: launching from a symlinked directory
+  records the canonical path (verified 2026-08-01 against 0.146.0). This is what makes the discovery
+  filter's `grep -F '"cwd":"<pwd -P of the workspace>"'` comparison sound.
 - **The resume boundary equals rollout-file presence** (verified with an abandoned-at-every-stage
   experiment, the analog of the claude one): file present resumes even with the index row deleted;
   file absent fails even with the row present; archived fails with an actionable "run
@@ -74,17 +78,55 @@ appears in the conversation. `session_id` stays unset until a later op discovers
 human's first submission there is nothing durable to resume, so a restart in that window launching
 fresh again loses nothing (the same boundary claude has).
 
-Discovery mechanics (op-time, target-side): the fresh-launch pane command touches a per-session
-marker file (under the session user's home, e.g. `~/.agentworks/codex/<session-name>.launch`) before
-`exec codex`, giving a same-clock "our launch happened here" anchor. On a later op with no stored
-id, the harness probes for rollout files newer than the marker whose `session_meta` cwd is the
-session's working directory:
+Discovery mechanics (op-time, target-side; redesigned at review 2026-08-01, lead-pinned, replacing
+the original name-derived-marker scheme whose count-only adoption could adopt a foreign session and
+whose leftover markers could leak a dead namesake's conversation into a recreated session):
 
-- exactly one candidate: adopt its uuid into `session_id` and resume it;
-- zero candidates: launch fresh (and refresh the marker);
-- multiple candidates (two codex sessions launched fresh in one workspace dir concurrently): raise a
-  typed `StateError` naming the candidate ids, refusing to guess; adopting the wrong id would
-  silently splice one session's conversation into another.
+- **Stored anchor, nonce marker.** A fresh launch mints a nonce marker filename
+  (`~/.agentworks/codex/<session-name>-<nonce>.launch`), stores it in the state blob under
+  `discovery_marker`, and the pane command touches that file before `exec codex` (removing the
+  previous anchor's file first if the blob held one from an unused earlier fresh launch). The
+  adoption resume command removes the consumed marker file.
+- **Discovery runs ONLY on a stored anchor.** With `discovery_marker` in the blob and no
+  `session_id`, the op probes; a blob holding neither has definitively nothing to discover, so no
+  target round-trip happens at all. A brand-new session, or a namesake recreated after a delete, can
+  therefore never adopt another session's conversation off a leftover marker file.
+- **Marker file missing while its anchor is stored: raise.** Either the fresh pane never ran (the
+  tolerated-touch-failure window) or someone removed the file; both break the anchor's account of
+  history, so the op raises a typed `StateError` whose hint names the recovery (recreate the marker
+  with `touch` if the session has no codex conversation worth keeping; the next launch starts
+  fresh).
+- **Candidates** are rollout files newer (mtime) than the marker whose `session_meta` cwd (the
+  rollout's first JSONL line) equals the session's workspace directory, both sides canonicalized
+  target-side (`cd <workspace> && pwd -P`) so logical-vs-physical symlink mismatches cannot exclude
+  our own rollout. The workspace path reaches the harness through a `workspace_path` keyword on the
+  base harness constructor, threaded from the session node seam. Then:
+  - exactly one candidate: adopt its uuid into `session_id`, clear `discovery_marker`, resume it;
+  - zero candidates: launch fresh (minting a replacement anchor); a foreign rollout in a DIFFERENT
+    directory is benign and must not brick a restart;
+  - multiple candidates: raise a typed `StateError` naming the candidate ids, refusing to guess;
+    adopting the wrong id would silently splice one session's conversation into another.
+
+#### Known residual windows (v1)
+
+Recorded honestly rather than claimed away; both are narrow, and the failure they leave is either
+loud or requires a same-user same-directory race:
+
+- **(a) Same-user, same-cwd foreign fresh launch.** A foreign codex session launched by the same
+  launch user in the SAME workspace directory between our marker touch and our discovery yields a
+  candidate the cwd filter cannot distinguish from ours: a single such candidate would be adopted
+  wrongly (two of them raise). Interim operator guidance: avoid two concurrently-fresh codex
+  sessions sharing one agent user and workspace directory; a future launch-to-rollout binding
+  mechanism closes this properly.
+- **(b) mtime is not creation time.** `find -newer` compares mtime, and codex rollout mtimes advance
+  on every turn, so an OLD conversation resumed in the same cwd after our marker touch enters the
+  candidate set even though it was created earlier. It surfaces as the loud multiple-candidates
+  error, or contributes a wrong single candidate under (a)'s conditions.
+- **(c) Workspace rehome between a fresh launch and its discovery.** `workspace rehome` moves the
+  workspace path, so a rollout recorded at the old path is excluded by the cwd filter and the next
+  op launches fresh, orphaning the undiscovered conversation (recoverable manually via
+  `codex resume`). Requires a rehome inside the create-to-first-restart window of a never-restarted
+  session, so it is narrower than (a) and (b).
 
 ### Resume-vs-launch probe
 
@@ -136,9 +178,12 @@ at implementation time; do not recall it).
 
 ### State stored per session (in the namespaced blob)
 
-`session_id` (discovered codex UUIDv7, absent until discovery) and whatever anchor the discovery
-mechanism needs (the marker-file path is derivable, so likely nothing else). The launch cwd is the
-session's workspace directory, already known to the harness.
+`session_id` (discovered codex UUIDv7, absent until discovery) and `discovery_marker` (the
+`$HOME`-relative nonce marker path the last fresh launch minted, absent once consumed by adoption).
+The original "the marker-file path is derivable, so likely nothing else" call is superseded by the
+stored-anchor redesign above: deriving the path from the session name is exactly what made the
+stale-namesake adoption possible. The launch cwd is the session's workspace directory, threaded to
+the harness at construction (`workspace_path`).
 
 ### Out of v1 (recorded)
 

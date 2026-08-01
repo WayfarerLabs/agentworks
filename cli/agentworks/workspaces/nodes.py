@@ -42,6 +42,12 @@ class LiveWorkspaceNode:
         return self._row.name
 
     @property
+    def workspace_path(self) -> str:
+        """The workspace's VM-side directory, from the row (the source of
+        truth: ``workspace rehome`` can move a live workspace anywhere)."""
+        return self._row.workspace_path
+
+    @property
     def row(self) -> WorkspaceRow:
         return self._row
 
@@ -96,6 +102,17 @@ class PendingWorkspaceNode:
     @property
     def name(self) -> str:
         return self._name
+
+    @property
+    def workspace_path(self) -> str:
+        """The VM-side directory the realize body WILL create this
+        workspace at (no row exists yet): the same
+        ``default_workspace_path`` derivation ``create_vm_workspace``
+        uses, so the pre-row answer and the realized row agree by
+        construction."""
+        from agentworks.workspaces.backends.vm import default_workspace_path
+
+        return default_workspace_path(self._config, self._name)
 
     @property
     def template(self) -> str | None:

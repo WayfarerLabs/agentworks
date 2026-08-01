@@ -365,6 +365,7 @@ def _harness_for_template(
         session_name=session_name,
         vm_name=vm.row.name,
         workspace_name=workspace.name,
+        workspace_path=workspace.workspace_path,
         target=target,
         admin=admin,
         state=namespace,

@@ -413,7 +413,10 @@ def test_create_failure_cleans_session_slice_then_unwinds_ephemerals(
     with pytest.raises(RuntimeError, match="tmux exploded"):
         create_session(
             db,
-            SimpleNamespace(session=SimpleNamespace(history_limit=1)),  # type: ignore[arg-type]
+            SimpleNamespace(  # type: ignore[arg-type]
+                session=SimpleNamespace(history_limit=1),
+                paths=SimpleNamespace(vm_workspaces="/srv"),
+            ),
             name="s1",
             new_workspace=True,
             new_agent=True,

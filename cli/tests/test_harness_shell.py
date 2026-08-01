@@ -50,6 +50,7 @@ def _harness(
         session_name=session_name,
         vm_name=vm_name,
         workspace_name=workspace_name,
+        workspace_path="/srv/ws1",
         target=target,  # type: ignore[arg-type]
         admin=admin,
         state={} if state is None else state,

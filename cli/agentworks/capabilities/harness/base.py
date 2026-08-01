@@ -142,6 +142,7 @@ class Harness(Capability):
         session_name: str,  # the session's own name (addresses the tool)
         vm_name: str,  # the session's VM ancestor
         workspace_name: str,  # the session's workspace ancestor
+        workspace_path: str,  # the workspace's VM-side directory (the pane cd's here)
         target: _Target | None,  # the agent node it runs as; None in admin mode
         admin: bool,  # admin mode (uses ctx.admin_target())
         state: dict[str, object],  # this harness's OWN namespace of the persisted blob (mutated in place)
@@ -150,6 +151,7 @@ class Harness(Capability):
         self._session_name = session_name
         self._vm_name = vm_name
         self._workspace_name = workspace_name
+        self._workspace_path = workspace_path
         self._target = target
         self._admin = admin
         self._state = state  # mutated in place by the ops; the manager persists it
@@ -186,8 +188,8 @@ class Harness(Capability):
         session but not the template whose ``harness_config`` named the
         secret, so the reference carries that locating info itself. A
         public accessor, so the node never reaches into the base
-        ``Capability._secret_refs`` private field. Empty for both
-        built-ins (``shell`` / ``claude-code`` declare no secrets); the
+        ``Capability._secret_refs`` private field. Empty for every
+        shipped harness (none declares a secret); the
         plumbing is here for a future secret-declaring harness.
         """
         from dataclasses import replace

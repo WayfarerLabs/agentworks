@@ -29,6 +29,13 @@ class _Platform:
     name = "stub"
 
 
+def _stub_config() -> Config:
+    """A minimal config double for node construction. ``paths`` is the one
+    attribute the graph reads at construction time (the pending workspace
+    node derives its eventual VM-side path from it)."""
+    return cast("Config", SimpleNamespace(paths=SimpleNamespace(vm_workspaces="/srv")))
+
+
 class _Probe:
     """Recording transport double for the required-commands probe."""
 
@@ -47,7 +54,7 @@ def _vm_node(db: Database, name: str = "box") -> LiveVMNode:
     row = db.get_vm(name)
     assert row is not None
     site = VMSiteNode("stub", cast("VMPlatform", _Platform()), (), cast("Registry", object()))
-    return LiveVMNode(db, cast("Config", object()), cast("Registry", object()), row, site)
+    return LiveVMNode(db, _stub_config(), cast("Registry", object()), row, site)
 
 
 def _pending_agent(db: Database, vm: LiveVMNode, name: str = "dev"):
@@ -55,7 +62,7 @@ def _pending_agent(db: Database, vm: LiveVMNode, name: str = "dev"):
     from agentworks.agents.templates import ResolvedAgentTemplate
 
     template = AgentTemplateNode(ResolvedAgentTemplate(name="default"), ())
-    return pending_agent_node(db, cast("Config", object()), name, template, vm)
+    return pending_agent_node(db, _stub_config(), name, template, vm)
 
 
 def _session(
@@ -69,11 +76,11 @@ def _session(
     from agentworks.workspaces.nodes import pending_workspace_node
 
     vm_node = vm if vm is not None else _vm_node(db)
-    workspace = pending_workspace_node(db, cast("Config", object()), "ws1", vm_node, None)
+    workspace = pending_workspace_node(db, _stub_config(), "ws1", vm_node, None)
     template = ResolvedSessionTemplate(name="claude", harness_config={"required_commands": list(required)})
     return pending_session_node(
         db,
-        cast("Config", object()),
+        _stub_config(),
         "s1",
         template,
         agent=agent,  # type: ignore[arg-type]
@@ -264,11 +271,11 @@ def test_session_create_graph_shares_one_vm_node(db: Database) -> None:
         cast("Registry", object()),
     )
     template = AgentTemplateNode(ResolvedAgentTemplate(name="default", git_credentials=["gh"]), (cred,))
-    agent = pending_agent_node(db, cast("Config", object()), "dev", template, vm)
-    workspace = pending_workspace_node(db, cast("Config", object()), "ws1", vm, None)
+    agent = pending_agent_node(db, _stub_config(), "dev", template, vm)
+    workspace = pending_workspace_node(db, _stub_config(), "ws1", vm, None)
     session = pending_session_node(
         db,
-        cast("Config", object()),
+        _stub_config(),
         "s1",
         ResolvedSessionTemplate(name="claude"),
         agent=agent,
@@ -513,7 +520,7 @@ def test_pending_workspace_teardown_is_todays_rollback_body(db: Database, monkey
         lambda db_, config, **kw: calls.append(dict(kw)),
     )
     vm = _vm_node(db)
-    workspace = pending_workspace_node(db, cast("Config", object()), "ws1", vm, None)
+    workspace = pending_workspace_node(db, _stub_config(), "ws1", vm, None)
     workspace.mark_realized()
     workspace.teardown()
     (call,) = calls
@@ -656,7 +663,7 @@ def test_reverse_realization_order_reproduces_rollback_order(db: Database, monke
         lambda *a, **k: order.append("workspace"),
     )
     vm = _vm_node(db)
-    workspace = pending_workspace_node(db, cast("Config", object()), "ws1", vm, None)
+    workspace = pending_workspace_node(db, _stub_config(), "ws1", vm, None)
     agent = _pending_agent(db, vm)
     log = RealizationLog()
     log.mark_realized(workspace)  # creation order: workspace, then agent
@@ -879,7 +886,7 @@ def _seam_harness(db: Database, blob: dict[str, object], harness_name: str):
     from agentworks.workspaces.nodes import pending_workspace_node
 
     vm_node = _vm_node(db)
-    workspace = pending_workspace_node(db, cast("Config", object()), "ws1", vm_node, None)
+    workspace = pending_workspace_node(db, _stub_config(), "ws1", vm_node, None)
     template = ResolvedSessionTemplate(name="t", harness=harness_name)
     return _harness_for_template(
         template,
@@ -902,7 +909,7 @@ def test_same_key_writers_land_in_distinct_namespaces(db: Database, monkeypatch:
     from agentworks.workspaces.nodes import pending_workspace_node
 
     vm_node = _vm_node(db)
-    workspace = pending_workspace_node(db, cast("Config", object()), "ws1", vm_node, None)
+    workspace = pending_workspace_node(db, _stub_config(), "ws1", vm_node, None)
     for hname in ("toy-a", "toy-b"):
         monkeypatch.setitem(HARNESS_REGISTRY, hname, _toy_harness(hname))
     blob: dict[str, object] = {}

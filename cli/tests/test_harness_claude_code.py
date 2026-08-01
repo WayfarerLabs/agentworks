@@ -39,6 +39,7 @@ def _harness(
         session_name=session_name,
         vm_name="box",
         workspace_name="ws1",
+        workspace_path="/srv/ws1",
         target=None,
         admin=admin,
         state={"session_id": _SID} if state is None else state,
@@ -158,6 +159,24 @@ def test_probe_is_slug_independent_and_finds_by_stored_id() -> None:
     assert "find" in probe_cmd
     # Rooted at the CLI's config dir with its documented override.
     assert "CLAUDE_CONFIG_DIR" in probe_cmd
+
+
+def test_probe_keeps_find_failure_distinct_from_a_clean_no_match() -> None:
+    """The inner command's structure: a missing projects dir short-circuits
+    to the clean no-match exit (1, fresh), while a find that FAILED without
+    printing a match exits 6, which the exit-code fork raises on rather
+    than folding into "no transcript". Pinned here because the fake target
+    answers by exit code alone; the structure is what guarantees those
+    codes mean what the fork thinks they mean."""
+    target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(0)})
+    _harness().start(_op_ctx(target))
+    (probe_cmd,) = target.commands
+    assert "[ -d " in probe_cmd  # dir-missing is a clean no-match, not a find failure
+    assert "exit 6" in probe_cmd  # find failure stays distinguishable
+    # And the fork raises on that distinct code.
+    failing = _FakeTarget({f"{_SID}.jsonl": _FakeResult(6)})
+    with pytest.raises(StateError, match="could not probe"):
+        _harness().start(_op_ctx(failing))
 
 
 def test_probe_that_could_not_execute_raises_rather_than_guessing() -> None:
