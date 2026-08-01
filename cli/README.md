@@ -355,17 +355,18 @@ Manage sessions (persistent tmux sessions running in workspaces). Session names 
 
 `session list` accepts `--workspace`, `--vm`, `--agent`, and `--admin` to narrow the result set.
 Filters compose with AND. The name filters (`--workspace`, `--vm`, `--agent`) accept a single value
-or a comma-separated list (`--vm vm1,vm2`); commas within a filter are OR-ed together.
-`--agent <name>` matches agent-mode sessions only; `--admin` matches admin-mode sessions only (the
-two are mutually exclusive).
+or a comma-separated list (`--vm vm1,vm2`); commas within a filter are OR-ed together. An unknown
+name in a filter is an error, not an empty result. `--agent <name>` matches agent-mode sessions
+only; `--admin` matches admin-mode sessions only (the two are mutually exclusive).
 
 `session stop` and `session restart` operate on a single session by default. Pass `--all`
 (`session stop`/`session restart`) or `--all-stopped` (`session restart`) to batch over the sessions
 on the VM. The batch form accepts `--vm <vm>`, `--workspace <ws>`, `--agent <agent>`, and `--admin`
 to narrow the set; filters compose with AND and require one of the batch flags. The name filters
 accept a single value or a comma-separated list (`--vm vm1,vm2`); commas within a filter are OR-ed
-together. `--agent` matches agent-mode sessions only; `--admin` matches admin-mode sessions only
-(the two are mutually exclusive). Pass `--force` to stop/restart broken sessions via PID kill.
+together, and an unknown name in a filter is an error, not an empty result. `--agent` matches
+agent-mode sessions only; `--admin` matches admin-mode sessions only (the two are mutually
+exclusive). Pass `--force` to stop/restart broken sessions via PID kill.
 
 `session create <name>` takes the session name as a required positional. Optional flags:
 `--workspace`, `--template`, `--admin`, and `--agent`. If `--workspace` / `--new-workspace` is
@@ -424,11 +425,11 @@ panes you want preloaded into a session's window.
 
 `console list` accepts `--vm`, `--workspace`, and `--agent` to narrow the result set. Each filter
 takes a single value or a comma-separated list (`--workspace ws1,ws2`); commas within a filter are
-OR-ed together. The `--workspace` and `--agent` filters use "any session matches" semantics: a
-console is listed if at least one of its member sessions belongs to the given workspace / runs as
-the given agent. When `--workspace` and `--agent` are both passed, the SAME session must satisfy
-both predicates. The session count displayed is the total membership, not the count of matching
-sessions. Filters compose with AND.
+OR-ed together, and an unknown name in a filter is an error, not an empty result. The `--workspace`
+and `--agent` filters use "any session matches" semantics: a console is listed if at least one of
+its member sessions belongs to the given workspace / runs as the given agent. When `--workspace` and
+`--agent` are both passed, the SAME session must satisfy both predicates. The session count
+displayed is the total membership, not the count of matching sessions. Filters compose with AND.
 
 Session specs use `name` or `name+N` shorthand, where `N` is the number of default shell panes to
 pre-open in that session's window (running as the session's agent user, cwd = workspace root):

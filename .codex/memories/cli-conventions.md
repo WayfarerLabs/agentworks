@@ -74,6 +74,12 @@ Operands keep their variadic-positional form (`agent grant-workspace my-agent ws
 take CSV. Commas cannot appear in resource names (see `validate_name` in `agentworks.config`), so
 CSV parsing is safe.
 
+An unknown name in a name filter is a hard error, not an empty result: the service-layer function
+validates every element of the filter against the entities defined in the state database and raises
+`NotFoundError` (see `validate_name_filters` in `agentworks.name_filters`). A valid name that simply
+matches nothing stays an empty result. Validation is DB-only; a defined-but-stopped VM is a valid
+filter value.
+
 **Mode filters** are bare boolean flags rather than valued options. Use `--admin` on `session list`
 to narrow to admin-mode sessions, not `--mode admin`. The bare-flag shape composes naturally with
 the name filters and matches how `session create --admin` already shapes the admin/agent mode
