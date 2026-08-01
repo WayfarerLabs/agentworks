@@ -13,7 +13,7 @@ consumer:
 YAML manifests ----\                                    /---> validation errors (owner + file:line)
                     +--> decode through MODELS --> registry --> reference extraction (graph edges)
 settings TOML -----/         (one regime)               \---> JSON Schema emission --> editor tooling
-                                                         \--> sample / describe renderer --> operator
+ (stretch, FR14)                                         \--> sample / describe renderer --> operator
 ```
 
 Every schema fact (field, type, required, default, description, reference semantics) is authored
@@ -32,20 +32,25 @@ Small architecture, mostly deletion. Components:
 - **Hard error at load.** The settings loader keeps a single check over `KIND_SECTIONS` (the
   existing shared table): any resource-declaring section present in config.toml is an aggregated
   `ConfigError` naming the sections and pointing at `agw resource migrate` / `agw resource sample`.
-  The existing warning (and its `--no-deprecations` silence) is replaced by this error. The existing
-  command exemption mechanism (migrate and `resource sample --write` load settings-only today)
-  carries over so the escape hatch can run.
+  The existing warning (and its `--no-deprecations` silence) is replaced by this error. The
+  settings-only load (`resources=False`) that `resource sample --write` and `resource edit`'s
+  fallback use today becomes the escape-hatch mechanism; `agw resource migrate`, which today loads
+  the full config (it is exempted only from the deprecation nudge and reads registry rows for
+  verification), MOVES to the settings-only load. That move is what forces the verification rework
+  below.
 - **Loader deletion.** The TOML resource loaders (`loaders_resources.py`, `loaders_secrets.py`'s
   resource half, `loaders_sessions.py`) and the decode layer's route-through-TOML-loaders shims are
   deleted. Decode logic that survives moves to be owned by the manifest decoders outright; this is
   an interim, phase-1-only state that phase 2 replaces with models, so no effort goes into
   beautifying it.
-- **Migrator verification rework.** `plan_migration` stays pure over the config file text, but its
-  registry-equivalence verification loses its "pre" side once TOML rows no longer load. The
-  verification flips to a decode-the-output check: the emitted YAML documents are decoded through
-  the manifest decoder and compared against rows the planner derives directly from the TOML text.
-  Both sides of the comparison then run through the one surviving decode path, which is a strictly
-  stronger check than today's (it proves the emitted manifests actually load).
+- **Migrator verification rework.** Planning becomes pure over the config file text (today it also
+  takes the built registry for its pre-migration rows, a source that disappears when TOML rows stop
+  loading). The reworked verification decodes the emitted YAML through the manifest decoder, proving
+  the output actually loads, and compares it against a pre-side derived from the TOML text. The
+  pre-side derivation must be INDEPENDENT of the section-to-spec mapping that produced the emitted
+  YAML, or the comparison is tautological for exactly the mapping under test; defining that
+  independent derivation is the core of the phase 1 LLD. The check gains "the output loads" and must
+  not lose "the migration preserved meaning".
 - **Record keeping.** A superseding ADR replaces ADR 0016's dual-path stance; guides and the
   capabilities README drop dual-path language; the resource-manifests SDD lockfile gains a dated
   entry (standing instruction: every PR advancing this effort appends lockfile entries to the locked
@@ -57,9 +62,12 @@ Small architecture, mostly deletion. Components:
 
 A new `resources/schema/` package owning the framework-wide model vocabulary:
 
-- **Base model.** A shared Pydantic v2 base (strict mode, frozen, `extra="forbid"` for closed-world
-  unknown-key rejection) that all spec and capability config models extend. Strict mypy stays
-  authoritative; the pydantic mypy plugin is enabled.
+- **Base model.** A shared Pydantic v2 base (strict mode, frozen) that all spec and capability
+  config models extend, with unknown-key policy set per surface to preserve today's contract:
+  capability config models are closed-world (`extra="forbid"`, unknown keys are errors, per FR12),
+  while kind spec models keep today's warn-on-unknown-keys behavior (unknown keys surface as issues,
+  the manifest still loads). Tightening kinds to errors is a deliberate future decision, not a side
+  effect of this effort. Strict mypy stays authoritative; the pydantic mypy plugin is enabled.
 - **Agentworks field metadata.** `Annotated` markers carrying the semantics JSON Schema does not
   have natively:
   - `SecretRef(default_template=...)`: the field names a secret; the template (e.g.
@@ -95,27 +103,51 @@ The capability contract changes from invoked validation to declared schema:
   of the raw mapping. Capability ops read typed fields off their model rather than
   `config.get(...)`.
 
-### Component 3: union assembly at finalize
+### Component 3: capability config dispatch, and when it validates
 
-The capability-hosting surfaces (`platform_config` keyed by `platform`, `provider_config` by
-`provider`, `harness_config` by `harness`, secret backend mappings by backend name) are
-discriminated unions. Assembly is registration-time: after plugins register (the same boundary
-`build_registry` already runs), the framework builds one union per capability kind from the
-registered capabilities' models and caches it on the kind's registry entry. Pydantic's callable
-discriminator dispatches on the naming field, so an unknown capability name fails with a typed error
-listing the registered names. Not-enabled plugins follow the existing enablement model: their
-capabilities are registered (so their config still validates and their samples still render) and
-use-gating stays where it is today.
+The capability-hosting surfaces (`platform_config` beside `platform`, `provider_config` beside
+`provider`, `harness_config` beside `harness`, secret backend mappings keyed by backend name) are
+conceptually discriminated unions, but the discriminator is a SIBLING field or a map key, not a
+field inside the blob, so runtime dispatch is framework-side rather than Pydantic-internal: after
+plugin registration (the boundary `build_registry` already provides; plugin impls seat at import),
+each capability kind's registry entry carries a name-to-model map, the framework selects the model
+by the naming field or map key, and validates the blob against it directly. Pydantic's
+discriminated-union machinery is used where it fits the artifact, the emitted JSON Schema (`oneOf`
+plus discriminator over the enclosing object), not for runtime dispatch.
+
+Timing preserves today's deliberate two-pass shape (capability blobs validate at finalize, never at
+decode, so graph construction never depends on a blob being valid):
+
+- **Decode** validates only kind-owned fields; the capability blob passes through as a raw mapping,
+  exactly as now.
+- **Finalize** validates each blob against the model selected by the naming field, raising through
+  the error bridge with owner framing.
+- **Reference extraction** runs the total walker over the raw blob at graph-construction time,
+  independent of validity, preserving the `dependencies` totality contract.
+
+Two existing tolerance seams are preserved, not reversed:
+
+- **Unknown capability names keep tolerate-and-self-disable.** A manifest naming a capability that
+  is not registered here (a plugin not installed on this host) still registers its resource, which
+  self-disables with a reason naming the missing capability; a resources dir shared across hosts
+  degrades gracefully. Dispatch simply has no model to select; the miss is handled by the existing
+  readiness/enablement semantics, never by a load failure.
+- **Blobs bound to disabled capabilities stay inert.** A mapping to a present-but-disabled backend
+  (or a blob for a not-enabled plugin's capability) is not validated until the capability is
+  enabled, matching the secrets contract today. Samples and describe still render for disabled
+  capabilities, since rendering reads the model, not the operator's blob.
 
 ### Component 4: kind spec models and decode replacement
 
 Each resource kind declares a spec model replacing its hand-rolled `_decode_*` function. The
 manifest envelope (apiVersion / kind / metadata / spec, duplicate detection, origin capture) stays
 as is; what changes is that `spec` decoding becomes `model_validate` into the kind's model,
-producing the declared-resource object. The frozen-dataclass decl classes become frozen models (or
-thin wrappers over a validated model where behavior-rich classes warrant it; LLD's call per kind).
-Kind-specific semantic checks that models cannot express field-locally (name/length rules with
-derived caps, cross-field constraints) become model validators, so they stay inside the one regime.
+producing the declared-resource object. Capability blobs are NOT part of the kind spec model's
+validated surface: the spec model types them as raw mappings and Component 3's finalize pass owns
+their validation. The frozen-dataclass decl classes become frozen models (or thin wrappers over a
+validated model where behavior-rich classes warrant it; LLD's call per kind). Kind-specific semantic
+checks that models cannot express field-locally (name/length rules with derived caps, cross-field
+constraints) become model validators, so they stay inside the one regime.
 
 ### Component 5: the error bridge
 
@@ -138,8 +170,10 @@ per kind, plus an envelope schema. Surfaces:
   completions tree gains it) prints or writes the schema set.
 - `agw resource sample --write` stamps the yaml-language-server modeline referencing the written
   schema files, so operators get completions and hover docs with zero editor setup beyond the
-  extension. Emission targets JSON Schema 2020-12; a draft-4 down-level exists only if FR14's taplo
-  integration lands and demands it.
+  extension. FR9's "generated manifests" resolves to this surface plus the migrator's emitted YAML,
+  which gains the same modeline stamp in phase 2 once schemas exist (the migrator itself lands in
+  phase 1, before there is a schema to reference). Emission targets JSON Schema 2020-12; a draft-4
+  down-level exists only if FR14's taplo integration lands and demands it.
 
 ### Component 7: the sample and describe renderer
 
@@ -193,6 +227,13 @@ Steps 2 and 3 keep the suite green at every commit; there is no flag-day cutover
 - **Error-message parity** is a review gate, not a hope: the plan carries the FRD's
   representative-mistakes corpus as a checked test comparing bridge output against the curated
   framing.
+- **FR13's test regime** rides with the renderer: the renderer is pinned over fixture schemas plus
+  every bundled kind, and a test renders each kind's sample, loads it through the manifest path, and
+  builds a registry from the result. The plan carries these beside the FR12 corpus.
+- **Verification normalization vs step 3.** The phase-1-reworked migrator verification normalizes
+  rows with a dataclass-only helper (`strip_source_fields`); when sequencing step 3 turns decl
+  classes into models, that helper silently stops normalizing unless taught the model shape. The
+  step 3 work carries an explicit checkbox for it.
 - **Model performance** is a non-concern at this scale (hundreds of small documents), but union
   rebuild per process is kept O(registered capabilities) and cached.
 - **DB-sourced rows** (`db/models.py`) are outside the declaration regime; FR15's "error, not local
