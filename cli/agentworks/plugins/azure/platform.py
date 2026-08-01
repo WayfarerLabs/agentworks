@@ -23,13 +23,16 @@ from agentworks.plugins.azure.network import (
     BOOTSTRAP_ALLOW_RULE_NAME,
     VNET_NAME_SUFFIX,
     cleanup_vm_resources,
+    config_allow_cidrs,
     converge_nsg,
+    delete_vm_and_resources,
     ensure_public_ip,
     get_vm_public_ip,
     initial_security_rules,
     operator_ssh_prefixes,
     poke_ssh_allow,
     remove_ssh_allow,
+    rollback_create_on_interrupt,
     wrap_azure_error,
 )
 from agentworks.ssh import SSHError
@@ -484,7 +487,7 @@ class AzureVMPlatform(VMPlatform):
         # bootstrap allow is poked at NSG creation, and a detection
         # failure with no operator.ssh_allow_cidrs escape hatch is a
         # typed error while there is still nothing to roll back.
-        ssh_allow_prefixes = operator_ssh_prefixes(self._config_allow_cidrs(ctx.config))
+        ssh_allow_prefixes = operator_ssh_prefixes(config_allow_cidrs(ctx.config))
 
         output.detail("Connecting to Azure...")
         compute = self._compute_client(az)
@@ -554,161 +557,171 @@ class AzureVMPlatform(VMPlatform):
             VirtualNetwork,
         )
 
+        # Interrupt rollback: spans BOTH the resource creation below and the
+        # inline bootstrap wait after it (the inner Exception arm keeps the
+        # plain-failure rollback as it was). Without it a Ctrl-C escapes
+        # create() uncleaned and the caller's row unwind orphans the whole
+        # resource set (#338).
         try:
-            # Create public IP
-            output.detail("Creating public IP...")
-            ip_poller = network.public_ip_addresses.begin_create_or_update(
-                az.resource_group,
-                f"{vm_name}-ip",
-                PublicIPAddress(
-                    location=az.region,
-                    sku=PublicIPAddressSku(name="Standard"),
-                    public_ip_allocation_method="Static",
-                    tags={"owner": "agentworks"},
-                ),
-            )
-            ip_result = ip_poller.result()
-            public_ip = ip_result.ip_address or ""
-
-            # Create the NSG: the permanent deny-all-inbound baseline plus
-            # the ephemeral bootstrap allow scoped to the operator's egress
-            # prefixes (cloud-init needs inbound SSH from the operator;
-            # post_tailscale_ready deletes the allow once Tailscale is up).
-            output.detail("Creating network security group...")
-            nsg_poller = network.network_security_groups.begin_create_or_update(
-                az.resource_group,
-                f"{vm_name}-nsg",
-                NetworkSecurityGroup(
-                    location=az.region,
-                    security_rules=initial_security_rules(ssh_allow_prefixes),
-                    tags={"owner": "agentworks"},
-                ),
-            )
-            nsg_result = nsg_poller.result()
-
-            # Create NIC
-            output.detail("Creating network interface...")
-
-            # Need a subnet: use default VNet or create one
-            vnet_name = f"{vm_name}{VNET_NAME_SUFFIX}"
-            subnet_name = "default"
-            vnet_poller = network.virtual_networks.begin_create_or_update(
-                az.resource_group,
-                vnet_name,
-                VirtualNetwork(
-                    location=az.region,
-                    address_space=AddressSpace(address_prefixes=["10.0.0.0/16"]),
-                    subnets=[
-                        Subnet(
-                            name=subnet_name,
-                            address_prefix="10.0.0.0/24",
-                        )
-                    ],
-                    tags={"owner": "agentworks"},
-                ),
-            )
-            vnet_result = vnet_poller.result()
-            # The vnet was just created with exactly the one subnet above, so
-            # the returned resource always carries it back.
-            assert vnet_result.subnets is not None
-            subnet_id = vnet_result.subnets[0].id
-
-            nic_poller = network.network_interfaces.begin_create_or_update(
-                az.resource_group,
-                f"{vm_name}-nic",
-                NetworkInterface(
-                    location=az.region,
-                    ip_configurations=[
-                        NetworkInterfaceIPConfiguration(
-                            name="default",
-                            subnet=Subnet(id=subnet_id),
-                            public_ip_address=PublicIPAddress(id=ip_result.id),
-                        )
-                    ],
-                    network_security_group=NetworkSecurityGroup(id=nsg_result.id),
-                    tags={"owner": "agentworks"},
-                ),
-            )
-            nic_result = nic_poller.result()
-
-            # Create VM
-            output.detail("Creating VM...")
-            vm_poller = compute.virtual_machines.begin_create_or_update(
-                az.resource_group,
-                vm_name,
-                VirtualMachine(
-                    location=az.region,
-                    hardware_profile=HardwareProfile(vm_size=azure_vm_size),
-                    storage_profile=StorageProfile(
-                        image_reference=ImageReference(
-                            publisher=IMAGE_PUBLISHER,
-                            offer=IMAGE_OFFER,
-                            sku=IMAGE_SKU,
-                            version=IMAGE_VERSION,
-                        ),
-                        os_disk=OSDisk(
-                            create_option="FromImage",
-                            disk_size_gb=disk,
-                            # Azure deletes the disk with the VM. This does not
-                            # replace the tag-based sweep in cleanup_vm_resources:
-                            # that covers the rollback window where create fails
-                            # before a VM exists to carry the disk away (#334),
-                            # and it is what deletes the disks of VMs created
-                            # before this option was set (their disks default
-                            # to Detach).
-                            delete_option="Delete",
-                            managed_disk=ManagedDiskParameters(storage_account_type="StandardSSD_LRS"),
-                        ),
+            try:
+                # Create public IP
+                output.detail("Creating public IP...")
+                ip_poller = network.public_ip_addresses.begin_create_or_update(
+                    az.resource_group,
+                    f"{vm_name}-ip",
+                    PublicIPAddress(
+                        location=az.region,
+                        sku=PublicIPAddressSku(name="Standard"),
+                        public_ip_allocation_method="Static",
+                        tags={"owner": "agentworks"},
                     ),
-                    os_profile=OSProfile(
-                        computer_name=vm_name,
-                        admin_username=admin_username,
-                        custom_data=cloud_init_b64,
-                        linux_configuration=LinuxConfiguration(
-                            disable_password_authentication=True,
-                            ssh=SshConfiguration(
-                                public_keys=[
-                                    SshPublicKey(
-                                        path=f"/home/{admin_username}/.ssh/authorized_keys",
-                                        key_data=ssh_pub_key,
-                                    )
-                                ]
+                )
+                ip_result = ip_poller.result()
+                public_ip = ip_result.ip_address or ""
+
+                # Create the NSG: the permanent deny-all-inbound baseline plus
+                # the ephemeral bootstrap allow scoped to the operator's egress
+                # prefixes (cloud-init needs inbound SSH from the operator;
+                # post_tailscale_ready deletes the allow once Tailscale is up).
+                output.detail("Creating network security group...")
+                nsg_poller = network.network_security_groups.begin_create_or_update(
+                    az.resource_group,
+                    f"{vm_name}-nsg",
+                    NetworkSecurityGroup(
+                        location=az.region,
+                        security_rules=initial_security_rules(ssh_allow_prefixes),
+                        tags={"owner": "agentworks"},
+                    ),
+                )
+                nsg_result = nsg_poller.result()
+
+                # Create NIC
+                output.detail("Creating network interface...")
+
+                # Need a subnet: use default VNet or create one
+                vnet_name = f"{vm_name}{VNET_NAME_SUFFIX}"
+                subnet_name = "default"
+                vnet_poller = network.virtual_networks.begin_create_or_update(
+                    az.resource_group,
+                    vnet_name,
+                    VirtualNetwork(
+                        location=az.region,
+                        address_space=AddressSpace(address_prefixes=["10.0.0.0/16"]),
+                        subnets=[
+                            Subnet(
+                                name=subnet_name,
+                                address_prefix="10.0.0.0/24",
+                            )
+                        ],
+                        tags={"owner": "agentworks"},
+                    ),
+                )
+                vnet_result = vnet_poller.result()
+                # The vnet was just created with exactly the one subnet above, so
+                # the returned resource always carries it back.
+                assert vnet_result.subnets is not None
+                subnet_id = vnet_result.subnets[0].id
+
+                nic_poller = network.network_interfaces.begin_create_or_update(
+                    az.resource_group,
+                    f"{vm_name}-nic",
+                    NetworkInterface(
+                        location=az.region,
+                        ip_configurations=[
+                            NetworkInterfaceIPConfiguration(
+                                name="default",
+                                subnet=Subnet(id=subnet_id),
+                                public_ip_address=PublicIPAddress(id=ip_result.id),
+                            )
+                        ],
+                        network_security_group=NetworkSecurityGroup(id=nsg_result.id),
+                        tags={"owner": "agentworks"},
+                    ),
+                )
+                nic_result = nic_poller.result()
+
+                # Create VM
+                output.detail("Creating VM...")
+                vm_poller = compute.virtual_machines.begin_create_or_update(
+                    az.resource_group,
+                    vm_name,
+                    VirtualMachine(
+                        location=az.region,
+                        hardware_profile=HardwareProfile(vm_size=azure_vm_size),
+                        storage_profile=StorageProfile(
+                            image_reference=ImageReference(
+                                publisher=IMAGE_PUBLISHER,
+                                offer=IMAGE_OFFER,
+                                sku=IMAGE_SKU,
+                                version=IMAGE_VERSION,
+                            ),
+                            os_disk=OSDisk(
+                                create_option="FromImage",
+                                disk_size_gb=disk,
+                                # Azure deletes the disk with the VM. This does
+                                # not replace the tag-based sweep in
+                                # cleanup_vm_resources: that covers the rollback
+                                # window where create fails before a VM exists
+                                # to carry the disk away (#334), and it is what
+                                # deletes the disks of VMs created before this
+                                # option was set (their disks default to
+                                # Detach).
+                                delete_option="Delete",
+                                managed_disk=ManagedDiskParameters(storage_account_type="StandardSSD_LRS"),
                             ),
                         ),
+                        os_profile=OSProfile(
+                            computer_name=vm_name,
+                            admin_username=admin_username,
+                            custom_data=cloud_init_b64,
+                            linux_configuration=LinuxConfiguration(
+                                disable_password_authentication=True,
+                                ssh=SshConfiguration(
+                                    public_keys=[
+                                        SshPublicKey(
+                                            path=f"/home/{admin_username}/.ssh/authorized_keys",
+                                            key_data=ssh_pub_key,
+                                        )
+                                    ]
+                                ),
+                            ),
+                        ),
+                        network_profile=NetworkProfile(
+                            network_interfaces=[NetworkInterfaceReference(id=nic_result.id)],
+                        ),
+                        tags={"owner": "agentworks"},
                     ),
-                    network_profile=NetworkProfile(
-                        network_interfaces=[NetworkInterfaceReference(id=nic_result.id)],
-                    ),
-                    tags={"owner": "agentworks"},
-                ),
+                )
+                vm_result = vm_poller.result()
+                resource_id = vm_result.id or ""
+
+            except Exception as exc:
+                output.detail("Cleaning up resources...")
+                cleanup_vm_resources(compute, network, az.resource_group, vm_name)
+                raise wrap_azure_error(exc) from exc
+
+            output.detail(f"Azure VM '{vm_name}' provisioned (IP: {public_ip})")
+
+            import sys
+
+            prov_transport = SSHTransport(
+                host=public_ip,
+                user=admin_username,
+                identity_file=request.ssh_private_key,
+                force_tty=sys.platform == "win32",
             )
-            vm_result = vm_poller.result()
-            resource_id = vm_result.id or ""
 
-        except Exception as exc:
-            output.detail("Cleaning up resources...")
-            cleanup_vm_resources(compute, network, az.resource_group, vm_name)
-            raise wrap_azure_error(exc) from exc
-
-        output.detail(f"Azure VM '{vm_name}' provisioned (IP: {public_ip})")
-
-        import sys
-
-        prov_transport = SSHTransport(
-            host=public_ip,
-            user=admin_username,
-            identity_file=request.ssh_private_key,
-            force_tty=sys.platform == "win32",
-        )
-
-        # If bootstrap was embedded in cloud-init, wait for it to finish
-        # and extract the Tailscale IP.
-        tailscale_ip = None
-        bootstrap_complete = False
-        if tailscale_auth_key:
-            tailscale_ip = self._wait_for_bootstrap(prov_transport, vm_name)
-            if tailscale_ip:
-                bootstrap_complete = True
+            # If bootstrap was embedded in cloud-init, wait for it to finish
+            # and extract the Tailscale IP.
+            tailscale_ip = None
+            bootstrap_complete = False
+            if tailscale_auth_key:
+                tailscale_ip = self._wait_for_bootstrap(prov_transport, vm_name)
+                if tailscale_ip:
+                    bootstrap_complete = True
+        except KeyboardInterrupt:
+            rollback_create_on_interrupt(compute, network, az.resource_group, vm_name)
+            raise
 
         metadata = {"resource_id": resource_id} if resource_id else {}
         return ProvisionResult(
@@ -794,15 +807,7 @@ class AzureVMPlatform(VMPlatform):
             return
 
         rg, name, az_cfg = _parse_resource_id(_resource_id(vm))
-        compute = self._compute_client(az_cfg)
-        network = self._network_client(az_cfg)
-
-        # Delete VM first (must complete before dependent resources)
-        with contextlib.suppress(Exception):
-            compute.virtual_machines.begin_delete(rg, name).result()
-
-        cleanup_vm_resources(compute, network, rg, name)
-
+        delete_vm_and_resources(self._compute_client(az_cfg), self._network_client(az_cfg), rg, name)
         output.info(f"Azure VM '{vm.name}' deleted")
 
     # The route-state helpers below are thin delegates into the network
@@ -823,15 +828,6 @@ class AzureVMPlatform(VMPlatform):
         :func:`agentworks.plugins.azure.network.converge_nsg`."""
         rg, name, az_cfg = _parse_resource_id(_resource_id(vm))
         converge_nsg(self._network_client(az_cfg), rg, name)
-
-    @staticmethod
-    def _config_allow_cidrs(config: Config | None) -> list[str]:
-        """The ``operator.ssh_allow_cidrs`` extras from an operator
-        config, or none when no config was threaded in. Same defensive
-        getattr chain as :meth:`native_transport`'s identity-file read
-        (callers may thread partial config stand-ins)."""
-        operator = getattr(config, "operator", None)
-        return list(getattr(operator, "ssh_allow_cidrs", None) or [])
 
     def _poke_ssh_allow(self, vm: VMRow, extra_cidrs: list[str] | None = None) -> tuple[str, list[str]]:
         """Create this operation's own ephemeral SSH allow scoped to the
@@ -951,7 +947,7 @@ class AzureVMPlatform(VMPlatform):
         rule_name: str | None = None
         prefixes: list[str] | None = None
         try:
-            rule_name, prefixes = self._poke_ssh_allow(vm, self._config_allow_cidrs(config))
+            rule_name, prefixes = self._poke_ssh_allow(vm, config_allow_cidrs(config))
             yield
         finally:
             if rule_name is not None:

@@ -15,13 +15,14 @@ converging legacy VMs on the way.
 Azure is a real dependency in the test env, so the fakes are installed
 by patching the SDK symbols the modules import function-locally
 (``monkeypatch.setattr`` on the real modules), matching
-test_azure_credential_caching.py. Egress detection is always stubbed:
+test_azure_credential_caching.py; the fakes themselves live in
+``tests._azure_platform_support`` (shared with
+test_azure_create_interrupt.py). Egress detection is always stubbed:
 no test hits the network.
 """
 
 from __future__ import annotations
 
-import builtins
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock, patch
@@ -43,12 +44,17 @@ from agentworks.plugins.azure.network import (
     TRANSIENT_ALLOW_RULE_PREFIX,
 )
 from agentworks.plugins.azure.platform import AzureVMPlatform
+from tests._azure_platform_support import (
+    _RESOURCE_ID,
+    _FakeSecurityRules,
+    _install_fakes,
+    _Poller,
+)
 
 if TYPE_CHECKING:
     from agentworks.db import VMRow
     from tests.conftest import CapturedOutput
 
-_RESOURCE_ID = "/subscriptions/sub-A/resourceGroups/rg1/providers/Microsoft.Compute/virtualMachines/vm1"
 _CONFIG = {"subscription_id": "sub-A", "resource_group": "rg1", "region": "eastus"}
 _DETECTED = "198.18.0.7"
 _DETECTED_PREFIX = f"{_DETECTED}/32"
@@ -88,171 +94,6 @@ def _operator_config(allow_cidrs: list[str] | None = None) -> Any:
     """A config stand-in carrying just ``operator.ssh_allow_cidrs``, the
     only operator field the route path reads."""
     return SimpleNamespace(operator=SimpleNamespace(ssh_allow_cidrs=allow_cidrs or []))
-
-
-class _Poller:
-    """A begin_* long-running-operation stub: ``.result()`` yields a value."""
-
-    def __init__(self, value: object) -> None:
-        self._value = value
-
-    def result(self) -> object:
-        return self._value
-
-
-class _FakeSecurityRules:
-    """Recording stub for ``network.security_rules``; per-test error
-    injection drives the 404-tolerance and removal-failure paths. The
-    shared ``events`` list records creations and deletions in call
-    order so ordering contracts (deny re-pin before allow poke) can be
-    asserted."""
-
-    def __init__(self) -> None:
-        self.events: list[tuple[str, str, str, str, Any]] = []
-        self.create_error: Exception | None = None
-        self.delete_error: Exception | None = None
-        # Live rules by name: what list() serves the poke's slot
-        # allocation. Creates upsert, deletes pop; tests may pre-seed
-        # (e.g. a legacy deny at 100, or a full band).
-        self.rules: dict[str, Any] = {}
-
-    def begin_create_or_update(self, rg: str, nsg: str, rule_name: str, rule: object) -> _Poller:
-        if self.create_error is not None:
-            raise self.create_error
-        self.events.append(("create", rg, nsg, rule_name, rule))
-        self.rules[rule_name] = rule
-        return _Poller(rule)
-
-    def begin_delete(self, rg: str, nsg: str, rule_name: str) -> _Poller:
-        if self.delete_error is not None:
-            raise self.delete_error
-        self.events.append(("delete", rg, nsg, rule_name, None))
-        self.rules.pop(rule_name, None)
-        return _Poller(None)
-
-    def creates(self) -> list[tuple[str, str, str, Any]]:
-        return [(e[1], e[2], e[3], e[4]) for e in self.events if e[0] == "create"]
-
-    def deletes(self) -> list[tuple[str, str, str]]:
-        return [(e[1], e[2], e[3]) for e in self.events if e[0] == "delete"]
-
-    def transient_names(self) -> list[str]:
-        """Names of every transient allow created so far, in call order."""
-        return [e[3] for e in self.events if e[0] == "create" and e[3].startswith(TRANSIENT_ALLOW_RULE_PREFIX)]
-
-    # The SDK method is genuinely named ``list``; annotate via builtins
-    # so the method does not shadow the builtin in this class's other
-    # annotations (mypy resolves them in class scope).
-    def list(self, rg: str, nsg: str) -> builtins.list[Any]:
-        return [rule for rule in self.rules.values()]
-
-
-class _FakePublicIps:
-    def __init__(self) -> None:
-        self.created: list[tuple[str, str]] = []
-
-    def begin_create_or_update(self, rg: str, name: str, params: object) -> _Poller:
-        self.created.append((rg, name))
-        return _Poller(SimpleNamespace(ip_address="203.0.113.5", id="/pip/id"))
-
-
-class _FakeNics:
-    """One NIC whose single ip-configuration either carries a public IP
-    reference (the permanent-IP steady state) or lacks one (a VM created
-    under the old detach scheme, awaiting the heal)."""
-
-    def __init__(self, *, public_ip_attached: bool) -> None:
-        self.updated: list[tuple[str, str, Any]] = []
-        pip = SimpleNamespace(id="/pip/id") if public_ip_attached else None
-        self.nic = SimpleNamespace(ip_configurations=[SimpleNamespace(public_ip_address=pip)])
-
-    def get(self, rg: str, name: str) -> Any:
-        return self.nic
-
-    def begin_create_or_update(self, rg: str, name: str, nic: object) -> _Poller:
-        self.updated.append((rg, name, nic))
-        return _Poller(SimpleNamespace(id="/nic/id"))
-
-
-class _FakeNsgs:
-    def __init__(self) -> None:
-        self.created: list[tuple[str, str, Any]] = []
-
-    def begin_create_or_update(self, rg: str, name: str, nsg: object) -> _Poller:
-        self.created.append((rg, name, nsg))
-        return _Poller(SimpleNamespace(id="/nsg/id"))
-
-
-class _FakeVnets:
-    def begin_create_or_update(self, rg: str, name: str, vnet: object) -> _Poller:
-        return _Poller(SimpleNamespace(subnets=[SimpleNamespace(id="/subnet/id")]))
-
-
-class _FakeVMs:
-    """Compute stub for the create path: no VM pre-exists (the collision
-    check sees the get raise) and creates succeed."""
-
-    def get(self, rg: str, name: str, **_kw: object) -> Any:
-        from azure.core.exceptions import ResourceNotFoundError
-
-        raise ResourceNotFoundError("no such VM")
-
-    def begin_create_or_update(self, rg: str, name: str, vm: object) -> _Poller:
-        return _Poller(SimpleNamespace(id=_RESOURCE_ID))
-
-
-class _FakeVMsWithLocation(_FakeVMs):
-    """Compute stub for the route path: location reads serve the heal's
-    public-IP region lookup."""
-
-    def get(self, rg: str, name: str, **_kw: object) -> Any:
-        return SimpleNamespace(location="eastus")
-
-
-class _FakeNetwork(SimpleNamespace):
-    pass
-
-
-def _install_fakes(
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    public_ip_attached: bool = True,
-    vm_exists_lookup: bool = True,
-) -> _FakeNetwork:
-    """Patch the Azure SDK symbols the plugin imports, returning the
-    fake network client holder the tests configure and assert on.
-    ``vm_exists_lookup`` picks the compute stub: location reads for the
-    heal (True) vs. the create path's not-found collision check (False).
-    """
-
-    network = _FakeNetwork(
-        public_ip_addresses=_FakePublicIps(),
-        network_interfaces=_FakeNics(public_ip_attached=public_ip_attached),
-        network_security_groups=_FakeNsgs(),
-        virtual_networks=_FakeVnets(),
-        security_rules=_FakeSecurityRules(),
-    )
-
-    class _FakeDefaultCred:
-        def get_token(self, *_scopes: str, **_kw: object) -> object:
-            return SimpleNamespace(token="tok", expires_on=0)
-
-    class _FakeComputeClient:
-        def __init__(self, credential: object, subscription_id: str) -> None:
-            self.virtual_machines = _FakeVMsWithLocation() if vm_exists_lookup else _FakeVMs()
-
-    class _FakeNetworkClient:
-        def __init__(self, credential: object, subscription_id: str) -> None:
-            self.public_ip_addresses = network.public_ip_addresses
-            self.network_interfaces = network.network_interfaces
-            self.network_security_groups = network.network_security_groups
-            self.virtual_networks = network.virtual_networks
-            self.security_rules = network.security_rules
-
-    monkeypatch.setattr("azure.identity.DefaultAzureCredential", _FakeDefaultCred)
-    monkeypatch.setattr("azure.mgmt.compute.ComputeManagementClient", _FakeComputeClient)
-    monkeypatch.setattr("azure.mgmt.network.NetworkManagementClient", _FakeNetworkClient)
-    return network
 
 
 def _platform() -> AzureVMPlatform:
@@ -303,7 +144,7 @@ class TestCreate:
         carrying the detected prefix plus the config extras. No standing
         world-open SSH rule exists, and the per-rule ops are untouched
         (closing the hole is the hooks' job)."""
-        network = _install_fakes(monkeypatch, vm_exists_lookup=False)
+        network = _install_fakes(monkeypatch, vm_exists_lookup=False).network
 
         result = _platform().create(
             self._request(),
@@ -332,7 +173,7 @@ class TestCreate:
     def test_create_fails_typed_when_detection_fails_and_no_extras(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Detection failure with no configured extras is a typed error
         BEFORE any resource exists, hinting at operator.ssh_allow_cidrs."""
-        network = _install_fakes(monkeypatch, vm_exists_lookup=False)
+        network = _install_fakes(monkeypatch, vm_exists_lookup=False).network
         _fail_detection(monkeypatch)
 
         with pytest.raises(ConnectivityError) as exc:
@@ -376,7 +217,7 @@ class TestCloseProvisioningAccessHooks:
         """The success hook deletes the fixed-name bootstrap allow (no
         in-process state needed); the deny baseline is permanent, so
         there is nothing to restore."""
-        network = _install_fakes(monkeypatch)
+        network = _install_fakes(monkeypatch).network
         vm: VMRow = _fake_vm()  # type: ignore[assignment]
 
         _platform().post_tailscale_ready(vm)
@@ -388,7 +229,7 @@ class TestCloseProvisioningAccessHooks:
         """Fail closed: the kept-VM hook removes the fixed-name bootstrap
         allow too, so a failed or interrupted create defaults to zero
         inbound exposure."""
-        network = _install_fakes(monkeypatch)
+        network = _install_fakes(monkeypatch).network
         vm: VMRow = _fake_vm()  # type: ignore[assignment]
 
         _platform().secure_failed_vm(vm)
@@ -400,7 +241,7 @@ class TestCloseProvisioningAccessHooks:
         """A 404 on the delete (hook re-run, already-closed VM) is fine."""
         from azure.core.exceptions import ResourceNotFoundError
 
-        network = _install_fakes(monkeypatch)
+        network = _install_fakes(monkeypatch).network
         network.security_rules.delete_error = ResourceNotFoundError("already gone")
         vm: VMRow = _fake_vm()  # type: ignore[assignment]
 
@@ -413,7 +254,7 @@ class TestTransientRoute:
         """A NIC with no public IP (a VM created under the old detach
         scheme) converges on enter: the IP is created (idempotent, same
         name as create's) and attached to the NIC."""
-        network = _install_fakes(monkeypatch, public_ip_attached=False)
+        network = _install_fakes(monkeypatch, public_ip_attached=False).network
         vm: VMRow = _fake_vm()  # type: ignore[assignment]
 
         with _platform().transient_route(vm):
@@ -425,7 +266,7 @@ class TestTransientRoute:
     def test_enter_skips_heal_when_public_ip_present(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The steady state (permanent IP already on the NIC) is a
         single NIC read: no IP create, no NIC update."""
-        network = _install_fakes(monkeypatch, public_ip_attached=True)
+        network = _install_fakes(monkeypatch, public_ip_attached=True).network
         vm: VMRow = _fake_vm()  # type: ignore[assignment]
 
         with _platform().transient_route(vm):
@@ -441,7 +282,7 @@ class TestTransientRoute:
         exactly that rule; the deny is never deleted. The legacy deny
         seeded at 100 here pins the freeing: after the re-pin, the poke
         lands on the just-vacated slot 100."""
-        network = _install_fakes(monkeypatch)
+        network = _install_fakes(monkeypatch).network
         # A legacy VM: its deny sits at the old priority 100, squatting
         # on the band's first slot until convergence re-pins it.
         network.security_rules.rules[DENY_ALL_INBOUND_RULE_NAME] = SimpleNamespace(
@@ -485,7 +326,7 @@ class TestTransientRoute:
         new-scheme VM) is expected; the enter proceeds to the poke."""
         from azure.core.exceptions import ResourceNotFoundError
 
-        network = _install_fakes(monkeypatch)
+        network = _install_fakes(monkeypatch).network
 
         rules: _FakeSecurityRules = network.security_rules
         real_delete = rules.begin_delete
@@ -515,7 +356,7 @@ class TestTransientRoute:
         wrapped error propagates after the attempts are exhausted."""
         from agentworks.plugins.azure.network import AzureError
 
-        network = _install_fakes(monkeypatch)
+        network = _install_fakes(monkeypatch).network
         rules: _FakeSecurityRules = network.security_rules
         real_create = rules.begin_create_or_update
 
@@ -554,7 +395,7 @@ class TestTransientRoute:
         the prefixes that remain allowed."""
         from agentworks.plugins.azure.network import AzureError
 
-        network = _install_fakes(monkeypatch)
+        network = _install_fakes(monkeypatch).network
         rules: _FakeSecurityRules = network.security_rules
         real_create = rules.begin_create_or_update
 
@@ -587,7 +428,7 @@ class TestTransientRoute:
     def test_exit_removes_allow_when_body_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The allow removal is a finally: it fires however the caller
         unwinds."""
-        network = _install_fakes(monkeypatch)
+        network = _install_fakes(monkeypatch).network
         vm: VMRow = _fake_vm()  # type: ignore[assignment]
 
         with pytest.raises(RuntimeError, match="kaboom"), _platform().transient_route(vm):
@@ -602,7 +443,7 @@ class TestTransientRoute:
         """A failed exit removal must not raise out of the finally, but
         the warning states the actual residual exposure: the rule, the
         NSG, and the exact prefixes that remain allowed (not the world)."""
-        network = _install_fakes(monkeypatch)
+        network = _install_fakes(monkeypatch).network
         vm: VMRow = _fake_vm()  # type: ignore[assignment]
 
         entered = False
@@ -626,7 +467,7 @@ class TestPerOperationAllows:
         prefixes (expected: the rules are independent). The inner exit
         removes only its own rule, leaving the outer's standing: the
         cross-removal bug of the old single well-known rule is gone."""
-        network = _install_fakes(monkeypatch)
+        network = _install_fakes(monkeypatch).network
         rules: _FakeSecurityRules = network.security_rules
         vm: VMRow = _fake_vm()  # type: ignore[assignment]
 
@@ -650,7 +491,7 @@ class TestPerOperationAllows:
     def test_slot_collision_retries_next_free_slot(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Losing the slot race to a concurrent allocation (Azure rejects
         the duplicate priority) re-lists and takes the next free slot."""
-        network = _install_fakes(monkeypatch)
+        network = _install_fakes(monkeypatch).network
         rules: _FakeSecurityRules = network.security_rules
         real_create = rules.begin_create_or_update
         collided = {"fired": False}
@@ -688,7 +529,7 @@ class TestPerOperationAllows:
         points at the stale transient rules."""
         from agentworks.errors import StateError
 
-        network = _install_fakes(monkeypatch)
+        network = _install_fakes(monkeypatch).network
         rules: _FakeSecurityRules = network.security_rules
         for priority in range(ALLOW_PRIORITY_BAND_START, ALLOW_PRIORITY_BAND_END + 1):
             rules.rules[f"squatter-{priority}"] = SimpleNamespace(
@@ -707,7 +548,7 @@ class TestPerOperationAllows:
         keys off them (no auto-pruning by age happens here)."""
         import re
 
-        network = _install_fakes(monkeypatch)
+        network = _install_fakes(monkeypatch).network
         vm: VMRow = _fake_vm()  # type: ignore[assignment]
 
         rule_name, _prefixes = _platform()._poke_ssh_allow(vm)
@@ -772,7 +613,7 @@ class TestEnsureDenyRaises:
         model by accident)."""
         from agentworks.plugins.azure.network import AzureError
 
-        network = _install_fakes(monkeypatch)
+        network = _install_fakes(monkeypatch).network
         network.security_rules.create_error = RuntimeError("boom")
         vm: VMRow = _fake_vm()  # type: ignore[assignment]
 
