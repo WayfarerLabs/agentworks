@@ -50,6 +50,8 @@ if TYPE_CHECKING:
     from azure.mgmt.network import NetworkManagementClient
     from azure.mgmt.network.models import SecurityRule
 
+    from agentworks.config import Config
+
 
 # Suffix appended to the VM hostname to name its virtual-network subresource:
 # {slug}-{vm}-vnet. This is the tightest sink bounding MAX_VM_NAME_LENGTH (the
@@ -192,6 +194,15 @@ def normalize_allow_cidrs(entries: Sequence[str]) -> list[str]:
                 f"operator.ssh_allow_cidrs: invalid entry {text!r}: must be an IPv4 address or CIDR"
             ) from exc
     return prefixes
+
+
+def config_allow_cidrs(config: Config | None) -> list[str]:
+    """The ``operator.ssh_allow_cidrs`` extras from an operator
+    config, or none when no config was threaded in. Same defensive
+    getattr chain as ``AzureVMPlatform.native_transport``'s
+    identity-file read (callers may thread partial config stand-ins)."""
+    operator = getattr(config, "operator", None)
+    return list(getattr(operator, "ssh_allow_cidrs", None) or [])
 
 
 def operator_ssh_prefixes(extra_cidrs: Sequence[str] = ()) -> list[str]:
@@ -551,6 +562,57 @@ def cleanup_vm_resources(
             disk_name = disk.name or ""
             if disk.tags and disk.tags.get("owner") == "agentworks" and name in disk_name and disk_name:
                 compute.disks.begin_delete(rg, disk_name).result()
+
+
+def delete_vm_and_resources(
+    compute: ComputeManagementClient,
+    network: NetworkManagementClient,
+    rg: str,
+    name: str,
+) -> None:
+    """Delete the VM first (it holds the NIC and managed disk, which
+    Azure refuses to delete while attached), then run the name-based
+    resource sweep. Best-effort per resource. The one place the
+    VM-first-then-sweep ordering lives: shared by the delete op and
+    :func:`rollback_create_on_interrupt`."""
+    with contextlib.suppress(Exception):
+        compute.virtual_machines.begin_delete(rg, name).result()
+    cleanup_vm_resources(compute, network, rg, name)
+
+
+def rollback_create_on_interrupt(
+    compute: ComputeManagementClient,
+    network: NetworkManagementClient,
+    rg: str,
+    name: str,
+) -> None:
+    """Roll back a partially created resource set after an operator
+    interrupt inside ``AzureVMPlatform.create``.
+
+    The VM may fully exist here (the likeliest interrupt point is the
+    minutes-long inline bootstrap wait, after every resource is up), so
+    this mirrors the delete op's ordering: the VM first (it holds the
+    NIC and disk), then the shared name-based sweep. Best-effort per
+    resource, like the delete op. A SECOND interrupt during the cleanup
+    abandons it cleanly instead of wedging: the surviving resources
+    keep the bootstrap-window NSG state (the deny-all baseline plus the
+    scoped bootstrap allow), and the warning names the resource group
+    and name prefix so the operator can finish the removal manually.
+    The second interrupt is absorbed so the caller re-raises the
+    ORIGINAL one; either way a KeyboardInterrupt propagates to
+    ``create_vm``, whose unwind then deletes the DB row it no longer
+    needs.
+    """
+    output.warn(
+        f"Interrupted: cleaning up partial Azure resources for '{name}', please wait (Ctrl-C again to abandon them)..."
+    )
+    try:
+        delete_vm_and_resources(compute, network, rg, name)
+    except KeyboardInterrupt:
+        output.warn(
+            f"Cleanup abandoned: Azure resources named '{name}*' may remain "
+            f"in resource group '{rg}'; delete them there manually."
+        )
 
 
 def _get_vm_location(compute: ComputeManagementClient, rg: str, name: str) -> str:

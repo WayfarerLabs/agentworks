@@ -188,6 +188,12 @@ class VMPlatform(Capability):
           exists (all four in-tree platforms; soft-name backends may
           auto-suffix instead).
         - Create the resource(s).
+        - Roll back partial backend state before letting a failure OR
+          an operator interrupt (``KeyboardInterrupt``) propagate: the
+          caller's unwind deletes only the DB row, so any backend
+          resource left behind is orphaned with nothing to target it.
+          Azure implements both arms (see #338); the other in-tree
+          platforms do not roll back partial backend state yet (#340).
         - Return ``ProvisionResult`` with ``platform_metadata``
           capturing whatever identifiers subsequent ops need, without
           relying on live configuration (e.g. proxmox records the node

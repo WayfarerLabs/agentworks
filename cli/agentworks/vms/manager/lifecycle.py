@@ -363,6 +363,13 @@ def create_vm(
             try:
                 result = platform_obj.create(request, platform_ctx)
             except KeyboardInterrupt:
+                # The platform's create owns rolling back its own partial
+                # backend resources before this interrupt propagates (the
+                # create contract; Azure cleans up or, on a second Ctrl-C,
+                # abandons loudly). By the time it reaches here the row is
+                # the only artifact left to unwind; deleting it for a VM
+                # that still exists in a backend would orphan the backend
+                # side (#338).
                 output.warn(f"Cancelling vm create '{vm_name}'... rolling back.")
                 log.unwind()
                 raise

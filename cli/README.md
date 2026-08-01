@@ -124,8 +124,11 @@ presence) to opt out of color even on a terminal.
 Pressing Ctrl-C during a long-running operation triggers best-effort cleanup. Where the operation
 can roll back (e.g. `vm create` during the provisioning phase, `workspace create`, `agent create`,
 `session create`) it undoes the partial DB / on-VM state and prints `Cancelling X... rolling back.`.
-Where rollback isn't possible (`vm reinit`, `agent reinit`, the init phase of `vm create`) it prints
-a recovery hint: the next command to run (`vm reinit`, `vm delete --force`, ...). Every cancellation
+On Azure, the `vm create` provisioning-phase rollback also deletes the partially created cloud
+resources (VM, NIC, public IP, NSG, vnet, disk), which can take a minute or two; a second Ctrl-C
+abandons that cleanup, printing the resource group and name prefix to remove manually. Where
+rollback isn't possible (`vm reinit`, `agent reinit`, the init phase of `vm create`) it prints a
+recovery hint: the next command to run (`vm reinit`, `vm delete --force`, ...). Every cancellation
 exits with the conventional SIGINT exit code (130).
 
 ## Commands
