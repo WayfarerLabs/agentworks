@@ -34,6 +34,7 @@ from agentworks.plugins.azure.network import (
     poke_ssh_allow,
     remove_ssh_allow,
     rollback_create_on_interrupt,
+    verify_vm_deleted,
     wrap_azure_error,
 )
 from agentworks.ssh import SSHError
@@ -1020,11 +1021,21 @@ class AzureVMPlatform(VMPlatform):
     def delete(self, vm: VMRow, ctx: RunContext) -> None:
         output.info(f"Deleting Azure VM '{vm.name}'...")
         if not vm.platform_metadata.get("resource_id"):
+            # Row-only delete of a never-provisioned VM (nothing was
+            # created backend-side, so there is nothing to remove or
+            # verify); the caller deletes the row.
             output.warn("no Azure resource ID, skipping Azure cleanup")
             return
 
         rg, name, az_cfg = _parse_resource_id(_resource_id(vm))
-        delete_vm_and_resources(self._compute_client(az_cfg, ctx), self._network_client(az_cfg, ctx), rg, name)
+        compute = self._compute_client(az_cfg, ctx)
+        vm_delete_exc = delete_vm_and_resources(compute, self._network_client(az_cfg, ctx), rg, name)
+        # The #329 gate: the teardown above is best-effort (auxiliary
+        # stragglers warn and stay recoverable), so never report success
+        # here, and never let the caller drop the row, without positive
+        # confirmation the backend VM is gone. A VM that outlives its
+        # row is orphaned with nothing left to target it.
+        verify_vm_deleted(compute, rg, name, vm_delete_exc)
         output.info(f"Azure VM '{vm.name}' deleted")
 
     # The route-state helpers below are thin delegates into the network

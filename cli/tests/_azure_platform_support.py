@@ -110,6 +110,7 @@ class _FakeNics:
         self.updated: list[tuple[str, str, Any]] = []
         self.deleted: list[tuple[str, str]] = []
         self.create_error: BaseException | None = None
+        self.delete_error: BaseException | None = None
         self._events = events if events is not None else []
         pip = SimpleNamespace(id="/pip/id") if public_ip_attached else None
         self.nic = SimpleNamespace(ip_configurations=[SimpleNamespace(public_ip_address=pip)])
@@ -124,6 +125,8 @@ class _FakeNics:
         return _Poller(SimpleNamespace(id="/nic/id"))
 
     def begin_delete(self, rg: str, name: str) -> _Poller:
+        if self.delete_error is not None:
+            raise self.delete_error
         self.deleted.append((rg, name))
         self._events.append(("delete", "nic", rg, name))
         return _Poller(None)
@@ -162,7 +165,9 @@ class _FakeVnets:
 class _FakeVMs:
     """Compute stub for the create path: no VM pre-exists (the collision
     check sees the get raise) and creates succeed. ``delete_error``
-    drives the second-interrupt-during-cleanup path."""
+    drives the second-interrupt-during-cleanup path. The delete-verify
+    suite (#329) reuses ``delete_error`` as the failed-backend-delete
+    seam, with ``get`` answering the did-the-VM-survive probe."""
 
     def __init__(self, events: list[tuple[str, str, str, str]] | None = None) -> None:
         self.deleted: list[tuple[str, str]] = []
@@ -235,6 +240,9 @@ def _install_fakes(
     fake client holders the tests configure and assert on.
     ``vm_exists_lookup`` picks the compute stub: location reads for the
     heal (True) vs. the create path's not-found collision check (False).
+    The delete-verify suite (#329) reads the same switch as the probe's
+    answer to "did the VM survive the teardown?": True serves the VM
+    back (it survived), False raises the SDK's not-found (it is gone).
     """
 
     # One cross-client sequence log shared by every delete-capable fake

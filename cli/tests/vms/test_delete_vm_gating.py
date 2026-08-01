@@ -1,7 +1,9 @@
 """``delete_vm`` cleanup discipline: never gates, never lets a
 best-effort step (the build-and-boundary composition, the hold, the
-logout) skip the backend delete, and keeps the SIGINT contract at a
-site-secret prompt.
+logout) skip the backend delete, keeps the SIGINT contract at a
+site-secret prompt, and never deletes the row past a FAILED backend
+delete (the one non-best-effort step: a raise from ``platform.delete``
+keeps the row so the surviving backend VM stays reachable, #329).
 
 Real config, registry, resolver, and backend loop (env-var backend);
 the platform's backend ops and the Tailscale logout are the fakes,
@@ -17,7 +19,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.db import VMStatus
-from agentworks.errors import UserAbort
+from agentworks.errors import AuthorizationError, UserAbort
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.vms import manager as vm_manager
 
@@ -145,6 +147,64 @@ def test_stranded_site_warns_with_hint_and_still_deletes_row(
     joined = "\n".join(captured_output.warnings)
     assert "skipping backend cleanup" in joined
     assert "kind: vm-site" in joined
+
+
+def _failing_backend_delete(monkeypatch: pytest.MonkeyPatch, counts: dict[str, int]) -> AuthorizationError:
+    """Make the platform's backend delete raise the typed error azure's
+    #329 verification gate raises (the backend VM survived the teardown
+    attempt), returning the instance so tests can assert identity."""
+    error = AuthorizationError("Azure refused to delete VM 'dvm'")
+
+    def _refused(self: ProxmoxPlatform, row: VMRow, ctx: object) -> None:
+        counts["delete"] += 1
+        raise error
+
+    monkeypatch.setattr(ProxmoxPlatform, "delete", _refused)
+    return error
+
+
+def test_backend_delete_failure_keeps_the_row(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """#329: the backend delete is the one step delete_vm must NOT
+    treat as best-effort. A platform delete that raises (it could not
+    remove the backend VM) aborts the command and keeps the row, so
+    the operator can fix the cause and retry; warning past it would
+    orphan the surviving VM with nothing left to target it."""
+    _seed(db)
+    counts = _fake_backend(monkeypatch)
+    monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *a, **k: None)
+    error = _failing_backend_delete(monkeypatch, counts)
+
+    with pytest.raises(AuthorizationError) as exc:
+        vm_manager.delete_vm(db, make_config(), "dvm", yes=True)
+
+    assert exc.value is error
+    assert counts["delete"] == 1
+    assert db.get_vm("dvm") is not None
+
+
+def test_force_does_not_suppress_backend_delete_failure(
+    db: Database,
+    make_config,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """--force skips the child-count guard and the confirm prompt,
+    never a failed backend delete: the #329 repro used --force and the
+    failure must still surface with the row kept."""
+    _seed(db)
+    counts = _fake_backend(monkeypatch)
+    monkeypatch.setattr(vm_manager, "_tailscale_logout", lambda *a, **k: None)
+    _failing_backend_delete(monkeypatch, counts)
+
+    with pytest.raises(AuthorizationError):
+        vm_manager.delete_vm(db, make_config(), "dvm", force=True)
+
+    assert db.get_vm("dvm") is not None
 
 
 def test_user_abort_at_boundary_prompt_aborts_the_delete(

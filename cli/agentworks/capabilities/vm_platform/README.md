@@ -39,8 +39,13 @@ needs, and fill in the class-level contract methods the site decoder and DB migr
   not restate the decorator. `reinit` re-applies everything and failed commands are retried, so the
   guarantee has to be real: `start`/`stop` on Lima, WSL2, and Proxmox check `status()` first and
   short-circuit, because the backend verb is not reliably a no-op on an already-in-state instance;
-  Azure needs no guard because its SDK start/deallocate calls are themselves idempotent; `delete` is
-  unconditionally best-effort across all four (already-gone is success).
+  Azure needs no guard because its SDK start/deallocate calls are themselves idempotent; `delete`
+  treats already-gone as success on all four. `delete` is NOT unconditionally best-effort though: a
+  delete that cannot remove the backend VM must raise a typed error (the manager deletes the DB row
+  only on success, so a swallowed backend failure orphans the VM; #329). Azure enforces this with a
+  post-teardown existence probe (`verify_vm_deleted`); only auxiliary-resource stragglers (its
+  NIC/IP/NSG/disk sweep) stay warn-and-continue. Lima, WSL2, and Proxmox do not yet verify; their
+  teardown verbs remain fire-and-forget (tracked in #356).
 - `status(vm, ctx) -> VMStatus` is a read-only query.
 - `display_backend_name(vm) -> str` is pure display and takes no `ctx`.
 

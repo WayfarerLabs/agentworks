@@ -128,6 +128,36 @@ class TestInterruptDuringInlineWait:
         assert "'vm1*'" in abandoned
         assert "resource group 'rg1'" in abandoned
 
+    def test_vm_delete_failure_during_rollback_warns_and_reraises(
+        self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+    ) -> None:
+        """A plain VM-delete failure inside the rollback (an Exception,
+        distinct from the second-interrupt case above) warns that the
+        VM may remain, naming the VM, resource group, and cause for
+        manual cleanup; the sweep still collects the stragglers and the
+        ORIGINAL interrupt propagates. This is #329's one sanctioned
+        warn: the path is already unwinding on the operator's
+        interrupt, so a raise would replace it, but a silent orphan is
+        never acceptable."""
+        fakes = _install_fakes(monkeypatch, vm_exists_lookup=False)
+        interrupt = _interrupt_the_wait(monkeypatch)
+        fakes.compute.virtual_machines.delete_error = RuntimeError("vm delete boom")
+
+        with pytest.raises(KeyboardInterrupt) as exc:
+            _platform().create(_request(tailscale=True), RunContext())
+
+        assert exc.value is interrupt
+        (may_remain,) = [w for w in captured_output.warnings if "may remain" in w]
+        assert "Azure VM 'vm1'" in may_remain
+        assert "resource group 'rg1'" in may_remain
+        assert "vm delete boom" in may_remain
+        assert "delete it there manually" in may_remain
+        # The cleanup was NOT abandoned: the sweep ran past the failed
+        # VM delete and the stragglers stayed collectable.
+        assert fakes.network.network_interfaces.deleted == [("rg1", "vm1-nic")]
+        assert fakes.network.public_ip_addresses.deleted == [("rg1", "vm1-ip")]
+        assert not any("Cleanup abandoned" in w for w in captured_output.warnings)
+
 
 class TestInterruptDuringResourceCreation:
     def test_rolls_back_what_exists_and_reraises(
