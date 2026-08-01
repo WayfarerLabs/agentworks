@@ -344,14 +344,15 @@ def _download_debian_rootfs(tarball_path: Path) -> None:
                 if downloaded - last_update >= 1024 * 1024:
                     p.update(downloaded)
                     last_update = downloaded
+        p.done()
+        os.replace(partial_path, tarball_path)
     except BaseException:
-        # BaseException: a Ctrl-C mid-download must not leave the
-        # partial file behind any more than a network failure may.
+        # BaseException: a Ctrl-C must not leave the partial file behind
+        # any more than a network failure may, whether it lands
+        # mid-download or in the rename window (after a successful
+        # rename the unlink is a missing_ok no-op).
         partial_path.unlink(missing_ok=True)
         raise
-
-    p.done()
-    os.replace(partial_path, tarball_path)
 
 
 @contextlib.contextmanager

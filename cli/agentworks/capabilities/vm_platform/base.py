@@ -194,7 +194,7 @@ class VMPlatform(Capability):
           resource left behind is orphaned with nothing to target it.
           Azure (see #338), lima, and wsl2 (#340) implement both
           arms; proxmox does not roll back partial backend state
-          yet (#340).
+          yet (#340, closing via #343).
         - Return ``ProvisionResult`` with ``platform_metadata``
           capturing whatever identifiers subsequent ops need, without
           relying on live configuration (e.g. proxmox records the node

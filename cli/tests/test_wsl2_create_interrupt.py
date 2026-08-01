@@ -286,6 +286,33 @@ def test_failed_download_leaves_no_file_at_the_cache_path(
     assert list(tmp_path.iterdir()) == []
 
 
+@pytest.mark.parametrize("error", [OSError("rename died"), KeyboardInterrupt("in the rename window")])
+def test_failed_rename_leaves_no_residue_either(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    captured_output: CapturedOutput,
+    error: BaseException,
+) -> None:
+    """The no-residue guarantee covers the rename window too: a failure
+    (or Ctrl-C) in os.replace itself unlinks the completed .partial and
+    leaves nothing at the final path."""
+    _stub_registry(monkeypatch, _BlobResp([b"rootfs-bytes"]))
+
+    def _explode(src: object, dst: object) -> None:
+        raise error
+
+    # wsl2 calls os.replace through its module-level `import os`, so
+    # patching the os module itself intercepts it (reverted by pytest).
+    monkeypatch.setattr("os.replace", _explode)
+    tarball = tmp_path / "debian-bookworm-amd64-rootfs.tar.gz"
+
+    with pytest.raises(type(error)):
+        wsl2._download_debian_rootfs(tarball)
+
+    assert not tarball.exists()
+    assert list(tmp_path.iterdir()) == []
+
+
 def test_completed_download_lands_at_the_cache_path(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, captured_output: CapturedOutput
 ) -> None:
