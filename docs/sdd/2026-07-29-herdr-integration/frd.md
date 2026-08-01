@@ -27,37 +27,39 @@ environment, and disables its own scrollback persistence by default because capt
 contain secrets). Agentworks is all of those things. The integration opportunity is therefore narrow
 and clean: **let herdr render what Agentworks already models.**
 
-### Why the operator workstation, and not the VM
+### Deployment shapes: a constrained VM-side server is plan A
 
-The tempting alternative is to run a herdr server on the VM as the admin user, replacing the
-console's tmux outright. The console already runs as a single user (the admin, reaching each session
-through its tmux socket and entering agent users with `sudo --login`), so the isolation model does
-not forbid it, and it would make the view durable against laptop sleep in exactly the way tmux
-consoles are today.
+Two deployment shapes exist, both in scope, and the spike evaluates both.
 
-It is nevertheless the wrong trade (maintainer ruling, 2026-07-29), for reasons that are about
-platform coherence rather than mechanics:
+**Plan A: a rendering-only herdr server on the VM.** The herdr server runs on the VM as the admin
+user, exactly where the console's tmux session runs today, and the operator reaches it the way they
+reach a tmux console: SSH in and attach, or use herdr's native thin-client mode (`herdr --remote`),
+which keeps the server remote while streaming the UI to a local client, bridging the local
+clipboard, and maintaining its own connection settings. This shape has the tmux console's durability
+profile: closing the laptop lid costs one client connection rather than one connection per pane, the
+view exists whether or not the operator's machine does, and phone access works by reaching the VM
+over Tailscale exactly as it does for tmux consoles today.
 
-- **It creates a second control plane on the VM that Agentworks does not own.** The database is the
-  single source of truth for what exists; a herdr server would hold its own workspace, tab, and pane
-  state beside it, with its own CLI, socket, and plugin system.
-- **It invites work outside the model.** A general-purpose multiplexer running as admin makes bare
-  admin shells the path of least resistance, so activity happens outside any session, workspace, or
-  agent record: no isolation, no lifecycle, no transcript.
-- **It adds a privilege surface.** Herdr's socket is authenticated only by filesystem permissions,
-  and anything that can write to it can open a pane as its owner. An admin-owned socket on a VM
-  hosting agent users is an escalation path that has to be defended for no functional gain.
-- **It moves an unreviewed plugin ecosystem onto the VM.** Herdr plugins are arbitrary executables
-  from auto-indexed GitHub repositories; running them as admin on a VM that hosts agents is a
-  supply-chain exposure the platform should not take on.
+**Plan B, and the on-ramp: a workstation-side server.** Herdr runs on the operator's machine and
+every pane runs an `agw` command over the platform's transports. This shape needs nothing installed
+on any VM, which makes it the natural spike vehicle and manual-adoption path. Its cost is that the
+cockpit lives and dies with the operator's machine: every wake from sleep reconnects one SSH
+connection per pane (self-healing with resilient attach, but noisy at scale), and phone access
+requires the workstation itself to be awake and reachable.
 
-On the operator's workstation none of that applies. Herdr is the operator's own tool on the
-operator's own machine, every pane runs an `agw` command, the only route to a VM is through
-Agentworks, and the blast radius of operator improvisation is a machine that is already entirely
-theirs. The durability difference is smaller than it first appears: the work never lived in the view
-(sessions are tmux on the VM and survive regardless), and a resilient attach that waits for a
-session and re-attaches on drop, the pattern the console's own attach wrapper already implements,
-lets a workstation pane self-heal after a sleep or a network blip.
+**An earlier ruling rejected the VM-side shape outright; it is superseded** (maintainer rulings
+2026-07-29 and 2026-07-30). The original objections (a second control plane beside the database,
+out-of-model admin work, an unauthenticated pane-creating socket as an escalation surface, an
+unreviewed plugin ecosystem running as admin) conflated two different propositions. They are
+decisive against an _unconstrained, general-purpose_ herdr on the VM, and that remains a non-goal.
+They largely dissolve for a _rendering-only_ host under the constraints R7 makes requirements: no
+plugins on the VM, the socket and state admin-owned with owner-only access, the version pinned and
+installed through the platform's own tool manifests, and the database remaining the sole source of
+truth per R2. Under those constraints the residual surface is symmetric with what the platform
+already runs: the admin console tmux socket has the same filesystem-permission trust model, and
+`console add-shell --admin` already provides admin shells. What is genuinely new is one more
+admin-owned stateful process on the VM, which is the price of the durability, and the ruling is that
+the durability is worth it.
 
 ### The shape
 
@@ -66,10 +68,12 @@ lets a workstation pane self-heal after a sleep or a network blip.
 
 Agentworks continues to own consoles: their membership, their shell layout, their lifecycle, their
 persistence. Rendering becomes pluggable. The existing tmux rendering is unchanged and remains the
-default. A herdr rendering materializes the same console on the operator's workstation by driving
-herdr's local control surface, with one pane per member session and one pane per companion shell,
-each pane running an ordinary `agw` command. Nothing is installed on the VM, no Agentworks state
-moves into herdr, and an operator with no herdr installed sees no change whatsoever.
+default. A herdr rendering materializes the same console by driving herdr's control surface, with
+one pane per member session and one pane per companion shell, every pane running a command
+Agentworks constructed from the database: `agw` commands in the workstation shape, and the same
+attach-loop and shell-pane wrappers the tmux console builder produces today in the VM-side shape
+(there is no `agw` on the VM). No Agentworks state moves into herdr in either shape, and an operator
+who never enables a herdr rendering sees no change whatsoever.
 
 Rendering is a live relationship, not a one-shot export. This follows the existing model rather than
 inventing one: today's console mutations (`add-sessions`, `remove-sessions`, `reorder-sessions`,
@@ -81,28 +85,36 @@ second-class.
 
 ### Scope
 
-In scope (functionally): a herdr rendering of named consoles; the operation set a rendering must
-support and its best-effort live-sync semantics; the pane contract and its in-model requirement for
-both session panes and companion shells; the first-class companion-shell command that contract
-requires; resilient attach behavior; state visibility; what Agentworks does and does not delegate to
-herdr; graceful degradation when herdr is absent or incompatible; and the operator surface for
-choosing a rendering.
+In scope (functionally): a herdr rendering of named consoles in both deployment shapes, with the
+constrained VM-side server as plan A; the operation set a rendering must support and its best-effort
+live-sync semantics; the pane contract and its in-model requirement for both session panes and
+companion shells; the first-class companion-shell command; resilient attach behavior; state
+visibility; the VM-side constraint set; what Agentworks does and does not delegate to herdr;
+graceful degradation when herdr is absent or incompatible; and the operator surface for choosing a
+rendering.
 
 Deferred to the HLA and later artifacts: whether the rendering seam becomes a formal capability kind
-in the registry sense, the control-surface mechanics (socket protocol versus CLI invocation), layout
-and tab mapping detail, version detection and pinning specifics, the companion-shell command's exact
-name and option spelling, and resolution of the open question below.
+in the registry sense, the control-surface mechanics (socket protocol versus CLI invocation, and how
+the CLI drives a VM-side server over the transport), layout and tab mapping detail, thin-client
+versus plain-attach ergonomics, version detection and pinning specifics, the companion-shell
+command's exact name and option spelling, and resolution of the open question below.
 
 ### Open question the HLA must resolve by spike
 
-Herdr's screen-based state detection reads rendered pane content. In this design a pane's content is
-a nested tmux client attached to the session, so the harness's output reaches the screen through an
-extra multiplexer, and **whether screen detection stays accurate through that nesting is
+Herdr's screen-based state detection reads rendered pane content. In both deployment shapes a pane's
+content is a nested tmux client attached to the session, so the harness's output reaches the screen
+through an extra multiplexer, and **whether screen detection stays accurate through that nesting is
 unverified.** Nesting itself is not a new risk (the tmux console already nests, and an outer herdr
 avoids tmux-in-tmux prefix collisions entirely), but detection accuracy through it is.
 
-The spike must evaluate three paths, in increasing order of both robustness and effort, and the HLA
-picks one:
+The spike covers **both deployment shapes**: the workstation shape (panes carrying
+`agw session attach` over SSH) because it is the zero-install way to test detection at all, and the
+VM-side shape (server as admin beside the sessions, attached plain and via the thin client) because
+it is plan A and additionally needs its ergonomics confirmed: attach and detach feel, thin-client
+behavior on reconnect, and the operational footprint of the server under the R7 constraints.
+
+For detection itself, the spike must evaluate three paths, in increasing order of both robustness
+and effort, and the HLA picks one:
 
 1. **Screen detection unaided.** Cheapest if it works. Claude Code sits in herdr's screen-manifest
    tier, so this is what happens with no effort on our side.
@@ -152,11 +164,18 @@ independent of any herdr work:**
 Neither needs the rendering backend, the capability seam, or herdr itself. Unbundling them is a
 small change rather than an SDD-sized effort.
 
-**The recommended sequence** is therefore: run the spike manually (install herdr, attach one session
-in a pane, observe whether the sidebar classifies it, then retry with the classification hint); ship
-the companion-shell command and resilient attach as a small standalone change; use herdr manually
-against real work for a few weeks; and only then decide whether the rendering backend earns its
-keep, informed by what actually proved annoying.
+**The recommended sequence** is therefore: run the spike manually across both shapes (workstation
+first because it is zero-install, then a hand-run server on one VM to confirm plan A's ergonomics
+and detection); ship the companion-shell command and resilient attach as a small standalone change;
+use the workstation shape manually against real work; and then decide whether the rendering backend
+earns its keep, informed by what actually proved annoying.
+
+**One asymmetry between the shapes bears on that decision.** The manual-use option is a property of
+the workstation shape only: it is cheap precisely because every pane is a command the operator can
+type. The VM-side shape is awkward to use by hand (its pane commands are socket-path tmux wrappers
+no operator should be typing), so plan A is only really usable once the rendering backend builds it.
+A passing spike therefore leads more directly to "build it" than the workstation-only framing
+suggested, and the gate is the spike rather than a long manual-use trial.
 
 **One factor could bring this forward.** The ephemeral-agents direction makes sessions much
 shorter-lived, created and destroyed continuously rather than persisting for weeks. Hand-maintaining
@@ -169,7 +188,11 @@ churn pattern is visible, rather than for building ahead of it now.
 - **Console**: an existing Agentworks named console, a persistent curated membership of sessions
   plus operator-chosen extra shells, owned in the database.
 - **Rendering**: the concrete multiplexer view built from a console's membership. Today: tmux on the
-  VM. Added here: herdr on the operator workstation.
+  VM. Added here: herdr, as a constrained server on the VM (plan A) or on the operator workstation.
+- **Deployment shape**: where the herdr server runs. VM-side (plan A): the server runs as the VM
+  admin beside the sessions and the operator attaches over SSH, plain or via herdr's thin client.
+  Workstation: the server runs on the operator's machine and panes reach sessions through `agw`
+  commands.
 - **Herdr workspace / pane**: herdr's own containers. A herdr workspace is its project-level view
   holding tabs and panes; a pane is one real terminal process. Note the false cognates: herdr's
   "workspace" is a view, not an Agentworks workspace, and herdr's "session" is its server instance,
@@ -185,7 +208,7 @@ churn pattern is visible, rather than for building ahead of it now.
 
 ### R1: Consoles gain a herdr rendering
 
-- An operator can open an existing named console as a herdr view on their workstation, as an
+- An operator can open an existing named console as a herdr view, in either deployment shape, as an
   alternative to attaching its tmux rendering.
 - The herdr view contains one pane per member session, ordered by the console's configured order,
   plus one pane per configured companion shell (R4), so the rendered view is recognizably the same
@@ -220,17 +243,23 @@ churn pattern is visible, rather than for building ahead of it now.
   functional requirement is that both renderings implement the same operations with the same
   best-effort semantics, so neither is second-class.
 
-### R3: Every pane is an Agentworks command
+### R3: Every pane is built by Agentworks
 
-- Session panes run an ordinary Agentworks session attach. Companion shell panes run the
-  companion-shell command of R4. Neither runs raw SSH, addresses tmux sockets directly, nor encodes
-  VM users, socket paths, or transport detail.
-- This is what keeps the integration in-model, and it is a requirement rather than an implementation
-  preference: it makes the rendering transport-independent (Lima, WSL2, Azure, and Proxmox sessions
-  render identically), keeps the database authoritative for where a session actually lives, gives
-  every pane Agentworks's own preflight diagnostics instead of an opaque multiplexer failure, and
-  ensures a rehomed or copied session keeps rendering correctly with no view to update.
-- No requirement here is satisfied by a pane that reaches a VM by any route other than Agentworks.
+- The invariant across both deployment shapes: every pane runs a command Agentworks constructed from
+  the database at render or reconcile time. No pane embeds operator-maintained SSH invocations,
+  hand-copied socket paths, or transport detail that can go stale, and no pane reaches a session by
+  a route Agentworks did not construct.
+- **Workstation shape**: session panes run an ordinary Agentworks session attach and companion
+  shells run the command of R4. This makes the rendering transport-independent (Lima, WSL2, Azure,
+  and Proxmox sessions render identically), gives every pane Agentworks's own preflight diagnostics
+  instead of an opaque multiplexer failure, and means a rehomed or copied session keeps rendering
+  correctly with no view to update.
+- **VM-side shape**: there is no `agw` on the VM, so panes run the same attach-loop and shell-pane
+  wrapper snippets the tmux console builder produces today, constructed by the CLI from the database
+  and delivered when the view is built or reconciled. The correctness properties are preserved by
+  reconciliation rather than per-spawn resolution: a rehome or copy moves the session to a different
+  VM, and the console's rendering follows it the way a tmux console does today (the view is rebuilt
+  from the database, not patched by hand).
 
 ### R4: Companion shells are first-class
 
@@ -283,6 +312,11 @@ console-internal pane construction to a real command.
   regression, not a simplification.
 - The command is independently valuable and is not scaffolding for this effort alone: it gives an
   operator a correctly scoped shell against a session without involving a console at all.
+- **The VM-side rendering may reuse the existing pane machinery instead of the command.** On the VM
+  the shell-pane construction of `_split_shell_pane` (or its refactored equivalent) is already
+  correct and local; requiring it to shell out through a workstation command would be indirection
+  for its own sake. The command remains required regardless, because the workstation shape and
+  manual use have no other way to get a session-scoped shell.
 - **Secret handling is unchanged.** Secrets continue to be resolved CLI-side on the operator's
   workstation and delivered to the pane over the transport, exactly as today. This effort adds no
   new secret path, no secret storage, and nothing secret-bearing inside herdr's own state (see R9).
@@ -321,15 +355,28 @@ console-internal pane construction to a real command.
   knows a session's state authoritatively. Whether this effort implements reporting now (as the
   spike may recommend) or leaves it as the recorded next step, neither design may foreclose it.
 
-### R7: Nothing on the VM changes
+### R7: The VM footprint is scoped, and its constraints are requirements
 
-- No component is installed on, provisioned into, or run on any VM by this effort. Herdr is a
-  workstation-side tool only.
-- No herdr server, socket, plugin, or configuration exists inside any VM's trust domain, so the
-  integration adds no privilege surface reachable by an agent user and no supply-chain exposure on
-  the VM.
-- Sessions remain tmux-hosted, as the harness model requires. This effort does not touch the session
-  substrate, session lifecycle, or the isolation model.
+- **In the workstation shape, nothing on the VM changes.** No component is installed on, provisioned
+  into, or run on any VM; no herdr server, socket, plugin, or configuration exists inside any VM's
+  trust domain.
+- **In the VM-side shape, the footprint is exactly one constrained addition**: the herdr binary and
+  its server process, running as the VM admin, present only on VMs where the operator has enabled
+  the rendering. The constraints below are what made the shape acceptable (see the deployment-shapes
+  ruling), so they are requirements, not recommendations:
+  - The herdr version is pinned and installed through the platform's own tool-provisioning
+    manifests, so every VM runs a version the integration declares support for and upgrades happen
+    through `reinit` like any other tool.
+  - No herdr plugins are installed on a VM, and the rendering never requires one. The VM-side server
+    is a rendering host, not an extension platform.
+  - The server's socket and state directory are admin-owned with owner-only access. An agent user
+    must have no read or write path to either; this is the same trust stance the admin console tmux
+    socket carries today, and it is what keeps the socket from being an agent-to-admin escalation
+    surface.
+  - Herdr's automation surface on the VM is used only by Agentworks's own rendering path. Nothing
+    exposes it to agent users or to out-of-band tooling.
+- Sessions remain tmux-hosted in both shapes, as the harness model requires. This effort does not
+  touch the session substrate, session lifecycle, or the isolation model.
 
 ### R8: Herdr is optional and its absence is uneventful
 
@@ -352,9 +399,11 @@ console-internal pane construction to a real command.
 - No credential material flows through the integration. Herdr has no secret management, and this
   effort gives it none: panes inherit whatever environment an ordinary interactive Agentworks attach
   inherits, and nothing is written into herdr's configuration or state.
-- Herdr's optional scrollback persistence captures pane content to disk on the workstation and is
-  therefore secret-bearing. The integration does not enable it, and the documentation states the
-  exposure so an operator who turns it on does so knowingly.
+- Herdr's optional scrollback persistence captures pane content to disk on whichever host runs the
+  server, and is therefore secret-bearing. The integration does not enable it in either shape, and
+  the documentation states the exposure so an operator who turns it on does so knowingly. The
+  VM-side shape raises the stakes: persisted scrollback there would be an on-VM file of everything
+  every rendered session printed, so the off default is part of R7's constraint set in spirit.
 - Transcripts (the harness-transcripts effort) remain the platform's record of session activity.
   Nothing in a herdr view is treated as a record, and no view content is collected or retained by
   Agentworks.
@@ -377,9 +426,10 @@ console-internal pane construction to a real command.
   scrollback caveat from R9.
 - The top-level `README.md` console material notes that consoles can be rendered by more than one
   multiplexer, without turning herdr into a required part of the model narrative.
-- The decision to treat rendering as pluggable, and specifically the workstation-versus-VM ruling
-  with its reasoning, is captured as an ADR, drafted in this feature directory and numbered into
-  `docs/adrs/` at the end of the effort.
+- The decision to treat rendering as pluggable, and specifically the deployment-shapes ruling (the
+  constrained VM-side server as plan A, what "constrained" requires, and why the earlier
+  workstation-only ruling was superseded), is captured as an ADR, drafted in this feature directory
+  and numbered into `docs/adrs/` at the end of the effort.
 - If the effort adds operator-configurable settings, `cli/agentworks/sample-config.toml` gains them
   with comments, per the sample-config rule.
 - Per the SDD lifecycle rules, each doc change rides the commits that make its claims true, and
@@ -387,15 +437,17 @@ console-internal pane construction to a real command.
 
 ## Non-goals
 
-- **Running herdr on any VM**, as a console backend, a session substrate, or anything else. The
-  ruling and its reasoning are recorded in the Background; revisiting it would need a new effort and
-  a materially different herdr (multi-user awareness and an authenticated control surface at
-  minimum).
-- **Replacing tmux anywhere.** Sessions stay tmux-hosted and the tmux console rendering stays
-  first-class and default.
-- **Cross-VM consoles.** A workstation-side rendering makes them reachable (a herdr view is not
-  VM-bound the way a VM-hosted tmux console is), but consoles are VM-scoped today by their own
-  model, and relaxing that is its own effort with its own questions about membership and naming.
+- **An unconstrained herdr on any VM.** Plan A runs herdr on the VM strictly as a rendering host
+  under R7's constraint set. What stays out, and would need a new effort and a materially different
+  herdr (multi-user awareness, an authenticated control surface): herdr plugins on a VM, the VM-side
+  socket or automation surface exposed to anything beyond Agentworks's own rendering path, VM-side
+  herdr as a general-purpose multiplexer for out-of-model work, or herdr state treated as
+  authoritative anywhere.
+- **Replacing tmux for sessions.** Sessions stay tmux-hosted in every shape, and the tmux console
+  rendering stays first-class and default.
+- **Cross-VM consoles.** The workstation shape makes them reachable (a workstation herdr view is not
+  VM-bound the way a VM-hosted rendering is), but consoles are VM-scoped today by their own model,
+  and relaxing that is its own effort with its own questions about membership and naming.
 - **An Agentworks herdr plugin.** Publishing a plugin so herdr can discover and launch Agentworks
   sessions from its own side is a plausible follow-up, including as a way to reach herdr's user
   base, but it inverts the direction of control and belongs to a separate effort.
@@ -441,7 +493,9 @@ console-internal pane construction to a real command.
 
 ## Migration notes
 
-The feature is purely additive. No existing command changes behavior, no console data is migrated,
-no VM is touched, and operators who never install herdr see nothing new beyond documentation. A
-console created before this effort renders in herdr with no preparation, because the rendering is
-built from console membership that already exists.
+The feature is purely additive. No existing command changes behavior and no console data is
+migrated. A VM is touched only when the operator enables the VM-side rendering for it, and then only
+through the ordinary provisioning path (a pinned herdr tool manifest applied at `reinit`). Operators
+who never enable a herdr rendering see nothing new beyond documentation. A console created before
+this effort renders in herdr with no preparation, because the rendering is built from console
+membership that already exists.

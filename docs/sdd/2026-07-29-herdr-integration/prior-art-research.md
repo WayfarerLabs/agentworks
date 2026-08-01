@@ -103,13 +103,18 @@ to make on paper.
   time of research). A plugin is an arbitrary executable in any language, invoked by herdr with
   context injected through environment variables. Herdr explicitly disclaims responsibility for
   plugin trustworthiness.
-- **Design consequence:** this is the finding that decided workstation-versus-VM. An unauthenticated
+- **Design consequence:** this finding initially decided workstation-versus-VM. An unauthenticated
   pane-creating socket owned by the VM admin, on a host whose entire purpose is running semi-trusted
-  agent users, is an escalation path with no functional payoff; and an unreviewed plugin ecosystem
-  running as admin on that host is a supply-chain exposure the platform should not adopt. On the
-  operator's own workstation both concerns are bounded by a trust domain the operator already fully
-  owns. It also confirms the integration is mechanically straightforward, since a documented local
-  control surface is exactly what a renderer needs.
+  agent users, is an escalation path; and an unreviewed plugin ecosystem running as admin on that
+  host is a supply-chain exposure the platform should not adopt. On the operator's own workstation
+  both concerns are bounded by a trust domain the operator already fully owns. It also confirms the
+  integration is mechanically straightforward, since a documented local control surface is exactly
+  what a renderer needs. _Refinement (2026-07-30): the ruling this produced was later narrowed. Both
+  concerns are properties of an unconstrained herdr, not of the binary itself: with no plugins
+  installed, the socket and state admin-owned with owner-only access, and the version pinned through
+  provisioning manifests, the VM-side residual surface is symmetric with the admin console tmux
+  socket the platform already runs. The FRD's deployment-shapes section carries the revised ruling
+  (constrained VM-side server as plan A); this entry preserves the original reasoning._
 
 ### Verified Agentworks-side facts
 
@@ -145,8 +150,9 @@ Established by reading the repository rather than from research, and load-bearin
   resolved environment or secrets, cannot target a subdirectory, and lacks the admin-promotion rule.
 - The console runs as the VM admin and enters agent users via `sudo --login` for agent-scoped shell
   panes (`cli/agentworks/sessions/multi_console/tmux_build.py`), which is why a VM-side herdr server
-  would not have violated the isolation model. The ruling against it rests on control-plane
-  coherence and privilege surface, not on isolation.
+  does not violate the isolation model. This fact is what ultimately allowed the constrained VM-side
+  shape to become plan A: the concerns were always control-plane coherence and privilege surface
+  (addressable by constraint), never isolation.
 - Consoles are VM-scoped by their own model: `console create` errors when the requested sessions
   span more than one VM and asks the operator to pick one (`cli/README.md`). This is why cross-VM
   rendering is called out as reachable-but-deferred rather than delivered.
