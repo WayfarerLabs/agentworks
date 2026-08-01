@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import logging
+import os
 from typing import TYPE_CHECKING, Any, ClassVar, NamedTuple, Protocol
 
 from agentworks import output
@@ -51,6 +53,55 @@ class _HasSubscriptionId(Protocol):
 
     @property
     def subscription_id(self) -> str: ...
+
+
+# The azure-identity logger tree. Its ChainedTokenCredential emits a WARNING
+# ("DefaultAzureCredential failed to retrieve a token from the included
+# credentials...") when the credential chain is exhausted (nothing in it can
+# authenticate). Observed by reproducing a failing DefaultAzureCredential
+# probe: that WARNING is the only azure-identity record that clears the
+# default threshold; the per-member
+# "... .get_token failed:" lines are DEBUG. azure.core is deliberately not
+# included: its HTTP request/response logging sits at INFO, so it never reaches
+# the last-resort stderr handler and is not part of this noise class.
+_AZURE_IDENTITY_LOGGER = "azure.identity"
+
+
+def _quiet_azure_identity_logging() -> None:
+    """Keep azure-identity's own credential-failure WARNING off stderr so the
+    operator sees only agentworks' typed :class:`AzureError`.
+
+    agentworks configures no logging handlers, so Python's last-resort handler
+    prints WARNING+ to stderr. When a credential fails to authenticate,
+    azure-identity logs its WARNING there directly ahead of the typed error we
+    render for the same failure, so the operator sees the failure twice: once
+    as raw SDK chatter, once as the clean typed one-liner. Raising the
+    ``azure.identity`` logger's threshold above WARNING drops exactly that
+    chatter (and the INFO/DEBUG below it) while still letting a genuine
+    ERROR-level record through, leaving the typed rendering to stand alone.
+
+    Skipped under --debug / AGW_DEBUG=1: there the operator wants the SDK
+    detail, so the logger is left at its default threshold. ``AGW_DEBUG`` is
+    the process-wide debug signal (the CLI mirrors ``--debug`` into it); a
+    plugin reading it avoids importing ``agentworks.cli`` and inverting the
+    layering.
+
+    Idempotent and side-effect-localized: it only ever adjusts the single
+    ``azure.identity`` logger, so calling it on every azure platform
+    construction is safe. This one-time set (rather than a context manager
+    scoped to the credential probe) covers both the probe and the lazy,
+    op-time token requests inside the SDK clients, which emit the same WARNING.
+
+    Single-shot assumption: the ``setLevel`` is decided once, when the first
+    ``AzureVMPlatform`` is built, and never reset for the process lifetime.
+    If ``AGW_DEBUG`` were to flip true AFTER an instance was already built with
+    it off, the logger would stay quieted (no reset path). That is fine for
+    today's one-command CLI; a longer-lived client (e.g. the anticipated
+    web-UI) that toggles debug mid-process would need to re-decide the level.
+    """
+    if os.environ.get("AGW_DEBUG") == "1":
+        return
+    logging.getLogger(_AZURE_IDENTITY_LOGGER).setLevel(logging.ERROR)
 
 
 def _build_credential() -> object:
@@ -197,6 +248,13 @@ class AzureVMPlatform(VMPlatform):
 
     def __init__(self, owner_name: str, config: Mapping[str, object]) -> None:
         super().__init__(owner_name, config)
+        # Quiet azure-identity's own credential-failure WARNING (unless
+        # debugging) so a failed probe or op-time token request surfaces only
+        # as our typed AzureError, not as raw SDK chatter ahead of it. Done at
+        # construction (the first point an azure platform is in use) so it
+        # covers both the credential probe and later op-time token requests;
+        # idempotent, so building more than one instance is harmless.
+        _quiet_azure_identity_logging()
         # Azure credential and SDK clients, built on FIRST need by the
         # accessors below and reused for the instance's remaining ops.
         # The credential is subscription-independent, so it caches once

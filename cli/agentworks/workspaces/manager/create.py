@@ -9,6 +9,7 @@ from agentworks import output
 from agentworks.agents.grants import MAX_WORKSPACE_NAME_LENGTH
 from agentworks.config import validate_name
 from agentworks.errors import AlreadyExistsError, NotFoundError
+from agentworks.name_filters import validate_name_filters
 from agentworks.workspaces.manager._common import _guard_vm_status, _resolve_vm, _workspace_scope
 
 if TYPE_CHECKING:
@@ -194,9 +195,13 @@ def list_workspaces(
 ) -> None:
     """List workspaces.
 
+    An unknown name in the VM filter raises ``NotFoundError`` rather
+    than matching nothing (issue #304).
+
     With ``names_only=True``, emit one workspace name per line and
     skip the table render. Used by shell completion (see issue #147).
     """
+    validate_name_filters(db, vm_name=vm_name)
     workspaces = db.list_workspaces(vm_name=vm_name)
 
     if names_only:

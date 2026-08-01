@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Annotated
@@ -135,6 +136,120 @@ def test_main_wrapper_lets_click_exceptions_through(tmp_path: Path, monkeypatch:
     # And no error.log entry from our wrapper.
     log_path = tmp_path / "logs" / "error.log"
     assert not log_path.exists()
+
+
+def test_main_wrapper_lets_vendored_abort_through(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A raw ``typer.Abort`` raised from a command is handled by typer's own
+    standalone runner inside ``app()`` (prints ``Aborted.`` and exits 1), so it
+    must never reach our wrapper's generic Exception clause or error.log
+    (issue #320)."""
+    from agentworks import cli as cli_mod
+
+    test_app = typer.Typer()
+
+    @test_app.callback()
+    def _cb() -> None:
+        pass
+
+    @test_app.command("bail")
+    def bail() -> None:
+        raise typer.Abort()
+
+    monkeypatch.setattr(cli_mod, "app", test_app)
+    monkeypatch.setattr("agentworks.config.CONFIG_DIR", tmp_path)
+    monkeypatch.setattr("sys.argv", ["agentworks", "bail"])
+    monkeypatch.setenv("AGW_DEBUG", "")
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli_mod.main()
+
+    # Typer's own abort handling: message + exit 1, upstream of our wrapper.
+    assert exc_info.value.code == 1
+    assert "Aborted." in capsys.readouterr().err
+    assert not (tmp_path / "logs" / "error.log").exists()
+
+
+@pytest.mark.parametrize(
+    ("exc_factory", "expected_code"),
+    [
+        pytest.param(lambda: typer.Exit(code=5), 5, id="vendored-exit"),
+        pytest.param(lambda: click.exceptions.Exit(code=3), 3, id="real-exit"),
+        # A clean Exit(0) must stay 0, not be coerced to a nonzero code.
+        pytest.param(lambda: typer.Exit(code=0), 0, id="vendored-exit-zero"),
+        pytest.param(lambda: click.exceptions.Exit(code=0), 0, id="real-exit-zero"),
+    ],
+)
+def test_main_wrapper_maps_escaped_exit_to_its_carried_code(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    exc_factory: Callable[[], BaseException],
+    expected_code: int,
+) -> None:
+    """An Exit (vendored or real) that escapes ``app()`` itself must exit with
+    its carried code, not fall into the generic Exception clause and error.log
+    (issue #320).
+
+    No known path delivers one today (typer's standalone runner converts its
+    vendored Exit to SystemExit inside ``app()``), so the escape is simulated
+    by replacing ``app`` with a plain callable that raises directly. This pins
+    the defensive clause in ``_entry.py`` so a framework change, or a raise
+    from code running outside ``app()``, degrades to a clean exit."""
+    from agentworks import cli as cli_mod
+
+    def fake_app() -> None:
+        raise exc_factory()
+
+    monkeypatch.setattr(cli_mod, "app", fake_app)
+    monkeypatch.setattr("agentworks.config.CONFIG_DIR", tmp_path)
+    monkeypatch.setattr("sys.argv", ["agentworks", "whatever"])
+    monkeypatch.setenv("AGW_DEBUG", "")
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli_mod.main()
+
+    assert exc_info.value.code == expected_code
+    assert not (tmp_path / "logs" / "error.log").exists()
+
+
+@pytest.mark.parametrize(
+    "exc_factory",
+    [
+        pytest.param(typer.Abort, id="vendored-abort"),
+        pytest.param(click.exceptions.Abort, id="real-abort"),
+    ],
+)
+def test_main_wrapper_maps_escaped_abort_to_exit_1(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    exc_factory: Callable[[], BaseException],
+) -> None:
+    """An Abort (vendored or real) that escapes ``app()`` must print
+    ``Aborted.`` and exit 1, mirroring typer's own standalone Abort handling
+    and the UserAbort clause, with no traceback and no error.log entry
+    (issue #320). Real ctrl-C exits 130 via typer's KeyboardInterrupt-to-
+    Exit(130) conversion, so SIGINT parity does not depend on this clause.
+    Same simulated-escape setup as the Exit test above."""
+    from agentworks import cli as cli_mod
+
+    def fake_app() -> None:
+        raise exc_factory()
+
+    monkeypatch.setattr(cli_mod, "app", fake_app)
+    monkeypatch.setattr("agentworks.config.CONFIG_DIR", tmp_path)
+    monkeypatch.setattr("sys.argv", ["agentworks", "whatever"])
+    monkeypatch.setenv("AGW_DEBUG", "")
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli_mod.main()
+
+    assert exc_info.value.code == 1
+    err = capsys.readouterr().err
+    assert "Aborted." in err
+    assert "Traceback" not in err
+    assert not (tmp_path / "logs" / "error.log").exists()
 
 
 def test_main_wrapper_renders_click_usage_error_cleanly(

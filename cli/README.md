@@ -91,16 +91,16 @@ agw console delete my-console              # Extra shells are lost but sessions 
 
 ## Global Options
 
-| Flag                | Description                                                                  |
-| ------------------- | ---------------------------------------------------------------------------- |
-| `--non-interactive` | Disable all interactive prompts                                              |
-| `--debug`           | Print the full Python traceback on unhandled errors (also via `AGW_DEBUG=1`) |
-| `--no-deprecations` | Suppress deprecation warnings (e.g. the TOML resource-section nudge)         |
+| Flag                | Description                                                                                                                                 |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--non-interactive` | Disable all interactive prompts                                                                                                             |
+| `--debug`           | Print the full traceback on unhandled errors, and show the Azure SDK's own log lines that are otherwise suppressed (also via `AGW_DEBUG=1`) |
+| `--no-deprecations` | Suppress deprecation warnings (e.g. the TOML resource-section nudge)                                                                        |
 
 When `--non-interactive` is set (or stdin is not a TTY), commands that would normally prompt for
 missing values (VM selection, workspace selection, name generation) will fail with a clear error
 indicating which flag is required. VM auto-selection still works: if there is exactly one usable VM,
-it is used without prompting. `session create` is an intentional exception -- it always prompts for
+it is used without prompting. `session create` is an intentional exception: it always prompts for
 workspace and mode (even when only one choice exists) since those are part of the session's identity
 and should be an explicit operator decision.
 
@@ -108,7 +108,8 @@ Domain errors (SSH timeouts, validation failures, missing resources, etc.) surfa
 line: `Error: <message>`. Truly unexpected failures (internal bugs, OS-level errors, third-party
 library failures) also get a clean single-line message, plus the full traceback appended to
 `~/.config/agentworks/logs/error.log` for debugging. Pass `--debug` (or set `AGW_DEBUG=1`) to print
-the traceback to stderr instead.
+the traceback to stderr instead. Debug mode also restores the Azure SDK's own credential-chain log
+lines, which are otherwise suppressed so a credential failure renders once as the typed error.
 
 On an interactive terminal, output is tastefully colorized by role so it is easy to scan at a
 glance: a yellow `Warning:` prefix, a red `Error:` prefix, bold section headers, a dim-green result
@@ -268,6 +269,9 @@ Manage workspaces on VMs.
 `workspace copy <source> <name>` copies a workspace to a new VM workspace. Accepts `--vm`. Source
 and destination can be the same VM (a clone) or different VMs.
 
+`workspace list` accepts `--vm` to narrow the result set to one VM's workspaces. An unknown name in
+the filter is an error, not an empty result.
+
 `workspace delete` requires `--force` if the workspace has sessions. Running sessions are killed
 during deletion. Pass `--yes` to skip the confirmation prompt.
 
@@ -296,6 +300,9 @@ Manage agents (isolated Linux users) on VMs. Agents are VM-scoped and access wor
 
 `agent create <name>` takes the agent name as a required positional. Optional flags: `--vm`,
 `--template`, and `--grant-all-workspaces`.
+
+`agent list` accepts `--vm` to narrow the result set to one VM's agents. An unknown name in the
+filter is an error, not an empty result.
 
 `agent reinit --update-template <tmpl>` re-points the agent to a different declared template
 (validated against the resource registry, then persisted) before re-running setup. An unknown
@@ -359,17 +366,18 @@ Manage sessions (persistent tmux sessions running in workspaces). Session names 
 
 `session list` accepts `--workspace`, `--vm`, `--agent`, and `--admin` to narrow the result set.
 Filters compose with AND. The name filters (`--workspace`, `--vm`, `--agent`) accept a single value
-or a comma-separated list (`--vm vm1,vm2`); commas within a filter are OR-ed together.
-`--agent <name>` matches agent-mode sessions only; `--admin` matches admin-mode sessions only (the
-two are mutually exclusive).
+or a comma-separated list (`--vm vm1,vm2`); commas within a filter are OR-ed together. An unknown
+name in a filter is an error, not an empty result. `--agent <name>` matches agent-mode sessions
+only; `--admin` matches admin-mode sessions only (the two are mutually exclusive).
 
 `session stop` and `session restart` operate on a single session by default. Pass `--all`
 (`session stop`/`session restart`) or `--all-stopped` (`session restart`) to batch over the sessions
 on the VM. The batch form accepts `--vm <vm>`, `--workspace <ws>`, `--agent <agent>`, and `--admin`
 to narrow the set; filters compose with AND and require one of the batch flags. The name filters
 accept a single value or a comma-separated list (`--vm vm1,vm2`); commas within a filter are OR-ed
-together. `--agent` matches agent-mode sessions only; `--admin` matches admin-mode sessions only
-(the two are mutually exclusive). Pass `--force` to stop/restart broken sessions via PID kill.
+together, and an unknown name in a filter is an error, not an empty result. `--agent` matches
+agent-mode sessions only; `--admin` matches admin-mode sessions only (the two are mutually
+exclusive). Pass `--force` to stop/restart broken sessions via PID kill.
 
 `session create <name>` takes the session name as a required positional. Optional flags:
 `--workspace`, `--template`, `--admin`, and `--agent`. If `--workspace` / `--new-workspace` is
@@ -428,11 +436,11 @@ panes you want preloaded into a session's window.
 
 `console list` accepts `--vm`, `--workspace`, and `--agent` to narrow the result set. Each filter
 takes a single value or a comma-separated list (`--workspace ws1,ws2`); commas within a filter are
-OR-ed together. The `--workspace` and `--agent` filters use "any session matches" semantics: a
-console is listed if at least one of its member sessions belongs to the given workspace / runs as
-the given agent. When `--workspace` and `--agent` are both passed, the SAME session must satisfy
-both predicates. The session count displayed is the total membership, not the count of matching
-sessions. Filters compose with AND.
+OR-ed together, and an unknown name in a filter is an error, not an empty result. The `--workspace`
+and `--agent` filters use "any session matches" semantics: a console is listed if at least one of
+its member sessions belongs to the given workspace / runs as the given agent. When `--workspace` and
+`--agent` are both passed, the SAME session must satisfy both predicates. The session count
+displayed is the total membership, not the count of matching sessions. Filters compose with AND.
 
 Session specs use `name` or `name+N` shorthand, where `N` is the number of default shell panes to
 pre-open in that session's window (running as the session's agent user, cwd = workspace root):
