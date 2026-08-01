@@ -55,21 +55,38 @@ are local); Azure uses it:
   `agentworks.transports.native_transport` factory wraps the call in `transient_route`, probes
   reachability with an `echo ok` retry loop, and raises a typed `StateError` (using
   `no_native_transport_hint`) when a platform returns `None`. Lima returns a `limactl shell`
-  transport, Azure an `SSHTransport` against the transient public IP, WSL2 a `wsl.exe`-backed
-  transport. Proxmox deliberately returns the default `None` and sets `no_native_transport_hint` to
-  point the operator at the Proxmox web-UI serial console, because its guest-agent exec is one-shot
-  and cannot host an interactive shell.
-- `transient_route(vm, ctx) -> context manager` (default `nullcontext()`). Azure attaches a public
-  IP on enter and detaches it in a `finally`, bounding the exposure window to the transport's
-  lifetime.
+  transport, Azure an `SSHTransport` against the VM's permanent public IP (read live off the NIC),
+  WSL2 a `wsl.exe`-backed transport. Proxmox deliberately returns the default `None` and sets
+  `no_native_transport_hint` to point the operator at the Proxmox web-UI serial console, because its
+  guest-agent exec is one-shot and cannot host an interactive shell.
+- `transient_route(vm, ctx, *, config=None) -> context manager` (default `nullcontext()`). Azure
+  opens a scoped SSH route on enter (heals a missing public IP, converges the NSG onto the
+  baseline-deny model, pokes this operation's own ephemeral allow rule scoped to the operator's
+  egress prefixes) and deletes exactly that rule in a `finally`, bounding the exposure window to the
+  transport's lifetime; concurrent native ops on one VM each own an independent rule, so they never
+  cross-remove. Those NSG calls read the credential from `ctx`, so a service-principal site
+  authenticates as itself with no ambient fallback.
 - `vm_active(vm, *, config=None) -> context manager` (default `nullcontext()`). WSL2 returns a
   keepalive that holds the distro against Windows' idle-shutdown for the span of a command, with
   Win32 Job-Object orphan-proofing for a hard-killed `agw`. No `ctx`: every hold that exists is
   local and makes no backend call. A cloud hold that did would thread it like the transport hooks.
-- `post_tailscale_ready(vm, ctx) -> None` (default no-op). Azure detaches its public IP here, the
-  instant Tailscale is reachable. The asymmetry with `transient_route` is intentional: the attach
-  happens inside `create()` (cloud-init needs the IP to bootstrap), and neither that nor this detach
-  point is context-manager-shaped.
+- `post_tailscale_ready(vm, ctx) -> None` (default no-op). The contract is "close provisioning
+  access": it fires the instant Tailscale is reachable. Azure deletes the ephemeral bootstrap SSH
+  allow rule here, leaving the VM with zero inbound exposure behind its permanent deny-all-inbound
+  baseline (the public IP itself stays attached for the VM's whole lifetime). The asymmetry with
+  `transient_route` is intentional: the bootstrap ingress opens inside `create()` (cloud-init needs
+  inbound SSH from the operator), and neither that nor this closing point is context-manager-shaped.
+- `secure_failed_vm(vm, ctx) -> None` (default no-op). Same contract as `post_tailscale_ready`, for
+  the paths where a create is kept without completing Phase A: the bootstrap or Tailscale
+  verification died (row marked FAILED) or the operator interrupted it mid-bootstrap (row status
+  untouched); the success-only hook never fired on either. Azure deletes the fixed-name bootstrap
+  allow so the VM defaults to zero inbound exposure; debugging survives via `vm shell --platform` (a
+  fresh per-operation allow) and the serial console (not NSG-gated).
+
+The two closing hooks and `transient_route` take `ctx` because closing or opening the NSG route is a
+backend call; the caller (Phase A's `bootstrap_vm` for the two closing hooks, the transports factory
+for `transient_route`) passes the create/op's own scoped context, whose secrets are already resolved
+before Phase A begins, so even the interrupt path never resolves a secret for the first time.
 
 Callers must pass the context their composition root already built for the platform's ops
 (`gated_vm_boundary` and `_live_vm_boundary` in `agentworks.vms.manager.boundary` both hand one out;

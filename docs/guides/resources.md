@@ -31,9 +31,9 @@ plugins" below). Filter by origin with `agw resource list --origin operator|auto
 
 Declare resources as YAML files under `~/.config/agentworks/resources/` (next to `config.toml`).
 Every `*.yaml` / `*.yml` file in that directory tree is loaded automatically whenever a command
-needs resources -- there is no `apply` step and no persisted state to reconcile. File names and
-layout are entirely your choice: one file per resource, one per kind, or one for everything all work
-the same.
+needs resources: there is no `apply` step and no persisted state to reconcile. File names and layout
+are entirely your choice: one file per resource, one per kind, or one for everything all work the
+same.
 
 Each document uses a Kubernetes-style envelope:
 
@@ -55,7 +55,7 @@ spec:
   `name: default` for now: `named-console-template` is an ordinary multi-instance kind in the
   framework, but no command can select a named instance yet, so a named declaration would be dead
   config (issue #165 adds the selector).
-- `spec` carries the kind-specific fields -- the same fields, with the same validation, as the TOML
+- `spec` carries the kind-specific fields: the same fields, with the same validation, as the TOML
   sections (both sources decode through the same loaders, so they cannot drift).
 - Multiple documents per file are separated with `---`.
 
@@ -97,10 +97,11 @@ store lines and in provider-side logs; remotes are never rewritten.
 ## TOML resource sections: deprecated but supported
 
 The classic TOML resource sections (`[secrets.*]`, `[vm_templates.*]`, `[git_credentials.*]`, ...)
-keep working with exactly their historical semantics. Their presence emits one aggregated
-deprecation warning naming the sections found (silence it with the global `--no-deprecations` flag),
-and their removal waits for a future major release. You may mix sources freely -- some resources in
-YAML, some in TOML -- but declaring the SAME resource in both is an error citing both locations.
+keep working with exactly their historical semantics for now, but declaring resources in
+`config.toml` is deprecated and will be removed in a future release. Their presence emits one
+aggregated deprecation warning naming the sections found (silence it with the global
+`--no-deprecations` flag). You may mix sources freely (some resources in YAML, some in TOML), but
+declaring the SAME resource in both is an error citing both locations.
 
 Move resources over whenever you like:
 
@@ -115,7 +116,7 @@ The migrator is incremental and repeat-safe: output is append-only (your existin
 never rewritten), the original `config.toml` is backed up to `paths.backups` first, migrated
 sections are commented out in place with a `# migrated to ...` marker (or removed with
 `--toml delete`), and every real run finishes by rebuilding the registry and verifying it is
-identical to the pre-migration one -- rolling back if not.
+identical to the pre-migration one, rolling back if not.
 
 ## VM sites and platforms
 
@@ -406,5 +407,7 @@ agw resource describe secret/npm-token  # where it's referenced, what uses it
 agw doctor                              # health: would every secret resolve?
 ```
 
-The design rationale (the config/resource split, capability kinds, the vocabulary rules, why dual
-sources are permanent, and the vm-site / vm-platform pair) is recorded in ADR 0016.
+The design rationale (the config/resource split, capability kinds, the vocabulary rules, and the
+vm-site / vm-platform pair) is recorded in ADR 0016. Its dual-path section records the original
+keep-both-paths stance; a status note there marks the revision to today's deprecate-for-removal
+policy, pending a superseding ADR from the sunset SDD effort.

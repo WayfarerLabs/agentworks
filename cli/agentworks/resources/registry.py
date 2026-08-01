@@ -123,8 +123,8 @@ class Registry:
         - operator row over operator row: ``ConfigError`` citing both
           declaration locations. The manifest loader catches duplicates
           within its own set; this is the backstop that also catches a
-          resource declared in both TOML and a manifest (a permanent
-          dual-path condition).
+          resource declared in both TOML and a manifest (a dual-path
+          condition for as long as both sources load).
         - operator row over built-in row: consults the kind's
           ``builtin_override`` flag. ``"allow"`` keeps the operator
           override (operator row replaces the built-in); ``"reserved"``
@@ -217,8 +217,9 @@ class Registry:
             if handler is not None and handler.builtin_override == "allow":
                 return _CollisionDecision.OVERWRITE
             raise ConfigError(
-                f'{kind} "{name}" is a built-in resource with a reserved '
-                f"name; declare a differently-named {kind} instead",
+                f'{kind} "{name}" ({format_origin_line(incoming)}) is a '
+                f"built-in resource with a reserved name; declare a "
+                f"differently-named {kind} instead",
             )
         if existing_variant == "operator-declared" and incoming.variant == "operator-declared":
             raise ConfigError(

@@ -228,7 +228,9 @@ def _ensure_tailscale(
     vm = _require_vm(db, vm.name)
 
     # If we have a known Tailscale host, wait for it to reconnect after boot.
-    # This avoids unnecessarily attaching a public IP on Azure.
+    # This avoids an unnecessary route toggle on Azure (poking and
+    # removing the scoped ephemeral SSH allow, plus healing a legacy
+    # VM's missing public IP).
     if vm.tailscale_host:
         target = transport(vm, config)
         context = TailscaleWait.VERIFY if already_running else TailscaleWait.RECONNECT
@@ -261,7 +263,8 @@ def _ensure_tailscale(
         resolved = resolve_for_command([], config, registry, extra_decls=[ts_decl])
         auth_key = resolved[rejoin_vm_tmpl.tailscale_auth_key]
 
-    # native_transport() composes Azure's attach/detach via
+    # native_transport() composes Azure's route open/close (heal the
+    # public IP, poke and remove the scoped ephemeral SSH allow) via
     # transient_route polymorphism with the reachability probe. Other
     # platforms have a nullcontext transient_route and just build the
     # native transport.
@@ -276,9 +279,10 @@ def _ensure_tailscale(
         exec_target = native_transport(vm, platform, config, ctx=ctx, stack=_stack)
         _mgr.rejoin_tailscale(db, vm.name, exec_target, auth_key=auth_key)
 
-    # After the stack unwinds (Azure detach has fired), wait for
-    # Tailscale SSH on the new IP to be reachable. The probe is cheap
-    # on platforms whose IP didn't change (succeeds on the first try).
+    # After the stack unwinds (Azure has removed its transient SSH
+    # allow), wait for Tailscale SSH on the new IP to be reachable. The
+    # probe is cheap on platforms whose IP didn't change (succeeds on
+    # the first try).
     refreshed = db.get_vm(vm.name)
     if refreshed and refreshed.tailscale_host:
         wait_for_reconnect(transport(refreshed, config))
@@ -293,11 +297,12 @@ def _tailscale_logout(vm: VMRow, config: Config, platform: VMPlatform, ctx: RunC
     """Best-effort: deregister from Tailscale via the provisioning transport.
 
     Uses ``native_transport(vm, platform, config, ctx=..., stack=...)``
-    so the Azure attach/detach lifecycle and the reachability probe are
-    composed polymorphically; ``ctx`` is the caller's op-start context,
-    which that lifecycle's backend calls read their credential from.
-    Platforms whose factory raises (Proxmox) are surfaced as a typed
-    StateError, which we catch and warn.
+    so the Azure route open/close lifecycle and the reachability probe
+    are composed polymorphically; ``ctx`` is the caller's op-start
+    context, which that lifecycle's NSG calls read their credential from
+    (an SP site authenticates as itself, no ambient fallback). Platforms
+    whose factory raises (Proxmox) are surfaced as a typed StateError,
+    which we catch and warn.
     """
     from agentworks.transports import native_transport
 

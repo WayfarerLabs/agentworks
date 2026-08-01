@@ -198,6 +198,86 @@ def test_git_credential_provider_wins_over_type(tmp_path: Path) -> None:
     assert any("git_credentials.ado" in issue and "provider wins" in issue for issue in cfg.config_issues)
 
 
+def test_git_credential_nonconforming_name_warns_and_loads(tmp_path: Path) -> None:
+    """A non-conforming credential name (uppercase) with no explicit token
+    still loads and stays usable, but warns: its default token secret
+    ``git-token-<name>`` inherits the non-conformance (issue #308)."""
+    config_file = _git_credential_config(
+        tmp_path,
+        '[git_credentials.GITHUB]\nprovider = "github"',
+    )
+    cfg = load_config(config_file, warn_issues=False)
+    # Warn-only, non-breaking: the credential is present and unchanged.
+    assert cfg.git_credentials["GITHUB"].provider == "github"
+    assert any("git_credentials.GITHUB" in issue and "git-token-GITHUB" in issue for issue in cfg.config_issues)
+
+
+def test_git_credential_conforming_name_no_warning(tmp_path: Path) -> None:
+    """A conforming credential name emits no derived-secret warning."""
+    config_file = _git_credential_config(
+        tmp_path,
+        '[git_credentials.github]\nprovider = "github"',
+    )
+    cfg = load_config(config_file, warn_issues=False)
+    assert not any("does not follow the naming rules" in issue for issue in cfg.config_issues)
+
+
+def test_git_credential_nonconforming_name_with_explicit_token_no_derived_warning(
+    tmp_path: Path,
+) -> None:
+    """When an explicit ``token`` is set, the credential name feeds no derived
+    secret, so #308's derived-default warning does not fire (the explicit
+    token value's own conformance is issue #279's concern, not this one)."""
+    config_file = _git_credential_config(
+        tmp_path,
+        '[git_credentials.GITHUB]\nprovider = "github"\ntoken = "git-token-github"',
+    )
+    cfg = load_config(config_file, warn_issues=False)
+    assert cfg.git_credentials["GITHUB"].provider == "github"
+    assert cfg.git_credentials["GITHUB"].provider_config["token"] == "git-token-github"
+    assert not any("does not follow the naming rules" in issue for issue in cfg.config_issues)
+
+
+def test_git_credential_name_deriving_secret_at_length_cap_no_warning(tmp_path: Path) -> None:
+    """A credential name whose derived ``git-token-<name>`` lands exactly at
+    MAX_SECRET_NAME_LENGTH emits no warning: the cap is inclusive (issue #308)."""
+    from agentworks.config.validation import MAX_SECRET_NAME_LENGTH
+
+    # 'git-token-' is 10 chars, so a name of (cap - 10) makes the derived
+    # secret name exactly the cap.
+    name = "a" * (MAX_SECRET_NAME_LENGTH - len("git-token-"))
+    config_file = _git_credential_config(
+        tmp_path,
+        f'[git_credentials.{name}]\nprovider = "github"',
+    )
+    cfg = load_config(config_file, warn_issues=False)
+    assert not any("does not follow the naming rules" in issue for issue in cfg.config_issues)
+
+
+def test_git_credential_name_conforming_but_derived_over_cap_warns(tmp_path: Path) -> None:
+    """The length-ceiling case: a credential name that passes the naming rules
+    on its own, but whose derived ``git-token-<name>`` overflows
+    MAX_SECRET_NAME_LENGTH once the prefix is added, still warns. Guards the
+    subtle property that the fix validates the DERIVED string, not the bare
+    name (issue #308): a future edit validating the bare name would pass this
+    name and silently regress."""
+    from agentworks.config.validation import MAX_SECRET_NAME_LENGTH, validate_name
+
+    # One char past the cap once the 10-char 'git-token-' prefix is added.
+    name = "a" * (MAX_SECRET_NAME_LENGTH - len("git-token-") + 1)
+    # Precondition: the bare name is itself valid; only the derived name overflows.
+    validate_name(name, max_length=MAX_SECRET_NAME_LENGTH)
+    config_file = _git_credential_config(
+        tmp_path,
+        f'[git_credentials.{name}]\nprovider = "github"',
+    )
+    cfg = load_config(config_file, warn_issues=False)
+    assert any(
+        f"git_credentials.{name}" in issue and "does not follow the naming rules" in issue
+        for issue in cfg.config_issues
+    )
+
+
 def test_unexpected_top_level_keys_warns(tmp_path: Path) -> None:
     """Bare keys before any section header land at top level."""
     pub = tmp_path / "id.pub"
@@ -290,6 +370,75 @@ def test_extra_ssh_public_keys_missing_file(tmp_path: Path) -> None:
 def test_extra_ssh_public_keys_defaults_empty(config_dir: Path) -> None:
     cfg = load_config(config_dir)
     assert cfg.operator.extra_ssh_public_keys == []
+
+
+def test_ssh_allow_cidrs_normalized(tmp_path: Path) -> None:
+    """Valid entries load normalized: a bare IP becomes its /32, a CIDR
+    with host bits set collapses to its network."""
+    pub = tmp_path / "id.pub"
+    priv = tmp_path / "id"
+    pub.write_text("key")
+    priv.write_text("key")
+
+    config_file = tmp_path / "config.toml"
+    config_file.write_text(
+        dedent(f"""\
+        [operator]
+        ssh_public_key = "{pub.as_posix()}"
+        ssh_private_key = "{priv.as_posix()}"
+        ssh_allow_cidrs = ["203.0.113.7", "198.51.100.0/24", "10.0.0.1/16"]
+    """)
+    )
+    cfg = load_config(config_file)
+    assert cfg.operator.ssh_allow_cidrs == ["203.0.113.7/32", "198.51.100.0/24", "10.0.0.0/16"]
+
+
+def test_ssh_allow_cidrs_invalid_entry_rejected(tmp_path: Path) -> None:
+    """A garbage entry fails at config load with a typed error naming the
+    setting and the offending value, not at the first vm op."""
+    pub = tmp_path / "id.pub"
+    priv = tmp_path / "id"
+    pub.write_text("key")
+    priv.write_text("key")
+
+    config_file = tmp_path / "config.toml"
+    config_file.write_text(
+        dedent(f"""\
+        [operator]
+        ssh_public_key = "{pub.as_posix()}"
+        ssh_private_key = "{priv.as_posix()}"
+        ssh_allow_cidrs = ["not-an-ip"]
+    """)
+    )
+    with pytest.raises(ConfigError, match="ssh_allow_cidrs.*'not-an-ip'"):
+        load_config(config_file)
+
+
+def test_ssh_allow_cidrs_scalar_rejected(tmp_path: Path) -> None:
+    """A scalar value (a bare string would otherwise iterate per
+    character) is a typed error naming the setting, not a TypeError or a
+    per-character parse failure."""
+    pub = tmp_path / "id.pub"
+    priv = tmp_path / "id"
+    pub.write_text("key")
+    priv.write_text("key")
+
+    config_file = tmp_path / "config.toml"
+    config_file.write_text(
+        dedent(f"""\
+        [operator]
+        ssh_public_key = "{pub.as_posix()}"
+        ssh_private_key = "{priv.as_posix()}"
+        ssh_allow_cidrs = "203.0.113.7"
+    """)
+    )
+    with pytest.raises(ConfigError, match="ssh_allow_cidrs must be a list"):
+        load_config(config_file)
+
+
+def test_ssh_allow_cidrs_defaults_empty(config_dir: Path) -> None:
+    cfg = load_config(config_dir)
+    assert cfg.operator.ssh_allow_cidrs == []
 
 
 # -- Legacy [proxmox] vm-site tests (table-driven) ----------------------------

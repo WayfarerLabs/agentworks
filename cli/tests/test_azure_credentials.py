@@ -27,7 +27,8 @@ import pytest
 from agentworks.capabilities.base import RunContext
 from agentworks.db import VMStatus
 from agentworks.errors import ConfigError
-from agentworks.plugins.azure.platform import DEFAULT_CLIENT_SECRET, AzureError, AzureVMPlatform
+from agentworks.plugins.azure.network import AzureError
+from agentworks.plugins.azure.platform import DEFAULT_CLIENT_SECRET, AzureVMPlatform
 
 if TYPE_CHECKING:
     from agentworks.db import VMRow
@@ -209,21 +210,21 @@ def _sp_ctx(name: str = "az-sp", value: str = "sp-secret-value") -> RunContext:
 
 class TestCredentialCaching:
     def test_one_build_across_ops_and_per_instance(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Multiple ops on one instance (status + start + attach, which
-        together touch both SDK clients and the credential) build the
-        credential and each client exactly once; a second instance builds
-        its own rather than reusing the first's."""
+        """Multiple ops on one instance (status + start + the public-IP
+        heal, which together touch both SDK clients and the credential)
+        build the credential and each client exactly once; a second
+        instance builds its own rather than reusing the first's."""
         counters = _install_fakes(monkeypatch)
         vm: VMRow = _fake_vm()  # type: ignore[assignment]
 
         platform = _platform()
         assert platform.status(vm, RunContext()) is VMStatus.RUNNING
         platform.start(vm, RunContext())
-        assert platform.attach_public_ip(vm, RunContext()) == "203.0.113.5"
+        platform._ensure_public_ip(vm, RunContext())
 
         # One credential build (one live probe), reused across all three ops;
         # one build of each client (compute is shared by status/start and the
-        # attach location lookup, network is built by attach).
+        # heal's location lookup, network is built by the heal).
         assert counters["cred_build"] == 1
         assert counters["get_token"] == 1
         assert counters["compute_build"] == 1
@@ -267,8 +268,8 @@ class TestCredentialCaching:
 
         assert platform.status(vm_a, RunContext()) is VMStatus.RUNNING
         assert platform.status(vm_b, RunContext()) is VMStatus.RUNNING
-        platform.attach_public_ip(vm_a, RunContext())
-        platform.attach_public_ip(vm_b, RunContext())
+        platform._ensure_public_ip(vm_a, RunContext())
+        platform._ensure_public_ip(vm_b, RunContext())
 
         # One compute and one network client per subscription, keyed by
         # subscription (the accessor passes the key to the constructor,
@@ -467,7 +468,7 @@ class TestCredentialSelection:
         assert platform._get_credential(ctx) is first
         platform.status(vm, ctx)
         platform.start(vm, ctx)
-        platform.attach_public_ip(vm, ctx)
+        platform._ensure_public_ip(vm, ctx)
 
         assert counters["sp_build"] == 1
         assert counters["sp_get_token"] == 1

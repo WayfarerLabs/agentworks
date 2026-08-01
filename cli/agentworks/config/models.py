@@ -39,6 +39,12 @@ class OperatorConfig:
     ssh_host_prefix: str = "awvm--"
     ssh_agent_host_prefix: str = "awagent--"
     extra_ssh_public_keys: list[Path] = field(default_factory=list)
+    # Extra source addresses (normalized IPv4 CIDRs; a bare IP loads as
+    # its /32) allowed through the transient cloud SSH firewall hole,
+    # alongside the auto-detected operator egress IP. For operators
+    # whose SSH traffic egresses somewhere detection cannot see (VPN
+    # split tunnels, proxies, CGNAT).
+    ssh_allow_cidrs: list[str] = field(default_factory=list)
 
 
 #: Backward-compatible alias; prefer ``OperatorConfig``.

@@ -45,10 +45,16 @@ def _seed_vm(db: Database) -> None:
     db.update_vm_tailscale("box", "100.64.0.9")
 
 
-def _seed_workspace(db: Database, *, vm_name: str = "box", name: str = "ws1") -> None:
+def _seed_workspace(
+    db: Database,
+    *,
+    vm_name: str = "box",
+    name: str = "ws1",
+    template: str | None = None,
+) -> None:
     db._conn.execute(
-        "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) VALUES (?, ?, ?, ?)",
-        (name, vm_name, f"/srv/{name}", f"ws-{name}"),
+        "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group, template) VALUES (?, ?, ?, ?, ?)",
+        (name, vm_name, f"/srv/{name}", f"ws-{name}", template),
     )
     db._conn.commit()
 
@@ -124,6 +130,79 @@ def test_graph_derives_from_row_and_env_joins_via_targets(
     resolver.register_targets([vm_manager._vm_secret_target(scopes, label="vm-shell=box")])
     resolver.resolve()
     assert set(resolver.values) == {"proxmox-token", "vm-env-secret"}
+
+
+# A real, resolvable workspace template whose env must flow into the
+# workspace scope of vm-level ``--workspace`` commands: the positive
+# control against the ``copied``-marker case, which resolves to nothing.
+WORKSPACE_ENV_SECTION = """
+[workspace_templates.proj.env]
+WS_VAR = "ws-val"
+"""
+
+
+def test_copied_workspace_pin_resolves_env_scopes_without_a_template(
+    db: Database,
+    make_config,  # noqa: ANN001
+) -> None:
+    """A copied workspace records the synthetic ``template="copied"``
+    marker, which is not a real template. Resolving vm-level env scopes
+    for such a pinned workspace must NOT raise ``unknown_template_error``
+    (issue #285): the workspace contributes an empty template scope while
+    the vm and admin scopes stay intact. Mirrors how ``repair`` tolerates
+    the same marker as a quiet no-op. A real workspace template still
+    contributes its env, proving the tolerance is scoped to the failure."""
+    from agentworks.bootstrap import build_registry
+
+    config = make_config(VM_ENV_SECTION + WORKSPACE_ENV_SECTION)
+    _seed_vm(db)
+    _seed_workspace(db, name="copied-ws", template="copied")
+    _seed_workspace(db, name="proj-ws", template="proj")
+    vm = db.get_vm("box")
+    assert vm is not None
+    registry = build_registry(config)
+
+    copied = db.get_workspace("copied-ws")
+    proj = db.get_workspace("proj-ws")
+    assert copied is not None and proj is not None
+
+    # The copied marker resolves cleanly to an empty workspace scope; the
+    # vm scope (its env-block secret ref) is untouched.
+    copied_scopes = vm_manager._resolve_vm_admin_env_scopes(registry, vm, ws=copied)
+    assert copied_scopes.workspace == {}
+    assert "API_KEY" in copied_scopes.vm
+
+    # A real template still contributes its env: the fix does not swallow
+    # resolvable templates.
+    proj_scopes = vm_manager._resolve_vm_admin_env_scopes(registry, vm, ws=proj)
+    assert proj_scopes.workspace is not None
+    assert "WS_VAR" in proj_scopes.workspace
+
+
+def test_exec_copied_workspace_pin_no_longer_crashes(
+    db: Database,
+    make_config,  # noqa: ANN001
+    resolve_counter: list[list[str]],
+    target: _FakeTarget,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output,  # noqa: ANN001
+) -> None:
+    """End to end: ``vm exec --workspace <copied-ws>`` ran the command in
+    the workspace dir but crashed on the synthetic template before this
+    fix (issue #285). It now runs, contributing no workspace-template env."""
+    config = make_config(VM_ENV_SECTION)
+    _seed_vm(db)
+    _seed_workspace(db, name="copied-ws", template="copied")
+    _reachable(monkeypatch, True)
+
+    rc = vm_manager.exec_vm(db, config, "box", ["echo", "hi"], workspace_name="copied-ws")
+
+    assert rc == 0
+    ((cmd, env),) = target.streaming_calls
+    # Still runs in the workspace dir, just without any template-derived env.
+    assert cmd == "cd /srv/copied-ws && echo hi"
+    # The vm-template env still flows; the copied workspace adds nothing.
+    assert env.get("API_KEY") == "env-val"
 
 
 # -- gate-prompt parity (the per-command carries) -----------------------------

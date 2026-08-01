@@ -132,6 +132,15 @@ class VMPlatform(Capability):
     # their actual escape hatch.
     no_native_transport_hint: ClassVar[str] = "This platform has no interactive native transport."
 
+    # Operator guidance warned when every reachability probe of the
+    # native transport fails (the transports factory emits it just
+    # before the SSHError propagates). None means no extra guidance;
+    # platforms whose route setup can succeed while the transport still
+    # cannot connect override with prose naming the likely cause (azure:
+    # the ephemeral SSH allow is scoped to the DETECTED egress IP, which
+    # may not be where the operator's SSH traffic actually leaves).
+    probe_failure_hint: ClassVar[str | None] = None
+
     @property
     def site_name(self) -> str:
         """The bound site's name (the capability-generic ``owner_name``,
@@ -179,6 +188,12 @@ class VMPlatform(Capability):
           exists (all four in-tree platforms; soft-name backends may
           auto-suffix instead).
         - Create the resource(s).
+        - Roll back partial backend state before letting a failure OR
+          an operator interrupt (``KeyboardInterrupt``) propagate: the
+          caller's unwind deletes only the DB row, so any backend
+          resource left behind is orphaned with nothing to target it.
+          Azure implements both arms (see #338); the other in-tree
+          platforms do not roll back partial backend state yet (#340).
         - Return ``ProvisionResult`` with ``platform_metadata``
           capturing whatever identifiers subsequent ops need, without
           relying on live configuration (e.g. proxmox records the node
@@ -256,33 +271,76 @@ class VMPlatform(Capability):
     def post_tailscale_ready(self, vm: VMRow, ctx: RunContext) -> None:  # noqa: B027  # intentional concrete no-op
         """Hook called once the VM's Tailscale node is up during create.
 
-        Default no-op. Azure overrides to detach the cloud-init public
-        IP at the moment Tailscale becomes reachable, minimizing the
-        window the VM is exposed to the internet. The asymmetry vs.
-        :meth:`transient_route` is genuine: the matching attach lives
-        inside :meth:`create` (cloud-init bootstrap needs the IP) and
-        the detach fires at an async Tailscale-ready point inside
-        ``bootstrap_vm`` (Phase A), neither of which is an ExitStack-shaped
-        lifecycle.
+        Default no-op. The hook's contract is "close provisioning
+        access": whatever ingress the platform opened for bootstrap is
+        no longer needed once Tailscale carries the traffic. Azure
+        overrides to delete the ephemeral bootstrap SSH allow rule
+        (scoped to the operator's egress prefixes; a permanent
+        deny-all-inbound baseline remains), leaving the VM with zero
+        inbound exposure. The asymmetry vs. :meth:`transient_route` is
+        genuine: the bootstrap ingress opens inside :meth:`create`
+        (cloud-init needs inbound SSH) and closes at an async
+        Tailscale-ready point inside ``bootstrap_vm`` (Phase A),
+        neither of which is an ExitStack-shaped lifecycle.
 
         ``ctx`` is the op-start :class:`RunContext` (see
-        :meth:`create`): the detach is a backend call and reads any
-        credential it needs from it.
+        :meth:`create`): closing the ingress is a backend call and
+        reads any credential it needs from it. With a service principal
+        configured there is no ambient fallback, so the caller must hand
+        the real scoped context (the create op's own).
         """
 
-    def transient_route(self, vm: VMRow, ctx: RunContext) -> AbstractContextManager[None]:
+    def secure_failed_vm(self, vm: VMRow, ctx: RunContext) -> None:  # noqa: B027  # intentional concrete no-op
+        """Hook called when a create is kept without completing Phase A:
+        the bootstrap or Tailscale verification died (the row is marked
+        FAILED) or the operator interrupted it mid-bootstrap (the row
+        keeps its in-flight status), and the VM is kept for debugging
+        rather than rolled back.
+
+        Default no-op. Same contract as :meth:`post_tailscale_ready`
+        (which only fires on success): close provisioning access. Azure
+        overrides to delete the ephemeral bootstrap SSH allow rule, so a
+        failed VM defaults to zero inbound exposure rather than keeping
+        its bootstrap ingress indefinitely. Implementations must not
+        assume the VM is reachable, and the caller treats the hook as
+        best-effort: the original failure keeps propagating regardless.
+        Operator debugging survives the fail-closed posture: ``vm shell
+        --platform`` pokes a fresh transient allow via
+        :meth:`transient_route`, and platform consoles outside the
+        firewalled path (Azure's serial console) are unaffected.
+
+        ``ctx`` is the op-start :class:`RunContext` (see
+        :meth:`create`): closing the ingress is a backend call and
+        reads any credential it needs from it. The caller passes the
+        create op's own scoped context, whose secrets are already
+        resolved (the boundary resolve ran before Phase A began), so
+        even the interrupt path never resolves a secret here for the
+        first time; with a service principal configured there is no
+        ambient fallback.
+        """
+
+    def transient_route(
+        self, vm: VMRow, ctx: RunContext, *, config: Config | None = None
+    ) -> AbstractContextManager[None]:
         """Hold any platform-native transient network state while the
         native transport is in use.
 
         Default no-op (:func:`contextlib.nullcontext`) for platforms
         whose native transport works without setup (lima, wsl2). Azure
-        overrides to attach a public IP on enter and detach on exit so
-        the transient state is bounded by the caller's
-        :class:`contextlib.ExitStack` scope.
+        overrides to open a scoped SSH route on enter (heal a missing
+        public IP, poke an ephemeral NSG allow scoped to the operator's
+        egress prefixes) and delete the allow on exit so the transient
+        state is bounded by the caller's :class:`contextlib.ExitStack`
+        scope.
 
         ``ctx`` is the op-start :class:`RunContext` (see
-        :meth:`create`): attaching and detaching are backend calls and
-        read any credential they need from it.
+        :meth:`create`): opening and closing the route are backend calls
+        and read any credential they need from it, with no ambient
+        fallback when a service principal is configured. ``config``
+        carries OPERATOR settings, mirroring :meth:`native_transport`
+        and :meth:`vm_active` (azure reads
+        ``config.operator.ssh_allow_cidrs`` to widen the allow's scope),
+        distinct from the bound ``platform_config``.
         """
         return nullcontext()
 

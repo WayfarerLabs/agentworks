@@ -523,6 +523,82 @@ def reinit_agent(
                         git_tokens=git_tokens,
                         logger=ssh_logger,
                     )
+
+                    # Reconcile the agent's recorded workspace grants onto the
+                    # VM. reinit shares create_agent_on_vm with the create path
+                    # but not realize's grant pass, so when the user step
+                    # recreates a truly-gone Linux user (issue #252) the fresh
+                    # user lands with no workspace group memberships while the
+                    # DB grant rows survive untouched. The agent would then hold
+                    # grants in the DB but no on-VM access (issue #280); this
+                    # repairs that.
+                    #
+                    # We reconcile from the recorded grant ROWS
+                    # (list_granted_workspaces), not from the live workspace set.
+                    # This one query is uniform across grant types: explicit,
+                    # grant_all, and implicit (session-tied) grants all
+                    # materialize rows, so it covers every kind with no per-type
+                    # branching. grant_all needs no special case: enabling it
+                    # materializes an explicit row per workspace, and the create
+                    # and workspace-create paths keep that in sync, so for a
+                    # grant_all agent the rows normally equal the live workspace
+                    # set. That sync is a maintained convention, not an
+                    # unbreakable invariant (e.g. copy_workspace does not
+                    # materialize grant_all rows today, issue #321), so the two
+                    # can legitimately diverge. reinit deliberately reconciles the
+                    # recorded ledger rather than re-deriving membership from the
+                    # grant_all flag: a missing row means the agent is not granted
+                    # that workspace yet, and reinit reflecting that (no access) is
+                    # more honest than papering over a materialization gap by
+                    # self-healing from the flag. The gap is fixed at its source
+                    # (issue #321), not masked here.
+                    #
+                    # add_to_workspace_group is idempotent (getent || groupadd,
+                    # then usermod -aG), so running it unconditionally is a
+                    # no-op on the already-exists branch and a repair on the
+                    # recreate branch. This reconciles ON-VM state only: the
+                    # grant rows already exist, so we do NOT re-insert them.
+                    from agentworks.agents.grants import add_to_workspace_group
+
+                    reconciled = 0
+                    for ws_name in db.list_granted_workspaces(name):
+                        try:
+                            add_to_workspace_group(vm, config, db, agent.linux_user, ws_name, logger=ssh_logger)
+                            reconciled += 1
+                        except NotFoundError:
+                            # The only NotFoundError reachable here is the
+                            # workspace-gone case: list_granted_workspaces
+                            # returned this name, so the agent (and its grant
+                            # row) exist; _resolve_ws_group is the sole lookup,
+                            # and it raises only when the workspace row is
+                            # absent. workspace deletion is supposed to sweep an
+                            # agent's grants (revoke_workspace_grants), so a
+                            # grant row pointing at a deleted workspace is an
+                            # invariant violation, a bookkeeping bug elsewhere.
+                            #
+                            # We deliberately do NOT delete the stale row here.
+                            # reinit's job is to reconcile ON-VM state to the
+                            # recorded grants, not to mutate the grant ledger;
+                            # silently sweeping the row would hide the upstream
+                            # bug, so warning and skipping is the conservative
+                            # repair. It is also non-fatal: reinit must not crash
+                            # on stale DB state, so we skip this workspace and
+                            # reconcile the rest. Any other failure (SSH / sudo)
+                            # propagates through the wrapper below, exactly like
+                            # create_agent_on_vm.
+                            output.warn(
+                                f"agent '{name}': skipping stale grant for workspace "
+                                f"'{ws_name}' (workspace no longer exists)"
+                            )
+
+                    # Confirm the repair to an operator recovering a truly-gone
+                    # user. reconciled counts the grants whose group add ran;
+                    # some may have been idempotent no-ops (add_to_workspace_group
+                    # cannot report whether membership actually changed), hence
+                    # "Reconciled", not "Repaired". Stay silent when there was
+                    # nothing to reconcile.
+                    if reconciled:
+                        output.info(f"Reconciled {output.count(reconciled, 'workspace grant')}")
                 except KeyboardInterrupt:
                     output.warn(
                         f"Cancelling agent reinit '{name}'. The agent may be in a partial state. "

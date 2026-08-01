@@ -8,8 +8,8 @@ import pytest
 
 from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
-from agentworks.doctor import Status, _check_config, _check_secrets
-from agentworks.errors import ConfigError
+from agentworks.doctor import Status, _check_config, _check_secrets, run_checks
+from agentworks.errors import ConfigError, ValidationError
 
 
 def _write_config(tmp_path: Path, *, extras: str = "") -> Path:
@@ -551,3 +551,60 @@ def test_prompt_only_site_secret_still_renders_on_its_own_secret_row(
     row = next(c for c in g.checks if "az-sp" in c.name)
     assert row.status is Status.OK
     assert "would resolve via prompt" in (row.message or "")
+
+
+def test_config_load_validation_error_yields_fail_row_not_abort(tmp_path: Path, monkeypatch) -> None:
+    """Regression for #310: a non-conforming explicit [secrets.*] name makes
+    _load_secrets raise ValidationError at config load. ValidationError is a
+    SIBLING of ConfigError under AgentworksError (not a subclass), so the
+    config-load guard must name it explicitly; otherwise it escapes _check_config
+    and aborts the whole doctor run. Here it must instead produce a Config FAIL
+    row (carrying the ValidationError's hint) and return cleanly."""
+    cfg = _write_config(
+        tmp_path,
+        extras="""
+[secrets.Bad-Name]
+description = "uppercase name is non-conforming"
+""",
+    )
+    # Precondition: this config really does raise ValidationError at load.
+    with pytest.raises(ValidationError):
+        load_config(cfg, warn_issues=False)
+
+    monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
+    g, config, registry = _check_config()  # must not raise / abort
+
+    assert config is None
+    assert registry is None
+    fails = [c for c in g.checks if c.name == "Config" and c.status == Status.FAIL]
+    assert fails and "Bad-Name" in (fails[0].message or "")
+
+
+@pytest.mark.integration
+def test_run_checks_renders_full_report_on_config_validation_error(tmp_path: Path, monkeypatch) -> None:
+    """Regression for #310, at the run_checks level: a load-time ValidationError
+    must not abort the run. Doctor's contract is maximal visibility in one run,
+    so the full report still renders (config-free groups present) with a
+    Configuration FAIL row, and report.has_failures stays True (the signal the
+    CLI uses to exit nonzero). Integration for the same reason as the other
+    run_checks tests: the config-free groups probe the real environment."""
+    cfg = _write_config(
+        tmp_path,
+        extras="""
+[secrets.Bad-Name]
+description = "uppercase name is non-conforming"
+""",
+    )
+    monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
+
+    report = run_checks()  # must not raise / abort
+
+    group_names = [g.name for g in report.groups]
+    # The rest of the report still rendered: config-free groups are present.
+    for name in ("System", "Python", "Required tools"):
+        assert name in group_names
+    # The Configuration group carries the load failure as a FAIL row.
+    config_group = next(g for g in report.groups if g.name == "Configuration")
+    assert any(c.name == "Config" and c.status == Status.FAIL for c in config_group.checks)
+    # The fail row is what drives a nonzero exit at the CLI surface.
+    assert report.has_failures is True

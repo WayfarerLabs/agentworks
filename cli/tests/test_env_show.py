@@ -141,6 +141,61 @@ def test_workspace_flag_auto_resolves_vm(db: Database, tmp_path: Path) -> None:
     assert "AGENTWORKS_SESSION" not in keys
 
 
+def test_copied_workspace_template_shows_no_workspace_env_and_does_not_crash(
+    db: Database,
+    tmp_path: Path,
+) -> None:
+    """A copied workspace records the synthetic ``template="copied"`` marker,
+    which is not a real template. ``env show --workspace <copied>`` (and
+    ``--session`` whose workspace is copied) must NOT crash with
+    ``unknown_template_error`` (issue #285): the workspace contributes no
+    template env, while the vm/identity scopes stay intact. A real workspace
+    template still contributes its env, proving the tolerance is scoped to
+    the failure."""
+    cfg = _write_config(
+        tmp_path,
+        extras="""
+[workspace_templates.proj.env]
+WS_VAR = "ws-val"
+""",
+    )
+    config = load_config(cfg, warn_issues=False)
+    _seed_db(db, with_workspace=False)
+    # A copied workspace (synthetic marker) and, on it, a session; plus a
+    # separate workspace on a real template as the positive control.
+    db._conn.execute(
+        "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group, template) "
+        "VALUES ('ws-copied', 'vm-1', '/home/agentworks/ws-copied', 'ws-ws-copied', 'copied')"
+    )
+    db._conn.execute(
+        "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group, template) "
+        "VALUES ('ws-proj', 'vm-1', '/home/agentworks/ws-proj', 'ws-ws-proj', 'proj')"
+    )
+    db._conn.execute(
+        "INSERT INTO sessions (name, workspace_name, template, mode, socket_path) "
+        "VALUES ('s-copied', 'ws-copied', 'default', 'admin', "
+        "'/run/agentworks/admin-tmux-sockets/agentworks/s-copied.sock')"
+    )
+    db._conn.commit()
+
+    # --workspace on the copied marker: renders, with no workspace-scope env.
+    copied_rows = show_env(db, config, workspace_name="ws-copied")
+    assert {r.key for r in copied_rows}  # rendered something (identity vars)
+    assert not any(r.scope == "workspace" for r in copied_rows)
+
+    # --session whose workspace is the copied marker: same tolerance via the
+    # session-inferred workspace.
+    session_rows = show_env(db, config, session_name="s-copied")
+    assert not any(r.scope == "workspace" for r in session_rows)
+
+    # Positive control: a real workspace template still shows its env, at
+    # the workspace scope.
+    proj_rows = show_env(db, config, workspace_name="ws-proj")
+    ws_var = next(r for r in proj_rows if r.key == "WS_VAR")
+    assert ws_var.scope == "workspace"
+    assert ws_var.rendered_value == "ws-val"
+
+
 # ---------------------------------------------------------------------------
 # Scope precedence + provenance
 # ---------------------------------------------------------------------------

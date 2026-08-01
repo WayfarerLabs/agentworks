@@ -72,9 +72,18 @@ class RunCommand(Protocol):
     ) -> object: ...
 
 
+def agent_socket_dir(linux_user: str) -> str:
+    """Return the per-agent tmux socket directory under ``AGENT_SOCKET_ROOT``.
+
+    Single source of truth for the per-agent socket path so create
+    (``ensure_agent_socket_dir``) and teardown agree on the location.
+    """
+    return f"{AGENT_SOCKET_ROOT}/{linux_user}"
+
+
 def agent_socket_path(linux_user: str, session_name: str) -> str:
     """Return the tmux socket path for an agent-mode session."""
-    return f"{AGENT_SOCKET_ROOT}/{linux_user}/{session_name}.sock"
+    return f"{agent_socket_dir(linux_user)}/{session_name}.sock"
 
 
 def admin_socket_path(admin_username: str, session_name: str) -> str:
@@ -150,7 +159,7 @@ def ensure_agent_socket_dir(
     """
     q_user = shlex.quote(linux_user)
     grp = shlex.quote(AGENT_SOCKET_GROUP)
-    q_path = shlex.quote(f"{AGENT_SOCKET_ROOT}/{linux_user}")
+    q_path = shlex.quote(agent_socket_dir(linux_user))
 
     probe = target.run(
         f'if test -d {q_path}; then stat -c "%U %G %a" {q_path} 2>/dev/null || echo PROBE_FAILED; '
@@ -191,7 +200,7 @@ def cleanup_stale_sockets(target: Transport, linux_user: str) -> int:
     """
     return _cleanup_stale_sockets_under(
         target,
-        f"{AGENT_SOCKET_ROOT}/{linux_user}",
+        agent_socket_dir(linux_user),
     )
 
 

@@ -261,12 +261,14 @@ def create_vm(
     with output.section("Resolving Secrets"):
         resolver.resolve()
 
-    # Polymorphic post-Tailscale-ready hook. Azure overrides to detach
-    # the cloud-init public IP (closing the public-exposure window the
-    # instant Tailscale becomes reachable); other platforms are no-op.
-    # It fires deep inside Phase A, so it closes over the same
+    # Polymorphic post-Tailscale-ready hook. Azure overrides to delete
+    # its ephemeral bootstrap SSH allow rule (closing provisioning
+    # access the instant Tailscale becomes reachable); other platforms
+    # are no-op. It fires deep inside Phase A, so it closes over the same
     # ``platform_obj`` / ``platform_ctx`` the create op ran with (both
-    # bound below, well before bootstrap_vm invokes this).
+    # bound below, well before bootstrap_vm invokes this), which is what
+    # delivers the SP credential to the NSG call with no ambient
+    # fallback.
     def _on_tailscale_ready() -> None:
         refreshed = db.get_vm(vm_name)
         assert refreshed is not None
@@ -368,6 +370,13 @@ def create_vm(
             try:
                 result = platform_obj.create(request, platform_ctx)
             except KeyboardInterrupt:
+                # The platform's create owns rolling back its own partial
+                # backend resources before this interrupt propagates (the
+                # create contract; Azure cleans up or, on a second Ctrl-C,
+                # abandons loudly). By the time it reaches here the row is
+                # the only artifact left to unwind; deleting it for a VM
+                # that still exists in a backend would orphan the backend
+                # side (#338).
                 output.warn(f"Cancelling vm create '{vm_name}'... rolling back.")
                 log.unwind()
                 raise
@@ -414,6 +423,7 @@ def create_vm(
                     vm_name,
                     result.native_transport,
                     platform_obj,
+                    platform_ctx,
                     admin_username=resolved_admin_username,
                     tailscale_auth_key=tailscale_auth_key,
                     git_tokens=git_tokens,

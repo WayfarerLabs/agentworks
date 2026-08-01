@@ -191,7 +191,7 @@ def test_native_transport_invokes_transient_route_then_builder() -> None:
         mock_run.return_value = SSHResult(returncode=0, stdout="ok\n", stderr="")
         t = native_transport(vm, platform, config, ctx=ctx, stack=stack)
 
-    platform.transient_route.assert_called_once_with(vm, ctx)
+    platform.transient_route.assert_called_once_with(vm, ctx, config=config)
     platform.native_transport.assert_called_once_with(vm, ctx, config=config)
     assert t is fake_target
 
@@ -271,6 +271,9 @@ def test_native_transport_reachability_probe_gives_up_after_six() -> None:
     config = _mock_config()
     ctx = RunContext()
     platform = _fake_lima_platform()
+    # The base-class default: no probe-failure guidance (a MagicMock
+    # auto-attribute would read as a truthy hint and mis-drive the warn).
+    platform.probe_failure_hint = None
     fake_target = platform.native_transport.return_value
 
     with (
@@ -282,14 +285,40 @@ def test_native_transport_reachability_probe_gives_up_after_six() -> None:
         native_transport(vm, platform, config, ctx=ctx, stack=stack)
 
 
+def test_native_transport_probe_exhaustion_warns_platform_hint(captured_output) -> None:  # type: ignore[no-untyped-def] # noqa: ANN001
+    """A platform that declares ``probe_failure_hint`` gets it warned
+    when every probe fails (azure: the scoped allow may not match the
+    operator's real egress), just before the SSHError propagates."""
+    vm = _mock_vm(site="azure")
+    config = _mock_config()
+    ctx = RunContext()
+    platform = MagicMock()
+    platform.name = "azure-vm"
+    platform.probe_failure_hint = "scoped allow guidance"
+    platform.transient_route.return_value = contextlib.nullcontext()
+    fake_target = SSHTransport(host="1.2.3.4", user="agentworks")
+    platform.native_transport.return_value = fake_target
+
+    with (
+        patch.object(fake_target, "run", side_effect=SSHError("always")),
+        patch("agentworks.transports.time.sleep"),
+        contextlib.ExitStack() as stack,
+        pytest.raises(SSHError),
+    ):
+        native_transport(vm, platform, config, ctx=ctx, stack=stack)
+
+    assert "scoped allow guidance" in captured_output.warnings
+
+
 # ---------------------------------------------------------------------------
 # native_transport: Azure transient_route lifecycle
 # ---------------------------------------------------------------------------
 
 
-def test_native_transport_azure_transient_route_attaches_and_detaches() -> None:
-    """``transient_route`` calls attach on enter and detach on exit; both
-    fire regardless of whether the downstream code raised."""
+def test_native_transport_azure_transient_route_opens_and_closes() -> None:
+    """``transient_route`` opens the route on enter and closes it (Azure:
+    removes the ephemeral SSH allow) on exit; both fire regardless of
+    whether the downstream code raised."""
     vm = _mock_vm(site="azure")
     config = _mock_config()
     ctx = RunContext()
@@ -300,12 +329,12 @@ def test_native_transport_azure_transient_route_attaches_and_detaches() -> None:
     platform.name = "azure-vm"
 
     @contextlib.contextmanager
-    def fake_route(_vm, _ctx):  # type: ignore[no-untyped-def] # noqa: ANN001, ANN202
-        events.append("attach")
+    def fake_route(_vm, _ctx, *, config=None):  # type: ignore[no-untyped-def] # noqa: ANN001, ANN202
+        events.append("open")
         try:
             yield
         finally:
-            events.append("detach")
+            events.append("close")
 
     platform.transient_route.side_effect = fake_route
     fake_target = SSHTransport(host="1.2.3.4", user="agentworks")
@@ -316,16 +345,16 @@ def test_native_transport_azure_transient_route_attaches_and_detaches() -> None:
         contextlib.ExitStack() as stack,
     ):
         native_transport(vm, platform, config, ctx=ctx, stack=stack)
-        # Inside the stack: attach has fired, detach has NOT.
-        assert events == ["attach"]
-    # ExitStack unwinds at end-of-with: detach fires deterministically.
-    assert events == ["attach", "detach"]
+        # Inside the stack: the route is open, the close has NOT fired.
+        assert events == ["open"]
+    # ExitStack unwinds at end-of-with: the close fires deterministically.
+    assert events == ["open", "close"]
 
 
-def test_native_transport_azure_detach_fires_on_downstream_exception() -> None:
+def test_native_transport_azure_close_fires_on_downstream_exception() -> None:
     """If the per-platform builder raises after ``transient_route``
-    attaches, the detach still runs (context-manager cleanup is bounded
-    by the caller's ExitStack)."""
+    opened the route, the close still runs (context-manager cleanup is
+    bounded by the caller's ExitStack)."""
     vm = _mock_vm(site="azure")
     config = _mock_config()
     ctx = RunContext()
@@ -336,12 +365,12 @@ def test_native_transport_azure_detach_fires_on_downstream_exception() -> None:
     platform.name = "azure-vm"
 
     @contextlib.contextmanager
-    def fake_route(_vm, _ctx):  # type: ignore[no-untyped-def] # noqa: ANN001, ANN202
-        events.append("attach")
+    def fake_route(_vm, _ctx, *, config=None):  # type: ignore[no-untyped-def] # noqa: ANN001, ANN202
+        events.append("open")
         try:
             yield
         finally:
-            events.append("detach")
+            events.append("close")
 
     platform.transient_route.side_effect = fake_route
     platform.native_transport.side_effect = SSHError("kaboom")
@@ -352,7 +381,7 @@ def test_native_transport_azure_detach_fires_on_downstream_exception() -> None:
     ):
         native_transport(vm, platform, config, ctx=ctx, stack=stack)
 
-    assert events == ["attach", "detach"]
+    assert events == ["open", "close"]
 
 
 # ---------------------------------------------------------------------------

@@ -167,6 +167,58 @@ def test_generate_bootstrap_script_writes_shell_rc_seeds() -> None:
     assert 'chown "$VM_USER:$VM_USER" "$HOME_DIR/.bashrc" "$HOME_DIR/.zshrc"' in script
 
 
+def test_authorized_keys_install_is_idempotent() -> None:
+    """The operator key install must not append a duplicate on re-run.
+
+    This bootstrap is a Lima provision.system provisioner, which Lima
+    re-executes on every guest boot. A bare ``echo ... >> authorized_keys``
+    would append a byte-identical duplicate on every stop/start (unbounded
+    managed-file growth). The install must instead be guarded so the append
+    only happens when the exact key line is absent.
+    """
+    script = generate_bootstrap_script(
+        admin_username="testuser",
+        ssh_public_key="ssh-ed25519 AAAA testkey",
+        provisioning_packages=["curl"],
+        tailscale_auth_key="tskey-auth-test123",
+        hostname="lima--myvm",
+    )
+
+    # Guarded append: whole-line fixed-string match, then append only if absent.
+    # (The template's line continuation collapses in Python, like the SVE gate,
+    # so the guard renders as one shell line; assert on its parts, not spacing.)
+    assert 'grep -qxF "$SSH_PUBLIC_KEY" "$HOME_DIR/.ssh/authorized_keys" 2>/dev/null' in script
+    assert '|| echo "$SSH_PUBLIC_KEY" >> "$HOME_DIR/.ssh/authorized_keys"' in script
+    # And specifically NOT the unguarded bare append that caused the growth.
+    assert 'mkdir -p "$HOME_DIR/.ssh"\necho "$SSH_PUBLIC_KEY" >>' not in script
+    # Exactly one authorized_keys append site, and it is the guarded one.
+    assert script.count('>> "$HOME_DIR/.ssh/authorized_keys"') == 1
+
+
+def test_swap_fstab_append_is_guarded_against_re_execution() -> None:
+    """The fstab swap entry must not duplicate when the bootstrap re-runs.
+
+    ``/swapfile`` is a persistent on-disk file, so the surrounding
+    ``if [ -f /swapfile ]`` guard sends every re-run down the "already exists"
+    branch, skipping both swap creation and the fstab append. Assert that the
+    single ``>> /etc/fstab`` append lives under that guard rather than at the
+    top level of the step.
+    """
+    script = generate_bootstrap_script(
+        admin_username="testuser",
+        ssh_public_key="ssh-ed25519 AAAA testkey",
+        provisioning_packages=["curl"],
+        tailscale_auth_key="tskey-auth-test123",
+        hostname="lima--myvm",
+        swap=4,
+    )
+
+    assert "if [ -f /swapfile ]; then" in script
+    # Exactly one fstab append, and it is the swap line under the guard.
+    assert script.count(">> /etc/fstab") == 1
+    assert "echo '/swapfile none swap sw 0 0' >> /etc/fstab" in script
+
+
 def test_generate_bootstrap_script_passes_bash_syntax_check() -> None:
     """End-to-end: the generated script must syntactically parse as
     bash. Catches any future template change that leaks an unescaped

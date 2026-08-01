@@ -65,9 +65,13 @@ def _resolve_vm_admin_env_scopes(
 
     ws_env: dict[str, EnvEntry] | None = None
     if ws is not None:
-        from agentworks.workspaces.templates import resolve_template as _resolve_ws_template
+        from agentworks.workspaces.templates import resolve_ws_template_env_or_empty
 
-        ws_env = _resolve_ws_template(registry, ws.template).env
+        # A copied workspace's synthetic ``template="copied"`` marker (or a
+        # template later removed from config) resolves to an empty env scope
+        # rather than raising: the pinned workspace stays in the ladder and
+        # contributes nothing, and the vm/site/admin scopes are unaffected.
+        ws_env = resolve_ws_template_env_or_empty(registry, ws.template)
 
     from agentworks.resources.access import admin_template
 

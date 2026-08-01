@@ -24,7 +24,8 @@ import pytest
 
 from agentworks.capabilities.base import RunContext
 from agentworks.errors import NotFoundError, TokenRejectedError
-from agentworks.plugins.azure.platform import AzureError, AzureVMPlatform
+from agentworks.plugins.azure.network import AzureError
+from agentworks.plugins.azure.platform import AzureVMPlatform
 from agentworks.plugins.proxmox.api import (
     ProxmoxAPI,
     ProxmoxAPIError,
@@ -170,7 +171,7 @@ def _wire_rg_raises(monkeypatch: pytest.MonkeyPatch, exc: Exception) -> None:
 def _auth_error() -> Exception:
     """A representative credential-rejection failure raised by the existence
     probe: an auth-flavored ``HttpResponseError`` (``ClientAuthenticationError``
-    subclasses it), which exercises ``_wrap_azure_error``'s HttpResponseError
+    subclasses it), which exercises ``wrap_azure_error``'s HttpResponseError
     branch rather than its generic fallback. Imported function-locally so azure
     is not loaded at collection time, matching the suite's convention."""
     from azure.core.exceptions import ClientAuthenticationError
@@ -193,7 +194,7 @@ def test_azure_runup_sdk_failure_wraps_not_masquerades_as_missing(
     load-bearing guarantee: a bad or unreachable credential surfaces as the
     wrapped Azure error, never as a ``NotFoundError`` claiming the resource
     group is absent. runup routes such exceptions through
-    ``_wrap_azure_error`` (``AzureError``), so the ``False``-return branch that
+    ``wrap_azure_error`` (``AzureError``), so the ``False``-return branch that
     raises ``NotFoundError`` is never reached."""
     raised = make_exc()  # type: ignore[operator]
     _wire_rg_raises(monkeypatch, raised)
@@ -202,7 +203,7 @@ def test_azure_runup_sdk_failure_wraps_not_masquerades_as_missing(
     # The forbidden masquerade: a probe FAILURE must not read as "group missing".
     assert not isinstance(exc.value, NotFoundError)
     # And it is genuinely the wrapped SDK failure, not a fresh error that happens
-    # to share a type: runup chains it via ``raise _wrap_azure_error(exc) from
+    # to share a type: runup chains it via ``raise wrap_azure_error(exc) from
     # exc``, so the raised object is the wrapped error's cause.
     assert exc.value.__cause__ is raised
 
@@ -239,7 +240,7 @@ def test_azure_runup_rejects_a_bad_service_principal_before_create(
     probe, not from the existence check (which never runs)."""
     from azure.core.exceptions import ClientAuthenticationError
 
-    from agentworks.plugins.azure.platform import AzureError as _AzureError
+    from agentworks.plugins.azure.network import AzureError as _AzureError
 
     class _RejectingCred:
         def __init__(self, tenant_id: str, client_id: str, client_secret: str) -> None: ...

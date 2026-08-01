@@ -8,14 +8,20 @@ Split out of the former monolithic ``agentworks/config.py`` (see
 
 from __future__ import annotations
 
+import ipaddress
 import re
 import sys
 from pathlib import Path
 
 from agentworks.config.models import DefaultsConfig, OperatorConfig, PathsConfig, _SectionLineMap
-from agentworks.config.validation import SSH_HOST_PREFIX_RE, validate_vm_workspaces
+from agentworks.config.validation import (
+    MAX_SECRET_NAME_LENGTH,
+    SSH_HOST_PREFIX_RE,
+    validate_name,
+    validate_vm_workspaces,
+)
 from agentworks.env import EnvEntry
-from agentworks.errors import ConfigError
+from agentworks.errors import ConfigError, ValidationError
 from agentworks.git_credentials.credential import GitCredentialConfig
 
 
@@ -54,6 +60,78 @@ def _warn_unexpected_keys(
     if unexpected:
         keys = ", ".join(sorted(unexpected))
         issues.append(f"unexpected keys in [{section}]: {keys}")
+
+
+def _warn_nonconforming_secret_name(name: str, *, location: str, issues: list[str]) -> None:
+    """Record a non-fatal warning when an operator-supplied secret NAME does
+    not follow the secret naming rules, then leave the name unchanged.
+
+    Names declared explicitly in ``[secrets.*]`` are validated with a hard
+    error (``_load_secrets``). The covered set here is the operator-supplied
+    secret-name REFERENCE sites, which historically bypassed that check. There
+    are four: an env entry's ``env.<KEY>.secret``, a git credential's
+    ``git_credentials.<name>.token``, a VM template's
+    ``vm_templates.<name>.tailscale_auth_key``, and a vm-site's
+    ``platform_config.token_secret`` (both the TOML ``[proxmox]`` legacy path
+    and the YAML manifest path). Validating them here at load unifies the
+    guarantee at the operator boundary (issue #279) WITHOUT breaking configs
+    that already load: a non-conforming reference still declares and resolves
+    exactly as before. The runtime synthesize and resolve paths stay tolerant
+    by design, so the warning is the only effect.
+
+    Deriving this coverage structurally from the ``ConfigReference(kind=
+    "secret")`` edges, rather than hand-enumerating the loaders that reference
+    a secret, is tracked in issue #311.
+    """
+    try:
+        validate_name(name, max_length=MAX_SECRET_NAME_LENGTH)
+    except ValidationError:
+        issues.append(
+            f"{location}: secret name {name!r} does not follow the secret naming rules "
+            f"(lowercase alphanumeric with hyphens or underscores, starting and ending "
+            f"with a letter or digit, at most {MAX_SECRET_NAME_LENGTH} characters). It "
+            f"still resolves as declared; rename it to conform."
+        )
+
+
+def _warn_nonconforming_derived_secret(credential_name: str, issues: list[str]) -> None:
+    """Warn (do not raise) when a git-credential NAME would derive a
+    non-conforming default token secret.
+
+    When ``[git_credentials.<name>]`` omits an explicit ``token``, the token
+    secret name defaults to ``git-token-<name>`` (``default_token_secret``),
+    and that derived name inherits any non-conformance in the credential name
+    (uppercase, an over-length name, a trailing hyphen, ...). Nothing
+    downstream re-validates it: ``Registry.add`` rejects only ``/`` and
+    ``_SecretKind.synthesize`` imposes no name restriction, so a name like
+    ``[git_credentials.GITHUB]`` silently produces the secret
+    ``git-token-GITHUB``. Warning at the operator boundary unifies the
+    "conforming secret names" guarantee (issue #308) WITHOUT breaking configs
+    that already load: the credential and its derived secret still declare and
+    resolve exactly as before, so the warning is the only effect. Deriving this
+    coverage structurally from the ConfigReference(kind="secret") edges, rather
+    than hand-wiring it here, is tracked in issue #311.
+
+    The fully-derived ``git-token-<name>`` is validated (not the bare
+    credential name) against ``MAX_SECRET_NAME_LENGTH``: that string is exactly
+    the secret name that will exist, so it predicts conformance precisely,
+    including the length ceiling the ``git-token-`` prefix eats into (a
+    credential name that fits on its own can still push the derived name past
+    the cap). This matches how an explicitly declared ``[secrets.<name>]`` is
+    validated in ``_load_secrets``.
+    """
+    derived = f"git-token-{credential_name}"
+    try:
+        validate_name(derived, max_length=MAX_SECRET_NAME_LENGTH)
+    except ValidationError:
+        issues.append(
+            f"git_credentials.{credential_name}: credential name {credential_name!r} does "
+            f"not follow the naming rules (lowercase alphanumeric with hyphens or "
+            f"underscores, starting and ending with a letter or digit, at most "
+            f"{MAX_SECRET_NAME_LENGTH} characters once the 'git-token-' prefix is added); "
+            f"its default token secret {derived!r} inherits this. Rename the credential to "
+            f"conform, or set an explicit conforming 'token'."
+        )
 
 
 _ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -122,6 +200,7 @@ def _parse_env_table(
                     f"{context}.env.{key_str}: inline table must set "
                     "'secret = \"<name>\"' (or use a bare string for plaintext)"
                 )
+            _warn_nonconforming_secret_name(secret_name, location=f"{context}.env.{key_str}", issues=issues)
             result[key_str] = EnvEntry(key=key_str, secret=secret_name)
         else:
             raise ConfigError(
@@ -139,6 +218,7 @@ _OPERATOR_KEYS = {
     "ssh_host_prefix",
     "ssh_agent_host_prefix",
     "extra_ssh_public_keys",
+    "ssh_allow_cidrs",
 }
 
 
@@ -178,6 +258,25 @@ def _load_operator(data: dict[str, object], issues: list[str]) -> OperatorConfig
             raise ConfigError(f"{section_name}.extra_ssh_public_keys: file does not exist: {p}")
         extra_keys.append(p)
 
+    # Extra sources allowed through the transient cloud SSH firewall
+    # hole; validated here so a typo fails at config load, not at the
+    # first vm op that pokes the hole. Stored normalized (a bare IP
+    # becomes its /32) so downstream consumers compare and poke
+    # canonical prefixes. The list guard keeps a scalar (a bare string
+    # would otherwise iterate per character) a typed error too.
+    raw_cidrs = raw.get("ssh_allow_cidrs", [])
+    if not isinstance(raw_cidrs, list):
+        raise ConfigError(f"{section_name}.ssh_allow_cidrs must be a list of IPv4 addresses and/or CIDRs")
+    allow_cidrs: list[str] = []
+    for entry in raw_cidrs:
+        text = str(entry).strip()
+        try:
+            allow_cidrs.append(str(ipaddress.IPv4Network(text, strict=False)))
+        except ValueError as exc:
+            raise ConfigError(
+                f"{section_name}.ssh_allow_cidrs: invalid entry {text!r}: must be an IPv4 address or CIDR"
+            ) from exc
+
     host_prefix = str(raw.get("ssh_host_prefix", "awvm--"))
     if not SSH_HOST_PREFIX_RE.match(host_prefix):
         raise ConfigError(
@@ -200,6 +299,7 @@ def _load_operator(data: dict[str, object], issues: list[str]) -> OperatorConfig
         ssh_host_prefix=host_prefix,
         ssh_agent_host_prefix=agent_host_prefix,
         extra_ssh_public_keys=extra_keys,
+        ssh_allow_cidrs=allow_cidrs,
     )
 
 
@@ -356,7 +456,16 @@ def _load_git_credentials(
                     f"omit the key to inherit the default secret name "
                     f'"git-token-{name}"'
                 )
+            _warn_nonconforming_secret_name(cdata["token"], location=f"git_credentials.{name}.token", issues=issues)
             provider_config["token"] = cdata["token"]
+        else:
+            # Only the token-absent case derives ``git-token-<name>`` from the
+            # credential name; when ``token`` is set explicitly the name feeds
+            # no secret, so warning about it here would be noise (and the
+            # explicit value's own conformance is a separate reference-site
+            # concern, issue #279). Scoping the warning to the default-
+            # derivation case is exactly #308's gap and avoids double-warning.
+            _warn_nonconforming_derived_secret(name, issues)
         # The flat TOML shape only ever read ``org``, and only for azdo;
         # hoisting it into the blob for other providers would promote a
         # historically-ignored stray key into a validation error and

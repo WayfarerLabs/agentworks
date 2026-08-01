@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.errors import NotFoundError
+from agentworks.name_filters import validate_name_filters
 
 from ._common import MAX_AGENT_NAME_LENGTH, MAX_GRANTS_DISPLAY
 
@@ -47,9 +48,13 @@ def list_agents(
 ) -> None:
     """List agents.
 
+    An unknown name in the VM filter raises ``NotFoundError`` rather
+    than matching nothing (issue #304).
+
     With ``names_only=True``, emit one agent name per line and skip
     the table render. Used by shell completion (see issue #147).
     """
+    validate_name_filters(db, vm_name=vm_name)
     agents = db.list_agents(vm_name=vm_name)
 
     if names_only:

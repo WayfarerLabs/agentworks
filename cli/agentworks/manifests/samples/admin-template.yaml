@@ -15,6 +15,9 @@
 #  git_credentials: [github]
 #  user_install_commands: [bun]
 #  dotfiles_source: git::https://github.com/user/dotfiles
+#  # dotfiles_destination: ~/.dotfiles   # where to put them on the VM
+#  # dotfiles_install_cmd: ./install.sh  # command to run after clone/copy
 #  mise_activate: true
+#  # git_force_safe_directory: true      # set safe.directory '*' for admin and agents (default true)
 #  env:
 #    EDITOR: nvim

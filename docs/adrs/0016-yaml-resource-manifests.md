@@ -147,6 +147,11 @@ a config resource or a live instance.
 
 ### Dual-path: deprecate, don't break
 
+> Status note (2026-07-31): the stance below is under revision. Declaring resources in TOML is now
+> deprecated for removal in "a future release" (deliberately no longer gated on a major release),
+> and the load-time warning and operator docs say so. A superseding ADR will come out of the
+> upcoming TOML-resource sunset SDD effort.
+
 TOML resource sections remain fully supported publishers into the same registry -- deprecation
 warnings at load, removal deferred to a future major release. Mixing sources is supported; the same
 resource declared in both is a hard error citing both locations. This is not a transitional window:

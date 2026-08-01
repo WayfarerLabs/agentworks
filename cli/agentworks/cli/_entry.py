@@ -94,13 +94,52 @@ def main() -> None:
         error(str(e))
         echo_hint(e)
         raise SystemExit(1) from None
-    except (click.exceptions.ClickException, click.exceptions.Exit, click.exceptions.Abort):
-        # Let Click / Typer own their own rendering and exit codes. Typer
-        # converts KeyboardInterrupt to click.Exit(130) internally before this
-        # try block sees it (see typer/core.py), so ctrl-C is already handled
-        # silently with the conventional SIGINT exit code; per-op rollback
-        # handlers fire inside the command, before typer's conversion.
-        raise
+    except click.exceptions.ClickException as e:
+        # Real-`click` parse/usage errors raised through a raw `click_type=`
+        # (e.g. a `click.Choice`, as in resource.py and completion.py). These
+        # reach us because typer vendors its own private copy of click
+        # (`typer._click`) and its internal handler catches only that vendored
+        # ClickException; a real-`click` exception fails typer's isinstance check
+        # and propagates past typer's own Rich renderer, out of app(), to here
+        # (which imports the same real `click`, so this except matches). Render
+        # Click's own message via e.show() (the one-line `Error: <message>`,
+        # already listing the valid choices, plus the usage/"Try --help" pointer
+        # when Click attached a context) and exit with its usage code, instead
+        # of re-raising into typer's Rich excepthook (a full traceback). No
+        # error.log write: these are user input errors, not bugs. This does NOT
+        # cover unknown-option / missing-argument errors from typer-native
+        # params; typer renders those itself as its boxed panel and they never
+        # reach this clause.
+        e.show()
+        raise SystemExit(e.exit_code) from None
+    except (click.exceptions.Exit, typer.Exit) as e:
+        # Defensive: no known path delivers an Exit here. Typer vendors its own
+        # click (see the ClickException clause above), so `typer.Exit` and the
+        # real `click.exceptions.Exit` are distinct classes. Typer's standalone
+        # runner (typer/core.py, `_main`) normally converts its vendored Exit
+        # to sys.exit(exit_code) inside app(), and converts KeyboardInterrupt
+        # to Exit(130) first, so ctrl-C already exits with the conventional
+        # SIGINT code; per-op rollback handlers fire inside the command, before
+        # that conversion. Should an Exit escape anyway (a framework change, or
+        # a raise from code running outside app()), exit with its carried code:
+        # by here we are outside app(), so a bare `raise` would propagate out of
+        # main() to Python's default unhandled-exception handler (a traceback,
+        # exit code 1), and falling through would hit the generic Exception
+        # clause and pollute error.log. A deliberate exit is not a bug, so, as
+        # in the ClickException clause, there is no debug-mode re-raise here.
+        raise SystemExit(e.exit_code) from None
+    except (click.exceptions.Abort, typer.Abort):
+        # Defensive, same vendored-vs-real story as Exit above: typer's
+        # standalone runner normally handles a vendored Abort inside app() by
+        # rendering its aborted message and calling sys.exit(1), so no known
+        # path reaches here. For an escapee, mirror that handling (and the
+        # UserAbort clause above): print the plain line and exit 1. Real ctrl-C
+        # still exits 130 through typer's KeyboardInterrupt-to-Exit(130)
+        # conversion, handled inside app() (or, if it too escaped, carried by
+        # the Exit clause above), so SIGINT parity does not depend on this
+        # clause.
+        typer.echo("Aborted.", err=True)
+        raise SystemExit(1) from None
     except KeyboardInterrupt:
         # Defensive: a KI that somehow bypasses typer's internal conversion
         # (e.g. raised during main()'s own setup, before app() runs).

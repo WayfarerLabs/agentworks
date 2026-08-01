@@ -137,7 +137,11 @@ def test_create_rollback_on_keyboard_interrupt_unwinds_the_row(
 ) -> None:
     """The unwind oracle, interrupt flavor: a cancel during
     provisioning deletes the row (the realized set, reverse order,
-    which for create is exactly the one VM node) and re-raises."""
+    which for create is exactly the one VM node) and re-raises. The
+    row deletion is safe because the platform's create owns rolling
+    back its own partial backend resources before the interrupt
+    reaches this handler (the create contract; #338, exercised in
+    test_azure_create_interrupt.py)."""
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
 
     def _interrupt(self: LimaPlatform, request: object, ctx: object) -> ProvisionResult:

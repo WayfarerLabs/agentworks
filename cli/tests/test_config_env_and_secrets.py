@@ -744,3 +744,120 @@ def test_undeclared_secret_in_parent_no_longer_errors_at_load(
     cfg = load_config(cfg_file, warn_issues=False)
     assert cfg.agent_templates["parent"].env["TOKEN"].secret == "missing-secret"
     assert cfg.agent_templates["child"].env["TOKEN"].value == "literal-value"
+
+
+# --- Issue #279: warn-only validation of operator-supplied secret NAMES ------
+#
+# Names declared explicitly in [secrets.*] are validated with a hard error.
+# Names that enter through a REFERENCE (a VM template's tailscale_auth_key, an
+# env entry's `secret = "..."`, a git credential's token) historically bypassed
+# that check. They now emit a non-fatal load-time warning yet STILL load and
+# resolve unchanged, so no config that loads today newly fails.
+
+
+def test_vm_template_tailscale_auth_key_nonconforming_warns_but_loads(
+    tmp_path: Path,
+) -> None:
+    """A VM template naming a non-conforming (uppercase) tailscale_auth_key
+    secret loads successfully, keeps the name usable, and warns naming the
+    secret and its config location."""
+    cfg_file = tmp_path / "config.toml"
+    _write_base(
+        cfg_file,
+        extras="""
+        [vm_templates.tester]
+        tailscale_auth_key = "GITHUB_TOKEN"
+        """,
+    )
+    cfg = load_config(cfg_file, warn_issues=False)
+    # The secret name is preserved exactly, still declared and usable.
+    assert cfg.vm_templates["tester"].tailscale_auth_key == "GITHUB_TOKEN"
+    assert any(
+        "GITHUB_TOKEN" in issue and "vm_templates.tester.tailscale_auth_key" in issue for issue in cfg.config_issues
+    ), cfg.config_issues
+
+
+def test_env_secret_ref_nonconforming_warns_but_loads(tmp_path: Path) -> None:
+    """An env entry referencing a non-conforming secret name loads with a
+    warning; the entry is preserved, not dropped."""
+    cfg_file = tmp_path / "config.toml"
+    _write_base(
+        cfg_file,
+        extras="""
+        [admin.env]
+        FOO = { secret = "Bad_Name" }
+        """,
+    )
+    cfg = load_config(cfg_file, warn_issues=False)
+    assert cfg.admin is not None
+    assert cfg.admin.env["FOO"].secret == "Bad_Name"
+    assert any("Bad_Name" in issue and "admin.env.FOO" in issue for issue in cfg.config_issues), cfg.config_issues
+
+
+def test_git_credential_token_nonconforming_warns_but_loads(tmp_path: Path) -> None:
+    """A git credential whose token names a non-conforming secret loads with a
+    warning; the token is preserved."""
+    cfg_file = tmp_path / "config.toml"
+    _write_base(
+        cfg_file,
+        extras="""
+        [git_credentials.gh]
+        provider = "github"
+        token = "GITHUB_TOKEN"
+        """,
+    )
+    cfg = load_config(cfg_file, warn_issues=False)
+    assert cfg.git_credentials["gh"].provider_config["token"] == "GITHUB_TOKEN"
+    assert any("GITHUB_TOKEN" in issue and "git_credentials.gh.token" in issue for issue in cfg.config_issues), (
+        cfg.config_issues
+    )
+
+
+def test_conforming_secret_ref_names_emit_no_warning(tmp_path: Path) -> None:
+    """Conforming secret names across all reference paths load with NO
+    secret-naming warning."""
+    cfg_file = tmp_path / "config.toml"
+    _write_base(
+        cfg_file,
+        extras="""
+        [vm_templates.tester]
+        tailscale_auth_key = "tailscale-auth-key"
+
+        [admin.env]
+        FOO = { secret = "github-token" }
+
+        [git_credentials.gh]
+        provider = "github"
+        token = "git-token-github"
+        """,
+    )
+    cfg = load_config(cfg_file, warn_issues=False)
+    assert not any("secret naming rules" in issue for issue in cfg.config_issues), cfg.config_issues
+
+
+def test_explicit_secret_declaration_invalid_still_raises(tmp_path: Path) -> None:
+    """Status quo: an explicit [secrets.*] declaration with a non-conforming
+    name still raises ValidationError at load (warn-only applies to REFERENCES,
+    not explicit declarations; the pre-existing hard error is unchanged)."""
+    from agentworks.errors import ValidationError
+
+    cfg_file = tmp_path / "config.toml"
+    _write_base(
+        cfg_file,
+        extras="""
+        [secrets.GITHUB_TOKEN]
+        description = "non-conforming explicit declaration"
+        """,
+    )
+    with pytest.raises(ValidationError, match="invalid name"):
+        load_config(cfg_file, warn_issues=False)
+
+
+def test_secretdecl_construction_tolerates_nonconforming_operator_name() -> None:
+    """The runtime path the prior (rejected) attempt would have broken:
+    constructing a SecretDecl for a non-conforming operator name must NOT raise.
+    Synthesize / resolve paths stay tolerant so no command newly fails."""
+    from agentworks.secrets import SecretDecl
+
+    decl = SecretDecl(name="GITHUB_TOKEN", description="")
+    assert decl.name == "GITHUB_TOKEN"
