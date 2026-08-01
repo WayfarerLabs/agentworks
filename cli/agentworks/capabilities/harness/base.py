@@ -144,7 +144,7 @@ class Harness(Capability):
         workspace_name: str,  # the session's workspace ancestor
         target: _Target | None,  # the agent node it runs as; None in admin mode
         admin: bool,  # admin mode (uses ctx.admin_target())
-        state: dict[str, object],  # per-session persisted blob (mutated in place)
+        state: dict[str, object],  # this harness's OWN namespace of the persisted blob (mutated in place)
     ) -> None:
         super().__init__(owner_name, config)
         self._session_name = session_name
@@ -157,11 +157,15 @@ class Harness(Capability):
 
     @property
     def state(self) -> dict[str, object]:
-        """The harness's per-session state blob. A harness reads and
-        mutates it in place during its ops (``claude-code`` mints and
-        records its Claude session id on the first ``start``); the session
-        manager reads this property after the op and persists it to the
-        session row. Empty for a harness that keeps no state (``shell``).
+        """The harness's per-session state dict: its OWN namespace of the
+        session row's ``harness_state`` blob (the platform seam,
+        ``sessions/nodes._harness_for_template``, splits the stored blob
+        by harness name, so no harness ever sees another's keys). A
+        harness reads and mutates it in place during its ops
+        (``claude-code`` mints and records its Claude session id on the
+        first ``start``); the dict is shared with the session node's full
+        blob, which the manager persists after the op. Empty for a
+        harness that keeps no state (``shell``).
         """
         return self._state
 
@@ -198,6 +202,24 @@ class Harness(Capability):
             for ref in self._secret_refs
         )
         return tuple(sourced_references(enriched, (self.owner_kind, self.owner_name)))
+
+    @classmethod
+    def hoist_legacy_state(cls, blob: dict[str, object]) -> None:
+        """Adopt a pre-namespacing ``harness_state`` blob in place.
+
+        Compatibility (pre-namespacing harness_state): DELETE on the next
+        major release, together with the ``claude-code`` override and the
+        seam call in ``sessions/nodes._harness_for_template``.
+
+        The seam calls this once with the session's FULL stored blob,
+        BEFORE the harness's own namespace is split out of it. Rows
+        written before the blob was namespaced by harness name carry that
+        era's keys at the top level; a harness that ever wrote
+        unnamespaced state overrides this to move its keys into its own
+        namespace, idempotently. Only ``claude-code`` ever did, so the
+        default is a no-op; the hook lives on the base so the platform
+        seam stays harness-agnostic.
+        """
 
     @classmethod
     def merge_config(cls, base: Mapping[str, object], child: Mapping[str, object]) -> dict[str, object]:

@@ -16,6 +16,14 @@ contract it relies on (validate / construct / preflight / runup / ops) is docume
 > present-but-disabled until an operator sets `[plugins] system = ["claude"]`. Where this record
 > calls `claude-code` a "built-in", read "shipped harness": it is now a system-plugin capability,
 > not a core one.
+>
+> Note (2026-08-01): the per-session harness state blob (the `sessions.harness_state` column) is now
+> NAMESPACED by harness name: the row stores `{"<harness-name>": {<that harness's keys>}}`, and the
+> platform seam (`sessions/nodes._harness_for_template`) hands each harness only its own namespace
+> as `self._state`, making cross-harness key collisions on a template's harness switch structurally
+> impossible. The authoring contract is unchanged. Pre-namespacing rows (claude-code's `session_id`
+> at the top level) are adopted lazily by a legacy hoist (`Harness.hoist_legacy_state`, overridden
+> by `claude-code`), compatibility code slated for deletion at the next major release.
 
 ## Context
 

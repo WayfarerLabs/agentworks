@@ -255,7 +255,8 @@ def _start_session_slice(
             # Insert DB record before any tmux work so a crash mid-create
             # leaves a recoverable row (and the teardown can find it to
             # delete). The harness's start op ran just above, so its
-            # state blob lands with the new row.
+            # state (mutated in place inside the node's full namespaced
+            # blob) lands with the new row.
             db.insert_session(
                 name,
                 workspace_name,
@@ -265,7 +266,7 @@ def _start_session_slice(
                 created_workspace=pending_workspace is not None,
                 created_agent=pending_agent is not None,
                 socket_path=expected_socket,
-                harness_state=session_node.harness.state,
+                harness_state=session_node.harness_state,
             )
 
             deploy_restricted_config(run_command, history_limit=config.session.history_limit)

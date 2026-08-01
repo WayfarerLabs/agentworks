@@ -133,20 +133,28 @@ pane-visible echo (below) so the decision is visible in both places the operator
 ### `state`: the per-session persisted blob
 
 `self._state` is a dict the harness reads and mutates in place during ops; the session manager
-persists it to the session row's `harness_state` JSON column after each op. The persistence contract
-the manager provides (and tests pin):
+persists it (inside the row's full blob, below) to the session row's `harness_state` JSON column
+after each op. The persistence contract the manager provides (and tests pin):
 
 - On create, the op runs BEFORE the row insert, so state minted during `start` lands with the new
   row atomically.
 - On restart, the updated blob is persisted BEFORE the new tmux session is created, so a failed
   launch retried later still sees the same identity.
-- A malformed stored blob degrades to `{}` with a warning, never a crash.
+- A malformed stored blob degrades to `{}` with a warning, never a crash; likewise a stored
+  namespace value that is not a dict degrades to empty with a warning at the seam.
 
-The blob is opaque to the core and SHARED across harness switches: if a session's template is edited
-from one harness to another, the old harness's keys are still in the blob. Guard accordingly: treat
-foreign or wrong-typed values as absent (as `claude-code._session_id` does with its
-`isinstance(sid, str)` check), and prefer tool-distinct key names for new harnesses so two tools'
-state never collides on a shared key.
+The stored blob is NAMESPACED by harness name at the platform seam
+(`sessions/nodes._harness_for_template`): the row holds
+`{"<harness-name>": {<that harness's keys>}}`, and each instance is handed only its own namespace as
+`self._state` (the same object, so in-place mutation keeps the full blob current). A harness never
+sees another harness's keys, so if a session's template is re-pointed from one harness to another,
+cross-harness key collisions are structurally impossible and the old harness's namespace survives a
+switch away and back. Author a harness against `self._state` alone; still treat wrong-typed values
+as absent (as `claude-code._session_id` does with its `isinstance(sid, str)` check), since the blob
+content is only as trustworthy as the DB it came from. Pre-namespacing rows carried `claude-code`'s
+`session_id` at the blob's top level; a legacy hoist (`Harness.hoist_legacy_state`, overridden by
+`claude-code`) adopts those at the seam and is compatibility code slated for DELETION on the next
+major release.
 
 ## How the session machinery consumes a harness
 
@@ -159,7 +167,9 @@ The wiring, so you know what you get for free and where to look when debugging:
   does not gate. The node factories do not gate either (they thread no registry); an AST drift guard
   (`cli/tests/sessions/test_harness_gate_drift.py`) enforces that every factory caller gates first.
 - **Construction point:** `_harness_for_template` (`sessions/nodes.py`) is the single place
-  instances are built: `state={}` on a fresh create, `state=row.harness_state` for a live session.
+  instances are built, and the namespacing seam: it holds the FULL blob (`{}` on a fresh create, the
+  stored `row.harness_state` for a live session) and constructs the harness with only its own
+  namespace; the session node exposes the full blob (`harness_state`) for the manager to persist.
 - **Op context:** the manager assembles an op-start `RunContext` (targets, operation scope, scoped
   secrets) per op (`sessions/manager/_create_roll.py`, `_lifecycle.py`). Readiness runs through the
   node's composed `preflight` / `runup` on create; the restart path deliberately builds no runup

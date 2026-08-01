@@ -546,14 +546,17 @@ def restart_session(
             )
             if (note := session_node.harness.launch_note()) is not None:
                 output.detail(note)
-            # Persist the harness's state blob after the op (mirrors the
-            # create-path insert). Usually a no-op (the value was stored on
-            # create), but a session predating the harness_state column
-            # (backfilled to {}) mints its id on this first restart. Persisting
-            # BEFORE create_tmux_session is intentional: a stable id that
-            # survives a tmux-recreate retry beats re-minting a new one each
-            # attempt (the id is the session's, whether or not the pane came up).
-            db.update_session_harness_state(name, session_node.harness.state)
+            # Persist the node's FULL namespaced harness_state blob after the
+            # op (mirrors the create-path insert): the harness mutated its own
+            # namespace in place, and persisting the full blob keeps foreign
+            # harnesses' namespaces intact across a template's harness switch.
+            # Usually a no-op (the value was stored on create), but a session
+            # predating the harness_state column (backfilled to {}) mints its
+            # id on this first restart. Persisting BEFORE create_tmux_session
+            # is intentional: a stable id that survives a tmux-recreate retry
+            # beats re-minting a new one each attempt (the id is the
+            # session's, whether or not the pane came up).
+            db.update_session_harness_state(name, session_node.harness_state)
             linux_user = _mgr._resolve_session_linux_user(db, session, vm)
             session_env = _mgr._resolve_session_env(
                 registry,
