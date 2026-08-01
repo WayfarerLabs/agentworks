@@ -2,7 +2,9 @@
 ## Selected at `agw agent create` time with --template. Agents default
 ## to nothing unless explicitly configured. The per-user dotfiles
 ## fields (dotfiles_source / dotfiles_destination / dotfiles_install_cmd)
-## work here exactly as in the admin-template sample.
+## work here exactly as in the admin-template sample, as do the Claude
+## Code plugin fields (claude_marketplaces / claude_plugins); see
+## "Claude Code Plugins" in cli/README.md.
 ##
 #apiVersion: agentworks/v1
 #kind: agent-template
@@ -14,5 +16,7 @@
 #  user_install_commands: []
 #  mise_activate: true
 #  mise_packages: [terraform@1.14.5]
+#  # claude_marketplaces: ["https://github.com/WayfarerLabs/nerftools#4.1.0"]
+#  # claude_plugins: [nerftools-default@nerftools]
 #  env:
-#    OPENAI_API_KEY: {secret: openai-api-key}
+#    NPM_TOKEN: {secret: npm-token}

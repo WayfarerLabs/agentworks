@@ -95,7 +95,7 @@ agw console delete my-console              # Extra shells are lost but sessions 
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | `--non-interactive` | Disable all interactive prompts                                                                                                             |
 | `--debug`           | Print the full traceback on unhandled errors, and show the Azure SDK's own log lines that are otherwise suppressed (also via `AGW_DEBUG=1`) |
-| `--no-deprecations` | Suppress deprecation warnings (e.g. the TOML resource-section nudge)                                                                        |
+| `--no-deprecations` | Silence the ambient per-command deprecation banner (`agw doctor` always reports deprecation health)                                         |
 
 When `--non-interactive` is set (or stdin is not a TTY), commands that would normally prompt for
 missing values (VM selection, workspace selection, name generation) will fail with a clear error

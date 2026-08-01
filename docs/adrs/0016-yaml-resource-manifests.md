@@ -152,13 +152,15 @@ a config resource or a live instance.
 > and the load-time warning and operator docs say so. A superseding ADR will come out of the
 > upcoming TOML-resource sunset SDD effort.
 
-TOML resource sections remain fully supported publishers into the same registry -- deprecation
-warnings at load, removal deferred to a future major release. Mixing sources is supported; the same
-resource declared in both is a hard error citing both locations. This is not a transitional window:
-keeping both paths live forces the "different publishers, single registry" architecture to be real.
-`agw resource migrate` moves resources from TOML to YAML incrementally, on the operator's schedule,
-with a per-run registry-equivalence verification; `agw resource sample` is the YAML teaching
-surface, while `agw config init/edit/sample` continue to own the permanent settings file.
+TOML resource sections remain fully supported publishers into the same registry, with deprecation
+warnings at load. As originally accepted, removal was deferred to a future major release and the
+dual path was deliberately "not a transitional window": keeping both paths live forces the
+"different publishers, single registry" architecture to be real. That stance is superseded by the
+status note above; TOML resource declarations are now deprecated for removal in a future release.
+Mixing sources is supported; the same resource declared in both is a hard error citing both
+locations. `agw resource migrate` moves resources from TOML to YAML incrementally, on the operator's
+schedule, with a per-run registry-equivalence verification; `agw resource sample` is the YAML
+teaching surface, while `agw config init/edit/sample` continue to own the permanent settings file.
 
 ## Consequences
 
