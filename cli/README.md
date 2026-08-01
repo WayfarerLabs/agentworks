@@ -264,6 +264,9 @@ Manage workspaces on VMs.
 `workspace copy <source> <name>` copies a workspace to a new VM workspace. Accepts `--vm`. Source
 and destination can be the same VM (a clone) or different VMs.
 
+`workspace list` accepts `--vm` to narrow the result set to one VM's workspaces. An unknown name in
+the filter is an error, not an empty result.
+
 `workspace delete` requires `--force` if the workspace has sessions. Running sessions are killed
 during deletion. Pass `--yes` to skip the confirmation prompt.
 
@@ -292,6 +295,9 @@ Manage agents (isolated Linux users) on VMs. Agents are VM-scoped and access wor
 
 `agent create <name>` takes the agent name as a required positional. Optional flags: `--vm`,
 `--template`, and `--grant-all-workspaces`.
+
+`agent list` accepts `--vm` to narrow the result set to one VM's agents. An unknown name in the
+filter is an error, not an empty result.
 
 `agent reinit --update-template <tmpl>` re-points the agent to a different declared template
 (validated against the resource registry, then persisted) before re-running setup. An unknown
