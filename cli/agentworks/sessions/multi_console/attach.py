@@ -28,6 +28,7 @@ from agentworks.errors import (
     StateError,
     UserAbort,
 )
+from agentworks.name_filters import validate_name_filters
 from agentworks.resources.access import named_console_template
 from agentworks.sessions.tmux import tmux_cmd
 from agentworks.vms.manager import gated_vm_boundary
@@ -266,9 +267,18 @@ def list_consoles(
     match; see `Database.list_consoles_with_counts` for full semantics.
     Filters compose with AND.
 
+    An unknown name in any filter raises ``NotFoundError`` rather than
+    matching nothing (issue #304).
+
     With ``names_only=True``, emit one console name per line and skip
     the table render. Used by shell completion (see issue #147).
     """
+    validate_name_filters(
+        db,
+        vm_name=vm_name,
+        workspace_name=workspace_name,
+        agent_name=agent_name,
+    )
     consoles = db.list_consoles_with_counts(
         vm_name=vm_name,
         workspace_name=workspace_name,

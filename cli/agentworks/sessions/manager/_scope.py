@@ -11,6 +11,7 @@ from agentworks.errors import (
     NotFoundError,
     StateError,
 )
+from agentworks.name_filters import validate_name_filters
 from agentworks.vms.manager import gated_vm_boundary
 
 if TYPE_CHECKING:
@@ -164,7 +165,20 @@ def filter_sessions(
     restricts to admin-mode sessions (no agent); it is mutually
     exclusive with ``agent_name`` at the caller level. See
     ``Database.list_sessions``.
+
+    An unknown name in any filter raises ``NotFoundError`` rather than
+    matching nothing (issue #304); every element of a list filter is
+    checked. Because every batch session op (``list_sessions``,
+    ``stop_all_sessions``, ``restart_all_sessions``) funnels its filters
+    through here, this is the single validation point for the session
+    surface.
     """
+    validate_name_filters(
+        db,
+        vm_name=vm_name,
+        workspace_name=workspace_name,
+        agent_name=agent_name,
+    )
     return db.list_sessions(
         workspace_name=workspace_name,
         vm_name=vm_name,
