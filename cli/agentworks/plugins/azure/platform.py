@@ -934,7 +934,11 @@ class AzureVMPlatform(VMPlatform):
             # bootstrap_complete=False and Phase A retries), so only a
             # genuine escape lands here, e.g. the raw OSError that
             # SSHTransport.run lets through when the local ssh binary is
-            # missing. Re-raised wrapped, matching the creation arm.
+            # missing. Re-raised wrapped, matching the creation arm. A
+            # second Ctrl-C DURING this arm's rollback escapes to the
+            # outer interrupt arm, which re-runs the rollback in full;
+            # that repeat is safe because every teardown step is
+            # idempotent or best-effort.
             try:
                 output.detail(f"Azure VM '{vm_name}' provisioned (IP: {public_ip})")
 
