@@ -108,13 +108,16 @@ class LiveSessionNode:
         """Fan into the held harness's readiness fork.
 
         Deliberately NO ``require_declared_refs`` intactness check over
-        the harness refs, unlike the vm-site and git-credential nodes:
-        the dangling-declaration case that check guards (a disabled
+        the harness refs, unlike the vm-site and git-credential nodes.
+        The dangling-declaration case that check guards (a disabled
         plugin's session-template, whose referenced secrets the R12
         materialization pass leaves unmaterialized) is refused at every
         factory call site by the drift-guard-pinned
-        ``ensure_recipe_enabled`` / ``ensure_harness_enabled`` gates,
-        before a node exists. The session nodes also thread no registry
+        ``ensure_recipe_enabled`` gate, before a node exists; the
+        sibling ``ensure_harness_enabled`` gate at the same sites
+        refuses the OTHER disabled state (a disabled harness under a
+        still-ready template, whose secrets stay materialized and so
+        never dangle). The session nodes also thread no registry
         (the R14 gate comments lean on that fact), so the check would
         add a registry edge to guard a state the call-site gates
         already make unreachable.
@@ -187,13 +190,16 @@ class PendingSessionNode:
         """Fan into the held harness's readiness fork.
 
         Deliberately NO ``require_declared_refs`` intactness check over
-        the harness refs, unlike the vm-site and git-credential nodes:
-        the dangling-declaration case that check guards (a disabled
+        the harness refs, unlike the vm-site and git-credential nodes.
+        The dangling-declaration case that check guards (a disabled
         plugin's session-template, whose referenced secrets the R12
         materialization pass leaves unmaterialized) is refused at every
         factory call site by the drift-guard-pinned
-        ``ensure_recipe_enabled`` / ``ensure_harness_enabled`` gates,
-        before a node exists. The session nodes also thread no registry
+        ``ensure_recipe_enabled`` gate, before a node exists; the
+        sibling ``ensure_harness_enabled`` gate at the same sites
+        refuses the OTHER disabled state (a disabled harness under a
+        still-ready template, whose secrets stay materialized and so
+        never dangle). The session nodes also thread no registry
         (the R14 gate comments lean on that fact), so the check would
         add a registry edge to guard a state the call-site gates
         already make unreachable.

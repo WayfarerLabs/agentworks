@@ -390,20 +390,45 @@ def test_live_session_node_exposes_the_same_harness_refs(db: Database, monkeypat
     assert session.secret_refs() == ("scanner-api-key",)
 
 
+@pytest.mark.parametrize("declared", [True, False], ids=["declared", "undeclared"])
 def test_sweep_predicts_a_harness_config_secret_with_owner_usage_framing(
-    db: Database, tmp_path, monkeypatch: pytest.MonkeyPatch
+    db: Database, tmp_path, monkeypatch: pytest.MonkeyPatch, declared: bool
 ) -> None:
     """The #305 fail-fast pin, the whole point of the threading: an
     unresolvable harness_config secret fails at the preflight sweep,
     before any prompt or mutation, with the same owner/usage framing
     every other declared config secret gets, instead of surfacing at
-    resolve time."""
+    resolve time.
+
+    Parametrized over the registry's knowledge of the secret. The
+    ``declared`` case is the path a real session create takes: the
+    operator config declares the template, finalize walks its harness
+    ``dependencies`` and auto-declares the secret row, and the sweep's
+    ``secret_declarations`` finds that row. The ``undeclared`` case
+    (no template in the config) drives the lookup-or-synthesize
+    fallback instead, pinning that the framing is identical either way
+    (the sweep's message is built from the node's declared reference,
+    not the registry row)."""
     from agentworks.bootstrap import build_registry
+    from agentworks.capabilities.harness import HARNESS_REGISTRY
     from agentworks.orchestration.readiness import preflight_all
+    from agentworks.secrets.kinds import SECRET_KIND_NAME
     from tests.orchestrated_fixtures import write_operator_config
 
-    config = write_operator_config(tmp_path, '[secret_config]\nbackends = ["env-var"]\n')
+    # Registered BEFORE the registry builds: in the declared case,
+    # finalize reaches through HARNESS_REGISTRY to walk the template's
+    # harness_config dependencies (the auto-declaration input).
+    monkeypatch.setitem(HARNESS_REGISTRY, "scanner", _SecretHarness)
+    template_section = '[session_templates.scan]\nharness = "scanner"\n' if declared else ""
+    config = write_operator_config(tmp_path, template_section + '[secret_config]\nbackends = ["env-var"]\n')
     registry = build_registry(config)
+    # Prove the parametrization actually forks the declaration path: a
+    # real auto-declared row versus the synthesize fallback's KeyError.
+    if declared:
+        registry.lookup(SECRET_KIND_NAME, "scanner-api-key")
+    else:
+        with pytest.raises(KeyError):
+            registry.lookup(SECRET_KIND_NAME, "scanner-api-key")
     monkeypatch.delenv("AW_SECRET_SCANNER_API_KEY", raising=False)
     session = _scanner_session(db, monkeypatch)
 
