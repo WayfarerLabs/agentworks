@@ -416,6 +416,26 @@ def _relative_target(unit: MigrationUnit, layout: str) -> Path:
     return Path(unit.kind) / f"{unit.name}.yaml"
 
 
+def _tagged_capability_table(kind: str, name: str, capability: Any, config: dict[str, Any] | None) -> dict[str, Any]:
+    """The tagged capability table the manifest surface emits:
+    ``{name: <capability>, <config keys...>}`` (the canonical shape; the
+    sibling ``*_config`` pair is deprecated). A config key literally named
+    ``name`` would collide with the table's discriminator; a known
+    capability's pre-write validation already refuses it as unknown, so
+    this guard covers only capabilities the run cannot validate (e.g. a
+    platform whose plugin is not enabled)."""
+    if config and "name" in config:
+        raise ConfigError(
+            f"cannot migrate {kind}/{name}: its capability config carries a "
+            f"'name' key, which collides with the tagged table's discriminator",
+            hint="Migrate this resource by hand.",
+        )
+    table: dict[str, Any] = {"name": capability}
+    if config:
+        table.update(config)
+    return table
+
+
 def _emit_document(doc: tomlkit.TOMLDocument, unit: MigrationUnit) -> str:
     """Render one unit as a YAML manifest document."""
     spec = _spec_data(doc, unit)
@@ -435,27 +455,25 @@ def _emit_document(doc: tomlkit.TOMLDocument, unit: MigrationUnit) -> str:
         metadata["description"] = spec.pop("description")
 
     if unit.kind == "vm-site":
-        # Flat legacy [azure] / [proxmox] sections nest under
-        # spec.platform_config; the section name becomes the resource
-        # name, and the platform comes from the legacy loader's own
-        # mapping (one source of truth: the [azure] section's
-        # platform is azure-vm, so the emitted manifest must match
-        # what the loader publishes or verification fails). Validate
-        # the blob pre-write in the operator's TOML vocabulary,
-        # mirroring the git-credential branch: an unvalidated emission
-        # would only fail the post-run verification after files were
-        # written.
+        # Flat legacy [azure] / [proxmox] sections emit as the tagged
+        # table (spec.platform: {name: ..., <config keys>}); the section
+        # name becomes the resource name, and the platform comes from
+        # the legacy loader's own mapping (one source of truth: the
+        # [azure] section's platform is azure-vm, so the emitted
+        # manifest must match what the loader publishes or verification
+        # fails). Validate the config keys pre-write in the operator's
+        # TOML vocabulary, mirroring the git-credential branch: an
+        # unvalidated emission would only fail the post-run verification
+        # after files were written.
         from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
         from agentworks.config import _LEGACY_SITE_SECTIONS
 
         platform = _LEGACY_SITE_SECTIONS[unit.section][0]
-        rebuilt_site: dict[str, Any] = {"platform": platform}
-        if spec:
-            rebuilt_site["platform_config"] = dict(spec)
+        platform_config = dict(spec)
         platform_cls = VM_PLATFORM_REGISTRY.get(platform)
-        if platform_cls is not None and "platform_config" in rebuilt_site:
+        if platform_cls is not None and platform_config:
             try:
-                platform_cls.validate(f"[{unit.section}]", rebuilt_site["platform_config"])
+                platform_cls.validate(f"[{unit.section}]", platform_config)
             except ConfigError as exc:
                 raise ConfigError(
                     f"cannot migrate vm-site/{unit.name}: {exc}",
@@ -465,7 +483,7 @@ def _emit_document(doc: tomlkit.TOMLDocument, unit: MigrationUnit) -> str:
                         "loader). Remove them from config.toml, then re-run."
                     ),
                 ) from exc
-        spec = rebuilt_site
+        spec = {"platform": _tagged_capability_table("vm-site", unit.name, platform, platform_config)}
 
     if unit.kind == "git-credential":
         # TOML accepts type (legacy) or provider (alias); the manifest
@@ -480,26 +498,24 @@ def _emit_document(doc: tomlkit.TOMLDocument, unit: MigrationUnit) -> str:
         legacy = spec.pop("type", None)
         provider = spec.pop("provider", None) or legacy
         # token is provider config now: it nests with everything else
-        # provider-owned (org, ...) under provider_config, no longer a
-        # top-level field.
-        rebuilt: dict[str, Any] = {"provider": provider}
-        if spec:
-            rebuilt["provider_config"] = dict(spec)
-        # The sweep above nests EVERYTHING the flat section carried
-        # beyond the kind-owned fields -- including stray keys the TOML
-        # loader silently ignores. The manifest loader validates blobs
-        # strictly, so an unvalidated emission would fail the post-run
-        # verification AFTER writing (rollback fires and the error cites
-        # a rolled-back file). Validate here instead: fail before
-        # anything is written, in the operator's TOML vocabulary.
+        # provider-owned (org, ...) inside the tagged table, no longer a
+        # top-level field. The sweep folds EVERYTHING the flat section
+        # carried beyond the kind-owned fields, including stray keys
+        # the TOML loader silently ignores. The manifest loader
+        # validates blobs strictly, so an unvalidated emission would
+        # fail the post-run verification AFTER writing (rollback fires
+        # and the error cites a rolled-back file). Validate here
+        # instead: fail before anything is written, in the operator's
+        # TOML vocabulary.
+        provider_config = dict(spec)
         from agentworks.capabilities.git_credential import (
             GIT_CREDENTIAL_PROVIDER_REGISTRY,
         )
 
         capability = GIT_CREDENTIAL_PROVIDER_REGISTRY.get(str(provider))
-        if capability is not None and "provider_config" in rebuilt:
+        if capability is not None and provider_config:
             try:
-                capability.validate(f"git-credential/{unit.name}", rebuilt["provider_config"])
+                capability.validate(f"git-credential/{unit.name}", provider_config)
             except ConfigError as exc:
                 raise ConfigError(
                     f"cannot migrate git-credential/{unit.name}: {exc}",
@@ -509,13 +525,13 @@ def _emit_document(doc: tomlkit.TOMLDocument, unit: MigrationUnit) -> str:
                         "loader). Remove them from config.toml, then re-run."
                     ),
                 ) from exc
-        spec = rebuilt
+        spec = {"provider": _tagged_capability_table("git-credential", unit.name, provider, provider_config)}
 
     if unit.kind == "session-template":
-        # The legacy flat command fields nest under harness_config on
-        # the 'shell' harness (mirroring the git-credential
-        # provider_config nesting); a declared harness / harness_config
-        # passes through. env and inherits are kind-owned and stay at
+        # The legacy flat command fields fold into the tagged harness
+        # table on the 'shell' harness (mirroring the git-credential
+        # fold); a declared harness / harness_config pair folds into the
+        # same tagged table. env and inherits are kind-owned and stay at
         # the spec top level. The TOML loader's hoist (``agentworks.config``)
         # and this emission land on the identical internal value, which the
         # post-run registry-equivalence verification proves; validate
@@ -535,9 +551,12 @@ def _emit_document(doc: tomlkit.TOMLDocument, unit: MigrationUnit) -> str:
         if "inherits" in spec:
             rebuilt_session["inherits"] = spec.pop("inherits")
         if harness is not None:
-            rebuilt_session["harness"] = harness
-        if harness_config is not None:
-            rebuilt_session["harness_config"] = dict(harness_config)
+            rebuilt_session["harness"] = _tagged_capability_table(
+                "session-template",
+                unit.name,
+                harness,
+                dict(harness_config) if harness_config is not None else None,
+            )
         rebuilt_session.update(spec)  # env and any remaining kind-owned keys
         if isinstance(harness, str) and harness_config is not None:
             from agentworks.capabilities.harness import HARNESS_REGISTRY

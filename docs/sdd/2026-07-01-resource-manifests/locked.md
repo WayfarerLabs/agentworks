@@ -211,3 +211,22 @@ of the TOML resource path (this SDD's TOML loaders, the decode-through-TOML-load
 and a registration-time schema model superseding the Phase 5.7 invoked-validation contract, as that
 contract's own docstrings anticipated. Future PRs advancing that effort will append further entries
 here as they retire pieces this SDD shipped.
+
+## 2026-08-01: capability config becomes one tagged table (declarative-schema pre-support)
+
+This SDD's manifest spec shape for the three capability-hosting surfaces (vm-site's
+`platform`/`platform_config`, git-credential's `provider`/`provider_config`, session-template's
+`harness`/`harness_config`, the "provider-owned configuration nests under `spec.provider_config`"
+ruling recorded above and pinned in `manifest-schema-lld.md`) is now revised: the canonical shape is
+ONE tagged table on the naming field, whose `name` key selects the capability and whose remaining
+keys are its config (`platform: {name: lima, vm_host: ...}`; discriminator key `name` by maintainer
+ruling). The old sibling shape still loads unchanged but is deprecated for removal: its usage emits
+one aggregated deprecation warning (same channel and silencer as the TOML resource-section nudge,
+surfaced as a doctor row), mixing the shapes on one resource is a hard error, and
+`agw resource migrate` now emits the tagged shape (its registry-equivalence verification is
+unchanged: both shapes normalize to the same internal fields at decode). The secret kind's
+`backend_mappings` is untouched (its map key already names the capability). The hard error on the
+old shape and an in-place manifest upgrade mode for `agw resource migrate` are deliberately NOT in
+this change; they land with the follow-on declarative-schema SDD effort (in progress, PR #316) after
+a released warning window. The locked LLD is not edited in place (a point-in-time record); this
+entry is the authoritative note.

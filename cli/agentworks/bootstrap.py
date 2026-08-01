@@ -76,6 +76,12 @@ def build_registry(config: Config, manifests: ManifestSet | None = None) -> Regi
         manifests = load_manifests(resources_dir)
         for issue in manifests.issues:
             output.warn(f"Manifest: {issue}")
+        # Deprecation nudges ride their own channel, mirroring
+        # ``load_config``'s handling of ``Config.deprecation_issues``:
+        # silenceable per-invocation with --no-deprecations.
+        if manifests.deprecation_issues and not output.deprecations_suppressed():
+            for issue in manifests.deprecation_issues:
+                output.warn(f"Manifest: {issue}")
 
     # Host support is NOT a bootstrap concern: every platform publishes its
     # capability row unconditionally (R13; host support is the row's folded

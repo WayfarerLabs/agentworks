@@ -115,18 +115,19 @@ def test_session_template_flat_fields_rejected_with_preserved_message(
     )
     with pytest.raises(ConfigError) as exc:
         load_manifests(root)
-    # The exact operator-facing phrasing the bespoke reject used, grouped
-    # into one message (alphabetized), now data-driven from the table.
+    # The operator-facing message, grouped into one line (alphabetized),
+    # data-driven from the table; it points at the tagged harness table
+    # (the canonical shape).
     assert (
         "session-template spec field(s) command, required_commands, "
-        "restart_command are the 'shell' harness's config; set harness: "
-        "shell and move them under spec.harness_config"
+        "restart_command are the 'shell' harness's config; move them "
+        "into a spec.harness table with name: shell"
     ) in str(exc.value)
 
 
 def test_session_template_single_flat_field_rejected(tmp_path: Path) -> None:
     root = _manifest(tmp_path, ["command: htop"])
-    with pytest.raises(ConfigError, match="move them under spec.harness_config"):
+    with pytest.raises(ConfigError, match="move them into a spec.harness table"):
         load_manifests(root)
 
 

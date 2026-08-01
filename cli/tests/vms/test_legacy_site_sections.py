@@ -209,14 +209,14 @@ def _write_site_manifest(manifest_dir: Path, token_secret: str) -> None:
 
 def test_manifest_token_secret_nonconforming_warns(tmp_path: Path) -> None:
     """The YAML manifest path emits the same warning: a non-conforming
-    ``platform_config.token_secret`` decodes with an issue whose location
-    includes ``platform_config.token_secret`` and names the bad secret."""
+    ``token_secret`` decodes with an issue whose shape-neutral location
+    names the key and the bad secret."""
     from agentworks.manifests.loader import load_manifests
 
     manifest_dir = tmp_path / "resources"
     _write_site_manifest(manifest_dir, "GITHUB_TOKEN")
     manifests = load_manifests(manifest_dir)
-    assert any("GITHUB_TOKEN" in issue and "platform_config.token_secret" in issue for issue in manifests.issues), (
+    assert any("GITHUB_TOKEN" in issue and "token_secret (platform config)" in issue for issue in manifests.issues), (
         manifests.issues
     )
     # The site still decoded, with the secret name preserved.

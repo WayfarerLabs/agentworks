@@ -163,3 +163,17 @@ for each native route and deleted after (post-Tailscale, on create failure, and 
 2026-07-26 addendum's "Azure `native_transport()` public-IP rationale for `config`" still holds (the
 SSH-via-public-IP path remains; only how the route opens changed). Living reference:
 `cli/agentworks/plugins/azure/platform.py`, `cli/agentworks/plugins/azure/network.py`, and ADR 0003.
+
+## Addendum: 2026-08-01 (vm-site manifest spec shape: tagged platform table)
+
+The vm-site manifest spec shape this SDD recorded (`hla.md` line 226's `spec.platform` string plus
+`spec.platform_config` table, and the worked old-shape example near line 487) is revised as part of
+the declarative-schema effort's release pre-support: the canonical shape is now ONE tagged table on
+`spec.platform`, whose `name` key selects the platform capability and whose remaining keys are its
+config (`platform: {name: lima, vm_host: ...}`). The old sibling shape still loads unchanged but is
+deprecated for removal, with an aggregated load-time warning shipped now; the hard error and an
+in-place manifest upgrade mode for `agw resource migrate` are deferred to the declarative-schema SDD
+effort (in progress, PR #316). The HLA is not edited in place (a point-in-time record); its shape
+references are superseded by this entry. See the resource-manifests lockfile's 2026-08-01 entry for
+the full cross-kind revision (git-credential's provider and session-template's harness change
+identically).

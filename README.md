@@ -208,11 +208,11 @@ in a workspace on a VM. The session is the outer wrapper (the tmux session, conf
 specifications, etc.) while the harness is the piece that knows how to run a particular tool (e.g. a
 Claude Code instance, or just a plain login shell): it owns starting and restarting the workload and
 checking that the tool's required executables are present on the launch target. A session template
-selects a harness (e.g. `harness: claude-code`) for a default experience and can further customize
-the behavior with a `harness_config` block. For even greater flexibility (e.g. the ability to run a
-tool that doesn't yet have a dedicated harness), the default `shell` harness simply runs a login
-shell, optionally executing a command or just leaving it in interactive mode; a template that names
-no harness runs this built-in `shell` harness.
+selects a harness with a tagged `harness` table (e.g. `harness: {name: claude-code}`) for a default
+experience and can further customize the behavior with the table's remaining keys. For even greater
+flexibility (e.g. the ability to run a tool that doesn't yet have a dedicated harness), the default
+`shell` harness simply runs a login shell, optionally executing a command or just leaving it in
+interactive mode; a template that names no harness runs this built-in `shell` harness.
 
 Because harnesses are a distinct extension layer separate from the core, they can be built to
 integrate tightly with their target tool (e.g. Claude Code), maximizing the functionality and value

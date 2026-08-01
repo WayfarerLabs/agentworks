@@ -370,7 +370,7 @@ def test_git_credential_token_in_provider_config(tmp_path: Path) -> None:
           token: at-top-level
         """,
     )
-    with pytest.raises(ConfigError, match="under spec.provider_config"):
+    with pytest.raises(ConfigError, match="into\\s+the spec.provider table"):
         load_manifests(tmp_path / "resources")
 
 
@@ -408,7 +408,7 @@ def test_git_credential_org_must_nest_under_provider_config(tmp_path: Path) -> N
           org: my-org
         """,
     )
-    with pytest.raises(ConfigError, match="goes under\\s+spec.provider_config"):
+    with pytest.raises(ConfigError, match="goes inside\\s+the spec.provider table"):
         load_manifests(tmp_path / "resources")
 
 

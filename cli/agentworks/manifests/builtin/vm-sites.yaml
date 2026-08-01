@@ -20,7 +20,7 @@ metadata:
   name: lima-local
   description: Local Lima VMs on this workstation
 spec:
-  platform: lima
+  platform: { name: lima }
 ---
 apiVersion: agentworks/v1
 kind: vm-site
@@ -28,4 +28,4 @@ metadata:
   name: wsl2
   description: WSL2 distros on this Windows workstation
 spec:
-  platform: wsl2
+  platform: { name: wsl2 }
