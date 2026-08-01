@@ -1,0 +1,26 @@
+{
+  "version": "0.2",
+  "import": ["../../../.cspell.json"],
+  "words": [
+    "abstractmethod",
+    "agnostically",
+    "assertable",
+    "ephemerals",
+    "findutils",
+    "frozenset",
+    "hostable",
+    "monkeypatch",
+    "monkeypatches",
+    "nomatch",
+    "overengineering",
+    "pinnable",
+    "preflighted",
+    "prereq",
+    "repoint",
+    "repointed",
+    "resumability",
+    "runups",
+    "staticmethod",
+    "ungranted"
+  ]
+}
