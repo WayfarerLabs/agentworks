@@ -221,7 +221,7 @@ def test_shell_vm_provisioner_uses_native_transport(
             return _stub_target()
 
         @contextlib.contextmanager  # type: ignore[arg-type]
-        def transient_route(self, vm: object):  # type: ignore[no-untyped-def]
+        def transient_route(self, vm: object, *, config: object | None = None):  # type: ignore[no-untyped-def]
             yield
 
         def vm_active(self, vm: object, *, config: object | None = None):  # type: ignore[no-untyped-def]
@@ -288,7 +288,7 @@ def test_provisioner_shell_target_wraps_missing_native_transport(
             return None
 
         @contextlib.contextmanager  # type: ignore[arg-type]
-        def transient_route(self, vm: object):  # type: ignore[no-untyped-def]
+        def transient_route(self, vm: object, *, config: object | None = None):  # type: ignore[no-untyped-def]
             yield
 
     # The platform arrives already bound from the caller's composition
@@ -335,7 +335,7 @@ def test_provisioner_shell_target_proxmox_hint_points_at_web_console(
             return None
 
         @contextlib.contextmanager  # type: ignore[arg-type]
-        def transient_route(self, vm: object):  # type: ignore[no-untyped-def]
+        def transient_route(self, vm: object, *, config: object | None = None):  # type: ignore[no-untyped-def]
             yield
 
     vm = vm_manager._require_vm(db, "vm1")
@@ -358,15 +358,15 @@ def test_provisioner_shell_target_proxmox_hint_points_at_web_console(
     db.close()
 
 
-def test_provisioner_shell_target_opens_route_and_registers_rearm_for_azure(
+def test_provisioner_shell_target_opens_route_and_registers_close_for_azure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """On Azure, the provisioner shell must open the public SSH route
-    (heal a missing public IP, lift the deny-all-inbound NSG rule) AND
-    register the rule re-arm as an ExitStack callback. The rule must
-    come back regardless of how shell_vm unwinds (success, SSH failure,
-    ^C)."""
+    """On Azure, the provisioner shell must open the scoped SSH route
+    (heal a missing public IP, converge the NSG, poke the ephemeral
+    allow) AND register the allow removal as an ExitStack callback. The
+    allow must come down regardless of how shell_vm unwinds (success,
+    SSH failure, ^C)."""
     import contextlib
 
     from agentworks.plugins.azure.platform import AzureVMPlatform
@@ -377,7 +377,7 @@ def test_provisioner_shell_target_opens_route_and_registers_rearm_for_azure(
     db = _seed_db(tmp_path)
 
     open_calls: list[str] = []
-    rearm_calls: list[str] = []
+    close_calls: list[str] = []
 
     class _FakeAzureProvisioner(AzureVMPlatform):
         # Chain super with a minimal valid config (validate re-runs
@@ -392,11 +392,15 @@ def test_provisioner_shell_target_opens_route_and_registers_rearm_for_azure(
         def _ensure_public_ip(self, vm: object) -> None:
             open_calls.append(f"heal:{getattr(vm, 'name', '?')}")
 
-        def _lift_deny_all_inbound(self, vm: object) -> None:
-            open_calls.append(f"lift:{getattr(vm, 'name', '?')}")
+        def _converge_nsg(self, vm: object) -> None:
+            open_calls.append(f"converge:{getattr(vm, 'name', '?')}")
 
-        def _arm_deny_all_inbound(self, vm: object) -> None:
-            rearm_calls.append(getattr(vm, "name", "?"))
+        def _poke_ssh_allow(self, vm: object, extra_cidrs: list[str] | None = None) -> list[str]:
+            open_calls.append(f"poke:{getattr(vm, 'name', '?')}")
+            return ["203.0.113.9/32"]
+
+        def _remove_ssh_allow(self, vm: object, prefixes: list[str] | None = None) -> None:
+            close_calls.append(getattr(vm, "name", "?"))
 
         def native_transport(self, vm: object, *, config: object | None = None) -> Transport:
             # The factory probes ``target.run('echo ok', ...)``; the real
@@ -420,30 +424,30 @@ def test_provisioner_shell_target_opens_route_and_registers_rearm_for_azure(
             _make_config(),
             stack=stack,
         )  # type: ignore[arg-type]
-        # Heal-then-lift must have run inside the stack scope.
-        assert open_calls == ["heal:vm1", "lift:vm1"]
-        # The re-arm must NOT have run yet; it should fire on stack exit.
-        assert rearm_calls == []
+        # Heal, converge, poke must have run inside the stack scope.
+        assert open_calls == ["heal:vm1", "converge:vm1", "poke:vm1"]
+        # The allow removal must NOT have run yet; it fires on stack exit.
+        assert close_calls == []
         assert isinstance(target, SSHTransport)
         assert target.host == "203.0.113.42"
 
-    # Stack exited: the re-arm must have run exactly once.
-    assert rearm_calls == ["vm1"]
+    # Stack exited: the allow removal must have run exactly once.
+    assert close_calls == ["vm1"]
     db.close()
 
 
-def test_provisioner_shell_target_rearms_on_exception_for_azure(
+def test_provisioner_shell_target_closes_allow_on_exception_for_azure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The re-arm must be registered BEFORE any post-open call that
-    could raise, so the deny-all-inbound rule comes back regardless of
-    how the function unwinds. Without this contract a future refactor
+    """The allow removal must be registered BEFORE any post-open call
+    that could raise, so the ephemeral SSH allow comes down regardless
+    of how the function unwinds. Without this contract a future refactor
     that entered ``transient_route`` after ``native_transport`` would
-    silently leave the VM's SSH port exposed on every error path.
+    silently leave the scoped allow in place on every error path.
 
     Test: make ``native_transport`` raise after the route opened;
-    assert the re-arm still fired when the surrounding ExitStack
+    assert the allow removal still fired when the surrounding ExitStack
     closes."""
     import contextlib
 
@@ -453,7 +457,7 @@ def test_provisioner_shell_target_rearms_on_exception_for_azure(
     from agentworks.vms import manager as vm_manager
 
     db = _seed_db(tmp_path)
-    rearm_calls: list[str] = []
+    close_calls: list[str] = []
 
     class _AzureRaisesAfterOpen(AzureVMPlatform):
         # Chain super with a minimal valid config; see _FakeAzureProvisioner.
@@ -466,11 +470,14 @@ def test_provisioner_shell_target_rearms_on_exception_for_azure(
         def _ensure_public_ip(self, vm: object) -> None:
             return None
 
-        def _lift_deny_all_inbound(self, vm: object) -> None:
+        def _converge_nsg(self, vm: object) -> None:
             return None
 
-        def _arm_deny_all_inbound(self, vm: object) -> None:
-            rearm_calls.append(getattr(vm, "name", "?"))
+        def _poke_ssh_allow(self, vm: object, extra_cidrs: list[str] | None = None) -> list[str]:
+            return ["203.0.113.9/32"]
+
+        def _remove_ssh_allow(self, vm: object, prefixes: list[str] | None = None) -> None:
+            close_calls.append(getattr(vm, "name", "?"))
 
         def native_transport(self, vm: object, *, config: object | None = None) -> Transport:
             raise RuntimeError("simulated post-open failure")
@@ -484,12 +491,12 @@ def test_provisioner_shell_target_rearms_on_exception_for_azure(
                 _make_config(),
                 stack=stack,
             )  # type: ignore[arg-type]
-        # ExitStack still open; the re-arm fires on stack exit, not before.
-        assert rearm_calls == []
+        # ExitStack still open; the removal fires on stack exit, not before.
+        assert close_calls == []
 
-    # After stack exit, the re-arm fired despite the RuntimeError. This
-    # is the load-bearing invariant.
-    assert rearm_calls == ["vm1"]
+    # After stack exit, the allow removal fired despite the RuntimeError.
+    # This is the load-bearing invariant.
+    assert close_calls == ["vm1"]
     db.close()
 
 
@@ -497,13 +504,13 @@ def test_provisioner_shell_target_retries_reachability_probe(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """After Azure's transient_route opens the SSH route (lifts the
-    deny-all-inbound rule, or heals a missing public IP), the change can
-    take a few seconds to propagate through the SDN. The function probes
-    the target with target.run('echo ok', ...) and retries on SSHError,
-    so the operator's interactive ssh sees a reachable target rather
-    than Connection refused on the first attempt. Matches the rekey_vm
-    pattern."""
+    """After Azure's transient_route opens the SSH route (pokes the
+    scoped ephemeral allow, or heals a missing public IP), the change
+    can take a few seconds to propagate through the SDN. The function
+    probes the target with target.run('echo ok', ...) and retries on
+    SSHError, so the operator's interactive ssh sees a reachable target
+    rather than Connection refused on the first attempt. Matches the
+    rekey_vm pattern."""
     import contextlib
 
     from agentworks.ssh import SSHError
@@ -538,7 +545,7 @@ def test_provisioner_shell_target_retries_reachability_probe(
             return t
 
         @contextlib.contextmanager  # type: ignore[arg-type]
-        def transient_route(self, vm: object):  # type: ignore[no-untyped-def]
+        def transient_route(self, vm: object, *, config: object | None = None):  # type: ignore[no-untyped-def]
             yield
 
     vm = vm_manager._require_vm(db, "vm1")
@@ -584,7 +591,7 @@ def test_provisioner_shell_target_raises_defensively_on_empty_host(
             return SSHTransport(host="")
 
         @contextlib.contextmanager  # type: ignore[arg-type]
-        def transient_route(self, vm: object):  # type: ignore[no-untyped-def]
+        def transient_route(self, vm: object, *, config: object | None = None):  # type: ignore[no-untyped-def]
             yield
 
     vm = vm_manager._require_vm(db, "vm1")

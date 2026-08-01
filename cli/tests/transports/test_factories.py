@@ -189,7 +189,7 @@ def test_native_transport_invokes_transient_route_then_builder() -> None:
         mock_run.return_value = SSHResult(returncode=0, stdout="ok\n", stderr="")
         t = native_transport(vm, platform, config, stack=stack)
 
-    platform.transient_route.assert_called_once_with(vm)
+    platform.transient_route.assert_called_once_with(vm, config=config)
     platform.native_transport.assert_called_once_with(vm, config=config)
     assert t is fake_target
 
@@ -283,7 +283,7 @@ def test_native_transport_reachability_probe_gives_up_after_six() -> None:
 
 def test_native_transport_azure_transient_route_opens_and_closes() -> None:
     """``transient_route`` opens the route on enter and closes it (Azure:
-    re-arms the deny-all-inbound rule) on exit; both fire regardless of
+    removes the ephemeral SSH allow) on exit; both fire regardless of
     whether the downstream code raised."""
     vm = _mock_vm(site="azure")
     config = _mock_config()
@@ -294,7 +294,7 @@ def test_native_transport_azure_transient_route_opens_and_closes() -> None:
     platform.name = "azure-vm"
 
     @contextlib.contextmanager
-    def fake_route(_vm):  # type: ignore[no-untyped-def] # noqa: ANN001, ANN202
+    def fake_route(_vm, *, config=None):  # type: ignore[no-untyped-def] # noqa: ANN001, ANN202
         events.append("open")
         try:
             yield
@@ -329,7 +329,7 @@ def test_native_transport_azure_close_fires_on_downstream_exception() -> None:
     platform.name = "azure-vm"
 
     @contextlib.contextmanager
-    def fake_route(_vm):  # type: ignore[no-untyped-def] # noqa: ANN001, ANN202
+    def fake_route(_vm, *, config=None):  # type: ignore[no-untyped-def] # noqa: ANN001, ANN202
         events.append("open")
         try:
             yield

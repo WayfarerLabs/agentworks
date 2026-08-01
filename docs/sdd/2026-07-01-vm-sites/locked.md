@@ -157,7 +157,9 @@ The Azure public-IP detach behavior quoted in `hla.md` (the old `post_tailscale_
 `transient_route` hook docstrings, which describe detaching the public IP once Tailscale is up and
 attaching a temporary one for native routes) was retired. Driver: Microsoft is retiring default
 outbound access, which made VMs with a detached public IP go offline. Azure VMs now keep their
-public IP for life; exposure is controlled by an NSG deny-all-inbound rule armed post-Tailscale and
-lifted transiently for native routes. The 2026-07-26 addendum's "Azure `native_transport()`
-public-IP rationale for `config`" still holds (the SSH-via-public-IP path remains; only how the
-route opens changed). Living reference: `cli/agentworks/plugins/azure/platform.py` and ADR 0003.
+public IP for life; the NSG carries a permanent deny-all-inbound baseline, and SSH ingress happens
+only through an ephemeral allow rule scoped to the operator's egress IP, opened for bootstrap and
+for each native route and deleted after (post-Tailscale, on create failure, and on route exit). The
+2026-07-26 addendum's "Azure `native_transport()` public-IP rationale for `config`" still holds (the
+SSH-via-public-IP path remains; only how the route opens changed). Living reference:
+`cli/agentworks/plugins/azure/platform.py`, `cli/agentworks/plugins/azure/network.py`, and ADR 0003.

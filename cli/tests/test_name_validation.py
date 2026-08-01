@@ -18,7 +18,7 @@ from agentworks.config import (
     validate_name,
 )
 from agentworks.output import ValidationError
-from agentworks.plugins.azure.platform import VNET_NAME_SUFFIX
+from agentworks.plugins.azure.network import VNET_NAME_SUFFIX
 from agentworks.sessions.tmux import AGENT_SOCKET_ROOT, MAX_SESSION_NAME_LENGTH, SUN_PATH_MAX
 
 

@@ -158,10 +158,11 @@ def native_transport(
     ``platform`` is the VM's bound platform, resolved at the caller's
     composition root (the node factories via ``resolve_site``). ``stack``
     bounds the lifetime of any transient network state the platform
-    needs (Azure lifts its deny-all-inbound NSG rule on enter, healing
-    a missing public IP first, and re-arms the rule on exit): the
-    platform's :meth:`VMPlatform.transient_route` runs first; once
-    that context is held, the per-platform transport builder runs.
+    needs (Azure pokes an ephemeral SSH allow scoped to the operator's
+    egress IP on enter, healing a missing public IP first, and deletes
+    the allow on exit): the platform's
+    :meth:`VMPlatform.transient_route` runs first; once that context is
+    held, the per-platform transport builder runs.
 
     A ``None`` from :meth:`VMPlatform.native_transport` (proxmox: the
     one-shot QEMU guest-agent exec can't host an interactive shell)
@@ -172,14 +173,17 @@ def native_transport(
     Probes the resulting transport with ``echo ok`` and retries up to
     six times with a 3-second sleep between attempts (total budget ~15s
     of sleeps plus the per-attempt 10s timeout) so the Azure SDN has
-    time to apply a freshly-lifted NSG rule (or a freshly-healed public
+    time to apply a freshly-poked NSG allow (or a freshly-healed public
     IP) before the first real command lands. Local transports (Lima,
-    WSL2) succeed on the first probe and skip the sleeps entirely.
+    WSL2) succeed on the first probe and skip the sleeps entirely. If
+    every probe fails on Azure, a warning notes that the allow was
+    scoped to the detected egress IP and names
+    ``operator.ssh_allow_cidrs`` before the SSHError propagates.
     """
     from agentworks import output
     from agentworks.ssh import SSHError
 
-    stack.enter_context(platform.transient_route(vm))
+    stack.enter_context(platform.transient_route(vm, config=config))
     target = platform.native_transport(vm, config=config)
     if target is None:
         raise StateError(
@@ -205,8 +209,9 @@ def native_transport(
             hint=(
                 "For Azure: the VM's NIC has no public IP and the heal may "
                 "have silently failed; check the Azure portal for the VM's "
-                "network configuration, or use the serial console (Connect > "
-                "Serial console on the VM resource page)."
+                "network configuration (including the NSG's transient SSH "
+                "allow), or use the serial console (Connect > Serial console "
+                "on the VM resource page)."
             ),
         )
 
@@ -218,6 +223,17 @@ def native_transport(
             if attempt == 0:
                 output.detail("Waiting for provisioning transport...")
             if attempt == 5:
+                if platform.name == "azure-vm":
+                    # The NSG allow is scoped to the DETECTED egress IP;
+                    # if the operator's SSH traffic leaves through a
+                    # different address (VPN split tunnel, proxy, CGNAT),
+                    # the hole does not match and every probe times out.
+                    output.warn(
+                        "The transient Azure SSH allow is scoped to your detected "
+                        "public IP; if your SSH traffic egresses elsewhere (VPN "
+                        "split tunnel, proxy, CGNAT), add your address(es) to "
+                        "operator.ssh_allow_cidrs in your agentworks config."
+                    )
                 raise
             time.sleep(3)
     return target

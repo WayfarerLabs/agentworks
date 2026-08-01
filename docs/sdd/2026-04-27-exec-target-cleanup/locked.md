@@ -27,6 +27,7 @@ provisioner-specific paths) is its own effort, captured in
 The Azure public-IP attach/detach flow steps in `frd.md` and `hla.md` ("For Azure: attach public IP"
 / "For Azure: detach public IP") describe a retired mechanism. Driver: Microsoft is retiring default
 outbound access, which made VMs with a detached public IP go offline. Azure VMs now keep their
-public IP for the VM's whole lifetime; exposure is controlled by an NSG deny-all-inbound rule armed
-once Tailscale is confirmed and lifted transiently for native routes. Living reference:
-`cli/agentworks/plugins/azure/platform.py` and ADR 0003.
+public IP for the VM's whole lifetime; the NSG carries a permanent deny-all-inbound baseline, and
+SSH ingress happens only through an ephemeral allow rule scoped to the operator's egress IP, opened
+for bootstrap and for each native route and deleted after. Living reference:
+`cli/agentworks/plugins/azure/platform.py`, `cli/agentworks/plugins/azure/network.py`, and ADR 0003.

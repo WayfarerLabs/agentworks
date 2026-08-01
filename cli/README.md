@@ -238,11 +238,15 @@ platform-native transports (`limactl shell`, `wsl.exe`) drop the `env=` kwarg by
 platform-native transport (`limactl shell` for Lima, `wsl.exe` for WSL2, SSH via the VM's public IP
 for Azure) instead of Tailscale. Useful when Tailscale itself is the thing you need to reach the VM
 to fix (the issue #117 latched DNS state is the canonical case: its heal involves restarting
-tailscaled, which would terminate a Tailscale-SSH session mid-sequence). On Azure, the inbound SSH
-firewall rule is opened for the duration of the session and closed again on exit (the public IP
-itself is permanent). Proxmox isn't supported by this flag because the QEMU guest agent's exec
-interface is one-shot and non-interactive; use the Proxmox web UI's serial console (`VM > Console`
-in the Proxmox VE web UI) as the equivalent escape hatch.
+tailscaled, which would terminate a Tailscale-SSH session mid-sequence). On Azure, the VM's firewall
+denies all inbound traffic at baseline; for the duration of the session an ephemeral SSH allow rule
+scoped to your detected public IP is created, and removed again on exit (the public IP itself is
+permanent). If your SSH traffic egresses through a different address than the detection sees (VPN
+split tunnel, proxy, CGNAT), set `ssh_allow_cidrs` in the config's `[operator]` section to a list of
+IPs and/or CIDRs to allow additionally; if detection fails entirely, those entries are used alone.
+Proxmox isn't supported by this flag because the QEMU guest agent's exec interface is one-shot and
+non-interactive; use the Proxmox web UI's serial console (`VM > Console` in the Proxmox VE web UI)
+as the equivalent escape hatch.
 
 ### Workspaces
 

@@ -595,12 +595,11 @@ def rekey_vm(
         # refuses anything outside it loudly.
         _stack.enter_context(activation_gate(vm_node, resolver.get))
 
-        # native_transport() composes transient_route (Azure opens its
-        # public SSH route on enter and re-arms the deny-all-inbound
-        # rule on exit) with the platform-native transport builder and
-        # the 6-attempt reachability probe. The caller-supplied
-        # ExitStack scopes the transient state to the duration of the
-        # rekey.
+        # native_transport() composes transient_route (Azure pokes a
+        # scoped ephemeral SSH allow on enter and deletes it on exit)
+        # with the platform-native transport builder and the 6-attempt
+        # reachability probe. The caller-supplied ExitStack scopes the
+        # transient state to the duration of the rekey.
         exec_target = native_transport(vm, platform, config, stack=_stack)
 
         # Restart, logout, login, restart. The initial restart clears any

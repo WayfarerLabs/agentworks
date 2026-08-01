@@ -56,17 +56,24 @@ just started:
   WSL2 a `wsl.exe`-backed transport. Proxmox deliberately returns the default `None` and sets
   `no_native_transport_hint` to point the operator at the Proxmox web-UI serial console, because its
   guest-agent exec is one-shot and cannot host an interactive shell.
-- `transient_route(vm) -> context manager` (default `nullcontext()`). Azure opens its public SSH
-  route on enter (heals a missing public IP, lifts the deny-all-inbound NSG rule) and re-arms the
-  rule in a `finally`, bounding the exposure window to the transport's lifetime.
+- `transient_route(vm) -> context manager` (default `nullcontext()`). Azure opens a scoped SSH route
+  on enter (heals a missing public IP, converges the NSG onto the baseline-deny model, pokes an
+  ephemeral allow rule scoped to the operator's egress prefixes) and deletes the allow in a
+  `finally`, bounding the exposure window to the transport's lifetime.
 - `vm_active(vm, *, config=None) -> context manager` (default `nullcontext()`). WSL2 returns a
   keepalive that holds the distro against Windows' idle-shutdown for the span of a command, with
   Win32 Job-Object orphan-proofing for a hard-killed `agw`.
-- `post_tailscale_ready(vm) -> None` (default no-op). Azure arms a deny-all-inbound rule on the VM's
-  network security group here, the instant Tailscale is reachable (the public IP itself stays
-  attached for the VM's whole lifetime). The asymmetry with `transient_route` is intentional: the VM
-  leaves `create()` publicly reachable (cloud-init needs inbound SSH to bootstrap), and neither that
-  nor this arming point is context-manager-shaped.
+- `post_tailscale_ready(vm) -> None` (default no-op). The contract is "close provisioning access":
+  it fires the instant Tailscale is reachable. Azure deletes the ephemeral bootstrap SSH allow rule
+  here, leaving the VM with zero inbound exposure behind its permanent deny-all-inbound baseline
+  (the public IP itself stays attached for the VM's whole lifetime). The asymmetry with
+  `transient_route` is intentional: the bootstrap ingress opens inside `create()` (cloud-init needs
+  inbound SSH from the operator), and neither that nor this closing point is context-manager-shaped.
+- `secure_failed_vm(vm) -> None` (default no-op). Same contract as `post_tailscale_ready`, for the
+  path where a create is kept in the FAILED state (Phase A bootstrap or Tailscale verification
+  died); the success-only hook never fired there. Azure deletes the bootstrap allow so a failed VM
+  defaults to zero inbound exposure; debugging survives via `vm shell --platform` (a fresh transient
+  allow) and the serial console (not NSG-gated).
 
 **Gates** (cheap, offline, distinct from preflight):
 
