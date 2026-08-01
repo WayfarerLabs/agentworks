@@ -237,17 +237,21 @@ class TestCreateOSDiskClamp:
     """`create` clamps a below-floor vm-template disk up to the image's minimum
     (IMAGE_OS_DISK_FLOOR_GIB) and warns, mirroring the cpu/memory round-up; an
     at-or-above-floor disk passes through untouched with no warning (issue #322
-    follow-up). The Azure clients are faked so the flow never touches Azure (same
+    follow-up). The recorded OS-disk shape also pins ``delete_option`` (issue
+    #334). The Azure clients are faked so the flow never touches Azure (same
     pattern as ``TestCreateProvisioningOutput``)."""
 
     class _RecordingVMs:
-        """A fake ``virtual_machines`` recording the OS-disk size ``create`` sends."""
+        """A fake ``virtual_machines`` recording the OS-disk shape ``create`` sends."""
 
         def __init__(self) -> None:
             self.disk_gib: int | None = None
+            self.delete_option: str | None = None
 
         def begin_create_or_update(self, rg: str, name: str, params: object) -> SimpleNamespace:
-            self.disk_gib = params.storage_profile.os_disk.disk_size_gb  # type: ignore[attr-defined]
+            os_disk = params.storage_profile.os_disk  # type: ignore[attr-defined]
+            self.disk_gib = os_disk.disk_size_gb
+            self.delete_option = os_disk.delete_option
             return SimpleNamespace(result=lambda: SimpleNamespace(id="/vm-id"))
 
     @staticmethod
@@ -308,6 +312,13 @@ class TestCreateOSDiskClamp:
         vms = self._run(monkeypatch, disk_gib=50)
         assert vms.disk_gib == 50
         assert not captured_output.warnings
+
+    def test_os_disk_delete_option_is_delete(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The OS disk is declared VM-lifetime (``delete_option="Delete"``) so
+        Azure removes it with the VM regardless of the tag-based cleanup sweep
+        (issue #334)."""
+        vms = self._run(monkeypatch, disk_gib=50)
+        assert vms.delete_option == "Delete"
 
 
 class TestImageOSDiskFloorConstant:
