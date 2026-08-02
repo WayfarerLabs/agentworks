@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from agentworks.ssh import SSHError, SSHResult
+from agentworks.terminal import guarded_terminal
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -85,7 +86,6 @@ class Transport(abc.ABC):
         the kwargs being accepted without isinstance narrowing.
         """
 
-    @abc.abstractmethod
     def interactive(
         self,
         command: str,
@@ -99,6 +99,30 @@ class Transport(abc.ABC):
         drop it (``limactl shell`` and ``wsl.exe`` don't expose env
         injection on their interactive APIs). Returns the process exit
         code; does not raise on remote-command failure.
+
+        Concrete on the ABC, delegating the transport-specific part to
+        ``_interactive``, so that every interactive path is wrapped in
+        ``guarded_terminal``: an attach hands the operator's terminal to
+        a remote full-screen program, and a connection that dies
+        mid-attach never delivers that program's reset sequences. There
+        are several attach call sites across sessions, consoles, and
+        agent/VM shells; putting the guard here means none of them can
+        forget it. See :mod:`agentworks.terminal`.
+        """
+        with guarded_terminal():
+            return self._interactive(command, env=env)
+
+    @abc.abstractmethod
+    def _interactive(
+        self,
+        command: str,
+        *,
+        env: dict[str, str] | None = None,
+    ) -> int:
+        """Transport-specific interactive session (see ``interactive``).
+
+        Subclasses implement this rather than ``interactive`` so the
+        terminal guard cannot be bypassed by an override.
         """
 
     @abc.abstractmethod

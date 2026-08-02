@@ -214,6 +214,14 @@ class SSHLogger:
 SSH_CONNECT_TIMEOUT = 30
 SSH_DEFAULT_RETRIES = 1
 
+# Client-side keepalive budget for interactive attaches: a probe every
+# 15s, giving up after 4 unanswered ones, so a dead peer is detected in
+# roughly a minute. Long enough not to tear down a session over a brief
+# network blip, short enough that a suspended laptop's terminal gets
+# cleaned up promptly on wake. See ``transports/ssh.py:_keepalive_args``.
+SSH_INTERACTIVE_ALIVE_INTERVAL = 15
+SSH_INTERACTIVE_ALIVE_COUNT_MAX = 4
+
 
 def _set_env_args(env: dict[str, str] | None) -> list[str]:
     """Build the ``-o SetEnv=...`` ssh-client args for a (key, value) dict.

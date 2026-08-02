@@ -16,7 +16,14 @@ import shlex
 import subprocess
 from typing import TYPE_CHECKING
 
-from agentworks.ssh import SSH_DEFAULT_RETRIES, SSHError, SSHResult, _set_env_args
+from agentworks.ssh import (
+    SSH_DEFAULT_RETRIES,
+    SSH_INTERACTIVE_ALIVE_COUNT_MAX,
+    SSH_INTERACTIVE_ALIVE_INTERVAL,
+    SSHError,
+    SSHResult,
+    _set_env_args,
+)
 from agentworks.transports.base import Transport
 
 if TYPE_CHECKING:
@@ -24,6 +31,30 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from agentworks.ssh import SSHLogger
+
+
+def _keepalive_args() -> list[str]:
+    """Client-side keepalives for long-lived interactive connections.
+
+    Without these, an interactive attach whose peer goes away silently
+    (laptop suspends, lid closes, Wi-Fi drops) blocks in a TCP read
+    until the kernel's own retransmit budget runs out, which can be many
+    minutes and is not something the client bounds. Nothing can clean up
+    the operator's terminal during that window, because this process is
+    parked inside ``subprocess.call``. The keepalives turn an unbounded
+    hang into a bounded one and hand control back so the terminal guard
+    in :mod:`agentworks.terminal` can run.
+
+    Non-interactive paths do not need this: they carry an explicit
+    subprocess timeout, which interactive sessions cannot (there is no
+    correct duration for "operator is using a shell").
+    """
+    return [
+        "-o",
+        f"ServerAliveInterval={SSH_INTERACTIVE_ALIVE_INTERVAL}",
+        "-o",
+        f"ServerAliveCountMax={SSH_INTERACTIVE_ALIVE_COUNT_MAX}",
+    ]
 
 
 def _scp_base_args(
@@ -196,7 +227,7 @@ class SSHTransport(Transport):
             self.logger.log_error(msg)
         raise SSHError(msg) from last_err
 
-    def interactive(
+    def _interactive(
         self,
         command: str,
         *,
@@ -205,7 +236,7 @@ class SSHTransport(Transport):
         """Interactive SSH with ``-t`` (allocates a TTY) and no
         ``BatchMode``. Empty ``command`` opens a login shell.
         """
-        args = ["ssh", "-t", "-o", "StrictHostKeyChecking=accept-new"]
+        args = ["ssh", "-t", "-o", "StrictHostKeyChecking=accept-new", *_keepalive_args()]
         if self.port is not None:
             args.extend(["-p", str(self.port)])
         if self.identity_file is not None:

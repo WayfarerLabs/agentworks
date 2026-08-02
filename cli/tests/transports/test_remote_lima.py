@@ -96,6 +96,19 @@ def test_interactive_two_hops_with_login_shell_wrap() -> None:
         assert "limactl shell my-vm" in payload
 
 
+def test_interactive_sets_client_keepalives() -> None:
+    """Same bounded-teardown reasoning as the plain SSH transport: this
+    hop is an ``ssh -t`` too, so a silently dead VM host must not park
+    the attach indefinitely."""
+    t = RemoteLimaTransport(vm_name="my-vm", vm_host_ssh="host.example")
+    with patch("agentworks.transports.remote_lima.subprocess.call") as mock_call:
+        mock_call.return_value = 0
+        t.interactive("")
+        argv = mock_call.call_args[0][0]
+        assert "ServerAliveInterval=15" in argv
+        assert "ServerAliveCountMax=4" in argv
+
+
 def test_interactive_with_command_includes_bash_lc() -> None:
     t = RemoteLimaTransport(vm_name="my-vm", vm_host_ssh="host.example")
     with patch("agentworks.transports.remote_lima.subprocess.call") as mock_call:

@@ -12,23 +12,23 @@ import typer
 
 from agentworks.errors import UserAbort
 from agentworks.output import Role, StatusStyle, _pad, _render_header, non_interactive
+from agentworks.terminal import MOUSE_TRACKING_DISABLE
 
 if TYPE_CHECKING:
     from agentworks.output import Progress
 
-# DECRST reset disabling every common xterm mouse-reporting mode: 1000
-# (X11), 1002 (button-event), 1003 (any-motion), 1006 (SGR, the
-# ``^[[<..M`` wire form), and 1015 (urxvt). 1003 is included so a
-# full-screen TUI that left any-motion tracking on keeps no reports
-# flowing after the reset. 1005 (UTF-8 mouse) is intentionally excluded:
-# a legacy encoding superseded by 1006. Guards against issue #211: a
-# prior interactive step can leave xterm mouse tracking enabled, so the
-# confirm prompt's plain input read picks up a stray mouse-event byte
-# sequence (the SGR/1006 form) that leaks into the next line of output.
-# Written to stdout (the stream ``typer.confirm`` prompts and reads on)
-# before the prompt is issued, and only when that stream is a real
-# terminal; see LLD sec 10.
-_MOUSE_TRACKING_DISABLE = "\x1b[?1000;1002;1003;1006;1015l"
+# Guards against issue #211: a prior interactive step can leave xterm
+# mouse tracking enabled, so the confirm prompt's plain input read picks
+# up a stray mouse-event byte sequence (the SGR/1006 form) that leaks
+# into the next line of output. Written to stdout (the stream
+# ``typer.confirm`` prompts and reads on) before the prompt is issued,
+# and only when that stream is a real terminal; see LLD sec 10.
+#
+# The escape itself lives in ``agentworks.terminal`` alongside the
+# post-attach sanitize sequence that supersets it: one definition of
+# "mouse reporting off", used by both the prompt-level guard here and
+# the attach-level guard there.
+_MOUSE_TRACKING_DISABLE = MOUSE_TRACKING_DISABLE
 
 # StatusStyle -> click.style fg color. NEUTRAL has no entry: it renders
 # unstyled, matching Role.BODY's "no color" treatment.

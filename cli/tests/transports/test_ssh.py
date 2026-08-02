@@ -179,6 +179,24 @@ def test_interactive_uses_minus_t_flag() -> None:
         assert "BatchMode=yes" not in argv  # interactive must not BatchMode
 
 
+def test_interactive_sets_client_keepalives() -> None:
+    """An interactive attach carries no subprocess timeout (there is no
+    correct duration for "operator is using a shell"), so the SSH
+    client's own keepalives are the only thing bounding a peer that goes
+    away silently: laptop suspends, lid closes, Wi-Fi drops. Without
+    them the call parks in a TCP read for as long as the kernel's
+    retransmit budget lasts, and the terminal guard cannot run until it
+    returns.
+    """
+    t = SSHTransport(host="vm1", user="agentworks")
+    with patch("agentworks.transports.ssh.subprocess.call") as mock_call:
+        mock_call.return_value = 0
+        t.interactive("")
+        argv = mock_call.call_args[0][0]
+        assert "ServerAliveInterval=15" in argv
+        assert "ServerAliveCountMax=4" in argv
+
+
 # ---------------------------------------------------------------------------
 # copy_to / copy_from
 # ---------------------------------------------------------------------------

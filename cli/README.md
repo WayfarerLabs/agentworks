@@ -573,6 +573,14 @@ via `--workspace <ws>`). Use these when you just need a terminal without the con
   avoid prefix key conflicts. Pass `--allow-nesting` to override.
 - **Console lifecycle**: consoles are independent of sessions. Killing or detaching a console does
   not affect running sessions. `--recreate` rebuilds from scratch.
+- **Dropped connections restore your terminal**: an attach reconfigures your local terminal
+  (alternate screen, mouse reporting, bracketed paste), and tmux only undoes that on a clean detach.
+  When the connection dies instead (laptop suspends, lid closes, Wi-Fi drops), agentworks restores
+  the terminal itself on the way out, so you don't land in a tab that echoes nothing and emits mouse
+  escape codes on every click. Interactive SSH also carries client keepalives, which bound how long
+  a dead connection hangs before it gives up (roughly a minute) so that cleanup can run. Nothing on
+  the VM is affected; reattaching picks the console back up. A tab killed outright, before the
+  command can return, is beyond this cleanup's reach.
 
 ### Session Templates
 

@@ -97,7 +97,7 @@ class WSL2Transport(Transport):
             )
         return ssh_result
 
-    def interactive(
+    def _interactive(
         self,
         command: str,
         *,

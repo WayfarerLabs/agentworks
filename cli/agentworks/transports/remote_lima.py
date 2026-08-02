@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 
 from agentworks.transports._shared import env_assignment_prefix
 from agentworks.transports.base import Transport
-from agentworks.transports.ssh import SSHTransport
+from agentworks.transports.ssh import SSHTransport, _keepalive_args
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -100,7 +100,7 @@ class RemoteLimaTransport(Transport):
             on_retry=on_retry,
         )
 
-    def interactive(
+    def _interactive(
         self,
         command: str,
         *,
@@ -112,7 +112,15 @@ class RemoteLimaTransport(Transport):
         if command:
             inner = f"limactl shell {self.vm_name} bash -lc {shlex.quote(command)}"
         wrapped = f"$SHELL -lc {shlex.quote(inner)}"
-        args = ["ssh", "-t", "-o", "StrictHostKeyChecking=accept-new", self.vm_host_ssh, wrapped]
+        args = [
+            "ssh",
+            "-t",
+            "-o",
+            "StrictHostKeyChecking=accept-new",
+            *_keepalive_args(),
+            self.vm_host_ssh,
+            wrapped,
+        ]
         return subprocess.call(args)
 
     def copy_to(
