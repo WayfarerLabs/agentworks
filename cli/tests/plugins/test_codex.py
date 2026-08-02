@@ -91,7 +91,11 @@ def test_install_command_row_is_disabled_system_plugin_by_default(tmp_path: Path
     row = registry.lookup("user-install-command", "codex")
     assert row.origin.variant == "system-plugin"
     assert row.origin.plugin == "codex"
-    assert row.command == "curl -fsSL https://chatgpt.com/codex/install.sh | sh"
+    # CODEX_NON_INTERACTIVE prefixes sh (where the script runs), not curl:
+    # the script prompts via /dev/tty when a TTY exists (Windows controllers
+    # force one on provisioning transports), and provisioning must never
+    # let an installer prompt.
+    assert row.command == "curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_NON_INTERACTIVE=1 sh"
     assert registry.graph.enablement_of("user-install-command", "codex") is Enablement.disabled
 
 
