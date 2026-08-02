@@ -61,14 +61,13 @@ def realize_workspace(
     failure AFTER unwinding its own partial state; the caller's
     realization log never sees a half-made workspace.
     """
-    from agentworks.agents.grants import add_to_workspace_group, workspace_group
+    from agentworks.agents.grants import materialize_grant_all_agents, workspace_group
     from agentworks.ssh import SSHLogger
     from agentworks.workspaces.backends.vm import (
         create_vm_workspace,
         delete_vm_workspace,
         generate_vscode_workspace,
     )
-    from agentworks.workspaces.manager import _revert_grant_on_failure
 
     workspace_path: str | None = None
     vscode_path: str | None = None
@@ -140,69 +139,11 @@ def realize_workspace(
                 hint=f"SSH log: {ssh_logger.path}",
             ) from e
 
-        # Add grant_all agents to the new workspace group. Best-effort: the
-        # workspace itself was already created and inserted above, so a
-        # per-agent failure (DB error, SSH hiccup) should not abort the
-        # whole command. Surface failures as warnings and report accurate
-        # counts so the user can re-grant manually with
-        # 'agent grant-workspaces'.
-        #
-        # DB grant is inserted BEFORE the on-VM group add. If the order were
-        # reversed and the DB write failed after the group add, the agent
-        # would have VM-side membership with no DB grant backing it (a
-        # silent authorization drift). With this ordering, a group-add
-        # failure can be cleanly compensated by deleting the just-inserted
-        # grant row.
-        grant_all_agents = db.list_agents_on_vm_with_grant_all(vm.name)
-        if grant_all_agents:
-            added = 0
-            failed: list[str] = []
-            for agent in grant_all_agents:
-                try:
-                    db.insert_agent_grant(agent.name, name, "explicit")
-                except KeyboardInterrupt:
-                    # sqlite commits inside a C call; KI can surface after
-                    # the commit but before we move on, leaving an inserted
-                    # row. Best-effort revert and re-raise to preserve the
-                    # SIGINT contract.
-                    output.warn(
-                        f"Cancelled while inserting grant for agent '{agent.name}' on "
-                        f"workspace '{name}'. Reverting in case the insert committed."
-                    )
-                    _revert_grant_on_failure(db, agent.name, name)
-                    raise
-                except Exception as e:
-                    failed.append(agent.name)
-                    output.warn(f"Failed to insert grant for agent '{agent.name}' on workspace '{name}': {e}")
-                    continue
-                try:
-                    add_to_workspace_group(vm, config, db, agent.linux_user, name, logger=ssh_logger)
-                    added += 1
-                except KeyboardInterrupt:
-                    # KI is a BaseException and slips past `except Exception`,
-                    # so it needs its own branch. Without this, Ctrl-C during
-                    # the SSH call would leave a committed grant row with no
-                    # VM-side group membership (silent authorization drift).
-                    output.warn(
-                        f"Cancelled while adding agent '{agent.name}' to workspace "
-                        f"'{name}' group. Reverting just-inserted DB grant."
-                    )
-                    _revert_grant_on_failure(db, agent.name, name)
-                    raise
-                except Exception as e:
-                    failed.append(agent.name)
-                    output.warn(
-                        f"Failed to add agent '{agent.name}' to workspace '{name}' "
-                        f"group: {e}. Reverting DB grant to keep state consistent."
-                    )
-                    _revert_grant_on_failure(db, agent.name, name)
-            if added:
-                output.detail(f"Added {added} grant-all agent(s) to workspace")
-            if failed:
-                output.warn(
-                    f"Grant-all agents not added: {', '.join(failed)}. "
-                    f"Re-grant manually with 'agent grant-workspaces <name> {name}'."
-                )
+        # Materialize grant_all agents onto the new workspace: one explicit
+        # grant row plus the on-VM group membership per agent. Best-effort
+        # (per-agent failures warn, they do not abort); the invariant,
+        # ordering rationale, and KI handling live with the helper.
+        materialize_grant_all_agents(db, config, vm, name, logger=ssh_logger)
     finally:
         ssh_logger.close()
 

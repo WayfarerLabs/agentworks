@@ -47,7 +47,7 @@ def copy_workspace(
     import tempfile
     from pathlib import Path
 
-    from agentworks.agents.grants import workspace_group
+    from agentworks.agents.grants import materialize_grant_all_agents, workspace_group
     from agentworks.bootstrap import build_registry
     from agentworks.ssh import SSHLogger
     from agentworks.transports import SSHTransport, transport
@@ -148,71 +148,88 @@ def copy_workspace(
                 )
 
             lg = SSHLogger(dest_vm.name, "workspace-copy")
-            dest_target = transport(dest_vm, config, logger=lg)
+            try:
+                dest_target = transport(dest_vm, config, logger=lg)
 
-            workspace_path = f"{config.paths.vm_workspaces}/{dest_name}"
-            ws_group = workspace_group(dest_name)
+                workspace_path = f"{config.paths.vm_workspaces}/{dest_name}"
+                ws_group = workspace_group(dest_name)
 
-            output.info(f"Unpacking to workspace '{dest_name}' on VM '{dest_vm.name}'...")
+                output.info(f"Unpacking to workspace '{dest_name}' on VM '{dest_vm.name}'...")
 
-            # Set up group, directory, and permissions (same as create_vm_workspace)
-            dest_target.run(
-                f"sh -c 'getent group {ws_group} >/dev/null 2>&1 || /usr/sbin/groupadd {ws_group}'",
-                sudo=True,
-            )
-            dest_target.run(f"usermod -aG {ws_group} {dest_vm.admin_username}", sudo=True)
-            dest_target.run(f"mkdir -p {workspace_path}", sudo=True, timeout=10)
-            dest_target.run(f"chown {dest_vm.admin_username}:{ws_group} {workspace_path}", sudo=True)
-            dest_target.run(f"chmod 2770 {workspace_path}", sudo=True)
+                # Set up group, directory, and permissions (same as create_vm_workspace)
+                dest_target.run(
+                    f"sh -c 'getent group {ws_group} >/dev/null 2>&1 || /usr/sbin/groupadd {ws_group}'",
+                    sudo=True,
+                )
+                dest_target.run(f"usermod -aG {ws_group} {dest_vm.admin_username}", sudo=True)
+                dest_target.run(f"mkdir -p {workspace_path}", sudo=True, timeout=10)
+                dest_target.run(f"chown {dest_vm.admin_username}:{ws_group} {workspace_path}", sudo=True)
+                dest_target.run(f"chmod 2770 {workspace_path}", sudo=True)
 
-            # Unpack archive and fix ownership
-            remote_tmp = f"/tmp/{dest_name}-copy.tgz"
-            dest_target.copy_to(tmp_path, remote_tmp, timeout=300)
-            dest_target.run(f"tar xzf {remote_tmp} -C {workspace_path}", sudo=True, timeout=120)
-            dest_target.run(f"rm -f {remote_tmp}", check=False, timeout=10)
-            dest_target.run(
-                f"chown -R {dest_vm.admin_username}:{ws_group} {workspace_path}",
-                sudo=True,
-                timeout=60,
-            )
-            dest_target.run(
-                f"find {shlex.quote(workspace_path)} -type d -exec chmod g+s {{}} +",
-                sudo=True,
-                timeout=120,
-            )
+                # Unpack archive and fix ownership
+                remote_tmp = f"/tmp/{dest_name}-copy.tgz"
+                dest_target.copy_to(tmp_path, remote_tmp, timeout=300)
+                dest_target.run(f"tar xzf {remote_tmp} -C {workspace_path}", sudo=True, timeout=120)
+                dest_target.run(f"rm -f {remote_tmp}", check=False, timeout=10)
+                dest_target.run(
+                    f"chown -R {dest_vm.admin_username}:{ws_group} {workspace_path}",
+                    sudo=True,
+                    timeout=60,
+                )
+                dest_target.run(
+                    f"find {shlex.quote(workspace_path)} -type d -exec chmod g+s {{}} +",
+                    sudo=True,
+                    timeout=120,
+                )
 
-            # Canonical workspace ACL, applied AFTER the unpack and the recursive
-            # chown/SGID so the recursive access ACL covers every unpacked entry
-            # and the per-directory default ACL is seeded for future entries.
-            # The same shared spec workspace create and repair apply, so a copied
-            # workspace lands in the canonical state (its first repair is an ACL
-            # no-op) and, per #254, denies `other` on both the access and default
-            # ACLs, which the old inline top-dir-only default did not.
-            apply_workspace_acls(dest_target, workspace_path)
+                # Canonical workspace ACL, applied AFTER the unpack and the recursive
+                # chown/SGID so the recursive access ACL covers every unpacked entry
+                # and the per-directory default ACL is seeded for future entries.
+                # The same shared spec workspace create and repair apply, so a copied
+                # workspace lands in the canonical state (its first repair is an ACL
+                # no-op) and, per #254, denies `other` on both the access and default
+                # ACLs, which the old inline top-dir-only default did not.
+                apply_workspace_acls(dest_target, workspace_path)
 
-            db.insert_workspace(
-                dest_name,
-                vm_name=dest_vm.name,
-                workspace_path=workspace_path,
-                template="copied",
-                linux_group=ws_group,
-            )
+                db.insert_workspace(
+                    dest_name,
+                    vm_name=dest_vm.name,
+                    workspace_path=workspace_path,
+                    template="copied",
+                    linux_group=ws_group,
+                )
 
-            # Generate tmuxinator config and VS Code workspace
-            from agentworks.workspaces.backends.vm import generate_vscode_workspace
-            from agentworks.workspaces.tmuxinator import console_session_name, generate_config
+                # Materialize grant_all agents on the destination VM onto the new
+                # workspace, exactly as workspace create's realization body does
+                # after ITS row insert (issue #321): every workspace-inserting
+                # path runs this pass, or grant_all agents silently lack access
+                # to the copied workspace and reinit's row-driven reconcile
+                # (#280) can never restore it.
+                materialize_grant_all_agents(db, config, dest_vm, dest_name, logger=lg)
 
-            tmux_config = generate_config(dest_name, workspace_path)
-            dest_target.write_file(f"{workspace_path}/.tmuxinator.yml", tmux_config)
-            session = console_session_name(dest_name)
-            dest_target.run("mkdir -p ~/.config/tmuxinator", timeout=10)
-            dest_target.run(
-                f"ln -sf {workspace_path}/.tmuxinator.yml ~/.config/tmuxinator/{session}.yml",
-                timeout=10,
-            )
-            vscode_path = generate_vscode_workspace(dest_vm, config, dest_name, workspace_path)
-            output.detail(f"VS Code workspace: {vscode_path}")
-            lg.close()
+                # Generate tmuxinator config and VS Code workspace
+                from agentworks.workspaces.backends.vm import generate_vscode_workspace
+                from agentworks.workspaces.tmuxinator import console_session_name, generate_config
+
+                tmux_config = generate_config(dest_name, workspace_path)
+                dest_target.write_file(f"{workspace_path}/.tmuxinator.yml", tmux_config)
+                session = console_session_name(dest_name)
+                dest_target.run("mkdir -p ~/.config/tmuxinator", timeout=10)
+                dest_target.run(
+                    f"ln -sf {workspace_path}/.tmuxinator.yml ~/.config/tmuxinator/{session}.yml",
+                    timeout=10,
+                )
+                vscode_path = generate_vscode_workspace(dest_vm, config, dest_name, workspace_path)
+                output.detail(f"VS Code workspace: {vscode_path}")
+            finally:
+                # Exactly-once close, in a finally so a cancellation (the
+                # sanctioned KeyboardInterrupt re-raise out of
+                # materialize_grant_all_agents) or an error from any
+                # dest_target.run in the span still lands the footer, and the
+                # in-flight traceback, in the per-VM log. Mirrors realize.py's
+                # own finally; close() is not idempotent (each call appends a
+                # footer), hence the single call site.
+                lg.close()
     finally:
         tmp_path.unlink(missing_ok=True)
 
