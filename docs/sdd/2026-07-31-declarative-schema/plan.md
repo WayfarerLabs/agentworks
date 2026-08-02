@@ -137,6 +137,10 @@ Status: DRAFT (authored alongside the FRD and HLA; implementation gated, see pre
       the row marked, errors on enable/use; broken blob on an enabled resource is a load error; an
       unregistered capability name remains a hard finalize error (R9.2/R9.11 preserved, operator
       decision 2026-08-01; the cross-host story rides the enablement axis, not name tolerance).
+- [ ] FR17 pinned by a regression test over a fixture inheriting surface: a child overriding the
+      parent's default secret name declares only the override in its refs, the parent keeps its own
+      default-secret edge, and no runtime-need traversal (secret union, resolvability prediction,
+      dependency listing) attributes the parent's default secret to the child.
 - [ ] `test_capability_config_contract.py` and `test_capability_base.py` reworked to pin the new
       contract (declare-and-receive: models in, typed instances out).
 
