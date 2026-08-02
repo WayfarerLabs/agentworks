@@ -195,6 +195,37 @@ def test_authorized_keys_install_is_idempotent() -> None:
     assert script.count('>> "$HOME_DIR/.ssh/authorized_keys"') == 1
 
 
+def test_ssh_key_install_is_skipped_when_the_key_is_empty() -> None:
+    """A platform that installs the admin key out of band (EC2 via the
+    cloud-init users block, to avoid embedding the key literal a second time in
+    a size-capped user-data) passes an empty key; the install step then no-ops,
+    and the key literal never appears in the payload.
+    """
+    script = generate_bootstrap_script(
+        admin_username="testuser",
+        ssh_public_key="",
+        provisioning_packages=["curl"],
+        tailscale_auth_key="tskey-auth-test123",
+        hostname="lima--myvm",
+    )
+    # The step is present but gated on a non-empty key, and the skip branch runs.
+    assert 'if [ -n "$SSH_PUBLIC_KEY" ]; then' in script
+    assert "SSH key provisioned out of band" in script
+    # No key literal is embedded (empty quotes), so it is not double-counted.
+    assert "SSH_PUBLIC_KEY=''" in script
+
+    # A non-empty key still embeds and installs, unchanged for every other
+    # platform.
+    with_key = generate_bootstrap_script(
+        admin_username="testuser",
+        ssh_public_key="ssh-ed25519 AAAA testkey",
+        provisioning_packages=["curl"],
+        tailscale_auth_key="tskey-auth-test123",
+        hostname="lima--myvm",
+    )
+    assert "ssh-ed25519 AAAA testkey" in with_key
+
+
 def test_swap_fstab_append_is_guarded_against_re_execution() -> None:
     """The fstab swap entry must not duplicate when the bootstrap re-runs.
 

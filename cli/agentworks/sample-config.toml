@@ -79,11 +79,12 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # build installs `onepassword` (the 1Password secret backend), `claude` (the
 # Claude Code session harness and its `claude` CLI install-command), `codex`
 # (the Codex session harness and its `codex` CLI install-command), `proxmox`
-# (the Proxmox VE VM platform), and `azure` (the Azure VM platform, the Azure
-# DevOps git-credential provider, and the `az-cli` install-command). `agw
-# doctor` shows a System plugins roster with each plugin's state.
+# (the Proxmox VE VM platform), `azure` (the Azure VM platform, the Azure
+# DevOps git-credential provider, and the `az-cli` install-command), and `aws`
+# (the EC2 VM platform). `agw doctor` shows a System plugins roster with each
+# plugin's state.
 #[plugins]
-#system = ["onepassword", "claude", "codex", "proxmox", "azure"]   # names of installed system plugins to enable
+#system = ["onepassword", "claude", "codex", "proxmox", "azure", "aws"]   # names of installed system plugins to enable
 
 # --- Default values for CLI flags ---
 
@@ -176,7 +177,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # and the chain falls through to the next one. An explicit empty list
 # `backends = []` disables resolution entirely.
 
-# --- VM sites (azure, proxmox, remote Lima, ...) ---
+# --- VM sites (azure, aws, proxmox, remote Lima, ...) ---
 # Places to create VMs are declared as vm-site RESOURCES (YAML manifests
 # under ~/.config/agentworks/resources/), not config sections. Run
 # `agw resource sample vm-site` for commented, ready-to-edit examples.
@@ -205,6 +206,20 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # platform_config and silently drops every other key, so a legacy azure site
 # must be migrated to a vm-site manifest (`agw resource migrate vm-site`)
 # before it can carry one.
+# ec2 ships as the opt-in `aws` system plugin: an ec2 site is not-ready with an
+# "enable plugin `aws`" hint until you add `[plugins] system = ["aws"]` above.
+# An ec2 site keeps a permanent public IP and controls SSH exposure with a
+# security group: the baseline denies all inbound, and access is granted only
+# through ephemeral rules scoped to your detected egress IP (plus
+# operator.ssh_allow_cidrs) during bootstrap and each native route. It
+# authenticates with the AMBIENT AWS credential chain by default (env vars,
+# shared config, instance profile, SSO), or with an explicit access key via an
+# optional `credentials` block carrying access_key_id and `access_key_secret`:
+# the NAME of the secret holding the secret access key, never its value (default
+# `aws-secret-access-key`, read by the env-var backend from
+# AW_SECRET_AWS_SECRET_ACCESS_KEY), with an optional assume_role_arn. Once set,
+# the site uses that identity and nothing else. Run
+# `agw resource sample vm-site` for the block to copy.
 
 # =============================================================================
 # Templates

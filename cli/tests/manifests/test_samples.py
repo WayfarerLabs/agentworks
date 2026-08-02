@@ -137,7 +137,7 @@ def test_uncommented_samples_build_a_registry(tmp_path: Path) -> None:
     auto-declare) resolve at finalize. No exclusions: the prose-only
     secret-backend sample contributes zero documents by design.
 
-    The azure and proxmox plugins are enabled here so the vm-site
+    The azure, aws, and proxmox plugins are enabled here so the vm-site
     sample's `platform_config` blocks reach their platform's `validate`
     (a disabled platform's site never does), which is what makes the
     sample's field names and shapes actually checked rather than merely
@@ -157,7 +157,7 @@ ssh_public_key = "{pub.as_posix()}"
 ssh_private_key = "{priv.as_posix()}"
 
 [plugins]
-system = ["azure", "proxmox"]
+system = ["azure", "aws", "proxmox"]
 """
     )
     resources = tmp_path / "resources"

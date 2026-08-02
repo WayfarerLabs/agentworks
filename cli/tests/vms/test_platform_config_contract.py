@@ -12,6 +12,7 @@ from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
 from agentworks.capabilities.vm_platform.lima import LimaPlatform
 from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
 from agentworks.errors import ConfigError
+from agentworks.plugins.aws.platform import DEFAULT_SECRET_ACCESS_KEY, EC2Platform
 from agentworks.plugins.azure.platform import DEFAULT_CLIENT_SECRET, AzureVMPlatform
 from agentworks.plugins.proxmox.platform import (
     DEFAULT_TOKEN_SECRET,
@@ -35,6 +36,8 @@ PROXMOX_CONFIG = {
     "token_id": "agw@pam!agw",
     "template_vmid": 9000,
 }
+EC2_CONFIG = {"region": "us-east-1"}
+EC2_CREDS = {"access_key_id": "AKIAEXAMPLE", "access_key_secret": "aws-secret"}
 
 
 def test_registry_names_match_classes() -> None:
@@ -43,6 +46,7 @@ def test_registry_names_match_classes() -> None:
         "wsl2": WSL2Platform,
         "azure-vm": AzureVMPlatform,
         "proxmox": ProxmoxPlatform,
+        "ec2": EC2Platform,
     } == VM_PLATFORM_REGISTRY
     for name, cls in VM_PLATFORM_REGISTRY.items():
         assert cls.name == name
@@ -118,6 +122,62 @@ def test_azure_rejects_malformed_service_principal(sp: object, match: str) -> No
         AzureVMPlatform.validate("t", {**AZURE_CONFIG, "service_principal": sp})
 
 
+def test_ec2_requires_region() -> None:
+    assert EC2Platform.validate("t", EC2_CONFIG) is None
+    with pytest.raises(ConfigError, match="region is required"):
+        EC2Platform.validate("t", {})
+    with pytest.raises(ConfigError, match="unknown ec2"):
+        EC2Platform.validate("t", {**EC2_CONFIG, "extra": "x"})
+
+
+def test_ec2_optional_subnet_id_is_shape_checked() -> None:
+    assert EC2Platform.validate("t", {**EC2_CONFIG, "subnet_id": "subnet-1"}) is None
+    with pytest.raises(ConfigError, match="subnet_id"):
+        EC2Platform.validate("t", {**EC2_CONFIG, "subnet_id": ""})
+
+
+def test_ec2_rejects_the_removed_ami_override() -> None:
+    """There is no image knob: the fleet standardizes on Debian bookworm, so an
+    ``ami`` key is an unknown field, not a pin."""
+    with pytest.raises(ConfigError, match="unknown ec2"):
+        EC2Platform.validate("t", {**EC2_CONFIG, "ami": "ami-123"})
+
+
+def test_ec2_credentials_is_optional_and_shape_checked() -> None:
+    """The optional ``credentials`` table: absent is the ambient path, present
+    must carry access_key_id, may name its secret and a role, and rejects
+    anything else."""
+    assert EC2Platform.validate("t", {**EC2_CONFIG, "credentials": EC2_CREDS}) is None
+    assert EC2Platform.validate("t", {**EC2_CONFIG, "credentials": {"access_key_id": "AKIA"}}) is None
+    assert EC2Platform.validate("t", {**EC2_CONFIG, "credentials": {**EC2_CREDS, "assume_role_arn": "arn:x"}}) is None
+
+
+@pytest.mark.parametrize(
+    ("creds", "match"),
+    [
+        pytest.param("not-a-table", "must be a table", id="not-a-table"),
+        pytest.param({}, "access_key_id", id="missing-access-key"),
+        pytest.param({**EC2_CREDS, "access_key_id": ""}, "access_key_id", id="empty-access-key"),
+        pytest.param({**EC2_CREDS, "access_key_secret": ""}, "bare secret name", id="empty-secret-name"),
+        pytest.param({**EC2_CREDS, "access_key_secret": 7}, "bare secret name", id="non-string-secret-name"),
+        pytest.param({**EC2_CREDS, "assume_role_arn": ""}, "assume_role_arn", id="empty-role"),
+        # The field is `access_key_secret` (a NAME), so AWS's own value-shaped
+        # term and the old `secret` spelling are both refused as unknown fields.
+        pytest.param({**EC2_CREDS, "secret_access_key": "hunter2"}, "unknown field", id="secret-value-spelling"),
+        pytest.param({**EC2_CREDS, "secret": "aws-secret"}, "unknown field", id="old-secret-spelling"),
+    ],
+)
+def test_ec2_rejects_malformed_credentials(creds: object, match: str) -> None:
+    with pytest.raises(ConfigError, match=match):
+        EC2Platform.validate("t", {**EC2_CONFIG, "credentials": creds})
+
+
+def test_ec2_rejects_bad_instance_type_arch() -> None:
+    bad = {**EC2_CONFIG, "instance_types": [{"cpus": 2, "memory": 4, "type": "x", "arch": "amd64"}]}
+    with pytest.raises(ConfigError, match="arch"):
+        EC2Platform.validate("t", bad)
+
+
 def test_proxmox_validation_errors() -> None:
     with pytest.raises(ConfigError, match="node is required"):
         ProxmoxPlatform.validate("t", {k: v for k, v in PROXMOX_CONFIG.items() if k != "node"})
@@ -138,6 +198,31 @@ def test_config_free_platforms_imply_no_edges() -> None:
     # No service_principal: azure authenticates ambiently and implies no
     # reference, exactly as every azure-vm site did before issue #199.
     assert AzureVMPlatform.dependencies("t", AZURE_CONFIG) == ()
+    # No credentials table: ec2 authenticates ambiently and implies no edge.
+    assert EC2Platform.dependencies("t", EC2_CONFIG) == ()
+
+
+def test_ec2_returns_the_secret_access_key_reference() -> None:
+    (ref,) = EC2Platform.dependencies("t", {**EC2_CONFIG, "credentials": EC2_CREDS})
+    assert (ref.kind, ref.name) == ("secret", "aws-secret")
+    assert ref.usage == "the AWS secret access key"
+
+    # Omitting ``access_key_secret`` falls back to the well-known default name.
+    (ref,) = EC2Platform.dependencies("t", {**EC2_CONFIG, "credentials": {"access_key_id": "AKIA"}})
+    assert ref.name == DEFAULT_SECRET_ACCESS_KEY
+
+
+def test_ec2_dependencies_is_total_on_malformed_config() -> None:
+    """``dependencies`` never raises. The edge's identity is the secret NAME,
+    so it emits even when the table's other fields are missing or malformed, and
+    is omitted only when the table itself, or the field naming the edge, is
+    unusable."""
+    (ref,) = EC2Platform.dependencies("t", {"credentials": {"access_key_secret": "aws-secret"}})
+    assert ref.name == "aws-secret"
+    (ref,) = EC2Platform.dependencies("t", {**EC2_CONFIG, "credentials": {}})
+    assert ref.name == DEFAULT_SECRET_ACCESS_KEY
+    assert EC2Platform.dependencies("t", {**EC2_CONFIG, "credentials": {**EC2_CREDS, "access_key_secret": ""}}) == ()
+    assert EC2Platform.dependencies("t", {**EC2_CONFIG, "credentials": "nope"}) == ()
 
 
 def test_azure_returns_the_client_secret_reference() -> None:
@@ -227,6 +312,9 @@ def test_legacy_platform_metadata_hooks() -> None:
     assert AzureVMPlatform.legacy_platform_metadata(az_row, {}) == {"resource_id": "/subscriptions/s/x"}
     az_row_null = {"name": "dev", "azure_resource_id": None}
     assert AzureVMPlatform.legacy_platform_metadata(az_row_null, {}) == {}
+    # ec2 ships after the DB migration, so it has no legacy rows to map: the
+    # base no-op return of {} is correct regardless of the row's contents.
+    assert EC2Platform.legacy_platform_metadata({"name": "dev", "azure_resource_id": "/x"}, {}) == {}
     px_row = {"name": "dev", "proxmox_vmid": "104"}
     assert ProxmoxPlatform.legacy_platform_metadata(px_row, {}) == {"vmid": "104"}
     assert ProxmoxPlatform.legacy_platform_metadata(px_row, {"proxmox": {"node": "pve1"}}) == {

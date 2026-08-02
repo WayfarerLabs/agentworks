@@ -42,7 +42,18 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from agentworks import output
-from agentworks.errors import AuthorizationError, ConfigError, ConnectivityError, ProvisioningError
+
+# The provider-neutral egress detection and ssh_allow_cidrs fold were hoisted
+# to the shared vm_platform home (aws reuses them); re-exported here so this
+# module's own callers (and tests that monkeypatch them) keep their spellings.
+from agentworks.capabilities.vm_platform.ssh_exposure import (
+    _EGRESS_IP_URL,
+    config_allow_cidrs,
+    detect_egress_ip,
+    normalize_allow_cidrs,
+    operator_ssh_prefixes,
+)
+from agentworks.errors import AuthorizationError, ProvisioningError
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -51,7 +62,13 @@ if TYPE_CHECKING:
     from azure.mgmt.network import NetworkManagementClient
     from azure.mgmt.network.models import SecurityRule
 
-    from agentworks.config import Config
+__all__ = [
+    "_EGRESS_IP_URL",
+    "config_allow_cidrs",
+    "detect_egress_ip",
+    "normalize_allow_cidrs",
+    "operator_ssh_prefixes",
+]
 
 
 # Suffix appended to the VM hostname to name its virtual-network subresource:
@@ -101,13 +118,6 @@ _POKE_ALLOCATION_ATTEMPTS = 5
 # The old scheme's standing world-open SSH allow, deleted on
 # convergence (see converge_nsg).
 LEGACY_SSH_RULE_NAME = "SSH"
-
-# The what's-my-ip service the egress detection queries.
-_EGRESS_IP_URL = "https://checkip.amazonaws.com"
-
-# Per-process cache for the detected egress IP: one probe per command,
-# not one per poke.
-_egress_ip_cache: str | None = None
 
 
 class AzureError(ProvisioningError):
@@ -166,90 +176,6 @@ def _trim_message(message: str) -> str:
         if idx != -1:
             return message[: idx + 1] if marker.startswith(".") else message[:idx]
     return message
-
-
-def detect_egress_ip() -> str:
-    """The operator's public IPv4 address, detected via a what's-my-ip
-    probe and cached per process (one probe per command, not per poke).
-
-    Raises whatever the probe raises (URLError on unreachability,
-    ValueError on a non-IPv4 response body); callers decide the policy
-    (see :func:`operator_ssh_prefixes`).
-    """
-    global _egress_ip_cache
-    if _egress_ip_cache is not None:
-        return _egress_ip_cache
-
-    import ipaddress
-    import urllib.request
-
-    with urllib.request.urlopen(_EGRESS_IP_URL, timeout=5) as response:  # noqa: S310  # fixed https URL
-        body = response.read().decode("ascii", errors="strict").strip()
-    # Strict parse: anything that is not a bare IPv4 address is a
-    # detection failure, never a prefix we would poke into an NSG.
-    _egress_ip_cache = str(ipaddress.IPv4Address(body))
-    return _egress_ip_cache
-
-
-def normalize_allow_cidrs(entries: Sequence[str]) -> list[str]:
-    """Normalize ``operator.ssh_allow_cidrs`` entries to canonical IPv4
-    prefixes (a bare IP becomes its /32). The config loader validates
-    and normalizes at load, so this mostly re-normalizes already-clean
-    values; a bad entry that reached here anyway (a hand-built config
-    object) raises the same shape of typed ConfigError."""
-    import ipaddress
-
-    prefixes: list[str] = []
-    for entry in entries:
-        text = str(entry).strip()
-        try:
-            prefixes.append(str(ipaddress.IPv4Network(text, strict=False)))
-        except ValueError as exc:
-            raise ConfigError(
-                f"operator.ssh_allow_cidrs: invalid entry {text!r}: must be an IPv4 address or CIDR"
-            ) from exc
-    return prefixes
-
-
-def config_allow_cidrs(config: Config | None) -> list[str]:
-    """The ``operator.ssh_allow_cidrs`` extras from an operator
-    config, or none when no config was threaded in. Same defensive
-    getattr chain as ``AzureVMPlatform.native_transport``'s
-    identity-file read (callers may thread partial config stand-ins)."""
-    operator = getattr(config, "operator", None)
-    return list(getattr(operator, "ssh_allow_cidrs", None) or [])
-
-
-def operator_ssh_prefixes(extra_cidrs: Sequence[str] = ()) -> list[str]:
-    """The source prefixes for the ephemeral SSH allow rule: the detected
-    operator egress IPv4 as a /32, plus the ``operator.ssh_allow_cidrs``
-    config extras handed in by the caller. Recomputed at every poke
-    (detection caches per process) so the scope stays current.
-
-    Detection-failure policy: with extras configured, proceed on the
-    extras alone with a warning; with none, raise a typed
-    ConnectivityError whose hint names the config setting as the escape
-    hatch (an unscoped allow is never poked as a fallback).
-    """
-    extras = normalize_allow_cidrs(extra_cidrs)
-    try:
-        detected = f"{detect_egress_ip()}/32"
-    except Exception as exc:
-        if extras:
-            output.warn(
-                f"could not detect the operator's public IP ({exc}); "
-                f"scoping SSH access to the operator.ssh_allow_cidrs entries only"
-            )
-            return extras
-        raise ConnectivityError(
-            f"could not detect the operator's public IP for the scoped SSH allow rule: {exc}",
-            hint=(
-                "set operator.ssh_allow_cidrs in your agentworks config to a list "
-                "of IPv4 addresses and/or CIDRs (e.g. your VPN or NAT egress "
-                "addresses) to grant SSH access explicitly"
-            ),
-        ) from exc
-    return [detected, *(p for p in extras if p != detected)]
 
 
 def _deny_all_inbound_rule() -> SecurityRule:

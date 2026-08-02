@@ -267,3 +267,100 @@ def test_azure_runup_without_the_client_secret_is_typed(monkeypatch: pytest.Monk
 
     with pytest.raises(ConfigError, match="resolved secrets"):
         AzureVMPlatform("az", _AZURE_SP_CONFIG).runup(RunContext())
+
+
+# -- EC2 (aws) -------------------------------------------------------------
+#
+# The ec2 platform's runup DELIBERATELY diverges from azure's fatal-only stance
+# and follows proxmox: botocore distinguishes a definitive auth rejection (a
+# ClientError carrying an auth error code) from an unreachable endpoint (an
+# EndpointConnectionError), so a rejection is fatal and anything indeterminate
+# warns and continues unverified. A configured-but-missing subnet is fatal the
+# way azure's missing resource group is.
+
+_EC2_CONFIG = {"region": "us-east-1"}
+_EC2_CREDS_CONFIG = {
+    "region": "us-east-1",
+    "credentials": {"access_key_id": "AKIA", "access_key_secret": "aws-secret"},
+}
+
+
+def _ec2_ctx() -> RunContext:
+    return RunContext(secrets=_Secrets({"aws-secret": "value"}))  # type: ignore[arg-type]
+
+
+def test_ec2_runup_ok_when_identity_passes(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agentworks.plugins.aws.platform import EC2Platform
+    from tests._aws_fakes import install_fakes
+
+    install_fakes(monkeypatch)
+    EC2Platform("aws", _EC2_CONFIG).runup(RunContext())  # no raise (ambient path)
+
+
+def test_ec2_runup_auth_rejection_is_fatal(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agentworks.plugins.aws.platform import EC2Platform
+    from tests._aws_fakes import Controls, client_error, install_fakes
+
+    install_fakes(
+        monkeypatch, Controls(identity_error=client_error("InvalidClientTokenId", "bad key", "GetCallerIdentity"))
+    )
+    with pytest.raises(TokenRejectedError, match="AWS rejected"):
+        EC2Platform("aws", _EC2_CONFIG).runup(RunContext())
+
+
+def test_ec2_runup_unreachable_warns(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    from agentworks.plugins.aws.platform import EC2Platform
+    from tests._aws_fakes import Controls, install_fakes, unreachable
+
+    install_fakes(monkeypatch, Controls(identity_error=unreachable()))
+    EC2Platform("aws", _EC2_CONFIG).runup(RunContext())  # no raise
+    assert "could not reach AWS" in capsys.readouterr().err
+
+
+def test_ec2_runup_non_auth_client_error_warns(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from agentworks.plugins.aws.platform import EC2Platform
+    from tests._aws_fakes import Controls, client_error, install_fakes
+
+    install_fakes(monkeypatch, Controls(identity_error=client_error("Throttling", "slow down", "GetCallerIdentity")))
+    EC2Platform("aws", _EC2_CONFIG).runup(RunContext())  # no raise
+    assert "could not verify" in capsys.readouterr().err
+
+
+def test_ec2_runup_missing_subnet_is_fatal(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agentworks.plugins.aws.platform import EC2Platform
+    from tests._aws_fakes import Controls, client_error, install_fakes
+
+    install_fakes(
+        monkeypatch,
+        Controls(subnet_error=client_error("InvalidSubnetID.NotFound", "no such subnet", "DescribeSubnets")),
+    )
+    with pytest.raises(NotFoundError) as exc:
+        EC2Platform("aws", {**_EC2_CONFIG, "subnet_id": "subnet-xyz"}).runup(RunContext())
+    assert exc.value.entity_kind == "subnet"
+    assert exc.value.entity_name == "subnet-xyz"
+
+
+def test_ec2_runup_rejects_a_bad_explicit_credential(monkeypatch: pytest.MonkeyPatch) -> None:
+    """On the explicit-credentials path the identity probe verifies the secret
+    the context delivered; a server rejection aborts create with a typed,
+    secret-naming error before anything is provisioned."""
+    from agentworks.plugins.aws.platform import EC2Platform
+    from tests._aws_fakes import Controls, client_error, install_fakes
+
+    install_fakes(
+        monkeypatch, Controls(identity_error=client_error("SignatureDoesNotMatch", "bad sig", "GetCallerIdentity"))
+    )
+    with pytest.raises(TokenRejectedError) as exc:
+        EC2Platform("aws", _EC2_CREDS_CONFIG).runup(_ec2_ctx())
+    assert exc.value.entity_kind == "vm-site"
+    assert "aws-secret" in (exc.value.hint or "")
+
+
+def test_ec2_runup_without_the_secret_is_typed() -> None:
+    from agentworks.errors import ConfigError
+    from agentworks.plugins.aws.platform import EC2Platform
+
+    with pytest.raises(ConfigError, match="resolved secrets"):
+        EC2Platform("aws", _EC2_CREDS_CONFIG).runup(RunContext())

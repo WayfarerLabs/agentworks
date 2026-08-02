@@ -82,7 +82,7 @@ def _support(
 def test_every_site_registers_regardless_of_host(make_config, monkeypatch: pytest.MonkeyPatch) -> None:
     """The worst host (no Windows, no limactl) still registers both
     bundled sites; under R13 every platform row publishes UNCONDITIONALLY
-    (host support is readiness, not absence), so all four are present even
+    (host support is readiness, not absence), so all of them are present even
     when host-unsupported."""
     _support(monkeypatch, wsl2="Windows only", lima_local="limactl not installed")
     registry = build_registry(make_config())
@@ -91,7 +91,7 @@ def test_every_site_registers_regardless_of_host(make_config, monkeypatch: pytes
     platforms = {e.name for e in registry.iter_kind("vm-platform")}
     # R9.5: the host-unsupported wsl2 platform is now a PRESENT (not-ready)
     # row, where before publish_to skipped it.
-    assert platforms == {"lima", "wsl2", "azure-vm", "proxmox"}
+    assert platforms == {"lima", "wsl2", "azure-vm", "proxmox", "ec2"}
 
 
 def test_not_ready_reasons_chain(make_config, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -147,7 +147,7 @@ def test_supported_host_has_everything_enabled(make_config, monkeypatch: pytest.
     for name, _decl in registry.iter_kind_items("vm-site"):
         assert registry.graph.readiness_of("vm-site", name).reason is None
     platforms = {e.name for e in registry.iter_kind("vm-platform")}
-    assert platforms == {"lima", "wsl2", "azure-vm", "proxmox"}
+    assert platforms == {"lima", "wsl2", "azure-vm", "proxmox", "ec2"}
 
 
 def test_remote_lima_site_enabled_without_local_limactl(make_config, monkeypatch: pytest.MonkeyPatch) -> None:

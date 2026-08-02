@@ -32,8 +32,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.capabilities.base import RunContext
-from agentworks.capabilities.vm_platform import ProvisionRequest
-from agentworks.plugins.azure import network as azure_network
+from agentworks.capabilities.vm_platform import ProvisionRequest, ssh_exposure
 from agentworks.plugins.azure.network import AzureError
 from agentworks.plugins.azure.platform import AzureVMPlatform
 from agentworks.ssh import SSHError
@@ -49,9 +48,10 @@ _CONFIG = {"subscription_id": "sub-A", "resource_group": "rg1", "region": "eastu
 @pytest.fixture(autouse=True)
 def _stub_egress_detection(monkeypatch: pytest.MonkeyPatch) -> None:
     """Create resolves the bootstrap-allow prefixes before any resource
-    exists; stub detection so no test hits the network."""
-    monkeypatch.setattr(azure_network, "_egress_ip_cache", None)
-    monkeypatch.setattr(azure_network, "detect_egress_ip", lambda: "198.18.0.7")
+    exists; stub detection so no test hits the network. Detection lives in
+    the shared ssh_exposure home now (hoisted for aws reuse)."""
+    monkeypatch.setattr(ssh_exposure, "_egress_ip_cache", None)
+    monkeypatch.setattr(ssh_exposure, "detect_egress_ip", lambda: "198.18.0.7")
 
 
 def _platform() -> AzureVMPlatform:

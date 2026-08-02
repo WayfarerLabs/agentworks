@@ -5,13 +5,14 @@
 > capability obeys (`dependencies` / `validate`, preflight, runup, ops); this one covers what is
 > specific to running VMs, plus the gotchas that have already bitten real platforms.
 
-Four platforms ship today and are the working references throughout this guide: `lima` (`lima.py`)
-and `wsl2` (`wsl2.py`) as core built-ins, plus `proxmox` and `azure-vm`, which now ship in opt-in
-system plugins (`agentworks/plugins/proxmox/platform.py`, with its REST client in `api.py`; and
-`agentworks/plugins/azure/platform.py`). The rules below apply to a plugin-shipped platform exactly
-as to a core one; each plugin re-seats its class into `VM_PLATFORM_REGISTRY` at import, so authoring
-a platform is the same either way. When a rule below has a concrete example, it names the platform
-and file that demonstrates it.
+Five platforms ship today and are the working references throughout this guide: `lima` (`lima.py`)
+and `wsl2` (`wsl2.py`) as core built-ins, plus `proxmox`, `azure-vm`, and `ec2`, which ship in
+opt-in system plugins (`agentworks/plugins/proxmox/platform.py`, with its REST client in `api.py`;
+`agentworks/plugins/azure/platform.py`, with its network mechanics in `network.py`; and
+`agentworks/plugins/aws/platform.py`, likewise split from its `network.py`). The rules below apply
+to a plugin-shipped platform exactly as to a core one; each plugin re-seats its class into
+`VM_PLATFORM_REGISTRY` at import, so authoring a platform is the same either way. When a rule below
+has a concrete example, it names the platform and file that demonstrates it.
 
 ## What a VM platform is
 
@@ -39,13 +40,13 @@ needs, and fill in the class-level contract methods the site decoder and DB migr
   not restate the decorator. `reinit` re-applies everything and failed commands are retried, so the
   guarantee has to be real: `start`/`stop` on Lima, WSL2, and Proxmox check `status()` first and
   short-circuit, because the backend verb is not reliably a no-op on an already-in-state instance;
-  Azure needs no guard because its SDK start/deallocate calls are themselves idempotent; `delete`
-  treats already-gone as success on all four. `delete` is NOT unconditionally best-effort though: a
-  delete that cannot remove the backend VM must raise a typed error (the manager deletes the DB row
-  only on success, so a swallowed backend failure orphans the VM; #329). Azure enforces this with a
-  post-teardown existence probe (`verify_vm_deleted`); only auxiliary-resource stragglers (its
-  NIC/IP/NSG/disk sweep) stay warn-and-continue. Lima, WSL2, and Proxmox do not yet verify; their
-  teardown verbs remain fire-and-forget (tracked in #356).
+  Azure and EC2 need no guard because their SDK start/stop calls are themselves idempotent on an
+  already-in-state instance; `delete` treats already-gone as success on all five. `delete` is NOT
+  unconditionally best-effort though: a delete that cannot remove the backend VM must raise a typed
+  error (the manager deletes the DB row only on success, so a swallowed backend failure orphans the
+  VM; #329). Azure enforces this with a post-teardown existence probe (`verify_vm_deleted`); only
+  auxiliary-resource stragglers (its NIC/IP/NSG/disk sweep) stay warn-and-continue. Lima, WSL2,
+  Proxmox, and EC2 do not yet verify; their teardown verbs remain fire-and-forget (tracked in #356).
 - `status(vm, ctx) -> VMStatus` is a read-only query.
 - `display_backend_name(vm) -> str` is pure display and takes no `ctx`.
 
@@ -54,23 +55,31 @@ backend needs). All are entered by callers that gate first, so on entry the VM i
 just started. The three transport hooks take `ctx: RunContext` for the same reason the ops do:
 opening a route to a cloud VM is a backend call, so a platform reads any credential it needs from
 `ctx.secret(name)` here exactly as in an op. Lima and WSL2 accept and ignore it (their transports
-are local); Azure uses it:
+are local); Azure and EC2 use it:
 
 - `native_transport(vm, ctx, *, config=None) -> Transport | None` (default `None`). The
   `agentworks.transports.native_transport` factory wraps the call in `transient_route`, probes
   reachability with an `echo ok` retry loop, and raises a typed `StateError` (using
   `no_native_transport_hint`) when a platform returns `None`. Lima returns a `limactl shell`
-  transport, Azure an `SSHTransport` against the VM's permanent public IP (read live off the NIC),
-  WSL2 a `wsl.exe`-backed transport. Proxmox deliberately returns the default `None` and sets
-  `no_native_transport_hint` to point the operator at the Proxmox web-UI serial console, because its
-  guest-agent exec is one-shot and cannot host an interactive shell.
+  transport, Azure and EC2 an `SSHTransport` against the VM's permanent public IP (Azure reads it
+  live off the NIC; EC2 reads it live off a fresh `describe_instances`, because EC2 reassigns the
+  auto-assigned IP across stop/start, so it is never cached), WSL2 a `wsl.exe`-backed transport.
+  Proxmox deliberately returns the default `None` and sets `no_native_transport_hint` to point the
+  operator at the Proxmox web-UI serial console, because its guest-agent exec is one-shot and cannot
+  host an interactive shell.
 - `transient_route(vm, ctx, *, config=None) -> context manager` (default `nullcontext()`). Azure
   opens a scoped SSH route on enter (heals a missing public IP, converges the NSG onto the
   baseline-deny model, pokes this operation's own ephemeral allow rule scoped to the operator's
   egress prefixes) and deletes exactly that rule in a `finally`, bounding the exposure window to the
   transport's lifetime; concurrent native ops on one VM each own an independent rule, so they never
-  cross-remove. Those NSG calls read the credential from `ctx`, so a service-principal site
-  authenticates as itself with no ambient fallback.
+  cross-remove. EC2 does the same with a security-group ingress rule and needs no public-IP heal
+  (its IP is permanent), but its rule model forces a divergence: an EC2 ingress rule's identity is
+  its `(protocol, port, cidr)` tuple, not a name, so two concurrent routes from one operator egress
+  share ONE rule rather than owning independent ones. The poke is therefore idempotent (tolerate
+  `InvalidPermission.Duplicate`) and the per-op remove tolerant (tolerate
+  `InvalidPermission.NotFound`), failing CLOSED (the deny baseline), never open; see
+  `plugins/aws/network.py`. Those calls read the credential from `ctx`, so a credentials-configured
+  site authenticates as itself with no ambient fallback.
 - `vm_active(vm, *, config=None) -> context manager` (default `nullcontext()`). WSL2 returns a
   keepalive that holds the distro against Windows' idle-shutdown for the span of a command, with
   Win32 Job-Object orphan-proofing for a hard-killed `agw`. No `ctx`: every hold that exists is
@@ -78,20 +87,24 @@ are local); Azure uses it:
 - `post_tailscale_ready(vm, ctx) -> None` (default no-op). The contract is "close provisioning
   access": it fires the instant Tailscale is reachable. Azure deletes the ephemeral bootstrap SSH
   allow rule here, leaving the VM with zero inbound exposure behind its permanent deny-all-inbound
-  baseline (the public IP itself stays attached for the VM's whole lifetime). The asymmetry with
-  `transient_route` is intentional: the bootstrap ingress opens inside `create()` (cloud-init needs
-  inbound SSH from the operator), and neither that nor this closing point is context-manager-shaped.
+  baseline (the public IP itself stays attached for the VM's whole lifetime); EC2 revokes exactly
+  the bootstrap allow's tuples (recorded in platform_metadata at create) to the same end, so a
+  concurrent native route's distinct allow survives. The asymmetry with `transient_route` is
+  intentional: the bootstrap ingress opens inside `create()` (cloud-init needs inbound SSH from the
+  operator), and neither that nor this closing point is context-manager-shaped.
 - `secure_failed_vm(vm, ctx) -> None` (default no-op). Same contract as `post_tailscale_ready`, for
   the paths where a create is kept without completing Phase A: the bootstrap or Tailscale
   verification died (row marked FAILED) or the operator interrupted it mid-bootstrap (row status
   untouched); the success-only hook never fired on either. Azure deletes the fixed-name bootstrap
-  allow so the VM defaults to zero inbound exposure; debugging survives via `vm shell --platform` (a
-  fresh per-operation allow) and the serial console (not NSG-gated).
+  allow and EC2 revokes the recorded bootstrap tuples, so the VM defaults to zero inbound exposure;
+  debugging survives via `vm shell --platform` (a fresh per-operation allow) and the platform's
+  serial console (not firewall-gated).
 
-The two closing hooks and `transient_route` take `ctx` because closing or opening the NSG route is a
-backend call; the caller (Phase A's `bootstrap_vm` for the two closing hooks, the transports factory
-for `transient_route`) passes the create/op's own scoped context, whose secrets are already resolved
-before Phase A begins, so even the interrupt path never resolves a secret for the first time.
+The two closing hooks and `transient_route` take `ctx` because opening or closing the firewall route
+(an Azure NSG rule, an EC2 security-group rule) is a backend call; the caller (Phase A's
+`bootstrap_vm` for the two closing hooks, the transports factory for `transient_route`) passes the
+create/op's own scoped context, whose secrets are already resolved before Phase A begins, so even
+the interrupt path never resolves a secret for the first time.
 
 Callers must pass the context their composition root already built for the platform's ops
 (`gated_vm_boundary` and `_live_vm_boundary` in `agentworks.vms.manager.boundary` both hand one out;
@@ -127,12 +140,13 @@ process having warmed a credential cache.
 **Inputs and outputs** are uniform. Every `create` receives the same `ProvisionRequest` and returns
 a `ProvisionResult` whose `platform_metadata` is written verbatim to `vms.platform_metadata` and
 read back only by the owning platform (Lima stores `instance_name`, WSL2 `distro_name`, Azure
-`resource_id`, Proxmox `vmid` + `node`). Add a platform-specific **input** by adding a field to
-`ProvisionRequest`, not by changing the protocol. But note the opposite pattern is also right:
-purely internal translation stays inside the platform. Azure's VM-size selection (mapping the
-request's `cpus`/`memory_gib`/`disk_gib` onto a concrete SKU, with a `platform_config.vm_sizes`
-override, per ADR 0018) lives entirely in `plugins/azure/platform.py` and adds nothing to
-`ProvisionRequest`.
+`resource_id`, Proxmox `vmid` + `node`, EC2 `instance_id` + `security_group_id` + `region` +
+`backend_name`, and never the public IP, which it reads live). Add a platform-specific **input** by
+adding a field to `ProvisionRequest`, not by changing the protocol. But note the opposite pattern is
+also right: purely internal translation stays inside the platform. Azure's VM-size selection
+(mapping the request's `cpus`/`memory_gib`/`disk_gib` onto a concrete SKU, with a
+`platform_config.vm_sizes` override, per ADR 0018) lives entirely in `plugins/azure/platform.py` and
+adds nothing to `ProvisionRequest`.
 
 ## How an op gets its dependencies: `RunContext`
 
@@ -170,8 +184,12 @@ GCP or AWS backend) should follow that shape.
 
 ## Credentials on a cloud platform: the reference shape
 
-Azure is the worked example, and a new cloud platform (AWS EC2 is the expected next one) should copy
-it rather than invent a variant. Four rules, in `plugins/azure/platform.py`:
+Azure is the worked example, and a new cloud platform should copy it rather than invent a variant.
+The `ec2` platform (`plugins/aws/platform.py`) is the first copy of it: its optional `credentials`
+table is the AWS analogue named below, with `access_key_id` as the plain identifier and
+`access_key_secret` naming the secret that holds the secret access key (plus an optional
+`assume_role_arn`). Read it alongside azure when adding the third. Four rules, in
+`plugins/azure/platform.py`:
 
 **1. Explicit credentials are an OPTIONAL nested table naming a secret.** The site's
 `platform_config` may carry a `service_principal` table:
@@ -190,9 +208,9 @@ credentials. The field is `secret` and holds a NAME, not `client_secret` holding
 invites an operator to paste a live credential into a plaintext file; the value resolves through the
 framework secret system like proxmox's `token_secret`. And the table is nested rather than flattened
 into three top-level keys so a future variant (a certificate instead of a client secret) slots in
-beside `secret` without a breaking change to declared sites. The AWS analogue writes itself: a
-`credentials` (or `access_key`) table with the plain key id and a `secret` naming the secret-access
-key.
+beside `secret` without a breaking change to declared sites. The `ec2` platform is exactly this
+analogue realized: a `credentials` table with the plain `access_key_id` and an `access_key_secret`
+naming the secret access key.
 
 **2. Declare the edge from `dependencies`, validate the shape in `validate`.** `dependencies` is
 total and non-throwing, so it emits the edge whenever it can derive the secret NAME (even if the
@@ -226,7 +244,42 @@ alongside its probe: SDKs validate constructor arguments eagerly, and a resolved
 back empty is reachable in a way config validation cannot catch.
 
 Read `_parse_service_principal`, `_build_service_principal_credential`, and `_get_credential`
-together: that trio is the whole pattern.
+together: that trio is the whole pattern. On EC2 the analogous trio is `_parse_credentials`,
+`_build_explicit_session`, and `_get_session`; two things differ deliberately, both because the SDKs
+differ. First, `_get_session` does NOT probe at build (boto3 sessions are inert), so the runup and
+status classify a definitive credential rejection apart from an unreachable endpoint: azure-identity
+collapses an Entra rejection and an unreachable Entra into one `ClientAuthenticationError`, so azure
+must treat every credential failure as fatal, but botocore surfaces a rejection as a `ClientError`
+with an auth error code and an outage as an `EndpointConnectionError`, so `ec2` follows proxmox
+(runup makes a rejection fatal and warns-and-continues on indeterminacy) and its `status` re-raises
+a rejection typed rather than degrading to UNKNOWN, so a misconfigured site never reads as UNKNOWN
+in `vm describe` (the exact #303 hole). Second, an `assume_role_arn` builds AUTO-REFRESHING
+credentials (botocore's `AssumeRoleCredentialFetcher` + `DeferredRefreshableCredentials`) rather
+than a one-shot assume, so a long op cannot fail with `ExpiredToken` from a frozen cache. See
+`test_platform_runup.py` and `test_aws_ec2_ops.py` for the halves.
+
+## Exposure on a cloud platform: baseline deny, ephemeral scoped allows
+
+Azure and EC2 share the model: the VM keeps a permanent public IP for its whole lifetime, and all
+inbound exposure is controlled by firewall rules, not by attaching and detaching the IP. The
+baseline is deny-all-inbound; SSH happens only through ephemeral rules on TCP/22 scoped to the
+operator's detected egress prefix (plus `operator.ssh_allow_cidrs`), opened for the bootstrap window
+and each native-transport session and closed after. The shared operator-egress detection and the
+`ssh_allow_cidrs` fold live in `capabilities/vm_platform/ssh_exposure.py` so both platforms use one
+detector and one policy; the per-platform rule mechanics stay in each plugin's `network.py`.
+
+One asymmetry is worth calling out because it drives the EC2 code. Azure must INSTALL an explicit
+`deny-all-inbound` rule (an NSG carries permissive defaults, and the deny has to outrank any allow),
+so its baseline is a rule it writes. An EC2 security group is the opposite: a group with no ingress
+rules already denies all inbound, so EC2's baseline is the group's NATURAL empty state, with nothing
+to install. That is why `plugins/aws/network.py`'s `create_security_group` authorizes no ingress at
+all. The close hooks revoke exactly the bootstrap allow's recorded prefixes (not a blanket
+revoke-all), so a concurrent `vm shell --platform` route's distinct allow survives (nothing
+serializes commands per VM); the prefixes are recorded in platform_metadata at create rather than
+recomputed, which would drift if the operator's egress or `ssh_allow_cidrs` changed. The other
+EC2-native divergence (tuple-identity rules, so concurrent same-egress routes share one rule and the
+poke/remove are idempotent/tolerant and fail closed) is covered under `transient_route` above and in
+`network.py`.
 
 ## The provisioning timeline: create-time bootstrap vs. initialization
 
@@ -342,11 +395,12 @@ disk creation and calls `cleanup_vm_resources` on any exception). The same oblig
 operator interrupt (`KeyboardInterrupt`) across the whole create span, including any inline
 readiness or bootstrap wait: warn with "Ctrl-C again to abandon" guidance, tear down what this
 create made, and re-raise the ORIGINAL interrupt; a second Ctrl-C abandons the cleanup loudly,
-naming the exact manual removal (Azure's `rollback_create_on_interrupt`; Proxmox, Lima, and WSL2 do
-the same over their single VM / instance / distro). That is distinct from, and composes under, the
-orchestrator's DB-row unwind (ADR 0019's `RealizationLog` / node `teardown`), which rolls back the
-persisted VM row. Keep the two separate in your head: your sweep undoes backend-side resources you
-created inside `create()`; the orchestrator undoes the agentworks-side record on top of it.
+naming the exact manual removal (Azure's `rollback_create_on_interrupt`; Proxmox, Lima, WSL2, and
+EC2 do the same over their single VM / instance / distro). That is distinct from, and composes
+under, the orchestrator's DB-row unwind (ADR 0019's `RealizationLog` / node `teardown`), which rolls
+back the persisted VM row. Keep the two separate in your head: your sweep undoes backend-side
+resources you created inside `create()`; the orchestrator undoes the agentworks-side record on top
+of it.
 
 ### Quoting and escaping when you embed scripts
 

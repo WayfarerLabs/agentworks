@@ -24,6 +24,8 @@
     "backgrounded",
     "batchable",
     "bigred",
+    "boto",
+    "botocore",
     "buildx",
     "bundleable",
     "burstable",

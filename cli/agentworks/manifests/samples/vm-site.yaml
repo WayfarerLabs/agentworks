@@ -1,5 +1,5 @@
 ## kind: vm-site -- a configured place to create VMs: a platform (the
-## capability: lima, wsl2, azure-vm, proxmox) plus its settings.
+## capability: lima, wsl2, azure-vm, ec2, proxmox) plus its settings.
 ## Referenced by name from `agw vm create --site` and defaults.site.
 ## The `lima-local` and `wsl2` sites ship built-in (zero config) and
 ## disable themselves on hosts missing their requirements; declare
@@ -61,6 +61,51 @@
 #      tenant_id: 00000000-0000-0000-0000-000000000000
 #      client_id: 00000000-0000-0000-0000-000000000000
 #      secret: azure-client-secret
+##
+## Amazon EC2, in one region (declare one site per region you target).
+## The instance keeps a permanent public IP; SSH exposure is a security
+## group that denies all inbound except ephemeral rules scoped to your
+## detected egress IP (plus operator.ssh_allow_cidrs) during bootstrap
+## and each native route.
+##
+#---
+#apiVersion: agentworks/v1
+#kind: vm-site
+#metadata:
+#  name: aws-dev
+#  description: Dev EC2 instances in us-east-1
+#spec:
+#  platform:
+#    name: ec2
+#    region: us-east-1
+#    # Optional: launch into a specific VPC subnet. Omit to use the
+#    # region's default VPC/subnet. When set, `vm create` checks the
+#    # subnet exists at runup and creates the security group in its VPC.
+#    subnet_id: subnet-00000000000000000
+#    # The image is always the current Debian 12 (bookworm) release, resolved
+#    # from the public SSM release parameter for the selected instance type's
+#    # arch at create time; there is no image override (the fleet standardizes
+#    # on bookworm).
+#    # Optional: override the built-in Graviton (arm64) instance-type
+#    # catalog. `vm create` picks the smallest entry whose cpus AND
+#    # memory satisfy the vm-template's request (off-ratio requests round
+#    # up and warn). `type` is the literal EC2 instance type and `arch`
+#    # is its EC2 architecture (x86_64 or arm64), which selects the image.
+#    instance_types:
+#      - {cpus: 2, memory: 8, type: m7g.large, arch: arm64}
+#      - {cpus: 4, memory: 16, type: m7g.xlarge, arch: arm64}
+#      - {cpus: 8, memory: 32, type: m7g.2xlarge, arch: arm64}
+#    # Optional: authenticate with a specific access key instead of the
+#    # ambient AWS credential chain (env vars, shared config, instance
+#    # profile, SSO). Omit the whole table to keep the ambient default.
+#    # `access_key_secret` is the NAME of the secret holding the secret
+#    # access key, never its value: it resolves through the backend chain
+#    # like any other (default env var: AW_SECRET_AWS_SECRET_ACCESS_KEY).
+#    # Once set, this site uses this identity and nothing else. Add
+#    # assume_role_arn to layer an STS AssumeRole on top of the access key.
+#    credentials:
+#      access_key_id: AKIAIOSFODNN7EXAMPLE
+#      access_key_secret: aws-secret-access-key
 ##
 ## Proxmox VE. The API token value is the `proxmox-token` secret
 ## (override the name with the `token_secret` key), resolved
