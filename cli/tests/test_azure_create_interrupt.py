@@ -1,16 +1,22 @@
-"""Azure ``create`` interrupt rollback (#338).
+"""Azure ``create`` rollback arms (#338, #347).
 
 ``create`` provisions the whole resource set (public IP, NSG, vnet,
 NIC, VM, disk) and then waits inline for the cloud-init bootstrap, a
 minutes-long window where a Ctrl-C is likeliest. The caller
-(``create_vm``) deletes only the DB row on an interrupt, so any
-resource the platform leaves behind would be orphaned with nothing
+(``create_vm``) deletes only the DB row on an interrupt or failure, so
+any resource the platform leaves behind would be orphaned with nothing
 left to target it. ``create`` therefore rolls back on
 ``KeyboardInterrupt`` across the whole span (resource creation AND the
 inline wait) and re-raises the interrupt; a SECOND interrupt during
 the cleanup abandons it loudly (naming the resource group and name
-prefix) instead of wedging. The plain-failure arm (``Exception``) is
-unchanged: name-based cleanup, wrapped error.
+prefix) instead of wedging. The failure side matches that span with
+two Exception arms (#347): a mid-creation failure runs the name-based
+cleanup and raises the wrapped error (the pre-#338 arm, unchanged),
+and a failure escaping the post-creation span (transport construction
+plus the inline wait, e.g. a raw OSError from a missing local ssh
+binary) tears the full set down VM-first; only ``SSHError``, absorbed
+inside ``_wait_for_bootstrap`` as the tolerated defer-to-Phase-A path,
+never rolls back.
 
 Fakes come from ``tests._azure_platform_support`` (shared with
 test_azure_nsg_exposure.py); egress detection is stubbed, no test hits
@@ -19,6 +25,7 @@ the network.
 
 from __future__ import annotations
 
+import time
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
@@ -29,6 +36,8 @@ from agentworks.capabilities.vm_platform import ProvisionRequest
 from agentworks.plugins.azure import network as azure_network
 from agentworks.plugins.azure.network import AzureError
 from agentworks.plugins.azure.platform import AzureVMPlatform
+from agentworks.ssh import SSHError
+from agentworks.transports import SSHTransport
 from tests._azure_platform_support import _install_fakes
 
 if TYPE_CHECKING:
@@ -151,6 +160,73 @@ class TestInterruptDuringResourceCreation:
         assert any("cleaning up partial Azure resources" in w for w in captured_output.warnings)
 
 
+class TestFailureDuringInlineWait:
+    """#347: the failure arm spans the transport construction and the
+    inline bootstrap wait, so a non-SSHError escaping the wait rolls the
+    full resource set back (closing the bootstrap ingress with it)
+    instead of leaking a running VM; the SSHError paths the wait absorbs
+    itself stay tolerated (defer to Phase A, no rollback)."""
+
+    def test_non_ssh_error_escaping_the_wait_rolls_back_vm_first_and_wraps(
+        self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+    ) -> None:
+        """The issue's scenario: no local ssh binary, so the wait's first
+        probe raises a raw FileNotFoundError that SSHTransport.run does
+        not wrap as SSHError. Every resource exists at that point, so the
+        rollback deletes the VM first (it holds the NIC and disk) and
+        then the name-based set, and the error re-raises wrapped, the
+        Exception arms' convention."""
+        fakes = _install_fakes(monkeypatch, vm_exists_lookup=False)
+        fakes.compute.disks.disks = [SimpleNamespace(name="vm1_OsDisk_1", tags={"owner": "agentworks"})]
+
+        def _no_ssh_binary(self: SSHTransport, command: str, **_kw: object) -> object:
+            raise FileNotFoundError("No such file or directory: 'ssh'")
+
+        monkeypatch.setattr(SSHTransport, "run", _no_ssh_binary)
+
+        with pytest.raises(AzureError, match="ssh"):
+            _platform().create(_request(tailscale=True), RunContext())
+
+        assert fakes.compute.virtual_machines.deleted == [("rg1", "vm1")]
+        assert fakes.network.network_interfaces.deleted == [("rg1", "vm1-nic")]
+        assert fakes.network.public_ip_addresses.deleted == [("rg1", "vm1-ip")]
+        assert fakes.network.network_security_groups.deleted == [("rg1", "vm1-nsg")]
+        assert fakes.network.virtual_networks.deleted == [("rg1", "vm1-vnet")]
+        assert fakes.compute.disks.deleted == [("rg1", "vm1_OsDisk_1")]
+        # VM-first ordering, same contract as the interrupt arm.
+        kinds = [kind for op, kind, _rg, _name in fakes.events if op == "delete"]
+        assert kinds[0] == "vm"
+        assert set(kinds[1:]) == {"nic", "ip", "nsg", "vnet", "disk"}
+        # The failure arm, not the interrupt arm: no interrupt messaging.
+        assert not any("Interrupted" in w for w in captured_output.warnings)
+        assert not any("Cleanup abandoned" in w for w in captured_output.warnings)
+
+    def test_tolerated_ssh_unavailability_defers_to_phase_a_without_rollback(
+        self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+    ) -> None:
+        """The wait's own SSHError absorption is NOT a rollback trigger:
+        an SSH connection that never comes up exhausts the probe retries,
+        warns, and create still returns a ProvisionResult with
+        bootstrap_complete=False (Phase A retries), every resource kept."""
+        fakes = _install_fakes(monkeypatch, vm_exists_lookup=False)
+
+        def _ssh_down(self: SSHTransport, command: str, **_kw: object) -> object:
+            raise SSHError("connect timed out")
+
+        monkeypatch.setattr(SSHTransport, "run", _ssh_down)
+        # The wait sleeps 10s between its 30 probes; don't.
+        monkeypatch.setattr(time, "sleep", lambda _s: None)
+
+        result = _platform().create(_request(tailscale=True), RunContext())
+
+        assert result.bootstrap_complete is False
+        assert result.tailscale_ip is None
+        assert fakes.compute.virtual_machines.deleted == []
+        assert fakes.network.network_interfaces.deleted == []
+        assert fakes.network.network_security_groups.deleted == []
+        assert any("deferring bootstrap to Phase A" in w for w in captured_output.warnings)
+
+
 class TestPlainFailureArmUnchanged:
     def test_failure_still_cleans_up_and_wraps(
         self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
@@ -171,3 +247,31 @@ class TestPlainFailureArmUnchanged:
         assert fakes.network.virtual_networks.deleted == [("rg1", "vm1-vnet")]
         assert not any("Interrupted" in w for w in captured_output.warnings)
         assert not any("Cleanup abandoned" in w for w in captured_output.warnings)
+
+
+class TestVMDeleteFailureWarns:
+    """#347's related minor: ``delete_vm_and_resources`` (shared by the
+    delete op and both rollback arms) keeps the sweep best-effort but no
+    longer suppresses the VM delete SILENTLY; a failure there warns
+    naming the VM, the error summary, and the manual-cleanup pointer, so
+    a genuine AuthorizationFailed is attributable instead of surfacing
+    as mysterious downstream NIC/disk leftovers."""
+
+    def test_suppressed_vm_delete_failure_warns_and_sweep_continues(
+        self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+    ) -> None:
+        fakes = _install_fakes(monkeypatch, vm_exists_lookup=False)
+        fakes.compute.virtual_machines.delete_error = RuntimeError("AuthorizationFailed: client lacks permission")
+
+        azure_network.delete_vm_and_resources(fakes.compute, fakes.network, "rg1", "vm1")
+
+        (warning,) = [w for w in captured_output.warnings if "could not delete Azure VM" in w]
+        assert "'vm1'" in warning
+        assert "AuthorizationFailed" in warning
+        assert "resource group 'rg1'" in warning
+        assert "manually" in warning
+        # Still best-effort: the name-based sweep ran regardless.
+        assert fakes.network.network_interfaces.deleted == [("rg1", "vm1-nic")]
+        assert fakes.network.public_ip_addresses.deleted == [("rg1", "vm1-ip")]
+        assert fakes.network.network_security_groups.deleted == [("rg1", "vm1-nsg")]
+        assert fakes.network.virtual_networks.deleted == [("rg1", "vm1-vnet")]

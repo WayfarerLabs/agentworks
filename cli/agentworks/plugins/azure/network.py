@@ -586,11 +586,23 @@ def delete_vm_and_resources(
 ) -> None:
     """Delete the VM first (it holds the NIC and managed disk, which
     Azure refuses to delete while attached), then run the name-based
-    resource sweep. Best-effort per resource. The one place the
-    VM-first-then-sweep ordering lives: shared by the delete op and
+    resource sweep. Best-effort per resource, but the VM delete WARNS
+    when it fails (#347): the sweep's silent suppressions are fine for
+    resources whose absence is the normal answer, while a suppressed
+    VM-delete failure (e.g. AuthorizationFailed) leaves the NIC and
+    disk deletions failing on attachment, misattributing the root
+    cause. A KeyboardInterrupt is not contained here; it escapes to the
+    caller's interrupt handling. The one place the VM-first-then-sweep
+    ordering lives: shared by the delete op and
     :func:`rollback_create_on_interrupt`."""
-    with contextlib.suppress(Exception):
+    try:
         compute.virtual_machines.begin_delete(rg, name).result()
+    except Exception as exc:
+        output.warn(
+            f"could not delete Azure VM '{name}' ({wrap_azure_error(exc)}); it may "
+            f"remain in resource group '{rg}' along with the NIC and disk it "
+            f"holds; delete them there manually."
+        )
     cleanup_vm_resources(compute, network, rg, name)
 
 
