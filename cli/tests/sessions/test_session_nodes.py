@@ -341,11 +341,11 @@ def _scanner_session(db: Database, monkeypatch: pytest.MonkeyPatch):  # noqa: AN
 
     monkeypatch.setitem(HARNESS_REGISTRY, "scanner", _SecretHarness)
     vm = _vm_node(db)
-    workspace = pending_workspace_node(db, cast("Config", object()), "ws1", vm, None)
+    workspace = pending_workspace_node(db, _stub_config(), "ws1", vm, None)
     template = ResolvedSessionTemplate(name="scan", harness="scanner")
     return pending_session_node(
         db,
-        cast("Config", object()),
+        _stub_config(),
         "s1",
         template,
         agent=None,

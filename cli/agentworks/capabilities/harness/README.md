@@ -76,9 +76,11 @@ type-checked. Two rules with teeth:
 
 The resource references the config blob implies, secrets above all. Never raises (malformed fields
 just omit their edge; `validate` owns the raising). Every shipped harness returns `()`; the plumbing
-behind it (secret_refs folding into the session node, scoped delivery through `ctx.secret(name)`) is
-live and tested at the framework level, but no shipped harness declares a secret yet, so a
-secret-declaring harness should expect to be the first real exerciser of that path.
+behind it is live and tested at the framework level: the session node exposes the harness's declared
+references through its `config_secret_refs` (what the preflight sweep predicts resolvability over,
+with owner/usage framing sourced to the session template) and derives its bare-name `secret_refs`
+union from them, with values delivered through `ctx.secret(name)`. No shipped harness declares a
+secret yet, so a secret-declaring harness should expect to be the first real exerciser of that path.
 
 ### `merge_config` (classmethod): inheritance semantics, decided per field
 
@@ -199,7 +201,10 @@ sessions. Five rules, each earned:
    forever after. If the tool will not accept a caller-supplied id, the same rule holds in its other
    form: let the tool mint the id, discover it from the tool's own durable state, and store THAT
    (`codex` is the shipped example: a STORED launch-marker anchor scopes discovery, filtered by the
-   session's workspace cwd, and an ambiguous candidate set raises rather than guesses). The
+   session's workspace cwd, and an ambiguous candidate set raises rather than guesses). Know that
+   discovery is a heuristic, and say so on its surfaces: codex's adoption `launch_note` names the
+   caveat, and its decisions doc records the residual windows honestly, with the operator guidance
+   (avoid two concurrently-fresh codex sessions sharing one agent user and workspace directory). The
    manager's persistence contract makes either survive restarts. Derivation schemes (from session
    name, cwd, or the tool's own directory layout) are brittle against renames and tool-version
    drift; a stored opaque value is not.

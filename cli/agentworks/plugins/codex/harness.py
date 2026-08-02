@@ -148,7 +148,11 @@ class CodexHarness(Harness):
             return None
         return {
             "resumed": "Existing Codex session found. Resuming...",
-            "adopted": "Discovered the Codex session from the previous launch. Adopting and resuming...",
+            "adopted": (
+                "Discovered the Codex session from the previous launch (best-effort match; "
+                "concurrent codex use under this user and workspace can mislead it). "
+                "Adopting and resuming..."
+            ),
             "stale": "Previous Codex session is archived or gone. Starting a new one...",
             "fresh": "No existing Codex session. Starting a new one...",
         }[self._decision]
@@ -366,7 +370,11 @@ class CodexHarness(Harness):
         actually provides"): codex serializes the session cwd as a
         PHYSICAL path, even when launched from a symlinked directory, in
         compact JSON (``"cwd":"<path>"`` with no spaces), which
-        ``grep -F`` matches without parsing. The
+        ``grep -F`` matches without parsing. The matched path is not
+        JSON-escaped: a workspace path carrying a JSON-special character
+        (a quote, a backslash) would fail the match and degrade to a
+        fresh launch, never a mis-adoption; workspace names are
+        validated to a safe character set, so this stays theoretical. The
         stdout parse also tolerates login-shell noise: only lines shaped
         like a rollout path (containing ``/rollout-`` and ending
         ``.jsonl``) are considered, so a dotfile that echoes cannot

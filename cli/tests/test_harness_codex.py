@@ -568,7 +568,12 @@ def test_launch_note_reports_adoption() -> None:
     target = _FakeTarget({_DISCOVERY_PROBE: _FakeResult(0, stdout=f"{_ROLLOUT}\n")})
     harness = _harness(state={"discovery_marker": _ANCHOR})
     harness.start(_op_ctx(target))
-    assert harness.launch_note() == ("Discovered the Codex session from the previous launch. Adopting and resuming...")
+    note = harness.launch_note()
+    assert note is not None
+    assert note.startswith("Discovered the Codex session from the previous launch")
+    # The adoption is heuristic and the note must say so (PR 360 review).
+    assert "best-effort match" in note
+    assert note.endswith("Adopting and resuming...")
 
 
 def test_launch_note_reports_the_stale_id_drop() -> None:
