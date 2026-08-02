@@ -18,8 +18,9 @@ Status: DRAFT (authored alongside the FRD and HLA; implementation gated, see pre
 
 ## Prerequisites (hard gates, in order)
 
-- [ ] The codex harness effort has landed on `main` (operator direction, 2026-08-01: wait for it,
-      then start). Its capability joins the phase 2 model inventory like any other.
+- [x] The codex harness effort has landed on `main` (operator direction, 2026-08-01: wait for it,
+      then start; landed via PR #360 on 2026-08-02, alongside the EC2 vm-platform, PR #359). Its
+      capability joins the phase 2 model inventory like any other.
 - [ ] PR #315 (TOML deprecation warning) and PR #349 (tagged-shape pre-support) are both in a
       shipped release. Phase 1's hard error and phase 2's shape hardening each require one released
       warning version of runway (FRD dependencies).
@@ -105,16 +106,20 @@ Status: DRAFT (authored alongside the FRD and HLA; implementation gated, see pre
 
 - [ ] `capability-contract-lld.md` written and reviewed: the registration surface, the interim
       tagged-table synthesis while decode still routes through the phase-1 decoders, the typed-ops
-      migration per capability (the hidden bulk), and retirement of the stale
-      tolerate-and-self-disable comment in `manifests/decode.py` (~298-301), which misstates the
-      shipped R9.2 hard-error behavior.
+      migration per capability (the hidden bulk), retirement of the stale tolerate-and-self-disable
+      comment in `manifests/decode.py` (~298-301), which misstates the shipped R9.2 hard-error
+      behavior, and the harness template-inheritance seam: the session resolver validates the MERGED
+      parent+child blob with a second `validate` call today (`capabilities/harness/README.md`), so
+      the model regime must serve per-blob and merged-blob validation both.
 - [ ] Per-capability models declared and registered via `config_model` (empty-config shared model
-      where applicable). Inventory at authoring time, re-enumerated at implementation: vm-platform
-      lima, wsl2, azure-vm (including the nested `service_principal` model), proxmox;
-      git-credential-provider github (scope union: repos/owner mutual exclusion as a model
-      validator; `token` as `SecretRef` with the `git-token-{owner}` template), azdo; harness shell,
-      claude-code, codex (new); secret backends env-var, prompt (no mapping), onepassword (mapping
-      is itself a union: `op://` string or account/reference table).
+      where applicable). Inventory re-enumerated 2026-08-02, still re-check at implementation:
+      vm-platform lima, wsl2, azure-vm (including the nested `service_principal` model), proxmox,
+      ec2 (new; nested `credentials` model with `access_key_secret` as a `SecretRef` defaulting to
+      the well-known name, plus the `instance_types` catalog); git-credential-provider github (scope
+      union: repos/owner mutual exclusion as a model validator; `token` as `SecretRef` with the
+      `git-token-{owner}` template), azdo; harness shell, claude-code, codex (new; `extra_args` list
+      plus flag fields); secret backends env-var, prompt (no mapping), onepassword (mapping is
+      itself a union: `op://` string or account/reference table).
 - [ ] Core-driven validation and extraction wired: registry name-to-model maps per capability kind;
       `Capability.validate` / `Capability.dependencies` classmethods and
       `SecretBackend.validate_mapping` retired; per-capability hand-rolled validate code deleted;
@@ -216,6 +221,8 @@ Status: DRAFT (authored alongside the FRD and HLA; implementation gated, see pre
       (narrative-necessary ones may stay).
 - [ ] Permanent-doc promotion: `capabilities/README.md` rewritten for the declare-schema contract
       (the invoked-validation sections and their standing deprecation notes retire);
+      `capabilities/harness/README.md` (the harness developer guide, added 2026-08-02, whose
+      `validate`/`dependencies` sections document the retired contract) updated the same way;
       `cli/agentworks/plugins/README.md` documents `config_model` for plugin capability authors;
       `docs/guides/resources.md` updated; the superseding ADR extended or a sibling ADR added for
       the schema model if the phase 1 ADR did not already cover it.
