@@ -991,11 +991,23 @@ class AzureVMPlatform(VMPlatform):
 
     @staticmethod
     def _vm_exists(compute: ComputeManagementClient, resource_group: str, vm_name: str) -> bool:
-        """Pre-flight: does a VM with this name exist in the group?"""
+        """Pre-flight: does a VM with this name exist in the group?
+
+        Fails CLOSED, like the collision probes on the other platforms
+        (aws ``_backend_name_in_use``, lima ``_instance_exists``): only a
+        genuine not-found answers "no VM". Any other SDK error (auth,
+        throttling, transient connectivity) is wrapped and surfaced here,
+        rather than masqueraded as "does not exist" and left to surface
+        less cleanly at the first ARM mutation. ARM's own name-uniqueness
+        enforcement still backstops a true duplicate regardless."""
+        from azure.core.exceptions import ResourceNotFoundError
+
         try:
             compute.virtual_machines.get(resource_group, vm_name)
-        except Exception:
+        except ResourceNotFoundError:
             return False
+        except Exception as exc:
+            raise wrap_azure_error(exc) from exc
         return True
 
     def _wait_for_bootstrap(self, target: Transport, vm_name: str) -> str | None:
