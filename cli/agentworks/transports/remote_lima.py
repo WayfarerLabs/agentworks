@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 
 from agentworks.transports._shared import env_assignment_prefix
 from agentworks.transports.base import Transport
-from agentworks.transports.ssh import SSHTransport, _keepalive_args
+from agentworks.transports.ssh import SSHTransport, keepalive_args
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -117,7 +117,7 @@ class RemoteLimaTransport(Transport):
             "-t",
             "-o",
             "StrictHostKeyChecking=accept-new",
-            *_keepalive_args(),
+            *keepalive_args(),
             self.vm_host_ssh,
             wrapped,
         ]

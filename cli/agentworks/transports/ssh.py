@@ -33,7 +33,7 @@ if TYPE_CHECKING:
     from agentworks.ssh import SSHLogger
 
 
-def _keepalive_args() -> list[str]:
+def keepalive_args() -> list[str]:
     """Client-side keepalives for connections with no subprocess timeout.
 
     Without these, a call whose peer goes away silently (laptop
@@ -240,7 +240,7 @@ class SSHTransport(Transport):
         """Interactive SSH with ``-t`` (allocates a TTY) and no
         ``BatchMode``. Empty ``command`` opens a login shell.
         """
-        args = ["ssh", "-t", "-o", "StrictHostKeyChecking=accept-new", *_keepalive_args()]
+        args = ["ssh", "-t", "-o", "StrictHostKeyChecking=accept-new", *keepalive_args()]
         if self.port is not None:
             args.extend(["-p", str(self.port)])
         if self.identity_file is not None:
@@ -328,7 +328,7 @@ class SSHTransport(Transport):
             "StrictHostKeyChecking=accept-new",
             "-o",
             "BatchMode=yes",
-            *_keepalive_args(),
+            *keepalive_args(),
         ]
         if self.port is not None:
             args.extend(["-p", str(self.port)])

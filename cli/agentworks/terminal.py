@@ -24,14 +24,24 @@ different owners, so they are gated separately: the line discipline
 belongs to stdin, the escape sequences to stdout.
 
 `guarded_terminal()` handles both, and sanitizes on the way IN as well
-as on the way out. The entry pass is what recovers a terminal wrecked
-by an attach this process never saw end (the operator closed the tab,
-or the agentworks process was killed outright, so no exit pass ran):
-the next attach cleans up the mess left by the last one. The exit pass
-runs unconditionally, including when the attach raises, because a clean
-detach has already reset everything and every sequence here is
-idempotent, so there is nothing to gain from trying to distinguish a
-clean exit from a dropped one.
+as on the way out. The exit pass runs unconditionally, including when
+the attach raises, because a clean detach has already reset everything
+and every sequence here is idempotent, so there is nothing to gain from
+trying to distinguish a clean exit from a dropped one.
+
+The entry pass covers the case this process never saw end at all: the
+operator closed the tab, or agentworks was killed outright, so no exit
+pass ran and the mess is still sitting in the terminal when the next
+attach starts. Note what it can and cannot do. The escape half is
+recoverable, because the sanitize payload is absolute rather than a
+diff, so it clears leftover emulator modes without needing to know what
+came before. The line-discipline half is not: the snapshot taken here
+is simply whatever is currently set, which in this scenario is already
+the broken raw mode, and the exit pass faithfully puts that same broken
+mode back. Recovering it would mean fabricating a "sane" discipline
+rather than restoring a real one, which is a different and more
+opinionated operation than this guard performs. A tab left not echoing
+by a killed attach therefore stays that way.
 
 Scope note: the other places agentworks hands the terminal to a
 full-screen program are `agw config edit` and `agw resource edit`,

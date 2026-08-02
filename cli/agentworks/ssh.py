@@ -218,7 +218,7 @@ SSH_DEFAULT_RETRIES = 1
 # 15s, giving up after 4 unanswered ones, so a dead peer is detected in
 # roughly a minute. Long enough not to tear down a session over a brief
 # network blip, short enough that a suspended laptop's terminal gets
-# cleaned up promptly on wake. See ``transports/ssh.py:_keepalive_args``.
+# cleaned up promptly on wake. See ``transports/ssh.py:keepalive_args``.
 SSH_INTERACTIVE_ALIVE_INTERVAL = 15
 SSH_INTERACTIVE_ALIVE_COUNT_MAX = 4
 

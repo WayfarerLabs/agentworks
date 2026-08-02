@@ -582,8 +582,11 @@ via `--workspace <ws>`). Use these when you just need a terminal without the con
   tradeoff is that an outage longer than that budget ends the attach even if it would eventually
   have recovered, such as a slow Wi-Fi handoff or a tunnel renegotiation. Nothing on the VM is
   affected either way, so reattaching picks the console back up where you left it. A tab killed
-  outright, before the command can return, is beyond that cleanup, but the next attach sanitizes on
-  the way in, so it repairs the terminal for you.
+  outright, before the command can return, runs no cleanup at all. The next attach sanitizes on the
+  way in, which clears the leftover emulator modes (the mouse codes, the alternate screen), but it
+  cannot recover a lost line discipline: there is no record of what echo and line-editing looked
+  like before the attach that died, so a tab left not echoing stays that way. Open a fresh tab for
+  that case.
 
 ### Session Templates
 
