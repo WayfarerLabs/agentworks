@@ -1,46 +1,126 @@
 # The capability model
 
-> This is the contract every Agentworks capability implements, so capabilities behave uniformly for
-> the framework, for `doctor`, and for the next author. It describes the contract, not a recipe.
-> `vm-platform` was the first capability to implement the full shape; `git-credential-provider` the
-> second.
->
-> This overview is the shared contract, and it is the level most readers need. Each capability
-> package also keeps a more detailed companion README that goes deep on one kind:
-> [`vm_platform/README.md`](vm_platform/README.md), [`harness/README.md`](harness/README.md), and
-> [`git_credential/README.md`](git_credential/README.md). Those are a level of detail, not a
-> separate audience: reach for them when you want the specifics of a kind, whether you are
-> implementing a new one or you are just curious how the shipped ones work.
+This document describes the capability model, the conceptual and practical framework for how
+agentworks can be extended to new backends and providers without modifying its core logic.
 
-Agentworks has a small number of **capabilities**: code that abstracts different backends and
-providers behind a set of uniform interfaces, so agentworks can be extended without modifying its
-core logic.
+## Motivation
 
-The currently considered/planned capabilities are:
+There's a lot of cool stuff out there that agentworks can leverage. New agentic harnesses, ways of
+provisioning VMs, credential providers, secret backends, and more are all potentially useful and
+relevant. But this presents a number of problems:
 
-- a `vm-platform` that provisions and manages VMs different ways (`lima`, `wsl2`, `azure-vm`,
-  `proxmox`, `aws-ec2`)
-- a `git-credential-provider` that sources and provisions git credentials for a git host so
-  agentworks can use them (`github`, `azdo`)
-- a `secret-backend` that resolves secrets from different sources (`env-var`, `prompt`,
-  `onepassword`, ...)
-- a `harness` that configures, runs, and manages a specific session workload (`shell`,
-  `claude-code`, `codex`, ...)
+- First and foremost, agentworks must remain secure and reliable. Integrating all this stuff
+  directly into the core would make it harder to maintain, audit, and generally reason about.
+- Every operator has different needs across this universe of possibility. We need a way to let
+  operators pick and choose what they want to use, without forcing them to install, configure, or
+  even just see everything.
+
+The capability model is the solution to these problems. It provides a structured way to add new
+functionality to agentworks without bloating or destabilizing the core, and without forcing
+operators to deal with things they don't need.
+
+## Conceptual model
+
+The capability model slots into the existing resource model in agentworks as a new type of resource.
+As with all resources, there is a notion of a _resource kind_, effectively the type of the resource,
+and the _resource_ itself, which is a concrete instance of that kind.
+
+In the capability world, the **capability resource kind** is the interface defining a particular
+type of capability (e.g. point of extension) such as a VM platform, a git credential provider, or a
+secret backend. The **capability resource** is a concrete implementation of that kind, such as
+`vm-platform/lima`, `git-credential-provider/github`, or `secret-backend/onepassword`. Each kind is
+its own interface, tuned for the specific type of capability it represents. Each resource is then a
+concrete implementation of that interface, providing the actual functionality.
+
+The current plan is that the set of capability kinds is fixed by the core as each one needs to be
+carefully integrated into the core logic. The set of capability resources that implement the various
+kinds is open-ended. Some are bundled in the core itself, some are included as opt-in **system
+plugins**, and some are (will be as of 0.13.0) provided by third-party **plugins**, defined and
+distributed entirely outside of the agentworks repository.
+
+## Currently implemented capabilities
+
+Four capability kinds ship today, and between them they cover most of what it takes to stand an
+agent up on a machine and let it work: where it runs, what it runs, how it gets its secrets, and how
+it talks to your git hosts. Each kind is its own extension point with its own set of shipped
+options, so you can pick the ones that match your environment and ignore the rest.
+
+### `vm-platform`
+
+Decides where your agents' VMs actually live and how they are brought up, torn down, and kept
+healthy. The point is that the same agentworks commands work whether you are running locally or on
+someone else's cloud: `lima` and `wsl2` give you fast local VMs on macOS and Windows, while
+`azure-vm`, `proxmox`, and `aws-ec2` reach out to real cloud or datacenter capacity when you want
+the work to happen off your laptop. See [`vm_platform/README.md`](vm_platform/README.md) for the
+specifics of each platform.
+
+### `harness`
+
+Decides what an agent session actually runs and how that workload is configured, launched, and
+managed. This is where a session becomes a plain `shell`, an interactive `claude-code` or `codex`
+session, or another agentic tool entirely, without agentworks needing to know the details of any one
+of them. See [`harness/README.md`](harness/README.md) for the harness contract and the shipped
+options.
+
+### `secret-backend`
+
+Decides where a secret's value comes from when agentworks needs one, so you never have to hand-carry
+credentials onto a VM. A secret can be read from an `env-var`, requested interactively at a
+`prompt`, pulled from `onepassword`, or sourced from another backend, and any secret can map to
+whichever backend fits how you store it. This lets a single resource definition travel between an
+operator who keeps tokens in a vault and one who supplies them by environment variable.
+
+### `git-credential-provider`
+
+Sources and provisions the git credentials an agent needs so it can clone and push against your git
+hosts over plain https, without you baking tokens into images. `github` and `azdo` (Azure DevOps)
+ship today, each knowing how to source a token for its host and get it onto the VM in the form git
+expects. See [`git_credential/README.md`](git_credential/README.md) for the provider contract and
+the shipped providers.
+
+## Planned future capabilities
+
+As of 0.13.0, the following capabilities are being considered for future implementation:
+
+- A `harness-user-provisioner` that handles the user-facing side of a harness, provisioning and
+  configuring the user account that will run the harness workload. This is a separate concern from
+  the harness itself, which is only concerned with running the workload once the user exists.
+  Depending on the harness, this may include things like auth, installing plugins, user-level
+  configuration and permissions, etc. Splitting it out means one harness can be paired with
+  different provisioning strategies (a shared service account, a per-agent user, a locked-down
+  sandbox) without the harness code changing.
 - `agent-feature`, `vm-feature`, and `session-feature` capabilities that enable optional, composable
   behaviors at each level: `agent-feature/az-cli` installs and configures the Azure CLI from
   provided secrets; `vm-feature/ca` exposes a certificate authority for cryptographic verification;
   `agent-feature/passport` issues a signed passport attesting to an agent's purpose, verifiable
-  against the VM's CA
+  against the VM's CA. The value is composability: an operator turns on exactly the features a given
+  agent, VM, or session needs, and features can build on each other (passport depends on the CA the
+  VM feature exposes) without any of it being wired into the core.
+- A `console-provider` that generalizes our current named console feature, allowing for different
+  frontends to provide access to the underlying sessions and companion shells. herdr.dev is one
+  likely candidate. This would let the same running sessions be reached through whatever console an
+  operator prefers, rather than the single built-in one.
 
-Capabilities live _inside_ the resource model, not beside it. This is the orienting fact. Every
-resource in the registry has a category, **declarable** (operator-declared data) or **capability**
-(read-only, code-backed), so a capability is simply a resource of the capability category:
-code-defined, registered by the app, listed by `agw resource kinds`, and never declared by an
-operator. The capability _kinds_ are fixed by the core; both the app and (future) plugins add
-_capabilities_ that conform to them by registering with the core. Consuming resources then use those
-capabilities by declaring them and supplying config.
+While the need to modify the core will mean a higher level of concern, ideas for new capability
+kinds are absolutely welcome.
 
-## Terminology
+## Technical overview
+
+Everything above this line is for operators. Everything below it is for engineers implementing or
+extending a capability: the vocabulary, the lifecycle contract each stage of an implementation must
+honor, the base class, and where the code lives. If you are choosing and configuring capabilities
+rather than writing one, you can stop here.
+
+One orientation note before the details. A capability instance is the unit this contract governs,
+but it is not the thing the framework walks: the consuming resource that holds an instance is a
+graph node, and the framework drives those nodes, resolves their secrets, and orders their
+readiness. That machinery is the orchestration layer
+([ADR 0019](../../../docs/adrs/0019-orchestration-layer-command-plans-over-node-graphs.md)),
+documented in [`../orchestration/README.md`](../orchestration/README.md). This document stays on the
+author's side of that boundary and points across it wherever the framework's behavior is what makes
+a stage's contract make sense.
+
+### Terminology
 
 Because a capability is a resource, its vocabulary parallels the resource model exactly, a four-rung
 ladder from type to running object:
@@ -78,38 +158,16 @@ capability with rich ops, like a credential provider that mints tokens):
 
 The rule this produces, and the one to hold onto: **the base capability class is instance-scoped,
 not resource-scoped.** Capability implementations extend it; the consuming resources, decls and
-sessions alike, do not. The readiness verbs and ops live on the instance; what a consuming resource
-adds is described by the orchestration layer's two contracts (`orchestration/node.py`):
+sessions alike, do not. The readiness verbs and ops live on the instance.
 
-- **`Readiness`** is just the two verbs, `preflight` and `runup`. A capability instance satisfies it
-  and nothing more: no graph key, no dependency declaration, so it is structurally NOT a node and
-  the orchestrator never walks or invokes it directly.
-- **`Node`** is `Readiness` plus graph identity (`key`, declared `deps`, declared `secret_refs`).
-  Consuming resources and live resources are nodes. A consuming-resource node HOLDS its capability
-  instance(s) and its `preflight` / `runup` COMPOSE the held instances' (a thin wrapper's is the
-  one-line fan-in `self._instance.preflight(ctx)`; a rich node also adds its own checks), and the
-  instances' declared secrets fold into the node's `secret_refs`, with the full owner/usage-bearing
-  references surfaced through the node's `config_secret_refs` (what the preflight sweep predicts
-  resolvability over).
+A capability instance satisfies the readiness verbs (`preflight` and `runup`) but is not itself a
+graph node: the consuming resource that holds it is the node, and that node composes its held
+instances' readiness (a thin wrapper forwards the instance's directly, a rich node also adds its own
+checks) and folds their declared secrets into its own. The full node-graph and driver model, why an
+instance is held-and-composed rather than walked, how the fan-in and the secret folding work, is the
+orchestration layer; see [`../orchestration/README.md`](../orchestration/README.md).
 
-So EVERY consuming-resource node grows a composing `preflight`, trivially in the thin case: the
-`git-credential` and `vm-site` nodes (`vms/nodes.py`) are the references, and the session node
-(`sessions/nodes.py`) is the rich one, holding a private `harness` instance whose readiness its
-`preflight` / `runup` fan into and whose declared config-secret references it exposes as its own
-(`config_secret_refs`, with the bare-name `secret_refs` union derived from them). (This REVERSES an
-earlier edition of this doc, which said not to grow a preflight on a consuming resource and to call
-the instance's directly; that guidance predated the node model, where the orchestrator drives nodes
-and only nodes, so the composing wrapper is now exactly where readiness belongs.) The shared verbs
-are deliberate: the readiness semantics are identical, and walked-vs-composed lives in the TYPE (the
-presence of `key` / `deps`), not in a renamed verb.
-
-Keep the instance a distinct object even in the thin case. It is tempting to collapse a one-to-one
-consuming resource and instance into a single class; resisting that is what lets thin and rich cases
-share one model instead of forking (and it is what keeps instances off the graph: an inline
-instance, like one entry of an agent template's feature map, has no globally-unique name to key a
-node by, while its holder does).
-
-### Multiplicity
+#### Multiplicity
 
 A consuming resource holds one instance _per capability usage_, so it may hold many. The thin
 wrapper holds exactly one. A rich resource may hold several: an agent template holds a _map_ of
@@ -119,7 +177,7 @@ preflights, and the one secret-resolution pass batches all their declared secret
 capability appearing more than once in a single consuming resource, with different config each time,
 is a further extension, not needed yet.)
 
-## The lifecycle
+### The lifecycle
 
 A capability instance moves through five stages. Each has a sharply different contract; the value of
 the whole model is in keeping them from bleeding into each other. The _order_ is part of the
@@ -150,35 +208,37 @@ prompted one not). Moving it _after_ resolution dissolves that: by the time runu
 is resolved the same way, so every credential is checked the same way. Both readiness stages are
 read-only and re-runnable; ops are the only mutation.
 
-**The two stages sit differently in time, and that difference has teeth.** Preflight has no choice
-about when it runs: the single secret-resolve pass runs once at the start of a command, and
-preflight must precede it, so preflight runs for _every_ resource before anything is touched. That
-forces preflight to be **dependency-blind**: it may only assume what is true at command entry, and
-must never check state that a later step in the same command creates. The canonical antipattern is a
-git-credential preflight failing `vm create` because git is not installed, the admin user does not
-exist, or the VM does not exist yet, all created later in that same command; a preflight that
-checked any of them would fail every first-time create. Runup carries no such obligation: it is
-**deferred to right before the ops it gates**, reading the already-resolved secrets from the cache,
-so it runs with full current context and may test anything, including dependencies an earlier phase
-has since satisfied. Hoisting runup to the front would only re-impose preflight's blindness for no
-gain; deferring it is strictly more capable.
+**The two stages sit differently in time, and that difference has teeth.** Preflight runs for
+_every_ resource before anything is touched, and it runs before any secret is resolved (the
+orchestration layer pins that ordering; see
+[`../orchestration/README.md`](../orchestration/README.md)). That forces preflight to be
+**dependency-blind**: it may only assume what is true at command entry, and must never check state
+that a later step in the same command creates. The canonical antipattern is a git-credential
+preflight failing `vm create` because git is not installed, the admin user does not exist, or the VM
+does not exist yet, all created later in that same command; a preflight that checked any of them
+would fail every first-time create. Runup carries no such obligation: it is **deferred to right
+before the ops it gates**, reading the already-resolved secrets from the cache, so it runs with full
+current context and may test anything, including dependencies an earlier phase has since satisfied.
+Hoisting runup to the front would only re-impose preflight's blindness for no gain; deferring it is
+strictly more capable.
 
 That "current context" is a concrete object: **`RunContext`** (`capabilities/base.py`), the resolved
 runtime world the service-layer operation assembles and hands to `preflight`, `runup`, and (as op
-shapes converge) ops. It carries the operation's config and operation scope as plain fields, and the
-power-granting world behind plain accessor methods: the execution targets (`ctx.admin_target()` /
-`ctx.agent_target()`: transports to run as those users on a VM) and resolved secrets
-(`ctx.secret(name)`). Everything is optional, and the timing is what populates it: **preflight gets
-it as of command start** (targets that _already_ exist, no resolved secrets), **runup gets it as of
-op start** (current targets, resolved secrets). It is the same object minus the secrets, differing
-only by when it is built, which is exactly why the dependency-blindness above is structural rather
-than a rule to remember: a `vm create` preflight is simply handed a context with no VM target, so it
-_cannot_ reach the thing the command has not created yet. (A future permission model omits fields
-the same way: a capability not granted a target or a secret just finds it absent.) The rule that
-pairs with it: pre-resolve concerns read `self` (config bound at construct); runup and ops read the
-context.
+shapes converge) ops (how and when the orchestrator assembles and populates it is the orchestration
+layer's concern, see [`../orchestration/README.md`](../orchestration/README.md)). It carries the
+operation's config and operation scope as plain fields, and the power-granting world behind plain
+accessor methods: the execution targets (`ctx.admin_target()` / `ctx.agent_target()`: transports to
+run as those users on a VM) and resolved secrets (`ctx.secret(name)`). Everything is optional, and
+the timing is what populates it: **preflight gets it as of command start** (targets that _already_
+exist, no resolved secrets), **runup gets it as of op start** (current targets, resolved secrets).
+It is the same object minus the secrets, differing only by when it is built, which is exactly why
+the dependency-blindness above is structural rather than a rule to remember: a `vm create` preflight
+is simply handed a context with no VM target, so it _cannot_ reach the thing the command has not
+created yet. (A future permission model omits fields the same way: a capability not granted a target
+or a secret just finds it absent.) The rule that pairs with it: pre-resolve concerns read `self`
+(config bound at construct); runup and ops read the context.
 
-### 1. `dependencies` / `validate` (declare; pure, classmethods)
+#### 1. `dependencies` / `validate` (declare; pure, classmethods)
 
 ```python
 dependencies(owner: str, config: Mapping[str, object]) -> tuple[ConfigReference, ...]
@@ -216,7 +276,7 @@ _values_ are fetched only by the framework's one batched resolve pass as soon as
 (described under ops), and delivered through the context. References are never value-resolved at
 command entry.
 
-### 2. construct (bind; cheap, config-valid by construction)
+#### 2. construct (bind; cheap, config-valid by construction)
 
 The instance is constructed bound to its `(owner_name, config)`: its config, _not_ resolved secret
 values, and no secret machinery at all (the operation's boundary union comes from the plan's
@@ -233,7 +293,7 @@ _runtime_ execution context (a harness's command channel, a platform's provision
 every capability needs as it runs; that is not a hosting difference. Config binds at construction
 for all of them; runtime context passes per call for all of them.
 
-### 3. `preflight` (predict readiness; pre-resolve, read-only)
+#### 3. `preflight` (predict readiness; pre-resolve, read-only)
 
 Preflight answers "will the real work probably succeed?" on an already-constructed,
 already-config-valid instance (config validity is construct's job, not preflight's), using only what
@@ -280,20 +340,17 @@ the secret backends. On-demand authenticated checking is an explicit, interactiv
 same surface (`doctor --runup`: allowed to prompt, therefore allowed to run runup), tracked
 separately; it is not something doctor's passive pass does.
 
-When does it run? The starting policy: **every service-layer operation runs preflight on all the
-resources it will use, before doing anything real** (before any mutation, and before any secret
-prompt). That means the capability instances, and also the declarable resources with readiness
-concerns of their own: basically everything has a preflight. `vm create` preflights both the
-vm-template and the site's platform instance, in either order, before the resolve pass, and the
-sweep predicts each node's declared secrets alongside (the template's Tailscale auth key is the
-template's declaration, not the site's, even though neither node is what asks whether it resolves).
-Within one service-layer operation, multiple ops on the same instance incur preflight once, not once
-per op. This is a real latency tax on routine commands, and it is accepted: failing clearly before
-work starts is worth more than the round-trip it costs, and there is room to refine (caching, per-op
-opt-outs) once real usage shows where it hurts. Doctor calls the same preflights for its
-per-resource health rows.
+When does it run? Every command runs preflight on all the resources it will use before doing
+anything real: before any mutation, and before any secret prompt. That is what lets the cheap fatal
+checks (a missing mapping, a missing tool, an unreachable API) fail before the operator is spent on
+a prompt. How that sweep is ordered across resources and how it predicts each declared secret's
+resolvability is the orchestration layer's job (see
+[`../orchestration/README.md`](../orchestration/README.md)). For the author the consequences are
+just two: preflight is invoked once per instance per command (not once per op), and it must stay
+read-only so running it that eagerly is safe and so doctor can reuse it for its per-resource health
+rows.
 
-### 4. `runup` (confirm readiness; post-resolve, authenticated, read-only)
+#### 4. `runup` (confirm readiness; post-resolve, authenticated, read-only)
 
 Runup is preflight's post-resolve twin, the engine run-up right before takeoff. It runs _after_ the
 operation's single resolve pass, so it holds the resolved secret values preflight could not, and
@@ -323,12 +380,13 @@ Its contract mirrors preflight where it matters and differs where it must:
 When does it run? **Deferred to right before the ops it gates**, not hoisted to the front with
 preflight. It reads the secrets the one up-front resolve pass already cached, but fires at the op
 boundary, so in a multi-phase command it sees the world as of that phase, with whatever earlier
-phases have since put in place. The shape is: preflight-all, then resolve-once, then _per phase_
-runup-then-its-ops (not one global runup-all followed by one global ops). It is skippable by
-operator policy where the round-trip is unwanted (the git stack exposes
-`[defaults] runup_git_credentials = false`, and airgapped setups want exactly that); preflight is
-not skippable, because predicting resolvability costs nothing. Doctor's passive pass does _not_ run
-runup (see the preflight section); `doctor --runup` is the explicit, prompting escalation that does.
+phases have since put in place (the orchestrator's preflight-all, resolve-once, then per-phase
+runup-then-ops sequence is spelled out in
+[`../orchestration/README.md`](../orchestration/README.md)). It is skippable by operator policy
+where the round-trip is unwanted (the git stack exposes `[defaults] runup_git_credentials = false`,
+and airgapped setups want exactly that); preflight is not skippable, because predicting
+resolvability costs nothing. Doctor's passive pass does _not_ run runup (see the preflight section);
+`doctor --runup` is the explicit, prompting escalation that does.
 
 **What a runup failure means is the caller's call, not runup's.** Runup's own contract is narrow:
 raise a typed error on definitive rejection. Whether that _aborts_ the command or is caught, logged,
@@ -349,7 +407,7 @@ runs right before its materials op and, on rejection, that one credential is ski
 initialization continues to partial (fix the token, `reinit`). Same stage, same raise; different,
 deliberate handling by the caller.
 
-### 5. ops (do the work; the mutation phase)
+#### 5. ops (do the work; the mutation phase)
 
 The domain methods: `create` / `destroy` for a platform, credential-materials for a provider,
 `start` / `probe` for a harness. These belong to the subclass, not the base; do not try to unify
@@ -362,30 +420,19 @@ detail of ops. Minting is strictly an op, never runup: minting is a mutation (a 
 expiry clock), and runup is read-only, so for a minting provider runup _reads and checks_ the
 current token and the op mints when that check says it must.
 
-Secret resolution rides the same seam, and its timing is pinned to the preflight boundary: **resolve
-as soon as preflight passes.** Once the operation's preflight checks clear, the framework resolves
-the union of secrets needed across all planned ops across all participating resources (the
-template's Tailscale key and the site's API token join the same pass) in one batched boundary pass,
-values cached; runup then runs on those resolved values, and ops draw from the same cache through
-the context (a minting provider produces its token here, guarded by check-then-mint). Resolution is
-deliberately neither of the two extremes: not eager at command entry (a prompt could precede a fatal
-check that would have sunk the op), and not deferred to first op-need (prompts would land
-mid-operation, scattered across the run). The promised invariant: all prompting happens before the
-work starts mutating anything (the walk-away point), and nothing is resolved or prompted twice in
-one command; contiguity is not promised (an activation gate may prompt for a stopped VM's credential
-before the boundary pass does the rest). In one line: preflight passing is the trigger, the
-command's declared set is the scope. Wait for preflight, then do it all.
+Secret resolution rides the same seam: ops draw their resolved values from a cache the framework
+populated once, through the context, and a minting provider produces its token here guarded by
+check-then-mint. How and when that cache is populated is the orchestration layer's concern, not the
+ops author's: the framework resolves the command's whole secret union in one batched pass as soon as
+preflight passes (neither eager at command entry nor deferred to first op-need), runup then runs on
+the resolved values, and every op reads from the same cache. The interactivity guarantees that come
+with it (all prompting happens before the work starts mutating anything, the walk-away point;
+nothing is resolved or prompted twice in one command; and the `UserAbort` re-raise discipline that
+keeps a Ctrl-C at a secret prompt from being downgraded into a swallowed warning, so a declined
+authentication never falls through into a mutation) are spelled out in
+[`../orchestration/README.md`](../orchestration/README.md).
 
-Prompting now happens inside the service-layer operation (at the preflight boundary rather than at
-bind), so the operator's abort point moves with it, and the error discipline moves too. A Ctrl-C at
-a secret prompt (`UserAbort`) must be handled cleanly, best-effort, at all times: catch-all handling
-that wraps a best-effort span (a "warn and continue" cleanup block, whether around the resolve pass
-or an op) must re-raise `UserAbort`, never downgrade it to a warning. The cautionary case is
-deleting a VM: its backend cleanup is deliberately best-effort (broken backends are what delete
-exists to clean up), but a swallowed abort at the token prompt would warn, fall through, and delete
-the DB row anyway, orphaning the backend VM the operator just declined to authenticate against.
-
-### Idempotency
+#### Idempotency
 
 Provisioning re-runs: `reinit` re-applies everything, and a failed command is retried. So the
 lifecycle has to be safe to re-run, and the five stages divide cleanly on how they get there:
@@ -408,53 +455,15 @@ A flagged, idempotent minting op must therefore **check-then-mint**: read the cu
 it (the same read-only check `runup` runs), and mint only if it is absent or expired. That guard is
 real work the implementer is on the hook for, and the flag is what tells them so.
 
-## Readiness (`not_ready`) and the fold
+### Host readiness and the fold
 
-Distinct from the lifecycle and cheaper than all of it: readiness answers **"can this run on this
-host right now?"** as a dependency-ordered fold computed once at finalize and stored on the graph
-(the registry's retained `DependencyGraph`; consumers read `graph.readiness_of`, never recompute).
-The contract is _cheap, offline, host-introspection only_: OS, tool presence, the shape of the
-config; never network, secrets, or prompting. Readiness that needs the secret machinery or a remote
-read is preflight's job at the op boundary.
+Separate from the lifecycle above is host readiness ("can this resource run on this host at all?"),
+a cheap dependency-ordered fold computed at registry finalize and stored on the graph, plus the
+enabled/disabled operator opt-in axis alongside it. That is orchestration-layer machinery, not the
+capability author's contract, so it lives in
+[`../orchestration/README.md`](../orchestration/README.md).
 
-Readiness splits into two config-shaped halves, both **non-constructing** (they never build an
-instance, so the fold stays total over unvalidated config, and a malformed block is never a
-permanent readiness reason):
-
-- A capability's config-INDEPENDENT host support: `VMPlatform.unsupported_reason()` ("could any
-  configuration ever work here": wsl2 off Windows). This is the **capability node's own** readiness.
-- A capability's config-DEPENDENT check: the classmethod `not_ready(config) -> Readiness` (default:
-  ready), keyed on the consuming resource's config (a local-Lima site without `limactl`; a remote
-  site with a `vm_host` needs nothing locally). The fold calls it off the graph-carried impl.
-
-A consuming resource decides its OWN verdict from its dependencies' states. The fold hands each node
-a `DependencyState` per dependency (the dep's enablement, its readiness when enabled, its carried
-disabled reason, its impl); the resource-level `not_ready(deps) -> Readiness` folds them however it
-likes. The fold imposes no propagation rule. Two consumers propagate from a single dependency:
-`vm-site` from its platform and `git-credential` from its provider (disabled dependency: the carried
-remediation reason, e.g. "enable plugin `<name>`", falling back to "enable its unit" when no source
-supplied one; a not-ready dependency with a readiness reason propagates that; else re-ask with the
-resource's own config). A `secret` and a `session-template` opt out (implement no `not_ready`, so
-they are always ready); a `session-template`'s harness is instead gated at use
-(`ensure_harness_enabled`), the secret model. The rules on the resulting verdict are uniform:
-
-- A not-ready resource **still registers**: it lists (marked), describes (with the reason), and
-  holds references. Existence and availability are separate axes.
-- **Using** a not-ready resource is a typed error naming the reason.
-- **References to** a not-ready resource are doctor warnings, never command failures: a resources
-  dir shared across hosts degrades gracefully on the host that lacks a requirement.
-- A reference to an **absent** resource (a typo, or an uninstalled plugin) is a hard error, not a
-  self-disable: absence is the registry's structural miss.
-
-Enablement (`enabled` / `disabled`) is a separate axis, for operator opt-in. It is modeled on the
-node and distributed by the fold, and it is now PRODUCED: `finalize` composes injected enablement
-sources into a disabled-node mark map and projects the binary axis from it (a node is `disabled` iff
-some source marks it). The plugin opt-in source (a not-opted-in `system-plugin` row is `disabled`
-with an "enable plugin `<name>`" reason) is the first such producer; it is threaded into `finalize`
-from `build_registry` (that wiring lands in a later plugin phase). A build with no sources yields
-all-`enabled`, exactly as before.
-
-## The base class
+### The base class
 
 The shared surface is real (it is a lifecycle, not a boilerplate default), so it earns a base class
 (`capabilities/base.py`). The base owns the contract above and nothing domain-specific:
@@ -473,7 +482,7 @@ resources do not.
 The base lives at the top of the `capabilities/` subtree, not in `resources/`: it is capability
 machinery, not framework machinery.
 
-## Secrets are just declared references
+### Secrets are just declared references
 
 A capability's config may name secrets (a Proxmox API token, a git PAT, an AWS client secret).
 Nothing special happens: the secret is an ordinary `ConfigReference` returned by `dependencies`. The
@@ -486,7 +495,7 @@ capability's to choose: a per-consumer default (`git-token-<name>`, derived from
 credentials are many, a shared well-known name (`proxmox-token`) where one is typical. Either way
 the capability owns the default; the framework only resolves what was declared.
 
-### Declare, then receive: the contract that keeps a capability forward-compatible
+#### Declare, then receive: the contract that keeps a capability forward-compatible
 
 Everything above reduces, for a capability author, to two obligations at two moments, with the
 framework owning everything in between:
@@ -521,7 +530,7 @@ in `runup` and in its ops (the op client is built on first need from the deliver
 for the operation); both get the accessor's typed `ConfigError` when the context carries none. A new
 capability should never hold a value source of its own.
 
-## Where capabilities live
+### Where capabilities live
 
 Capabilities form a clean layer: framework (`resources/`), then capabilities, then domains. A
 capability depends only on the framework (it returns framework references, constructs from config
@@ -538,7 +547,7 @@ change, not in one sweep. `vm-platform` (`capabilities/vm_platform/`) and `git-c
 `git_credentials/` domain, exactly the split this layer is for. The already-merged `secret-backend`
 capability still moves in under its own change. That is expected, not half-done.
 
-## Open questions
+### Open questions
 
 The model is proven on two consuming-side capabilities (`vm-platform`, `git-credential-provider`).
 The `secret-backend` capability (already merged, adopting the base under its own change) stresses it
@@ -568,7 +577,7 @@ in ways worth recording before that change, because it is a different animal:
   anyway: env-var and prompt are knowable offline, so they are preflight-only; only the network/auth
   ones like 1Password carry a real one.)
 
-## Related
+### Related
 
 - **Each capability kind has a detailed companion README** with more depth on that specific kind:
   [`vm_platform/README.md`](vm_platform/README.md) (running VMs: exposure, credentials, rollback,
@@ -578,6 +587,10 @@ in ways worth recording before that change, because it is a different animal:
   the provider contract, the github and azdo providers, the credential-helper path). Reach for them
   when you want the specifics of a kind, whether you are implementing a new one or you are just
   curious how the shipped ones work.
+- **The orchestration layer** ([`../orchestration/README.md`](../orchestration/README.md)) is the
+  companion on the framework side: how commands walk the node graph that holds capability instances,
+  resolve their secrets once, order preflight and runup, and unwind on failure. Reach for it
+  whenever a stage's contract here leans on _when_ or _how_ the framework drives it.
 - **Hosting shapes.** A consuming resource can host a capability's config three ways: as a dedicated
   kind (reference + a config blob, like `vm-site`), inline in a richer consumer (like a
   session-template's inline harness block), or in a map keyed by name (like an agent template's

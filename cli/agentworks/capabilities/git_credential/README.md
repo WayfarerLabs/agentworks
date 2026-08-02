@@ -6,6 +6,40 @@
 > Read on when you want the specifics, whether you are implementing a new provider or you are just
 > curious how the shipped ones (`github`, `azdo`) work.
 
+A git credential provider sources and provisions the git credentials an agent needs so it can clone
+and push against your git hosts over https, without you baking tokens into images or hand-carrying
+them onto a VM. You name a secret that holds a personal access token (PAT), and agentworks gets that
+token onto the VM in the form git expects, wired so the agent's ordinary git commands authenticate
+on their own.
+
+## The shipped providers
+
+Two providers ship today, one per supported host:
+
+- **`github`** sources a GitHub PAT for `github.com`. It can optionally be scoped to a set of
+  repositories or to a single owner, so several credentials can serve the same host and each
+  repository draws the one meant for it.
+- **`azdo`** sources an Azure DevOps PAT scoped to one Azure DevOps organization. It ships in the
+  opt-in `azure` system plugin, so you turn it on only if you use Azure DevOps.
+
+## What an operator can rely on
+
+- **Credentials are sourced by secret name, never pasted as values.** A credential points at the
+  _name_ of a secret that holds the token, and the secret backend supplies the value at provisioning
+  time. Nothing invites you to paste a live token into a plaintext config file, and the same
+  credential definition travels between operators who store their tokens differently.
+- **A bad token is caught early.** At provisioning time agentworks verifies the token against its
+  host before writing anything, so an expired, revoked, or mistyped token surfaces as a clear,
+  actionable error up front rather than as a confusing git failure partway through setup. (The check
+  is skippable by policy for airgapped setups.)
+
+## Technical overview
+
+Everything above this line is for operators. Everything below it is for engineers implementing or
+extending a git credential provider: where a provider sits, how its output becomes working auth on a
+VM, the contract each method must honor, the two shipped providers side by side, and where the code
+lives. If you are choosing and configuring a provider rather than writing one, you can stop here.
+
 A **git credential provider** is the code that sources and provisions credentials for one git host,
 so agentworks (and the agents running on a VM) can authenticate to that host over plain https. Each
 subclasses `GitCredentialProvider` (`base.py`), sources a personal access token (PAT) from a named
@@ -27,7 +61,7 @@ Two providers ship today and are the working references throughout this guide:
 They differ in host, probe endpoint, username convention, and a few host-specific quirks; the
 [github vs azdo](#github-vs-azdo) section lays those out side by side.
 
-## Where a git credential provider sits
+### Where a git credential provider sits
 
 The capability ladder (`../README.md` has the full model), credential edition:
 
@@ -55,7 +89,7 @@ domain. The consuming resource (`GitCredentialConfig`) and the materials assembl
 credentials to a VM live in the `git_credentials/` domain, not here; the domain depends on the
 capability, never the reverse.
 
-### How a credential reaches a git operation
+#### How a credential reaches a git operation
 
 A provider's output is inert on its own. Three domain pieces turn it into working auth on a VM, and
 they are where the `helper_entry` / `credential_lines` / `store_username` / `secret_name` surface is
@@ -109,14 +143,14 @@ remote URL, and workspace create (`workspaces/manager/create.py`) runs it agains
 declared `repo` so a remote that would defeat credential resolution draws an advisory before anyone
 clones.
 
-## The contract
+### The contract
 
 A new provider implements this surface (see `base.py` for the full docstrings). The lifecycle it
 plugs into (the `dependencies` / `validate` split, the preflight/runup boundary, ops after the
 resolve pass) is the shared capability contract in `../README.md`; what follows is what is specific
 to a credential provider.
 
-### Class identity and registration
+#### Class identity and registration
 
 `name` and `description` ClassVars (the registry row), and the inherited
 `owner_kind = "git-credential"` (error framing: config errors render as `git-credential/<name>`).
@@ -124,7 +158,7 @@ Register the class in `GIT_CREDENTIAL_PROVIDER_REGISTRY` for a core built-in; a 
 provider is seated into the same registry by the plugin machinery at import and its row publishes
 with a `system-plugin` origin instead (the `azdo` shape).
 
-### `dependencies` (classmethod): the token-secret edge, total and non-throwing
+#### `dependencies` (classmethod): the token-secret edge, total and non-throwing
 
 The token-sourcing providers both do the same thing: return the one `ConfigReference` the PAT config
 implies. The shared helper `token_dependency(owner, config)` derives it: the `provider_config`'s
@@ -145,7 +179,7 @@ what gets it into the boundary resolve and therefore delivered to `ctx.secret` a
 MINTING provider would instead declare its bootstrap secret(s) here (or none), and mint the token in
 an op rather than sourcing it.
 
-### `validate` (classmethod): shape and vocabulary only
+#### `validate` (classmethod): shape and vocabulary only
 
 The throwing half of the split. It calls `validate_token_field(owner, config)` (the correctness
 check for the `token` field: present means a non-empty secret name) and adds its own provider-shaped
@@ -163,7 +197,7 @@ rules:
 Keep `validate` to shape and vocabulary. Do not validate host-owned choice sets you do not control,
 and do not reach for the world here (that is runup's job).
 
-### Construction: cheap, no I/O
+#### Construction: cheap, no I/O
 
 The base `__init__` binds `(owner_name, config)` and re-runs `validate` (so a shape error dies at
 construction, never later); the provider constructor re-parses its own scope shape from the bound
@@ -171,7 +205,7 @@ config (`github` re-runs `_validated_scope`, `azdo` re-reads `org`), which canno
 `validate` already passed. Nothing else: no network, no token resolution, no probe. The instance
 never holds a token or a resolver; the value arrives through the context at runup and op time.
 
-### `runup` and the PAT probe
+#### `runup` and the PAT probe
 
 `runup` is the whole point of a credential provider at the readiness layer. The base implements it
 once:
@@ -208,7 +242,7 @@ Runup never mints and never mutates. A minting provider would READ-and-check the
 runup and mint only in a flagged, idempotent, check-then-mint op (see the idempotency section of
 `../README.md`).
 
-### Ops: the materials surface
+#### Ops: the materials surface
 
 The mutation-phase output. For a token-sourcing provider these are pure functions of the bound
 config and the resolved token, which is why they are idempotent for free (the domain writes the
@@ -229,7 +263,7 @@ files wholesale):
 - `secret_name` (property, on the base) is the token secret, named by the helper's rejection
   diagnosis and read at runup.
 
-### `review_remote`: advisory, config-only
+#### `review_remote`: advisory, config-only
 
 `review_remote(url) -> list[str]` is an advisory review of a declared repo remote against THIS
 credential's resolution semantics: no token, no network, no per-user wiring, reading only the
@@ -241,7 +275,7 @@ the embedded username and skip path-based per-repo/owner selection). `azdo` flag
 that is NOT the org (the standard `https://<org>@dev.azure.com/<org>/...` remote embeds exactly what
 the helper serves by, so it resolves correctly; only a foreign username bypasses it).
 
-## github vs azdo
+### github vs azdo
 
 The two shipped providers differ in every host-specific dimension and agree on the framework
 surface. The contrast is the fastest way to see which parts of a provider are host policy and which
@@ -264,11 +298,11 @@ The shared shape underneath: identical `dependencies` (both wrap `token_dependen
 `credential_lines` and a `HelperEntry`. A third provider should look the same from the outside and
 differ only in these host-policy rows.
 
-## Best practices
+### Best practices
 
 Grounded in the two shipped providers.
 
-### Source secrets by name, never by value
+#### Source secrets by name, never by value
 
 A provider names its token secret and reads the value only through the context; it never holds a
 token. The `provider_config`'s `token` field carries a NAME (defaulting to `git-token-<name>`), the
@@ -277,7 +311,7 @@ through the framework's resolve pass. This is the same discipline the cloud plat
 their API credentials (see the credentials section of `vm_platform/README.md`): nothing ever invites
 an operator to paste a live credential into a plaintext config file.
 
-### Probe at runup, not before and not at construct
+#### Probe at runup, not before and not at construct
 
 The authenticated check belongs in `runup`, after the resolve boundary, so every token is checked
 the same way regardless of where it came from (env var, prompt, 1Password). Construction stays cheap
@@ -286,7 +320,7 @@ and token-free; preflight stays credential-free (a git-credential preflight must
 command). Read the dependency-blindness discussion in `../README.md` before you are tempted to hoist
 a check earlier.
 
-### Type your errors: definitive rejection vs indeterminacy
+#### Type your errors: definitive rejection vs indeterminacy
 
 A definitive rejection (a 401, or azdo's 203) is a `TokenRejectedError` with entity framing and an
 actionable hint; a network failure or any other status warns and continues unverified. The
@@ -295,7 +329,7 @@ degrades init to PARTIAL, but an indeterminate probe leaves the credential in th
 outage never blocks provisioning. Route both through `_probe_pat` rather than re-implementing the
 classification.
 
-### Keep interpolated values charset-safe
+#### Keep interpolated values charset-safe
 
 Anything a provider puts into a store URL, a gitconfig header, or the generated helper is validated
 to a safe charset at its source: github scopes via `_NAME_RE`, the azdo org via `_ORG_RE`, and the
@@ -303,14 +337,14 @@ materials assembly re-checks store usernames and scope values with `_assert_sh_s
 them into sh. Validate new config fields the same way; the helper generator is safe by construction,
 not by a distant invariant.
 
-### Idempotency is free here, and stays free
+#### Idempotency is free here, and stays free
 
 The materials ops are deterministic functions of config plus token, and the domain writes all three
 files wholesale and registers the helper with `--replace-all`, so `reinit` reconciles cleanly with
 no per-op state. Preserve that: a token-sourcing provider needs no idempotency flag. A minting
 provider would, and would owe the check-then-mint guard the flag documents.
 
-## Testing
+### Testing
 
 No real host is ever contacted: the suite-wide conftest guard makes any unmocked probe look like a
 network failure, so a test can never reach the network. The layers, with the shipped suites as
@@ -335,7 +369,7 @@ templates:
   create/reinit suites exercise construction, the deferred runup, and the write step through the
   real provisioning path with stubbed transports.
 
-## Cross-references
+### Cross-references
 
 - [`../README.md`](../README.md): the capability lifecycle contract (read this first).
 - [`vm_platform/README.md`](../vm_platform/README.md): the sibling deep-dive; its credentials
