@@ -6,7 +6,7 @@
 > specific to running VMs, plus the gotchas that have already bitten real platforms.
 
 Five platforms ship today and are the working references throughout this guide: `lima` (`lima.py`)
-and `wsl2` (`wsl2.py`) as core built-ins, plus `proxmox`, `azure-vm`, and `ec2`, which ship in
+and `wsl2` (`wsl2.py`) as core built-ins, plus `proxmox`, `azure-vm`, and `aws-ec2`, which ship in
 opt-in system plugins (`agentworks/plugins/proxmox/platform.py`, with its REST client in `api.py`;
 `agentworks/plugins/azure/platform.py`, with its network mechanics in `network.py`; and
 `agentworks/plugins/aws/platform.py`, likewise split from its `network.py`). The rules below apply
@@ -185,9 +185,9 @@ GCP or AWS backend) should follow that shape.
 ## Credentials on a cloud platform: the reference shape
 
 Azure is the worked example, and a new cloud platform should copy it rather than invent a variant.
-The `ec2` platform (`plugins/aws/platform.py`) is the first copy of it: its optional `credentials`
-table is the AWS analogue named below, with `access_key_id` as the plain identifier and
-`access_key_secret` naming the secret that holds the secret access key (plus an optional
+The `aws-ec2` platform (`plugins/aws/platform.py`) is the first copy of it: its optional
+`credentials` table is the AWS analogue named below, with `access_key_id` as the plain identifier
+and `access_key_secret` naming the secret that holds the secret access key (plus an optional
 `assume_role_arn`). Read it alongside azure when adding the third. Four rules, in
 `plugins/azure/platform.py`:
 
@@ -208,7 +208,7 @@ credentials. The field is `secret` and holds a NAME, not `client_secret` holding
 invites an operator to paste a live credential into a plaintext file; the value resolves through the
 framework secret system like proxmox's `token_secret`. And the table is nested rather than flattened
 into three top-level keys so a future variant (a certificate instead of a client secret) slots in
-beside `secret` without a breaking change to declared sites. The `ec2` platform is exactly this
+beside `secret` without a breaking change to declared sites. The `aws-ec2` platform is exactly this
 analogue realized: a `credentials` table with the plain `access_key_id` and an `access_key_secret`
 naming the secret access key.
 
@@ -250,7 +250,7 @@ differ. First, `_get_session` does NOT probe at build (boto3 sessions are inert)
 status classify a definitive credential rejection apart from an unreachable endpoint: azure-identity
 collapses an Entra rejection and an unreachable Entra into one `ClientAuthenticationError`, so azure
 must treat every credential failure as fatal, but botocore surfaces a rejection as a `ClientError`
-with an auth error code and an outage as an `EndpointConnectionError`, so `ec2` follows proxmox
+with an auth error code and an outage as an `EndpointConnectionError`, so `aws-ec2` follows proxmox
 (runup makes a rejection fatal and warns-and-continues on indeterminacy) and its `status` re-raises
 a rejection typed rather than degrading to UNKNOWN, so a misconfigured site never reads as UNKNOWN
 in `vm describe` (the exact #303 hole). Second, an `assume_role_arn` builds AUTO-REFRESHING

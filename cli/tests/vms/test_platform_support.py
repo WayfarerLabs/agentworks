@@ -91,7 +91,7 @@ def test_every_site_registers_regardless_of_host(make_config, monkeypatch: pytes
     platforms = {e.name for e in registry.iter_kind("vm-platform")}
     # R9.5: the host-unsupported wsl2 platform is now a PRESENT (not-ready)
     # row, where before publish_to skipped it.
-    assert platforms == {"lima", "wsl2", "azure-vm", "proxmox", "ec2"}
+    assert platforms == {"lima", "wsl2", "azure-vm", "proxmox", "aws-ec2"}
 
 
 def test_not_ready_reasons_chain(make_config, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -147,7 +147,7 @@ def test_supported_host_has_everything_enabled(make_config, monkeypatch: pytest.
     for name, _decl in registry.iter_kind_items("vm-site"):
         assert registry.graph.readiness_of("vm-site", name).reason is None
     platforms = {e.name for e in registry.iter_kind("vm-platform")}
-    assert platforms == {"lima", "wsl2", "azure-vm", "proxmox", "ec2"}
+    assert platforms == {"lima", "wsl2", "azure-vm", "proxmox", "aws-ec2"}
 
 
 def test_remote_lima_site_enabled_without_local_limactl(make_config, monkeypatch: pytest.MonkeyPatch) -> None:

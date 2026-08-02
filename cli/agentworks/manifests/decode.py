@@ -346,7 +346,8 @@ def _decode_vm_site(doc: Document, spec: dict[str, object], issues: list[str]) -
     platform = spec.pop("platform", None)
     if not isinstance(platform, str) or not platform:
         raise ConfigError(
-            "vm-site requires spec.platform (a vm-platform capability name, e.g. lima, wsl2, azure-vm, ec2, proxmox)",
+            "vm-site requires spec.platform (a vm-platform capability name, "
+            "e.g. lima, wsl2, azure-vm, aws-ec2, proxmox)",
         )
     raw_config = spec.pop("platform_config", {})
     if not isinstance(raw_config, dict):
