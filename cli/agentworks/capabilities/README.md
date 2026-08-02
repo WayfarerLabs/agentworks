@@ -4,6 +4,10 @@
 > the framework, for `doctor`, and for the next author. It describes the contract, not a recipe.
 > `vm-platform` was the first capability to implement the full shape; `git-credential-provider` the
 > second.
+>
+> This overview is the one most readers need. The per-capability packages carry developer-focused
+> deep-dive guides for implementers ([`vm_platform/README.md`](vm_platform/README.md) is the first):
+> read those when you sit down to build a new implementation of that kind.
 
 Agentworks has a small number of **capabilities**: code that abstracts different backends and
 providers behind a set of uniform interfaces, so agentworks can be extended without modifying its

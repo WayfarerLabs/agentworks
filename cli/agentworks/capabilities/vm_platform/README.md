@@ -24,6 +24,31 @@ invocation goes through site resolution (`agentworks.vms.sites`). ADR 0016 recor
 capability/declarable split; ADR 0019 records the orchestration layer that now drives the lifecycle
 (below).
 
+## Who controls the host, and what you owe
+
+Before you copy patterns across platforms, know which category yours is in: the machine the VMs run
+on has an owner, and the security obligations follow from who that is. The exposure model below
+(baseline deny, ephemeral scoped allows) is a category-1 obligation, not a universal one, and
+replicating it where it does not belong is a real mistake.
+
+1. **Full-control cloud platforms** (`azure-vm` and `ec2` today). agentworks provisions the host AND
+   its network exposure surface (Azure: public IP, NSG, VNet, NIC; EC2: public IP, security group,
+   subnet, ENI), so it owns the security posture end to end. The locked-down-by-default exposure
+   model below applies in full, as do the rollback obligations for the remotely billed resources a
+   failed create must not leak.
+2. **Externally administered hosts** (`proxmox`; remote Lima via a site's `vm_host`). The hypervisor
+   belongs to the operator's infrastructure. agentworks does not control host or network security
+   there and must not try to: no firewall management, no exposure toggling. The operator's own
+   perimeter is authoritative (Proxmox VMs get `ipconfig0: ip=dhcp` on the operator's bridge and the
+   platform touches nothing else network-side). agentworks' obligations shrink to the artifacts it
+   created (the cloned VM, the Lima instance) and their cleanup. Do not cargo-cult the cloud
+   exposure machinery onto a platform in this category; it would be overreach.
+3. **Local platforms** (local Lima, `wsl2`). The host is the operator's own machine and exposure is
+   inherently host-local (Lima forwards guest SSH to a local port, `localPort: 0` in
+   `LIMA_TEMPLATE`; WSL2 traffic rides `wsl.exe` into a NAT'd virtual network). There is nothing to
+   arm or lift, which is why `secure_failed_vm` and `probe_failure_hint` correctly stay at their
+   defaults here.
+
 ## The platform surface
 
 The authoritative contract is `base.py`. Implement the ops, override only the hooks your backend
@@ -259,6 +284,10 @@ than a one-shot assume, so a long op cannot fail with `ExpiredToken` from a froz
 `test_platform_runup.py` and `test_aws_ec2_ops.py` for the halves.
 
 ## Exposure on a cloud platform: baseline deny, ephemeral scoped allows
+
+This is the category-1 obligation from the host-control categories above: a full-control cloud
+platform owns the exposure surface, so it owns keeping it shut. An externally administered or local
+platform has no business here and does none of it.
 
 Azure and EC2 share the model: the VM keeps a permanent public IP for its whole lifetime, and all
 inbound exposure is controlled by firewall rules, not by attaching and detaching the IP. The
