@@ -243,7 +243,7 @@ def test_azure_service_principal_secret_reaches_the_site_node(tmp_path: Path) ->
     assert vm_site_node(ambient, "azure-ambient").secret_refs() == ()
 
 
-def test_ec2_credentials_secret_reaches_the_site_node(tmp_path: Path) -> None:
+def test_aws_ec2_credentials_secret_reaches_the_site_node(tmp_path: Path) -> None:
     """The same end-to-end hop the azure test pins, for the aws-ec2 platform: an
     aws site with a ``credentials`` block reaches
     ``vm_site_node(...).secret_refs()`` carrying its secret access key.
@@ -263,12 +263,12 @@ def test_ec2_credentials_secret_reaches_the_site_node(tmp_path: Path) -> None:
     )
     resources = tmp_path / "resources"
     resources.mkdir()
-    ec2_site = (
+    aws_ec2_site = (
         "apiVersion: agentworks/v1\nkind: vm-site\nmetadata:\n  name: aws-dev\nspec:\n"
         "  platform:\n    name: aws-ec2\n    region: us-east-1\n"
         "    credentials:\n      access_key_id: AKIAEXAMPLE\n      access_key_secret: aws-secret\n"
     )
-    (resources / "site.yaml").write_text(ec2_site)
+    (resources / "site.yaml").write_text(aws_ec2_site)
 
     registry = build_registry(load_config(cfg, warn_issues=False))
     assert vm_site_node(registry, "aws-dev").secret_refs() == ("aws-secret",)

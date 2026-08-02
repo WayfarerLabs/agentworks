@@ -75,7 +75,7 @@ def test_aws_seated_by_plugin() -> None:
     assert plugin.manifests is None
 
 
-def test_ec2_row_disabled_system_plugin_by_default(tmp_path: Path) -> None:
+def test_aws_ec2_row_disabled_system_plugin_by_default(tmp_path: Path) -> None:
     registry = build_registry(_config(tmp_path))
     row = registry.lookup("vm-platform", "aws-ec2")
     assert row.origin.variant == "system-plugin"
@@ -83,7 +83,7 @@ def test_ec2_row_disabled_system_plugin_by_default(tmp_path: Path) -> None:
     assert registry.graph.enablement_of("vm-platform", "aws-ec2") is Enablement.disabled
 
 
-def test_disabled_ec2_hidden_from_list_shown_by_describe(tmp_path: Path) -> None:
+def test_disabled_aws_ec2_hidden_from_list_shown_by_describe(tmp_path: Path) -> None:
     registry = build_registry(_config(tmp_path))
     default_rows = {(r.kind, r.name) for r in list_resources(registry).rows}
     assert ("vm-platform", "aws-ec2") not in default_rows
