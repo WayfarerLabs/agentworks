@@ -578,9 +578,12 @@ via `--workspace <ws>`). Use these when you just need a terminal without the con
   When the connection dies instead (laptop suspends, lid closes, Wi-Fi drops), agentworks restores
   the terminal itself on the way out, so you don't land in a tab that echoes nothing and emits mouse
   escape codes on every click. Interactive SSH also carries client keepalives, which bound how long
-  a dead connection hangs before it gives up (roughly a minute) so that cleanup can run. Nothing on
-  the VM is affected; reattaching picks the console back up. A tab killed outright, before the
-  command can return, is beyond this cleanup's reach.
+  a dead connection hangs before it gives up (roughly a minute) so that cleanup can run. The
+  tradeoff is that an outage longer than that budget ends the attach even if it would eventually
+  have recovered, such as a slow Wi-Fi handoff or a tunnel renegotiation. Nothing on the VM is
+  affected either way, so reattaching picks the console back up where you left it. A tab killed
+  outright, before the command can return, is beyond that cleanup, but the next attach sanitizes on
+  the way in, so it repairs the terminal for you.
 
 ### Session Templates
 

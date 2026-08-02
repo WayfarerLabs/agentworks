@@ -38,3 +38,18 @@ allow rule scoped to the operator's egress IP, opened for bootstrap and for each
 unchanged; only Azure's implementation behind them changed, and the `ctx` threading from the
 2026-07-30 addendum above carries through to the NSG calls. Living reference:
 `cli/agentworks/plugins/azure/platform.py`, `cli/agentworks/plugins/azure/network.py`, and ADR 0003.
+
+## 2026-08-02: `interactive()` is now concrete over an abstract `_interactive()`
+
+`hla.md` presents `interactive()` as one of the `Transport` ABC's abstract members. It is now a
+concrete template method on the ABC that wraps a new abstract `_interactive()`, which is what the
+four transports implement. The surface callers use is unchanged: `interactive(command, env=...)`
+still returns the process exit code and still does not raise on remote-command failure.
+
+Driver: an interactive attach hands the operator's local terminal to a remote full-screen program
+(tmux), which reconfigures it with DECSET sequences and only undoes them on a clean detach. A
+connection that dies mid-attach leaves the operator's terminal holding mouse reporting, the
+alternate screen, and raw-mode line discipline. The fix has to wrap every interactive path, and
+there are five attach call sites across consoles, sessions, and the agent/VM shells. Making the
+wrapper the concrete member means no call site and no future transport can bypass it. See
+`cli/agentworks/terminal.py` and the ABC-level tests in `cli/tests/transports/test_abc.py`.

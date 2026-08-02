@@ -34,20 +34,24 @@ if TYPE_CHECKING:
 
 
 def _keepalive_args() -> list[str]:
-    """Client-side keepalives for long-lived interactive connections.
+    """Client-side keepalives for connections with no subprocess timeout.
 
-    Without these, an interactive attach whose peer goes away silently
-    (laptop suspends, lid closes, Wi-Fi drops) blocks in a TCP read
-    until the kernel's own retransmit budget runs out, which can be many
-    minutes and is not something the client bounds. Nothing can clean up
-    the operator's terminal during that window, because this process is
-    parked inside ``subprocess.call``. The keepalives turn an unbounded
-    hang into a bounded one and hand control back so the terminal guard
-    in :mod:`agentworks.terminal` can run.
+    Without these, a call whose peer goes away silently (laptop
+    suspends, lid closes, Wi-Fi drops) blocks in a TCP read until the
+    kernel's own retransmit budget runs out, which can be many minutes
+    and is not something the client bounds. For an attach that window is
+    doubly bad: nothing can clean up the operator's terminal during it,
+    because this process is parked inside ``subprocess.call``. The
+    keepalives turn an unbounded hang into a bounded one and hand
+    control back so the terminal guard in :mod:`agentworks.terminal`
+    can run.
 
-    Non-interactive paths do not need this: they carry an explicit
-    subprocess timeout, which interactive sessions cannot (there is no
-    correct duration for "operator is using a shell").
+    Applied to both stdio-inheriting paths, ``interactive`` and
+    ``call_streaming``: neither can carry a subprocess timeout, because
+    there is no correct duration for "operator is using a shell" or for
+    an arbitrary ``vm exec`` command. ``run`` is the exception that does
+    not need them, since it passes an explicit timeout to subprocess and
+    retries on expiry.
     """
     return [
         "-o",
@@ -317,7 +321,15 @@ class SSHTransport(Transport):
         ``vm exec`` and ``agent exec`` so the operator sees output
         stream in real time. Returns the remote exit code.
         """
-        args = ["ssh", "-T", "-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes"]
+        args = [
+            "ssh",
+            "-T",
+            "-o",
+            "StrictHostKeyChecking=accept-new",
+            "-o",
+            "BatchMode=yes",
+            *_keepalive_args(),
+        ]
         if self.port is not None:
             args.extend(["-p", str(self.port)])
         if self.identity_file is not None:
