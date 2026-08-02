@@ -122,7 +122,7 @@ def test_azure_rejects_malformed_service_principal(sp: object, match: str) -> No
         AzureVMPlatform.validate("t", {**AZURE_CONFIG, "service_principal": sp})
 
 
-def test_ec2_requires_region() -> None:
+def test_aws_ec2_requires_region() -> None:
     assert EC2Platform.validate("t", EC2_CONFIG) is None
     with pytest.raises(ConfigError, match="region is required"):
         EC2Platform.validate("t", {})
@@ -130,20 +130,20 @@ def test_ec2_requires_region() -> None:
         EC2Platform.validate("t", {**EC2_CONFIG, "extra": "x"})
 
 
-def test_ec2_optional_subnet_id_is_shape_checked() -> None:
+def test_aws_ec2_optional_subnet_id_is_shape_checked() -> None:
     assert EC2Platform.validate("t", {**EC2_CONFIG, "subnet_id": "subnet-1"}) is None
     with pytest.raises(ConfigError, match="subnet_id"):
         EC2Platform.validate("t", {**EC2_CONFIG, "subnet_id": ""})
 
 
-def test_ec2_rejects_the_removed_ami_override() -> None:
+def test_aws_ec2_rejects_the_removed_ami_override() -> None:
     """There is no image knob: the fleet standardizes on Debian bookworm, so an
     ``ami`` key is an unknown field, not a pin."""
     with pytest.raises(ConfigError, match="unknown aws-ec2"):
         EC2Platform.validate("t", {**EC2_CONFIG, "ami": "ami-123"})
 
 
-def test_ec2_credentials_is_optional_and_shape_checked() -> None:
+def test_aws_ec2_credentials_is_optional_and_shape_checked() -> None:
     """The optional ``credentials`` table: absent is the ambient path, present
     must carry access_key_id, may name its secret and a role, and rejects
     anything else."""
@@ -167,12 +167,12 @@ def test_ec2_credentials_is_optional_and_shape_checked() -> None:
         pytest.param({**EC2_CREDS, "secret": "aws-secret"}, "unknown field", id="old-secret-spelling"),
     ],
 )
-def test_ec2_rejects_malformed_credentials(creds: object, match: str) -> None:
+def test_aws_ec2_rejects_malformed_credentials(creds: object, match: str) -> None:
     with pytest.raises(ConfigError, match=match):
         EC2Platform.validate("t", {**EC2_CONFIG, "credentials": creds})
 
 
-def test_ec2_rejects_bad_instance_type_arch() -> None:
+def test_aws_ec2_rejects_bad_instance_type_arch() -> None:
     bad = {**EC2_CONFIG, "instance_types": [{"cpus": 2, "memory": 4, "type": "x", "arch": "amd64"}]}
     with pytest.raises(ConfigError, match="arch"):
         EC2Platform.validate("t", bad)
@@ -202,7 +202,7 @@ def test_config_free_platforms_imply_no_edges() -> None:
     assert EC2Platform.dependencies("t", EC2_CONFIG) == ()
 
 
-def test_ec2_returns_the_secret_access_key_reference() -> None:
+def test_aws_ec2_returns_the_secret_access_key_reference() -> None:
     (ref,) = EC2Platform.dependencies("t", {**EC2_CONFIG, "credentials": EC2_CREDS})
     assert (ref.kind, ref.name) == ("secret", "aws-secret")
     assert ref.usage == "the AWS secret access key"
@@ -212,7 +212,7 @@ def test_ec2_returns_the_secret_access_key_reference() -> None:
     assert ref.name == DEFAULT_SECRET_ACCESS_KEY
 
 
-def test_ec2_dependencies_is_total_on_malformed_config() -> None:
+def test_aws_ec2_dependencies_is_total_on_malformed_config() -> None:
     """``dependencies`` never raises. The edge's identity is the secret NAME,
     so it emits even when the table's other fields are missing or malformed, and
     is omitted only when the table itself, or the field naming the edge, is

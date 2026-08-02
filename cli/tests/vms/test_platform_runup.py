@@ -289,7 +289,7 @@ def _ec2_ctx() -> RunContext:
     return RunContext(secrets=_Secrets({"aws-secret": "value"}))  # type: ignore[arg-type]
 
 
-def test_ec2_runup_ok_when_identity_passes(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_aws_ec2_runup_ok_when_identity_passes(monkeypatch: pytest.MonkeyPatch) -> None:
     from agentworks.plugins.aws.platform import EC2Platform
     from tests._aws_fakes import install_fakes
 
@@ -297,7 +297,7 @@ def test_ec2_runup_ok_when_identity_passes(monkeypatch: pytest.MonkeyPatch) -> N
     EC2Platform("aws", _EC2_CONFIG).runup(RunContext())  # no raise (ambient path)
 
 
-def test_ec2_runup_auth_rejection_is_fatal(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_aws_ec2_runup_auth_rejection_is_fatal(monkeypatch: pytest.MonkeyPatch) -> None:
     from agentworks.plugins.aws.platform import EC2Platform
     from tests._aws_fakes import Controls, client_error, install_fakes
 
@@ -308,7 +308,7 @@ def test_ec2_runup_auth_rejection_is_fatal(monkeypatch: pytest.MonkeyPatch) -> N
         EC2Platform("aws", _EC2_CONFIG).runup(RunContext())
 
 
-def test_ec2_runup_unreachable_warns(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+def test_aws_ec2_runup_unreachable_warns(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     from agentworks.plugins.aws.platform import EC2Platform
     from tests._aws_fakes import Controls, install_fakes, unreachable
 
@@ -317,7 +317,7 @@ def test_ec2_runup_unreachable_warns(monkeypatch: pytest.MonkeyPatch, capsys: py
     assert "could not reach AWS" in capsys.readouterr().err
 
 
-def test_ec2_runup_non_auth_client_error_warns(
+def test_aws_ec2_runup_non_auth_client_error_warns(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     from agentworks.plugins.aws.platform import EC2Platform
@@ -328,7 +328,7 @@ def test_ec2_runup_non_auth_client_error_warns(
     assert "could not verify" in capsys.readouterr().err
 
 
-def test_ec2_runup_missing_subnet_is_fatal(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_aws_ec2_runup_missing_subnet_is_fatal(monkeypatch: pytest.MonkeyPatch) -> None:
     from agentworks.plugins.aws.platform import EC2Platform
     from tests._aws_fakes import Controls, client_error, install_fakes
 
@@ -342,7 +342,7 @@ def test_ec2_runup_missing_subnet_is_fatal(monkeypatch: pytest.MonkeyPatch) -> N
     assert exc.value.entity_name == "subnet-xyz"
 
 
-def test_ec2_runup_rejects_a_bad_explicit_credential(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_aws_ec2_runup_rejects_a_bad_explicit_credential(monkeypatch: pytest.MonkeyPatch) -> None:
     """On the explicit-credentials path the identity probe verifies the secret
     the context delivered; a server rejection aborts create with a typed,
     secret-naming error before anything is provisioned."""
@@ -358,7 +358,7 @@ def test_ec2_runup_rejects_a_bad_explicit_credential(monkeypatch: pytest.MonkeyP
     assert "aws-secret" in (exc.value.hint or "")
 
 
-def test_ec2_runup_without_the_secret_is_typed() -> None:
+def test_aws_ec2_runup_without_the_secret_is_typed() -> None:
     from agentworks.errors import ConfigError
     from agentworks.plugins.aws.platform import EC2Platform
 
