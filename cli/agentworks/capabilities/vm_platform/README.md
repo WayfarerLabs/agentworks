@@ -33,9 +33,9 @@ on has an owner, and the security obligations follow from who that is. The expos
 (baseline deny, ephemeral scoped allows) is a category-1 obligation, not a universal one, and
 replicating it where it does not belong is a real mistake.
 
-1. **Full-control cloud platforms** (`azure-vm` and `ec2` today). agentworks provisions the host AND
-   its network exposure surface (Azure: public IP, NSG, VNet, NIC; EC2: public IP, security group,
-   ENI, launched into an existing subnet), so it owns the security posture end to end. The
+1. **Full-control cloud platforms** (`azure-vm` and `aws-ec2` today). agentworks provisions the host
+   AND its network exposure surface (Azure: public IP, NSG, VNet, NIC; EC2: public IP, security
+   group, ENI, launched into an existing subnet), so it owns the security posture end to end. The
    locked-down-by-default exposure model below applies in full, as do the rollback obligations for
    the remotely billed resources a failed create must not leak.
 2. **Externally administered hosts** (`proxmox`; remote Lima via a site's `vm_host`). The hypervisor
