@@ -14,8 +14,12 @@ guard is therefore two structural assertions, mirroring the
 1. The CALLER SETS of the two runners and the two choreography functions are
    exactly the enumerated set, so a NEW caller of any of them fails the test
    until its command entry is added here and gated.
-2. Each of the five true COMMAND ENTRIES calls ``ensure_recipe_enabled``, and
+2. Each of the six COMMAND ENTRIES calls ``ensure_recipe_enabled``, and
    the two entries that call the realize/init function in-body gate BEFORE it.
+   ``restart_session`` is entry-only: its gate guards the restart/reattach
+   recipe merge and it sits on NO runner chain (restart re-runs no install
+   commands), so the caller-set walk cannot anchor it and gate PRESENCE is
+   its whole pin.
 
 If you legitimately add a new caller (or a new entry command), update the
 enumerated sets here AND add the entry's recipe gate.
@@ -63,6 +67,7 @@ _ENTRY_GATES: dict[str, str | None] = {
     "create_agent": "realize_agent",
     "reinit_agent": "create_agent_on_vm",
     "_build_session_graph": None,  # session create + --new-agent
+    "restart_session": None,  # session restart / reattach; no runner chain (see docstring)
 }
 
 _GATE = "ensure_recipe_enabled"
