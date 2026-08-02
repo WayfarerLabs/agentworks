@@ -5,9 +5,12 @@
 > `vm-platform` was the first capability to implement the full shape; `git-credential-provider` the
 > second.
 >
-> This overview is the one most readers need. The per-capability packages carry developer-focused
-> deep-dive guides for implementers ([`vm_platform/README.md`](vm_platform/README.md) is the first):
-> read those when you sit down to build a new implementation of that kind.
+> This overview is the shared contract, and it is the level most readers need. Each capability
+> package also keeps a more detailed companion README that goes deep on one kind:
+> [`vm_platform/README.md`](vm_platform/README.md), [`harness/README.md`](harness/README.md), and
+> [`git_credential/README.md`](git_credential/README.md). Those are a level of detail, not a
+> separate audience: reach for them when you want the specifics of a kind, whether you are
+> implementing a new one or you are just curious how the shipped ones work.
 
 Agentworks has a small number of **capabilities**: code that abstracts different backends and
 providers behind a set of uniform interfaces, so agentworks can be extended without modifying its
@@ -15,13 +18,14 @@ core logic.
 
 The currently considered/planned capabilities are:
 
-- a `vm-platform` that provisions and manages VMs different ways (`lima`, `azure-vm`, `proxmox`)
+- a `vm-platform` that provisions and manages VMs different ways (`lima`, `wsl2`, `azure-vm`,
+  `proxmox`, `ec2`)
 - a `git-credential-provider` that sources and provisions git credentials for a git host so
   agentworks can use them (`github`, `azdo`)
 - a `secret-backend` that resolves secrets from different sources (`env-var`, `prompt`,
   `onepassword`, ...)
-- a `harness` that configures, runs, and manages a specific session workload (`claude-code`,
-  `codex`, ...)
+- a `harness` that configures, runs, and manages a specific session workload (`shell`,
+  `claude-code`, `codex`, ...)
 - `agent-feature`, `vm-feature`, and `session-feature` capabilities that enable optional, composable
   behaviors at each level: `agent-feature/az-cli` installs and configures the Azure CLI from
   provided secrets; `vm-feature/ca` exposes a certificate authority for cryptographic verification;
@@ -566,9 +570,14 @@ in ways worth recording before that change, because it is a different animal:
 
 ## Related
 
-- **The harness capability has its own developer guide** (`harness/README.md`): the harness-specific
-  contract on top of this model, and the practices for building a new harness (session resume,
-  pane-command assembly, testing, plugin packaging).
+- **Each capability kind has a detailed companion README** with more depth on that specific kind:
+  [`vm_platform/README.md`](vm_platform/README.md) (running VMs: exposure, credentials, rollback,
+  and the bring-up gotchas), [`harness/README.md`](harness/README.md) (session harnesses: the
+  contract, how the session machinery consumes it, session resume), and
+  [`git_credential/README.md`](git_credential/README.md) (sourcing and provisioning git credentials:
+  the provider contract, the github and azdo providers, the credential-helper path). Reach for them
+  when you want the specifics of a kind, whether you are implementing a new one or you are just
+  curious how the shipped ones work.
 - **Hosting shapes.** A consuming resource can host a capability's config three ways: as a dedicated
   kind (reference + a config blob, like `vm-site`), inline in a richer consumer (like a
   session-template's inline harness block), or in a map keyed by name (like an agent template's

@@ -1,9 +1,11 @@
-# Developing a VM platform
+# VM platforms
 
-> Practical guidance for authors of `vm-platform` capabilities. This is the platform-kind companion
-> to the capability contract in [`../README.md`](../README.md): that doc defines the lifecycle every
-> capability obeys (`dependencies` / `validate`, preflight, runup, ops); this one covers what is
-> specific to running VMs, plus the gotchas that have already bitten real platforms.
+> The detailed companion to the capability overview in [`../README.md`](../README.md), focused on
+> the `vm-platform` kind. That overview covers the lifecycle every capability shares (`dependencies`
+> / `validate`, preflight, runup, ops) and is the level most readers need; this one goes deep on
+> what is specific to running VMs, plus the gotchas that have already bitten real platforms. Read on
+> when you want the specifics, whether you are implementing a new platform or you are just curious
+> how the shipped ones work.
 
 Five platforms ship today and are the working references throughout this guide: `lima` (`lima.py`)
 and `wsl2` (`wsl2.py`) as core built-ins, plus `proxmox`, `azure-vm`, and `aws-ec2`, which ship in
@@ -33,9 +35,9 @@ replicating it where it does not belong is a real mistake.
 
 1. **Full-control cloud platforms** (`azure-vm` and `ec2` today). agentworks provisions the host AND
    its network exposure surface (Azure: public IP, NSG, VNet, NIC; EC2: public IP, security group,
-   subnet, ENI), so it owns the security posture end to end. The locked-down-by-default exposure
-   model below applies in full, as do the rollback obligations for the remotely billed resources a
-   failed create must not leak.
+   ENI, launched into an existing subnet), so it owns the security posture end to end. The
+   locked-down-by-default exposure model below applies in full, as do the rollback obligations for
+   the remotely billed resources a failed create must not leak.
 2. **Externally administered hosts** (`proxmox`; remote Lima via a site's `vm_host`). The hypervisor
    belongs to the operator's infrastructure. agentworks does not control host or network security
    there and must not try to: no firewall management, no exposure toggling. The operator's own
@@ -309,6 +311,40 @@ recomputed, which would drift if the operator's egress or `ssh_allow_cidrs` chan
 EC2-native divergence (tuple-identity rules, so concurrent same-egress routes share one rule and the
 poke/remove are idempotent/tolerant and fail closed) is covered under `transient_route` above and in
 `network.py`.
+
+## Resources on a cloud platform: per-VM lifecycle, shared state stays ambient
+
+Hold one rule above the others when you decide what a cloud platform creates: every
+agentworks-managed resource should be scoped to exactly one VM and share that VM's lifecycle. It is
+created during that VM's `create` and torn down when the VM is deleted or when create rolls back,
+and nothing agentworks makes outlives the VM it belongs to. The shipped platforms hold to this.
+Azure gives each VM its own NIC, public IP, NSG, OS disk, and even its own VNet (`{name}-vnet`, its
+own `10.0.0.0/16`), and the delete and rollback sweep removes exactly that set; EC2 gives each VM
+its own security group, instance, and ENI. Per-VM scoping is what makes teardown and rollback total:
+there is no shared thing a delete could half-break.
+
+Shared infrastructure gets the opposite treatment: assume it, do not manage it. The resource group a
+VNet lives in, the VPC and subnet an instance launches into, are the operator's to provision, and
+the platform only READS them. Azure requires a `resource_group` in config and its `runup` checks
+that the group EXISTS, failing with a hint to create it rather than creating it silently; EC2 takes
+an optional `subnet_id` (falling back to the account's default subnet) and existence-checks it the
+same way, deriving the VPC from it. Neither creates or deletes shared infrastructure, because
+deleting one VM must never risk something another VM, or the operator, still depends on.
+
+If a platform genuinely must manage a shared resource itself (none of the shipped ones do; a future
+backend might), two rules keep it safe:
+
+1. **agentworks owns it outright, and it is marked as such.** It carries the same `owner=agentworks`
+   tag (or the backend's equivalent) that the per-VM resources carry, so it is unambiguously
+   agentworks-created and a future `doctor` sweep can find it. Never half-adopt a resource the
+   operator also manages.
+2. **It is re-ensured idempotently on every create, never created-once-and-remembered.** Every
+   `vm create` runs the same get-or-create step, so a fresh account, a manually deleted shared
+   resource, or a half-provisioned environment all converge on the next create. It is the same
+   convergence shape Azure already runs for the NSG baseline on each transient route, just hoisted
+   to a shared resource. Do NOT tear such a resource down on a single VM delete (another VM likely
+   needs it); shared-resource teardown is an explicit operator action, not part of the per-VM
+   lifecycle.
 
 ## The provisioning timeline: create-time bootstrap vs. initialization
 

@@ -1,10 +1,13 @@
-# The harness capability: developer guide
+# Session harnesses
 
-> How to build, test, and ship a session harness. The capability model this builds on (the
-> lifecycle, readiness stages, secrets) is documented in `../README.md`; the architectural record is
-> [ADR 0020](../../../../docs/adrs/0020-session-harness.md). This guide covers what is specific to
-> harnesses: the contract a new harness implements, how the session machinery consumes it, and the
-> practices that made the shipped harnesses robust (session resume above all).
+> The detailed companion to the capability overview in [`../README.md`](../README.md), focused on
+> the `harness` kind; the architectural record is
+> [ADR 0020](../../../../docs/adrs/0020-session-harness.md). That overview covers the lifecycle,
+> readiness stages, and secrets every capability shares and is the level most readers need; this one
+> goes deep on what is specific to harnesses: the contract a new harness implements, how the session
+> machinery consumes it, and the practices that made the shipped harnesses robust (session resume
+> above all). Read on when you want the specifics, whether you are implementing a new harness or you
+> are just curious how the shipped ones work.
 
 A **harness** is a tool's runtime adapter: it knows how a session workload (a plain shell, Claude
 Code, Codex, ...) is configured, started, and restarted, and what the launch target must provide for
