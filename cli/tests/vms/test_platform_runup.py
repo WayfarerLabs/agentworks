@@ -271,7 +271,7 @@ def test_azure_runup_without_the_client_secret_is_typed(monkeypatch: pytest.Monk
 
 # -- EC2 (aws) -------------------------------------------------------------
 #
-# The ec2 platform's runup DELIBERATELY diverges from azure's fatal-only stance
+# The aws-ec2 platform's runup DELIBERATELY diverges from azure's fatal-only stance
 # and follows proxmox: botocore distinguishes a definitive auth rejection (a
 # ClientError carrying an auth error code) from an unreachable endpoint (an
 # EndpointConnectionError), so a rejection is fatal and anything indeterminate

@@ -256,3 +256,11 @@ The runup and status classify a definitive credential rejection apart from an un
 (botocore can; azure-identity cannot), so EC2 follows proxmox's honest split there. Living
 reference: `cli/agentworks/plugins/aws/platform.py`, `cli/agentworks/plugins/aws/network.py`, and
 `cli/agentworks/capabilities/vm_platform/README.md`.
+
+## Addendum: 2026-08-02 (platform renamed to aws-ec2)
+
+The platform the 2026-08-01 entry above describes as `ec2` shipped (pre-release, nothing released
+yet) as `aws-ec2`: renamed from `ec2` for provider-service naming symmetry, so the plugin/platform
+pairing reads uniformly (`azure` -> `azure-vm`, `aws` -> `aws-ec2`), matching the
+one-specific-service rationale `azure-vm` follows. Only the platform NAME changed; the class
+(`EC2Platform`), the plugin (`aws`), and the config surface are unchanged.

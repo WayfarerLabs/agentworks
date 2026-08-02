@@ -1,5 +1,5 @@
 ## kind: vm-site -- a configured place to create VMs: a platform (the
-## capability: lima, wsl2, azure-vm, ec2, proxmox) plus its settings.
+## capability: lima, wsl2, azure-vm, aws-ec2, proxmox) plus its settings.
 ## Referenced by name from `agw vm create --site` and defaults.site.
 ## The `lima-local` and `wsl2` sites ship built-in (zero config) and
 ## disable themselves on hosts missing their requirements; declare
@@ -76,7 +76,7 @@
 #  description: Dev EC2 instances in us-east-1
 #spec:
 #  platform:
-#    name: ec2
+#    name: aws-ec2
 #    region: us-east-1
 #    # Optional: launch into a specific VPC subnet. Omit to use the
 #    # region's default VPC/subnet. When set, `vm create` checks the

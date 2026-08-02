@@ -46,7 +46,7 @@ def test_registry_names_match_classes() -> None:
         "wsl2": WSL2Platform,
         "azure-vm": AzureVMPlatform,
         "proxmox": ProxmoxPlatform,
-        "ec2": EC2Platform,
+        "aws-ec2": EC2Platform,
     } == VM_PLATFORM_REGISTRY
     for name, cls in VM_PLATFORM_REGISTRY.items():
         assert cls.name == name
@@ -126,7 +126,7 @@ def test_ec2_requires_region() -> None:
     assert EC2Platform.validate("t", EC2_CONFIG) is None
     with pytest.raises(ConfigError, match="region is required"):
         EC2Platform.validate("t", {})
-    with pytest.raises(ConfigError, match="unknown ec2"):
+    with pytest.raises(ConfigError, match="unknown aws-ec2"):
         EC2Platform.validate("t", {**EC2_CONFIG, "extra": "x"})
 
 
@@ -139,7 +139,7 @@ def test_ec2_optional_subnet_id_is_shape_checked() -> None:
 def test_ec2_rejects_the_removed_ami_override() -> None:
     """There is no image knob: the fleet standardizes on Debian bookworm, so an
     ``ami`` key is an unknown field, not a pin."""
-    with pytest.raises(ConfigError, match="unknown ec2"):
+    with pytest.raises(ConfigError, match="unknown aws-ec2"):
         EC2Platform.validate("t", {**EC2_CONFIG, "ami": "ami-123"})
 
 

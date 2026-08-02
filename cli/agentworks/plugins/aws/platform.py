@@ -270,12 +270,12 @@ def _generate_ec2_user_data(
 
 
 class EC2Platform(VMPlatform):
-    """Runs VMs on Amazon EC2 via the AWS Python SDK (boto3). Named ``ec2``,
+    """Runs VMs on Amazon EC2 via the AWS Python SDK (boto3). Named ``aws-ec2``,
     not ``aws``: the capability is one specific AWS service, and other AWS
     services could plausibly back platforms of their own someday (the same
-    one-service rationale ``azure-vm`` follows)."""
+    one-service rationale ``azure-vm`` follows for Azure)."""
 
-    name: ClassVar[str] = "ec2"
+    name: ClassVar[str] = "aws-ec2"
     description: ClassVar[str] = "Amazon EC2 instances (region + optional VPC subnet)"
 
     # Warned by the transports factory when every reachability probe fails: the
@@ -344,10 +344,10 @@ class EC2Platform(VMPlatform):
         for key in _EC2_REQUIRED_KEYS:
             value = config.get(key)
             if not isinstance(value, str) or not value:
-                raise ConfigError(f"{owner}.{key} is required for the ec2 platform and must be a non-empty string")
+                raise ConfigError(f"{owner}.{key} is required for the aws-ec2 platform and must be a non-empty string")
         unknown = sorted(set(config) - set(_EC2_REQUIRED_KEYS) - set(_EC2_OPTIONAL_KEYS))
         if unknown:
-            raise ConfigError(f"{owner}: unknown ec2 platform field(s): {', '.join(unknown)}")
+            raise ConfigError(f"{owner}: unknown aws-ec2 platform field(s): {', '.join(unknown)}")
         # Optional string knob: shape-check here so a malformed subnet_id fails
         # at config load, not first vm create.
         subnet_id = config.get("subnet_id")

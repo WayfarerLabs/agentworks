@@ -2,7 +2,7 @@
 
 A capability-only plugin in the proxmox mould (no bundled manifest, no
 install-command). It drives ``build_registry`` on real config and pins that its
-one contribution, the ``ec2`` vm-platform, publishes present-but-disabled with
+one contribution, the ``aws-ec2`` vm-platform, publishes present-but-disabled with
 a ``system-plugin`` origin until the operator opts in with
 ``[plugins] system = ["aws"]``, at which point a ``vm-site`` on it becomes
 ready and resolvable.
@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
     from agentworks.config import Config
 
-# A vm-site on the ec2 platform (ambient credentials: no secret declared).
+# A vm-site on the aws-ec2 platform (ambient credentials: no secret declared).
 _AWS_SITE = """
 apiVersion: agentworks/v1
 kind: vm-site
@@ -34,7 +34,7 @@ metadata:
   name: aws-dev
 spec:
   platform:
-    name: ec2
+    name: aws-ec2
     region: us-east-1
 """
 
@@ -67,7 +67,7 @@ def test_aws_seated_by_plugin() -> None:
     from agentworks.plugins import SYSTEM_PLUGINS
 
     assert "aws" in SYSTEM_PLUGINS
-    assert "ec2" in VM_PLATFORM_REGISTRY
+    assert "aws-ec2" in VM_PLATFORM_REGISTRY
     plugin = SYSTEM_PLUGINS["aws"]
     assert set(plugin.capabilities) == {"vm-platform"}
     # No bundled manifest: EC2 talks to AWS in-process, so it ships no
@@ -77,17 +77,17 @@ def test_aws_seated_by_plugin() -> None:
 
 def test_ec2_row_disabled_system_plugin_by_default(tmp_path: Path) -> None:
     registry = build_registry(_config(tmp_path))
-    row = registry.lookup("vm-platform", "ec2")
+    row = registry.lookup("vm-platform", "aws-ec2")
     assert row.origin.variant == "system-plugin"
     assert row.origin.plugin == "aws"
-    assert registry.graph.enablement_of("vm-platform", "ec2") is Enablement.disabled
+    assert registry.graph.enablement_of("vm-platform", "aws-ec2") is Enablement.disabled
 
 
 def test_disabled_ec2_hidden_from_list_shown_by_describe(tmp_path: Path) -> None:
     registry = build_registry(_config(tmp_path))
     default_rows = {(r.kind, r.name) for r in list_resources(registry).rows}
-    assert ("vm-platform", "ec2") not in default_rows
-    desc = describe_resource(registry, "vm-platform", "ec2")
+    assert ("vm-platform", "aws-ec2") not in default_rows
+    desc = describe_resource(registry, "vm-platform", "aws-ec2")
     assert desc.disabled_reason is not None
     assert "aws" in desc.disabled_reason
 
@@ -114,12 +114,12 @@ def test_enabling_aws_makes_the_site_ready_and_resolvable(tmp_path: Path) -> Non
     from agentworks.vms.sites import resolve_site
 
     registry = build_registry(_config(tmp_path, _AWS_SITE, enabled=True))
-    assert registry.graph.enablement_of("vm-platform", "ec2") is Enablement.enabled
+    assert registry.graph.enablement_of("vm-platform", "aws-ec2") is Enablement.enabled
     assert registry.graph.readiness_of("vm-site", "aws-dev").reason is None
 
     platform = resolve_site("aws-dev", registry)  # no raise
     assert isinstance(platform, VMPlatform)
-    assert platform.name == "ec2"
+    assert platform.name == "aws-ec2"
 
 
 def test_doctor_roster_lists_the_aws_plugin(tmp_path: Path) -> None:
