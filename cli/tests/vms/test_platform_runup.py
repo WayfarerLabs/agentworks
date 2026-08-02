@@ -281,7 +281,7 @@ def test_azure_runup_without_the_client_secret_is_typed(monkeypatch: pytest.Monk
 _EC2_CONFIG = {"region": "us-east-1"}
 _EC2_CREDS_CONFIG = {
     "region": "us-east-1",
-    "credentials": {"access_key_id": "AKIA", "secret": "aws-secret"},
+    "credentials": {"access_key_id": "AKIA", "access_key_secret": "aws-secret"},
 }
 
 

@@ -266,7 +266,7 @@ def test_ec2_credentials_secret_reaches_the_site_node(tmp_path: Path) -> None:
     ec2_site = (
         "apiVersion: agentworks/v1\nkind: vm-site\nmetadata:\n  name: aws-dev\nspec:\n"
         "  platform:\n    name: ec2\n    region: us-east-1\n"
-        "    credentials:\n      access_key_id: AKIAEXAMPLE\n      secret: aws-secret\n"
+        "    credentials:\n      access_key_id: AKIAEXAMPLE\n      access_key_secret: aws-secret\n"
     )
     (resources / "site.yaml").write_text(ec2_site)
 

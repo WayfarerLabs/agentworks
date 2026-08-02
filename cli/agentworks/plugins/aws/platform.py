@@ -63,19 +63,21 @@ if TYPE_CHECKING:
     from agentworks.transports import Transport
 
 
-# The well-known secret name the credentials.secret field defaults to,
-# mirroring azure's DEFAULT_CLIENT_SECRET. The default env-var backend
+# The well-known secret NAME the credentials.access_key_secret field defaults
+# to, mirroring azure's DEFAULT_CLIENT_SECRET. The default env-var backend
 # convention reads AW_SECRET_AWS_SECRET_ACCESS_KEY. The config field is
-# `secret`, NOT `secret_access_key`: it names a secret in the framework's
-# secret system, and a field called secret_access_key would invite operators
-# to paste the literal value into plaintext config.
+# `access_key_secret`: it pairs visually with `access_key_id`, follows
+# proxmox's `token_secret` convention (the framework-secret NAME for the
+# thing), and NAMES a secret rather than holding a value, so it is deliberately
+# distinct from AWS's own "secret access key" term (which a field called
+# `secret_access_key` would invite operators to paste literally into config).
 DEFAULT_SECRET_ACCESS_KEY = "aws-secret-access-key"
 
 _EC2_REQUIRED_KEYS = ("region",)
 _EC2_OPTIONAL_KEYS = ("credentials", "instance_types", "subnet_id")
 
 _CREDS_REQUIRED_KEYS = ("access_key_id",)
-_CREDS_OPTIONAL_KEYS = ("secret", "assume_role_arn")
+_CREDS_OPTIONAL_KEYS = ("access_key_secret", "assume_role_arn")
 
 # The EC2 API vocabulary for CPU architecture, and the Debian-image naming the
 # public SSM release parameters use for the same thing. The mapping stays
@@ -115,17 +117,19 @@ def _parse_credentials(config: Mapping[str, object], owner: str) -> _Credentials
     if raw is None:
         return None
     if not isinstance(raw, dict):
-        raise ConfigError(f"{owner}.credentials must be a table of {{access_key_id, secret, assume_role_arn}}")
+        raise ConfigError(
+            f"{owner}.credentials must be a table of {{access_key_id, access_key_secret, assume_role_arn}}"
+        )
     access_key_id = raw.get("access_key_id")
     if not isinstance(access_key_id, str) or not access_key_id:
         raise ConfigError(
             f"{owner}.credentials.access_key_id is required and must be a non-empty string; "
             f"omit the whole credentials table to use ambient AWS credentials"
         )
-    secret_name = raw.get("secret", DEFAULT_SECRET_ACCESS_KEY)
+    secret_name = raw.get("access_key_secret", DEFAULT_SECRET_ACCESS_KEY)
     if not isinstance(secret_name, str) or not secret_name:
         raise ConfigError(
-            f"{owner}.credentials.secret must be a bare secret name (string), "
+            f"{owner}.credentials.access_key_secret must be a bare secret name (string), "
             f"not the secret access key's value; omit the key to use the default '{DEFAULT_SECRET_ACCESS_KEY}'"
         )
     assume_role_arn = raw.get("assume_role_arn")
@@ -308,21 +312,21 @@ class EC2Platform(VMPlatform):
     @classmethod
     def dependencies(cls, owner: str, config: Mapping[str, object]) -> tuple[ConfigReference, ...]:
         """The secret-access-key reference a declared ``credentials`` table
-        implies: its ``secret`` field names it (default
+        implies: its ``access_key_secret`` field names it (default
         ``aws-secret-access-key``). A site with no ``credentials`` table
         authenticates ambiently and implies no reference, so its edge set is
         empty.
 
         Total and non-throwing: the edge's identity is the secret name alone,
         so it emits even when the table's OTHER fields are absent or malformed,
-        and is omitted only when the table itself, or the ``secret`` field that
-        names the edge, is malformed. ``validate`` is where those shape errors
-        surface.
+        and is omitted only when the table itself, or the ``access_key_secret``
+        field that names the edge, is malformed. ``validate`` is where those
+        shape errors surface.
         """
         raw = config.get("credentials")
         if not isinstance(raw, dict):
             return ()
-        secret_name = raw.get("secret", DEFAULT_SECRET_ACCESS_KEY)
+        secret_name = raw.get("access_key_secret", DEFAULT_SECRET_ACCESS_KEY)
         if not isinstance(secret_name, str) or not secret_name:
             return ()
         from agentworks.resources.reference import ConfigReference

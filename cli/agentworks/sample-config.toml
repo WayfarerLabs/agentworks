@@ -214,8 +214,8 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # operator.ssh_allow_cidrs) during bootstrap and each native route. It
 # authenticates with the AMBIENT AWS credential chain by default (env vars,
 # shared config, instance profile, SSO), or with an explicit access key via an
-# optional `credentials` block carrying access_key_id and `secret`: the NAME of
-# the secret holding the secret access key, never its value (default
+# optional `credentials` block carrying access_key_id and `access_key_secret`:
+# the NAME of the secret holding the secret access key, never its value (default
 # `aws-secret-access-key`, read by the env-var backend from
 # AW_SECRET_AWS_SECRET_ACCESS_KEY), with an optional assume_role_arn. Once set,
 # the site uses that identity and nothing else. Run

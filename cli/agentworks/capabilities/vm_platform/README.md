@@ -186,9 +186,10 @@ GCP or AWS backend) should follow that shape.
 
 Azure is the worked example, and a new cloud platform should copy it rather than invent a variant.
 The `ec2` platform (`plugins/aws/platform.py`) is the first copy of it: its optional `credentials`
-table is the AWS analogue named below, with `access_key_id` as the plain identifier and `secret`
-naming the secret that holds the secret access key (plus an optional `assume_role_arn`). Read it
-alongside azure when adding the third. Four rules, in `plugins/azure/platform.py`:
+table is the AWS analogue named below, with `access_key_id` as the plain identifier and
+`access_key_secret` naming the secret that holds the secret access key (plus an optional
+`assume_role_arn`). Read it alongside azure when adding the third. Four rules, in
+`plugins/azure/platform.py`:
 
 **1. Explicit credentials are an OPTIONAL nested table naming a secret.** The site's
 `platform_config` may carry a `service_principal` table:
@@ -208,8 +209,8 @@ invites an operator to paste a live credential into a plaintext file; the value 
 framework secret system like proxmox's `token_secret`. And the table is nested rather than flattened
 into three top-level keys so a future variant (a certificate instead of a client secret) slots in
 beside `secret` without a breaking change to declared sites. The `ec2` platform is exactly this
-analogue realized: a `credentials` table with the plain `access_key_id` and a `secret` naming the
-secret access key.
+analogue realized: a `credentials` table with the plain `access_key_id` and an `access_key_secret`
+naming the secret access key.
 
 **2. Declare the edge from `dependencies`, validate the shape in `validate`.** `dependencies` is
 total and non-throwing, so it emits the edge whenever it can derive the secret NAME (even if the

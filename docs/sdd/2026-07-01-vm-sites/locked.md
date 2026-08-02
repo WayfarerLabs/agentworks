@@ -242,10 +242,11 @@ ephemeral rules on TCP/22 scoped to the operator's detected egress prefix plus
 (post-Tailscale, on create failure via `secure_failed_vm`, and on `transient_route` exit). This is
 the same deny-baseline / ephemeral-scoped-allow shape azure adopted in the 2026-07-31 addendum, so
 the two cloud platforms share the operator-egress detection (hoisted to
-`cli/agentworks/capabilities/vm_platform/ssh_exposure.py`) and the `create` rollback-on-failure-and-
-interrupt contract. SSM would add real prerequisites (an enrolled agent, an instance profile, VPC
-endpoints or NAT) for no steady-state benefit; it remains a plausible FUTURE alternative transport
-behind the same `native_transport` / `transient_route` hooks, out of scope here but not foreclosed.
+`cli/agentworks/capabilities/vm_platform/ssh_exposure.py`) and the `create` rollback contract (both
+the failure arm and the operator-interrupt arm). SSM would add real prerequisites (an enrolled
+agent, an instance profile, VPC endpoints or NAT) for no steady-state benefit; it remains a
+plausible FUTURE alternative transport behind the same `native_transport` / `transient_route` hooks,
+out of scope here but not foreclosed.
 
 Two EC2-native divergences from azure are recorded in the vm-platform README and the code: an EC2
 security group needs no explicit deny rule (its empty state IS the baseline), and an EC2 ingress

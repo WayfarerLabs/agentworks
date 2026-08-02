@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     from agentworks.db import VMRow
 
 _CONFIG = {"region": "us-east-1"}
-_CREDS = {"access_key_id": "AKIAEXAMPLE", "secret": "aws-secret"}
+_CREDS = {"access_key_id": "AKIAEXAMPLE", "access_key_secret": "aws-secret"}
 
 
 def _fake_vm() -> Any:
@@ -55,8 +55,8 @@ def _platform() -> EC2Platform:
     return EC2Platform("aws-site", dict(_CONFIG))
 
 
-def _creds_platform(secret_key: str | None = "secret") -> EC2Platform:
-    creds = dict(_CREDS) if secret_key else {k: v for k, v in _CREDS.items() if k != "secret"}
+def _creds_platform(*, name_field: bool = True) -> EC2Platform:
+    creds = dict(_CREDS) if name_field else {k: v for k, v in _CREDS.items() if k != "access_key_secret"}
     return EC2Platform("aws-site", {**_CONFIG, "credentials": creds})
 
 
@@ -95,11 +95,11 @@ class TestCredentialSelection:
         assert "aws_session_token" not in session
 
     def test_credentials_secret_name_defaults(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Omitting ``credentials.secret`` reads the well-known default name."""
+        """Omitting ``credentials.access_key_secret`` reads the default name."""
         rec = install_fakes(monkeypatch)
         vm: VMRow = _fake_vm()  # type: ignore[assignment]
 
-        platform = _creds_platform(secret_key=None)
+        platform = _creds_platform(name_field=False)
         platform.status(vm, _ctx(name=DEFAULT_SECRET_ACCESS_KEY, value="default-named"))
 
         assert rec.sessions[0]["aws_secret_access_key"] == "default-named"

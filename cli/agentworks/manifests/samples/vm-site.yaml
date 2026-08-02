@@ -98,14 +98,14 @@
 #    # Optional: authenticate with a specific access key instead of the
 #    # ambient AWS credential chain (env vars, shared config, instance
 #    # profile, SSO). Omit the whole table to keep the ambient default.
-#    # `secret` is the NAME of the secret holding the secret access key,
-#    # never its value: it resolves through the backend chain like any
-#    # other (default env var: AW_SECRET_AWS_SECRET_ACCESS_KEY). Once set,
-#    # this site uses this identity and nothing else. Add assume_role_arn
-#    # to layer an STS AssumeRole on top of the access key.
+#    # `access_key_secret` is the NAME of the secret holding the secret
+#    # access key, never its value: it resolves through the backend chain
+#    # like any other (default env var: AW_SECRET_AWS_SECRET_ACCESS_KEY).
+#    # Once set, this site uses this identity and nothing else. Add
+#    # assume_role_arn to layer an STS AssumeRole on top of the access key.
 #    credentials:
 #      access_key_id: AKIAIOSFODNN7EXAMPLE
-#      secret: aws-secret-access-key
+#      access_key_secret: aws-secret-access-key
 ##
 ## Proxmox VE. The API token value is the `proxmox-token` secret
 ## (override the name with the `token_secret` key), resolved

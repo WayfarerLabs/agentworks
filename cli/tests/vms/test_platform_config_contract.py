@@ -37,7 +37,7 @@ PROXMOX_CONFIG = {
     "template_vmid": 9000,
 }
 EC2_CONFIG = {"region": "us-east-1"}
-EC2_CREDS = {"access_key_id": "AKIAEXAMPLE", "secret": "aws-secret"}
+EC2_CREDS = {"access_key_id": "AKIAEXAMPLE", "access_key_secret": "aws-secret"}
 
 
 def test_registry_names_match_classes() -> None:
@@ -158,12 +158,13 @@ def test_ec2_credentials_is_optional_and_shape_checked() -> None:
         pytest.param("not-a-table", "must be a table", id="not-a-table"),
         pytest.param({}, "access_key_id", id="missing-access-key"),
         pytest.param({**EC2_CREDS, "access_key_id": ""}, "access_key_id", id="empty-access-key"),
-        pytest.param({**EC2_CREDS, "secret": ""}, "bare secret name", id="empty-secret-name"),
-        pytest.param({**EC2_CREDS, "secret": 7}, "bare secret name", id="non-string-secret-name"),
+        pytest.param({**EC2_CREDS, "access_key_secret": ""}, "bare secret name", id="empty-secret-name"),
+        pytest.param({**EC2_CREDS, "access_key_secret": 7}, "bare secret name", id="non-string-secret-name"),
         pytest.param({**EC2_CREDS, "assume_role_arn": ""}, "assume_role_arn", id="empty-role"),
-        # The field is deliberately named `secret` (a NAME), so the
-        # value-shaped spelling an operator might reach for is refused.
+        # The field is `access_key_secret` (a NAME), so AWS's own value-shaped
+        # term and the old `secret` spelling are both refused as unknown fields.
         pytest.param({**EC2_CREDS, "secret_access_key": "hunter2"}, "unknown field", id="secret-value-spelling"),
+        pytest.param({**EC2_CREDS, "secret": "aws-secret"}, "unknown field", id="old-secret-spelling"),
     ],
 )
 def test_ec2_rejects_malformed_credentials(creds: object, match: str) -> None:
@@ -206,7 +207,7 @@ def test_ec2_returns_the_secret_access_key_reference() -> None:
     assert (ref.kind, ref.name) == ("secret", "aws-secret")
     assert ref.usage == "the AWS secret access key"
 
-    # Omitting ``secret`` falls back to the well-known default name.
+    # Omitting ``access_key_secret`` falls back to the well-known default name.
     (ref,) = EC2Platform.dependencies("t", {**EC2_CONFIG, "credentials": {"access_key_id": "AKIA"}})
     assert ref.name == DEFAULT_SECRET_ACCESS_KEY
 
@@ -216,11 +217,11 @@ def test_ec2_dependencies_is_total_on_malformed_config() -> None:
     so it emits even when the table's other fields are missing or malformed, and
     is omitted only when the table itself, or the field naming the edge, is
     unusable."""
-    (ref,) = EC2Platform.dependencies("t", {"credentials": {"secret": "aws-secret"}})
+    (ref,) = EC2Platform.dependencies("t", {"credentials": {"access_key_secret": "aws-secret"}})
     assert ref.name == "aws-secret"
     (ref,) = EC2Platform.dependencies("t", {**EC2_CONFIG, "credentials": {}})
     assert ref.name == DEFAULT_SECRET_ACCESS_KEY
-    assert EC2Platform.dependencies("t", {**EC2_CONFIG, "credentials": {**EC2_CREDS, "secret": ""}}) == ()
+    assert EC2Platform.dependencies("t", {**EC2_CONFIG, "credentials": {**EC2_CREDS, "access_key_secret": ""}}) == ()
     assert EC2Platform.dependencies("t", {**EC2_CONFIG, "credentials": "nope"}) == ()
 
 
