@@ -108,9 +108,13 @@ Status: DRAFT (authored alongside the FRD and HLA; implementation gated, see pre
       tagged-table synthesis while decode still routes through the phase-1 decoders, the typed-ops
       migration per capability (the hidden bulk), retirement of the stale tolerate-and-self-disable
       comment in `manifests/decode.py` (~298-301), which misstates the shipped R9.2 hard-error
-      behavior, and the harness template-inheritance seam: the session resolver validates the MERGED
-      parent+child blob with a second `validate` call today (`capabilities/harness/README.md`), so
-      the model regime must serve per-blob and merged-blob validation both.
+      behavior, and effective-config validation (operator decision 2026-08-02): validation runs on
+      the MERGED blob only, resolved along the graph's `inherits` chain at finalize (chain length
+      one everywhere but session templates), never on a partial declared blob. The LLD settles the
+      per-key provenance the merge tracks for error attribution, the two-stage reference extraction
+      (structural refs per declared blob feed the graph; secret refs read the effective blob), and
+      the retirement of the session resolver's use-time completeness call
+      (`sessions/templates.py::_validate_merged`) in favor of the finalize pass.
 - [ ] Per-capability models declared and registered via `config_model` (empty-config shared model
       where applicable). Inventory re-enumerated 2026-08-02, still re-check at implementation:
       vm-platform lima, wsl2, azure-vm (including the nested `service_principal` model), proxmox,

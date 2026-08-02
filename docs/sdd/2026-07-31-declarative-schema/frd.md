@@ -131,13 +131,20 @@ Derived surfaces:
   the throwing validate pass runs on the resources that emerge READY and ENABLED. A resource that
   emerges disabled or not-ready skips hard validation at load, so a broken blob on a disabled-plugin
   resource can never sink the whole config; its problems become hard errors the moment it is enabled
-  or used, when finalize validates it like any other. A capability name with no registration on this
-  host stays what it is today: a hard finalize error (the registry-readiness refactor's R9.2/R9.11
-  rulings, preserved). Every host registers every shipped plugin's capabilities, enablement being a
-  separate axis, so an unregistered name can only be a typo, and the cross-host sharing story rides
-  the enablement axis above, not name tolerance. Revisit only if out-of-tree plugins ever make
-  unregistered-but-real names possible. Error quality does not regress: errors keep owner-scoped
-  framing (`<owner>.<field>: ...`) and file/position context at least as good as today's.
+  or used, when finalize validates it like any other. Validation operates on the EFFECTIVE config:
+  where a surface supports inheritance (session templates), declared blobs merge along the graph's
+  declared chain first and the merged blob is what validates, because a declared blob may be
+  legitimately partial (completed by a parent or child) and has no completeness of its own to check.
+  Every other surface is a chain of length one, so effective-config validation is one uniform rule,
+  not a special case; it also moves the merged-blob completeness check from first use (today's
+  session-resolve timing) to load, where the rest of hard validation lives. A capability name with
+  no registration on this host stays what it is today: a hard finalize error (the registry-readiness
+  refactor's R9.2/R9.11 rulings, preserved). Every host registers every shipped plugin's
+  capabilities, enablement being a separate axis, so an unregistered name can only be a typo, and
+  the cross-host sharing story rides the enablement axis above, not name tolerance. Revisit only if
+  out-of-tree plugins ever make unregistered-but-real names possible. Error quality does not
+  regress: errors keep owner-scoped framing (`<owner>.<field>: ...`) and file/position context at
+  least as good as today's.
 - **FR13.** Drift is structurally impossible or test-caught: schema facts appear in exactly one
   authored place (the model), samples and describe output are rendered from it (so they cannot drift
   by construction), the renderer is pinned by tests over fixture schemas plus every bundled kind
@@ -218,3 +225,11 @@ Decided with the operator on 2026-08-01:
 - **Tagged-union shape break.** The naming-field-plus-blob pair collapses into one
   `name`-discriminated table (FR8), accepted as a breaking manifest change now, shipped with hard
   actionable errors on the old shape plus a manifest-upgrade mode in `agw resource migrate`.
+
+Decided with the operator on 2026-08-02:
+
+- **Effective-config validation.** There is no per-blob completeness validation: an inheriting
+  surface's declared blob may be legitimately partial, so validation universally runs on the merged
+  (effective) blob, resolved along the graph's chain at finalize; chain length is one everywhere but
+  session templates, making the rule uniform. This moves the merged completeness check from
+  session-resolve time to load, and FR12 states it.

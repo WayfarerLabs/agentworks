@@ -139,6 +139,16 @@ contract's disabled-backend seam as a consequence of the general rule rather tha
 Samples and describe render for disabled capabilities too: rendering reads the model, not the
 operator's blob.
 
+Validation operates on effective config (FR12): the finalize pass resolves each inheritance chain
+through the graph (session templates' `inherits` edges; every other surface is a chain of length
+one) and validates the merged blob, never a partial declared blob, since a Pydantic model's required
+fields would wrongly reject a child blob a parent completes. Today's session-resolve-time merged
+check moves to finalize as a consequence; resolve still merges to build the instance, and
+construction re-validates as always. Two LLD-owned details: the merge tracks per-key provenance so
+the bridge can name the template that declared a bad key, and reference extraction stages
+(structural refs per declared blob feed the graph the merge walks; secret refs read the effective
+blob so an overridden parent secret is not over-declared).
+
 Timing preserves today's deliberate two-pass shape (capability blobs validate at finalize, never at
 decode, so graph construction never depends on a blob being valid):
 
