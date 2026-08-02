@@ -47,6 +47,8 @@ def test_vm_exists_wraps_and_raises_on_a_non_not_found_error() -> None:
         raise ClientAuthenticationError("token expired")
 
     # Fails CLOSED: the probe surfaces the real error (wrapped) rather
-    # than reporting "does not exist" and letting create march on.
-    with pytest.raises(AzureError):
+    # than reporting "does not exist" and letting create march on. The
+    # original SDK error is chained, so "surface the real error" holds.
+    with pytest.raises(AzureError) as excinfo:
         AzureVMPlatform._vm_exists(_compute(get), "rg", "vm")
+    assert isinstance(excinfo.value.__cause__, ClientAuthenticationError)
