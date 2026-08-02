@@ -29,7 +29,7 @@ from agentworks.capabilities.base import RunContext
 from agentworks.errors import AuthorizationError
 from agentworks.plugins.azure.network import AzureError
 from agentworks.plugins.azure.platform import AzureVMPlatform
-from tests._azure_platform_support import _RESOURCE_ID, _install_fakes
+from tests._azure_platform_support import _RESOURCE_ID, _authorization_denied, _install_fakes
 
 if TYPE_CHECKING:
     from tests.conftest import CapturedOutput
@@ -47,22 +47,33 @@ def _vm_row(*, resource_id: str | None = _RESOURCE_ID) -> Any:
     return SimpleNamespace(name="vm1", admin_username="agentworks", platform_metadata=metadata)
 
 
-def _authorization_denied() -> Exception:
-    """An ARM RBAC rejection as the SDK raises it: HttpResponseError
-    carrying the documented ``AuthorizationFailed`` error code."""
+def _linked_authorization_denied() -> Exception:
+    """The sibling RBAC rejection: ``LinkedAuthorizationFailed``, the
+    code ARM uses when the credential lacks rights on a LINKED resource
+    (e.g. the NIC's subnet) rather than the VM itself."""
     from azure.core.exceptions import HttpResponseError
 
     exc = HttpResponseError(message="denied")
     exc.error = SimpleNamespace(  # type: ignore[assignment]
-        code="AuthorizationFailed",
-        message="The client does not have authorization to perform action 'Microsoft.Compute/virtualMachines/delete'.",
+        code="LinkedAuthorizationFailed",
+        message="The client has permission to perform the action, but does not have permission on the linked scope.",
         details=None,
     )
     return exc
 
 
+def _malformed_details_error() -> Exception:
+    """An arbitrary failure whose ``error.details`` is truthy but not
+    subscriptable: the classifier must answer non-RBAC, never raise (a
+    raise inside classification would replace the real delete failure)."""
+    exc = RuntimeError("LRO exploded strangely")
+    exc.error = SimpleNamespace(code="Conflict", details=object())  # type: ignore[attr-defined]
+    return exc
+
+
 def _authorization_denied_nested() -> Exception:
-    """The same RBAC rejection with ``AuthorizationFailed`` buried in
+    """``_authorization_denied``'s rejection with ``AuthorizationFailed``
+    buried in
     ``error.details[0]`` behind a generic top-level code, the nesting
     ARM sometimes uses and ``wrap_azure_error`` already walks."""
     from azure.core.exceptions import HttpResponseError
@@ -87,8 +98,8 @@ def _authorization_denied_nested() -> Exception:
 class TestSurvivingVMRaises:
     @pytest.mark.parametrize(
         "denied",
-        [_authorization_denied, _authorization_denied_nested],
-        ids=["top-level-code", "nested-details-code"],
+        [_authorization_denied, _authorization_denied_nested, _linked_authorization_denied],
+        ids=["top-level-code", "nested-details-code", "linked-scope-code"],
     )
     def test_rbac_denial_raises_authorization_error(
         self,
@@ -100,7 +111,8 @@ class TestSurvivingVMRaises:
         rights, the VM survives the teardown, and the op raises the
         clean typed rejection (naming the retry) instead of reporting
         success; the caller keeps the row. Both code placements (top
-        level and nested under ``error.details``) must land here."""
+        level and nested under ``error.details``) and the linked-scope
+        sibling code must land here."""
         fakes = _install_fakes(monkeypatch)  # get() serves the VM back: it survived
         fakes.compute.virtual_machines.delete_error = denied()
 
@@ -128,6 +140,18 @@ class TestSurvivingVMRaises:
         with pytest.raises(AzureError, match="still exists .* LRO exploded"):
             _platform().delete(_vm_row(), RunContext())
 
+    def test_malformed_details_classify_as_generic_without_raising(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A truthy but non-subscriptable ``error.details`` on the
+        captured failure must not blow up INSIDE the RBAC classifier
+        (that would replace the real delete failure with a TypeError);
+        it classifies as non-RBAC and the generic still-exists raise
+        names the actual failure."""
+        fakes = _install_fakes(monkeypatch)
+        fakes.compute.virtual_machines.delete_error = _malformed_details_error()
+
+        with pytest.raises(AzureError, match="still exists .* LRO exploded strangely"):
+            _platform().delete(_vm_row(), RunContext())
+
     def test_silent_survival_raises_even_without_a_captured_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Belt-and-braces: a delete that LOOKED successful but left the
         VM behind still refuses to report success."""
@@ -151,6 +175,47 @@ class TestSurvivingVMRaises:
 
         with pytest.raises(AzureError, match="could not confirm"):
             _platform().delete(_vm_row(), RunContext())
+
+    def test_denied_probe_after_rbac_delete_failure_raises_authorization_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The issue's worst case: one credential lacking both delete
+        and read rights. The delete fails RBAC and the probe GET is
+        denied too; the typed refusal (with the grant hint) must
+        surface, not the generic could-not-confirm."""
+        fakes = _install_fakes(monkeypatch)
+        fakes.compute.virtual_machines.delete_error = _authorization_denied()
+
+        def _denied_probe(rg: str, name: str, **_kw: object) -> Any:
+            raise _authorization_denied()
+
+        monkeypatch.setattr(fakes.compute.virtual_machines, "get", _denied_probe)
+
+        with pytest.raises(AuthorizationError) as exc:
+            _platform().delete(_vm_row(), RunContext())
+
+        assert "refused to delete" in str(exc.value)
+        assert exc.value.hint is not None
+        assert "Contributor" in exc.value.hint
+
+    def test_denied_probe_alone_raises_authorization_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Even with no captured delete failure, a probe the credential
+        is not allowed to make is an RBAC answer, not an unknown: the
+        denial (and its grant hint) surfaces instead of the generic
+        could-not-confirm."""
+        fakes = _install_fakes(monkeypatch)
+
+        def _denied_probe(rg: str, name: str, **_kw: object) -> Any:
+            raise _authorization_denied()
+
+        monkeypatch.setattr(fakes.compute.virtual_machines, "get", _denied_probe)
+
+        with pytest.raises(AuthorizationError) as exc:
+            _platform().delete(_vm_row(), RunContext())
+
+        assert "read access while confirming" in str(exc.value)
+        assert exc.value.hint is not None
+        assert "Contributor" in exc.value.hint
 
 
 class TestGoneVMSucceeds:
@@ -188,6 +253,37 @@ class TestGoneVMSucceeds:
         assert fakes.network.public_ip_addresses.deleted == [("rg1", "vm1-ip")]
         assert fakes.network.network_security_groups.deleted == [("rg1", "vm1-nsg")]
         assert fakes.network.virtual_networks.deleted == [("rg1", "vm1-vnet")]
+
+    def test_already_gone_disk_stays_quiet(
+        self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+    ) -> None:
+        """Idempotent re-delete: the tagged OS disk vanished between the
+        sweep's listing and its delete (or a retry lists a stale view).
+        The disk gets the same 404 tolerance as the named resources, so
+        the re-delete stays warning-free."""
+        from azure.core.exceptions import ResourceNotFoundError
+
+        fakes = _install_fakes(monkeypatch, vm_exists_lookup=False)
+        fakes.compute.disks.disks = [SimpleNamespace(name="vm1-osdisk", tags={"owner": "agentworks"})]
+        fakes.compute.disks.delete_error = ResourceNotFoundError("disk already gone")
+
+        _platform().delete(_vm_row(), RunContext())  # no raise
+
+        assert captured_output.warnings == []
+
+    def test_disk_sweep_failure_still_warns(
+        self, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+    ) -> None:
+        """A genuine disk-delete failure keeps its straggler warning
+        (naming the manual cleanup) without failing the delete."""
+        fakes = _install_fakes(monkeypatch, vm_exists_lookup=False)
+        fakes.compute.disks.disks = [SimpleNamespace(name="vm1-osdisk", tags={"owner": "agentworks"})]
+        fakes.compute.disks.delete_error = RuntimeError("disk is locked")
+
+        _platform().delete(_vm_row(), RunContext())  # stragglers never fail the delete
+
+        (warning,) = [w for w in captured_output.warnings if "OS disk" in w]
+        assert "agentworks-tagged disk" in warning
 
 
 def test_no_resource_id_short_circuits(monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput) -> None:

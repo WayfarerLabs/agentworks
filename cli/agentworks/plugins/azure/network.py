@@ -37,13 +37,15 @@ priority band [100, 199] under the deny:
 
 from __future__ import annotations
 
+import contextlib
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.errors import AuthorizationError, ConfigError, ConnectivityError, ProvisioningError
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable
 
     from azure.mgmt.compute import ComputeManagementClient
     from azure.mgmt.network import NetworkManagementClient
@@ -598,7 +600,11 @@ def cleanup_vm_resources(
         for disk in compute.disks.list_by_resource_group(rg):
             disk_name = disk.name or ""
             if disk.tags and disk.tags.get("owner") == "agentworks" and name in disk_name and disk_name:
-                compute.disks.begin_delete(rg, disk_name).result()
+                # An already-gone disk is the normal answer on a retry.
+                with contextlib.suppress(ResourceNotFoundError):
+                    compute.disks.begin_delete(rg, disk_name).result()
+    except ResourceNotFoundError:
+        pass  # the resource group itself is gone: nothing left to sweep
     except Exception as exc:
         output.warn(
             f"could not sweep the OS disk(s) for '{name}' in resource group "
@@ -637,21 +643,34 @@ def delete_vm_and_resources(
     return vm_delete_exc
 
 
+# The documented ARM RBAC rejection codes: ``AuthorizationFailed`` (the
+# credential lacks rights on the resource itself) and
+# ``LinkedAuthorizationFailed`` (it lacks rights on a linked resource,
+# e.g. the NIC's subnet during a VM delete).
+_AUTHORIZATION_FAILURE_CODES = frozenset({"AuthorizationFailed", "LinkedAuthorizationFailed"})
+
+
 def _is_authorization_failure(exc: Exception) -> bool:
     """Whether the SDK exception is an ARM authorization rejection (the
     credential is authenticated but RBAC denies it the operation).
-    Matched on the documented ``AuthorizationFailed`` error code, read
-    with the same nested-details walk as :func:`wrap_azure_error` (ARM
-    sometimes reports a generic top-level code and buries the specific
-    one in ``error.details[0]``), with an HTTP 403 fallback; every
-    attribute is read defensively because the exception may be anything
-    the SDK raised."""
+    Matched on the documented RBAC error codes
+    (:data:`_AUTHORIZATION_FAILURE_CODES`), read with the same
+    nested-details walk as :func:`wrap_azure_error` (ARM sometimes
+    reports a generic top-level code and buries the specific one in
+    ``error.details[0]``), with an HTTP 403 fallback. Every attribute is
+    read defensively because the exception may be anything the SDK
+    raised; ``details`` in particular is only indexed when it is a real
+    sequence, so a malformed shape can never raise out of
+    classification and replace the failure being classified.
+    (``wrap_azure_error``'s walk needs no such guard: it runs only
+    under the ``HttpResponseError`` isinstance gate, whose
+    ``error.details`` is the SDK's typed list.)"""
     error = getattr(exc, "error", None)
     code = getattr(error, "code", None)
     details = getattr(error, "details", None)
-    if details:
+    if isinstance(details, Sequence) and details:
         code = getattr(details[0], "code", None) or code
-    if code == "AuthorizationFailed":
+    if code in _AUTHORIZATION_FAILURE_CODES:
         return True
     return getattr(exc, "status_code", None) == 403
 
@@ -680,7 +699,12 @@ def verify_vm_deleted(
     - VM still present otherwise: ``AzureError`` naming the captured
       delete failure when there is one.
     - Probe itself failed (cannot confirm): ``AzureError``; claiming
-      success without positive confirmation is how #329 happened.
+      success without positive confirmation is how #329 happened. But
+      when the probe failure OR the captured delete failure is itself
+      an RBAC denial, ``AuthorizationError`` instead: a credential
+      without delete rights often lacks read rights too, and a generic
+      could-not-confirm would bury the actionable denial and its
+      grant hint.
 
     ``delete_exc`` is the VM delete's captured failure from
     :func:`delete_vm_and_resources`, threaded in so the raise names the
@@ -689,11 +713,38 @@ def verify_vm_deleted(
     from azure.core.exceptions import ResourceNotFoundError
 
     retry_hint = "the VM record is kept so the delete can be retried"
+    grant_hint = (
+        f"{retry_hint}; grant the active Azure credential delete "
+        f"rights on the resource group (e.g. the Contributor role) "
+        f"and re-run `agw vm delete`"
+    )
+
+    def _rbac_refusal(cause: Exception) -> AuthorizationError:
+        """The typed RBAC rejection for a delete Azure refused, shared
+        by the still-present branch and the denied-probe branch."""
+        return AuthorizationError(
+            f"Azure refused to delete VM '{name}' in resource group '{rg}': {wrap_azure_error(cause).summary}",
+            entity_kind="vm",
+            entity_name=name,
+            hint=grant_hint,
+        )
+
     try:
         compute.virtual_machines.get(rg, name)
     except ResourceNotFoundError:
         return
     except Exception as probe_exc:
+        if delete_exc is not None and _is_authorization_failure(delete_exc):
+            raise _rbac_refusal(delete_exc) from delete_exc
+        if _is_authorization_failure(probe_exc):
+            raise AuthorizationError(
+                f"Azure denied the credential read access while confirming "
+                f"VM '{name}' was deleted from resource group '{rg}': "
+                f"{wrap_azure_error(probe_exc).summary}",
+                entity_kind="vm",
+                entity_name=name,
+                hint=grant_hint,
+            ) from probe_exc
         cause = delete_exc or probe_exc
         raise AzureError(
             f"could not confirm Azure VM '{name}' was deleted from resource "
@@ -705,16 +756,7 @@ def verify_vm_deleted(
         ) from cause
 
     if delete_exc is not None and _is_authorization_failure(delete_exc):
-        raise AuthorizationError(
-            f"Azure refused to delete VM '{name}' in resource group '{rg}': {wrap_azure_error(delete_exc).summary}",
-            entity_kind="vm",
-            entity_name=name,
-            hint=(
-                f"{retry_hint}; grant the active Azure credential delete "
-                f"rights on the resource group (e.g. the Contributor role) "
-                f"and re-run `agw vm delete`"
-            ),
-        ) from delete_exc
+        raise _rbac_refusal(delete_exc) from delete_exc
     summary = (
         wrap_azure_error(delete_exc).summary
         if delete_exc is not None

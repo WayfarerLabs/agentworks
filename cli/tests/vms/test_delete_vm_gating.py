@@ -8,7 +8,12 @@ keeps the row so the surviving backend VM stays reachable, #329).
 Real config, registry, resolver, and backend loop (env-var backend);
 the platform's backend ops and the Tailscale logout are the fakes,
 mirroring ``test_lifecycle_orchestrated.py`` (delete shares the
-lifecycle commands' composition root, ``_live_vm_boundary``).
+lifecycle commands' composition root, ``_live_vm_boundary``). One
+end-to-end azure pin at the bottom drops one level lower: the REAL
+``AzureVMPlatform.delete`` (with its #329 verification gate) runs
+through this same manager path, with only the Azure SDK faked
+(``tests._azure_platform_support``), composing the two halves the
+suites above and ``test_azure_delete_verify.py`` pin separately.
 """
 
 from __future__ import annotations
@@ -22,8 +27,12 @@ from agentworks.db import VMStatus
 from agentworks.errors import AuthorizationError, UserAbort
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.vms import manager as vm_manager
+from tests._azure_platform_support import _RESOURCE_ID, _authorization_denied, _install_fakes
+from tests.orchestrated_fixtures import write_operator_config
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from agentworks.db import Database, VMRow
     from tests.conftest import CapturedOutput
 
@@ -268,3 +277,42 @@ def test_user_abort_inside_an_op_span_aborts_the_delete(
         vm_manager.delete_vm(db, config, "dvm", yes=True)
     assert db.get_vm("dvm") is not None
     assert counts2["delete"] == 0  # aborted before the backend delete
+
+
+def test_azure_rbac_delete_failure_keeps_the_row_end_to_end(
+    db: Database,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """The #329 seam composed end to end for azure: the RBAC-refused
+    backend delete surfaces through the platform's REAL verification
+    gate (``verify_vm_deleted``) and the real manager delete path as
+    the typed ``AuthorizationError``, aborting the command with the
+    row kept. Real config (azure plugin enabled, its ``[azure]`` site
+    section), registry, resolver, and boundary; only the Azure SDK is
+    faked. The suites above fake ``platform.delete`` wholesale and
+    ``test_azure_delete_verify.py`` stops at the platform, so this is
+    the one pin proving the two halves meet."""
+    config = write_operator_config(
+        tmp_path,
+        '[plugins]\nsystem = ["azure"]\n\n'
+        "[azure]\n"
+        'subscription_id = "sub-A"\n'
+        'resource_group = "rg1"\n'
+        'region = "eastus"\n',
+    )
+    # No tailscale host: the best-effort logout span never opens, so
+    # nothing here needs the transport stubs.
+    db.insert_vm("vm1", site="azure", hostname="vm1")
+    db.update_vm_platform_metadata("vm1", {"resource_id": _RESOURCE_ID})
+    fakes = _install_fakes(monkeypatch)  # the probe serves the VM back: it survived
+    fakes.compute.virtual_machines.delete_error = _authorization_denied()
+
+    with pytest.raises(AuthorizationError) as exc:
+        vm_manager.delete_vm(db, config, "vm1", yes=True)
+
+    assert "AuthorizationFailed" in str(exc.value)
+    assert exc.value.hint is not None
+    assert "Contributor" in exc.value.hint
+    assert db.get_vm("vm1") is not None

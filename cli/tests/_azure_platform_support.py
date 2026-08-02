@@ -28,6 +28,22 @@ if TYPE_CHECKING:
 _RESOURCE_ID = "/subscriptions/sub-A/resourceGroups/rg1/providers/Microsoft.Compute/virtualMachines/vm1"
 
 
+def _authorization_denied() -> Exception:
+    """An ARM RBAC rejection as the SDK raises it: ``HttpResponseError``
+    carrying the documented ``AuthorizationFailed`` error code. Shared
+    by the #329 delete-verify suite and the manager-seam integration pin
+    in ``tests/vms/test_delete_vm_gating.py``."""
+    from azure.core.exceptions import HttpResponseError
+
+    exc = HttpResponseError(message="denied")
+    exc.error = SimpleNamespace(  # type: ignore[assignment]
+        code="AuthorizationFailed",
+        message="The client does not have authorization to perform action 'Microsoft.Compute/virtualMachines/delete'.",
+        details=None,
+    )
+    return exc
+
+
 class _Poller:
     """A begin_* long-running-operation stub: ``.result()`` yields a value."""
 
@@ -200,17 +216,22 @@ class _FakeVMsWithLocation(_FakeVMs):
 
 class _FakeDisks:
     """Compute ``disks`` stub for the cleanup sweep: serves whatever the
-    test pre-seeds into ``disks`` (default none) and records deletes."""
+    test pre-seeds into ``disks`` (default none) and records deletes;
+    ``delete_error`` drives the sweep's 404-tolerance and
+    straggler-warning paths."""
 
     def __init__(self, events: list[tuple[str, str, str, str]] | None = None) -> None:
         self.disks: list[Any] = []
         self.deleted: list[tuple[str, str]] = []
+        self.delete_error: BaseException | None = None
         self._events = events if events is not None else []
 
     def list_by_resource_group(self, rg: str) -> list[Any]:
         return list(self.disks)
 
     def begin_delete(self, rg: str, name: str) -> _Poller:
+        if self.delete_error is not None:
+            raise self.delete_error
         self.deleted.append((rg, name))
         self._events.append(("delete", "disk", rg, name))
         return _Poller(None)
