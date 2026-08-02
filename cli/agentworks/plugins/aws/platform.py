@@ -1054,9 +1054,10 @@ class EC2Platform(VMPlatform):
         """The BlockDeviceMappings to resize the root volume to ``disk_gib``, or
         an empty list when no disk was requested (the AMI's own root size stands
         and no DescribeImages call is made). When a size IS requested, the AMI's
-        real root device name must be used: a pinned custom AMI whose root device
-        is not the Debian default would otherwise attach the sized volume to the
-        wrong device and silently drop the operator's request."""
+        real root device name is read from DescribeImages rather than hard-coded:
+        Debian's published root device could change across image releases, and a
+        wrong constant would attach the sized volume to the wrong device and
+        silently drop the operator's request."""
         if disk_gib is None:
             return []
         root_device = self._root_device_name(ec2, ami)
