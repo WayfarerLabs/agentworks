@@ -189,17 +189,13 @@ class TestCreate:
             _platform().create(_request(), RunContext(config=_config()))
         assert "10-byte" in str(exc.value)
 
-    def test_resolves_debian_ami_from_ssm_for_arch(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_always_resolves_debian_ami_from_ssm_for_arch(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """SSM is the ONLY image source (no operator pin): the Debian bookworm
+        release parameter for the selected arch is always resolved at create."""
         rec = install_fakes(monkeypatch, Controls(ssm_ami="ami-from-ssm"))
         _platform().create(_request(), RunContext(config=_config()))
         assert rec.kwargs_for("get_parameter")["Name"] == "/aws/service/debian/release/bookworm/latest/arm64"
         assert rec.kwargs_for("run_instances")["ImageId"] == "ami-from-ssm"
-
-    def test_uses_the_ami_pin_and_skips_ssm(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        rec = install_fakes(monkeypatch)
-        _platform(ami="ami-pinned").create(_request(), RunContext(config=_config()))
-        assert "get_parameter" not in rec.methods("ssm")
-        assert rec.kwargs_for("run_instances")["ImageId"] == "ami-pinned"
 
     def test_rejects_a_name_collision(self, monkeypatch: pytest.MonkeyPatch) -> None:
         install_fakes(monkeypatch, Controls(collision=True))

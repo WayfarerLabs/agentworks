@@ -72,7 +72,7 @@ if TYPE_CHECKING:
 DEFAULT_SECRET_ACCESS_KEY = "aws-secret-access-key"
 
 _EC2_REQUIRED_KEYS = ("region",)
-_EC2_OPTIONAL_KEYS = ("credentials", "instance_types", "ami", "subnet_id")
+_EC2_OPTIONAL_KEYS = ("credentials", "instance_types", "subnet_id")
 
 _CREDS_REQUIRED_KEYS = ("access_key_id",)
 _CREDS_OPTIONAL_KEYS = ("secret", "assume_role_arn")
@@ -344,12 +344,11 @@ class EC2Platform(VMPlatform):
         unknown = sorted(set(config) - set(_EC2_REQUIRED_KEYS) - set(_EC2_OPTIONAL_KEYS))
         if unknown:
             raise ConfigError(f"{owner}: unknown ec2 platform field(s): {', '.join(unknown)}")
-        # Optional string knobs: shape-check here so a malformed ami/subnet_id
-        # fails at config load, not first vm create.
-        for key in ("ami", "subnet_id"):
-            value = config.get(key)
-            if value is not None and (not isinstance(value, str) or not value):
-                raise ConfigError(f"{owner}.{key} must be a non-empty string when set")
+        # Optional string knob: shape-check here so a malformed subnet_id fails
+        # at config load, not first vm create.
+        subnet_id = config.get("subnet_id")
+        if subnet_id is not None and (not isinstance(subnet_id, str) or not subnet_id):
+            raise ConfigError(f"{owner}.subnet_id must be a non-empty string when set")
         # Validate the optional blocks' shapes here too (same reason).
         _parse_instance_catalog(config, owner)
         _parse_credentials(config, owner)
@@ -510,8 +509,10 @@ class EC2Platform(VMPlatform):
                 f"({selected.cpus} vCPU / {selected.memory_gib} GiB) "
                 f"for requested {req_cpus} vCPU / {req_memory} GiB."
             )
-        # Root-volume sizing is opt-in: with no disk request the AMI's own root
-        # size stands and no DescribeImages call is made.
+        # Root-volume sizing is driven by request.disk_gib. It is None only when
+        # a caller omits it entirely; the orchestrated path always sets it
+        # (ResolvedVMTemplate defaults 50), so the None branch (AMI's own root
+        # size, no DescribeImages call) is the rare direct-API case, not the norm.
         disk = request.disk_gib
         swap = request.swap_gib if request.swap_gib is not None else 0
 
@@ -983,13 +984,12 @@ class EC2Platform(VMPlatform):
             )
 
     def _resolve_ami(self, ctx: RunContext, region: str, arch: str) -> str:
-        """The AMI to launch: the configured pin, or the Debian 12 (bookworm)
-        release AMI resolved from the public SSM release parameter for the
-        selected arch. Fleet OS standard is bookworm, matching azure's debian-12
-        pin."""
-        ami = self.platform_config.get("ami")
-        if isinstance(ami, str) and ami:
-            return ami
+        """The Debian 12 (bookworm) release AMI, resolved from the public SSM
+        release parameter for the selected arch. This is the ONLY image source:
+        agentworks standardizes on Debian bookworm across the fleet (matching
+        azure's debian-12 pin), so there is deliberately no operator image knob.
+        An arbitrary AMI would break the provisioning contract mid-bootstrap
+        rather than failing typed, so the platform does not accept one."""
         segment = _DEBIAN_ARCH_SEGMENT[arch]
         parameter = f"/aws/service/debian/release/bookworm/latest/{segment}"
         ssm = self._client("ssm", region, ctx)

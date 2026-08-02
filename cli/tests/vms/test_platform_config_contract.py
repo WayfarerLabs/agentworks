@@ -130,11 +130,17 @@ def test_ec2_requires_region() -> None:
         EC2Platform.validate("t", {**EC2_CONFIG, "extra": "x"})
 
 
-def test_ec2_optional_string_knobs_are_shape_checked() -> None:
-    assert EC2Platform.validate("t", {**EC2_CONFIG, "ami": "ami-123", "subnet_id": "subnet-1"}) is None
-    for key in ("ami", "subnet_id"):
-        with pytest.raises(ConfigError, match=key):
-            EC2Platform.validate("t", {**EC2_CONFIG, key: ""})
+def test_ec2_optional_subnet_id_is_shape_checked() -> None:
+    assert EC2Platform.validate("t", {**EC2_CONFIG, "subnet_id": "subnet-1"}) is None
+    with pytest.raises(ConfigError, match="subnet_id"):
+        EC2Platform.validate("t", {**EC2_CONFIG, "subnet_id": ""})
+
+
+def test_ec2_rejects_the_removed_ami_override() -> None:
+    """There is no image knob: the fleet standardizes on Debian bookworm, so an
+    ``ami`` key is an unknown field, not a pin."""
+    with pytest.raises(ConfigError, match="unknown ec2"):
+        EC2Platform.validate("t", {**EC2_CONFIG, "ami": "ami-123"})
 
 
 def test_ec2_credentials_is_optional_and_shape_checked() -> None:
