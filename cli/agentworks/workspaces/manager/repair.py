@@ -421,23 +421,6 @@ def _repair_git_identity(
         return 0
 
 
-def _revert_grant_on_failure(db: Database, agent_name: str, ws_name: str) -> None:
-    """Best-effort: drop a just-inserted explicit grant after the on-VM
-    group add failed (or was cancelled). Used by the grant-all loop in
-    create_workspace to keep DB and VM authorization aligned. A failure
-    to revert is logged but does not raise, so it never masks the
-    caller's original exception (or KeyboardInterrupt)."""
-    try:
-        db.delete_agent_grant(agent_name, ws_name, "explicit")
-    except Exception as revert_err:
-        output.warn(
-            f"Could not revert grant for '{agent_name}' on workspace '{ws_name}': "
-            f"{revert_err}. DB has a grant row with no VM-side group membership; "
-            f"re-run 'agent grant-workspaces {agent_name} {ws_name}' or "
-            f"revoke explicitly."
-        )
-
-
 def _rehome_partial_state_hint(db: Database, ws_name: str, old_path: str, new_path: str) -> str:
     """Describe the actual DB state after a rehome failure / cancellation.
 

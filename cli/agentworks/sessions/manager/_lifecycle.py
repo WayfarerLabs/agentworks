@@ -441,7 +441,7 @@ def restart_session(
             # Capture the graph boundary union for the harness's op-start
             # context (matching the create path, which captures
             # ``resolver.values`` at its boundary). Inert for the built-in
-            # shell harness (empty ``secret_refs()``), but keeps the restart
+            # shell harness (empty ``config_secret_refs()``), but keeps the restart
             # op ctx shape-correct for a future secret-declaring harness; the
             # env-chain resolve (``resolve_for_command`` below) is a SEPARATE
             # pass, not this graph union.

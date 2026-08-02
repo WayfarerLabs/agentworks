@@ -20,11 +20,10 @@ from agentworks.workspaces.manager.copy import copy_workspace
 from agentworks.workspaces.manager.create import create_workspace, describe_workspace, list_workspaces
 from agentworks.workspaces.manager.delete import delete_workspace
 from agentworks.workspaces.manager.rehome import rehome_workspace
-from agentworks.workspaces.manager.repair import _revert_grant_on_failure, repair_workspace
+from agentworks.workspaces.manager.repair import repair_workspace
 
 __all__ = [
     "_guard_vm_status",
-    "_revert_grant_on_failure",
     "copy_workspace",
     "create_workspace",
     "delete_workspace",

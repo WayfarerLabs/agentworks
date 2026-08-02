@@ -5,10 +5,12 @@ explicit and implicit grants plus the agent row's grant_all flag) and
 the VM's Linux group memberships (each workspace's recorded
 linux_group). This module owns the commands that reconcile the two
 (``agent grant-workspaces`` / ``agent revoke-workspaces`` and the
-workspace-delete grant sweep) and the group-membership primitives
+workspace-delete grant sweep), the group-membership primitives
 other domains call when they create or unwind grant-bearing state
 (session create's implicit grant, agent realization's grant-all pass,
-agent delete's membership cleanup).
+agent delete's membership cleanup), and the grant-all materialization
+pass every workspace-inserting path runs
+(:func:`materialize_grant_all_agents`).
 """
 
 from __future__ import annotations
@@ -251,6 +253,110 @@ def remove_from_workspace_group(
     target = transport(vm, config, logger=logger)
     ws_grp = _resolve_ws_group(db, workspace_name)
     target.run(f"gpasswd -d {linux_user} {ws_grp}", sudo=True, check=False)
+
+
+# -- Grant-all materialization ---------------------------------------------
+
+
+def materialize_grant_all_agents(
+    db: Database,
+    config: Config,
+    vm: VMRow,
+    workspace_name: str,
+    *,
+    logger: SSHLogger | None = None,
+) -> None:
+    """Materialize every grant_all agent on ``vm`` onto the just-created
+    workspace ``workspace_name``: one explicit grant row plus the on-VM
+    group membership per agent.
+
+    Every path that inserts a workspace row must run this pass, so the
+    invariant holds that a grant_all agent has a grant row for every
+    workspace on its VM (issue #321). Agent reinit's reconcile (#280)
+    replays ON-VM state from the recorded rows, so grant_all agents would
+    silently lack access to a workspace this pass skipped, and even a
+    reinit could not restore it.
+
+    Best-effort: the workspace itself was already created and inserted by
+    the caller, so a per-agent failure (DB error, SSH hiccup) does not
+    abort the whole command. Failures surface as warnings with accurate
+    counts so the user can re-grant manually with
+    'agent grant-workspaces'.
+
+    The DB grant is inserted BEFORE the on-VM group add. If the order
+    were reversed and the DB write failed after the group add, the agent
+    would have VM-side membership with no DB grant backing it (a silent
+    authorization drift). With this ordering, a group-add failure can be
+    cleanly compensated by deleting the just-inserted grant row.
+    """
+    grant_all_agents = db.list_agents_on_vm_with_grant_all(vm.name)
+    if not grant_all_agents:
+        return
+    added = 0
+    failed: list[str] = []
+    for agent in grant_all_agents:
+        try:
+            db.insert_agent_grant(agent.name, workspace_name, "explicit")
+        except KeyboardInterrupt:
+            # sqlite commits inside a C call; KI can surface after the
+            # commit but before we move on, leaving an inserted row.
+            # Best-effort revert and re-raise to preserve the SIGINT
+            # contract.
+            output.warn(
+                f"Cancelled while inserting grant for agent '{agent.name}' on "
+                f"workspace '{workspace_name}'. Reverting in case the insert committed."
+            )
+            _revert_grant_on_failure(db, agent.name, workspace_name)
+            raise
+        except Exception as e:
+            failed.append(agent.name)
+            output.warn(f"Failed to insert grant for agent '{agent.name}' on workspace '{workspace_name}': {e}")
+            continue
+        try:
+            add_to_workspace_group(vm, config, db, agent.linux_user, workspace_name, logger=logger)
+            added += 1
+        except KeyboardInterrupt:
+            # KI is a BaseException and slips past `except Exception`,
+            # so it needs its own branch. Without this, Ctrl-C during
+            # the SSH call would leave a committed grant row with no
+            # VM-side group membership (silent authorization drift).
+            output.warn(
+                f"Cancelled while adding agent '{agent.name}' to workspace "
+                f"'{workspace_name}' group. Reverting just-inserted DB grant."
+            )
+            _revert_grant_on_failure(db, agent.name, workspace_name)
+            raise
+        except Exception as e:
+            failed.append(agent.name)
+            output.warn(
+                f"Failed to add agent '{agent.name}' to workspace '{workspace_name}' "
+                f"group: {e}. Reverting DB grant to keep state consistent."
+            )
+            _revert_grant_on_failure(db, agent.name, workspace_name)
+    if added:
+        output.detail(f"Added {added} grant-all agent(s) to workspace")
+    if failed:
+        output.warn(
+            f"Grant-all agents not added: {', '.join(failed)}. "
+            f"Re-grant manually with 'agent grant-workspaces <name> {workspace_name}'."
+        )
+
+
+def _revert_grant_on_failure(db: Database, agent_name: str, ws_name: str) -> None:
+    """Best-effort: drop a just-inserted explicit grant after the on-VM
+    group add failed (or was cancelled). Used by
+    :func:`materialize_grant_all_agents` to keep DB and VM authorization
+    aligned. A failure to revert is logged but does not raise, so it
+    never masks the caller's original exception (or KeyboardInterrupt)."""
+    try:
+        db.delete_agent_grant(agent_name, ws_name, "explicit")
+    except Exception as revert_err:
+        output.warn(
+            f"Could not revert grant for '{agent_name}' on workspace '{ws_name}': "
+            f"{revert_err}. DB has a grant row with no VM-side group membership; "
+            f"re-run 'agent grant-workspaces {agent_name} {ws_name}' or "
+            f"revoke explicitly."
+        )
 
 
 # -- Helpers ---------------------------------------------------------------

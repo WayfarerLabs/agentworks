@@ -6,6 +6,7 @@ import base64
 import contextlib
 import logging
 import os
+import sys
 from typing import TYPE_CHECKING, Any, ClassVar, NamedTuple, Protocol
 
 from agentworks import output
@@ -775,11 +776,15 @@ class AzureVMPlatform(VMPlatform):
             VirtualNetwork,
         )
 
-        # Interrupt rollback: spans BOTH the resource creation below and the
-        # inline bootstrap wait after it (the inner Exception arm keeps the
-        # plain-failure rollback as it was). Without it a Ctrl-C escapes
-        # create() uncleaned and the caller's row unwind orphans the whole
-        # resource set (#338).
+        # Rollback arms: the OUTER try is the interrupt arm (#338) and spans
+        # BOTH the resource creation below and the inline bootstrap wait
+        # after it; without it a Ctrl-C escapes create() uncleaned and the
+        # caller's row unwind orphans the whole resource set. The failure
+        # side of the same contract is TWO inner Exception arms tiling that
+        # span with no gap (#347), split where the VM comes to fully
+        # exist: a mid-creation failure runs the name-based sweep, a
+        # post-creation failure tears down VM-first. KeyboardInterrupt
+        # passes through both inner arms to the outer one.
         try:
             try:
                 # Create public IP
@@ -801,6 +806,11 @@ class AzureVMPlatform(VMPlatform):
                 # the ephemeral bootstrap allow scoped to the operator's egress
                 # prefixes (cloud-init needs inbound SSH from the operator;
                 # post_tailscale_ready deletes the allow once Tailscale is up).
+                # The NSG create is what opens the bootstrap SSH route, so it
+                # announces the open with the transient poke's wording; the
+                # matching close line comes from the hooks' remove_ssh_allow
+                # (#350: the close was announced, the open was silent).
+                output.info(f"Opening SSH route (allow scoped to {', '.join(ssh_allow_prefixes)})...")
                 output.detail("Creating network security group...")
                 nsg_poller = network.network_security_groups.begin_create_or_update(
                     az.resource_group,
@@ -918,25 +928,55 @@ class AzureVMPlatform(VMPlatform):
                 cleanup_vm_resources(compute, network, az.resource_group, vm_name)
                 raise wrap_azure_error(exc) from exc
 
-            output.detail(f"Azure VM '{vm_name}' provisioned (IP: {public_ip})")
+            # The post-creation failure arm (#347): it opens the moment the
+            # creation arm closes (the two arms tile create's whole span)
+            # and runs to the end of the inline bootstrap wait. The full
+            # resource set exists here with the ephemeral bootstrap SSH
+            # allow still open, so a failure that ESCAPES this span must
+            # tear the whole set down (VM first: it holds the NIC and
+            # disk) exactly as the interrupt arm does.
+            # _wait_for_bootstrap absorbs every SSHError itself (an
+            # unreachable or slow bootstrap is tolerated: create returns
+            # bootstrap_complete=False and Phase A retries), so only a
+            # genuine escape lands here, e.g. the raw OSError that
+            # SSHTransport.run lets through when the local ssh binary is
+            # missing. Re-raised wrapped, matching the creation arm. A
+            # second Ctrl-C DURING this arm's rollback escapes to the
+            # outer interrupt arm, which re-runs the rollback in full;
+            # that repeat is safe because every teardown step is
+            # idempotent or best-effort.
+            try:
+                output.detail(f"Azure VM '{vm_name}' provisioned (IP: {public_ip})")
 
-            import sys
+                prov_transport = SSHTransport(
+                    host=public_ip,
+                    user=admin_username,
+                    identity_file=request.ssh_private_key,
+                    force_tty=sys.platform == "win32",
+                )
 
-            prov_transport = SSHTransport(
-                host=public_ip,
-                user=admin_username,
-                identity_file=request.ssh_private_key,
-                force_tty=sys.platform == "win32",
-            )
-
-            # If bootstrap was embedded in cloud-init, wait for it to finish
-            # and extract the Tailscale IP.
-            tailscale_ip = None
-            bootstrap_complete = False
-            if tailscale_auth_key:
-                tailscale_ip = self._wait_for_bootstrap(prov_transport, vm_name)
-                if tailscale_ip:
-                    bootstrap_complete = True
+                # If bootstrap was embedded in cloud-init, wait for it to finish
+                # and extract the Tailscale IP.
+                tailscale_ip = None
+                bootstrap_complete = False
+                if tailscale_auth_key:
+                    tailscale_ip = self._wait_for_bootstrap(prov_transport, vm_name)
+                    if tailscale_ip:
+                        bootstrap_complete = True
+            except Exception as exc:
+                output.detail("Cleaning up resources...")
+                # The teardown captures a VM-delete failure rather than
+                # warning itself (#329); this rollback re-raises the
+                # ORIGINAL error below, so surface the survivor here the
+                # same way the interrupt rollback does.
+                rollback_vm_exc = delete_vm_and_resources(compute, network, az.resource_group, vm_name)
+                if rollback_vm_exc is not None:
+                    output.warn(
+                        f"Azure VM '{vm_name}' may remain in resource group "
+                        f"'{az.resource_group}' ({wrap_azure_error(rollback_vm_exc).summary}); "
+                        f"delete it there manually."
+                    )
+                raise wrap_azure_error(exc) from exc
         except KeyboardInterrupt:
             rollback_create_on_interrupt(compute, network, az.resource_group, vm_name)
             raise
@@ -963,6 +1003,14 @@ class AzureVMPlatform(VMPlatform):
 
         SSH may not be immediately available after VM creation, so we retry.
         Returns None if we cannot get the IP (Phase A will handle it).
+
+        Absorbs only ``SSHError``, the tolerated bootstrap-failure class
+        (connection timeouts and remote-command failures, which
+        ``SSHTransport.run`` raises as ``SSHError``): those defer to
+        Phase A via the ``None`` return. Anything else (a raw ``OSError``
+        from a missing local ssh binary, ``KeyboardInterrupt``) escapes
+        to ``create``'s rollback arms; widening the catch here would turn
+        deliberate deferrals into rollbacks.
         """
         import time
 
@@ -1112,7 +1160,6 @@ class AzureVMPlatform(VMPlatform):
         # ``SSHTransport(host="")`` which the transports.native_transport
         # factory catches with a typed StateError.
         public_ip = get_vm_public_ip(network, vm_info)
-        import sys
 
         # Include identity file if config is available (needed for SSH auth
         # via public IP, e.g., during Tailscale logout on delete).
