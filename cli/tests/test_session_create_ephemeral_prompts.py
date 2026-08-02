@@ -53,7 +53,7 @@ def test_admin_non_interactive_on_vm_with_agents_does_not_prompt(
     # vm1 with ws1 AND an existing agent on it.
     db = _seed_one_vm(tmp_path)
     db.insert_agent("agt1", "vm1", "aw-agt1")
-    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000), paths=SimpleNamespace(vm_workspaces="/srv"))
 
     # Stub template resolution so the SimpleNamespace doesn't need
     # session_templates; the call we want to land at is ensure_active.
@@ -100,7 +100,7 @@ def test_mode_required_in_non_interactive(tmp_path: Path) -> None:
     from agentworks.sessions.manager import create_session
 
     db = _seed_one_vm(tmp_path)  # vm1 + ws1, no agents
-    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000), paths=SimpleNamespace(vm_workspaces="/srv"))
 
     with pytest.raises(ValidationError, match="session mode is required in non-interactive mode"):
         create_session(
@@ -122,7 +122,7 @@ def test_workspace_required_in_non_interactive(tmp_path: Path) -> None:
     from agentworks.sessions.manager import create_session
 
     db = _seed_one_vm(tmp_path)  # vm1 + ws1, exactly one workspace
-    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000), paths=SimpleNamespace(vm_workspaces="/srv"))
 
     with pytest.raises(ValidationError, match="workspace is required in non-interactive mode"):
         create_session(
@@ -146,7 +146,7 @@ def test_workspace_prompt_picks_existing(tmp_path: Path, monkeypatch: pytest.Mon
     from agentworks.sessions.manager import create_session
 
     db = _seed_one_vm(tmp_path)  # vm1 + ws1
-    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000), paths=SimpleNamespace(vm_workspaces="/srv"))
 
     monkeypatch.setattr(output, "is_interactive", lambda: True)
     monkeypatch.setattr(output, "choose", lambda msg, opts: 0)  # ws1
@@ -170,7 +170,7 @@ def test_workspace_prompt_picks_create_new(tmp_path: Path, monkeypatch: pytest.M
     from agentworks.sessions.manager import create_session
 
     db = _seed_one_vm(tmp_path)
-    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000), paths=SimpleNamespace(vm_workspaces="/srv"))
 
     monkeypatch.setattr(output, "is_interactive", lambda: True)
     # One workspace + [Create new] = 2 options; index 1 is [Create new].
@@ -212,7 +212,7 @@ def test_mode_prompt_picks_admin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 
     db = _seed_one_vm(tmp_path)
     db.insert_agent("agt1", "vm1", "aw-agt1")
-    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000), paths=SimpleNamespace(vm_workspaces="/srv"))
 
     monkeypatch.setattr(output, "is_interactive", lambda: True)
     monkeypatch.setattr(output, "choose", lambda msg, opts: 0)  # admin
@@ -236,7 +236,7 @@ def test_mode_prompt_picks_existing_agent(tmp_path: Path, monkeypatch: pytest.Mo
 
     db = _seed_one_vm(tmp_path)
     db.insert_agent("agt1", "vm1", "aw-agt1")
-    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000), paths=SimpleNamespace(vm_workspaces="/srv"))
 
     monkeypatch.setattr(output, "is_interactive", lambda: True)
     monkeypatch.setattr(output, "choose", lambda msg, opts: 1)  # agt1
@@ -263,7 +263,7 @@ def test_mode_prompt_picks_create_new(tmp_path: Path, monkeypatch: pytest.Monkey
     from agentworks.sessions.manager import create_session
 
     db = _seed_one_vm(tmp_path)  # vm1 + ws1, no agents
-    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000), paths=SimpleNamespace(vm_workspaces="/srv"))
 
     monkeypatch.setattr(output, "is_interactive", lambda: True)
     # No agents on VM: options are [admin, [Create new agent]] = 2 entries.

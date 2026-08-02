@@ -7,7 +7,7 @@ is a list of raw argv tokens appended last (the operator escape hatch for
 any flag the harness does not model). See ``claude-code-lld.md``.
 
 Addressing uses a stored per-session Claude session id (a v4 uuid) kept in
-the harness-state blob under ``session_id``: minted once on the first
+the harness's state namespace under ``session_id``: minted once on the first
 ``start`` and read back on every ``restart``, because the session manager
 persists the blob to the session row after each op. Resume-vs-launch is an
 op-time existence probe for that id's transcript on disk (slug-independent,
@@ -59,6 +59,43 @@ class ClaudeCodeHarness(Harness):
         """``claude-code`` implies no resource reference, so its edge set
         is empty (total, non-throwing per the ``dependencies`` contract)."""
         return ()
+
+    @classmethod
+    def hoist_legacy_state(cls, blob: dict[str, object]) -> None:
+        """Compatibility (pre-namespacing harness_state): DELETE on the
+        next major release, together with the base hook and its seam call.
+
+        Pre-namespacing rows stored this harness's ``session_id`` at the
+        blob's top level; adopt it into the ``claude-code`` namespace so
+        the session resumes with the same id after the seam split. One
+        coherent rule: a NON-EMPTY string is the only value this harness
+        ever wrote, so only that shape is adopted, and it is adopted
+        whenever the namespaced ``session_id`` is not itself a non-empty
+        string (a valid namespaced id wins; hand-edited garbage there
+        does not get to discard a real legacy id). The flat key is
+        removed for ANY string (empty-string garbage is swept too),
+        which also makes the hoist idempotent; a non-string flat value
+        is not this harness's legacy shape and is left alone.
+
+        "Namespaced wins" assumes forward-only history, consistent with
+        the repo's forward-only migration doctrine: after the namespacing
+        release only the namespace is ever written, so the namespaced
+        value is the recent one. A downgrade-then-upgrade interleaving
+        (where the flat id would be the recent one) is out of scope.
+        """
+        legacy = blob.get("session_id")
+        if not isinstance(legacy, str):
+            return
+        del blob["session_id"]
+        if not legacy:
+            return
+        namespace = blob.get(cls.name)
+        if not isinstance(namespace, dict):
+            namespace = {}
+            blob[cls.name] = namespace
+        namespaced = namespace.get("session_id")
+        if not (isinstance(namespaced, str) and namespaced):
+            namespace["session_id"] = legacy
 
     @classmethod
     def validate(cls, owner: str, config: Mapping[str, object]) -> None:
@@ -132,8 +169,9 @@ class ClaudeCodeHarness(Harness):
         """The stored Claude session id, minted (and recorded in the state
         blob) on first use. A v4 uuid: Claude accepts any valid uuid at
         ``--session-id``, and global uniqueness keeps the transcript probe
-        slug-independent. The manager persists ``self.state`` after the op,
-        so a minted id survives to the next restart."""
+        slug-independent. ``self._state`` rides inside the session node's
+        full namespaced blob, which the manager persists after the op, so
+        a minted id survives to the next restart."""
         sid = self._state.get("session_id")
         if not isinstance(sid, str):
             # If the op raises after this mint but before the manager
@@ -165,9 +203,9 @@ class ClaudeCodeHarness(Harness):
     def _transcript_exists(self, transport: Transport, sid: str) -> bool:
         """True iff the stored session's transcript (``<sid>.jsonl``) exists
         under the projects dir on the launch target. Slug-independent
-        (``find`` matches under ANY project directory); shell-neutral
-        (``find ... -print -quit | grep -q .`` has no glob-nomatch
-        divergence). Runs through ``$SHELL -lic`` like the readiness probe.
+        (``find`` matches under ANY project directory); shell-neutral (no
+        glob reaches the shell). Runs through ``$SHELL -lic`` like the
+        readiness probe.
 
         On restart the orchestrator has already killed the old session, but
         no flush wait is needed: Claude writes transcript turns to the
@@ -175,14 +213,23 @@ class ClaudeCodeHarness(Harness):
         killed session's history is already on disk when this probe runs.
 
         The exit code is read, not just ``.ok``, to keep a probe that could
-        not EXECUTE from masquerading as "no transcript": ``grep -q`` exits
-        0 for a match and 1 for none, so any other exit (an SSH failure's
-        255, a shell that could not start) means the probe never ran. Guessing
-        "fresh" there would launch ``--session-id <reserved-uuid>``, which
-        Claude rejects as already-in-use on a real session's restart and the
-        pane fails to start, so a probe failure raises instead of guessing."""
+        not EXECUTE from masquerading as "no transcript". The inner command
+        keeps find's own failure distinguishable from a clean no-match: a
+        missing projects dir (Claude never ran here) exits 1 up front; a
+        printed match exits 0 (a found transcript is definitive even if
+        find also stumbled elsewhere); a find that FAILED without printing
+        one (an unreadable subdir, not a mere no-match) exits 6 rather
+        than folding into "no transcript". Anything but {0, 1} (the 6, an
+        SSH failure's 255, a shell that could not start) raises: guessing
+        "fresh" would launch ``--session-id <reserved-uuid>``, which
+        Claude rejects as already-in-use on a real session's restart and
+        the pane fails to start."""
         needle = shlex.quote(f"{sid}.jsonl")
-        inner = f"find {_PROJECTS_DIR} -name {needle} -print -quit 2>/dev/null | grep -q ."
+        inner = (
+            f'[ -d "{_PROJECTS_DIR}" ] || exit 1; '
+            f'out=$(find "{_PROJECTS_DIR}" -name {needle} -print -quit 2>/dev/null); rc=$?; '
+            f'[ -n "$out" ] && exit 0; [ "$rc" -eq 0 ] || exit 6; exit 1'
+        )
         result = transport.run(f'"$SHELL" -lic {shlex.quote(inner)}', check=False)
         if result.returncode == 0:
             return True  # transcript on disk: resume

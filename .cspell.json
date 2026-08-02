@@ -89,6 +89,8 @@
     "logind",
     "logname",
     "misalign",
+    "mtime",
+    "mtimes",
     "multicall",
     "myproject",
     "mypy",

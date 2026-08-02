@@ -240,12 +240,35 @@ spec:
 - The only requirement checked on the launch target is that `claude` is installed. The chosen action
   (resume vs new session) is announced in the pane on start, so it is never silent.
 
-`shell` is the built-in default harness; `claude-code` ships as the opt-in `claude` system plugin.
-Neither is the whole set the platform is built around. The `harness` kind is extensible: another
-tool or agent runtime, whatever the provider, is added as its own harness with its own config
-vocabulary. `claude-code` above (and its Claude-specific `model` / `permission_mode` fields) is one
-worked example; the core assumes no particular runtime, and a session runs whatever harness its
-template selects.
+The `codex` harness runs Codex the same way and ships as the opt-in `codex` system plugin. Codex
+mints its own session ids, so instead of assigning one the harness discovers the id from Codex's
+on-disk state after the first launch and stores it; `session restart` then resumes the same
+conversation whenever its session file still exists (a session archived with `codex archive` is
+deliberately treated as not resumable, and a fresh one is started). Its config is five optional
+fields: `model`, `sandbox`, `approval_policy`, and `profile` forward verbatim to `codex -m` / `-s` /
+`-a` / `-p` (their choice sets are Codex's, not validated here), and `extra_args` is the same
+appended-last escape hatch. The only launch-target requirement is that `codex` is installed, and the
+chosen action (resume, adopt-and-resume, or new session) is announced in the pane on start:
+
+```yaml
+apiVersion: agentworks/v1
+kind: session-template
+metadata:
+  name: codex
+  description: Codex session
+spec:
+  harness:
+    name: codex
+    sandbox: workspace-write # optional; forwarded to `codex -s`
+    approval_policy: on-request # optional; forwarded to `codex -a`
+```
+
+`shell` is the built-in default harness; `claude-code` and `codex` ship as the opt-in `claude` and
+`codex` system plugins. None of them is the whole set the platform is built around. The `harness`
+kind is extensible: another tool or agent runtime, whatever the provider, is added as its own
+harness with its own config vocabulary. `claude-code` above (and its Claude-specific `model` /
+`permission_mode` fields) is one worked example; the core assumes no particular runtime, and a
+session runs whatever harness its template selects.
 
 ## Built-ins and overrides
 
@@ -263,14 +286,14 @@ policy is per kind:
 - **Secret backends** (`env-var`, `prompt`; `onepassword` ships as an opt-in system plugin, see
   below), **VM platforms** (`lima`, `wsl2`; `proxmox` and `azure-vm` ship as the opt-in `proxmox`
   and `azure` system plugins, see below), **git-credential providers** (`github`; `azdo` ships in
-  the opt-in `azure` system plugin), and **session harnesses** (`shell`; `claude-code` ships as the
-  opt-in `claude` system plugin, see below): registered capabilities, shown as read-only rows. You
-  cannot declare or override them; secrets customize per secret via `backend_mappings`, platforms
-  configure per site via the `spec.platform` table, and harnesses configure per session-template via
-  the `spec.harness` table. Every installed platform publishes a row regardless of host support: a
-  platform whose host requirements are not met (e.g. `wsl2` off Windows) publishes a present,
-  not-ready row (`agw resource list` and `agw doctor` show it with the reason), and a site
-  referencing it is not-ready rather than erroring.
+  the opt-in `azure` system plugin), and **session harnesses** (`shell`; `claude-code` and `codex`
+  ship as the opt-in `claude` and `codex` system plugins, see below): registered capabilities, shown
+  as read-only rows. You cannot declare or override them; secrets customize per secret via
+  `backend_mappings`, platforms configure per site via the `spec.platform` table, and harnesses
+  configure per session-template via the `spec.harness` table. Every installed platform publishes a
+  row regardless of host support: a platform whose host requirements are not met (e.g. `wsl2` off
+  Windows) publishes a present, not-ready row (`agw resource list` and `agw doctor` show it with the
+  reason), and a site referencing it is not-ready rather than erroring.
 
 ## System plugins
 
@@ -309,9 +332,10 @@ is the opt-in state and hides the row, while a **not-ready** resource (enabled b
 this host) still lists with its reason.
 
 The shipped build installs the `onepassword` (1Password secret backend), `claude` (Claude Code
-session harness and its `claude` CLI install-command), `proxmox` (Proxmox VE VM platform), and
-`azure` (Azure VM platform, `azdo` git-credential provider, and `az-cli` install-command) plugins,
-all disabled until opted in. Authoring a system plugin is documented in the plugins package README
+session harness and its `claude` CLI install-command), `codex` (Codex session harness and its
+`codex` CLI install-command), `proxmox` (Proxmox VE VM platform), and `azure` (Azure VM platform,
+`azdo` git-credential provider, and `az-cli` install-command) plugins, all disabled until opted in.
+Authoring a system plugin is documented in the plugins package README
 (`cli/agentworks/plugins/README.md`).
 
 **Config errors in a not-enabled plugin's resources surface only once you enable it.** Validation

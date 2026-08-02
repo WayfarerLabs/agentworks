@@ -147,11 +147,14 @@ class SessionRow:
     socket_path: str | None = None
     pid: int | None = None
     boot_id: str | None = None
-    # The session harness's per-session state blob (harness-owned and
-    # OPAQUE to the core: JSON object stored as TEXT). The harness reads
-    # and mutates it during its ops; the session manager persists it back
-    # after the op. Empty for a harness that keeps no state (``shell``);
-    # ``claude-code`` stores its minted Claude session id here.
+    # The session's harness-state blob (harness-owned and OPAQUE to the
+    # core: JSON object stored as TEXT), namespaced by harness name:
+    # ``{"<harness-name>": {<that harness's keys>}}``. The harness reads
+    # and mutates only its own namespace during its ops; the session
+    # manager persists the full blob back after the op. The seam always
+    # materializes the current harness's namespace, so a stateless
+    # harness persists an empty one (``{"shell": {}}``); ``claude-code``
+    # stores its minted Claude session id in its namespace.
     harness_state: dict[str, object] = field(default_factory=dict)
 
 

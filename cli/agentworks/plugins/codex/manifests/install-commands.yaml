@@ -1,0 +1,25 @@
+# The codex system plugin's bundled install-command: the Codex CLI, a
+# user-install-command (per-user, run for each user). The command is the
+# first-party install script the Codex README documents for Mac/Linux
+# (re-verified 2026-08-01 against the openai/codex README): it downloads a
+# prebuilt binary into ~/.local/bin (CODEX_INSTALL_DIR overrides) and assumes
+# curl on the target, the same way the claude plugin's installer does.
+# CODEX_NON_INTERACTIVE=1 (on sh, where the script runs, not on curl)
+# suppresses the script's trailing "start codex?" prompt: it prompts via
+# /dev/tty whenever a controlling TTY exists, and provisioning transports
+# from Windows controllers force one (ssh -tt), which stalled the install
+# step until its timeout. A provisioning-invoked installer must never be
+# allowed to prompt.
+# Published present-but-disabled until an operator opts in with
+# `[plugins] system = ["codex"]`; a template that references it while codex
+# is not enabled is gated with the enable hint, not an unknown-name error.
+apiVersion: agentworks/v1
+kind: user-install-command
+metadata:
+  name: codex
+  description: Codex CLI
+spec:
+  command: "curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_NON_INTERACTIVE=1 sh"
+  path:
+    - ~/.local/bin
+  test_exec: codex

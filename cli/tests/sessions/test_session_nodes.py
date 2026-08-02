@@ -22,10 +22,18 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database
     from agentworks.resources.registry import Registry
+    from tests.conftest import CapturedOutput
 
 
 class _Platform:
     name = "stub"
+
+
+def _stub_config() -> Config:
+    """A minimal config double for node construction. ``paths`` is the one
+    attribute the graph reads at construction time (the pending workspace
+    node derives its eventual VM-side path from it)."""
+    return cast("Config", SimpleNamespace(paths=SimpleNamespace(vm_workspaces="/srv")))
 
 
 class _Probe:
@@ -46,7 +54,7 @@ def _vm_node(db: Database, name: str = "box") -> LiveVMNode:
     row = db.get_vm(name)
     assert row is not None
     site = VMSiteNode("stub", cast("VMPlatform", _Platform()), (), cast("Registry", object()))
-    return LiveVMNode(db, cast("Config", object()), cast("Registry", object()), row, site)
+    return LiveVMNode(db, _stub_config(), cast("Registry", object()), row, site)
 
 
 def _pending_agent(db: Database, vm: LiveVMNode, name: str = "dev"):
@@ -54,7 +62,7 @@ def _pending_agent(db: Database, vm: LiveVMNode, name: str = "dev"):
     from agentworks.agents.templates import ResolvedAgentTemplate
 
     template = AgentTemplateNode(ResolvedAgentTemplate(name="default"), ())
-    return pending_agent_node(db, cast("Config", object()), name, template, vm)
+    return pending_agent_node(db, _stub_config(), name, template, vm)
 
 
 def _session(
@@ -68,11 +76,11 @@ def _session(
     from agentworks.workspaces.nodes import pending_workspace_node
 
     vm_node = vm if vm is not None else _vm_node(db)
-    workspace = pending_workspace_node(db, cast("Config", object()), "ws1", vm_node, None)
+    workspace = pending_workspace_node(db, _stub_config(), "ws1", vm_node, None)
     template = ResolvedSessionTemplate(name="claude", harness_config={"required_commands": list(required)})
     return pending_session_node(
         db,
-        cast("Config", object()),
+        _stub_config(),
         "s1",
         template,
         agent=agent,  # type: ignore[arg-type]
@@ -263,11 +271,11 @@ def test_session_create_graph_shares_one_vm_node(db: Database) -> None:
         cast("Registry", object()),
     )
     template = AgentTemplateNode(ResolvedAgentTemplate(name="default", git_credentials=["gh"]), (cred,))
-    agent = pending_agent_node(db, cast("Config", object()), "dev", template, vm)
-    workspace = pending_workspace_node(db, cast("Config", object()), "ws1", vm, None)
+    agent = pending_agent_node(db, _stub_config(), "dev", template, vm)
+    workspace = pending_workspace_node(db, _stub_config(), "ws1", vm, None)
     session = pending_session_node(
         db,
-        cast("Config", object()),
+        _stub_config(),
         "s1",
         ResolvedSessionTemplate(name="claude"),
         agent=agent,
@@ -333,11 +341,11 @@ def _scanner_session(db: Database, monkeypatch: pytest.MonkeyPatch):  # noqa: AN
 
     monkeypatch.setitem(HARNESS_REGISTRY, "scanner", _SecretHarness)
     vm = _vm_node(db)
-    workspace = pending_workspace_node(db, cast("Config", object()), "ws1", vm, None)
+    workspace = pending_workspace_node(db, _stub_config(), "ws1", vm, None)
     template = ResolvedSessionTemplate(name="scan", harness="scanner")
     return pending_session_node(
         db,
-        cast("Config", object()),
+        _stub_config(),
         "s1",
         template,
         agent=None,
@@ -512,7 +520,7 @@ def test_pending_workspace_teardown_is_todays_rollback_body(db: Database, monkey
         lambda db_, config, **kw: calls.append(dict(kw)),
     )
     vm = _vm_node(db)
-    workspace = pending_workspace_node(db, cast("Config", object()), "ws1", vm, None)
+    workspace = pending_workspace_node(db, _stub_config(), "ws1", vm, None)
     workspace.mark_realized()
     workspace.teardown()
     (call,) = calls
@@ -655,7 +663,7 @@ def test_reverse_realization_order_reproduces_rollback_order(db: Database, monke
         lambda *a, **k: order.append("workspace"),
     )
     vm = _vm_node(db)
-    workspace = pending_workspace_node(db, cast("Config", object()), "ws1", vm, None)
+    workspace = pending_workspace_node(db, _stub_config(), "ws1", vm, None)
     agent = _pending_agent(db, vm)
     log = RealizationLog()
     log.mark_realized(workspace)  # creation order: workspace, then agent
@@ -841,3 +849,120 @@ def test_agent_template_node_derives_credential_edges(tmp_path, monkeypatch: pyt
     assert node.credentials[0].secret_refs() == ("git-token-gh",)
     assert node.credentials[1].secret_refs() == ("git-token-gh2",)
     assert node.secret_refs() == ()  # tokens ride the credential nodes
+
+
+# -- the harness_state namespacing seam --------------------------------------
+
+
+def _toy_harness(harness_name: str) -> type:
+    """A minimal stateful harness whose ops write ``session_id`` (the same
+    key ``claude-code`` uses) into its own state, to prove the seam keeps
+    same-key writers structurally apart."""
+    from typing import ClassVar
+
+    from agentworks.capabilities.harness import Harness
+
+    class _Toy(Harness):
+        name: ClassVar[str] = harness_name
+        description: ClassVar[str] = "toy"
+
+        def start(self, ctx: RunContext) -> str:
+            self._state["session_id"] = f"{harness_name}-id"
+            return ""
+
+        def restart(self, ctx: RunContext) -> str:
+            return self.start(ctx)
+
+        def _probe_target(self, transport: object) -> None:
+            return None
+
+    return _Toy
+
+
+def _seam_harness(db: Database, blob: dict[str, object], harness_name: str):
+    """Drive ``_harness_for_template`` (the ONE construction point, and the
+    namespacing seam) for ``harness_name`` over the full blob ``blob``."""
+    from agentworks.sessions.nodes import _harness_for_template
+    from agentworks.workspaces.nodes import pending_workspace_node
+
+    vm_node = _vm_node(db)
+    workspace = pending_workspace_node(db, _stub_config(), "ws1", vm_node, None)
+    template = ResolvedSessionTemplate(name="t", harness=harness_name)
+    return _harness_for_template(
+        template,
+        session_name="s1",
+        target=None,
+        admin=True,
+        vm=vm_node,
+        workspace=workspace,
+        state=blob,
+    )
+
+
+def test_same_key_writers_land_in_distinct_namespaces(db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The collision the namespacing exists to prevent: two harnesses
+    writing the SAME state key (a template re-pointed between stateful
+    harnesses) land in distinct per-harness namespaces, so neither ever
+    inherits the other's value."""
+    from agentworks.capabilities.harness import HARNESS_REGISTRY
+    from agentworks.sessions.nodes import _harness_for_template
+    from agentworks.workspaces.nodes import pending_workspace_node
+
+    vm_node = _vm_node(db)
+    workspace = pending_workspace_node(db, _stub_config(), "ws1", vm_node, None)
+    for hname in ("toy-a", "toy-b"):
+        monkeypatch.setitem(HARNESS_REGISTRY, hname, _toy_harness(hname))
+    blob: dict[str, object] = {}
+    for hname in ("toy-a", "toy-b"):
+        harness = _harness_for_template(
+            ResolvedSessionTemplate(name="t", harness=hname),
+            session_name="s1",
+            target=None,
+            admin=True,
+            vm=vm_node,
+            workspace=workspace,
+            state=blob,
+        )
+        harness.start(cast("RunContext", object()))
+    assert blob == {
+        "toy-a": {"session_id": "toy-a-id"},
+        "toy-b": {"session_id": "toy-b-id"},
+    }
+
+
+def test_a_non_dict_namespace_value_degrades_to_empty_with_a_warning(
+    db: Database, monkeypatch: pytest.MonkeyPatch, captured_output: CapturedOutput
+) -> None:
+    """A stored namespace value that is not a dict (a hand-edited DB, a
+    future bug) degrades to empty at the seam WITH a warning naming the
+    session and the namespace, mirroring the malformed-blob philosophy of
+    ``db/converters._parse_harness_state``; the replacement dict is the
+    live shared object, so mutations still reach the full blob."""
+    from agentworks.capabilities.harness import HARNESS_REGISTRY
+
+    monkeypatch.setitem(HARNESS_REGISTRY, "toy-a", _toy_harness("toy-a"))
+    blob: dict[str, object] = {"toy-a": "garbage"}
+    harness = _seam_harness(db, blob, "toy-a")
+    assert harness.state == {}
+    assert blob["toy-a"] is harness.state
+    assert any("'s1'" in msg and "'toy-a'" in msg and "got str" in msg for msg in captured_output.warnings)
+    harness.start(cast("RunContext", object()))
+    assert blob == {"toy-a": {"session_id": "toy-a-id"}}
+
+
+def test_seam_hoists_legacy_claude_state_before_the_split(db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Compatibility (pre-namespacing harness_state): DELETE with the
+    hoist on the next major release. The seam calls the hoist hook with
+    the FULL blob before splitting, so a pre-namespacing row's flat
+    ``session_id`` reaches the constructed harness as its own namespaced
+    state (the same shared object the full blob now holds)."""
+    from agentworks.capabilities.harness import HARNESS_REGISTRY
+    from agentworks.plugins.claude.harness import ClaudeCodeHarness
+
+    monkeypatch.setitem(HARNESS_REGISTRY, "claude-code", ClaudeCodeHarness)
+    sid = "939b1597-7c61-5ace-80f4-14617b7b4257"
+    blob: dict[str, object] = {"session_id": sid}
+    harness = _seam_harness(db, blob, "claude-code")
+    assert harness.state == {"session_id": sid}
+    assert blob == {"claude-code": {"session_id": sid}}
+    assert blob["claude-code"] is harness.state

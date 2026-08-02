@@ -562,11 +562,14 @@ in ways worth recording before that change, because it is a different animal:
 
 ## Related
 
+- **The harness capability has its own developer guide** (`harness/README.md`): the harness-specific
+  contract on top of this model, and the practices for building a new harness (session resume,
+  pane-command assembly, testing, plugin packaging).
 - **Hosting shapes.** A consuming resource can host a capability's config three ways: as a dedicated
-  kind (reference + a config blob, like `vm-site`), inline in a richer consumer (like a session's
-  `harness_config`), or in a map keyed by name (like an agent template's feature map).
-  `dependencies` / `validate`'s host-agnostic `owner` is exactly what lets one capability serve all
-  three without knowing which consumer hosts it.
+  kind (reference + a config blob, like `vm-site`), inline in a richer consumer (like a
+  session-template's inline harness block), or in a map keyed by name (like an agent template's
+  feature map). `dependencies` / `validate`'s host-agnostic `owner` is exactly what lets one
+  capability serve all three without knowing which consumer hosts it.
 - `owner` is a host-agnostic string today. If a second consumer (preflight's richer context is the
   likely trigger) needs more than a name, the right evolution is a small host-agnostic context
   value, not passing the consuming resource, designed once, when two real consumers reveal its

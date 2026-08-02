@@ -649,6 +649,30 @@ spec:
     model: opus
 ```
 
+The `codex` harness runs Codex the same way: `session create` starts a new Codex session and
+`session restart` resumes the same conversation once Codex has recorded it. Codex mints its own
+session ids, so the harness discovers the id from Codex's on-disk state after the first launch and
+stores it (a session archived with `codex archive` is deliberately treated as not resumable, and a
+fresh one is started). It ships as the opt-in `codex` system plugin, disabled by default with the
+same gating as `claude-code` above. Once enabled, it needs only that `codex` is installed on the
+launch target, and announces the chosen action (resume, adopt-and-resume, or new session) in the
+pane. Its config vocabulary is five optional fields: `model`, `sandbox`, `approval_policy`, and
+`profile` forward verbatim to `codex -m` / `-s` / `-a` / `-p` (their choice sets are Codex's, not
+validated here), and `extra_args` is the same appended-last escape hatch:
+
+```yaml
+apiVersion: agentworks/v1
+kind: session-template
+metadata:
+  name: codex
+  description: Codex session
+spec:
+  harness:
+    name: codex
+    sandbox: workspace-write
+    approval_policy: on-request
+```
+
 The harness-plus-config pair inherits as a unit: a child that restates the same harness merges its
 config block into the parent's (child wins per key; `shell` unions `required_commands`), while a
 child naming a _different_ harness starts from a fresh config (the parent's block was addressed to a
@@ -944,8 +968,9 @@ Agentworks ships some vendor- and tool-specific capabilities (VM platforms, sess
 git-credential providers, secret backends) as **system plugins**: separable bundles that are
 installed but off by default. The shipped build installs `azure` (the `azure-vm` VM platform, the
 `azdo` git-credential provider, and the `az-cli` install-command), `proxmox` (the `proxmox` VM
-platform), `onepassword` (the `onepassword` secret backend), and `claude` (the `claude-code` session
-harness and the `claude` CLI install-command). (This is a different sense of "plugin" from
+platform), `onepassword` (the `onepassword` secret backend), `claude` (the `claude-code` session
+harness and the `claude` CLI install-command), and `codex` (the `codex` session harness and the
+`codex` CLI install-command). (This is a different sense of "plugin" from
 [Claude Code Plugins](#claude-code-plugins) below, which installs marketplace plugins into Claude
 Code itself.)
 
@@ -953,7 +978,7 @@ Opt in by name in `config.toml`:
 
 ```toml
 [plugins]
-system = ["azure", "proxmox", "onepassword", "claude"]   # only the ones you use
+system = ["azure", "proxmox", "onepassword", "claude", "codex"]   # only the ones you use
 ```
 
 A resource that references a not-enabled plugin's contribution (an `azure-vm` vm-site, a

@@ -77,12 +77,13 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # error. Only installed plugin names are valid in `system` (an unknown name is a
 # hard error, as is any key in `[plugins]` other than `system`). The shipped
 # build installs `onepassword` (the 1Password secret backend), `claude` (the
-# Claude Code session harness and its `claude` CLI install-command), `proxmox`
+# Claude Code session harness and its `claude` CLI install-command), `codex`
+# (the Codex session harness and its `codex` CLI install-command), `proxmox`
 # (the Proxmox VE VM platform), and `azure` (the Azure VM platform, the Azure
 # DevOps git-credential provider, and the `az-cli` install-command). `agw
 # doctor` shows a System plugins roster with each plugin's state.
 #[plugins]
-#system = ["onepassword", "claude", "proxmox", "azure"]   # names of installed system plugins to enable
+#system = ["onepassword", "claude", "codex", "proxmox", "azure"]   # names of installed system plugins to enable
 
 # --- Default values for CLI flags ---
 
@@ -218,7 +219,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 #   agw resource sample admin-template       # the admin (operator) user on VMs
 #   agw resource sample agent-template       # per-agent-user settings
 #   agw resource sample workspace-template   # repo, tmuxinator, git identity
-#   agw resource sample session-template     # harness (shell, claude-code, ...)
+#   agw resource sample session-template     # harness (shell, claude-code, codex, ...)
 #
 # Each template kind supports a "default" entry used when --template is not
 # specified, inheritance via `inherits`, and an `env` table (plaintext values

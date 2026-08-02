@@ -1,7 +1,7 @@
 """The ``claude-code`` harness: config vocabulary, the resume-vs-launch
 detection (both directions), the flag mapping and ``extra_args``
-passthrough, the visible decision, the stored-id persistence, and that
-readiness probes ``claude``.
+passthrough, the visible decision, the stored-id persistence, the legacy
+pre-namespacing state hoist, and that readiness probes ``claude``.
 
 Detection is exercised with NO real ``claude`` binary by stubbing the one
 transport call the op makes (the ``<sid>.jsonl`` find probe), keyed on the
@@ -39,6 +39,7 @@ def _harness(
         session_name=session_name,
         vm_name="box",
         workspace_name="ws1",
+        workspace_path="/srv/ws1",
         target=None,
         admin=admin,
         state={"session_id": _SID} if state is None else state,
@@ -160,6 +161,24 @@ def test_probe_is_slug_independent_and_finds_by_stored_id() -> None:
     assert "CLAUDE_CONFIG_DIR" in probe_cmd
 
 
+def test_probe_keeps_find_failure_distinct_from_a_clean_no_match() -> None:
+    """The inner command's structure: a missing projects dir short-circuits
+    to the clean no-match exit (1, fresh), while a find that FAILED without
+    printing a match exits 6, which the exit-code fork raises on rather
+    than folding into "no transcript". Pinned here because the fake target
+    answers by exit code alone; the structure is what guarantees those
+    codes mean what the fork thinks they mean."""
+    target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(0)})
+    _harness().start(_op_ctx(target))
+    (probe_cmd,) = target.commands
+    assert "[ -d " in probe_cmd  # dir-missing is a clean no-match, not a find failure
+    assert "exit 6" in probe_cmd  # find failure stays distinguishable
+    # And the fork raises on that distinct code.
+    failing = _FakeTarget({f"{_SID}.jsonl": _FakeResult(6)})
+    with pytest.raises(StateError, match="could not probe"):
+        _harness().start(_op_ctx(failing))
+
+
 def test_probe_that_could_not_execute_raises_rather_than_guessing() -> None:
     """A non-{0,1} exit (an SSH failure's 255, a shell that could not
     start) means the probe never ran. Guessing "fresh" would launch
@@ -195,6 +214,73 @@ def test_restart_reads_the_stored_id_back_verbatim() -> None:
     command = harness.restart(_op_ctx(target))
     assert f"--resume {_SID}" in command
     assert harness.state == {"session_id": _SID}  # unchanged
+
+
+# -- the legacy state hoist (compatibility, pre-namespacing) -----------------
+# Compatibility (pre-namespacing harness_state): DELETE this section on the
+# next major release, together with the hoist itself.
+
+
+def test_hoist_moves_a_legacy_top_level_id_into_the_namespace() -> None:
+    """A pre-namespacing blob stores ``session_id`` at the top level; the
+    hoist adopts it into the ``claude-code`` namespace and removes the
+    flat key, so the session keeps its id (and its resumable history)."""
+    blob: dict[str, object] = {"session_id": _SID}
+    ClaudeCodeHarness.hoist_legacy_state(blob)
+    assert blob == {"claude-code": {"session_id": _SID}}
+
+
+def test_hoist_is_idempotent() -> None:
+    blob: dict[str, object] = {"session_id": _SID}
+    ClaudeCodeHarness.hoist_legacy_state(blob)
+    ClaudeCodeHarness.hoist_legacy_state(blob)
+    assert blob == {"claude-code": {"session_id": _SID}}
+
+
+def test_hoist_never_clobbers_an_already_namespaced_id() -> None:
+    """A VALID namespaced id is the one recent ops used (forward-only
+    history), so it wins; the legacy top-level key is dropped either
+    way."""
+    blob: dict[str, object] = {
+        "session_id": "00000000-0000-4000-8000-000000000000",
+        "claude-code": {"session_id": _SID},
+    }
+    ClaudeCodeHarness.hoist_legacy_state(blob)
+    assert blob == {"claude-code": {"session_id": _SID}}
+
+
+def test_hoist_replaces_a_non_string_namespaced_id_with_the_legacy_one() -> None:
+    """Hand-edited garbage in the namespaced slot does not get to discard
+    a real legacy id: only a non-empty string namespaced value wins."""
+    blob: dict[str, object] = {"session_id": _SID, "claude-code": {"session_id": 7}}
+    ClaudeCodeHarness.hoist_legacy_state(blob)
+    assert blob == {"claude-code": {"session_id": _SID}}
+
+
+def test_hoist_sweeps_an_empty_flat_id_without_adopting_it() -> None:
+    """An empty flat string is garbage this harness never wrote: it is
+    swept off the top level but not adopted into the namespace."""
+    blob: dict[str, object] = {"session_id": ""}
+    ClaudeCodeHarness.hoist_legacy_state(blob)
+    assert blob == {}
+
+
+def test_hoist_leaves_a_non_string_top_level_value_alone() -> None:
+    """A non-string top-level ``session_id`` is not this harness's legacy
+    shape; the hoist does not guess at it."""
+    blob: dict[str, object] = {"session_id": 7}
+    ClaudeCodeHarness.hoist_legacy_state(blob)
+    assert blob == {"session_id": 7}
+
+
+def test_base_hoist_is_a_no_op() -> None:
+    """The base hook exists so the platform seam stays harness-agnostic;
+    a harness that never wrote unnamespaced state leaves the blob as-is."""
+    from agentworks.capabilities.harness import ShellHarness
+
+    blob: dict[str, object] = {"session_id": _SID}
+    ShellHarness.hoist_legacy_state(blob)
+    assert blob == {"session_id": _SID}
 
 
 # -- the managed flags and extra_args ----------------------------------------

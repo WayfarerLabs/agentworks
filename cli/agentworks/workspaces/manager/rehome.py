@@ -42,7 +42,9 @@ def rehome_workspace(
         )
 
     # Determine target path
-    new_path = target_path if target_path is not None else f"{config.paths.vm_workspaces}/{name}"
+    from agentworks.workspaces.backends.vm import default_workspace_path
+
+    new_path = target_path if target_path is not None else default_workspace_path(config, name)
 
     old_path = ws.workspace_path
 

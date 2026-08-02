@@ -44,7 +44,7 @@ def test_ephemeral_workspace_name_uses_workspace_cap(tmp_path: Path) -> None:
     from agentworks.sessions.manager import create_session
 
     db = _seed_one_vm(tmp_path)
-    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000), paths=SimpleNamespace(vm_workspaces="/srv"))
 
     with pytest.raises(ValidationError, match=f"max {MAX_WORKSPACE_NAME_LENGTH}") as excinfo:
         create_session(
@@ -71,7 +71,7 @@ def test_ephemeral_agent_name_uses_agent_cap(tmp_path: Path) -> None:
     from agentworks.sessions.manager import create_session
 
     db = _seed_one_vm(tmp_path)
-    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000), paths=SimpleNamespace(vm_workspaces="/srv"))
 
     with pytest.raises(ValidationError, match=f"max {MAX_AGENT_NAME_LENGTH}") as excinfo:
         create_session(
@@ -99,7 +99,7 @@ def test_defaulted_ephemeral_agent_name_overflow_hints_override_flag(tmp_path: P
     from agentworks.sessions.tmux import MAX_SESSION_NAME_LENGTH
 
     db = _seed_one_vm(tmp_path)
-    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000), paths=SimpleNamespace(vm_workspaces="/srv"))
 
     # A max-length session name: valid as a session, but over the agent cap.
     long_session = "s" * MAX_SESSION_NAME_LENGTH
@@ -131,7 +131,7 @@ def test_defaulted_ephemeral_workspace_name_overflow_hints_override_flag(tmp_pat
     from agentworks.sessions.tmux import MAX_SESSION_NAME_LENGTH
 
     db = _seed_one_vm(tmp_path)
-    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000), paths=SimpleNamespace(vm_workspaces="/srv"))
 
     long_session = "s" * MAX_SESSION_NAME_LENGTH
     assert MAX_WORKSPACE_NAME_LENGTH < len(long_session) == MAX_SESSION_NAME_LENGTH
@@ -160,7 +160,7 @@ def test_session_name_uses_socket_derived_cap(tmp_path: Path) -> None:
     from agentworks.sessions.tmux import MAX_SESSION_NAME_LENGTH
 
     db = _seed_one_vm(tmp_path)
-    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000), paths=SimpleNamespace(vm_workspaces="/srv"))
 
     with pytest.raises(ValidationError, match=f"max {MAX_SESSION_NAME_LENGTH}"):
         create_session(
@@ -182,7 +182,7 @@ def test_cross_vm_existing_workspace_and_agent_fails_upfront(tmp_path: Path) -> 
     from agentworks.sessions.manager import create_session
 
     db = _seed_two_vms(tmp_path)
-    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000), paths=SimpleNamespace(vm_workspaces="/srv"))
 
     with pytest.raises(ValidationError, match="VM mismatch"):
         create_session(
@@ -204,7 +204,7 @@ def test_explicit_vm_disagreeing_with_workspace_fails_upfront(tmp_path: Path) ->
     from agentworks.sessions.manager import create_session
 
     db = _seed_two_vms(tmp_path)
-    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000), paths=SimpleNamespace(vm_workspaces="/srv"))
 
     with pytest.raises(ValidationError, match="VM mismatch"):
         create_session(
@@ -230,7 +230,7 @@ def test_explicit_vm_agreeing_with_workspace_passes_anchor_check(
     from agentworks.sessions.manager import create_session
 
     db = _seed_two_vms(tmp_path)
-    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000), paths=SimpleNamespace(vm_workspaces="/srv"))
 
     # Template resolution is downstream of anchor cross-check but upstream
     # of ensure_active; stub it so the SimpleNamespace config doesn't
@@ -276,7 +276,7 @@ def test_no_vm_anchor_with_multiple_vms_raises_in_non_interactive(
     from agentworks.sessions.manager import create_session
 
     db = _seed_two_vms(tmp_path)  # vm-A and vm-B, both fully initialized
-    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000), paths=SimpleNamespace(vm_workspaces="/srv"))
 
     with pytest.raises(ValidationError, match="--vm is required in non-interactive mode"):
         create_session(
@@ -296,7 +296,7 @@ def test_no_vm_anchor_with_zero_vms_raises(tmp_path: Path) -> None:
     from agentworks.sessions.manager import create_session
 
     db = Database(tmp_path / "test.db")  # no VMs at all
-    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000), paths=SimpleNamespace(vm_workspaces="/srv"))
 
     with pytest.raises(NotFoundError, match="no VMs available"):
         create_session(
@@ -324,7 +324,7 @@ def test_no_vm_anchor_with_single_vm_auto_selects(tmp_path: Path, monkeypatch: p
     db._conn.execute("DELETE FROM workspaces WHERE name = 'ws1'")
     db._conn.commit()
 
-    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000), paths=SimpleNamespace(vm_workspaces="/srv"))
 
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: None)
     # The pre-create SecretTarget joins the resolver's boundary
@@ -362,7 +362,7 @@ def test_workspace_and_new_workspace_mutex(tmp_path: Path) -> None:
     from agentworks.sessions.manager import create_session
 
     db = _seed_one_vm(tmp_path)
-    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000), paths=SimpleNamespace(vm_workspaces="/srv"))
 
     with pytest.raises(ValidationError, match="--workspace or --new-workspace, not both"):
         create_session(
@@ -380,7 +380,7 @@ def test_workspace_template_requires_new_workspace(tmp_path: Path) -> None:
     from agentworks.sessions.manager import create_session
 
     db = _seed_one_vm(tmp_path)
-    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000), paths=SimpleNamespace(vm_workspaces="/srv"))
 
     with pytest.raises(ValidationError, match="require --new-workspace"):
         create_session(
@@ -398,7 +398,7 @@ def test_admin_and_agent_mutex(tmp_path: Path) -> None:
     from agentworks.sessions.manager import create_session
 
     db = _seed_one_vm(tmp_path)
-    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000), paths=SimpleNamespace(vm_workspaces="/srv"))
 
     with pytest.raises(ValidationError, match="at most one of --agent, --new-agent, or --admin"):
         create_session(
@@ -417,7 +417,7 @@ def test_agent_template_requires_new_agent(tmp_path: Path) -> None:
     from agentworks.sessions.manager import create_session
 
     db = _seed_one_vm(tmp_path)
-    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000), paths=SimpleNamespace(vm_workspaces="/srv"))
 
     with pytest.raises(ValidationError, match="require --new-agent"):
         create_session(
@@ -437,7 +437,7 @@ def test_new_agent_with_explicit_agent_name(tmp_path: Path, monkeypatch: pytest.
     from agentworks.sessions.manager import create_session
 
     db = _seed_one_vm(tmp_path)
-    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000), paths=SimpleNamespace(vm_workspaces="/srv"))
 
     _install_session_prep_stubs(monkeypatch)
 
@@ -477,7 +477,7 @@ def test_ephemeral_agent_name_defaults_to_session_name(tmp_path: Path, monkeypat
         "VALUES ('bbvm1', 'lima', 'h', 'admin', '100.64.0.5', 'complete')"
     )
     db._conn.commit()
-    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000), paths=SimpleNamespace(vm_workspaces="/srv"))
 
     _install_session_prep_stubs(monkeypatch)
 
@@ -517,7 +517,7 @@ def test_ephemeral_workspace_name_collision_raises(tmp_path: Path) -> None:
     from agentworks.sessions.manager import create_session
 
     db = _seed_one_vm(tmp_path)  # already has ws1
-    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000), paths=SimpleNamespace(vm_workspaces="/srv"))
 
     with pytest.raises(AlreadyExistsError, match="workspace 'ws1' already exists"):
         create_session(

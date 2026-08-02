@@ -11,6 +11,7 @@ from agentworks.agents.grants import MAX_WORKSPACE_NAME_LENGTH
 from agentworks.config import validate_name
 from agentworks.errors import AlreadyExistsError, ExternalError, NotFoundError, StateError
 from agentworks.vms.manager import gated_vm_boundary
+from agentworks.workspaces.backends.vm import default_workspace_path
 from agentworks.workspaces.manager._common import _guard_vm_status, _resolve_vm, _workspace_scope
 
 if TYPE_CHECKING:
@@ -151,7 +152,7 @@ def copy_workspace(
             try:
                 dest_target = transport(dest_vm, config, logger=lg)
 
-                workspace_path = f"{config.paths.vm_workspaces}/{dest_name}"
+                workspace_path = default_workspace_path(config, dest_name)
                 ws_group = workspace_group(dest_name)
 
                 output.info(f"Unpacking to workspace '{dest_name}' on VM '{dest_vm.name}'...")
