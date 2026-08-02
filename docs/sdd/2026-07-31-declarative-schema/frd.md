@@ -99,6 +99,14 @@ Declaration:
   effort's remaining job is hardening: the old shape becomes a hard error naming the exact rewrite,
   and `agw resource migrate` gains a manifest-upgrade mode that rewrites YAML files in place under
   its existing backup-first discipline.
+- **FR17.** Inheritance is not a dependency. An inheritance edge (a session template's `inherits`,
+  and any future inheriting surface) is source composition: it participates in existence checking,
+  cycle detection, and merge ordering, and is EXCLUDED from runtime-need traversal (the secret
+  resolve union, preflight's resolvability prediction, dependency listings). A resource's runtime
+  dependencies derive from its EFFECTIVE config only (FR12's merged blob), so a child overriding a
+  parent's secret name depends on the override alone; the parent's own edge to its default secret
+  describes the parent's standalone use and never attributes to the child. Without this rule, a
+  transitive walk would prompt the operator for a secret the child does not use.
 
 Derived surfaces:
 
@@ -233,3 +241,8 @@ Decided with the operator on 2026-08-02:
   (effective) blob, resolved along the graph's chain at finalize; chain length is one everywhere but
   session templates, making the rule uniform. This moves the merged completeness check from
   session-resolve time to load, and FR12 states it.
+- **Inheritance is not a dependency (FR17).** Raised by the operator against the overload risk: a
+  child overriding a parent's default secret name must not inherit a transitive dependency on the
+  default secret (a double prompt, at worst for a secret the child never uses). The inheritance edge
+  is typed as source composition and excluded from runtime-need traversal; runtime needs derive from
+  effective config only.

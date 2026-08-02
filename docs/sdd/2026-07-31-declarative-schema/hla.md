@@ -149,6 +149,17 @@ the bridge can name the template that declared a bad key, and reference extracti
 (structural refs per declared blob feed the graph the merge walks; secret refs read the effective
 blob so an overridden parent secret is not over-declared).
 
+The graph types the inheritance edge (FR17). It is source composition, not a runtime dependency: it
+drives existence checks, cycle detection, and merge ordering, and is excluded from runtime-need
+traversal, so the secret union, the preflight resolvability sweep, and dependency listings never
+cross it. A parent's own secret edge describes the parent's standalone use; a child's runtime needs
+come from its effective blob alone. (Concrete failure this prevents: a child overriding the parent's
+default secret name would otherwise inherit a transitive edge to the default secret and
+double-prompt the operator.) The reference model already labels the parent edge with a usage string;
+this effort promotes that to a traversal-relevant kind. Whether readiness or enablement propagates
+across an inheritance edge is a policy question the capability-contract LLD settles; today session
+templates opt out of the fold entirely, so nothing is decided by accident.
+
 Timing preserves today's deliberate two-pass shape (capability blobs validate at finalize, never at
 decode, so graph construction never depends on a blob being valid):
 
