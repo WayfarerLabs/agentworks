@@ -375,10 +375,15 @@ def delete_vm(
     composition (:func:`_live_vm_boundary`) is BEST-EFFORT: a broken
     backend, a stranded site, or an unresolvable secret warns and
     skips backend cleanup, because broken states are exactly what
-    delete exists to clean up. No activation gate ever opens (an
-    operator-stopped VM would refuse; deletion never starts a stopped
-    VM), and the Tailscale logout uses a hold-only span. ``UserAbort``
-    is the one exception nothing here may downgrade: an abort at the
+    delete exists to clean up. The backend delete op itself is the
+    one step that is NOT best-effort: a platform delete that cannot
+    remove the backend VM raises (the ``VMPlatform.delete`` contract)
+    and the row survives for a retry, because a deleted row leaves a
+    surviving backend VM orphaned with nothing to target it (#329).
+    No activation gate ever opens (an operator-stopped VM would
+    refuse; deletion never starts a stopped VM), and the Tailscale
+    logout uses a hold-only span. ``UserAbort`` is the one exception
+    the best-effort spans may not downgrade: an abort at the
     boundary's secret prompt or inside an op span must keep the row.
     """
     import agentworks.vms.manager as _mgr
@@ -458,12 +463,15 @@ def delete_vm(
             except Exception as e:
                 output.warn(f"tailscale logout skipped: {e}")
 
-        try:
-            platform.delete(vm, ops_ctx)
-        except UserAbort:
-            raise
-        except Exception as e:
-            output.warn(f"platform cleanup failed: {e}")
+        # NOT best-effort, unlike the spans above: the platform's delete
+        # contract (VMPlatform.delete) is that a delete which cannot
+        # remove the backend VM raises a typed error, and that error
+        # aborts the command HERE, keeping the row. Warning past it and
+        # deleting the row would orphan a surviving backend VM with
+        # nothing left to target it (#329). ``--force`` does not soften
+        # this: force skips the child-count guard and the confirm
+        # prompt, never a failed backend delete.
+        platform.delete(vm, ops_ctx)
 
     # Clean up logs
     from agentworks.ssh import LOG_DIR

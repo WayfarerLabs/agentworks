@@ -227,7 +227,17 @@ class VMPlatform(Capability):
 
         Idempotent by contract: deleting resources that are already
         gone must succeed (``vm delete`` is retried against
-        half-cleaned backends; a second run finishes the job)."""
+        half-cleaned backends; a second run finishes the job).
+
+        Failure contract (#329): a delete that cannot remove the
+        backend VM must raise a typed error rather than return. The
+        caller (``delete_vm``) deletes the DB row only after this op
+        returns, so a swallowed backend failure orphans a surviving VM
+        with nothing left to target it; a raise keeps the row for a
+        retry. Best-effort warn-and-continue is acceptable only for
+        auxiliary resources an operator can still find and remove
+        (azure's NIC/IP/NSG/disk sweep); the VM itself is the gate,
+        which azure enforces with a post-teardown existence probe."""
 
     @abstractmethod
     def status(self, vm: VMRow, ctx: RunContext) -> VMStatus:
