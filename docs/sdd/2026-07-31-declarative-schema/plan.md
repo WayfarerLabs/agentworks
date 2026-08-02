@@ -120,12 +120,13 @@ Status: DRAFT (authored alongside the FRD and HLA; implementation gated, see pre
 - [ ] Per-capability models declared and registered via `config_model` (empty-config shared model
       where applicable). Inventory re-enumerated 2026-08-02, still re-check at implementation:
       vm-platform lima, wsl2, azure-vm (including the nested `service_principal` model), proxmox,
-      ec2 (new; nested `credentials` model with `access_key_secret` as a `SecretRef` defaulting to
-      the well-known name, plus the `instance_types` catalog); git-credential-provider github (scope
-      union: repos/owner mutual exclusion as a model validator; `token` as `SecretRef` with the
-      `git-token-{owner}` template), azdo; harness shell, claude-code, codex (new; `extra_args` list
-      plus flag fields); secret backends env-var, prompt (no mapping), onepassword (mapping is
-      itself a union: `op://` string or account/reference table).
+      aws-ec2 (new, renamed from ec2 by PR #363; nested `credentials` model with `access_key_secret`
+      as a `SecretRef` defaulting to the well-known name, plus the `instance_types` catalog);
+      git-credential-provider github (scope union: repos/owner mutual exclusion as a model
+      validator; `token` as `SecretRef` with the `git-token-{owner}` template), azdo; harness shell,
+      claude-code, codex (new; `extra_args` list plus flag fields); secret backends env-var, prompt
+      (no mapping), onepassword (mapping is itself a union: `op://` string or account/reference
+      table).
 - [ ] Core-driven validation and extraction wired: registry name-to-model maps per capability kind;
       `Capability.validate` / `Capability.dependencies` classmethods and
       `SecretBackend.validate_mapping` retired; per-capability hand-rolled validate code deleted;
