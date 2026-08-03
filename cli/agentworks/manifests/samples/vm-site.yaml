@@ -5,6 +5,11 @@
 ## disable themselves on hosts missing their requirements; declare
 ## sites for remote or cloud backends.
 ##
+## The cloud platforms ship as opt-in system plugins: an azure-vm,
+## aws-ec2, or proxmox site is not-ready with an "enable plugin <name>"
+## hint until its plugin is listed in config.toml under
+## `[plugins] system`. `agw doctor` shows each site's state.
+##
 ## `spec.platform` is one tagged table: its `name` key selects the
 ## platform capability and the remaining keys are that platform's
 ## configuration. (The old sibling shape, `platform: <name>` plus a

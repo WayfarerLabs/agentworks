@@ -89,7 +89,7 @@ class LimaTransport(Transport):
             )
         return ssh_result
 
-    def interactive(
+    def _interactive(
         self,
         command: str,
         *,

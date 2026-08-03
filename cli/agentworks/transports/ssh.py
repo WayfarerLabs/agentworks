@@ -16,7 +16,15 @@ import shlex
 import subprocess
 from typing import TYPE_CHECKING
 
-from agentworks.ssh import SSH_DEFAULT_RETRIES, SSHError, SSHResult, _set_env_args
+from agentworks.ssh import (
+    SSH_DEFAULT_RETRIES,
+    SSH_INTERACTIVE_ALIVE_COUNT_MAX,
+    SSH_INTERACTIVE_ALIVE_INTERVAL,
+    SSH_TRANSPORT_ERROR,
+    SSHError,
+    SSHResult,
+    _set_env_args,
+)
 from agentworks.transports.base import Transport
 
 if TYPE_CHECKING:
@@ -24,6 +32,58 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from agentworks.ssh import SSHLogger
+
+
+def keepalive_args() -> list[str]:
+    """Client-side keepalives for connections with no subprocess timeout.
+
+    Without these, a call whose peer goes away silently (laptop
+    suspends, lid closes, Wi-Fi drops) blocks in a TCP read until the
+    kernel's own retransmit budget runs out, which can be many minutes
+    and is not something the client bounds. For an attach that window is
+    doubly bad: nothing can clean up the operator's terminal during it,
+    because this process is parked inside ``subprocess.call``. The
+    keepalives turn an unbounded hang into a bounded one and hand
+    control back so the terminal guard in :mod:`agentworks.terminal`
+    can run.
+
+    Applied to both stdio-inheriting paths, ``interactive`` and
+    ``call_streaming``: neither can carry a subprocess timeout, because
+    there is no correct duration for "operator is using a shell" or for
+    an arbitrary ``vm exec`` command. ``run`` is the exception that does
+    not need them, since it passes an explicit timeout to subprocess and
+    retries on expiry.
+    """
+    return [
+        "-o",
+        f"ServerAliveInterval={SSH_INTERACTIVE_ALIVE_INTERVAL}",
+        "-o",
+        f"ServerAliveCountMax={SSH_INTERACTIVE_ALIVE_COUNT_MAX}",
+    ]
+
+
+def note_ssh_interactive_exit(code: int, endpoint: str) -> None:
+    """Explain a dropped interactive SSH connection.
+
+    ssh reserves exit 255 for its own transport failures, so it is the
+    one code that separates "the connection died" from "the remote
+    command exited non-zero". A dropped attach is otherwise completely
+    silent from the operator's side: the CLI just exits with the code,
+    and ssh's own diagnostic went to the alternate screen that the
+    terminal guard has since discarded.
+
+    Shared by ``SSHTransport`` and ``RemoteLimaTransport``, whose outer
+    hop is an ``ssh -t`` with the same failure mode. Callers invoke this
+    from ``_note_interactive_exit``, which the ABC calls only after the
+    guard has closed; see ``Transport._note_interactive_exit`` for why
+    that ordering matters.
+    """
+    if code != SSH_TRANSPORT_ERROR:
+        return
+    from agentworks import output
+
+    output.warn(f"connection to {endpoint} dropped (ssh exit {SSH_TRANSPORT_ERROR}); terminal restored.")
+    output.detail("Remote state is untouched. Re-run the same command to reattach.")
 
 
 def _scp_base_args(
@@ -196,7 +256,7 @@ class SSHTransport(Transport):
             self.logger.log_error(msg)
         raise SSHError(msg) from last_err
 
-    def interactive(
+    def _interactive(
         self,
         command: str,
         *,
@@ -205,7 +265,7 @@ class SSHTransport(Transport):
         """Interactive SSH with ``-t`` (allocates a TTY) and no
         ``BatchMode``. Empty ``command`` opens a login shell.
         """
-        args = ["ssh", "-t", "-o", "StrictHostKeyChecking=accept-new"]
+        args = ["ssh", "-t", "-o", "StrictHostKeyChecking=accept-new", *keepalive_args()]
         if self.port is not None:
             args.extend(["-p", str(self.port)])
         if self.identity_file is not None:
@@ -219,6 +279,9 @@ class SSHTransport(Transport):
             args.append("--")  # fence: see run() for rationale
             args.append(command)
         return subprocess.call(args)
+
+    def _note_interactive_exit(self, code: int) -> None:
+        note_ssh_interactive_exit(code, self.describe())
 
     def copy_to(
         self,
@@ -286,7 +349,15 @@ class SSHTransport(Transport):
         ``vm exec`` and ``agent exec`` so the operator sees output
         stream in real time. Returns the remote exit code.
         """
-        args = ["ssh", "-T", "-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes"]
+        args = [
+            "ssh",
+            "-T",
+            "-o",
+            "StrictHostKeyChecking=accept-new",
+            "-o",
+            "BatchMode=yes",
+            *keepalive_args(),
+        ]
         if self.port is not None:
             args.extend(["-p", str(self.port)])
         if self.identity_file is not None:

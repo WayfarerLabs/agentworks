@@ -946,15 +946,17 @@ class EC2Platform(VMPlatform):
         """Pre-flight: is a non-terminated instance already tagged with this
         backend name in the region?
 
-        Fails CLOSED, unlike azure's ``_vm_exists`` (which swallows any
-        exception and returns "does not exist"). The asymmetry is deliberate:
-        azure names are uniqueness-enforced by the platform, so a duplicate
-        create fails at the API regardless of this guard, but the EC2
-        ``agentworks:vm`` tag is NOT unique-enforced, so this describe is the
-        only thing standing between a describe failure and a silent duplicate
-        instance. runup has just validated the credential, so a failure here is
-        anomalous; the create contract wants collision checks loud, so it
-        surfaces typed rather than being read as "no collision"."""
+        Fails CLOSED, like the collision probes on the other platforms
+        (azure ``_vm_exists``, lima ``_instance_exists``): only a genuine
+        absence answers "no collision", and any other error surfaces typed.
+        The stakes are highest here, though: azure VM names are
+        uniqueness-enforced by the platform, so a duplicate create fails at
+        the API regardless of that guard, but the EC2 ``agentworks:vm`` tag
+        is NOT unique-enforced, so this describe is the only thing standing
+        between a describe failure and a silent duplicate instance. runup has
+        just validated the credential, so a failure here is anomalous; the
+        create contract wants collision checks loud, so it surfaces typed
+        rather than being read as "no collision"."""
         try:
             result = ec2.describe_instances(
                 Filters=[

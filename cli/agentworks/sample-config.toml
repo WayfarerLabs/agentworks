@@ -7,12 +7,11 @@
 # RESOURCES ARE DECLARED AS YAML MANIFESTS, NOT HERE: secrets, templates,
 # git credentials, vm-sites, and apt / install-command entries live in the
 # resources/ directory next to this file (`agw resource sample <kind>`
-# prints a commented starter; --all for every kind). Declaring resources
-# in config.toml is deprecated and will be removed: existing TOML
-# declarations keep loading with a deprecation warning, and
-# `agw resource migrate` moves them to YAML. This file is the permanent
-# home for SETTINGS: operator identity, paths, defaults, enabled plugins,
-# and the secret backend chain.
+# prints a commented starter; --all for every kind). Legacy TOML resource
+# sections are deprecated: they keep loading with a deprecation warning,
+# and `agw resource migrate` moves them to YAML. This file is the
+# permanent home for SETTINGS: operator identity, paths, defaults,
+# enabled plugins, and the secret backend chain.
 #
 # Comment convention: examples are written as `#key = "value"` (no space
 # after `#`), so you can uncomment a line in place by deleting one `#`.
@@ -94,27 +93,9 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
                                             # disable themselves where this host
                                             # lacks what they need; see
                                             # `agw doctor` for each site's state)
-# `platform` is the deprecated alias of `site` (one release); rename the key.
 #runup_git_credentials = true               # run the git-credential runup: authenticate each
                                             # token against its provider API before it is
                                             # written (false for airgapped setups)
-
-# --- Named consoles ---
-# The layout template for named multi-session consoles (created via
-# `agw console create`) is a named-console-template RESOURCE:
-# `agw resource sample named-console-template` prints a commented starter
-# including the tmux_layout vocabulary. A legacy [named_console] TOML
-# section still loads but is deprecated; `agw resource migrate
-# named-console-template` moves it to YAML.
-
-# --- Git credentials ---
-# Git credential providers (how to obtain git tokens, referenced by name
-# from admin and agent templates) are git-credential RESOURCES:
-# `agw resource sample git-credential` prints commented starters for the
-# github and azdo providers, including scoped GitHub credentials
-# (fine-grained PATs pinned to a repo or org). Legacy [git_credentials.*]
-# TOML sections still load but are deprecated; `agw resource migrate
-# git-credential` moves them to YAML.
 
 # =============================================================================
 # Secrets
@@ -124,13 +105,6 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # also be `{ secret = "<name>" }`, referencing a declared secret. Backends
 # produce the value at command time; agentworks never persists secret values
 # to disk.
-#
-# Secret DECLARATIONS (name, description, per-backend mappings) are
-# RESOURCES: `agw resource sample secret` prints a commented starter,
-# including `backend_mappings` overrides such as the onepassword
-# `op://vault/item/field` address form. Legacy [secrets.*] TOML sections
-# still load but are deprecated; `agw resource migrate secret` moves them
-# to YAML.
 #
 # Use `agw secret list` to see how each active backend would look up each
 # declared secret. Use `agw secret describe <name>` for a full view including
@@ -142,18 +116,18 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # built-in backends ship with agentworks:
 #   env-var     : reads from process env. Default convention is
 #                 AW_SECRET_<UPPER_SNAKE_CASE>, so secret "npm-token" reads
-#                 from AW_SECRET_NPM_TOKEN unless overridden via the secret
-#                 declaration's `backend_mappings.env-var`.
+#                 from AW_SECRET_NPM_TOKEN unless the secret's declaration
+#                 overrides it (`backend_mappings.env-var`).
 #   onepassword : ships as the opt-in `onepassword` system plugin (enable it in
 #                 [plugins] above); while disabled it is dormant (dropped from
 #                 the chain). Once enabled it reads via the 1Password CLI
-#                 (`op read op://...`). Requires
-#                 a per-secret `backend_mappings.onepassword` address (see
+#                 (`op read op://...`). Requires a per-secret
+#                 `backend_mappings.onepassword` address (see
 #                 `agw resource sample secret`); unmapped secrets are skipped.
-#                 `op` must be
-#                 able to read at command time (the 1Password app's CLI
-#                 integration enabled, or `op signin`); a mapping that points
-#                 at a missing item is a hard error, not a fall-through.
+#                 `op` must be able to read at command time (the 1Password
+#                 app's CLI integration enabled, or `op signin`); a mapping
+#                 that points at a missing item is a hard error, not a
+#                 fall-through.
 #                 If `op` is not installed the backend is NOT-READY on this
 #                 host: resolution skips it with a warning and falls through to
 #                 the next backend in the chain (`agw secret list` /
@@ -162,8 +136,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 #                 the same secret twice in one command, and all prompting
 #                 happens before the command starts changing anything.
 # Backends are registered code capabilities (agw resource list --kind
-# secret-backend); their names are the valid chain entries here. (The old
-# `[secret_backends.*]` TOML sections are deprecated no-ops.)
+# secret-backend); their names are the valid chain entries here.
 
 #[secret_config]
 #backends = ["env-var", "onepassword", "prompt"]    # example chain; the default is ["env-var", "prompt"].
@@ -177,91 +150,12 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # and the chain falls through to the next one. An explicit empty list
 # `backends = []` disables resolution entirely.
 
-# --- VM sites (azure, aws, proxmox, remote Lima, ...) ---
-# Places to create VMs are declared as vm-site RESOURCES (YAML manifests
-# under ~/.config/agentworks/resources/), not config sections. Run
-# `agw resource sample vm-site` for commented, ready-to-edit examples.
-# The legacy [azure] / [proxmox] sections still load as deprecated
-# vm-site declarations; migrate them with `agw resource migrate vm-site`.
-# proxmox ships as the opt-in `proxmox` system plugin: a proxmox site (declared
-# or legacy) is not-ready with an "enable plugin `proxmox`" hint until you add
-# `[plugins] system = ["proxmox"]` above. The proxmox API token is the
-# `proxmox-token` secret (default env-var: AW_SECRET_PROXMOX_TOKEN).
-# azure-vm likewise ships as the opt-in `azure` system plugin: an azure site
-# (declared or legacy) is not-ready with an "enable plugin `azure`" hint until
-# you add `[plugins] system = ["azure"]` above.
-# An azure site authenticates with AMBIENT credentials by default (whatever
-# `az login`, the AZURE_* env vars, or a managed identity provide, with a
-# browser login as the last resort). It can instead be pinned to an explicit
-# service principal, via an optional `service_principal` block in the site's
-# platform_config carrying tenant_id, client_id, and `secret`: the NAME of the
-# secret holding the client secret, never its value (default
-# `azure-client-secret`, read by the env-var backend from
-# AW_SECRET_AZURE_CLIENT_SECRET). Once set, the site uses that identity and
-# nothing else: a rejected or expired client secret fails the command outright
-# rather than quietly falling back to ambient credentials. Run
-# `agw resource sample vm-site` for the block to copy.
-# The service principal is MANIFEST-ONLY: the legacy flat [azure] section
-# hoists only subscription_id / resource_group / region into the site's
-# platform_config and silently drops every other key, so a legacy azure site
-# must be migrated to a vm-site manifest (`agw resource migrate vm-site`)
-# before it can carry one.
-# aws-ec2 ships as the opt-in `aws` system plugin: an aws-ec2 site is not-ready
-# with an "enable plugin `aws`" hint until you add `[plugins] system = ["aws"]`
-# above. An aws-ec2 site controls SSH exposure with a security group: the
-# baseline denies all inbound, and access is granted only
-# through ephemeral rules scoped to your detected egress IP (plus
-# operator.ssh_allow_cidrs) during bootstrap and each native route. It
-# authenticates with the AMBIENT AWS credential chain by default (env vars,
-# shared config, instance profile, SSO), or with an explicit access key via an
-# optional `credentials` block carrying access_key_id and `access_key_secret`:
-# the NAME of the secret holding the secret access key, never its value (default
-# `aws-secret-access-key`, read by the env-var backend from
-# AW_SECRET_AWS_SECRET_ACCESS_KEY), with an optional assume_role_arn. Once set,
-# the site uses that identity and nothing else. Run
-# `agw resource sample vm-site` for the block to copy.
-
 # =============================================================================
-# Templates
+# Sessions
 # =============================================================================
 #
-# Agentworks uses templates for VMs, the admin user, agents, workspaces,
-# sessions, and named consoles. Templates are RESOURCES, declared as YAML
-# manifests in the resources/ directory; `agw resource sample <kind>`
-# prints a commented, ready-to-edit starter for each kind:
-#
-#   agw resource sample vm-template          # hardware, apt packages, system tools
-#   agw resource sample admin-template       # the admin (operator) user on VMs
-#   agw resource sample agent-template       # per-agent-user settings
-#   agw resource sample workspace-template   # repo, tmuxinator, git identity
-#   agw resource sample session-template     # harness (shell, claude-code, codex, ...)
-#
-# Each template kind supports a "default" entry used when --template is not
-# specified, inheritance via `inherits`, and an `env` table (plaintext values
-# or `{ secret = "<name>" }` references; `agw env show` previews the merged
-# value at any scope).
-#
-# The legacy TOML template sections ([vm_templates.*], [admin.config],
-# [agent_templates.*], [workspace_templates.*], [session_templates.*]) still
-# load but are deprecated; `agw resource migrate <kind>` (or `--all`) moves
-# them to YAML.
-
-# --- Session configuration ---
-# Non-template session settings.
+# Session runtime settings. (Per-harness session TEMPLATES are resources;
+# see the header note.)
 
 #[session.config]
 #history_limit = 50000                     # tmux scrollback buffer lines per session
-
-# =============================================================================
-# Apt / install-command extensions
-# =============================================================================
-#
-# Operator-defined apt-source, apt-package, system-install-command, and
-# user-install-command entries extend (or, on a name collision, override) the
-# built-in entries. They are RESOURCES: `agw resource sample apt-source`
-# (or apt-package / system-install-command / user-install-command) prints a
-# commented starter, and `agw resource list --kind <kind>` shows all
-# available entries (built-in and operator-defined). The legacy TOML
-# sections ([apt_sources.*], [apt_packages.*], [system_install_commands.*],
-# [user_install_commands.*]) still load but are deprecated;
-# `agw resource migrate <kind>` moves them to YAML.

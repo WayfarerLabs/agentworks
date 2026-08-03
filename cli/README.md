@@ -574,6 +574,25 @@ via `--workspace <ws>`). Use these when you just need a terminal without the con
   avoid prefix key conflicts. Pass `--allow-nesting` to override.
 - **Console lifecycle**: consoles are independent of sessions. Killing or detaching a console does
   not affect running sessions. `--recreate` rebuilds from scratch.
+- **Dropped connections restore your terminal**: an attach reconfigures your local terminal
+  (alternate screen, mouse reporting, bracketed paste), and tmux only undoes that on a clean detach.
+  When the connection dies instead (laptop suspends, lid closes, Wi-Fi drops), agentworks restores
+  the terminal itself on the way out, so you don't land in a tab that echoes nothing and emits mouse
+  escape codes on every click. Interactive SSH also carries client keepalives, which bound how long
+  a dead connection hangs before it gives up (roughly a minute) so that cleanup can run. The
+  tradeoff is that an outage longer than that budget ends the attach even if it would eventually
+  have recovered, such as a slow Wi-Fi handoff or a tunnel renegotiation. Nothing on the VM is
+  affected either way, so reattaching picks the console back up where you left it. A tab killed
+  outright, before the command can return, runs no cleanup at all. The next attach sanitizes on the
+  way in, which clears the leftover emulator modes (the mouse codes, the alternate screen), but it
+  cannot recover a lost line discipline: there is no record of what echo and line-editing looked
+  like before the attach that died, so a tab left not echoing stays that way. Open a fresh tab for
+  that case.
+- **A dropped connection says so.** When ssh exits 255 (its transport-failure code, as opposed to
+  the remote command simply exiting non-zero) you get a one-line notice that the connection dropped
+  and the terminal was restored. Without it the failure is silent: ssh writes its own diagnostic
+  while tmux still holds the alternate screen, so leaving that screen discards the message before
+  you can read it. A clean detach prints nothing.
 
 ### Session Templates
 
@@ -792,7 +811,7 @@ Resource kinds (YAML manifests; the deprecated TOML section is noted for each):
   credentials, Proxmox API endpoint + token secret, remote-Lima `vm_host`). The `lima-local` and
   `wsl2` sites ship built in (on hosts where their platform can run) and their names are reserved
 - `vm-platform`: read-only capability rows for the VM platforms (`lima`, `wsl2` built in;
-  `azure-vm`, `aws-ec2`, and `proxmox` ship as the opt-in `azure`, `aws`, and `proxmox` system
+  `azure-vm`, `proxmox`, and `aws-ec2` ship as the opt-in `azure`, `proxmox`, and `aws` system
   plugins, disabled by default, see [System Plugins](#system-plugins)); listed by
   `agw resource kinds`, never declared
 - `vm-template` (`[vm_templates.*]`): VM resources, apt packages, system install commands, mise, and

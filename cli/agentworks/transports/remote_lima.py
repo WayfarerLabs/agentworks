@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 
 from agentworks.transports._shared import env_assignment_prefix
 from agentworks.transports.base import Transport
-from agentworks.transports.ssh import SSHTransport
+from agentworks.transports.ssh import SSHTransport, keepalive_args, note_ssh_interactive_exit
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -100,7 +100,7 @@ class RemoteLimaTransport(Transport):
             on_retry=on_retry,
         )
 
-    def interactive(
+    def _interactive(
         self,
         command: str,
         *,
@@ -112,8 +112,22 @@ class RemoteLimaTransport(Transport):
         if command:
             inner = f"limactl shell {self.vm_name} bash -lc {shlex.quote(command)}"
         wrapped = f"$SHELL -lc {shlex.quote(inner)}"
-        args = ["ssh", "-t", "-o", "StrictHostKeyChecking=accept-new", self.vm_host_ssh, wrapped]
+        args = [
+            "ssh",
+            "-t",
+            "-o",
+            "StrictHostKeyChecking=accept-new",
+            *keepalive_args(),
+            self.vm_host_ssh,
+            wrapped,
+        ]
         return subprocess.call(args)
+
+    def _note_interactive_exit(self, code: int) -> None:
+        # The outer hop is a plain ``ssh -t``, so it carries ssh's 255
+        # transport-failure convention and the same dropped-attach
+        # failure mode as SSHTransport.
+        note_ssh_interactive_exit(code, self.describe())
 
     def copy_to(
         self,
