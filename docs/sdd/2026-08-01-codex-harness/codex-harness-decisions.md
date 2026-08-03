@@ -154,18 +154,36 @@ resume: sh -c 'echo <msg>; exec codex resume <sid> -c tui.resume_cwd=current [fl
 `cd`-ed to the workspace dir, so "current" is always the right answer). All generated tokens are
 `shlex.quote`d; no generated piece emits `{{word}}`.
 
-### Config vocabulary (v1, all optional, all forwarded unvalidated)
+### Config vocabulary (all optional; shape-checked here, codex-owned values forwarded unvalidated)
 
-| `harness_config` field  | CLI flag emitted        | Notes                                        |
-| ----------------------- | ----------------------- | -------------------------------------------- |
-| `model` (str)           | `-m <value>`            | codex-owned values                           |
-| `sandbox` (str)         | `-s <value>`            | `read-only` / `workspace-write` / ... drift  |
-| `approval_policy` (str) | `-a <value>`            | `untrusted` / `on-request` / `never` drift   |
-| `profile` (str)         | `-p <value>`            | note: an unknown profile is silently ignored |
-| `extra_args` (list)     | (the tokens themselves) | appended verbatim, last                      |
+Extended 2026-08-03 (operator-decided) with the network/writable-dirs/web-search knobs and the
+strict-config default, after the first real usage showed the `-c` network spelling too arcane and
+its drift mode too silent.
+
+| `harness_config` field         | CLI surface emitted                          | Notes                                        |
+| ------------------------------ | -------------------------------------------- | -------------------------------------------- |
+| `model` (str)                  | `-m <value>`                                 | codex-owned values                           |
+| `sandbox` (str)                | `-s <value>`                                 | `read-only` / `workspace-write` / ... drift  |
+| `approval_policy` (str)        | `-a <value>`                                 | `untrusted` / `on-request` / `never` drift   |
+| `profile` (str)                | `-p <value>`                                 | note: an unknown profile is silently ignored |
+| `network` (bool)               | `-c sandbox_workspace_write.network_access=` | both directions forward; key is codex-owned  |
+| `writable_dirs` (list)         | one `--add-dir <dir>` each                   | union-merged across inheritance              |
+| `web_search` (bool)            | `--search` when true                         | the server-side tool, not sandbox network    |
+| `disable_strict_config` (bool) | omits the default `--strict-config`          | see below                                    |
+| `extra_args` (list)            | (the tokens themselves)                      | appended verbatim, last                      |
 
 Choice sets are codex-owned and drift between releases; invalid values surface as codex's own
 startup error in the pane (the same rule as claude-code). `extra_args` is the escape hatch.
+
+**`--strict-config` is emitted by default (operator-decided 2026-08-03).** Verified against 0.146.0:
+an unknown `-c` config key is SILENTLY ignored by a non-strict codex, so if codex ever renames the
+network key, a non-strict session would silently lose network instead of failing. Agentworks owns
+the emitted config surface, so strictness is the right default; it also hardens the target user's
+own `config.toml`, which is deliberate and documented. `disable_strict_config: true` is the
+sanctioned off-switch, for either regression vector: a config codex must tolerate (e.g. written by a
+newer codex than the target runs), or a target codex old enough to lack the flag entirely (verified
+present in 0.146.0 on both `codex` and `codex resume`; an older binary rejects it as an unknown
+argument at launch, and harness readiness probes only that `codex` exists, not its version).
 
 ### Readiness, provisioning, auth
 

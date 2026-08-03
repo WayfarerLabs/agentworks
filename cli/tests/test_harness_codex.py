@@ -106,7 +106,7 @@ def test_dependencies_imply_no_reference() -> None:
     assert CodexHarness.dependencies("session-template/codex", {"model": 3, "sandbx": "typo"}) == ()
 
 
-def test_validate_accepts_the_five_fields_and_empty_config() -> None:
+def test_validate_accepts_the_nine_fields_and_empty_config() -> None:
     assert (
         CodexHarness.validate(
             "session-template/codex",
@@ -115,6 +115,10 @@ def test_validate_accepts_the_five_fields_and_empty_config() -> None:
                 "sandbox": "workspace-write",
                 "approval_policy": "on-request",
                 "profile": "work",
+                "network": True,
+                "writable_dirs": ["/srv/cache"],
+                "web_search": False,
+                "disable_strict_config": False,
                 "extra_args": ["--foo"],
             },
         )
@@ -602,13 +606,106 @@ def test_config_fields_map_to_their_short_flags() -> None:
     assert "-p work" in command
 
 
+def test_strict_config_is_emitted_by_default_on_both_paths() -> None:
+    """The harness owns the emitted config surface, so --strict-config is
+    on by default: codex-owned key drift (the network -c override) fails
+    loudly at startup instead of being silently ignored."""
+    resume_target = _FakeTarget({_ROLLOUT_PROBE: _FakeResult(0)})
+    assert "--strict-config" in _harness().start(_op_ctx(resume_target))
+    fresh = _harness(state={}).start(_op_ctx(_FakeTarget()))
+    assert "--strict-config" in fresh
+
+
+def test_disable_strict_config_suppresses_the_flag_on_both_paths() -> None:
+    resume_target = _FakeTarget({_ROLLOUT_PROBE: _FakeResult(0)})
+    command = _harness({"disable_strict_config": True}).start(_op_ctx(resume_target))
+    assert "--strict-config" not in command
+    # Fresh path: with strict suppressed and no other config, the inner
+    # command ends at the bare exec again (the pre-strict-default shape).
+    fresh = _harness({"disable_strict_config": True}, state={}).start(_op_ctx(_FakeTarget()))
+    assert shlex.split(fresh)[2].endswith("exec codex")
+
+
+def test_network_forwards_both_directions_to_the_config_key() -> None:
+    """`true` AND `false` forward explicitly (false overrides a profile
+    or config.toml that enabled network access); absent emits nothing."""
+    target = _FakeTarget({_ROLLOUT_PROBE: _FakeResult(0)})
+    on = _harness({"network": True}).start(_op_ctx(target))
+    assert "-c sandbox_workspace_write.network_access=true" in on
+    off = _harness({"network": False}).start(_op_ctx(target))
+    assert "-c sandbox_workspace_write.network_access=false" in off
+    absent = _harness().start(_op_ctx(target))
+    assert "network_access" not in absent
+
+
+def test_writable_dirs_emit_one_add_dir_each_in_order_and_quoted() -> None:
+    target = _FakeTarget({_ROLLOUT_PROBE: _FakeResult(0)})
+    command = _harness({"writable_dirs": ["/srv/cache", "/data/shared dir"]}).start(_op_ctx(target))
+    assert "--add-dir /srv/cache" in command
+    # Peel the sh -c nesting: the spaced dir must survive as ONE argv token.
+    inner_tokens = shlex.split(shlex.split(command)[2])
+    assert "/data/shared dir" in inner_tokens
+    first = inner_tokens.index("/srv/cache")
+    second = inner_tokens.index("/data/shared dir")
+    assert inner_tokens[first - 1] == "--add-dir"
+    assert inner_tokens[second - 1] == "--add-dir"
+    assert first < second
+
+
+def test_web_search_true_emits_search_and_false_emits_nothing() -> None:
+    target = _FakeTarget({_ROLLOUT_PROBE: _FakeResult(0)})
+    assert "--search" in _harness({"web_search": True}).start(_op_ctx(target))
+    assert "--search" not in _harness({"web_search": False}).start(_op_ctx(target))
+
+
+def test_new_fields_reject_wrong_types() -> None:
+    for field, bad in (
+        ("network", "yes"),
+        ("web_search", 1),
+        ("disable_strict_config", "true"),
+        ("writable_dirs", "/srv/cache"),
+        ("writable_dirs", [1, 2]),
+    ):
+        with pytest.raises(ConfigError, match=field):
+            CodexHarness.validate("session-template/t", {field: bad})
+
+
+def test_merge_config_unions_writable_dirs_and_child_wins_the_rest() -> None:
+    """`writable_dirs` is an additive grant list (like shell's
+    required_commands): a child adding one dir must not drop the
+    parent's. Scalars/bools and extra_args child-win."""
+    merged = CodexHarness.merge_config(
+        {"writable_dirs": ["/srv/a"], "network": True, "extra_args": ["--x"]},
+        {"writable_dirs": ["/srv/b", "/srv/a"], "network": False, "extra_args": ["--y"]},
+    )
+    assert merged["writable_dirs"] == ["/srv/a", "/srv/b"]
+    assert merged["network"] is False
+    assert merged["extra_args"] == ["--y"]
+
+
+def test_merge_config_never_launders_an_invalid_writable_dirs_entry() -> None:
+    """merge_config runs on RAW declared blobs (the resolver merges before
+    the final validate), so a mixed valid/invalid list must survive the
+    merge un-filtered for validate to reject; silently dropping the bad
+    entry would produce a valid-looking blob that validate passes."""
+    merged = CodexHarness.merge_config({}, {"writable_dirs": ["/srv/a", 5]})
+    assert merged["writable_dirs"] == ["/srv/a", 5]
+    with pytest.raises(ConfigError, match="writable_dirs"):
+        CodexHarness.validate("session-template/t", merged)
+
+
 def test_extra_args_appended_verbatim_last_and_quoted() -> None:
     target = _FakeTarget({_ROLLOUT_PROBE: _FakeResult(0)})
-    command = _harness({"model": "gpt-5", "extra_args": ["--foo", "bar baz"]}).start(_op_ctx(target))
+    command = _harness(
+        {"model": "gpt-5", "network": True, "web_search": True, "extra_args": ["--foo", "bar baz"]}
+    ).start(_op_ctx(target))
     # One argv token stays one token: "bar baz" is quoted, not re-split.
     assert shlex.quote("bar baz") in command
-    # Appended last: after the managed -m flag.
-    assert command.index("-m gpt-5") < command.index("--foo")
+    # Appended last, after EVERY managed token: the operator-override
+    # story depends on an extra_args -c landing after the managed
+    # network -c (later codex config overrides win).
+    for managed in ("-m gpt-5", "network_access=true", "--search"):
+        assert command.index(managed) < command.index("--foo")
 
 
 def test_extra_args_with_shell_metacharacters_cannot_inject() -> None:
@@ -645,7 +742,9 @@ def test_fresh_string_is_a_single_sh_c_that_echoes_touches_then_execs() -> None:
     inner = shlex.split(command)[2]
     assert 'mkdir -p "$HOME"/.agentworks/codex' in inner
     assert f'touch "$HOME"/{state["discovery_marker"]}' in inner
-    assert inner.endswith("exec codex")  # no prompt, no trailing tokens
+    # No positional prompt, no trailing tokens beyond the default-on
+    # --strict-config (the harness owns the emitted config surface).
+    assert inner.endswith("exec codex --strict-config")
 
 
 def test_resume_string_is_a_single_sh_c_that_echoes_then_execs() -> None:

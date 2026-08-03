@@ -158,6 +158,17 @@ def test_merge_unions_required_commands_append_dedupe() -> None:
     assert merged["required_commands"] == ["claude", "rg", "fd"]
 
 
+def test_merge_never_launders_an_invalid_required_commands_entry() -> None:
+    """merge_config runs on RAW declared blobs (the resolver merges before
+    the final validate), so a mixed valid/invalid list must survive the
+    merge un-filtered for validate to reject; silently dropping the bad
+    entry would produce a valid-looking blob that validate passes."""
+    merged = ShellHarness.merge_config({}, {"required_commands": ["rg", 5]})
+    assert merged["required_commands"] == ["rg", 5]
+    with pytest.raises(ConfigError, match="required_commands"):
+        ShellHarness.validate("session-template/t", merged)
+
+
 def test_merge_child_overriding_only_command_keeps_parent_required() -> None:
     """The reason for the union override: a child that overrides only
     ``command`` must not silently drop the parent's required commands."""

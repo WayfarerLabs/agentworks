@@ -244,11 +244,24 @@ The `codex` harness runs Codex the same way and ships as the opt-in `codex` syst
 mints its own session ids, so instead of assigning one the harness discovers the id from Codex's
 on-disk state after the first launch and stores it; `session restart` then resumes the same
 conversation whenever its session file still exists (a session archived with `codex archive` is
-deliberately treated as not resumable, and a fresh one is started). Its config is five optional
+deliberately treated as not resumable, and a fresh one is started). Its config is nine optional
 fields: `model`, `sandbox`, `approval_policy`, and `profile` forward verbatim to `codex -m` / `-s` /
-`-a` / `-p` (their choice sets are Codex's, not validated here), and `extra_args` is the same
-appended-last escape hatch. The only launch-target requirement is that `codex` is installed, and the
-chosen action (resume, adopt-and-resume, or new session) is announced in the pane on start:
+`-a` / `-p` (their choice sets are Codex's, not validated here); `network` (bool) forwards to
+Codex's `sandbox_workspace_write.network_access` config key (Codex sandboxes network OFF by default
+even in `workspace-write`, so a coding session that needs `npm install` or `git push` wants
+`network: true`); `writable_dirs` (list) grants extra writable directories alongside the workspace
+(one `codex --add-dir` each; union-merged across template inheritance; entries are passed literally,
+so use absolute paths: `~` and `$HOME` are not expanded); `web_search` (bool) enables Codex's live
+web-search tool (`codex --search`, distinct from sandbox network access); `extra_args` is the same
+appended-last escape hatch; and `disable_strict_config` (bool) is the strictness off-switch
+described next. The harness always passes `--strict-config` so a Codex config mistake (or a
+Codex-renamed config key) fails loudly at launch instead of being silently ignored;
+`disable_strict_config: true` turns that off when strictness itself is the problem: a target whose
+`config.toml` Codex must tolerate (for example one written by a newer Codex than the target runs),
+or a target Codex old enough to not know the flag (it was verified against codex-cli 0.146.0, and an
+older binary rejects it as an unknown argument at launch). The only launch-target requirement is
+that `codex` is installed, and the chosen action (resume, adopt-and-resume, or new session) is
+announced in the pane on start:
 
 ```yaml
 apiVersion: agentworks/v1
@@ -261,6 +274,7 @@ spec:
     name: codex
     sandbox: workspace-write # optional; forwarded to `codex -s`
     approval_policy: on-request # optional; forwarded to `codex -a`
+    network: true # optional; sandbox network access (off by default)
 ```
 
 `shell` is the built-in default harness; `claude-code` and `codex` ship as the opt-in `claude` and

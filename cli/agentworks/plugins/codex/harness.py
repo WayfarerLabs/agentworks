@@ -2,11 +2,16 @@
 rollout when one exists and launching fresh otherwise.
 
 Config vocabulary (all optional): ``model``, ``sandbox``, ``approval_policy``,
-and ``profile`` map to the ``-m`` / ``-s`` / ``-a`` / ``-p`` flags verbatim,
-and ``extra_args`` is a list of raw argv tokens appended last (the operator
-escape hatch for any flag the harness does not model). See
-``codex-harness-decisions.md`` for the pinned CLI research (verified against
-codex-cli 0.146.0).
+and ``profile`` map to the ``-m`` / ``-s`` / ``-a`` / ``-p`` flags verbatim;
+``network`` (bool) forwards to the ``sandbox_workspace_write.network_access``
+config key via ``-c``; ``writable_dirs`` (list) emits one ``--add-dir`` per
+entry (union-merged across template inheritance, like ``shell``'s
+``required_commands``); ``web_search`` (bool) emits ``--search``;
+``disable_strict_config`` (bool, default false) suppresses the
+``--strict-config`` the harness otherwise always emits; and ``extra_args`` is
+a list of raw argv tokens appended last (the operator escape hatch for any
+flag the harness does not model). See ``codex-harness-decisions.md`` for the
+pinned CLI research (verified against codex-cli 0.146.0).
 
 Addressing is discover-and-store (the harness guide's rule 1, second form):
 codex offers no ``--session-id`` analog, so the harness never mints an id.
@@ -55,7 +60,17 @@ if TYPE_CHECKING:
     from agentworks.resources.reference import ConfigReference
     from agentworks.transports import Transport
 
-_CODEX_FIELDS = {"model", "sandbox", "approval_policy", "profile", "extra_args"}
+_CODEX_FIELDS = {
+    "model",
+    "sandbox",
+    "approval_policy",
+    "profile",
+    "network",
+    "writable_dirs",
+    "web_search",
+    "disable_strict_config",
+    "extra_args",
+}
 
 # Config field -> the codex flag it forwards to, in emission order. The
 # choice sets (sandbox modes, approval policies, model names) are
@@ -67,6 +82,47 @@ _FLAG_FIELDS: tuple[tuple[str, str], ...] = (
     ("approval_policy", "-a"),
     ("profile", "-p"),
 )
+
+# The codex config key ``network`` forwards to (via ``-c``). Codex-owned
+# and could drift; a renamed key is SILENTLY ignored by a non-strict
+# codex (verified against 0.146.0), which is exactly why the harness
+# emits ``--strict-config`` by default: with it, drift surfaces as
+# codex's own unknown-field startup error in the pane instead of a
+# session that silently has no network. Re-verify on codex major bumps.
+_NETWORK_KEY = "sandbox_workspace_write.network_access"
+
+
+def _as_str_list(value: object) -> list[str] | None:
+    """Narrow a merge-time list field: an ABSENT value is a clean empty
+    list; a fully-string list passes through; anything else returns
+    ``None`` (unclean). ``merge_config`` runs on raw declared blobs (the
+    resolver merges before the final validate), so an unclean side must
+    NOT be filtered into a valid-looking union: laundering would hide the
+    bad entry from the merged-blob ``validate`` pass. The caller skips
+    the union instead, leaving the raw value for ``validate`` to reject.
+    """
+    if value is None:
+        return []
+    if isinstance(value, list) and all(isinstance(item, str) for item in value):
+        return list(value)
+    return None
+
+
+def _append_dedupe(target: list[str], source: list[str]) -> list[str]:
+    """Append source items to target, skipping dupes. Preserves order.
+
+    A per-domain copy of the trivial merge helper (``shell.py`` carries
+    its own for ``required_commands``), per the sanctioned copy-per-domain
+    shape.
+    """
+    seen = set(target)
+    result = list(target)
+    for item in source:
+        if item not in seen:
+            seen.add(item)
+            result.append(item)
+    return result
+
 
 # The rollout root. ``CODEX_HOME`` is the CLI's own override env var
 # (honored by codex-cli 0.146.0); the default is ``$HOME/.codex``.
@@ -113,6 +169,29 @@ class CodexHarness(Harness):
         return ()
 
     @classmethod
+    def merge_config(cls, base: Mapping[str, object], child: Mapping[str, object]) -> dict[str, object]:
+        """Same-harness inheritance merge: scalars and bools child-win via
+        the shallow default; ``writable_dirs`` unions append-dedupe (it is
+        an additive grant list, like ``shell``'s ``required_commands``: a
+        child adding one dir must not silently drop the parent's).
+        ``extra_args`` deliberately child-wins (an escape hatch is an
+        override, not an accumulation), matching ``claude-code``.
+
+        The union runs only when BOTH sides are clean lists of strings:
+        the merge sees raw declared blobs, and filtering a mixed list
+        into a valid-looking union would hide the invalid entry from the
+        merged-blob ``validate`` pass. An unclean side falls through to
+        the shallow merge, so ``validate`` still rejects it."""
+        merged = {**base, **child}
+        base_dirs = _as_str_list(base.get("writable_dirs"))
+        child_dirs = _as_str_list(child.get("writable_dirs"))
+        if base_dirs is not None and child_dirs is not None:
+            union = _append_dedupe(base_dirs, child_dirs)
+            if union:
+                merged["writable_dirs"] = union
+        return merged
+
+    @classmethod
     def validate(cls, owner: str, config: Mapping[str, object]) -> None:
         """Shape-and-vocabulary only: unknown fields raise; each present
         field is type-checked. The flag VALUES are codex-owned choice sets
@@ -126,11 +205,14 @@ class CodexHarness(Harness):
             value = config.get(field_name)
             if value is not None and not isinstance(value, str):
                 raise ConfigError(f"{owner}.{field_name} must be a string")
-        extra_args = config.get("extra_args")
-        if extra_args is not None and (
-            not isinstance(extra_args, list) or not all(isinstance(item, str) for item in extra_args)
-        ):
-            raise ConfigError(f"{owner}.extra_args must be a list of strings")
+        for field_name in ("network", "web_search", "disable_strict_config"):
+            value = config.get(field_name)
+            if value is not None and not isinstance(value, bool):
+                raise ConfigError(f"{owner}.{field_name} must be a boolean")
+        for field_name in ("writable_dirs", "extra_args"):
+            value = config.get(field_name)
+            if value is not None and (not isinstance(value, list) or not all(isinstance(item, str) for item in value)):
+                raise ConfigError(f"{owner}.{field_name} must be a list of strings")
 
     def start(self, ctx: RunContext) -> str:
         """The pane command for ``session create``: resume the stored (or
@@ -289,12 +371,36 @@ class CodexHarness(Harness):
     def _config_flags(self) -> list[str]:
         """The managed flags then ``extra_args``, each an argv token.
         ``extra_args`` is appended verbatim last so it can carry (or
-        override) any flag the harness does not model."""
+        override) any flag the harness does not model.
+
+        ``--strict-config`` is emitted by DEFAULT (operator-decided
+        2026-08-03): the harness owns the emitted config surface, and
+        strictness turns codex-owned key drift (``_NETWORK_KEY``) into a
+        loud startup error instead of a silently ignored override. It
+        also hardens the target user's own ``config.toml``; that is
+        deliberate and documented, and ``disable_strict_config: true``
+        is the sanctioned off-switch for a config codex must tolerate
+        (e.g. one written by a newer codex than the target runs).
+        """
         tokens: list[str] = []
+        if self.config.get("disable_strict_config") is not True:
+            tokens.append("--strict-config")
         for field_name, flag in _FLAG_FIELDS:
             value = self.config.get(field_name)
             if isinstance(value, str):
                 tokens += [flag, value]
+        network = self.config.get("network")
+        if isinstance(network, bool):
+            # Both directions forward explicitly: `false` overrides a
+            # profile or config.toml that enabled network access.
+            tokens += ["-c", f"{_NETWORK_KEY}={'true' if network else 'false'}"]
+        writable_dirs = self.config.get("writable_dirs")
+        if isinstance(writable_dirs, list):
+            for item in writable_dirs:
+                if isinstance(item, str):
+                    tokens += ["--add-dir", item]
+        if self.config.get("web_search") is True:
+            tokens.append("--search")
         extra_args = self.config.get("extra_args")
         if isinstance(extra_args, list):
             tokens += [item for item in extra_args if isinstance(item, str)]
