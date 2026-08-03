@@ -154,7 +154,7 @@ resume: sh -c 'echo <msg>; exec codex resume <sid> -c tui.resume_cwd=current [fl
 `cd`-ed to the workspace dir, so "current" is always the right answer). All generated tokens are
 `shlex.quote`d; no generated piece emits `{{word}}`.
 
-### Config vocabulary (all optional; values forwarded unvalidated)
+### Config vocabulary (all optional; shape-checked here, codex-owned values forwarded unvalidated)
 
 Extended 2026-08-03 (operator-decided) with the network/writable-dirs/web-search knobs and the
 strict-config default, after the first real usage showed the `-c` network spelling too arcane and

@@ -252,9 +252,10 @@ even in `workspace-write`, so a coding session that needs `npm install` or `git 
 `network: true`); `writable_dirs` (list) grants extra writable directories alongside the workspace
 (one `codex --add-dir` each; union-merged across template inheritance; entries are passed literally,
 so use absolute paths: `~` and `$HOME` are not expanded); `web_search` (bool) enables Codex's live
-web-search tool (`codex --search`, distinct from sandbox network access); and `extra_args` is the
-same appended-last escape hatch. The harness always passes `--strict-config` so a Codex config
-mistake (or a Codex-renamed config key) fails loudly at launch instead of being silently ignored;
+web-search tool (`codex --search`, distinct from sandbox network access); `extra_args` is the same
+appended-last escape hatch; and `disable_strict_config` (bool) is the strictness off-switch
+described next. The harness always passes `--strict-config` so a Codex config mistake (or a
+Codex-renamed config key) fails loudly at launch instead of being silently ignored;
 `disable_strict_config: true` turns that off when strictness itself is the problem: a target whose
 `config.toml` Codex must tolerate (for example one written by a newer Codex than the target runs),
 or a target Codex old enough to not know the flag (it was verified against codex-cli 0.146.0, and an
