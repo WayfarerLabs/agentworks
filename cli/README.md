@@ -676,9 +676,15 @@ stores it (a session archived with `codex archive` is deliberately treated as no
 fresh one is started). It ships as the opt-in `codex` system plugin, disabled by default with the
 same gating as `claude-code` above. Once enabled, it needs only that `codex` is installed on the
 launch target, and announces the chosen action (resume, adopt-and-resume, or new session) in the
-pane. Its config vocabulary is five optional fields: `model`, `sandbox`, `approval_policy`, and
+pane. Its config vocabulary is nine optional fields: `model`, `sandbox`, `approval_policy`, and
 `profile` forward verbatim to `codex -m` / `-s` / `-a` / `-p` (their choice sets are Codex's, not
-validated here), and `extra_args` is the same appended-last escape hatch:
+validated here); `network` (bool) forwards to Codex's `sandbox_workspace_write.network_access`
+config key (sandboxed network is off by default, so coding sessions usually want `network: true`);
+`writable_dirs` (list of paths) emits one `codex --add-dir` each; `web_search` (bool) enables the
+live web-search tool (`codex --search`); `disable_strict_config` (bool) suppresses the
+`--strict-config` the harness otherwise always passes (strictness makes a Codex config mistake or a
+Codex-renamed key fail loudly at launch instead of being silently ignored); and `extra_args` is the
+same appended-last escape hatch:
 
 ```yaml
 apiVersion: agentworks/v1
@@ -691,12 +697,14 @@ spec:
     name: codex
     sandbox: workspace-write
     approval_policy: on-request
+    network: true
 ```
 
 The harness-plus-config pair inherits as a unit: a child that restates the same harness merges its
-config block into the parent's (child wins per key; `shell` unions `required_commands`), while a
-child naming a _different_ harness starts from a fresh config (the parent's block was addressed to a
-different tool). `env`, `inherits`, and the description merge as usual.
+config block into the parent's (child wins per key; `shell` unions `required_commands` and `codex`
+unions `writable_dirs`), while a child naming a _different_ harness starts from a fresh config (the
+parent's block was addressed to a different tool). `env`, `inherits`, and the description merge as
+usual.
 
 **TOML** (`[session_templates.<name>]` in `config.toml`, deprecated but supported): the same
 `harness` string and a nested `harness_config` table are accepted:
