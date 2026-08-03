@@ -24,7 +24,7 @@ given provider (Lima, WSL2, Proxmox, Azure VMs, and AWS EC2 today, with more to 
 the platform, every VM runs the same base operating system (Debian Bookworm), is joined to the same
 Tailscale tailnet, and is accessible over SSH at its Tailscale IP address using the operator's keys.
 
-![Agentworks topology: the operator's workstation runs the agw CLI, which creates VMs at declared sites across local platforms (Lima or WSL2), a remote SSH VM site (e.g. Lima), Azure, AWS EC2, and Proxmox. Every VM and the workstation itself join a shared Tailnet overlay, which is how the CLI reaches them all.](docs/images/agw-topology.png)
+![Agentworks topology: the operator's workstation runs the agw CLI, which creates VMs at declared sites across local platforms (Lima or WSL2), a remote SSH VM site (e.g. Lima), Azure, AWS EC2, and Proxmox, with room reserved for future platforms. Every VM and the workstation itself join a shared Tailnet overlay, which is how the CLI reaches them all.](docs/images/agw-topology.png)
 
 Beyond the VMs themselves, Agentworks provides several layered primitives for organizing agentic
 workloads:
@@ -76,7 +76,7 @@ stand up a VM and drive your first session:
 
 ```bash
 agw config init        # writes ~/.config/agentworks/config.toml
-agw config edit        # fill in required fields (at minimum, your operator SSH keys and select plugins)
+agw config edit        # fill in required fields (at minimum, your operator SSH keys, plus any plugins you need)
 agw doctor             # sanity-check tools, Tailscale, config, and the local DB
                        # note that you must have at least one active vm-site to create a VM
                        # follow hints and/or enable plugins to address any issues
