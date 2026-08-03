@@ -74,11 +74,11 @@ vouches for it. It:
 - **MUST** default its store username to a value unique per credential, so two scoped credentials on
   one host cannot collide, overriding only where the host dictates and only to a value that stays
   disjoint for that host.
-- **MUST NOT** write to the VM, configure git, or perform any mutation in any stage; it returns
-  strings and lets Agentworks materialize and wire them.
+- **MUST NOT** write to the VM, configure git, or otherwise mutate the VM or its git configuration
+  in any stage; it returns strings and lets Agentworks materialize and wire them.
 - **MUST NOT** mint or mutate in `runup` or `review_remote` (both are read-only), and **MUST NOT**
-  reach the network or the host anywhere but the token check, which happens after the resolve
-  boundary.
+  reach the network or the host anywhere but the token check and, for a minting provider, its
+  check-then-mint op, both of which happen after the resolve boundary.
 - **MUST NOT** speak for, serve, or advise on a host it does not own, so it never shadows another
   provider's credential or clobbers an unrelated host's git configuration.
 - **SHOULD** verify the token against its host before it is relied on, raising a typed rejection on

@@ -119,7 +119,9 @@ machinery around it. It:
 - **MUST** keep its effects session-scoped: it may set up state for this one session (for example, a
   session-local env var), but **MUST NOT** cause effects that persist to the whole user, the
   workspace, or the machine, such as an auth flow that writes shared login state or a workspace-wide
-  plugin install. Broader-scope provisioning is a separate, forthcoming concern (see
+  plugin install. A session-local secret (say, for auth) belongs in that session's environment,
+  never baked into the launch command, where it would leak into process listings and terminal
+  scrollback. Broader-scope provisioning is a separate, forthcoming concern (see
   [A Note on Scope](#a-note-on-scope)).
 - **SHOULD** surface its launch decision (resumed, started fresh, or adopted by discovery) to the
   operator, both in the command's output and as the pane's first visible line.
