@@ -358,3 +358,71 @@ def test_write_file_chmods_when_mode_supplied(tmp_path: Path) -> None:
         # Last call (after the copy) should chmod the remote path.
         mock_run.assert_called_once()
         assert mock_run.call_args[0][0] == "chmod 0644 /remote/conf"
+
+
+# ---------------------------------------------------------------------------
+# dropped-connection reporting
+# ---------------------------------------------------------------------------
+
+
+def test_interactive_reports_a_dropped_connection(captured_output) -> None:  # noqa: ANN001
+    """A dropped attach is otherwise completely silent from the
+    operator's side: the CLI exits with the code and prints nothing, and
+    ssh's own diagnostic went to the alternate screen that the terminal
+    guard has since discarded."""
+    t = SSHTransport(host="vm1", user="agentworks")
+    with patch("agentworks.transports.ssh.subprocess.call") as mock_call:
+        mock_call.return_value = 255
+        assert t.interactive("tmux attach -t s1") == 255
+    assert any("dropped" in w for w in captured_output.warnings)
+    assert any("agentworks@vm1" in w for w in captured_output.warnings)
+
+
+def test_interactive_says_nothing_on_a_clean_detach(captured_output) -> None:  # noqa: ANN001
+    """Detaching is the common case and needs no commentary."""
+    t = SSHTransport(host="vm1", user="agentworks")
+    with patch("agentworks.transports.ssh.subprocess.call") as mock_call:
+        mock_call.return_value = 0
+        t.interactive("tmux attach -t s1")
+    assert captured_output.warnings == []
+
+
+def test_interactive_says_nothing_for_a_remote_command_failure(captured_output) -> None:  # noqa: ANN001
+    """255 is ssh's transport-failure code. Any other non-zero exit is
+    the remote command's own status (``exit 3`` in a login shell), which
+    is not a connection problem and not ours to narrate."""
+    t = SSHTransport(host="vm1", user="agentworks")
+    with patch("agentworks.transports.ssh.subprocess.call") as mock_call:
+        mock_call.return_value = 3
+        t.interactive("")
+    assert captured_output.warnings == []
+
+
+def test_dropped_connection_notice_is_written_after_the_terminal_guard(
+    captured_output,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The ordering IS the feature.
+
+    The guard's exit pass emits the alternate-screen leave, which
+    discards everything drawn on that screen. A notice written before
+    the guard closes would be wiped exactly like ssh's own message, so
+    the operator would see nothing at all. Assert the sanitize payload
+    has already gone out by the time the warning is emitted.
+    """
+    from agentworks import terminal
+
+    events: list[str] = []
+    monkeypatch.setattr(terminal, "_emit_sanitize", lambda: events.append("sanitize"))
+    monkeypatch.setattr(
+        "agentworks.output.warn",
+        lambda message: events.append(f"warn:{message}"),
+    )
+
+    t = SSHTransport(host="vm1", user="agentworks")
+    with patch("agentworks.transports.ssh.subprocess.call") as mock_call:
+        mock_call.return_value = 255
+        t.interactive("")
+
+    # entry sanitize, exit sanitize, then the notice.
+    assert [e.split(":")[0] for e in events] == ["sanitize", "sanitize", "warn"]

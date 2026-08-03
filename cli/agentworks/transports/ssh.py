@@ -20,6 +20,7 @@ from agentworks.ssh import (
     SSH_DEFAULT_RETRIES,
     SSH_INTERACTIVE_ALIVE_COUNT_MAX,
     SSH_INTERACTIVE_ALIVE_INTERVAL,
+    SSH_TRANSPORT_ERROR,
     SSHError,
     SSHResult,
     _set_env_args,
@@ -59,6 +60,30 @@ def keepalive_args() -> list[str]:
         "-o",
         f"ServerAliveCountMax={SSH_INTERACTIVE_ALIVE_COUNT_MAX}",
     ]
+
+
+def note_ssh_interactive_exit(code: int, endpoint: str) -> None:
+    """Explain a dropped interactive SSH connection.
+
+    ssh reserves exit 255 for its own transport failures, so it is the
+    one code that separates "the connection died" from "the remote
+    command exited non-zero". A dropped attach is otherwise completely
+    silent from the operator's side: the CLI just exits with the code,
+    and ssh's own diagnostic went to the alternate screen that the
+    terminal guard has since discarded.
+
+    Shared by ``SSHTransport`` and ``RemoteLimaTransport``, whose outer
+    hop is an ``ssh -t`` with the same failure mode. Callers invoke this
+    from ``_note_interactive_exit``, which the ABC calls only after the
+    guard has closed; see ``Transport._note_interactive_exit`` for why
+    that ordering matters.
+    """
+    if code != SSH_TRANSPORT_ERROR:
+        return
+    from agentworks import output
+
+    output.warn(f"connection to {endpoint} dropped (ssh exit {SSH_TRANSPORT_ERROR}); terminal restored.")
+    output.detail("Remote state is untouched. Re-run the same command to reattach.")
 
 
 def _scp_base_args(
@@ -254,6 +279,9 @@ class SSHTransport(Transport):
             args.append("--")  # fence: see run() for rationale
             args.append(command)
         return subprocess.call(args)
+
+    def _note_interactive_exit(self, code: int) -> None:
+        note_ssh_interactive_exit(code, self.describe())
 
     def copy_to(
         self,

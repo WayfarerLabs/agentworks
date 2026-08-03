@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 
 from agentworks.transports._shared import env_assignment_prefix
 from agentworks.transports.base import Transport
-from agentworks.transports.ssh import SSHTransport, keepalive_args
+from agentworks.transports.ssh import SSHTransport, keepalive_args, note_ssh_interactive_exit
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -122,6 +122,12 @@ class RemoteLimaTransport(Transport):
             wrapped,
         ]
         return subprocess.call(args)
+
+    def _note_interactive_exit(self, code: int) -> None:
+        # The outer hop is a plain ``ssh -t``, so it carries ssh's 255
+        # transport-failure convention and the same dropped-attach
+        # failure mode as SSHTransport.
+        note_ssh_interactive_exit(code, self.describe())
 
     def copy_to(
         self,

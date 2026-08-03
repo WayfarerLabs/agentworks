@@ -113,6 +113,16 @@ class _RecordingTransport(Transport):
         raise NotImplementedError
 
 
+def test_abc_reports_nothing_on_a_non_zero_interactive_exit(captured_output) -> None:  # noqa: ANN001
+    """The default hook is a no-op on purpose. For Lima, WSL2, or any
+    login shell a non-zero exit is usually just the remote command's own
+    status, so narrating it would be noise. Only transports that can
+    tell a connection failure apart from a command failure override."""
+    t = _RecordingTransport(exit_code=255)
+    t.interactive("")
+    assert captured_output.warnings == []
+
+
 def test_interactive_delegates_to_the_subclass_hook() -> None:
     """The concrete wrapper is pass-through: command, env, and exit code
     all survive the trip through the guard."""

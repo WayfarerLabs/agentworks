@@ -587,6 +587,11 @@ via `--workspace <ws>`). Use these when you just need a terminal without the con
   cannot recover a lost line discipline: there is no record of what echo and line-editing looked
   like before the attach that died, so a tab left not echoing stays that way. Open a fresh tab for
   that case.
+- **A dropped connection says so.** When ssh exits 255 (its transport-failure code, as opposed to
+  the remote command simply exiting non-zero) you get a one-line notice that the connection dropped
+  and the terminal was restored. Without it the failure is silent: ssh writes its own diagnostic
+  while tmux still holds the alternate screen, so leaving that screen discards the message before
+  you can read it. A clean detach prints nothing.
 
 ### Session Templates
 

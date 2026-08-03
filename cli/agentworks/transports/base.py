@@ -110,7 +110,9 @@ class Transport(abc.ABC):
         forget it. See :mod:`agentworks.terminal`.
         """
         with guarded_terminal():
-            return self._interactive(command, env=env)
+            code = self._interactive(command, env=env)
+        self._note_interactive_exit(code)
+        return code
 
     @abc.abstractmethod
     def _interactive(
@@ -124,6 +126,32 @@ class Transport(abc.ABC):
         Subclasses implement this rather than ``interactive`` so the
         terminal guard cannot be bypassed by an override.
         """
+
+    def _note_interactive_exit(self, code: int) -> None:
+        """Tell the operator why an interactive session ended abnormally.
+
+        Called AFTER the guard closes, and that ordering carries the
+        whole value. The guard's exit pass leaves the alternate screen,
+        which discards everything drawn on it, and a remote program that
+        died mid-attach was almost certainly holding the alternate
+        screen. Anything written before the guard closes is wiped along
+        with it, including the SSH client's own "Timeout, server not
+        responding" on its inherited stderr. Post-guard is the first
+        moment a message is guaranteed to land somewhere the operator
+        can still read it.
+
+        No-op by default, because a non-zero exit is not in general an
+        error: for Lima, WSL2, or any login shell it is usually just the
+        remote command's own exit status, and narrating that would be
+        noise. Only a transport that can distinguish "the connection
+        failed" from "the command exited non-zero" has anything worth
+        saying, so only those override this.
+
+        Nothing is reported on a clean exit. Detaching is the common
+        case and needs no commentary, and the terminal restore is
+        plumbing the operator should never have to think about.
+        """
+        del code  # documented no-op: see above
 
     @abc.abstractmethod
     def copy_to(
