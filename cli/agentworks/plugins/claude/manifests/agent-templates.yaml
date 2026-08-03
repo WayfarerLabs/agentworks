@@ -1,0 +1,22 @@
+# The claude system plugin's bundled example agent-template. It exists so the
+# example-claude-* session-templates can actually start on a stock VM: an
+# agent-template's user_install_commands is what installs a CLI for the agent
+# user, and this one installs the Claude Code CLI (the plugin's `claude`
+# user-install-command). That CLI is the only agent-level install a session
+# needs to start; the base VM already provides the rest (curl for the
+# installer, tmux for the session pane). Pair the two examples:
+#
+#   agw session create <name> --template example-claude-strict \
+#       --new-agent --agent-template example-claude
+#
+# Or inherit from it, or copy it into your own resources/ and adjust.
+#
+# Like every plugin-bundled resource, it publishes present-but-disabled until
+# an operator opts in with `[plugins] system = ["claude"]`.
+apiVersion: agentworks/v1
+kind: agent-template
+metadata:
+  name: example-claude
+  description: "Example agent for the example-claude-* sessions: installs the Claude Code CLI for the agent"
+spec:
+  user_install_commands: [claude]

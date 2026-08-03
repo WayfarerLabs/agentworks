@@ -6,6 +6,12 @@
 #   2. Inherit from one, adding your own session-template settings (env, etc.).
 #   3. Copy them into your own resources/ directory and adjust as you see fit.
 #
+# To start a session from one on a stock VM, the agent also needs the Claude
+# Code CLI installed. The plugin ships a paired example agent-template,
+# `example-claude`, that installs it; compose the two:
+#   agw session create <name> --template example-claude-strict \
+#       --new-agent --agent-template example-claude
+#
 # Like every plugin-bundled resource, they publish present-but-disabled until
 # an operator opts in with `[plugins] system = ["claude"]`.
 #
