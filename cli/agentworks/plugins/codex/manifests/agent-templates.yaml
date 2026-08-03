@@ -1,0 +1,22 @@
+# The codex system plugin's bundled example agent-template. It exists so the
+# example-codex-* session-templates can actually start on a stock VM: an
+# agent-template's user_install_commands is what installs a CLI for the agent
+# user, and this one installs the Codex CLI (the plugin's `codex`
+# user-install-command). That CLI is the only agent-level install a session
+# needs to start; the base VM already provides the rest (curl for the
+# installer, tmux for the session pane). Pair the two examples:
+#
+#   agw session create <name> --template example-codex-strict \
+#       --new-agent --agent-template example-codex
+#
+# Or inherit from it, or copy it into your own resources/ and adjust.
+#
+# Like every plugin-bundled resource, it publishes present-but-disabled until
+# an operator opts in with `[plugins] system = ["codex"]`.
+apiVersion: agentworks/v1
+kind: agent-template
+metadata:
+  name: example-codex
+  description: "Example agent for the example-codex-* sessions: installs the Codex CLI for the agent"
+spec:
+  user_install_commands: [codex]
