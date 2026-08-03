@@ -80,6 +80,73 @@ host and get it onto the VM in the form git expects. See
 [`git_credential/README.md`](git_credential/README.md) for the provider contract and the shipped
 providers.
 
+## What Each Capability Must Provide
+
+Each kind has a small, basic contract: the functionality an implementation has to deliver for
+agentworks to build on. This is the _what_. The _how_ (the lifecycle it plugs into, the shared
+bootstrap it can reuse, the conventions it should follow) is past the Technical Overview divider
+below and in each kind's companion guide. The line to hold throughout: a capability provides a
+primitive, and agentworks builds the rest on top of it.
+
+**A `vm-platform`** stands up a machine and hands agentworks an administrative foothold on it. It:
+
+- **MUST** provision a VM running the standard base operating system, Debian Bookworm, at the
+  configured site.
+- **MUST** create the admin user with the operator-configured name, holding full passwordless `sudo`
+  over the machine.
+- **MUST** install the operator's SSH public key for that admin user, so the machine is reachable
+  with the operator's key and no password.
+- **MUST** provide a transport that runs arbitrary commands as the admin user: the single foothold
+  every later step is driven through.
+- **MUST** join the VM to the operator's Tailscale tailnet when given an auth key (or otherwise make
+  it reachable), giving it a stable address for the life of the VM.
+- **MUST** support the lifecycle agentworks drives, create, start, stop, and delete, and report the
+  VM's status.
+- **SHOULD** release the backend's billable or heavy resources when a VM is stopped, wherever the
+  backend allows it, so a stopped VM holds as little cost and capacity as possible.
+
+It does not create agent users, workspaces, groups, sessions, or inject secrets. Those are
+agentworks' layer, built by running commands as the admin user over the transport above.
+
+**A `harness`** knows how to run one tool as a workload, and nothing about the machinery around it.
+It:
+
+- **MUST** produce the command that launches its tool for a given session, as the target user in the
+  session's workspace.
+- **MUST** produce the command that brings the workload back on a restart; a stateful tool
+  **SHOULD** resume its existing session wherever the tool supports it, while the plain `shell`
+  simply relaunches.
+- **MUST** declare the executables its tool needs on the launch target, so agentworks can verify the
+  environment before starting.
+
+It does not own the tmux session, the user, the workspace, or attach and detach. agentworks provides
+those; the harness only decides what runs in the pane.
+
+**A `secret-backend`** answers where a secret's value comes from. It:
+
+- **MUST** resolve a secret mapping to its value from the backend's source (an environment variable,
+  a prompt, a vault item), or report that the mapping has no value.
+- **MUST** describe a mapping for inspection (the environment variable name, the vault reference)
+  without ever revealing the value.
+- **SHOULD** report cheaply whether it is usable on this host, so a backend that cannot run here is
+  known before it is relied on.
+
+It does not decide where secrets apply or in what precedence. agentworks merges and injects them
+across the VM, workspace, agent, and session scopes; the backend just answers "what is the value for
+this mapping."
+
+**A `git-credential-provider`** sources a git credential for one host and says how git should use
+it. It:
+
+- **MUST** obtain a credential (a token) for its git host from an operator-named secret.
+- **MUST** produce what git needs to authenticate as that credential on a VM: the stored entry, the
+  username git keys on, and the selection the helper uses.
+- **SHOULD** verify the credential is good before it is relied on, so a bad token surfaces clearly
+  rather than as a failing clone later.
+
+It does not write to the VM or configure git itself. agentworks materializes the credential onto the
+VM and wires the credential helper; the provider sources the token and defines how git presents it.
+
 ## Planned Future Capabilities
 
 As of 0.13.0, the following capabilities are being considered for future implementation:
