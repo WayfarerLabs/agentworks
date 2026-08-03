@@ -1,17 +1,15 @@
 # Git Credential Providers
 
 > The detailed companion to the capability overview in [`../README.md`](../README.md), focused on
-> the `git-credential-provider` kind. That overview covers the contract every capability shares.
-> This page is operator-first: the top covers what a git credential provider does for you and the
-> shipped providers, and past the [Technical Overview](#technical-overview) divider it goes deep for
-> engineers implementing or extending one, whether you are building a new provider or you are just
-> curious how the shipped ones (`github`, `azdo`) work.
+> the `git-credential-provider` kind. That overview covers the contract every capability shares. The
+> operator sections cover the purpose and shipped providers. The sections after the
+> [Technical Overview](#technical-overview) divider cover implementation details and the behavior of
+> the shipped `github` and `azdo` providers.
 
-A git credential provider sources and provisions the git credentials an agent needs so it can clone
-and push against your git hosts over https, without you baking tokens into images or hand-carrying
-them onto a VM. You name a secret that holds a personal access token (PAT), and agentworks gets that
-token onto the VM in the form git expects, wired so the agent's ordinary git commands authenticate
-on their own.
+A git credential provider sources and provisions the git credentials an agent needs to clone and
+push against git hosts over https without baking tokens into images or hand-carrying them onto a VM.
+The credential names a secret containing a personal access token (PAT), and Agentworks places that
+token on the VM in the form git expects so ordinary git commands authenticate automatically.
 
 ## The Shipped Providers
 
@@ -21,15 +19,15 @@ Two providers ship today, one per supported host:
   repositories or to a single owner, so several credentials can serve the same host and each
   repository draws the one meant for it.
 - **`azdo`** sources an Azure DevOps PAT scoped to one Azure DevOps organization. It ships in the
-  opt-in `azure` system plugin, so you turn it on only if you use Azure DevOps.
+  opt-in `azure` system plugin and becomes available when that plugin is enabled.
 
 ## What an Operator Can Rely On
 
 - **Credentials are sourced by secret name, never pasted as values.** A credential points at the
   _name_ of a secret that holds the token, and the secret backend supplies the value at provisioning
-  time. Nothing invites you to paste a live token into a plaintext config file, and the same
-  credential definition travels between operators who store their tokens differently.
-- **A bad token is caught early.** At provisioning time agentworks verifies the token against its
+  time. The interface never asks for a live token in plaintext config, and the same credential
+  definition travels between operators who store their tokens differently.
+- **A bad token is caught early.** At provisioning time Agentworks verifies the token against its
   host before writing anything, so an expired, revoked, or mistyped token surfaces as a clear,
   actionable error up front rather than as a confusing git failure partway through setup. (The check
   is skippable by policy for airgapped setups.)
@@ -50,7 +48,7 @@ vouches for it. It:
   one host cannot collide, overriding only where the host dictates and only to a value that stays
   disjoint for that host.
 - **MUST NOT** write to the VM, configure git, or perform any mutation in any stage; it returns
-  strings and lets agentworks materialize and wire them.
+  strings and lets Agentworks materialize and wire them.
 - **MUST NOT** mint or mutate in `runup` or `review_remote` (both are read-only), and **MUST NOT**
   reach the network or the host anywhere but the token check, which happens after the resolve
   boundary.
@@ -67,19 +65,18 @@ vouches for it. It:
 - **MAY** carry a host-specific scope (github `repos`/`owner`, azdo `org`) so several credentials
   serve one host and each repo draws the one meant for it.
 
-It does not write to the VM or configure git itself. agentworks materializes the credential onto the
+It does not write to the VM or configure git itself. Agentworks materializes the credential onto the
 VM and wires the credential helper; the provider sources the token, says how git should present it,
 and vouches for it.
 
 ## Technical Overview
 
-Everything above this line is for operators. Everything below it is for engineers implementing or
-extending a git credential provider: where a provider sits, how its output becomes working auth on a
-VM, the contract each method must honor, the two shipped providers side by side, and where the code
-lives. If you are choosing and configuring a provider rather than writing one, you can stop here.
+The preceding sections describe the operator-facing model. The remaining sections cover where a
+provider sits, how its output becomes working authentication on a VM, the method contract, the two
+shipped providers, and the implementation layout.
 
 A **git credential provider** is the code that sources and provisions credentials for one git host,
-so agentworks (and the agents running on a VM) can authenticate to that host over plain https. Each
+so Agentworks (and the agents running on a VM) can authenticate to that host over plain https. Each
 subclasses `GitCredentialProvider` (`base.py`), sources a personal access token (PAT) from a named
 secret, checks that token against the host at the `runup` stage, and produces the materials that get
 written to a VM: the store line, the selection entry for the generated credential helper, and the
@@ -148,7 +145,7 @@ actually consumed:
      (`[defaults] runup_git_credentials = false`).
    - `build_credential_materials` assembles a `CredentialMaterials` from the survivors: the full
      `~/.git-credentials` body (from each provider's `credential_lines(token)`), the
-     agentworks-owned gitconfig include (exactly the `credential.useHttpPath = true` switch), and
+     Agentworks-owned gitconfig include (exactly the `credential.useHttpPath = true` switch), and
      THE git credential helper, a generated POSIX-sh script. It reads `helper_entry()` for each
      provider's host, username, and scopes; enforces that no two credentials claim the same scope on
      one host (a hard `ConfigError`); and bakes the `secret_name` into the helper's rejection
@@ -232,8 +229,8 @@ rules:
 - `azdo`: `org` is REQUIRED and must match `_ORG_RE` (it is interpolated into the generated helper),
   and the only other permitted field is `token`.
 
-Keep `validate` to shape and vocabulary. Do not validate host-owned choice sets you do not control,
-and do not reach for the world here (that is runup's job).
+`validate` stays limited to shape and vocabulary. Host-owned choice sets remain the host's
+responsibility, and checks requiring external state belong in runup.
 
 #### Construction: Cheap, No I/O
 
@@ -280,7 +277,7 @@ Runup never mints and never mutates. A minting provider would READ-and-check the
 runup and mint only in a flagged, idempotent, check-then-mint op (see the idempotency section of
 `../README.md`).
 
-#### Ops: the Materials Surface
+#### Ops: The Materials Surface
 
 The mutation-phase output. For a token-sourcing provider these are pure functions of the bound
 config and the resolved token, which is why they are idempotent for free (the domain writes the
@@ -355,10 +352,10 @@ The authenticated check belongs in `runup`, after the resolve boundary, so every
 the same way regardless of where it came from (env var, prompt, 1Password). Construction stays cheap
 and token-free; preflight stays credential-free (a git-credential preflight must not fail
 `vm create` because the VM or the admin user does not exist yet, all created later in that same
-command). Read the dependency-blindness discussion in `../README.md` before you are tempted to hoist
-a check earlier.
+command). The dependency-blindness discussion in `../README.md` explains why the check cannot move
+earlier.
 
-#### Type Your Errors: Definitive Rejection vs Indeterminacy
+#### Typed Errors: Definitive Rejection vs Indeterminacy
 
 A definitive rejection (a 401, or azdo's 203) is a `TokenRejectedError` with entity framing and an
 actionable hint; a network failure or any other status warns and continues unverified. The
@@ -409,7 +406,7 @@ templates:
 
 ### Cross-References
 
-- [`../README.md`](../README.md): the capability lifecycle contract (read this first).
+- [`../README.md`](../README.md): the capability lifecycle contract and prerequisite for this guide.
 - [`vm_platform/README.md`](../vm_platform/README.md): the sibling deep-dive; its credentials
   section is the reference for the secret-by-name discipline shared here.
 - `base.py`: the `GitCredentialProvider` ABC, `HelperEntry`, and the shared helpers

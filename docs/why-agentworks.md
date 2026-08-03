@@ -124,16 +124,18 @@ Sessions are intended to be the most ephemeral: started for a specific activity 
 done.
 
 This gives agents two modes. A **disposable** agent is created alongside a session (`--new-agent`)
-and torn down with it, which suits one-off work that needs no standing identity. A **durable** agent
-is set up once and reused across many sessions and workspaces. Its reproducible setup (installed
-tools, dotfiles, git credentials) belongs in the agent template, so it is declared once and rebuilt
-on demand rather than hand-maintained. What makes a durable agent worth keeping is the state a
-template _cannot_ reproduce: the harness and app-specific state that accumulates in the agent's
-home, such as a coding assistant's conversation context and memory, and interactive logins
-(OAuth/MFA token caches) that no script can regenerate. That accumulated state is the expensive part
-you cannot fully automate, so a long-lived agent lets you build it up once and run a fleet of
-disposable sessions against it. The agent carries the durable identity and its accumulated state;
-the session is just the unit of work.
+and can be torn down when that session is deleted, which suits one-off work that needs no standing
+identity. Interactive deletion offers to remove an unused session-created agent; `--yes`
+automatically removes it when no remaining session or standing workspace grant still needs it. A
+**durable** agent is set up once and reused across many sessions and workspaces. Its reproducible
+setup (installed tools, dotfiles, git credentials) belongs in the agent template, so it is declared
+once and converged on demand with `agw agent reinit` rather than hand-maintained. What makes a
+durable agent worth keeping is the state a template _cannot_ reproduce: the harness and app-specific
+state that accumulates in the agent's home, such as a coding assistant's conversation context and
+memory, and interactive logins (OAuth/MFA token caches) that no script can regenerate. That
+accumulated state is the expensive part you cannot fully automate, so a long-lived agent lets you
+build it up once and run a fleet of disposable sessions against it. The agent carries the durable
+identity and its accumulated state; the session is just the unit of work.
 
 ### Declarative Configuration and Templates
 

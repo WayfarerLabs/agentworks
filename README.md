@@ -24,7 +24,7 @@ given provider (Lima, WSL2, Proxmox, Azure VMs, and AWS EC2 today, with more to 
 the platform, every VM runs the same base operating system (Debian Bookworm), is joined to the same
 Tailscale tailnet, and is accessible over SSH at its Tailscale IP address using the operator's keys.
 
-![Agentworks topology: the operator's workstation runs the agw CLI, which creates VMs at declared sites across local platforms (Lima or WSL2), a remote SSH VM site (e.g. Lima), Azure, and Proxmox, with room reserved for future platforms. Every VM and the workstation itself join a shared Tailnet overlay, which is how the CLI reaches them all.](docs/images/agw-topology.png)
+![Agentworks topology: the operator's workstation runs the agw CLI, which creates VMs at declared sites across local platforms (Lima or WSL2), a remote SSH VM site (e.g. Lima), Azure, AWS EC2, and Proxmox. Every VM and the workstation itself join a shared Tailnet overlay, which is how the CLI reaches them all.](docs/images/agw-topology.png)
 
 Beyond the VMs themselves, Agentworks provides several layered primitives for organizing agentic
 workloads:
@@ -64,13 +64,22 @@ uv tool install agentworks-cli
 # or:  pipx install agentworks-cli
 ```
 
+Or, if you prefer to run from source:
+
+```bash
+git clone https://github.com/WayfarerLabs/agentworks.git
+uv tool install -e ./agentworks/cli
+```
+
 The everyday command is `agw` (the longer `agentworks` is installed too). Set up your config, then
 stand up a VM and drive your first session:
 
 ```bash
 agw config init        # writes ~/.config/agentworks/config.toml
-agw config edit        # fill in required fields (at minimum, your operator SSH keys)
+agw config edit        # fill in required fields (at minimum, your operator SSH keys and select plugins)
 agw doctor             # sanity-check tools, Tailscale, config, and the local DB
+                       # note that you must have at least one active vm-site to create a VM
+                       # follow hints and/or enable plugins to address any issues
 
 # Create a VM and run a session on it
 agw vm create my-vm
@@ -105,14 +114,14 @@ no system services, no room to install a real toolchain or spin up containers of
 ability to collaborate with other users, etc.
 
 Agentworks gives workloads a **shared, full-featured Linux VM**, complete with the whole tapestry
-that a full machine entails: massive libraries of standard tools, daemonized services, ability to
-run containers when needed (and even nested VMs), and genuine multi-user collaboration between
-agents. On the security side, this choice taps into decades of multi-user Linux development and
-experience. While the VM itself provides a strong isolation boundary, further isolation between
-workloads is possible using the battle-tested Linux primitives of users, groups, and permissioned
-filesystem subtrees, all mapped to the concepts described below, thus allowing many workloads to
-securely share a single VM. For additional reasoning on the VM choice, see
-[ADR 0001](docs/adrs/0001-vm-based-infrastructure.md).
+that a full machine entails: massive libraries of standard tools, daemonized services, the ability
+to run containers when needed, and genuine multi-user collaboration between agents. Underlying
+platforms that support nested virtualization can run nested VMs too. On the security side, this
+choice taps into decades of multi-user Linux development and experience. While the VM itself
+provides a strong isolation boundary, further isolation between workloads is possible using the
+battle-tested Linux primitives of users, groups, and permissioned filesystem subtrees, all mapped to
+the concepts described below, thus allowing many workloads to securely share a single VM. For
+additional reasoning on the VM choice, see [ADR 0001](docs/adrs/0001-vm-based-infrastructure.md).
 
 And to support the [consistency principle](docs/why-agentworks.md#consistency), Agentworks demands
 that every VM uses the same base OS (Debian Bookworm), the same admin user setup, and the same
@@ -195,18 +204,20 @@ In the spirit of opinionated consistency, Agentworks tightly integrates a small 
 tools rather than abstracting over interchangeable alternatives. Users are encouraged to embrace
 them rather than work around them.
 
-- **SSH** is the control plane for every VM operation: provisioning, initialization, agent and
-  session management, file transfer, command execution. The operator's key (configured in
-  `[operator]`) is deployed during provisioning and is the sole authentication mechanism thereafter.
-  Provisioning uses the platform's native transport (Lima shell, Azure or EC2 public IP, WSL2 exec,
-  or Proxmox guest agent); once Tailscale is joined, all further access goes over the tailnet, and
-  `~/.ssh/config` entries are managed automatically so standard tools (scp, ssh, VS Code Remote)
-  work seamlessly.
+- **SSH** is the control plane after provisioning: initialization, agent and session management,
+  file transfer, and command execution. Provisioning uses the platform's native transport (Lima
+  shell, SSH over a scoped Azure or EC2 public route, WSL2 exec, or Proxmox guest agent). The
+  operator's key (configured in `[operator]`) is deployed during provisioning and is the sole SSH
+  authentication mechanism thereafter. Once Tailscale is joined, routine access goes over the
+  tailnet, and `~/.ssh/config` entries are managed automatically so standard tools (scp, ssh, VS
+  Code Remote) work seamlessly.
 - **[Tailscale](https://tailscale.com/)** is the network fabric. VMs join a tailnet during
-  provisioning and all subsequent SSH access rides it, so SSH ports are never exposed to the public
-  internet. The `tailscale-auth-key` secret resolves through the backend chain on `vm create` (and
-  re-joins on `vm start`); ephemeral keys (append `?ephemeral=true`) are fully supported, with the
-  node removed from the tailnet when the VM goes offline. Generate auth keys at the
+  provisioning and routine SSH access rides it. Azure and EC2 temporarily open TCP/22 on their
+  public interfaces to the operator's detected public IPv4 address (as a `/32`), plus configured
+  allow-list CIDRs, during bootstrap or explicit native-platform access, then close it again. The
+  `tailscale-auth-key` secret resolves through the backend chain on `vm create` (and re-joins on
+  `vm start`); ephemeral keys (append `?ephemeral=true`) are fully supported, with the node removed
+  from the tailnet when the VM goes offline. Generate auth keys at the
   [Tailscale admin console](https://login.tailscale.com/admin/settings/keys).
 - **[tmux](https://github.com/tmux/tmux)** is the persistence layer. Every session maps 1:1 to a
   tmux session on the VM with the same lifecycle (agent sessions on per-agent sockets for

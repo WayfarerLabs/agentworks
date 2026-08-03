@@ -85,9 +85,9 @@ agw console delete my-console              # Extra shells are lost but sessions 
 - Python 3.12+ (uv will install one for you if needed)
 - [uv](https://docs.astral.sh/uv/) or [pipx](https://pipx.pypa.io/) for installation
 - [Tailscale](https://tailscale.com/) installed and connected (for VM workspaces)
-- One of: [Lima](https://lima-vm.io/), Azure CLI (`az`), [Proxmox](https://www.proxmox.com/), or
-  WSL2 (for VM provisioning; Azure and Proxmox also need their [system plugin](#system-plugins)
-  enabled)
+- One of: [Lima](https://lima-vm.io/), Azure CLI (`az`), AWS credentials for EC2,
+  [Proxmox](https://www.proxmox.com/), or WSL2 (for VM provisioning; Azure, AWS, and Proxmox also
+  need their [system plugin](#system-plugins) enabled)
 
 ## Global Options
 
@@ -167,7 +167,7 @@ just a vm-site.
 
 > **Note on WSL2:** WSL2 distros share the Windows workstation's lifecycle. They idle-shut after
 > ~60s of no `wsl.exe` activity (`vmIdleTimeout` in `.wslconfig`) and do not survive workstation
-> shutdown or sleep. agentworks holds a `wsl.exe` keepalive for the duration of each VM-touching
+> shutdown or sleep. Agentworks holds a `wsl.exe` keepalive for the duration of each VM-touching
 > command, so individual `agw` operations work cleanly, but agents and sessions on WSL2 are not
 > suitable for unattended background workflows. Use a site on a different platform that provides
 > true long-lived VMs (e.g. Lima, Azure, Proxmox, etc.) if you need a VM that survives independent
@@ -213,7 +213,7 @@ behavior (packages, install commands, etc.) is driven by config. Templates carry
 placement is per-host, so it never travels inside a shared template.
 
 The first interactive `vm create` asks once for an optional **system slug** (3-20 chars, lowercase
-alphanumeric plus dash, no leading/trailing dash): a short identifier for this agentworks
+alphanumeric plus dash, no leading/trailing dash): a short identifier for this Agentworks
 installation, used to namespace VM hostnames and backend-side names (`{slug}-{vm-name}`) so installs
 sharing a cloud account, Proxmox cluster, or Windows/Mac user don't collide. Leave it blank if this
 install is the only one using its sites' backends; a blank answer is remembered and it will never
@@ -225,7 +225,7 @@ Changes to config (new packages, different install commands, etc.) are picked up
 `vm delete` requires `--force` if the VM has workspaces, agents, or sessions. The confirmation
 message shows what will be deleted. Pass `--yes` to skip the prompt.
 
-`agw vm shell` is the agentworks-wrapped entry point; for raw SSH (VS Code Remote-SSH, `scp`, etc.),
+`agw vm shell` is the Agentworks-wrapped entry point; for raw SSH (VS Code Remote-SSH, `scp`, etc.),
 use the `awvm--<vm>` alias documented under [Direct SSH aliases](#direct-ssh-aliases).
 
 `vm shell` and `vm exec` both accept `--workspace <ws>` to root the admin session in a workspace
@@ -235,7 +235,7 @@ into the workspace; the exec variant runs the command from the workspace directo
 lives on a different VM is rejected with a `ValidationError` before any SSH work.
 
 In both exec commands the `--` separator is only required when the remote command's first token
-starts with `-` (it stops agentworks from reading the token as its own option); without it, a
+starts with `-` (it stops Agentworks from reading the token as its own option); without it, a
 dash-led first token is rejected with a hint naming the recoveries. Bare commands need no `--`.
 
 Combining `--workspace` with `--platform` works (the shell still `cd`s into the workspace) but the
@@ -333,7 +333,7 @@ with a hint to run `agent grant-workspaces`.
 `agent delete` requires `--force` if the agent has running sessions. Pass `--yes` to skip the
 confirmation prompt.
 
-`agw agent shell` / `agw agent exec` are agentworks-wrapped entry points; for raw SSH access to an
+`agw agent shell` / `agw agent exec` are Agentworks-wrapped entry points; for raw SSH access to an
 agent (e.g. from VS Code Remote-SSH or `scp`), use the `awagent--<agent>` alias documented under
 [Direct SSH aliases](#direct-ssh-aliases).
 
@@ -549,7 +549,7 @@ regenerated whenever sessions change. The `agw workspace console` command that a
 removed (superseded by named consoles); the config remains usable directly on the VM via
 `tmuxinator start ws-<name>-console` (e.g. inside VS Code's integrated terminal).
 
-#### VM Console (deprecated)
+#### VM Console (Deprecated)
 
 `vm console` creates or attaches to the `vm-console` session, which spans all sessions on the VM.
 Built dynamically (not via tmuxinator). Superseded by named consoles, which let you curate which

@@ -3,32 +3,28 @@
 > The detailed companion to the capability overview in [`../README.md`](../README.md), focused on
 > the `harness` kind; the architectural record is
 > [ADR 0020](../../../../docs/adrs/0020-session-harness.md). That overview covers the lifecycle,
-> readiness stages, and secrets every capability shares. This page opens with what a harness is and
+> readiness stages, and secrets every capability shares. This guide opens with what a harness is and
 > does for an operator selecting one, and then, below the Technical Overview divider, goes deep on
 > what is specific to harnesses: the contract a new harness implements, how the session machinery
 > consumes it, and the practices that made the shipped harnesses robust (session resume above all).
-> Read the operator sections to choose a harness; read on past the divider when you want the
-> specifics, whether you are implementing a new harness or you are just curious how the shipped ones
-> work.
+> The operator sections support harness selection and configuration; the sections after the divider
+> cover implementation details and the behavior of the shipped harnesses.
 
 A **harness** decides what an agent session actually runs and how that workload is launched and
 restarted. It is what lets the same `session` commands drive a plain shell, an interactive Claude
-Code session, or another tool entirely, without you having to learn a different set of commands for
-each: you choose a harness, and agentworks handles the tool-specific details of getting its workload
-up and bringing it back.
+Code session, or another tool entirely, without requiring a different command surface for each. The
+selected harness handles the tool-specific details of getting its workload up and bringing it back.
 
-You select a harness in a `session-template`: its harness block names the harness and carries
-whatever settings that harness accepts (the operator-facing spelling is documented in
-`docs/guides/resources.md`). Every session created from that template runs under the harness you
-chose.
+The `harness` block in a `session-template` names the harness and carries whatever settings that
+harness accepts (the operator-facing spelling is documented in `docs/guides/resources.md`). Every
+session created from that template runs under the selected harness.
 
 ## The Shipped Harnesses
 
 Three harnesses ship today:
 
-- **`shell`** is a plain login shell, and the default. You hand it the command to run; it runs
-  exactly that. Reach for it when the workload is just a script or an interactive shell and no
-  tool-specific handling is needed.
+- **`shell`** is the default. It runs the configured command, or a login shell when no command is
+  configured, without tool-specific handling.
 - **`claude-code`** is an interactive Claude Code session, shipped as the opt-in `claude` system
   plugin. It knows how to launch Claude Code and, on restart, how to reattach to the conversation
   that was already going.
@@ -40,9 +36,9 @@ Three harnesses ship today:
 
 For the tool harnesses, a restart is not a fresh start. `claude-code` and `codex` reattach to the
 session that was already running rather than beginning a new one, so an interrupted or restarted
-session picks up where it left off instead of losing its history. You do not configure this; it is
-how the tool harnesses behave. The mechanism, and the rules a new stateful harness must follow to
-get it right, are below the divider.
+session picks up where it left off instead of losing its history. This behavior is built into the
+tool harnesses. The mechanism, and the rules a new stateful harness must follow to get it right, are
+below the divider.
 
 ## What a Harness Must Provide
 
@@ -54,20 +50,20 @@ machinery around it. It:
 - **MUST** produce the command that brings the workload back on a restart; a stateful tool
   **SHOULD** resume its existing session wherever the tool supports it, while the plain `shell`
   simply relaunches.
-- **MUST** declare the executables its tool needs on the launch target, so agentworks can verify
+- **MUST** declare the executables its tool needs on the launch target, so Agentworks can verify
   their presence before starting and surface a missing tool as an actionable error.
 - **MUST**, for a stateful tool, own a durable session identity and refuse to guess it: mint or
   discover the tool's session id once, store it, read it back verbatim, and raise rather than adopt
   an ambiguous match that could splice one session's history into another.
 - **MUST** decide resume-versus-launch at op time from the tool's own on-disk state on the launch
   target, so an interrupted session or a restarted VM recovers its prior work rather than silently
-  starting over. agentworks is built to lose running processes and restart, so a harness **MUST**
+  starting over. Agentworks is built to lose running processes and restart, so a harness **MUST**
   recover from durable state alone and **MUST NOT** depend on in-memory continuity.
 - **MUST NOT** validate the tool's own choice sets (model names, permission or sandbox modes); those
   drift across the tool's releases, so an unrecognized value is forwarded verbatim and left to
   surface as the tool's own startup error.
 - **MUST NOT** own or touch the tmux session, the Linux user, the workspace, attach/detach, or the
-  session lifecycle; it returns a pane command string and lets agentworks own everything around it.
+  session lifecycle; it returns a pane command string and lets Agentworks own everything around it.
 - **MUST NOT** assume the tool is already authenticated or bake credentials into the launch: the
   tool's own accruing login state is out of harness scope today (a future `harness-user-provisioner`
   is the sketched owner), and the harness must not depend on having provisioned it.
@@ -78,16 +74,14 @@ machinery around it. It:
 - **SHOULD** surface its launch decision (resumed, started fresh, or adopted by discovery) to the
   operator, both in the command's output and as the pane's first visible line.
 
-It does not own the tmux session, the user, the workspace, or attach and detach. agentworks provides
+It does not own the tmux session, the user, the workspace, or attach and detach. Agentworks provides
 those; the harness only decides what runs in the pane.
 
 ## Technical Overview
 
-Everything above this line is for operators. Everything below it is for engineers implementing or
-extending a harness: where a harness sits in the capability model, the contract a new harness
-implements, how the session machinery consumes it, and the practices that made the shipped harnesses
-robust (session resume above all). If you are choosing and configuring a harness rather than writing
-one, you can stop here.
+The preceding sections describe the operator-facing model. The remaining sections cover where a
+harness sits in the capability model, its implementation contract, how the session machinery
+consumes it, and the practices that make the shipped harnesses robust, especially session resume.
 
 A **harness** is a tool's runtime adapter: it knows how a session workload (a plain shell, Claude
 Code, Codex, ...) is configured, started, and restarted, and what the launch target must provide for
@@ -169,20 +163,20 @@ real exerciser of that path.
 #### Config Inheritance, Decided per Field
 
 When a child template names the SAME harness as its parent chain, the blobs merge through this hook.
-The base default is shallow child-wins per key. Decide deliberately for every field you add:
+The base default is shallow child-wins per key. Each added field requires an explicit merge policy:
 
 - Scalars (a mode, a model) usually want child-wins: the default is right.
 - **Accumulating lists usually want a union.** `shell` overrides `merge_config` to append-dedupe
   `required_commands`, so a child that overrides only `command` cannot silently drop the parent's
   probe list. Note the asymmetry to avoid copying blindly: `claude-code.extra_args` deliberately
-  child-wins (an escape hatch is an override, not an accumulation). Whichever you choose, say so in
+  child-wins (an escape hatch is an override, not an accumulation). The selected policy belongs in
   the field's documentation.
 
-The resolver calls your `merge_config` on every declared-blob fold, with `base={}` when the lineage
-starts (a template with no parents included) or when a child switches to your harness from a
-different one, so it must be sane with an empty base. A different harness's blob never lands in your
-`base`: the resolver discards the accumulated config on a harness switch, so a parent's config
-cannot leak across it.
+The resolver calls `merge_config` on every declared-blob fold, with `base={}` when the lineage
+starts (a template with no parents included) or when a child switches to a different harness. Every
+implementation must therefore accept an empty base. A different harness's blob never lands in
+`base`: the resolver discards accumulated config on a harness switch, so a parent's config cannot
+leak across it.
 
 #### Construction: Cheap, No I/O
 
@@ -222,7 +216,7 @@ fresh) and the session manager prints it in the CLI op output. Default `None` ke
 Pair it with a pane-visible echo (below) so the decision is visible in both places the operator
 looks.
 
-#### Per-Session State: the Persisted Blob
+#### Per-Session State: The Persisted Blob
 
 `self._state` is a dict the harness reads and mutates in place during ops; the session manager
 persists it (inside the row's full blob, below) to the session row's `harness_state` JSON column
@@ -250,7 +244,7 @@ major release.
 
 ### How the Session Machinery Consumes a Harness
 
-The wiring, so you know what you get for free and where to look when debugging:
+The surrounding wiring supplies the following behavior and debugging boundaries:
 
 - **Enablement gate:** `ensure_harness_enabled` (`__init__.py`) runs at session create and restart
   (`sessions/manager/_create_build.py`, `_lifecycle.py`; restart also covers recovering a broken
@@ -266,17 +260,17 @@ The wiring, so you know what you get for free and where to look when debugging:
   secrets) per op (`sessions/manager/_create_roll.py`, `_lifecycle.py`). Readiness runs through the
   node's composed `preflight` / `runup` on create; the restart path deliberately builds no runup
   context (its only readiness pass is the pre-kill preflight sweep), and on both paths only the op
-  context carries secrets. Do not design a harness that depends on runup firing before `restart`.
+  context carries secrets. A harness cannot depend on runup firing before `restart`.
 - **Substitution stays outside:** the returned string is passed through `{{session_name}}` /
-  `{{workspace_name}}` substitution at the call site. Consequences for you are under "Building the
-  pane command" below.
+  `{{workspace_name}}` substitution at the call site. The resulting constraints appear under
+  "Building the pane command" below.
 - **Display:** `session list` / `session describe` show the resolved harness name by re-resolving
   the template read-only (no instance is built, no gate runs); `resource list --kind harness` and
   `resource describe harness/<name>` show the registry row.
 
 ### Best Practices
 
-#### Session Resume: the Stateful-Harness Pattern
+#### Session Resume: The Stateful-Harness Pattern
 
 The `claude-code` harness is the worked example; the pattern generalizes to any tool with resumable
 sessions. Five rules, each earned:
@@ -298,13 +292,13 @@ sessions. Five rules, each earned:
    dir) over the transport, with the same `$SHELL -lic` environment the pane will get. Do it per op,
    not cached: the world changes between ops, and restart runs with the old process dead precisely
    so this probe sees settled state.
-3. **Verify, empirically, that your probe boundary equals the tool's resume boundary.** The claude
-   work ran a controlled experiment (sessions abandoned at every stage) to confirm transcript
-   presence and Claude's own resume boundary are the SAME line, which is what makes both failure
-   modes (blind resume of nothing; fresh launch colliding with a live id) impossible rather than
-   merely rare. Do the equivalent for your tool before trusting a probe, and record the tool version
-   you verified against (the latest-stable rule: exercise the real CLI, do not recall flags from
-   memory; re-verify when the tool ships a major update).
+3. **Verify empirically that the probe boundary equals the tool's resume boundary.** The claude work
+   ran a controlled experiment (sessions abandoned at every stage) to confirm transcript presence
+   and Claude's own resume boundary are the SAME line, which is what makes both failure modes (blind
+   resume of nothing; fresh launch colliding with a live id) impossible rather than merely rare.
+   Each harness must establish the equivalent result before relying on a probe and record the
+   verified tool version (the latest-stable rule requires exercising the real CLI rather than
+   recalling flags from memory, with re-verification after major tool updates).
 4. **A probe that could not RUN is not a probe that found nothing.** Branch on the exit code
    trichotomy: 0 means resume, 1 means launch fresh, anything else (SSH failure, shell that could
    not start) RAISES a typed `StateError` rather than guessing. Guessing "fresh" launches with a
@@ -314,17 +308,17 @@ sessions. Five rules, each earned:
 
 #### Building the Pane Command
 
-- **Compound commands need a single `sh -c`.** The pane wrapper is `... && exec <your string>`, and
-  `exec` takes one simple command: with a bare `echo ...; exec tool ...` the shell would `exec` the
-  `echo` and nothing after the `;` would ever run. Return `sh -c '<inner>'` with the inner
+- **Compound commands need a single `sh -c`.** The pane wrapper is `... && exec <returned string>`,
+  and `exec` takes one simple command: with a bare `echo ...; exec tool ...` the shell would `exec`
+  the `echo` and nothing after the `;` would ever run. Return `sh -c '<inner>'` with the inner
   `shlex.quote`d, and `exec` the tool inside it so the pane process becomes the tool.
 - **`shlex.quote` every generated token.** Build an argv token list, quote each, and space-join.
   Never interpolate raw values into shell syntax.
 - **Generated pieces must not emit `{{word}}`.** The call-site substitution raises on unknown
-  `{{word}}` tokens and substitutes known ones, over your WHOLE returned string. Operator-authored
+  `{{word}}` tokens and substitutes known ones over the entire returned string. Operator-authored
   slices (shell's commands, `extra_args` elements) carry `{{session_name}}` semantics on purpose;
-  your code-generated skeleton must stay clear of doubled-brace words. Single braces (`${VAR}`,
-  JSON) are untouched.
+  the code-generated skeleton must stay clear of doubled-brace words. Single braces (`${VAR}`, JSON)
+  are untouched.
 - **Model the common flags; leave the rest to `extra_args`.** A small optional vocabulary
   (`permission_mode`, `model`) plus a verbatim, appended-last `extra_args` list keeps the harness
   useful without chasing the tool's whole flag surface. Append `extra_args` after the managed flags
@@ -355,7 +349,7 @@ No real tool binary anywhere. The layers, with the shipped tests as templates:
 - **Plugin end-to-end:** `cli/tests/plugins/test_claude.py`. Through `build_registry`:
   present-but-disabled row with `system-plugin` origin, gate refusal with the enable hint,
   enablement via `[plugins] system`.
-- **Parity guards you will trip:** the harness-kind publisher set
+- **Parity guards affected by a new harness:** the harness-kind publisher set
   (`cli/tests/resources/test_harness_kind.py`), builtin-entries parity
   (`cli/tests/test_builtin_entries_parity.py`), and the plugin-framework adapter/kind drift guards.
   Update them deliberately; they exist to make additions loud.
@@ -392,7 +386,7 @@ The checklist beyond code, per the repo rules: the `[plugins]` block comment in
 manifest (`cli/agentworks/manifests/samples/session-template.yaml`) if it should demonstrate the new
 harness, the harness material in `cli/README.md` (under "Session Templates"), `.cspell.json` for
 tool names, and a completions check (today no completer enumerates harness names, so there is
-nothing to regenerate unless you also add CLI surface; the rule still says look).
+nothing to regenerate unless the change also adds CLI surface; the rule still requires the check).
 
 ### Reserved Directions (Recorded, Not Built)
 

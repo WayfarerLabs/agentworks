@@ -1,27 +1,34 @@
 # The Capability Model
 
-This document describes the capability model, the conceptual and practical framework for how
-agentworks can be extended to new backends and providers without modifying its core logic.
+The capability model is the conceptual and practical framework for extending Agentworks to new
+backends and providers without modifying its core logic.
 
 ## Motivation
 
-There's a lot of cool stuff out there that agentworks can leverage. New agentic harnesses, ways of
-provisioning VMs, credential providers, secret backends, and more are all potentially useful and
-relevant. But this presents a number of problems:
+The surrounding ecosystem provides many potentially useful agentic harnesses, VM-provisioning
+mechanisms, credential providers, secret backends, and related integrations. The naive path of just
+building all that into the core app presents several problems:
 
-- First and foremost, agentworks must remain secure and reliable. Integrating all this stuff
+- First and foremost, Agentworks must remain secure and reliable. Integrating all this stuff
   directly into the core would make it harder to maintain, audit, and generally reason about.
-- Every operator has different needs across this universe of possibility. We need a way to let
-  operators pick and choose what they want to use, without forcing them to install, configure, or
-  even just see everything.
+- Every operator has different needs across this universe of possibility. The system must let
+  operators select what they need without forcing them to install, configure, or even just see
+  everything.
+- Overly-specific integrations into the core might not scale to similar integrations, resulting in
+  multiple, slightly different implementations of the same concept, each needing to be tested and
+  maintained for all core development.
 
-The capability model is the solution to these problems. It provides a structured way to add new
-functionality to agentworks without bloating or destabilizing the core, and without forcing
-operators to deal with things they don't need.
+The capability model is the solution to these problems. By identifying and designing flexible and
+powerful extension abstractions, it lets Agentworks integrate new functionality without bloating or
+destabilizing the core, and significantly reduces the risk of operators getting negatively impacted
+by functionality they do not need or want.
+
+Additionally, the capability model is the foundation for a plugin system that will let third parties
+implement and distribute their own capabilities without needing to touch the Agentworks repository.
 
 ## Conceptual Model
 
-The capability model slots into the existing resource model in agentworks as a new type of resource.
+The capability model slots into the existing resource model in Agentworks as a new type of resource.
 As with all resources, there is a notion of a _resource kind_, effectively the type of the resource,
 and the _resource_ itself, which is a concrete instance of that kind.
 
@@ -36,56 +43,56 @@ The current plan is that the set of capability kinds is fixed by the core as eac
 carefully integrated into the core logic. The set of capability resources that implement the various
 kinds is open-ended. Some are bundled in the core itself, some are included as opt-in **system
 plugins**, and some are (will be as of 0.13.0) provided by third-party **plugins**, defined and
-distributed entirely outside of the agentworks repository.
+distributed entirely outside of the Agentworks repository.
 
 ## Currently Implemented Capabilities
 
 Four capability kinds ship today, and between them they cover most of what it takes to stand an
 agent up on a machine and let it work: where it runs, what it runs, how it gets its secrets, and how
-it talks to your git hosts. Each kind is its own extension point with its own set of shipped
-options, so you can pick the ones that match your environment and ignore the rest.
+it authenticates to git hosts. Each kind is an independent extension point with its own shipped
+options, allowing an operator to enable only those needed in a particular environment.
 
 ### VM Platform
 
-The `vm-platform` capability decides where your agents' VMs actually live and how they are brought
-up, torn down, and kept healthy. The point is that the same agentworks commands work whether you are
-running locally or on someone else's cloud: `lima` and `wsl2` give you fast local VMs on macOS and
-Windows, while `azure-vm`, `proxmox`, and `aws-ec2` reach out to real cloud or datacenter capacity
-when you want the work to happen off your laptop. Whatever the backend, each delivers the same
-foundation: a Debian VM with a passwordless-sudo admin login reachable over Tailscale, whose whole
-lifecycle (create, start, a cost-saving stop that resumes with state intact, delete) agentworks
-drives through that one admin foothold. See [`vm_platform/README.md`](vm_platform/README.md) for
-what a platform must provide and the specifics of each.
+The `vm-platform` capability decides where agent VMs live and how they are brought up, torn down,
+and kept healthy. The same Agentworks commands apply across local, cloud, and datacenter
+infrastructure: `lima` and `wsl2` provide local VMs on macOS and Windows, while `azure-vm`,
+`proxmox`, and `aws-ec2` target cloud or datacenter capacity. Whatever the backend, each delivers
+the same foundation: a Debian VM with a passwordless-sudo admin login reachable over Tailscale,
+whose whole lifecycle (create, start, a cost-saving stop that resumes with state intact, delete)
+Agentworks drives through that one admin foothold. See
+[`vm_platform/README.md`](vm_platform/README.md) for what a platform must provide and the specifics
+of each.
 
 ### Harness
 
 The `harness` capability decides what an agent session actually runs and how that workload is
 configured, launched, and managed. This is where a session becomes a plain `shell`, an interactive
-`claude-code` or `codex` session, or another agentic tool entirely, without agentworks needing to
+`claude-code` or `codex` session, or another agentic tool entirely, without Agentworks needing to
 know the details of any one of them. A harness just launches its tool, brings it back on restart
-(resuming where the tool allows), and checks the tool's binaries are present, while agentworks owns
+(resuming where the tool allows), and checks the tool's binaries are present, while Agentworks owns
 the tmux session, the user, and the workspace around it. See
 [`harness/README.md`](harness/README.md) for what a harness must provide and the shipped options.
 
 ### Secret Backend
 
-The `secret-backend` capability decides where a secret's value comes from when agentworks needs one,
-so you never have to hand-carry credentials onto a VM. A secret can be read from an `env-var`,
+The `secret-backend` capability decides where a secret's value comes from when Agentworks needs one,
+avoiding any need to hand-carry credentials onto a VM. A secret can be read from an `env-var`,
 requested interactively at a `prompt`, pulled from `onepassword`, or sourced from another backend,
-and any secret can map to whichever backend fits how you store it. This lets a single resource
+and any secret can map to the backend that matches its storage policy. This lets a single resource
 definition travel between an operator who keeps tokens in a vault and one who supplies them by
 environment variable. A backend resolves a mapping to its value (or reports it absent so the next
 backend in the chain gets a turn), describes the lookup for inspection without ever exposing the
-value, and never logs it; agentworks handles where each secret applies and injects it there.
+value, and never logs it; Agentworks handles where each secret applies and injects it there.
 
 ### Git Credential Provider
 
 The `git-credential-provider` capability sources and provisions the git credentials an agent needs
-so it can clone and push against your git hosts over plain https, without you baking tokens into
-images. `github` and `azdo` (Azure DevOps) ship today, each knowing how to source a token for its
-host and get it onto the VM in the form git expects. A provider sources its token by secret name
-(never a pasted value), verifies it before it is relied on, and produces exactly what git needs to
-authenticate on the VM, with per-repo scoping so several credentials can serve one host. See
+to clone and push against git hosts over plain https without baking tokens into images. `github` and
+`azdo` (Azure DevOps) ship today, each knowing how to source a token for its host and get it onto
+the VM in the form git expects. A provider sources its token by secret name (never a pasted value),
+verifies it before it is relied on, and produces exactly what git needs to authenticate on the VM,
+with per-repo scoping so several credentials can serve one host. See
 [`git_credential/README.md`](git_credential/README.md) for what a provider must provide and the
 shipped providers.
 
@@ -117,19 +124,18 @@ kinds are absolutely welcome.
 
 ## Technical Overview
 
-Everything above this line is for operators. Everything below it is for engineers implementing or
-extending a capability: the vocabulary, the lifecycle contract each stage of an implementation must
-honor, the base class, and where the code lives. If you are choosing and configuring capabilities
-rather than writing one, you can stop here.
+The preceding sections describe the operator-facing model. The remaining sections cover the
+implementation vocabulary, lifecycle contract, base class, and code layout for engineers who
+implement or extend capabilities.
 
 One orientation note before the details. A capability instance is the unit this contract governs,
 but it is not the thing the framework walks: the consuming resource that holds an instance is a
 graph node, and the framework drives those nodes, resolves their secrets, and orders their
 readiness. That machinery is the orchestration layer
 ([ADR 0019](../../../docs/adrs/0019-orchestration-layer-command-plans-over-node-graphs.md)),
-documented in [`../orchestration/README.md`](../orchestration/README.md). This document stays on the
-author's side of that boundary and points across it wherever the framework's behavior is what makes
-a stage's contract make sense.
+documented in [`../orchestration/README.md`](../orchestration/README.md). This guide stays on the
+implementation side of that boundary and points across it wherever the framework's behavior makes a
+stage's contract make sense.
 
 ### Terminology
 
@@ -150,7 +156,7 @@ ladder from type to running object:
   config, and owns the instances built from it. It lives in the registry as data.
 
 The load-bearing distinction is between the **capability instance** (runtime) and the **consuming
-resource** (data): it governs how agentworks handles config, secrets, and lifecycle, so the rest of
+resource** (data): it governs how Agentworks handles config, secrets, and lifecycle, so the rest of
 this doc turns on it.
 
 These are always two things, even when they look like one. Today a `GitCredentialConfig` /
@@ -180,13 +186,11 @@ orchestration layer; see [`../orchestration/README.md`](../orchestration/README.
 
 #### Multiplicity
 
-A consuming resource holds one instance _per capability usage_, so it may hold many. The thin
-wrapper holds exactly one. A rich resource may hold several: an agent template holds a _map_ of
-`agent-feature` instances (`az-cli`, `passport`, ...), one per enabled feature. The lifecycle below
-scales to that with no new machinery: the consuming resource's preflight composes all its instances'
-preflights, and the one secret-resolution pass batches all their declared secrets together. (One
-capability appearing more than once in a single consuming resource, with different config each time,
-is a further extension, not needed yet.)
+A consuming resource holds one instance _per capability usage_. The thin wrappers implemented today
+hold exactly one: a `vm-site` holds one `vm-platform`, and a `git-credential` holds one
+`git-credential-provider`. The lifecycle can also compose several capability instances without new
+machinery: the consuming resource composes their preflights, and the one secret-resolution pass
+batches all their declared secrets together. No current resource needs that richer multiplicity.
 
 ### The Lifecycle
 
@@ -198,13 +202,13 @@ that a bad mapping or a missing tool was going to sink anyway), and authenticate
 runs only once the secrets it needs are in hand.
 
 The two readiness stages take their names from flight: **preflight** is the walk-around inspection
-at the ramp (early, cheap, before you commit anything); **runup** is the engine run-up at the
-hold-short line (everything aboard, throttle up and watch the gauges before committing to the
-takeoff roll). They are split by the secret-resolve boundary. **The boundary is the only hard rule;
-what each stage checks is the capability author's judgment**, driven by two goals:
+at the ramp (early, cheap, before any commitment); **runup** is the engine run-up at the hold-short
+line (everything aboard, throttle up and watch the gauges before committing to the takeoff roll).
+They are split by the secret-resolve boundary. **The boundary is the only hard rule; what each stage
+checks is the capability author's judgment**, driven by two goals:
 
-- **preflight** (pre-resolve): catch every issue you can _before_ burdening the operator with secret
-  prompts. It runs before resolution, so it works without secret values.
+- **preflight** (pre-resolve): catch every issue possible _before_ burdening the operator with
+  secret prompts. It runs before resolution, so it works without secret values.
 - **runup** (post-resolve): cleanly catch and identify errors _before_ any mutating op, both to
   avoid unnecessary mutations and to protect against hard-to-diagnose failures partway through the
   real work. It runs after resolution, so it has the resolved secrets in hand.
@@ -292,10 +296,10 @@ command entry.
 The instance is constructed bound to its `(owner_name, config)`: its config, _not_ resolved secret
 values, and no secret machinery at all (the operation's boundary union comes from the plan's
 declared references; values arrive later through the context). Construction re-runs `validate` and
-**fails on an invalid config shape**: you do not build an instance around an invalid blob, so a
-shape error dies here, at construction, never later in preflight. (Errors that need the world to
-detect, an unreachable API, a missing tool, are preflight's job, not this.) Construction is
-otherwise cheap: no network, no secret resolution, no prompt.
+**fails on an invalid config shape**: an instance is not built around an invalid blob, so a shape
+error dies here, at construction, never later in preflight. (Errors that need the world to detect,
+an unreachable API, a missing tool, are preflight's job, not this.) Construction is otherwise cheap:
+no network, no secret resolution, no prompt.
 
 This is uniform across hosting shapes. Whether a consuming resource is dedicated to one capability
 (`vm-site`) or holds it as one field among many (a `session` with a harness), the instance is
@@ -506,7 +510,7 @@ capability's to choose: a per-consumer default (`git-token-<name>`, derived from
 credentials are many, a shared well-known name (`proxmox-token`) where one is typical. Either way
 the capability owns the default; the framework only resolves what was declared.
 
-#### Declare, Then Receive: the Contract That Keeps a Capability Forward-Compatible
+#### Declare, Then Receive: The Contract That Keeps a Capability Forward-Compatible
 
 Everything above reduces, for a capability author, to two obligations at two moments, with the
 framework owning everything in between:
@@ -574,11 +578,11 @@ in ways worth recording before that change, because it is a different animal:
   many-resources-one-instance shape is not yet modeled.
 
 - **Provider-side vs consuming-side base.** The `Capability` base is shaped for the _consuming_
-  side: declare the secrets your config names, read them back from the context at runup. A backend
-  has no declared secrets; it is the thing that _serves_ them. Its contract is different: preflight
-  = am I installed/configured, runup = can I reach/authenticate, op = resolve. Adopting it will
-  likely reveal that today's base is really the _consuming-capability_ base, and a backend needs a
-  sibling base or a deliberately looser one.
+  side: declare the secrets its config names, then read them back from the context at runup. A
+  backend has no declared secrets; it is the thing that _serves_ them. Its contract is different:
+  preflight checks installation and configuration, runup checks reachability and authentication, and
+  the op resolves a value. Adopting it will likely reveal that today's base is really the
+  _consuming-capability_ base, and a backend needs a sibling base or a deliberately looser one.
 
 - **Where its runup lands.** A backend's op _is_ resolution, so "runup right before its op" puts its
   runup at the resolve-pass boundary: authenticate/reach the vault once, before serving any value,
@@ -592,16 +596,15 @@ in ways worth recording before that change, because it is a different animal:
 
 - **Each capability kind has a detailed companion README** with more depth on that specific kind:
   [`vm_platform/README.md`](vm_platform/README.md) (running VMs: exposure, credentials, rollback,
-  and the bring-up gotchas), [`harness/README.md`](harness/README.md) (session harnesses: the
+  and the bring-up pitfalls), [`harness/README.md`](harness/README.md) (session harnesses: the
   contract, how the session machinery consumes it, session resume), and
   [`git_credential/README.md`](git_credential/README.md) (sourcing and provisioning git credentials:
-  the provider contract, the github and azdo providers, the credential-helper path). Reach for them
-  when you want the specifics of a kind, whether you are implementing a new one or you are just
-  curious how the shipped ones work.
+  the provider contract, the github and azdo providers, the credential-helper path). These guides
+  provide the kind-specific details needed for implementation and for tracing shipped behavior.
 - **The orchestration layer** ([`../orchestration/README.md`](../orchestration/README.md)) is the
   companion on the framework side: how commands walk the node graph that holds capability instances,
-  resolve their secrets once, order preflight and runup, and unwind on failure. Reach for it
-  whenever a stage's contract here leans on _when_ or _how_ the framework drives it.
+  resolve their secrets once, order preflight and runup, and unwind on failure. It supplies the
+  framework context whenever a stage's contract depends on _when_ or _how_ that stage is driven.
 - **Hosting shapes.** A consuming resource can host a capability's config three ways: as a dedicated
   kind (reference + a config blob, like `vm-site`), inline in a richer consumer (like a
   session-template's inline harness block), or in a map keyed by name (like an agent template's

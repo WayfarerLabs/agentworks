@@ -1,11 +1,12 @@
 # The Orchestration Layer
 
-This document is the working guide to the orchestration layer (`cli/agentworks/orchestration/`): the
-code that turns a service-layer command into a walk over a graph of nodes, resolves that command's
-secrets exactly once, checks readiness in the right order, and unwinds cleanly on failure. Every
-resource in agentworks participates in this layer, whether or not it holds a capability, so this is
-where the framework's command-driving behavior lives, distinct from the per-capability author
-contract described in [`../capabilities/README.md`](../capabilities/README.md).
+This document is the working guide to the Agentworks orchestration layer
+(`cli/agentworks/orchestration/`): the code that turns a service-layer command into a walk over a
+graph of nodes, resolves that command's secrets exactly once, checks readiness in the right order,
+and unwinds cleanly on failure. Every resource involved in an orchestrated operation participates in
+this layer, whether or not it holds a capability. This is where the framework's command-driving
+behavior lives, distinct from the per-capability author contract described in
+[`../capabilities/README.md`](../capabilities/README.md).
 
 The decision record for the layer is
 [ADR 0019](../../../docs/adrs/0019-orchestration-layer-command-plans-over-node-graphs.md): why a
