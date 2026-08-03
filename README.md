@@ -198,6 +198,25 @@ A few convictions shape the whole design. The short version:
 The full reasoning, including the threat model Agentworks is designed against and how it bounds
 blast radius (and what it deliberately does not do), is in [Why Agentworks](docs/why-agentworks.md).
 
+## Agentworks Is Not a Harness
+
+One point is absolutely critical to understanding the Agentworks model: **Agentworks is not a
+harness**. There are many incredible options for actually running agentic workloads, from the
+native/proprietary options (Anthropic's Claude Code, OpenAI's Codex, etc.) to the many open-source
+alternatives (OpenCode, Aider, etc.). Agentworks does not try to be any of those. Rather, it strives
+to be the platform that makes it easy to run them, and to run them securely, consistently, and at
+scale. As described above, the Agentworks "harness" is just the adapter that makes it easy to run a
+particular harness. That's as far as we want to go.
+
+And for us, the writing is on the wall. Harnesses are getting better and better every day. Our
+belief is that, before long, custom harnesses simply won't be able to compete with a vanilla harness
+running its native models. Context will always matter, but the harness minutiae will matter less and
+less (and even get in the way) as the models get better and better at autonomous operation.
+
+On the flip side, easily providing and managing least-privilege environments for those harnesses is
+a problem that is not going away. Agentworks is designed to solve that problem, and to do so in a
+way that is consistent, secure, and scalable.
+
 ## Tightly Integrated Tools
 
 In the spirit of opinionated consistency, Agentworks tightly integrates a small set of excellent
