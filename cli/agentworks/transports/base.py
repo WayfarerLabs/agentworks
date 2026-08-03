@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from agentworks.ssh import SSHError, SSHResult
+from agentworks.terminal import guarded_terminal
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -85,7 +86,6 @@ class Transport(abc.ABC):
         the kwargs being accepted without isinstance narrowing.
         """
 
-    @abc.abstractmethod
     def interactive(
         self,
         command: str,
@@ -99,7 +99,59 @@ class Transport(abc.ABC):
         drop it (``limactl shell`` and ``wsl.exe`` don't expose env
         injection on their interactive APIs). Returns the process exit
         code; does not raise on remote-command failure.
+
+        Concrete on the ABC, delegating the transport-specific part to
+        ``_interactive``, so that every interactive path is wrapped in
+        ``guarded_terminal``: an attach hands the operator's terminal to
+        a remote full-screen program, and a connection that dies
+        mid-attach never delivers that program's reset sequences. There
+        are several attach call sites across sessions, consoles, and
+        agent/VM shells; putting the guard here means none of them can
+        forget it. See :mod:`agentworks.terminal`.
         """
+        with guarded_terminal():
+            code = self._interactive(command, env=env)
+        self._note_interactive_exit(code)
+        return code
+
+    @abc.abstractmethod
+    def _interactive(
+        self,
+        command: str,
+        *,
+        env: dict[str, str] | None = None,
+    ) -> int:
+        """Transport-specific interactive session (see ``interactive``).
+
+        Subclasses implement this rather than ``interactive`` so the
+        terminal guard cannot be bypassed by an override.
+        """
+
+    def _note_interactive_exit(self, code: int) -> None:
+        """Tell the operator why an interactive session ended abnormally.
+
+        Called AFTER the guard closes, and that ordering carries the
+        whole value. The guard's exit pass leaves the alternate screen,
+        which discards everything drawn on it, and a remote program that
+        died mid-attach was almost certainly holding the alternate
+        screen. Anything written before the guard closes is wiped along
+        with it, including the SSH client's own "Timeout, server not
+        responding" on its inherited stderr. Post-guard is the first
+        moment a message is guaranteed to land somewhere the operator
+        can still read it.
+
+        No-op by default, because a non-zero exit is not in general an
+        error: for Lima, WSL2, or any login shell it is usually just the
+        remote command's own exit status, and narrating that would be
+        noise. Only a transport that can distinguish "the connection
+        failed" from "the command exited non-zero" has anything worth
+        saying, so only those override this.
+
+        Nothing is reported on a clean exit. Detaching is the common
+        case and needs no commentary, and the terminal restore is
+        plumbing the operator should never have to think about.
+        """
+        del code  # documented no-op: see above
 
     @abc.abstractmethod
     def copy_to(

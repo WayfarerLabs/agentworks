@@ -3,6 +3,7 @@
   "language": "en",
   "words": [
     "CGNAT",
+    "DECSET",
     "DERP",
     "EACCES",
     "Liskov",
@@ -78,6 +79,7 @@
     "inspectable",
     "isinstance",
     "keepalive",
+    "keepalives",
     "keypairs",
     "keyrings",
     "kptr",
