@@ -4,7 +4,7 @@
 > the `harness` kind; the architectural record is
 > [ADR 0020](../../../../docs/adrs/0020-session-harness.md). That overview covers the lifecycle,
 > readiness stages, and secrets every capability shares. This page opens with what a harness is and
-> does for an operator selecting one, and then, below the Technical overview divider, goes deep on
+> does for an operator selecting one, and then, below the Technical Overview divider, goes deep on
 > what is specific to harnesses: the contract a new harness implements, how the session machinery
 > consumes it, and the practices that made the shipped harnesses robust (session resume above all).
 > Read the operator sections to choose a harness; read on past the divider when you want the

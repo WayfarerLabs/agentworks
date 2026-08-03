@@ -1,9 +1,10 @@
 # Git Credential Providers
 
 > The detailed companion to the capability overview in [`../README.md`](../README.md), focused on
-> the `git-credential-provider` kind. That overview covers the contract every capability shares and
-> is all most readers need; this goes deep on how agentworks sources and provisions git credentials.
-> Read on when you want the specifics, whether you are implementing a new provider or you are just
+> the `git-credential-provider` kind. That overview covers the contract every capability shares.
+> This page is operator-first: the top covers what a git credential provider does for you and the
+> shipped providers, and past the [Technical Overview](#technical-overview) divider it goes deep for
+> engineers implementing or extending one, whether you are building a new provider or you are just
 > curious how the shipped ones (`github`, `azdo`) work.
 
 A git credential provider sources and provisions the git credentials an agent needs so it can clone

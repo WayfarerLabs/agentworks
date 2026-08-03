@@ -3,7 +3,7 @@
 > The detailed companion to the capability overview in [`../README.md`](../README.md), focused on
 > the `vm-platform` kind. That overview covers the lifecycle every capability shares (`dependencies`
 > / `validate`, preflight, runup, ops). This page is operator-first: the top helps you choose and
-> configure a platform, and past the [Technical overview](#technical-overview) divider it goes deep
+> configure a platform, and past the [Technical Overview](#technical-overview) divider it goes deep
 > for engineers implementing or extending one.
 
 ## What a VM Platform Does for You
@@ -110,15 +110,17 @@ needs, and fill in the class-level contract methods the site decoder and DB migr
 - `start(vm, ctx)`, `stop(vm, ctx)`, `delete(vm, ctx)` are flagged `@idempotent_op` and must land in
   the same place run twice as run once. The marker is inherited through the MRO, so an override does
   not restate the decorator. `reinit` re-applies everything and failed commands are retried, so the
-  guarantee has to be real: `start`/`stop` on Lima, WSL2, and Proxmox check `status()` first and
-  short-circuit, because the backend verb is not reliably a no-op on an already-in-state instance;
-  Azure and EC2 need no guard because their SDK start/stop calls are themselves idempotent on an
-  already-in-state instance; `delete` treats already-gone as success on all five. `delete` is NOT
-  unconditionally best-effort though: a delete that cannot remove the backend VM must raise a typed
-  error (the manager deletes the DB row only on success, so a swallowed backend failure orphans the
-  VM; #329). Azure enforces this with a post-teardown existence probe (`verify_vm_deleted`); only
-  auxiliary-resource stragglers (its NIC/IP/NSG/disk sweep) stay warn-and-continue. Lima, WSL2,
-  Proxmox, and EC2 do not yet verify; their teardown verbs remain fire-and-forget (tracked in #356).
+  guarantee has to be real: `start`/`stop` on Lima and Proxmox and `stop` on WSL2 check `status()`
+  first and short-circuit, because the backend verb is not reliably a no-op on an already-in-state
+  instance; WSL2's `start` needs no guard because running a command boots a stopped distro and is a
+  plain exec on a running one, and Azure and EC2 need no guard because their SDK start/stop calls
+  are themselves idempotent on an already-in-state instance; `delete` treats already-gone as success
+  on all five. `delete` is NOT unconditionally best-effort though: a delete that cannot remove the
+  backend VM must raise a typed error (the manager deletes the DB row only on success, so a
+  swallowed backend failure orphans the VM; #329). Azure enforces this with a post-teardown
+  existence probe (`verify_vm_deleted`); only auxiliary-resource stragglers (its NIC/IP/NSG/disk
+  sweep) stay warn-and-continue. Lima, WSL2, Proxmox, and EC2 do not yet verify; their teardown
+  verbs remain fire-and-forget (tracked in #356).
 - `status(vm, ctx) -> VMStatus` is a read-only query.
 - `display_backend_name(vm) -> str` is pure display and takes no `ctx`.
 
@@ -328,7 +330,7 @@ a rejection typed rather than degrading to UNKNOWN, so a misconfigured site neve
 in `vm describe` (the exact #303 hole). Second, an `assume_role_arn` builds AUTO-REFRESHING
 credentials (botocore's `AssumeRoleCredentialFetcher` + `DeferredRefreshableCredentials`) rather
 than a one-shot assume, so a long op cannot fail with `ExpiredToken` from a frozen cache. See
-`test_platform_runup.py` and `test_aws_ec2_ops.py` for the halves.
+`test_platform_runup.py` and `test_aws_ec2_ops.py` (directly under `cli/tests/`) for the halves.
 
 ### Exposure on a Cloud Platform: Baseline Deny, Ephemeral Scoped Allows
 

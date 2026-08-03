@@ -370,8 +370,8 @@ nothing to authenticate leaves runup a no-op.
 Its contract mirrors preflight where it matters and differs where it must:
 
 - **Read-only and side-effect-free**, exactly like preflight. It never mints, creates, or mutates.
-  This is what lets it be re-run and, crucially, lets an explicit interactive surface
-  (`doctor --runup`) call it outside an operation.
+  This is what lets it be re-run and, crucially, would let an explicit interactive surface (a
+  planned `doctor --runup`) call it outside an operation.
 - **Authenticated.** Reading resolved secrets and probing with them is the whole point; it is the
   half of readiness that only makes sense once resolution has happened.
 - **Best-effort, not an oracle**, again like preflight. It raises a typed, actionable error on a
@@ -388,7 +388,7 @@ runup-then-ops sequence is spelled out in
 where the round-trip is unwanted (the git stack exposes `[defaults] runup_git_credentials = false`,
 and airgapped setups want exactly that); preflight is not skippable, because predicting
 resolvability costs nothing. Doctor's passive pass does _not_ run runup (see the preflight section);
-`doctor --runup` is the explicit, prompting escalation that does.
+a planned `doctor --runup` would be the explicit, prompting escalation that does.
 
 **What a runup failure means is the caller's call, not runup's.** Runup's own contract is narrow:
 raise a typed error on definitive rejection. Whether that _aborts_ the command or is caught, logged,
@@ -513,9 +513,9 @@ framework owning everything in between:
 
 The rule that ties the two together is the self-vs-context split stated with `RunContext` above:
 pre-resolve concerns read `self`, post-resolve concerns read the context. `ctx.secret(name)` raises
-only when the context was assembled without a resolve pass (inspection), and that is a typed
-`ConfigError`, not a silent skip: runup runs post-resolve, so a missing value is a caller bug, not a
-state to tolerate.
+when the context was assembled without a resolve pass (inspection), a typed `ConfigError`, and it
+also refuses a name the node never declared; neither is a silent skip: runup runs post-resolve, so a
+missing value is a caller bug, not a state to tolerate.
 
 Holding this line is what keeps a capability **forward-compatible with the resolution model moving
 under it.** That model is the orchestration layer, and it is LANDED: every command's orchestrator
