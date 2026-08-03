@@ -3,53 +3,99 @@
 > The detailed companion to the capability overview in [`../README.md`](../README.md), focused on
 > the `harness` kind; the architectural record is
 > [ADR 0020](../../../../docs/adrs/0020-session-harness.md). That overview covers the lifecycle,
-> readiness stages, and secrets every capability shares. This guide opens with what a harness is and
-> does for an operator selecting one, and then, below the Technical Overview divider, goes deep on
-> what is specific to harnesses: the contract a new harness implements, how the session machinery
-> consumes it, and the practices that made the shipped harnesses robust (session resume above all).
-> The operator sections support harness selection and configuration; the sections after the divider
-> cover implementation details and the behavior of the shipped harnesses.
+> readiness stages, and secrets every capability shares. This guide is for both operators and
+> developers: the first part (before the Technical Overview) covers the functional details (what a
+> harness is, its obligations) that matter to both audiences, and the part after the divider is
+> developer-focused, covering the implementation contract and the practices that make the shipped
+> harnesses robust.
 
-A **harness** decides what an agent session actually runs and how that workload is launched and
-restarted. It is what lets the same `session` commands drive a plain shell, an interactive Claude
-Code session, or another tool entirely, without requiring a different command surface for each. The
-selected harness handles the tool-specific details of getting its workload up and bringing it back.
+## What Is a Harness?
 
-The `harness` block in a `session-template` names the harness and carries whatever settings that
-harness accepts (the operator-facing spelling is documented in `docs/guides/resources.md`). Every
-session created from that template runs under the selected harness.
+In the world of agentic engineering, the term "harness" is a bit overloaded but is generally used to
+refer to the tooling within which agentic workloads operate. Agentworks **does not** aim to be this
+tooling. Rather, Agentworks aims to provide the infrastructure to support whatever tooling the
+operator chooses to run.
 
-## The Shipped Harnesses
+In the simplest (and default) case, Agentworks just runs a plain shell as the session's workload.
+From here, the operator can do whatever they want in terms of configuring the environment and
+launching their desired tooling.
 
-Three harnesses ship today:
+However, Agentworks also supports more advanced tooling integration through the concept of a
+**harness**. An Agentworks harness is an adapter that knows how to run a specific tool as the
+session's workload, including checking for dependencies, configuration, exact session start/resume
+semantics, etc. This allows for tight integration with specific tools like Claude Code or Codex,
+where the harness can handle all the details of the tool's operation.
 
-- **`shell`** is the default. It runs the configured command, or a login shell when no command is
-  configured, without tool-specific handling.
-- **`claude-code`** is an interactive Claude Code session, shipped as the opt-in `claude` system
-  plugin. It knows how to launch Claude Code and, on restart, how to reattach to the conversation
-  that was already going.
-- **`codex`** is an interactive Codex session, shipped as the opt-in `codex` system plugin. Like
+The initial implementation focuses narrowly on basic configuration and start/restart semantics, but
+the harness is designed to grow: richer per-session integration now, and, as the scope model
+described below matures, tooling logic at the user and workspace levels too (auth, rule/skill/hook
+publishing, and the like).
+
+And note that regardless of harness, all sessions run inside the standard tmux session. This
+provides both access to stdin/stdout/stderr for interactivity as well as the persistent execution
+capability. This is all handled automatically by the core Agentworks session logic. The harness
+itself has no part in this (or other core operations such as user and workspace management) other
+than to tell the core session logic what to run.
+
+## A Note on Scope
+
+The current harness concept is scoped solely to the session (the running workload/process), and
+everything a harness does must stay session-local. It may set up state that belongs to this one
+session, but it must not cause effects that reach a wider scope: another session of the same user,
+the whole user account, the workspace, or the machine.
+
+Auth is the clarifying example. Authenticating a tool in a way that stays session-local (say, an
+injected env var only this session sees) is entirely fair game. Authenticating in a way that mutates
+shared user state (a login written into the user's home that every one of that user's sessions then
+inherits) is not, because it reaches past the session. The same line rules out installing a plugin
+into the workspace (every session there would see it) or changing anything machine-wide.
+
+This is a real current limitation, not the end state. Tooling logic legitimately lives at the
+machine, user, and workspace scopes too, and a model to support those cleanly is in active design.
+It will expand what harnesses (or their siblings) can do; until it lands, keep every harness effect
+session-scoped.
+
+## Available Harnesses
+
+Three harnesses ship today. This list can change, so
+`agw resource list --kind harness --include-disabled` is the definitive set on any given install.
+
+- **`shell`** (built in) is the default. By default it simply opens the configured shell for the
+  session's target user (agent or admin user). It can further be configured to run a specific
+  command with additional support for running a different command on restart vs the initial start
+  (via `session create`). From here, an operator can do whatever they want in terms of configuring
+  the environment and launching their desired tooling. They're just largely on their own.
+- **`claude-code`** (via the `claude` system plugin) drives an interactive Claude Code session. It
+  knows how to launch Claude Code and, on restart, how to check for an existing session and reattach
+  if found so that the operator experience is seamless and they can pick up right where they left
+  off. Limited configuration is supported, expressed in Claude Code's own terms: `permission_mode`
+  and `model` map to the `--permission-mode` and `--model` CLI flags, and `extra_args` passes
+  additional Claude Code CLI arguments through verbatim.
+- **`codex`** (via the `codex` system plugin) drives an interactive Codex session. Like
   `claude-code`, it launches the tool and, on restart, reattaches to the existing session instead of
-  starting over.
+  starting over when a Codex session exists, and offers limited configuration options.
 
 ## Session Resume
 
-For the tool harnesses, a restart is not a fresh start. `claude-code` and `codex` reattach to the
-session that was already running rather than beginning a new one, so an interrupted or restarted
-session picks up where it left off instead of losing its history. This behavior is built into the
-tool harnesses. The mechanism, and the rules a new stateful harness must follow to get it right, are
-below the divider.
+Where possible, harnesses should support resuming a session on restart rather than starting over.
+This is going to mean different things for different tools, but the general idea is that if a
+session is interrupted or restarted, the operator should be able to pick up right where they left
+off rather than losing their work.
 
-## What a Harness Must Provide
+Of course, this is not always possible. Some tools, like a plain shell, do not have any concept of a
+session to resume, so the harness simply starts a new workload.
+
+## Harness Obligations
 
 A harness knows how to run one tool as a session's workload and bring it back, and nothing about the
 machinery around it. It:
 
 - **MUST** produce the command that launches its tool for a given session, to run as the target user
   (an agent, or admin) in the session's workspace.
-- **MUST** produce the command that brings the workload back on a restart; a stateful tool
-  **SHOULD** resume its existing session wherever the tool supports it, while the plain `shell`
-  simply relaunches.
+- **MUST** produce the command that allows the workload to be restarted if the workload is
+  interrupted (e.g. process exit, machine restart, manual session stop, etc.); where possible (i.e.
+  for "stateful" tools), the harness **SHOULD** resume the existing session rather than starting
+  over.
 - **MUST** declare the executables its tool needs on the launch target, so Agentworks can verify
   their presence before starting and surface a missing tool as an actionable error.
 - **MUST**, for a stateful tool, own a durable session identity and refuse to guess it: mint or
@@ -59,18 +105,22 @@ machinery around it. It:
   target, so an interrupted session or a restarted VM recovers its prior work rather than silently
   starting over. Agentworks is built to lose running processes and restart, so a harness **MUST**
   recover from durable state alone and **MUST NOT** depend on in-memory continuity.
-- **MUST NOT** validate the tool's own choice sets (model names, permission or sandbox modes); those
-  drift across the tool's releases, so an unrecognized value is forwarded verbatim and left to
-  surface as the tool's own startup error.
+- While some degree of configuration "understanding" is required, **SHOULD NOT** try to validate
+  tool-owned choice sets (like `permission_mode` or `model`) because they drift across the tool's
+  releases. The tooling itself will validate those and the existing session mechanism should surface
+  those errors back to the operator.
 - **MUST NOT** own or touch the tmux session, the Linux user, the workspace, attach/detach, or the
   session lifecycle; it returns a pane command string and lets Agentworks own everything around it.
-- **MUST NOT** assume the tool is already authenticated or bake credentials into the launch: the
-  tool's own accruing login state is out of harness scope today (a future `harness-user-provisioner`
-  is the sketched owner), and the harness must not depend on having provisioned it.
 - **MUST NOT** do anything in its workspace or agent that would interfere with other sessions or
-  running processes, beyond normal file modification, whether under its own user or a different
-  user: it must not kill or signal processes it did not start, touch another session's tmux, mutate
-  shared tool or system config, hold exclusive locks, or delete files it does not own.
+  running processes (beyond normal file modification, which is part of the workspace contract)
+  whether under its own user or a different user: it must not kill or signal processes it did not
+  start, mutate shared user state, touch another session's tmux, mutate shared tool or system
+  config, hold exclusive locks, or delete files it does not own.
+- **MUST** keep its effects session-scoped: it may set up state for this one session (for example, a
+  session-local env var), but **MUST NOT** cause effects that persist to the whole user, the
+  workspace, or the machine, such as an auth flow that writes shared login state or a workspace-wide
+  plugin install. Broader-scope provisioning is a separate, forthcoming concern (see
+  [A Note on Scope](#a-note-on-scope)).
 - **SHOULD** surface its launch decision (resumed, started fresh, or adopted by discovery) to the
   operator, both in the command's output and as the pane's first visible line.
 
