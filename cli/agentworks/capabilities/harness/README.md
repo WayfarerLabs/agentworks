@@ -44,6 +44,43 @@ session picks up where it left off instead of losing its history. You do not con
 how the tool harnesses behave. The mechanism, and the rules a new stateful harness must follow to
 get it right, are below the divider.
 
+## What a Harness Must Provide
+
+A harness knows how to run one tool as a session's workload and bring it back, and nothing about the
+machinery around it. It:
+
+- **MUST** produce the command that launches its tool for a given session, to run as the target user
+  (an agent, or admin) in the session's workspace.
+- **MUST** produce the command that brings the workload back on a restart; a stateful tool
+  **SHOULD** resume its existing session wherever the tool supports it, while the plain `shell`
+  simply relaunches.
+- **MUST** declare the executables its tool needs on the launch target, so agentworks can verify
+  their presence before starting and surface a missing tool as an actionable error.
+- **MUST**, for a stateful tool, own a durable session identity and refuse to guess it: mint or
+  discover the tool's session id once, store it, read it back verbatim, and raise rather than adopt
+  an ambiguous match that could splice one session's history into another.
+- **MUST** decide resume-versus-launch at op time from the tool's own on-disk state on the launch
+  target, so an interrupted session or a restarted VM recovers its prior work rather than silently
+  starting over. agentworks is built to lose running processes and restart, so a harness **MUST**
+  recover from durable state alone and **MUST NOT** depend on in-memory continuity.
+- **MUST NOT** validate the tool's own choice sets (model names, permission or sandbox modes); those
+  drift across the tool's releases, so an unrecognized value is forwarded verbatim and left to
+  surface as the tool's own startup error.
+- **MUST NOT** own or touch the tmux session, the Linux user, the workspace, attach/detach, or the
+  session lifecycle; it returns a pane command string and lets agentworks own everything around it.
+- **MUST NOT** assume the tool is already authenticated or bake credentials into the launch: the
+  tool's own accruing login state is out of harness scope today (a future `harness-user-provisioner`
+  is the sketched owner), and the harness must not depend on having provisioned it.
+- **MUST NOT** do anything in its workspace or agent that would interfere with other sessions or
+  running processes, beyond normal file modification, whether under its own user or a different
+  user: it must not kill or signal processes it did not start, touch another session's tmux, mutate
+  shared tool or system config, hold exclusive locks, or delete files it does not own.
+- **SHOULD** surface its launch decision (resumed, started fresh, or adopted by discovery) to the
+  operator, both in the command's output and as the pane's first visible line.
+
+It does not own the tmux session, the user, the workspace, or attach and detach. agentworks provides
+those; the harness only decides what runs in the pane.
+
 ## Technical Overview
 
 Everything above this line is for operators. Everything below it is for engineers implementing or

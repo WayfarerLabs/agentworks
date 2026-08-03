@@ -44,6 +44,57 @@ On platforms where the host is not agentworks' to control (`proxmox` and remote 
 administer, or a local `lima` / `wsl2` VM on your own machine), your own perimeter stays
 authoritative and agentworks does not touch it. The mechanism behind both cases is described below.
 
+## What a VM Platform Must Provide
+
+A vm-platform stands up a machine and hands agentworks an administrative foothold on it. It:
+
+- **MUST** provision a VM running the standard base operating system, Debian Bookworm, at the
+  operator-configured site. (An externally administered backend that clones an operator-supplied
+  template inherits this from the template today; that deviation is being closed under
+  [#368](https://github.com/WayfarerLabs/agentworks/issues/368).)
+- **MUST** create the admin user with the operator-configured name, holding full passwordless `sudo`
+  over the machine, reachable by the operator's installed SSH public key and never by password.
+- **MUST** provide a transport that runs arbitrary commands as the admin user: the single foothold
+  every later provisioning step is driven through.
+- **MUST** join the VM to the operator's Tailscale tailnet when given an auth key (or otherwise make
+  it reachable), giving it a stable address for the life of the VM.
+- **MUST** provision the VM to the requested cpus, memory, and disk, rounding up to the nearest
+  available shape where the backend sells only fixed shapes. A backend that structurally cannot
+  honor a per-VM shape (WSL2, whose limits are global) is the exception, and it **MUST** at least
+  warn that the request is being dropped rather than ignore it silently
+  ([#369](https://github.com/WayfarerLabs/agentworks/issues/369)).
+- **MUST** support the lifecycle agentworks drives, create, start, stop, and delete, and report the
+  VM's status; `create` **MUST** be collision-checked and fail loudly on a name that already exists,
+  never silently making a second VM.
+- **MUST** provide a stop that preserves all system state for a later resume. Snapshotting and
+  restoring running state is preferable, but a platform **MAY** implement stop as a full OS
+  shutdown/restart, since agentworks is built to be robust against restarts and the loss of running
+  processes.
+- **SHOULD** take reasonable steps to reduce the cost and resource usage of a stopped VM, releasing
+  billable or heavy resources (compute, memory) for the duration of the stop where the backend
+  allows it. Some standing costs are over that line and accepted: Azure keeps its permanent public
+  IP attached (and billing) while stopped, because detaching it would undermine the deny-baseline
+  exposure model.
+- **MUST** roll back its own partial backend state before letting a failure or an operator interrupt
+  propagate out of `create`, and **MUST NOT** report a `delete` as successful unless the backend VM
+  is actually gone (a delete that cannot remove it **MUST** raise, so agentworks keeps the row for a
+  retry rather than orphaning a billed VM).
+- **MUST NOT** leave billed or orphaned backend resources behind after a delete or a rolled-back
+  create: every resource it creates is scoped to exactly one VM and shares that VM's lifecycle.
+- **MUST NOT** touch, reconfigure, or tear down anything it did not create for this VM, whether
+  another VM's resources, another site's state, or the operator's shared infrastructure (a resource
+  group, VPC, subnet, or bridge), which it reads and existence-checks but never creates or deletes.
+- On a full-control cloud host it **MUST** default to zero standing inbound exposure, opening only a
+  narrowly scoped, ephemeral hole for the one operation that needs it and closing it after, failing
+  closed rather than open; on an externally administered or local host it **MUST NOT** manage the
+  host's or network's security at all.
+- **MUST NOT** share host filesystem paths into the guest by default (a VM is self-contained), and
+  **MUST NOT** log or persist resolved secret values (its metadata carries only backend
+  identifiers).
+
+It does not create agent users, workspaces, groups, sessions, or inject secrets. Those are
+agentworks' layer, built by running commands as the admin user over the transport above.
+
 ## Technical Overview
 
 Everything above this line is for operators. Everything below it is for engineers implementing or

@@ -34,6 +34,43 @@ Two providers ship today, one per supported host:
   actionable error up front rather than as a confusing git failure partway through setup. (The check
   is skippable by policy for airgapped setups.)
 
+## What a Git Credential Provider Must Provide
+
+A git-credential-provider sources a git credential for one host, says how git should present it, and
+vouches for it. It:
+
+- **MUST** source its credential (a token) for its one git host from an operator-named secret,
+  reading the value only through the framework's resolve pass, and **MUST NOT** hold, cache, log, or
+  persist a token beyond the call that receives it, nor accept a pasted credential.
+- **MUST** produce what git needs to authenticate as that credential on a VM: the stored entry, the
+  username git keys on, and the selection the helper uses.
+- **MUST** validate anything it interpolates into a store URL, a gitconfig header, or the generated
+  helper to a safe charset, at its own source rather than trusting a downstream check.
+- **MUST** default its store username to a value unique per credential, so two scoped credentials on
+  one host cannot collide, overriding only where the host dictates and only to a value that stays
+  disjoint for that host.
+- **MUST NOT** write to the VM, configure git, or perform any mutation in any stage; it returns
+  strings and lets agentworks materialize and wire them.
+- **MUST NOT** mint or mutate in `runup` or `review_remote` (both are read-only), and **MUST NOT**
+  reach the network or the host anywhere but the token check, which happens after the resolve
+  boundary.
+- **MUST NOT** speak for, serve, or advise on a host it does not own, so it never shadows another
+  provider's credential or clobbers an unrelated host's git configuration.
+- **SHOULD** verify the token against its host before it is relied on, raising a typed rejection on
+  a definitive failure while warning and continuing on network indeterminacy, so a bad token
+  surfaces clearly rather than as a failing clone later.
+- **SHOULD** announce, on successful verification, the identity the token authenticates as and its
+  expiry where the host exposes them, to aid rotation
+  ([#372](https://github.com/WayfarerLabs/agentworks/issues/372)).
+- **SHOULD** advise, through `review_remote`, when a declared repo remote would defeat this
+  credential's resolution (an embedded username that bypasses path-based selection).
+- **MAY** carry a host-specific scope (github `repos`/`owner`, azdo `org`) so several credentials
+  serve one host and each repo draws the one meant for it.
+
+It does not write to the VM or configure git itself. agentworks materializes the credential onto the
+VM and wires the credential helper; the provider sources the token, says how git should present it,
+and vouches for it.
+
 ## Technical Overview
 
 Everything above this line is for operators. Everything below it is for engineers implementing or
