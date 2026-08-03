@@ -26,10 +26,26 @@ if TYPE_CHECKING:
 _SHELL_FIELDS = {"command", "restart_command", "required_commands"}
 
 
-def _as_str_list(value: object) -> list[str]:
-    """Narrow a merged-blob field to a list of strings. ``validate``
-    has already enforced the shape at load, so a non-list is treated as
-    absent (empty) rather than re-raising here."""
+def _as_str_list(value: object) -> list[str] | None:
+    """Narrow a merge-time list field: an ABSENT value is a clean empty
+    list; a fully-string list passes through; anything else returns
+    ``None`` (unclean). ``merge_config`` runs on raw declared blobs (the
+    resolver merges before the final validate), so an unclean side must
+    NOT be filtered into a valid-looking union: laundering would hide the
+    bad entry from the merged-blob ``validate`` pass. The caller skips
+    the union instead, leaving the raw value for ``validate`` to reject.
+    """
+    if value is None:
+        return []
+    if isinstance(value, list) and all(isinstance(item, str) for item in value):
+        return list(value)
+    return None
+
+
+def _run_str_list(value: object) -> list[str]:
+    """Narrow an op-time list field best-effort: by op time the merged
+    blob has passed ``validate``, so a non-conforming value cannot occur;
+    degrade to empty rather than raising if one somehow does."""
     if isinstance(value, list):
         return [item for item in value if isinstance(item, str)]
     return []
@@ -90,14 +106,20 @@ class ShellHarness(Harness):
         """Same-harness inheritance merge (FRD R5): scalars child-win via
         the shallow default; ``required_commands`` unions append-dedupe so
         a child overriding only ``command`` never silently drops the
-        parent's required commands."""
+        parent's required commands.
+
+        The union runs only when BOTH sides are clean lists of strings:
+        the merge sees raw declared blobs, and filtering a mixed list
+        into a valid-looking union would hide the invalid entry from the
+        merged-blob ``validate`` pass. An unclean side falls through to
+        the shallow merge, so ``validate`` still rejects it."""
         merged = {**base, **child}
-        union = _append_dedupe(
-            _as_str_list(base.get("required_commands")),
-            _as_str_list(child.get("required_commands")),
-        )
-        if union:
-            merged["required_commands"] = union
+        base_cmds = _as_str_list(base.get("required_commands"))
+        child_cmds = _as_str_list(child.get("required_commands"))
+        if base_cmds is not None and child_cmds is not None:
+            union = _append_dedupe(base_cmds, child_cmds)
+            if union:
+                merged["required_commands"] = union
         return merged
 
     def start(self, ctx: RunContext) -> str:
@@ -117,7 +139,7 @@ class ShellHarness(Harness):
 
     def _probe_target(self, transport: Transport) -> None:
         require_commands(
-            tuple(_as_str_list(self.config.get("required_commands"))),
+            tuple(_run_str_list(self.config.get("required_commands"))),
             transport,
             harness_name=self.name,
             template_name=self.owner_name,
