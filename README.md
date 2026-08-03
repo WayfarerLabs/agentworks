@@ -96,20 +96,33 @@ agentic identities.)
 
 ### VMs - The Compute Environment
 
-The first question most people ask is "why VMs and not containers?" Because you would not seal a
-good developer inside a single locked-down container and expect their best work, and a capable agent
-is no different. Confine either one and the friction shows up fast: no system services, no room to
-install a real toolchain or spin up containers of their own, no second user to collaborate with. So
-Agentworks gives each workload a **full VM**: a complete Linux machine with the whole tapestry of
-tools and runtimes, daemonized services, its own containers when it wants them, and genuine
-multi-user collaboration between agents. And because the VM is also the hard isolation boundary
-([ADR 0001](docs/adrs/0001-vm-based-infrastructure.md)), you get full-machine capability and a real
-security perimeter at once, instead of trading one away for the other.
+A major question the industry is wrestling with is "what is the right compute primitive for agentic
+work?" Agentworks sits solidly in the virtual machine camp. The reasoning is simple: you would not
+seal a good developer inside a single locked-down container and expect their best work. A capable
+agent is no different. Containers and other less-than-full-machine primitives might work for basic
+development but, just like with human devs, the more you expect, the more friction this introduces:
+no system services, no room to install a real toolchain or spin up containers of their own, no
+ability to collaborate with other users, etc.
 
-Every VM runs the same base OS (Debian Bookworm,
-[ADR 0002](docs/adrs/0002-use-debian-as-the-vm-base-image.md)) for consistency, is long-lived, and
-is declaratively templated and reinitializable to pick up template or config changes. Each carries
-an admin user with full sudo for provisioning and management.
+Agentworks gives workloads a **shared, full-featured Linux VM**, complete with the whole tapestry
+that a full machine entails: massive libraries of standard tools, daemonized services, ability to
+run containers when needed (and even nested VMs), and genuine multi-user collaboration between
+agents. On the security side, this choice taps into decades of multi-user Linux development and
+experience. While the VM itself provides a strong isolation boundary, further isolation between
+workloads is possible using the battle-tested Linux primitives of users, groups, and permissioned
+filesystem subtrees, all mapped to the concepts described below, thus allowing many workloads to
+securely share a single VM. For additional reasoning on the VM choice, see
+[ADR 0001](docs/adrs/0001-vm-based-infrastructure.md).
+
+And to support the [consistency principle](docs/why-agentworks.md#consistency), Agentworks demands
+that every VM uses the same base OS (Debian Bookworm), the same admin user setup, and the same
+Tailscale tailnet join, so that the technical reality of the VM largely disappears and all VMs can
+be handled the same way, both by the human operator and Agentworks itself. See
+[ADR 0002](docs/adrs/0002-use-debian-as-the-vm-base-image.md) for more information.
+
+Consistent with the general declarative approach, VMs are long-lived, backed by declarative
+templates, and can be idempotently reinitialized to pick up changes whenever desired, thus allowing
+operators to evolve their VMs over time without having to tear them down and start over.
 
 ### Workspaces - The Project
 
