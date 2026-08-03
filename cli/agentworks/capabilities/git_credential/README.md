@@ -45,11 +45,11 @@ Whichever provider a credential names, an operator can rely on two guarantees:
 
 - **A live token is never pasted into config.** Today's providers source their token from a named
   secret: a credential's `token` field points at the _name_ of a secret that holds the token, and
-  the secret backend supplies the value at provisioning time. A provider may instead mint a token
-  (for example via the host's API) rather than source one, drawing on a named bootstrap secret where
-  it needs credentials to do so. Either way, the interface never asks for a live token in plaintext
-  config, and the same credential definition travels between operators who store their tokens
-  differently.
+  the secret backend supplies the value at provisioning time. A future extension may allow a
+  provider to mint a token through the host's API instead, drawing on a named bootstrap secret where
+  it needs credentials to do so. In either model, the interface never asks for a live token in
+  plaintext config, and the same credential definition travels between operators who store their
+  tokens differently.
 - **A bad token is caught early.** At provisioning time Agentworks verifies the token against its
   host before writing anything, so an expired, revoked, or mistyped token surfaces as a clear,
   actionable error up front rather than as a confusing git failure partway through setup. (The check
@@ -60,13 +60,11 @@ Whichever provider a credential names, an operator can rely on two guarantees:
 A git-credential-provider obtains a git credential for one host, says how git should present it, and
 vouches for it. It:
 
-- **MUST** obtain a credential (a token) for its one git host, either by sourcing it from an
-  operator-named secret (read only through the framework's resolve pass) or by minting it (for
-  example via the host's API); it **MUST NOT** accept a pasted credential, and **MUST NOT** hold,
-  cache, log, or persist a token beyond the call that produces it.
-- **MUST**, if it mints rather than sources, mint idempotently (check-then-mint: reuse a still-valid
-  existing credential rather than minting a fresh one on every run), and declare any bootstrap
-  secret it needs to mint through the same resolve pass.
+- **MUST** obtain a credential (a token) for its one git host by sourcing it from an operator-named
+  secret, read only through the framework's resolve pass; it **MUST NOT** accept a pasted
+  credential, and **MUST NOT** hold, cache, log, or persist a token beyond the call that produces
+  it. A future extension may support providers that mint tokens through a host API; that contract is
+  not implemented today.
 - **MUST** produce what git needs to authenticate as that credential on a VM: the stored entry, the
   username git keys on, and the selection the helper uses.
 - **MUST** validate anything it interpolates into a store URL, a gitconfig header, or the generated

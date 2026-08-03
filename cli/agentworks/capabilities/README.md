@@ -96,10 +96,11 @@ The `git-credential-provider` capability obtains and provisions the git credenti
 to clone and push against git hosts over plain https without baking tokens into images. `github` and
 `azdo` (Azure DevOps) ship today, each knowing how to source a token for its host and get it onto
 the VM in the form git expects. A provider obtains its token without a pasted value, sourcing it by
-secret name or minting it (for example via the host's API), verifies it before it is relied on, and
-produces exactly what git needs to authenticate on the VM, with per-repo scoping so several
-credentials can serve one host. See [`git_credential/README.md`](git_credential/README.md) for what
-a provider must provide and the shipped providers.
+secret name, verifies it before it is relied on, and produces exactly what git needs to authenticate
+on the VM, with per-repo scoping so several credentials can serve one host. A future extension may
+allow providers to mint tokens through a host API. See
+[`git_credential/README.md`](git_credential/README.md) for what a provider must provide and the
+shipped providers.
 
 ## Planned Future Capabilities
 

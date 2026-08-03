@@ -11,9 +11,9 @@
 ## What Is a Secret Backend?
 
 A secret backend is a source of secret values. It supplies the actual value behind a named secret
-when Agentworks needs one, letting a credential be named in a resource definition and filled in at
-provisioning time from wherever the operator actually keeps it, so tokens and passwords never have
-to be hand-carried onto a VM or baked into an image.
+when an Agentworks operation needs it, letting a credential be named in a resource definition and
+resolved from wherever the operator actually keeps it, so tokens and passwords never have to be
+hand-carried onto a VM or baked into an image.
 
 The division of labor is the important part. Agentworks owns WHERE a secret applies and in what
 order: it merges and injects secrets across the VM, workspace, agent, and session scopes, resolves
