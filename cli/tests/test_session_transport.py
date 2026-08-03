@@ -518,3 +518,75 @@ def test_restart_migrates_legacy_session_to_per_session_socket(tmp_path: Path, m
     assert refreshed.pid == 67890
 
     db.close()
+
+
+def test_restart_dead_workload_error_propagates(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``restart_session`` routes through the same ``tmux.create_session`` as
+    create, so a workload that dies instantly on restart must surface the
+    dead-workload ``StateError`` with the captured output. Pins that the
+    restart path's ``except RuntimeError`` clause (the active-server remap)
+    neither swallows nor remaps it: the REAL create_session runs here against
+    a scripted transport whose pane_dead probe answers dead."""
+    from agentworks.db import SessionMode
+    from agentworks.errors import StateError
+    from agentworks.sessions import manager as session_manager
+    from agentworks.sessions import tmux as tmux_mod
+
+    db = _seed_db(tmp_path)
+    # Legacy shape (socket_path=None, pid set) keeps the preflight simple:
+    # it skips check_session_status and goes straight to kill + create.
+    db.insert_session(
+        "s1",
+        "ws1",
+        "default",
+        SessionMode.ADMIN,
+        agent_name=None,
+        socket_path=None,
+    )
+    db.update_session_pid("s1", 12345, boot_id="boot-x")
+
+    clap_error = "error: invalid value 'on-failure' for '--ask-for-approval <APPROVAL_POLICY>'"
+
+    class _ScriptedResult:
+        def __init__(self, ok: bool = True, stdout: str = "") -> None:
+            self.ok = ok
+            self.returncode = 0 if ok else 1
+            self.stdout = stdout
+            self.stderr = ""
+
+    class _DeadPaneTarget:
+        """Admin transport whose fresh tmux session holds a dead pane."""
+
+        def run(self, cmd: str, *_args: object, **_kwargs: object) -> _ScriptedResult:
+            if cmd.startswith("test -e "):
+                return _ScriptedResult(ok=False)
+            if "#{pane_dead}" in cmd:
+                return _ScriptedResult(ok=True, stdout="1 2\n")
+            if "capture-pane" in cmd:
+                return _ScriptedResult(ok=True, stdout=f"{clap_error}\n")
+            return _ScriptedResult()
+
+    target = _DeadPaneTarget()
+    factory = lambda *a, **k: target  # noqa: E731
+    monkeypatch.setattr("agentworks.transports.transport", factory)
+    monkeypatch.setattr("agentworks.sessions.manager.transport", factory)
+    monkeypatch.setattr("agentworks.transports.agent_transport", factory)
+    stub_vm_gates(monkeypatch)
+    stub_session_resolvers(monkeypatch)
+
+    monkeypatch.setattr(session_manager, "_regenerate_tmuxinator", lambda *_a, **_kw: None)
+    monkeypatch.setattr(session_manager, "_resolve_session_linux_user", lambda *_a, **_kw: "admin")
+    monkeypatch.setattr(tmux_mod, "deploy_restricted_config", lambda *_a, **_kw: None)
+    monkeypatch.setattr(tmux_mod, "kill_session", lambda *_a, **_kw: True)
+
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+
+    with pytest.raises(StateError) as excinfo:
+        session_manager.restart_session(db, config, name="s1", yes=True)  # type: ignore[arg-type]
+
+    msg = str(excinfo.value)
+    assert "exited immediately after launch (status 2)" in msg
+    assert clap_error in msg
+    # NOT remapped by the restart path's active-server RuntimeError clause.
+    assert "already has an active tmux server" not in msg
+    db.close()

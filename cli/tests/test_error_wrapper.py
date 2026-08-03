@@ -641,3 +641,108 @@ def test_create_session_rollback_failure_does_not_mask_keyboard_interrupt(
     # actually removed because the first delete attempt raised.
     assert cleanup_attempts == ["s1"]
     db.close()
+
+
+def test_create_session_surfaces_dead_workload_output_through_rollback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """End-to-end through the manager: a session workload that dies instantly
+    (the 2026-08-03 incident: `codex -a on-failure` rejected by clap in
+    milliseconds) must surface its own captured output in the operator-visible
+    failure, roll back the session's partial state, and never run the grant
+    machinery against the dead socket. Drives the REAL tmux.create_session
+    against a scripted agent transport whose pane_dead probe answers dead."""
+    from agentworks.agents import grants as agent_grants
+    from agentworks.agents import manager as agent_mgr
+    from agentworks.db import Database
+    from agentworks.errors import StateError
+    from agentworks.sessions import manager as session_manager
+    from agentworks.sessions import tmux as tmux_mod
+
+    db = Database(tmp_path / "test.db")
+    db._conn.execute(
+        "INSERT INTO vms (name, site, hostname, admin_username, tailscale_host) "
+        "VALUES ('vm1', 'lima', 'h', 'admin', '100.64.0.5')"
+    )
+    db._conn.execute(
+        "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) "
+        "VALUES ('ws1', 'vm1', '/home/me/ws1', 'ws-ws1')"
+    )
+    db._conn.commit()
+    db.insert_agent("a1", "vm1", "aw-a1")
+
+    stub_vm_gates(monkeypatch)
+
+    clap_error = "error: invalid value 'on-failure' for '--ask-for-approval <APPROVAL_POLICY>'"
+
+    class _Result:
+        def __init__(self, ok: bool = True, stdout: str = "") -> None:
+            self.ok = ok
+            self.returncode = 0 if ok else 1
+            self.stdout = stdout
+            self.stderr = ""
+
+    class _AdminTarget:
+        def run(self, *args: object, **kwargs: object) -> _Result:
+            return _Result()
+
+    agent_commands: list[str] = []
+
+    class _DeadPaneAgentTarget:
+        """Agent transport whose tmux server holds a dead pane: the liveness
+        probe answers dead and capture-pane returns the workload's output."""
+
+        def run(self, cmd: str, *args: object, **kwargs: object) -> _Result:
+            agent_commands.append(cmd)
+            if cmd.startswith("test -e "):
+                return _Result(ok=False)
+            if "#{pane_dead}" in cmd:
+                return _Result(ok=True, stdout="1 2\n")
+            if "capture-pane" in cmd:
+                return _Result(ok=True, stdout=f"{clap_error}\n\nFor more information, try '--help'.\n")
+            return _Result()
+
+    monkeypatch.setattr("agentworks.transports.transport", lambda *a, **k: _AdminTarget())
+    monkeypatch.setattr("agentworks.sessions.manager.transport", lambda *a, **k: _AdminTarget())
+    monkeypatch.setattr("agentworks.transports.agent_transport", lambda *a, **k: _DeadPaneAgentTarget())
+    monkeypatch.setattr(agent_mgr, "_assert_agent_ssh_works", lambda *a, **k: None)
+    monkeypatch.setattr(tmux_mod, "deploy_restricted_config", lambda *args, **kwargs: None)
+    monkeypatch.setattr(agent_grants, "add_to_workspace_group", lambda *a, **k: None)
+    monkeypatch.setattr(agent_grants, "remove_from_workspace_group", lambda *a, **k: None)
+
+    warns: list[str] = []
+    monkeypatch.setattr("agentworks.output.warn", lambda msg, **k: warns.append(str(msg)))
+
+    stub_session_resolvers(monkeypatch)
+
+    config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
+
+    with pytest.raises(StateError) as excinfo:
+        session_manager.create_session(
+            db,
+            config,  # type: ignore[arg-type]
+            name="s1",
+            workspace="ws1",
+            template_name=None,
+            agent="a1",
+        )
+
+    # The typed error carries the workload's own output verbatim, plus the
+    # exit status from the combined pane_dead probe.
+    msg = str(excinfo.value)
+    assert "exited immediately after launch (status 2)" in msg
+    assert clap_error in msg
+
+    # The manager's pre-rollback warn (the operator-visible bridge line)
+    # carries the same captured output.
+    reason_warns = [w for w in warns if "rolling back. Reason:" in w]
+    assert reason_warns and clap_error in reason_warns[0]
+
+    # Rollback ran: no session row, no grant left behind.
+    assert db.get_session("s1") is None
+    assert not db.has_any_grant("a1", "ws1")
+
+    # The grant machinery never touched the dead socket.
+    assert not any("server-access" in c for c in agent_commands)
+    assert not any("chmod g+rwx" in c for c in agent_commands)
+    db.close()

@@ -199,7 +199,9 @@ type-checked. Two rules with teeth:
 - **Do not validate tool-owned choice sets.** `claude-code` forwards `permission_mode` and `model`
   values verbatim: the valid choices are the tool's and drift between its releases, so a stale
   harness-side enum would reject values a newer CLI accepts. An invalid value surfaces as the tool's
-  own startup error in the pane, which is the right place.
+  own startup error in the pane, which is the right place. That promise holds even when the workload
+  dies too fast for the pane to ever be attached: `session create` / `session restart` detect the
+  instantly-dead pane, capture its output, and fold it into their own error message.
 
 #### Declaring Dependencies: Total and Pure
 

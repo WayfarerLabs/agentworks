@@ -233,7 +233,9 @@ spec:
 ```
 
 - Its config is three optional fields: `permission_mode` and `model` forward verbatim to
-  `claude --permission-mode` / `--model` (their choice sets are Claude's, not validated here), and
+  `claude --permission-mode` / `--model` (their choice sets are Claude's, not validated here: an
+  invalid value fails at launch with the tool's own error, which `session create` /
+  `session restart` capture into their error message when the workload exits immediately), and
   `extra_args` is a list of raw argv tokens appended last, the escape hatch for any flag the harness
   does not model. Unknown fields are errors. `extra_args` elements support the `{{session_name}}` /
   `{{workspace_name}}` variables.

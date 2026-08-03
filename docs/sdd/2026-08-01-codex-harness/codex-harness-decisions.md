@@ -173,7 +173,9 @@ its drift mode too silent.
 | `extra_args` (list)            | (the tokens themselves)                      | appended verbatim, last                      |
 
 Choice sets are codex-owned and drift between releases; invalid values surface as codex's own
-startup error in the pane (the same rule as claude-code). `extra_args` is the escape hatch.
+startup error in the pane (the same rule as claude-code); when the rejection kills the pane
+instantly, `session create` / `session restart` capture that output into their own error, so the
+message still reaches the operator. `extra_args` is the escape hatch.
 
 **`--strict-config` is emitted by default (operator-decided 2026-08-03).** Verified against 0.146.0:
 an unknown `-c` config key is SILENTLY ignored by a non-strict codex, so if codex ever renames the
