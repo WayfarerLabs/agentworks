@@ -96,13 +96,20 @@ agentic identities.)
 
 ### VMs - The Compute Environment
 
-A VM is the base **compute environment** and the strong isolation boundary
-([ADR 0001](docs/adrs/0001-vm-based-infrastructure.md)): a full Linux environment (daemonized
-services, multi-user collaboration, containers) rather than a narrower sandbox. Every VM runs the
-same base OS (Debian Bookworm, [ADR 0002](docs/adrs/0002-use-debian-as-the-vm-base-image.md)) for
-consistency. VMs are meant to be long-lived, are provisioned and templated declaratively, and can be
-"reinitialized" to pick up template or config changes. Each VM has an admin user with full sudo used
-for provisioning and management.
+The first question most people ask is "why VMs and not containers?" Because you would not seal a
+good developer inside a single locked-down container and expect their best work, and a capable agent
+is no different. Confine either one and the friction shows up fast: no system services, no room to
+install a real toolchain or spin up containers of their own, no second user to collaborate with. So
+Agentworks gives each workload a **full VM**: a complete Linux machine with the whole tapestry of
+tools and runtimes, daemonized services, its own containers when it wants them, and genuine
+multi-user collaboration between agents. And because the VM is also the hard isolation boundary
+([ADR 0001](docs/adrs/0001-vm-based-infrastructure.md)), you get full-machine capability and a real
+security perimeter at once, instead of trading one away for the other.
+
+Every VM runs the same base OS (Debian Bookworm,
+[ADR 0002](docs/adrs/0002-use-debian-as-the-vm-base-image.md)) for consistency, is long-lived, and
+is declaratively templated and reinitializable to pick up template or config changes. Each carries
+an admin user with full sudo for provisioning and management.
 
 ### Workspaces - The Project
 

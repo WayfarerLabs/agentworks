@@ -27,7 +27,9 @@ several factors:
    that may execute arbitrary code. Container escapes are a well-documented attack surface; VM
    escapes are significantly harder.
 
-2. **Robustness**: VMs are real machines with all the capabilities of the full Linux environment.
+2. **Robustness**: You would not confine a capable developer to a single locked-down container and
+   expect their best work; an agent is an open-ended worker, not a fixed workload, and the same
+   holds for it. VMs are real machines with all the capabilities of the full Linux environment.
    Tools, installers, development workflows, daemon processes, monitoring, ... all work as expected.
    Containers can be made to do some of this but it quickly devolves into hacks and workarounds.
    With VMs there are no filesystem overlay quirks, no pid namespace surprises, and no restrictions
