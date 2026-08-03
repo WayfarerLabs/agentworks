@@ -5,6 +5,7 @@
 - Supersedes: the planned `harness-user-provisioner` capability (see
   `cli/agentworks/capabilities/README.md` "Planned Future Capabilities")
 - Related prior SDDs: `docs/sdd/2026-07-07-session-harness`, `docs/sdd/2026-08-01-codex-harness`
+- Review folded in: `codex-response.md` (Codex review of this FRD, 2026-08-03)
 
 ## Summary
 
@@ -15,32 +16,40 @@ tool as a session's workload and nothing else. Two pressures have built up again
    Codex working well also involves user-level setup (installing it, authenticating it, user-level
    configuration) and workspace-level setup (publishing rules, skills, hooks, or workspace config).
    Today none of that has a home in the capability, so it either does not happen or is wired ad hoc
-   outside the capability model.
-2. **Naming.** The industry (and Anthropic's own Claude Code glossary) has settled on "harness"
-   meaning the tool itself: "Claude Code is the harness; Claude is the model inside it." Agentworks
-   uses "harness" for the Agentworks-side adapter that runs such a tool. That is a genuine misnomer,
-   and it gets worse as the capability grows past the session, because the thing being named is no
-   longer even the session runtime, it is the whole cross-scope integration.
+   outside the capability model. This is already observable: the example session-templates shipped
+   for Claude Code and Codex cannot start on a stock VM without a separately hand-paired
+   agent-template to install the tool's CLI, precisely because user-level tool installation has no
+   home in the harness capability.
+2. **Naming.** Leading coding-agent vendors increasingly use "harness" for the tool itself:
+   Anthropic's Claude Code glossary states "Claude Code is the harness; Claude is the model inside
+   it." Agentworks uses "harness" for its own adapter that runs such a tool, creating an avoidable
+   collision. It gets worse as the capability grows past the session, because the thing being named
+   is no longer even the session runtime, it is the whole cross-scope integration.
 
 This effort proposes: (a) expand the capability so a single tool integration contributes hooks at
 multiple stages of the provisioning flow (user, workspace, session), under a per-hook scope
-contract; and (b) rename the capability so it stops colliding with the industry meaning of
-"harness".
+contract; and (b) rename the capability so it stops colliding with the harness-is-the-tool meaning
+that vendors increasingly use.
 
 This document covers functional requirements only. The interface shape, the readiness/lifecycle
 wiring, and the migration mechanics are for the HLA, the plan, and a `migration-strategy.md`.
 
 ## Background and prior art
 
-The term "harness" is no longer ambiguous in the agentic-coding space; it has converged on "the tool
-that wraps a model into an agent" (the loop, tool calls, context management, memory, guardrails).
-Anthropic's Claude Code glossary defines "agentic harness" and states plainly that Claude Code is
-the harness and Claude is the model inside it. Independent glossaries and eval literature use the
-term the same way, distinguishing "harness" (the running integration) from "scaffold" (the
-instructions/tools the model starts from).
+Leading coding-agent vendors increasingly use "harness" for the tool that wraps a model into an
+agent (the loop, tool calls, context management, memory, guardrails). Anthropic's Claude Code
+glossary defines "agentic harness" and states plainly that Claude Code is the harness and Claude is
+the model inside it; OpenAI describes the Codex harness as the agent loop and logic underlying all
+Codex surfaces, with its App Server as the embedding boundary.
 
-The consequence for Agentworks: naming our adapter "harness" fights the settled vocabulary. The
-cleanest framing is a three-layer model:
+The usage is not universal or fully settled, and the FRD should not claim it is. "Harness" is also
+applied to evaluation runners (the SWE-bench harness), to scaffolds, and to frameworks, SDKs, and
+orchestrators; a recent survey catalogs exactly this polysemy (arXiv 2606.10106, "What makes a
+harness a harness"). The narrower, well-supported claim is enough for our purposes: leading vendors
+increasingly use "harness" for the runtime, Agentworks uses the same word for its integration with
+that runtime, and that local collision alone justifies the rename.
+
+The cleanest framing is a three-layer model:
 
 1. the **model** (for example, Claude): the weights.
 2. the **harness** (for example, Claude Code): the tool that turns the model into an agent. This is
@@ -55,8 +64,11 @@ differ only in how they provision the user or workspace). The current model bake
 assumption into the resource name (a resource literally named `claude-code`), which the expansion
 makes untenable.
 
-Sources are captured in the accompanying research notes; the load-bearing one is the Claude Code
-glossary entry for "agentic harness" (`code.claude.com/docs/en/glossary`).
+Key sources: the Claude Code glossary entry for "agentic harness"
+(`code.claude.com/docs/en/glossary`); OpenAI's "Unlocking the Codex harness"
+(`openai.com/index/unlocking-the-codex-harness/`); and the survey of the term's inconsistent use,
+"What makes a harness a harness" (`arxiv.org/abs/2606.10106`). Further review notes are in
+`codex-response.md`.
 
 ## Goals
 
@@ -64,8 +76,9 @@ glossary entry for "agentic harness" (`code.claude.com/docs/en/glossary`).
   in one cohesive unit per tool.
 - Keep the safety story intact under expansion: effects stay bounded to the stage that produced
   them.
-- Rename the capability so it no longer collides with the industry meaning of "harness", and remove
-  the baked-in assumption that an adapter is identified with the tool it drives.
+- Rename the capability so it no longer collides with the harness-is-the-tool meaning vendors
+  increasingly use, and remove the baked-in assumption that an adapter is identified with the tool
+  it drives.
 - Preserve a simple operator experience for the common case (pick a tool for a session).
 
 ## Non-goals
@@ -107,9 +120,13 @@ glossary entry for "agentic harness" (`code.claude.com/docs/en/glossary`).
 - **R5 (cohesion).** All tool-specific integration for one tool SHOULD live in one implementation
   unit, so an author reasons about (and a reader finds) a tool's whole Agentworks story in one
   place.
-- **R6 (operator surface stays simple).** Selecting a tool for a session MUST remain a single,
-  simple choice. Existing session-templates that reference a tool by name MUST either keep working
-  or be carried by a defined migration (see R10).
+- **R6 (selection names the adapter, and stays simple).** Selecting an integration for a session
+  MUST remain a single, simple choice. The selector MUST identify the adapter, not the underlying
+  harness (consistent with R8); the adapter in turn declares the harness it drives. Retaining the
+  current `harness:` selector spelling would preserve the very identity collapse R8 removes, so any
+  `harness:` that is kept MUST be a temporary compatibility shim with a defined removal path, not a
+  permanent alias; the canonical emitted form uses the new name. Existing session-templates MUST be
+  carried by a defined migration (see R10).
 - **R7 (rename the kind).** The capability kind MUST be renamed to remove the "harness-is-the-tool"
   collision. Candidate names and the recommendation are in Decision D1. The word "workload" is
   reserved for the session-scoped facet (the thing that runs in the pane), not the kind, because it
@@ -143,20 +160,28 @@ glossary entry for "agentic harness" (`code.claude.com/docs/en/glossary`).
 ## Open decisions
 
 - **D1 (kind name).** Options, with the trade-off to settle explicitly rather than by feel:
-  - `harness-adapter`: keeps the now-standard "harness" vocabulary and is honest that our thing is
-    the adapter. Slightly long. `shell` is a degenerate ("no-harness") member.
-  - `tool-adapter`: neutral; spans install/configure/run naturally; less tied to the "harness" term;
-    more generic.
-  - `tool`: cleanest single word and spans scopes better than `workload`, but re-collapses the
-    adapter/tool distinction at the name level (mitigated by R8 making the tool an explicit
-    attribute).
-  - Rejected for the kind: `workload` (names only the session facet; repeats the under-scoping the
-    rename is meant to fix). Recommendation: **`harness-adapter`**, keeping `workload` for the
-    session facet. Revisit against `tool-adapter` in HLA.
-- **D2 (selector field).** Keep the operator-facing `harness:` selector as sugar for "the harness I
-  want this session to run" (which is correct under the industry meaning) even though the kind is
-  renamed, versus renaming the field too. Recommendation: keep `harness:` for operators; the rename
-  is primarily to the kind and the implementation vocabulary.
+  - `harness-adapter`: keeps the increasingly common "harness" vocabulary and is honest that our
+    thing is the adapter. Slightly long. `shell` is a degenerate ("no-harness") member.
+  - `harness-integration`: worth evaluating in the HLA. Once the capability owns install,
+    authentication, configuration, workspace publication, launch, and resume, "integration" may
+    describe the full cross-scope responsibility more naturally than the narrower "adapter".
+  - `tool` / `tool-adapter`: **rejected.** In agent-systems vocabulary "tool" already means an
+    action a model can call (shell execution, a function call, web search), so a tool-based name
+    trades the harness collision for a different, equally live one.
+  - `workload`: rejected for the kind (names only the session facet; repeats the under-scoping the
+    rename is meant to fix), but reserved for the session-scoped facet inside the capability.
+  - Recommendation: **`harness-adapter`**, with `workload` reserved for the session facet. Test it
+    against `harness-integration` in the HLA across resource identifiers, class names, CLI output,
+    docs prose, and the multiple-adapters-per-harness case.
+- **D2 (selector field).** Reversing an earlier lean: the selector should name the adapter, not the
+  harness (see R6/R8). Keeping `harness:` as a permanent alias would preserve the identity collapse
+  the whole effort removes, so the kind, selector, and implementation vocabulary should agree on
+  what is being selected (the adapter, which declares its harness). The open sub-question for the
+  HLA is the exact spelling and how much ergonomic sugar to retain during migration: a longer
+  selector (for example `harness-adapter: {name: claude-code}`) is more consistent but clunkier than
+  `harness: claude-code`, and a temporary `harness:` shim with a removal path is acceptable. Weigh
+  the ergonomic cost against the consistency gain in the HLA; the functional requirement (R6) is
+  fixed, the spelling is not.
 - **D3 (multiplicity now vs later).** Permit multiple adapters per tool in the model (R8) but do not
   build the selection UX or ship a second adapter until one is needed. Recommendation: permit, do
   not build.
