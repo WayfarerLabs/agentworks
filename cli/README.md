@@ -150,17 +150,18 @@ conventional SIGINT exit code (130).
 
 ### VMs
 
-Manage virtual machines across declared vm-sites (Lima local or remote, Azure, WSL2, Proxmox).
+Manage virtual machines across declared vm-sites (Lima local or remote, Azure, AWS EC2, WSL2,
+Proxmox).
 
 Where VMs are created is declared as `vm-site` resources: YAML manifests under
 `~/.config/agentworks/resources/` that pair a platform (the code that runs VMs on one backend kind)
 with its configuration. The `lima-local` and `wsl2` sites ship built in and are always available;
-the `azure-vm` and `proxmox` platforms ship as the opt-in `azure` and `proxmox` system plugins (see
-[System Plugins](#system-plugins)) and are not-ready until enabled. Every site registers on every
-host and reports not-ready when this host lacks what it needs (wsl2 is Windows-only; a local Lima
-site needs `limactl`; a platform may simply not be installed, or its plugin not enabled): a
-not-ready site still lists and describes, using it is an error naming the requirement, and
-`agw doctor` shows each platform's and site's state with the reason. Run
+the `azure-vm`, `aws-ec2`, and `proxmox` platforms ship as the opt-in `azure`, `aws`, and `proxmox`
+system plugins (see [System Plugins](#system-plugins)) and are not-ready until enabled. Every site
+registers on every host and reports not-ready when this host lacks what it needs (wsl2 is
+Windows-only; a local Lima site needs `limactl`; a platform may simply not be installed, or its
+plugin not enabled): a not-ready site still lists and describes, using it is an error naming the
+requirement, and `agw doctor` shows each platform's and site's state with the reason. Run
 `agw resource sample vm-site` for commented, ready-to-edit examples (an Azure site, a remote-Lima
 site with a `vm_host` key). The former `agw vm-host` registry is gone: a remote Lima host is now
 just a vm-site.
@@ -790,9 +791,10 @@ Resource kinds (YAML manifests; the deprecated TOML section is noted for each):
   `service_principal` block to authenticate as a specific service principal instead of with ambient
   credentials, Proxmox API endpoint + token secret, remote-Lima `vm_host`). The `lima-local` and
   `wsl2` sites ship built in (on hosts where their platform can run) and their names are reserved
-- `vm-platform`: read-only capability rows for the VM platforms (`lima`, `wsl2` built in; `azure-vm`
-  and `proxmox` ship as the opt-in `azure` and `proxmox` system plugins, disabled by default, see
-  [System Plugins](#system-plugins)); listed by `agw resource kinds`, never declared
+- `vm-platform`: read-only capability rows for the VM platforms (`lima`, `wsl2` built in;
+  `azure-vm`, `aws-ec2`, and `proxmox` ship as the opt-in `azure`, `aws`, and `proxmox` system
+  plugins, disabled by default, see [System Plugins](#system-plugins)); listed by
+  `agw resource kinds`, never declared
 - `vm-template` (`[vm_templates.*]`): VM resources, apt packages, system install commands, mise, and
   the target `site`
 - `admin-template` (`[admin.config]`) -- admin user shell, dotfiles, git credentials, user install
@@ -968,17 +970,17 @@ Agentworks ships some vendor- and tool-specific capabilities (VM platforms, sess
 git-credential providers, secret backends) as **system plugins**: separable bundles that are
 installed but off by default. The shipped build installs `azure` (the `azure-vm` VM platform, the
 `azdo` git-credential provider, and the `az-cli` install-command), `proxmox` (the `proxmox` VM
-platform), `onepassword` (the `onepassword` secret backend), `claude` (the `claude-code` session
-harness and the `claude` CLI install-command), and `codex` (the `codex` session harness and the
-`codex` CLI install-command). (This is a different sense of "plugin" from
-[Claude Code Plugins](#claude-code-plugins) below, which installs marketplace plugins into Claude
-Code itself.)
+platform), `aws` (the `aws-ec2` VM platform), `onepassword` (the `onepassword` secret backend),
+`claude` (the `claude-code` session harness and the `claude` CLI install-command), and `codex` (the
+`codex` session harness and the `codex` CLI install-command). (This is a different sense of "plugin"
+from [Claude Code Plugins](#claude-code-plugins) below, which installs marketplace plugins into
+Claude Code itself.)
 
 Opt in by name in `config.toml`:
 
 ```toml
 [plugins]
-system = ["azure", "proxmox", "onepassword", "claude", "codex"]   # only the ones you use
+system = ["azure", "aws", "proxmox", "onepassword", "claude", "codex"]   # only the ones you use
 ```
 
 A resource that references a not-enabled plugin's contribution (an `azure-vm` vm-site, a

@@ -208,8 +208,8 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # before it can carry one.
 # aws-ec2 ships as the opt-in `aws` system plugin: an aws-ec2 site is not-ready
 # with an "enable plugin `aws`" hint until you add `[plugins] system = ["aws"]`
-# above. An aws-ec2 site keeps a permanent public IP and controls SSH exposure with a
-# security group: the baseline denies all inbound, and access is granted only
+# above. An aws-ec2 site controls SSH exposure with a security group: the
+# baseline denies all inbound, and access is granted only
 # through ephemeral rules scoped to your detected egress IP (plus
 # operator.ssh_allow_cidrs) during bootstrap and each native route. It
 # authenticates with the AMBIENT AWS credential chain by default (env vars,

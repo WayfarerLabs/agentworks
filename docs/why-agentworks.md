@@ -125,9 +125,9 @@ done.
 
 This gives agents two modes. A **disposable** agent is created alongside a session (`--new-agent`)
 and can be torn down when that session is deleted, which suits one-off work that needs no standing
-identity. Interactive deletion offers to remove an unused session-created agent; `--yes`
-automatically removes it when no remaining session or standing workspace grant still needs it. A
-**durable** agent is set up once and reused across many sessions and workspaces. Its reproducible
+identity. Interactive deletion offers to remove any now-unused agent; `--yes` auto-removes only one
+this session created, and only when no remaining session or standing workspace grant still needs it.
+A **durable** agent is set up once and reused across many sessions and workspaces. Its reproducible
 setup (installed tools, dotfiles, git credentials) belongs in the agent template, so it is declared
 once and converged on demand with `agw agent reinit` rather than hand-maintained. What makes a
 durable agent worth keeping is the state a template _cannot_ reproduce: the harness and app-specific

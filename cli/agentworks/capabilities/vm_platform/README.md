@@ -11,13 +11,15 @@ A VM platform is a backend that provisions and manages virtual machines (VMs) fo
 abstracts the underlying infrastructure, allowing operators to create and manage VMs on different
 environments without changing the way they interact with Agentworks. The platform handles the
 creation, starting, stopping, and deletion of VMs, as well as providing a transport for executing
-commands on the VMs. It also manages the security posture of the VMs, ensuring that they are secure
-by default and that any necessary access is granted in a controlled manner.
+commands on the VMs. On the full-control cloud platforms it also owns the VM's network exposure,
+locking it down by default and opening access only in a controlled, scoped way; on operator-managed
+hosts the existing perimeter stays authoritative and the platform does not touch it (see Security
+Posture below).
 
 ### Relationship to VM Sites
 
-VM platforms represent general capabilities. VM sites, declared as YAML objects, bind a platform to
-a specific configuration. The exact configuration surface depends on the platform, but generally
+VM platforms represent general capabilities. VM sites, declared as YAML manifests, bind a platform
+to a specific configuration. The exact configuration surface depends on the platform, but generally
 includes location, credentials, and other platform-specific settings.
 
 ## Available Platforms
@@ -73,7 +75,7 @@ A vm-platform stands up a machine and hands Agentworks an administrative foothol
 - **MUST** provision the VM to the requested cpus, memory, and disk, rounding up to the nearest
   available shape where the backend sells only fixed shapes. A backend that structurally cannot
   honor a per-VM shape (WSL2, whose limits are global) is the exception, and it **MUST** at least
-  warn that the requested resources are being ignored.
+  warn that the requested resources are being ignored
   ([#369](https://github.com/WayfarerLabs/agentworks/issues/369)).
 - **MUST** support the lifecycle Agentworks drives, create, start, stop, and delete, and report the
   VM's status; `create` **MUST** be collision-checked and either fail loudly on a name that already
@@ -112,8 +114,8 @@ Those are managed by the Agentworks core system through platform-agnostic mechan
 Everything above this line is for operators. Everything below it is for engineers implementing or
 extending a VM platform: the platform surface each backend implements, how an op gets its
 dependencies, the exposure and credential machinery on the cloud platforms, the provisioning
-timeline, and implementation pitfalls. The remaining sections are intended for engineers
-implementing or extending a platform rather than selecting or configuring one.
+timeline, and implementation pitfalls. If you are selecting or configuring a platform rather than
+writing one, you can stop here.
 
 Five platforms ship today and are the working references throughout this guide: `lima` (`lima.py`)
 and `wsl2` (`wsl2.py`) as core built-ins, plus `proxmox`, `azure-vm`, and `aws-ec2`, which ship in
@@ -168,9 +170,9 @@ and DB migration.
 `RunContext` after `vm` (see the next section for what that is and how to read from it):
 
 - `create(request, ctx) -> ProvisionResult` is deliberately **not** `@idempotent_op`: it runs a
-  pre-flight collision check, then either raises `StateError` or selects a different collision-free
-  backend name and records that identifier in `platform_metadata`. A re-run must never target or
-  replace an existing VM.
+  pre-flight collision check, then either raises `StateError` (all five in-tree platforms) or, for a
+  soft-name backend, selects a different collision-free backend name and records that identifier in
+  `platform_metadata`. A re-run must never target or replace an existing VM.
 - `start(vm, ctx)`, `stop(vm, ctx)`, `delete(vm, ctx)` are flagged `@idempotent_op` and must land in
   the same place run twice as run once. The marker is inherited through the MRO, so an override does
   not restate the decorator. `reinit` re-applies everything and failed commands are retried, so the

@@ -1,4 +1,4 @@
-# 1. VM-Based Infrastructure
+# 1. VM-based Infrastructure
 
 Date: 2026-03-05
 

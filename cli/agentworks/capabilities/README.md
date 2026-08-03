@@ -574,7 +574,7 @@ in ways worth recording before that change, because it is a different animal:
   to it**. The consuming resource (a secret) supplies only a per-secret _mapping_ (the env-var name,
   the 1Password item ref), not the backend's config. So readiness deduplicates per backend (check
   1Password once for twenty secrets), and the "consuming resource supplies the config" story flips.
-  The Multiplicity section models one-resource-many-instances (feature maps); this
+  The Multiplicity section covers the one-resource-many-instances case; this
   many-resources-one-instance shape is not yet modeled.
 
 - **Provider-side vs consuming-side base.** The `Capability` base is shaped for the _consuming_
@@ -607,9 +607,10 @@ in ways worth recording before that change, because it is a different animal:
   framework context whenever a stage's contract depends on _when_ or _how_ that stage is driven.
 - **Hosting shapes.** A consuming resource can host a capability's config three ways: as a dedicated
   kind (reference + a config blob, like `vm-site`), inline in a richer consumer (like a
-  session-template's inline harness block), or in a map keyed by name (like an agent template's
-  feature map). `dependencies` / `validate`'s host-agnostic `owner` is exactly what lets one
-  capability serve all three without knowing which consumer hosts it.
+  session-template's inline harness block), or in a map keyed by name (the planned shape for an
+  agent template's feature map, once `agent-feature` ships). `dependencies` / `validate`'s
+  host-agnostic `owner` is exactly what lets one capability serve any of these without knowing which
+  consumer hosts it.
 - `owner` is a host-agnostic string today. If a second consumer (preflight's richer context is the
   likely trigger) needs more than a name, the right evolution is a small host-agnostic context
   value, not passing the consuming resource, designed once, when two real consumers reveal its
