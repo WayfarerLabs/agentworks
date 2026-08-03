@@ -85,9 +85,9 @@ agw console delete my-console              # Extra shells are lost but sessions 
 - Python 3.12+ (uv will install one for you if needed)
 - [uv](https://docs.astral.sh/uv/) or [pipx](https://pipx.pypa.io/) for installation
 - [Tailscale](https://tailscale.com/) installed and connected (for VM workspaces)
-- One of: [Lima](https://lima-vm.io/), Azure CLI (`az`), [Proxmox](https://www.proxmox.com/), or
-  WSL2 (for VM provisioning; Azure and Proxmox also need their [system plugin](#system-plugins)
-  enabled)
+- One of: [Lima](https://lima-vm.io/), Azure CLI (`az`), AWS credentials for EC2,
+  [Proxmox](https://www.proxmox.com/), or WSL2 (for VM provisioning; Azure, AWS, and Proxmox also
+  need their [system plugin](#system-plugins) enabled)
 
 ## Global Options
 
@@ -150,24 +150,25 @@ conventional SIGINT exit code (130).
 
 ### VMs
 
-Manage virtual machines across declared vm-sites (Lima local or remote, Azure, WSL2, Proxmox).
+Manage virtual machines across declared vm-sites (Lima local or remote, Azure, AWS EC2, WSL2,
+Proxmox).
 
 Where VMs are created is declared as `vm-site` resources: YAML manifests under
 `~/.config/agentworks/resources/` that pair a platform (the code that runs VMs on one backend kind)
 with its configuration. The `lima-local` and `wsl2` sites ship built in and are always available;
-the `azure-vm` and `proxmox` platforms ship as the opt-in `azure` and `proxmox` system plugins (see
-[System Plugins](#system-plugins)) and are not-ready until enabled. Every site registers on every
-host and reports not-ready when this host lacks what it needs (wsl2 is Windows-only; a local Lima
-site needs `limactl`; a platform may simply not be installed, or its plugin not enabled): a
-not-ready site still lists and describes, using it is an error naming the requirement, and
-`agw doctor` shows each platform's and site's state with the reason. Run
+the `azure-vm`, `aws-ec2`, and `proxmox` platforms ship as the opt-in `azure`, `aws`, and `proxmox`
+system plugins (see [System Plugins](#system-plugins)) and are not-ready until enabled. Every site
+registers on every host and reports not-ready when this host lacks what it needs (wsl2 is
+Windows-only; a local Lima site needs `limactl`; a platform may simply not be installed, or its
+plugin not enabled): a not-ready site still lists and describes, using it is an error naming the
+requirement, and `agw doctor` shows each platform's and site's state with the reason. Run
 `agw resource sample vm-site` for commented, ready-to-edit examples (an Azure site, a remote-Lima
 site with a `vm_host` key). The former `agw vm-host` registry is gone: a remote Lima host is now
 just a vm-site.
 
 > **Note on WSL2:** WSL2 distros share the Windows workstation's lifecycle. They idle-shut after
 > ~60s of no `wsl.exe` activity (`vmIdleTimeout` in `.wslconfig`) and do not survive workstation
-> shutdown or sleep. agentworks holds a `wsl.exe` keepalive for the duration of each VM-touching
+> shutdown or sleep. Agentworks holds a `wsl.exe` keepalive for the duration of each VM-touching
 > command, so individual `agw` operations work cleanly, but agents and sessions on WSL2 are not
 > suitable for unattended background workflows. Use a site on a different platform that provides
 > true long-lived VMs (e.g. Lima, Azure, Proxmox, etc.) if you need a VM that survives independent
@@ -213,7 +214,7 @@ behavior (packages, install commands, etc.) is driven by config. Templates carry
 placement is per-host, so it never travels inside a shared template.
 
 The first interactive `vm create` asks once for an optional **system slug** (3-20 chars, lowercase
-alphanumeric plus dash, no leading/trailing dash): a short identifier for this agentworks
+alphanumeric plus dash, no leading/trailing dash): a short identifier for this Agentworks
 installation, used to namespace VM hostnames and backend-side names (`{slug}-{vm-name}`) so installs
 sharing a cloud account, Proxmox cluster, or Windows/Mac user don't collide. Leave it blank if this
 install is the only one using its sites' backends; a blank answer is remembered and it will never
@@ -225,7 +226,7 @@ Changes to config (new packages, different install commands, etc.) are picked up
 `vm delete` requires `--force` if the VM has workspaces, agents, or sessions. The confirmation
 message shows what will be deleted. Pass `--yes` to skip the prompt.
 
-`agw vm shell` is the agentworks-wrapped entry point; for raw SSH (VS Code Remote-SSH, `scp`, etc.),
+`agw vm shell` is the Agentworks-wrapped entry point; for raw SSH (VS Code Remote-SSH, `scp`, etc.),
 use the `awvm--<vm>` alias documented under [Direct SSH aliases](#direct-ssh-aliases).
 
 `vm shell` and `vm exec` both accept `--workspace <ws>` to root the admin session in a workspace
@@ -235,7 +236,7 @@ into the workspace; the exec variant runs the command from the workspace directo
 lives on a different VM is rejected with a `ValidationError` before any SSH work.
 
 In both exec commands the `--` separator is only required when the remote command's first token
-starts with `-` (it stops agentworks from reading the token as its own option); without it, a
+starts with `-` (it stops Agentworks from reading the token as its own option); without it, a
 dash-led first token is rejected with a hint naming the recoveries. Bare commands need no `--`.
 
 Combining `--workspace` with `--platform` works (the shell still `cd`s into the workspace) but the
@@ -333,7 +334,7 @@ with a hint to run `agent grant-workspaces`.
 `agent delete` requires `--force` if the agent has running sessions. Pass `--yes` to skip the
 confirmation prompt.
 
-`agw agent shell` / `agw agent exec` are agentworks-wrapped entry points; for raw SSH access to an
+`agw agent shell` / `agw agent exec` are Agentworks-wrapped entry points; for raw SSH access to an
 agent (e.g. from VS Code Remote-SSH or `scp`), use the `awagent--<agent>` alias documented under
 [Direct SSH aliases](#direct-ssh-aliases).
 
@@ -549,7 +550,7 @@ regenerated whenever sessions change. The `agw workspace console` command that a
 removed (superseded by named consoles); the config remains usable directly on the VM via
 `tmuxinator start ws-<name>-console` (e.g. inside VS Code's integrated terminal).
 
-#### VM Console (deprecated)
+#### VM Console (Deprecated)
 
 `vm console` creates or attaches to the `vm-console` session, which spans all sessions on the VM.
 Built dynamically (not via tmuxinator). Superseded by named consoles, which let you curate which
@@ -988,17 +989,17 @@ Agentworks ships some vendor- and tool-specific capabilities (VM platforms, sess
 git-credential providers, secret backends) as **system plugins**: separable bundles that are
 installed but off by default. The shipped build installs `azure` (the `azure-vm` VM platform, the
 `azdo` git-credential provider, and the `az-cli` install-command), `proxmox` (the `proxmox` VM
-platform), `onepassword` (the `onepassword` secret backend), `claude` (the `claude-code` session
-harness and the `claude` CLI install-command), and `codex` (the `codex` session harness and the
-`codex` CLI install-command). (This is a different sense of "plugin" from
-[Claude Code Plugins](#claude-code-plugins) below, which installs marketplace plugins into Claude
-Code itself.)
+platform), `aws` (the `aws-ec2` VM platform), `onepassword` (the `onepassword` secret backend),
+`claude` (the `claude-code` session harness and the `claude` CLI install-command), and `codex` (the
+`codex` session harness and the `codex` CLI install-command). (This is a different sense of "plugin"
+from [Claude Code Plugins](#claude-code-plugins) below, which installs marketplace plugins into
+Claude Code itself.)
 
 Opt in by name in `config.toml`:
 
 ```toml
 [plugins]
-system = ["azure", "proxmox", "onepassword", "claude", "codex"]   # only the ones you use
+system = ["azure", "aws", "proxmox", "onepassword", "claude", "codex"]   # only the ones you use
 ```
 
 A resource that references a not-enabled plugin's contribution (an `azure-vm` vm-site, a

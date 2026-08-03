@@ -97,8 +97,9 @@ class VMPlatform(Capability):
     ``stop``, ``delete``) must land in the same place run twice as run
     once (``reinit`` re-applies everything and failed commands are
     retried). ``create`` is deliberately unflagged: it is one-shot per
-    VM, and its collision check makes a re-run a loud error rather than
-    a silent second resource.
+    VM. A platform must collision-check its intended backend name and
+    either fail loudly or select and persist a different collision-free
+    name, never target or replace the existing resource.
     """
 
     owner_kind: ClassVar[str] = "vm-site"
@@ -183,10 +184,12 @@ class VMPlatform(Capability):
 
         - Construct a backend-side name, using ``request.system_slug``
           as the namespacing token when set (else ``request.vm_name``).
-        - Pre-flight collision check: raise ``StateError`` with
-          clear guidance when a resource with the intended name already
-          exists (all five in-tree platforms; soft-name backends may
-          auto-suffix instead).
+        - Pre-flight collision check: when a resource with the intended
+          name already exists, either raise ``StateError`` with clear
+          guidance (all five in-tree platforms) or choose a different,
+          collision-free name. A platform that chooses a name must persist
+          the exact backend identifier in ``platform_metadata`` so every
+          later operation targets the created resource.
         - Create the resource(s).
         - Roll back partial backend state before letting a failure OR
           an operator interrupt (``KeyboardInterrupt``) propagate: the

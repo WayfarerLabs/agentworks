@@ -1,9 +1,125 @@
-# Developing a VM platform
+# VM Platforms
 
-> Practical guidance for authors of `vm-platform` capabilities. This is the platform-kind companion
-> to the capability contract in [`../README.md`](../README.md): that doc defines the lifecycle every
-> capability obeys (`dependencies` / `validate`, preflight, runup, ops); this one covers what is
-> specific to running VMs, plus the gotchas that have already bitten real platforms.
+> The detailed companion to the capability overview in [`../README.md`](../README.md), focused on
+> the `vm-platform` kind. This guide covers the available platforms, the contract each
+> implementation must honor, and the lifecycle, security, and resource-management patterns behind
+> the shared interface.
+
+## What Is a VM Platform?
+
+A VM platform is a backend that provisions and manages virtual machines (VMs) for Agentworks. It
+abstracts the underlying infrastructure, allowing operators to create and manage VMs on different
+environments without changing the way they interact with Agentworks. The platform handles the
+creation, starting, stopping, and deletion of VMs, as well as providing a transport for executing
+commands on the VMs. On the full-control cloud platforms it also owns the VM's network exposure,
+locking it down by default and opening access only in a controlled, scoped way; on operator-managed
+hosts the existing perimeter stays authoritative and the platform does not touch it (see Security
+Posture below).
+
+### Relationship to VM Sites
+
+VM platforms represent general capabilities. VM sites, declared as YAML manifests, bind a platform
+to a specific configuration. The exact configuration surface depends on the platform, but generally
+includes location, credentials, and other platform-specific settings.
+
+## Available Platforms
+
+Five platforms ship today. This list can change, so
+`agw resource list --kind vm-platform --include-disabled` is the definitive set on any given
+install.
+
+- **`lima`** (built in) runs fast local VMs on the operator's machine (commonly macOS, but any host
+  Lima supports). It can also connect to a remote Linux host over SSH and drive `limactl` there,
+  creating and managing Lima VMs on infrastructure the operator administers.
+- **`wsl2`** (built in) leverages the Windows Subsystem for Linux 2 to run Agentworks VMs on Windows
+  hosts. It is a local platform that does not require external infrastructure and is available only
+  on Windows hosts with WSL2 installed.
+- **`proxmox`** (via the `proxmox` system plugin) runs VMs on a Proxmox hypervisor, a popular
+  open-source virtualization platform. It is suitable for operators who want agent VMs on Proxmox
+  infrastructure they administer.
+- **`azure-vm`** (via the `azure` system plugin) runs VMs on the Azure Virtual Machines service,
+  placing the workload on managed cloud infrastructure in an operator-selected subscription,
+  resource group, and region.
+- **`aws-ec2`** (via the `aws` system plugin) runs VMs on Amazon EC2 in an operator-selected region
+  and optional subnet.
+
+Per the Agentworks model, the choice of platform largely disappears once a VM is up and running. All
+VMs run the same base OS (Debian Bookworm) and are accessible via SSH over Tailscale.
+
+## Security Posture
+
+On the full-control cloud platforms (`azure-vm` and `aws-ec2`), Agentworks provisions not just the
+VM but its whole network exposure surface, and it locks that surface down by default. The baseline
+is no standing inbound access at all: a freshly provisioned cloud VM has nothing open to the
+internet. When Agentworks genuinely needs to reach the VM (to bring it up, or to open a shell for
+the operator), it opens a narrowly scoped hole for the workstation's detected public IPv4 address
+(as a `/32`) plus any configured `operator.ssh_allow_cidrs`. The hole exists only for that operation
+and closes as soon as the work is done; this scoped, ephemeral behavior is the cloud-platform
+default.
+
+On platforms where the host is not Agentworks' to control (`proxmox` and remote Lima on
+operator-administered hosts, or a local `lima` / `wsl2` VM on the operator's machine), the existing
+perimeter stays authoritative and Agentworks does not touch it. The mechanism behind both cases is
+described below.
+
+## VM Platform Obligations
+
+A vm-platform stands up a machine and hands Agentworks an administrative foothold on it. It:
+
+- **MUST** provision a VM running the standard base operating system, Debian Bookworm, at the
+  operator-configured site. (An externally administered backend that clones an operator-supplied
+  template inherits this from the template today; that deviation is being closed under
+  [#368](https://github.com/WayfarerLabs/agentworks/issues/368).)
+- **MUST** create the admin user with the operator-configured name, holding full passwordless `sudo`
+  over the machine, reachable by the operator's installed SSH public key and never by password.
+- **MUST** provide a transport that runs arbitrary commands as the admin user: the single foothold
+  every later provisioning step is driven through.
+- **MUST** join the VM to the operator's Tailscale tailnet when given an auth key (or otherwise make
+  it reachable), giving it a stable address for the life of the VM.
+- **MUST** provision the VM to the requested cpus, memory, and disk, rounding up to the nearest
+  available shape where the backend sells only fixed shapes. A backend that structurally cannot
+  honor a per-VM shape (WSL2, whose limits are global) is the exception, and it **MUST** at least
+  warn that the requested resources are being ignored
+  ([#369](https://github.com/WayfarerLabs/agentworks/issues/369)).
+- **MUST** support the lifecycle Agentworks drives, create, start, stop, and delete, and report the
+  VM's status; `create` **MUST** be collision-checked and either fail loudly on a name that already
+  exists or pick and persist a new, collision-free backend name, never impacting an existing VM
+  outside its control.
+- **MUST** provide a stop that preserves all system state for a later resume. Snapshotting and
+  restoring running state is preferable, but a platform **MAY** implement stop as a full OS
+  shutdown/restart, since Agentworks is built to be robust against restarts and the loss of running
+  processes.
+- **SHOULD** take reasonable steps to reduce the cost and resource usage of a stopped VM, releasing
+  billable or heavy resources (compute, memory) for the duration of the stop where the backend
+  allows it. Some standing costs are over that line and accepted: Azure keeps its permanent public
+  IP attached (and billing) while stopped, because detaching it would incur unnecessary complexity.
+- **MUST** roll back its own partial backend state before letting a failure or an operator interrupt
+  propagate out of `create`, and **MUST NOT** report a `delete` as successful unless the backend VM
+  is actually gone. A delete that cannot remove the VM **MUST** raise so Agentworks retains its row
+  for a retry rather than orphaning a backend resource.
+- **MUST NOT** leave billed or orphaned backend resources behind after a delete or a rolled-back
+  create: every resource it creates is scoped to exactly one VM and shares that VM's lifecycle.
+- **MUST NOT** touch, reconfigure, or tear down anything it did not create for this VM, whether
+  another VM's resources, another site's state, or the operator's shared infrastructure (a resource
+  group, VPC, subnet, or bridge), which it reads and existence-checks but never creates or deletes.
+- On a full-control cloud host it **MUST** default to zero standing inbound exposure, opening only a
+  narrowly scoped, ephemeral hole for the one operation that needs it and closing it after, failing
+  closed rather than open; on an externally administered or local host it **MUST NOT** manage the
+  host's or network's security at all.
+- **MUST NOT** share host filesystem paths into the guest by default (a VM is self-contained), and
+  **MUST NOT** log or persist resolved secret values (its metadata carries only backend
+  identifiers).
+
+Notably, VM platforms do not create agent users, workspaces, groups, sessions, or inject secrets.
+Those are managed by the Agentworks core system through platform-agnostic mechanisms.
+
+## Technical Overview
+
+Everything above this line is for operators. Everything below it is for engineers implementing or
+extending a VM platform: the platform surface each backend implements, how an op gets its
+dependencies, the exposure and credential machinery on the cloud platforms, the provisioning
+timeline, and implementation pitfalls. If you are selecting or configuring a platform rather than
+writing one, you can stop here.
 
 Five platforms ship today and are the working references throughout this guide: `lima` (`lima.py`)
 and `wsl2` (`wsl2.py`) as core built-ins, plus `proxmox`, `azure-vm`, and `aws-ec2`, which ship in
@@ -14,70 +130,98 @@ to a plugin-shipped platform exactly as to a core one; each plugin re-seats its 
 `VM_PLATFORM_REGISTRY` at import, so authoring a platform is the same either way. When a rule below
 has a concrete example, it names the platform and file that demonstrates it.
 
-## What a VM platform is
+### Technical Definition of a VM Platform
 
-A VM platform is the code that runs VMs on one backend kind. Each subclasses `VMPlatform`
-(`base.py`), registers in `VM_PLATFORM_REGISTRY` (`__init__.py`), and publishes as a read-only
-`vm-platform` capability resource. Operators never invoke a platform directly: a declarable
-`vm-site` binds a platform to a config blob (`spec.platform` + `spec.platform_config`), and all
-invocation goes through site resolution (`agentworks.vms.sites`). ADR 0016 records the
+A VM platform is the code capable of running VMs on a specific VM provider. Each subclasses
+`VMPlatform` (`base.py`), registers in `VM_PLATFORM_REGISTRY` (`__init__.py`), and publishes as a
+read-only `vm-platform` capability resource. Operators never invoke a platform directly: a
+declarable `vm-site` binds a platform to a config blob (`spec.platform` + `spec.platform_config`),
+and all invocation goes through site resolution (`agentworks.vms.sites`). ADR 0016 records the
 capability/declarable split; ADR 0019 records the orchestration layer that now drives the lifecycle
 (below).
 
-## The platform surface
+### Host Control and Platform Obligations
 
-The authoritative contract is `base.py`. Implement the ops, override only the hooks your backend
-needs, and fill in the class-level contract methods the site decoder and DB migration consume.
+Platform patterns depend on who controls the machine and its surrounding network. The exposure model
+below (baseline deny, ephemeral scoped allows) is a category-1 obligation, not a universal one;
+replicating it in another category would cross the platform's ownership boundary.
+
+1. **Full-control cloud platforms** (`azure-vm` and `aws-ec2` today). Agentworks provisions the host
+   AND its network exposure surface (Azure: public IP, NSG, VNet, NIC; EC2: public IP, security
+   group, ENI, launched into an existing subnet), so it owns the security posture end to end. The
+   locked-down-by-default exposure model below applies in full, as do the rollback obligations for
+   the remotely billed resources a failed create must not leak.
+2. **Externally administered hosts** (`proxmox`; remote Lima via a site's `vm_host`). The hypervisor
+   belongs to the operator's infrastructure. Agentworks does not control host or network security
+   there and must not try to: no firewall management, no exposure toggling. The operator's own
+   perimeter is authoritative (Proxmox VMs get `ipconfig0: ip=dhcp` on the operator's bridge and the
+   platform touches nothing else network-side). Agentworks' obligations shrink to the artifacts it
+   created (the cloned VM, the Lima instance) and their cleanup. Do not cargo-cult the cloud
+   exposure machinery onto a platform in this category; it would be overreach.
+3. **Local platforms** (local Lima, `wsl2`). The host is the operator's own machine and exposure is
+   inherently host-local (Lima forwards guest SSH to a local port, `localPort: 0` in
+   `LIMA_TEMPLATE`; WSL2 traffic rides `wsl.exe` into a NAT'd virtual network). There is nothing to
+   arm or lift, which is why `secure_failed_vm` and `probe_failure_hint` correctly stay at their
+   defaults here.
+
+### The Platform Surface
+
+The authoritative contract is `base.py`. An implementation supplies the ops, overrides only the
+hooks its backend needs, and fills in the class-level contract methods consumed by the site decoder
+and DB migration.
 
 **Ops** (the mutation surface). Every op except `display_backend_name` takes the op-start
 `RunContext` after `vm` (see the next section for what that is and how to read from it):
 
 - `create(request, ctx) -> ProvisionResult` is deliberately **not** `@idempotent_op`: it runs a
-  pre-flight collision check and raises `StateError` on a name that already exists, so a re-run is a
-  loud error, never a silent second VM.
+  pre-flight collision check, then either raises `StateError` (all five in-tree platforms) or, for a
+  soft-name backend, selects a different collision-free backend name and records that identifier in
+  `platform_metadata`. A re-run must never target or replace an existing VM.
 - `start(vm, ctx)`, `stop(vm, ctx)`, `delete(vm, ctx)` are flagged `@idempotent_op` and must land in
   the same place run twice as run once. The marker is inherited through the MRO, so an override does
   not restate the decorator. `reinit` re-applies everything and failed commands are retried, so the
-  guarantee has to be real: `start`/`stop` on Lima, WSL2, and Proxmox check `status()` first and
-  short-circuit, because the backend verb is not reliably a no-op on an already-in-state instance;
-  Azure and EC2 need no guard because their SDK start/stop calls are themselves idempotent on an
-  already-in-state instance; `delete` treats already-gone as success on all five. `delete` is NOT
-  unconditionally best-effort though: a delete that cannot remove the backend VM must raise a typed
-  error (the manager deletes the DB row only on success, so a swallowed backend failure orphans the
-  VM; #329). Azure enforces this with a post-teardown existence probe (`verify_vm_deleted`); only
-  auxiliary-resource stragglers (its NIC/IP/NSG/disk sweep) stay warn-and-continue. Lima, WSL2,
-  Proxmox, and EC2 do not yet verify; their teardown verbs remain fire-and-forget (tracked in #356).
+  guarantee has to be real: `start`/`stop` on Lima and Proxmox and `stop` on WSL2 check `status()`
+  first and short-circuit, because the backend verb is not reliably a no-op on an already-in-state
+  instance; WSL2's `start` needs no guard because running a command boots a stopped distro and is a
+  plain exec on a running one, and Azure and EC2 need no guard because their SDK start/stop calls
+  are themselves idempotent on an already-in-state instance; `delete` treats already-gone as success
+  on all five. `delete` is NOT unconditionally best-effort though: a delete that cannot remove the
+  backend VM must raise a typed error (the manager deletes the DB row only on success, so a
+  swallowed backend failure orphans the VM; #329). Azure enforces this with a post-teardown
+  existence probe (`verify_vm_deleted`); only auxiliary-resource stragglers (its NIC/IP/NSG/disk
+  sweep) stay warn-and-continue. Lima, WSL2, Proxmox, and EC2 do not yet verify; their teardown
+  verbs remain fire-and-forget (tracked in #356).
 - `status(vm, ctx) -> VMStatus` is a read-only query.
 - `display_backend_name(vm) -> str` is pure display and takes no `ctx`.
 
-**Transport and lifecycle hooks** (sensible defaults on `VMPlatform`; override only what your
-backend needs). All are entered by callers that gate first, so on entry the VM is running or was
-just started. The three transport hooks take `ctx: RunContext` for the same reason the ops do:
-opening a route to a cloud VM is a backend call, so a platform reads any credential it needs from
-`ctx.secret(name)` here exactly as in an op. Lima and WSL2 accept and ignore it (their transports
-are local); Azure and EC2 use it:
+**Transport and lifecycle hooks** (sensible defaults on `VMPlatform`; implementations override only
+what their backends need). All are entered by callers that gate first, so on entry the VM is running
+or was just started. The three transport hooks take `ctx: RunContext` for the same reason the ops
+do: opening a route to a cloud VM is a backend call, so a platform reads any credential it needs
+from `ctx.secret(name)` here exactly as in an op. Lima and WSL2 accept and ignore it (their
+transports are local); Azure and EC2 use it:
 
 - `native_transport(vm, ctx, *, config=None) -> Transport | None` (default `None`). The
   `agentworks.transports.native_transport` factory wraps the call in `transient_route`, probes
   reachability with an `echo ok` retry loop, and raises a typed `StateError` (using
   `no_native_transport_hint`) when a platform returns `None`. Lima returns a `limactl shell`
-  transport, Azure and EC2 an `SSHTransport` against the VM's permanent public IP (Azure reads it
-  live off the NIC; EC2 reads it live off a fresh `describe_instances`, because EC2 reassigns the
-  auto-assigned IP across stop/start, so it is never cached), WSL2 a `wsl.exe`-backed transport.
-  Proxmox deliberately returns the default `None` and sets `no_native_transport_hint` to point the
-  operator at the Proxmox web-UI serial console, because its guest-agent exec is one-shot and cannot
-  host an interactive shell.
+  transport, Azure and EC2 an `SSHTransport` against the VM's current public IP (Azure reads its
+  persistent address live off the NIC; EC2 reads its address live off a fresh `describe_instances`,
+  because EC2 reassigns the auto-assigned IP across stop/start, so it is never cached), WSL2 a
+  `wsl.exe`-backed transport. Proxmox deliberately returns the default `None` and sets
+  `no_native_transport_hint` to point the operator at the Proxmox web-UI serial console, because its
+  guest-agent exec is one-shot and cannot host an interactive shell.
 - `transient_route(vm, ctx, *, config=None) -> context manager` (default `nullcontext()`). Azure
   opens a scoped SSH route on enter (heals a missing public IP, converges the NSG onto the
   baseline-deny model, pokes this operation's own ephemeral allow rule scoped to the operator's
   egress prefixes) and deletes exactly that rule in a `finally`, bounding the exposure window to the
   transport's lifetime; concurrent native ops on one VM each own an independent rule, so they never
-  cross-remove. EC2 does the same with a security-group ingress rule and needs no public-IP heal
-  (its IP is permanent), but its rule model forces a divergence: an EC2 ingress rule's identity is
-  its `(protocol, port, cidr)` tuple, not a name, so two concurrent routes from one operator egress
-  share ONE rule rather than owning independent ones. The poke is therefore idempotent (tolerate
-  `InvalidPermission.Duplicate`) and the per-op remove tolerant (tolerate
-  `InvalidPermission.NotFound`), failing CLOSED (the deny baseline), never open; see
+  cross-remove. EC2 does the same with a security-group ingress rule and needs no public-IP heal (a
+  running instance receives an address automatically), but its rule model forces a divergence: an
+  EC2 ingress rule's identity is its `(protocol, port, cidr)` tuple, not a name, so two concurrent
+  routes from one operator egress share ONE rule rather than owning independent ones. The poke is
+  therefore idempotent (tolerate `InvalidPermission.Duplicate`) and the per-op remove tolerant
+  (tolerate `InvalidPermission.NotFound`), failing CLOSED (the deny baseline), never open; see
   `plugins/aws/network.py`. Those calls read the credential from `ctx`, so a credentials-configured
   site authenticates as itself with no ambient fallback.
 - `vm_active(vm, *, config=None) -> context manager` (default `nullcontext()`). WSL2 returns a
@@ -148,7 +292,7 @@ also right: purely internal translation stays inside the platform. Azure's VM-si
 `platform_config.vm_sizes` override, per ADR 0018) lives entirely in `plugins/azure/platform.py` and
 adds nothing to `ProvisionRequest`.
 
-## How an op gets its dependencies: `RunContext`
+### How an Op Gets Its Dependencies
 
 This is the part the orchestration-layer refactor (ADR 0019) changed most, and the part a platform
 author most needs to get right.
@@ -182,7 +326,7 @@ row in the Secrets group.
 client (`self._api_cached`), never the token. Any future platform with an API token (a hypothetical
 GCP or AWS backend) should follow that shape.
 
-## Credentials on a cloud platform: the reference shape
+### Credentials on a Cloud Platform: The Reference Shape
 
 Azure is the worked example, and a new cloud platform should copy it rather than invent a variant.
 The `aws-ec2` platform (`plugins/aws/platform.py`) is the first copy of it: its optional
@@ -236,12 +380,12 @@ unprobed interactive-browser credential and raises nothing. The platform's `runu
 explicit path's error lands on the provisioning timeline, ahead of `create`, so a wrong credential
 aborts `vm create` with nothing realized.
 
-Two placement rules go with it. Keep the client construction OUTSIDE the `try` that wraps SDK calls
-in your platform error type: a typed credential failure is already the answer, and re-wrapping it
-strips the hint (worse, a `status()` that degrades to UNKNOWN on any exception would swallow it
-entirely). But keep the credential's own construction INSIDE the try that produces that typed error,
-alongside its probe: SDKs validate constructor arguments eagerly, and a resolved secret that comes
-back empty is reachable in a way config validation cannot catch.
+Two placement rules go with it. Client construction stays OUTSIDE the `try` that wraps SDK calls in
+the platform error type: a typed credential failure is already the answer, and re-wrapping it strips
+the hint (worse, a `status()` that degrades to UNKNOWN on any exception would swallow it entirely).
+But keep the credential's own construction INSIDE the try that produces that typed error, alongside
+its probe: SDKs validate constructor arguments eagerly, and a resolved secret that comes back empty
+is reachable in a way config validation cannot catch.
 
 Read `_parse_service_principal`, `_build_service_principal_credential`, and `_get_credential`
 together: that trio is the whole pattern. On EC2 the analogous trio is `_parse_credentials`,
@@ -256,15 +400,22 @@ a rejection typed rather than degrading to UNKNOWN, so a misconfigured site neve
 in `vm describe` (the exact #303 hole). Second, an `assume_role_arn` builds AUTO-REFRESHING
 credentials (botocore's `AssumeRoleCredentialFetcher` + `DeferredRefreshableCredentials`) rather
 than a one-shot assume, so a long op cannot fail with `ExpiredToken` from a frozen cache. See
-`test_platform_runup.py` and `test_aws_ec2_ops.py` for the halves.
+`test_platform_runup.py` and `test_aws_ec2_ops.py` (directly under `cli/tests/`) for the halves.
 
-## Exposure on a cloud platform: baseline deny, ephemeral scoped allows
+### Exposure on a Cloud Platform: Baseline Deny, Ephemeral Scoped Allows
 
-Azure and EC2 share the model: the VM keeps a permanent public IP for its whole lifetime, and all
-inbound exposure is controlled by firewall rules, not by attaching and detaching the IP. The
-baseline is deny-all-inbound; SSH happens only through ephemeral rules on TCP/22 scoped to the
-operator's detected egress prefix (plus `operator.ssh_allow_cidrs`), opened for the bootstrap window
-and each native-transport session and closed after. The shared operator-egress detection and the
+This is the category-1 obligation from the host-control categories above: a full-control cloud
+platform owns the exposure surface, so it owns keeping it shut. An externally administered or local
+platform has no business here and does none of it.
+
+Azure and EC2 share the firewall model, but not the address lifetime. Azure keeps a persistent
+public IP for the VM's whole lifetime. EC2 receives an auto-assigned public IP while running,
+releases it on stop, and receives a different one on start, so Agentworks always reads it live. In
+both cases, inbound exposure is controlled by firewall rules rather than using address attachment as
+an access switch. The baseline is deny-all-inbound; SSH happens only through ephemeral rules on
+TCP/22 scoped to the operator's detected public IPv4 address as a `/32`, plus any addresses or CIDR
+ranges in `operator.ssh_allow_cidrs`. The rules open for the bootstrap window and each
+native-transport session and close afterward. The shared operator-egress detection and the
 `ssh_allow_cidrs` fold live in `capabilities/vm_platform/ssh_exposure.py` so both platforms use one
 detector and one policy; the per-platform rule mechanics stay in each plugin's `network.py`.
 
@@ -281,7 +432,41 @@ EC2-native divergence (tuple-identity rules, so concurrent same-egress routes sh
 poke/remove are idempotent/tolerant and fail closed) is covered under `transient_route` above and in
 `network.py`.
 
-## The provisioning timeline: create-time bootstrap vs. initialization
+### Resources on a Cloud Platform: Per-VM Lifecycle, Shared State Stays Ambient
+
+One rule governs what a cloud platform creates: every Agentworks-managed resource should be scoped
+to exactly one VM and share that VM's lifecycle. It is created during that VM's `create` and torn
+down when the VM is deleted or when create rolls back, and nothing Agentworks makes outlives the VM
+it belongs to. The shipped platforms hold to this. Azure gives each VM its own NIC, public IP, NSG,
+OS disk, and even its own VNet (`{name}-vnet`, its own `10.0.0.0/16`), and the delete and rollback
+sweep removes exactly that set; EC2 gives each VM its own security group, instance, and ENI. Per-VM
+scoping is what makes teardown and rollback total: there is no shared thing a delete could
+half-break.
+
+Shared infrastructure gets the opposite treatment: assume it, do not manage it. The resource group a
+VNet lives in, the VPC and subnet an instance launches into, are the operator's to provision, and
+the platform only READS them. Azure requires a `resource_group` in config and its `runup` checks
+that the group EXISTS, failing with a hint to create it rather than creating it silently; EC2 takes
+an optional `subnet_id` (falling back to the account's default subnet) and existence-checks it the
+same way, deriving the VPC from it. Neither creates or deletes shared infrastructure, because
+deleting one VM must never risk something another VM, or the operator, still depends on.
+
+If a platform genuinely must manage a shared resource itself (none of the shipped ones do; a future
+backend might), two rules keep it safe:
+
+1. **Agentworks owns it outright, and it is marked as such.** It carries the same `owner=agentworks`
+   tag (or the backend's equivalent) that the per-VM resources carry, so it is unambiguously
+   Agentworks-created and a future `doctor` sweep can find it. Never half-adopt a resource the
+   operator also manages.
+2. **It is re-ensured idempotently on every create, never created-once-and-remembered.** Every
+   `vm create` runs the same get-or-create step, so a fresh account, a manually deleted shared
+   resource, or a half-provisioned environment all converge on the next create. It is the same
+   convergence shape Azure already runs for the NSG baseline on each transient route, just hoisted
+   to a shared resource. Do NOT tear such a resource down on a single VM delete (another VM likely
+   needs it); shared-resource teardown is an explicit operator action, not part of the per-VM
+   lifecycle.
+
+### The Provisioning Timeline: Create-Time Bootstrap vs Initialization
 
 Standing up a VM splits into two stages with different owners and, crucially, different re-run
 behavior. (These are a provisioning-timeline concept, orthogonal to the capability lifecycle stages
@@ -307,7 +492,7 @@ create-time bootstrap; when `None`, every platform defers the join to initializa
 
 The seam between the two stages is the source of the most important gotcha below.
 
-## `reinit` reaches existing VMs; create-time provisioning does not
+### What `reinit` Reaches and What It Does Not
 
 Because create-time bootstrap is baked into the backend's create mechanism, **a change to it reaches
 new VMs only.** `agw vm reinit` (`manager.reinit_vm`) re-runs initialization (`run_initialization`
@@ -328,19 +513,20 @@ home exactly once by `bootstrap_script.py` at create, but written to `/etc/skel`
 by `initializer._write_skel_seeds` so future `useradd -m` inherits it. Same content, two writers,
 two different re-run behaviors, on purpose.
 
-If you find yourself wanting a platform-specific fix to also reach existing VMs via `reinit`, that
-is a signal the initializer may need a platform hook. None exists today; raise it rather than
-smearing platform-specific logic into the shared initialization path.
+A platform-specific fix that must also reach existing VMs via `reinit` signals that the initializer
+may need a platform hook. None exists today; adding the hook is preferable to placing
+platform-specific logic in the shared initialization path.
 
-## Things to keep in mind
+### Things to Keep in Mind
 
-### The backend is not a blank slate: watch what it injects
+#### The Backend Is Not a Blank Slate: Watch What It Injects
 
 The single biggest surprise with a new platform is that the backend creates its own users, groups,
-ID ranges, mounts, and network config before agentworks touches the VM, and those can collide with
-assumptions agentworks makes. Do not assume a clean Debian image with nothing but your bootstrap on
-it. When bringing up a platform, inventory what the backend injects and check it against what
-agentworks needs (notably: agent-user creation allocates a subordinate uid/gid block per agent).
+ID ranges, mounts, and network config before Agentworks touches the VM, and those can collide with
+assumptions Agentworks makes. A platform cannot assume a clean Debian image containing only its
+bootstrap changes. Initial platform development should inventory what the backend injects and check
+it against what Agentworks needs (notably: agent-user creation allocates a subordinate uid/gid block
+per agent).
 
 **Worked example (Lima `subuid` exhaustion).** Lima creates a guest user matching the host username
 and, in its `rootless-base` boot script, grants that user a **1 GiB** (`1073741824`) subordinate
@@ -352,13 +538,13 @@ grep -qw "${LIMA_CIDATA_USER}" "$f" || echo "${LIMA_CIDATA_USER}:${subuid_begin}
 ```
 
 That single entry starts at `524288` and runs past `login.defs`' `SUB_UID_MAX` (`600100000`),
-swallowing essentially the entire allocatable space. agentworks creates each agent as its own Linux
+swallowing essentially the entire allocatable space. Agentworks creates each agent as its own Linux
 user with a plain `useradd`, which auto-allocates a `65536` subordinate block; once Lima's giant
 range has eaten the space, `useradd` can no longer find a free block and **agent creation fails**.
 The symptom is far from the cause: a VM that provisioned fine simply stops being able to add agents
 after a handful.
 
-The fix agentworks ships caps any oversized range back to the standard `65536` in `lima.py`'s create
+The fix Agentworks ships caps any oversized range back to the standard `65536` in `lima.py`'s create
 provision block (see the `subuid`-cap step in `LIMA_TEMPLATE`). The general lessons, which apply to
 any future platform:
 
@@ -366,43 +552,42 @@ any future platform:
   `cat /etc/passwd` on a freshly created VM with no agents yet is a five-minute check that would
   have caught this at design time.
 - A working first VM does not prove the platform is correct. This bug only appears after N agents.
-- When you correct backend state, understand the backend's own re-run behavior so your fix sticks.
+- Corrections to backend state must account for the backend's own re-run behavior so the fix sticks.
   Lima's `grep -qw <user>` guard means a corrected entry is not re-added on reboot; a different
-  backend might stomp your correction on every start, which changes where the fix has to live.
+  backend might overwrite the correction on every start, which changes where the fix has to live.
 
-### A create-time step that needs a reboot: the restart sentinel
+#### A Create-Time Step That Needs a Reboot: The Restart Sentinel
 
 Some bootstrap steps only take effect after a reboot, and rebooting mid-provision is unreliable.
 Currently only the Apple-vz SVE grub mask needs this. The convention (`bootstrap_script.py`'s
 `REBOOT_SENTINEL_PATH`) is that such a step drops a sentinel file on tmpfs; the platform's
 `create()` probes for it after provisioning and restarts the instance once if present (Lima does
 this). The probe stays why-agnostic: the host restarts on the sentinel without needing to know which
-step set it, and the sentinel clears itself on the restart. If your backend has a step that only
-lands after a reboot, reuse this convention rather than inventing a second one.
+step set it, and the sentinel clears itself on the restart. A backend step that only lands after a
+reboot should reuse this convention rather than introduce a second one.
 
-### No host file sharing by default
+#### No Host File Sharing by Default
 
-agentworks VMs are self-contained. Do not mount host directories into a guest unless there is a
+Agentworks VMs are self-contained. Do not mount host directories into a guest unless there is a
 concrete need: it is an attack surface and a portability trap. Lima defaults to sharing the host
 home; `LIMA_TEMPLATE` sets `mounts: []` explicitly to guarantee none. Hold the same line on any new
 platform, and prefer an explicit "no sharing" over relying on a backend default.
 
-### Your own cleanup on failure or interrupt is not the orchestrator's unwind
+#### Platform Cleanup on Failure or Interrupt Is Not the Orchestrator's Unwind
 
-A platform's `create()` may build several backend resources before one fails. Clean up your own
-partial work in a best-effort sweep and re-raise (Azure's `create()` wraps NIC / IP / NSG / VNet /
-disk creation and calls `cleanup_vm_resources` on any exception). The same obligation covers an
-operator interrupt (`KeyboardInterrupt`) across the whole create span, including any inline
+A platform's `create()` may build several backend resources before one fails. The platform cleans up
+its partial work in a best-effort sweep and re-raises (Azure's `create()` wraps NIC / IP / NSG /
+VNet / disk creation and calls `cleanup_vm_resources` on any exception). The same obligation covers
+an operator interrupt (`KeyboardInterrupt`) across the whole create span, including any inline
 readiness or bootstrap wait: warn with "Ctrl-C again to abandon" guidance, tear down what this
 create made, and re-raise the ORIGINAL interrupt; a second Ctrl-C abandons the cleanup loudly,
 naming the exact manual removal (Azure's `rollback_create_on_interrupt`; Proxmox, Lima, WSL2, and
 EC2 do the same over their single VM / instance / distro). That is distinct from, and composes
 under, the orchestrator's DB-row unwind (ADR 0019's `RealizationLog` / node `teardown`), which rolls
-back the persisted VM row. Keep the two separate in your head: your sweep undoes backend-side
-resources you created inside `create()`; the orchestrator undoes the agentworks-side record on top
-of it.
+back the persisted VM row. The platform's sweep undoes backend-side resources created inside
+`create()`; the orchestrator undoes the Agentworks-side record on top of it.
 
-### Quoting and escaping when you embed scripts
+#### Quoting and Escaping in Embedded Scripts
 
 Platforms embed shell into YAML or cloud-init, sometimes through several layers (Python `.format`,
 YAML block scalar, remote shell). Two traps that have already occurred:
@@ -413,28 +598,30 @@ YAML block scalar, remote shell). Two traps that have already occurred:
   catches brace and indentation mistakes that are otherwise found only at provision time. See
   `cli/tests/vms/test_lima_template.py` for the pattern.
 
-## Adding a new platform
+### Adding a New Platform
 
-1. Subclass `VMPlatform` and implement the ops. Every op except `display_backend_name` takes
-   `ctx: RunContext`, as do the three transport hooks; read declared secrets via `ctx.secret(name)`
-   and never hold a resolver or raw reader on the instance. If your backend has a persistent client,
-   memoize the derived client, not the secret (the Proxmox `_api` pattern). Remember `create` is
-   intentionally not `@idempotent_op`; the idempotent ops must land in-state themselves.
-2. Implement `validate` to check your `platform_config` shape and `dependencies` to return a
-   `ConfigReference` for each secret you read. Declaring a secret in `dependencies` is what
-   authorizes the op to read it later.
-3. Register the class in `VM_PLATFORM_REGISTRY` (`__init__.py`).
-4. Set `unsupported_reason` if the platform cannot run on some hosts (WSL2 off Windows); implement
-   the non-constructing `not_ready(config)` for per-site tool checks (Lima with no `limactl`). Add
-   `legacy_platform_metadata` only if there are pre-migration rows to map.
-5. Override only the transport/lifecycle hooks your backend needs; accept the defaults otherwise.
-6. Reuse `bootstrap_script.py` / `cloud_init.py` for the create-time payload rather than reinventing
-   it.
-7. Add dispatch, idempotency, and (if you embed a template) render tests under `cli/tests/vms/`; see
-   the next section.
-8. Walk the "things to keep in mind" gotchas against your backend before calling it done.
+1. A new implementation subclasses `VMPlatform` and implements the ops. Every op except
+   `display_backend_name` takes `ctx: RunContext`, as do the three transport hooks; declared secrets
+   are read via `ctx.secret(name)`, and the instance never holds a resolver or raw reader. A backend
+   with a persistent client memoizes the derived client, not the secret (the Proxmox `_api`
+   pattern). `create` is intentionally not `@idempotent_op`; the idempotent ops must land in-state
+   themselves.
+2. `validate` checks the `platform_config` shape, and `dependencies` returns a `ConfigReference` for
+   each secret the implementation reads. Declaring a secret in `dependencies` authorizes the op to
+   read it later.
+3. The class is registered in `VM_PLATFORM_REGISTRY` (`__init__.py`).
+4. `unsupported_reason` identifies platforms that cannot run on some hosts (WSL2 off Windows), while
+   the non-constructing `not_ready(config)` handles per-site tool checks (Lima with no `limactl`).
+   `legacy_platform_metadata` is needed only when pre-migration rows must be mapped.
+5. Only the transport and lifecycle hooks required by the backend override their defaults.
+6. `bootstrap_script.py` / `cloud_init.py` supply the create-time payload instead of a
+   platform-specific reinvention.
+7. Dispatch, idempotency, and, where applicable, template-render tests belong under
+   `cli/tests/vms/`; the next section lists the existing references.
+8. The implementation is checked against the preceding platform-development considerations before it
+   is considered complete.
 
-## Testing
+### Testing
 
 The existing tests under `cli/tests/vms/` are the templates to copy from:
 
@@ -454,13 +641,13 @@ The existing tests under `cli/tests/vms/` are the templates to copy from:
   shape handed to the platform, the persisted row, and the orchestrated create/reinit graph
   including the `RealizationLog` unwind and the activation gate.
 - `test_lima_create_flow.py`: create-time provisioning wiring with mocked `limactl` and transport,
-  the pattern for pinning your own create steps without a real VM.
+  the pattern for pinning platform create steps without a real VM.
 - `test_lima_template.py`: `yaml.safe_load` over a rendered template with tripwires for the baked-in
   hardening rules (`mounts: []`, subuid cap present and first).
 
 A new `Transport` subclass belongs under `cli/tests/transports/` alongside the platform.
 
-## Cross-references
+### Cross-References
 
 - [`../README.md`](../README.md): the capability lifecycle contract (read this first).
 - `base.py`: the `VMPlatform` ABC, `ProvisionRequest`, `ProvisionResult`.

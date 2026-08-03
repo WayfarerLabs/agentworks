@@ -4,7 +4,7 @@ This is the second cloud platform, and it copies the azure-vm reference shape
 deliberately (see ``cli/agentworks/capabilities/vm_platform/README.md``): an
 optional ``credentials`` table that names a secret, an instance-type catalog
 with smallest-that-fits selection, and the baseline-deny / ephemeral-scoped-allow
-exposure model azure's redesign established (a permanent public IP; a security
+exposure model azure's redesign established (a security
 group that denies all inbound by default; SSH via ephemeral rules scoped to the
 operator's egress prefixes; ``post_tailscale_ready`` / ``secure_failed_vm`` /
 ``transient_route`` close hooks; create rollback on both failure and operator
