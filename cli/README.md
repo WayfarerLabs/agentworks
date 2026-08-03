@@ -809,9 +809,10 @@ Resource kinds (YAML manifests; the deprecated TOML section is noted for each):
   `service_principal` block to authenticate as a specific service principal instead of with ambient
   credentials, Proxmox API endpoint + token secret, remote-Lima `vm_host`). The `lima-local` and
   `wsl2` sites ship built in (on hosts where their platform can run) and their names are reserved
-- `vm-platform`: read-only capability rows for the VM platforms (`lima`, `wsl2` built in; `azure-vm`
-  and `proxmox` ship as the opt-in `azure` and `proxmox` system plugins, disabled by default, see
-  [System Plugins](#system-plugins)); listed by `agw resource kinds`, never declared
+- `vm-platform`: read-only capability rows for the VM platforms (`lima`, `wsl2` built in;
+  `azure-vm`, `proxmox`, and `aws-ec2` ship as the opt-in `azure`, `proxmox`, and `aws` system
+  plugins, disabled by default, see [System Plugins](#system-plugins)); listed by
+  `agw resource kinds`, never declared
 - `vm-template` (`[vm_templates.*]`): VM resources, apt packages, system install commands, mise, and
   the target `site`
 - `admin-template` (`[admin.config]`) -- admin user shell, dotfiles, git credentials, user install
