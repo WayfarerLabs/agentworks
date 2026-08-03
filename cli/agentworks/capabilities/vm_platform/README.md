@@ -24,20 +24,24 @@ includes location, credentials, and other platform-specific settings.
 
 ## Available Platforms
 
-Five platforms ship today.
+Five platforms ship today. This list can change, so
+`agw resource list --kind vm-platform --include-disabled` is the definitive set on any given
+install.
 
-- **`lima`** runs fast local VMs on the operator's machine (commonly macOS, but any host Lima
-  supports). It can also connect to a remote Linux host over SSH and drive `limactl` there, creating
-  and managing Lima VMs on infrastructure the operator administers.
-- **`wsl2`** leverages the Windows Subsystem for Linux 2 to run Agentworks VMs on Windows hosts. It
-  is a local platform that does not require external infrastructure and is available only on Windows
-  hosts with WSL2 installed.
-- **`proxmox`** runs VMs on a Proxmox hypervisor, which is a popular open-source virtualization
-  platform. It is suitable for operators who want agent VMs on Proxmox infrastructure they
-  administer.
-- **`azure-vm`** runs VMs on the Azure Virtual Machines service, placing the workload on managed
-  cloud infrastructure in an operator-selected subscription, resource group, and region.
-- **`aws-ec2`** runs VMs on Amazon EC2 in an operator-selected region and optional subnet.
+- **`lima`** (built in) runs fast local VMs on the operator's machine (commonly macOS, but any host
+  Lima supports). It can also connect to a remote Linux host over SSH and drive `limactl` there,
+  creating and managing Lima VMs on infrastructure the operator administers.
+- **`wsl2`** (built in) leverages the Windows Subsystem for Linux 2 to run Agentworks VMs on Windows
+  hosts. It is a local platform that does not require external infrastructure and is available only
+  on Windows hosts with WSL2 installed.
+- **`proxmox`** (via the `proxmox` system plugin) runs VMs on a Proxmox hypervisor, a popular
+  open-source virtualization platform. It is suitable for operators who want agent VMs on Proxmox
+  infrastructure they administer.
+- **`azure-vm`** (via the `azure` system plugin) runs VMs on the Azure Virtual Machines service,
+  placing the workload on managed cloud infrastructure in an operator-selected subscription,
+  resource group, and region.
+- **`aws-ec2`** (via the `aws` system plugin) runs VMs on Amazon EC2 in an operator-selected region
+  and optional subnet.
 
 Per the Agentworks model, the choice of platform largely disappears once a VM is up and running. All
 VMs run the same base OS (Debian Bookworm) and are accessible via SSH over Tailscale.

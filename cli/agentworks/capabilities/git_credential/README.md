@@ -1,45 +1,72 @@
 # Git Credential Providers
 
 > The detailed companion to the capability overview in [`../README.md`](../README.md), focused on
-> the `git-credential-provider` kind. That overview covers the contract every capability shares. The
-> operator sections cover the purpose and shipped providers. The sections after the
-> [Technical Overview](#technical-overview) divider cover implementation details and the behavior of
-> the shipped `github` and `azdo` providers.
+> the `git-credential-provider` kind. That overview covers the contract every capability shares.
+> This guide is for both operators and developers: the first part (before the Technical Overview)
+> covers the functional details (what a git credential provider is, the shipped providers, and their
+> obligations) that matter to both audiences, and the part after the divider is developer-focused,
+> covering the implementation contract and the behavior of the shipped `github` and `azdo`
+> providers.
 
-A git credential provider sources and provisions the git credentials an agent needs to clone and
-push against git hosts over https without baking tokens into images or hand-carrying them onto a VM.
-The credential names a secret containing a personal access token (PAT), and Agentworks places that
-token on the VM in the form git expects so ordinary git commands authenticate automatically.
+## What Is a Git Credential Provider?
 
-## The Shipped Providers
+A git credential provider obtains the credential an agent needs to clone and push against ONE git
+host over https, without baking tokens into images or hand-carrying them onto a VM. Most providers
+source a token from an operator-named secret (a personal access token, or PAT); a provider may
+instead mint one, for example by calling the host's API to create a scoped token, rather than
+reading a pre-existing one. Either way, it says how git should present that credential: the store
+line, the username git keys on, and how the credential is selected when several serve the same host.
+That is the whole of what a provider does. It obtains a credential and describes its use; it never
+touches a VM.
 
-Two providers ship today, one per supported host:
+Everything downstream of that is Agentworks, not the provider. Agentworks resolves the named secret,
+materializes the token onto the VM in the form git expects, and wires up git so ordinary git
+commands authenticate automatically. Part of that wiring is a generated helper script that git
+consults for each remote, which is worth disambiguating from a term it collides with: git has its
+own built-in notion of a "credential helper" (the program git runs to fetch credentials, such as
+`credential-store`). An Agentworks git credential provider is a different thing, a config-side
+capability that sources a token and describes its use. Agentworks itself generates and installs the
+actual git credential helper on the VM; the provider never does.
 
-- **`github`** sources a GitHub PAT for `github.com`. It can optionally be scoped to a set of
-  repositories or to a single owner, so several credentials can serve the same host and each
-  repository draws the one meant for it.
-- **`azdo`** sources an Azure DevOps PAT scoped to one Azure DevOps organization. It ships in the
-  opt-in `azure` system plugin and becomes available when that plugin is enabled.
+## Available Providers
 
-## What an Operator Can Rely On
+Two providers ship today, one per supported host. This list can change, so
+`agw resource list --kind git-credential-provider --include-disabled` is the definitive set on any
+given install.
 
-- **Credentials are sourced by secret name, never pasted as values.** A credential points at the
-  _name_ of a secret that holds the token, and the secret backend supplies the value at provisioning
-  time. The interface never asks for a live token in plaintext config, and the same credential
-  definition travels between operators who store their tokens differently.
+- **`github`** (built in) sources a GitHub PAT for `github.com`. It can optionally be scoped to a
+  set of repositories (`repos`) or to a single owner (`owner`), so several credentials can serve the
+  same host and each repository draws the one meant for it. Its token secret is named by the `token`
+  field.
+- **`azdo`** (via the `azure` system plugin) sources an Azure DevOps PAT scoped to one Azure DevOps
+  organization (a required `org`). It becomes available when that plugin is enabled.
+
+Whichever provider a credential names, an operator can rely on two guarantees:
+
+- **A live token is never pasted into config.** Today's providers source their token from a named
+  secret: a credential's `token` field points at the _name_ of a secret that holds the token, and
+  the secret backend supplies the value at provisioning time. A provider may instead mint a token
+  (for example via the host's API) rather than source one, drawing on a named bootstrap secret where
+  it needs credentials to do so. Either way, the interface never asks for a live token in plaintext
+  config, and the same credential definition travels between operators who store their tokens
+  differently.
 - **A bad token is caught early.** At provisioning time Agentworks verifies the token against its
   host before writing anything, so an expired, revoked, or mistyped token surfaces as a clear,
   actionable error up front rather than as a confusing git failure partway through setup. (The check
   is skippable by policy for airgapped setups.)
 
-## What a Git Credential Provider Must Provide
+## Git Credential Provider Obligations
 
-A git-credential-provider sources a git credential for one host, says how git should present it, and
+A git-credential-provider obtains a git credential for one host, says how git should present it, and
 vouches for it. It:
 
-- **MUST** source its credential (a token) for its one git host from an operator-named secret,
-  reading the value only through the framework's resolve pass, and **MUST NOT** hold, cache, log, or
-  persist a token beyond the call that receives it, nor accept a pasted credential.
+- **MUST** obtain a credential (a token) for its one git host, either by sourcing it from an
+  operator-named secret (read only through the framework's resolve pass) or by minting it (for
+  example via the host's API); it **MUST NOT** accept a pasted credential, and **MUST NOT** hold,
+  cache, log, or persist a token beyond the call that produces it.
+- **MUST**, if it mints rather than sources, mint idempotently (check-then-mint: reuse a still-valid
+  existing credential rather than minting a fresh one on every run), and declare any bootstrap
+  secret it needs to mint through the same resolve pass.
 - **MUST** produce what git needs to authenticate as that credential on a VM: the stored entry, the
   username git keys on, and the selection the helper uses.
 - **MUST** validate anything it interpolates into a store URL, a gitconfig header, or the generated

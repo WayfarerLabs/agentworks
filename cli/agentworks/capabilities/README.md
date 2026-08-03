@@ -76,25 +76,30 @@ the tmux session, the user, and the workspace around it. See
 
 ### Secret Backend
 
-The `secret-backend` capability decides where a secret's value comes from when Agentworks needs one,
+The `secret-backend` capability is the source of a secret's value when Agentworks needs one,
 avoiding any need to hand-carry credentials onto a VM. A secret can be read from an `env-var`,
 requested interactively at a `prompt`, pulled from `onepassword`, or sourced from another backend,
 and any secret can map to the backend that matches its storage policy. This lets a single resource
 definition travel between an operator who keeps tokens in a vault and one who supplies them by
 environment variable. A backend resolves a mapping to its value (or reports it absent so the next
 backend in the chain gets a turn), describes the lookup for inspection without ever exposing the
-value, and never logs it; Agentworks handles where each secret applies and injects it there.
+value, and never logs it; Agentworks handles where each secret applies and injects it there. Unlike
+the other kinds, `secret-backend` is a capability in spirit today: it is a real capability kind but
+has not yet moved into `capabilities/` or adopted the shared capability base (tracked in
+[#374](https://github.com/WayfarerLabs/agentworks/issues/374)). See
+[`../secrets/README.md`](../secrets/README.md) for what a backend must provide and the shipped
+options.
 
 ### Git Credential Provider
 
-The `git-credential-provider` capability sources and provisions the git credentials an agent needs
+The `git-credential-provider` capability obtains and provisions the git credentials an agent needs
 to clone and push against git hosts over plain https without baking tokens into images. `github` and
 `azdo` (Azure DevOps) ship today, each knowing how to source a token for its host and get it onto
-the VM in the form git expects. A provider sources its token by secret name (never a pasted value),
-verifies it before it is relied on, and produces exactly what git needs to authenticate on the VM,
-with per-repo scoping so several credentials can serve one host. See
-[`git_credential/README.md`](git_credential/README.md) for what a provider must provide and the
-shipped providers.
+the VM in the form git expects. A provider obtains its token without a pasted value, sourcing it by
+secret name or minting it (for example via the host's API), verifies it before it is relied on, and
+produces exactly what git needs to authenticate on the VM, with per-repo scoping so several
+credentials can serve one host. See [`git_credential/README.md`](git_credential/README.md) for what
+a provider must provide and the shipped providers.
 
 ## Planned Future Capabilities
 
