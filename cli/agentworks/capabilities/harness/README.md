@@ -1,4 +1,4 @@
-# Session harnesses
+# Session Harnesses
 
 > The detailed companion to the capability overview in [`../README.md`](../README.md), focused on
 > the `harness` kind; the architectural record is
@@ -22,7 +22,7 @@ whatever settings that harness accepts (the operator-facing spelling is document
 `docs/guides/resources.md`). Every session created from that template runs under the harness you
 chose.
 
-## The shipped harnesses
+## The Shipped Harnesses
 
 Three harnesses ship today:
 
@@ -36,7 +36,7 @@ Three harnesses ship today:
   `claude-code`, it launches the tool and, on restart, reattaches to the existing session instead of
   starting over.
 
-## Session resume
+## Session Resume
 
 For the tool harnesses, a restart is not a fresh start. `claude-code` and `codex` reattach to the
 session that was already running rather than beginning a new one, so an interrupted or restarted
@@ -44,7 +44,7 @@ session picks up where it left off instead of losing its history. You do not con
 how the tool harnesses behave. The mechanism, and the rules a new stateful harness must follow to
 get it right, are below the divider.
 
-## Technical overview
+## Technical Overview
 
 Everything above this line is for operators. Everything below it is for engineers implementing or
 extending a harness: where a harness sits in the capability model, the contract a new harness
@@ -71,7 +71,7 @@ Three harnesses ship today and serve as references:
   launch-marker anchor and the session's workspace cwd) and stores it, refusing to guess when
   discovery is ambiguous.
 
-### Where a harness sits
+### Where a Harness Sits
 
 The capability ladder, harness edition:
 
@@ -95,16 +95,16 @@ Layering is a hard rule: this package imports neither `sessions/` nor `orchestra
 type is a local `Protocol` for exactly this reason), and `test_harness_shell.py` asserts it. A
 harness depends only on the framework; the session domain depends on the harness.
 
-### The contract
+### The Contract
 
 A new harness implements this surface (see `base.py` for the full docstrings):
 
-#### Class identity
+#### Class Identity
 
 `name` and `description` ClassVars (the registry row), inherited `owner_kind = "session-template"`
 (error framing: config errors render as `session-template/<name>`).
 
-#### `validate` (classmethod): shape and vocabulary only
+#### Validation: Shape and Vocabulary Only
 
 Unknown fields raise `ConfigError` naming the harness and the field(s); each present field is
 type-checked. Two rules with teeth:
@@ -118,17 +118,18 @@ type-checked. Two rules with teeth:
   harness-side enum would reject values a newer CLI accepts. An invalid value surfaces as the tool's
   own startup error in the pane, which is the right place.
 
-#### `dependencies` (classmethod): total and pure
+#### Declaring Dependencies: Total and Pure
 
-The resource references the config blob implies, secrets above all. Never raises (malformed fields
-just omit their edge; `validate` owns the raising). Every shipped harness returns `()`; the plumbing
-behind it is live and tested at the framework level: the session node exposes the harness's declared
-references through its `config_secret_refs` (what the preflight sweep predicts resolvability over,
-with owner/usage framing sourced to the session template) and derives its bare-name `secret_refs`
-union from them, with values delivered through `ctx.secret(name)`. No shipped harness declares a
-secret yet, so a secret-declaring harness should expect to be the first real exerciser of that path.
+`dependencies` returns the resource references the config blob implies, secrets above all. Never
+raises (malformed fields just omit their edge; `validate` owns the raising). Every shipped harness
+returns `()`; the plumbing behind it is live and tested at the framework level: the session node
+exposes the harness's declared references through its `config_secret_refs` (what the preflight sweep
+predicts resolvability over, with owner/usage framing sourced to the session template) and derives
+its bare-name `secret_refs` union from them, with values delivered through `ctx.secret(name)`. No
+shipped harness declares a secret yet, so a secret-declaring harness should expect to be the first
+real exerciser of that path.
 
-#### `merge_config` (classmethod): inheritance semantics, decided per field
+#### Config Inheritance, Decided per Field
 
 When a child template names the SAME harness as its parent chain, the blobs merge through this hook.
 The base default is shallow child-wins per key. Decide deliberately for every field you add:
@@ -146,13 +147,13 @@ different one, so it must be sane with an empty base. A different harness's blob
 `base`: the resolver discards the accumulated config on a harness switch, so a parent's config
 cannot leak across it.
 
-#### Construction: cheap, no I/O
+#### Construction: Cheap, No I/O
 
 The base `__init__` binds `(owner_name, config)` and re-runs `validate`; the harness constructor
 adds the session identity kwargs and the `state` blob. Nothing else: no probing, no network, no
 minting. Anything that needs the world happens in readiness or ops.
 
-#### Readiness: implement `_probe_target` only
+#### Readiness: One Probe to Implement
 
 The base owns the whole readiness fork (`_run_readiness`): the loud scope-less error, the
 out-of-scope-level skip, the SESSION-level identity guard, the single-fire guard, the admin-vs-agent
@@ -166,7 +167,7 @@ concern: readiness is read-only and re-runnable by contract, and it runs at comm
 world the op changes (on restart, the resume decision must see the old process already dead, which
 only the op-time probe does).
 
-#### Ops: `start` / `restart` return the raw pane command string
+#### Ops: Returning the Pane Command String
 
 - The return value is a command string, not an execution: the session manager wraps it (template-var
   substitution, then the tmux pane's `$SHELL -lic 'cd <dir> && exec <command>'`) and runs it. Empty
@@ -177,13 +178,14 @@ only the op-time probe does).
 - `start` and `restart` should be symmetric for a stateful harness (both call one shared decision
   method); the difference between them is caller-side.
 
-#### `launch_note`: the operator-facing decision line
+#### The Operator-Facing Decision Line
 
-Return a one-line note about what the op decided (`claude-code`: resumed vs started fresh) and the
-session manager prints it in the CLI op output. Default `None` keeps `shell` silent. Pair it with a
-pane-visible echo (below) so the decision is visible in both places the operator looks.
+`launch_note` returns a one-line note about what the op decided (`claude-code`: resumed vs started
+fresh) and the session manager prints it in the CLI op output. Default `None` keeps `shell` silent.
+Pair it with a pane-visible echo (below) so the decision is visible in both places the operator
+looks.
 
-#### `state`: the per-session persisted blob
+#### Per-Session State: the Persisted Blob
 
 `self._state` is a dict the harness reads and mutates in place during ops; the session manager
 persists it (inside the row's full blob, below) to the session row's `harness_state` JSON column
@@ -209,7 +211,7 @@ content is only as trustworthy as the DB it came from. Pre-namespacing rows carr
 `claude-code`) adopts those at the seam and is compatibility code slated for DELETION on the next
 major release.
 
-### How the session machinery consumes a harness
+### How the Session Machinery Consumes a Harness
 
 The wiring, so you know what you get for free and where to look when debugging:
 
@@ -235,9 +237,9 @@ The wiring, so you know what you get for free and where to look when debugging:
   the template read-only (no instance is built, no gate runs); `resource list --kind harness` and
   `resource describe harness/<name>` show the registry row.
 
-### Best practices
+### Best Practices
 
-#### Session resume: the stateful-harness pattern
+#### Session Resume: the Stateful-Harness Pattern
 
 The `claude-code` harness is the worked example; the pattern generalizes to any tool with resumable
 sessions. Five rules, each earned:
@@ -273,7 +275,7 @@ sessions. Five rules, each earned:
 5. **Make the decision visible twice.** An `echo` as the pane's first line (the operator attaching
    sees which way it went) and `launch_note` (the operator running the CLI op sees it too).
 
-#### Building the pane command
+#### Building the Pane Command
 
 - **Compound commands need a single `sh -c`.** The pane wrapper is `... && exec <your string>`, and
   `exec` takes one simple command: with a bare `echo ...; exec tool ...` the shell would `exec` the
@@ -291,7 +293,7 @@ sessions. Five rules, each earned:
   useful without chasing the tool's whole flag surface. Append `extra_args` after the managed flags
   so operators can override or extend.
 
-#### Probing the launch target
+#### Probing the Launch Target
 
 Run probes as `"$SHELL" -lic '<inner>'` with `check=False`: login+interactive sources the same
 dotfiles the pane's shell will (mise activation, PATH fragments), so the probe answers for the
@@ -299,7 +301,7 @@ environment the workload actually gets. Prefer shell-neutral inner commands (the
 `find ... -print -quit | grep -q .` avoids bash/zsh divergence on unmatched globs).
 `require_commands` does all of this for executable checks; reuse it rather than hand-rolling.
 
-#### Testing a harness
+#### Testing a Harness
 
 No real tool binary anywhere. The layers, with the shipped tests as templates:
 
@@ -321,7 +323,7 @@ No real tool binary anywhere. The layers, with the shipped tests as templates:
   (`cli/tests/test_builtin_entries_parity.py`), and the plugin-framework adapter/kind drift guards.
   Update them deliberately; they exist to make additions loud.
 
-#### Shipping a harness as a system plugin
+#### Shipping a Harness as a System Plugin
 
 The plugin framework's own guide (`agentworks/plugins/README.md`, "Shipping a plugin") is the
 authority on the descriptor, registration mechanics, and the enablement model; the `claude` plugin
@@ -355,7 +357,7 @@ harness, the harness material in `cli/README.md` (under "Session Templates"), `.
 tool names, and a completions check (today no completer enumerates harness names, so there is
 nothing to regenerate unless you also add CLI surface; the rule still says look).
 
-### Reserved directions (recorded, not built)
+### Reserved Directions (Recorded, Not Built)
 
 Known holes the current contract leaves open on purpose, so v1 boundaries read as deliberate:
 

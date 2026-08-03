@@ -1,4 +1,4 @@
-# VM platforms
+# VM Platforms
 
 > The detailed companion to the capability overview in [`../README.md`](../README.md), focused on
 > the `vm-platform` kind. That overview covers the lifecycle every capability shares (`dependencies`
@@ -6,7 +6,7 @@
 > configure a platform, and past the [Technical overview](#technical-overview) divider it goes deep
 > for engineers implementing or extending one.
 
-## What a VM platform does for you
+## What a VM Platform Does for You
 
 A VM platform decides where your agent VMs run and how they are brought up and torn down. You pick
 one when you configure a `vm-site`, and from then on the same agentworks commands (`agw vm create`,
@@ -14,7 +14,7 @@ one when you configure a `vm-site`, and from then on the same agentworks command
 VM on your laptop to cloud capacity is a change to a site's configuration, not a change to how you
 drive agentworks.
 
-## Choosing a platform
+## Choosing a Platform
 
 Five platforms ship today. Pick the one that matches where you want the agent work to happen:
 
@@ -31,7 +31,7 @@ Five platforms ship today. Pick the one that matches where you want the agent wo
 The point of the shared surface is that this choice does not change how you operate: the same
 commands and the same `vm-site` shape work whichever backend you pick.
 
-## Security posture
+## Security Posture
 
 On the full-control cloud platforms (`azure-vm` and `aws-ec2`), agentworks provisions not just the
 VM but its whole network exposure surface, and it locks that surface down by default. The baseline
@@ -44,7 +44,7 @@ On platforms where the host is not agentworks' to control (`proxmox` and remote 
 administer, or a local `lima` / `wsl2` VM on your own machine), your own perimeter stays
 authoritative and agentworks does not touch it. The mechanism behind both cases is described below.
 
-## Technical overview
+## Technical Overview
 
 Everything above this line is for operators. Everything below it is for engineers implementing or
 extending a VM platform: the platform surface each backend implements, how an op gets its
@@ -61,7 +61,7 @@ to a plugin-shipped platform exactly as to a core one; each plugin re-seats its 
 `VM_PLATFORM_REGISTRY` at import, so authoring a platform is the same either way. When a rule below
 has a concrete example, it names the platform and file that demonstrates it.
 
-### What a VM platform is
+### What a VM Platform Is
 
 A VM platform is the code that runs VMs on one backend kind. Each subclasses `VMPlatform`
 (`base.py`), registers in `VM_PLATFORM_REGISTRY` (`__init__.py`), and publishes as a read-only
@@ -71,7 +71,7 @@ invocation goes through site resolution (`agentworks.vms.sites`). ADR 0016 recor
 capability/declarable split; ADR 0019 records the orchestration layer that now drives the lifecycle
 (below).
 
-### Who controls the host, and what you owe
+### Who Controls the Host, and What You Owe
 
 Before you copy patterns across platforms, know which category yours is in: the machine the VMs run
 on has an owner, and the security obligations follow from who that is. The exposure model below
@@ -96,7 +96,7 @@ replicating it where it does not belong is a real mistake.
    arm or lift, which is why `secure_failed_vm` and `probe_failure_hint` correctly stay at their
    defaults here.
 
-### The platform surface
+### The Platform Surface
 
 The authoritative contract is `base.py`. Implement the ops, override only the hooks your backend
 needs, and fill in the class-level contract methods the site decoder and DB migration consume.
@@ -220,7 +220,7 @@ also right: purely internal translation stays inside the platform. Azure's VM-si
 `platform_config.vm_sizes` override, per ADR 0018) lives entirely in `plugins/azure/platform.py` and
 adds nothing to `ProvisionRequest`.
 
-### How an op gets its dependencies: `RunContext`
+### How an Op Gets Its Dependencies
 
 This is the part the orchestration-layer refactor (ADR 0019) changed most, and the part a platform
 author most needs to get right.
@@ -254,7 +254,7 @@ row in the Secrets group.
 client (`self._api_cached`), never the token. Any future platform with an API token (a hypothetical
 GCP or AWS backend) should follow that shape.
 
-### Credentials on a cloud platform: the reference shape
+### Credentials on a Cloud Platform: the Reference Shape
 
 Azure is the worked example, and a new cloud platform should copy it rather than invent a variant.
 The `aws-ec2` platform (`plugins/aws/platform.py`) is the first copy of it: its optional
@@ -330,7 +330,7 @@ credentials (botocore's `AssumeRoleCredentialFetcher` + `DeferredRefreshableCred
 than a one-shot assume, so a long op cannot fail with `ExpiredToken` from a frozen cache. See
 `test_platform_runup.py` and `test_aws_ec2_ops.py` for the halves.
 
-### Exposure on a cloud platform: baseline deny, ephemeral scoped allows
+### Exposure on a Cloud Platform: Baseline Deny, Ephemeral Scoped Allows
 
 This is the category-1 obligation from the host-control categories above: a full-control cloud
 platform owns the exposure surface, so it owns keeping it shut. An externally administered or local
@@ -357,7 +357,7 @@ EC2-native divergence (tuple-identity rules, so concurrent same-egress routes sh
 poke/remove are idempotent/tolerant and fail closed) is covered under `transient_route` above and in
 `network.py`.
 
-### Resources on a cloud platform: per-VM lifecycle, shared state stays ambient
+### Resources on a Cloud Platform: Per-VM Lifecycle, Shared State Stays Ambient
 
 Hold one rule above the others when you decide what a cloud platform creates: every
 agentworks-managed resource should be scoped to exactly one VM and share that VM's lifecycle. It is
@@ -391,7 +391,7 @@ backend might), two rules keep it safe:
    needs it); shared-resource teardown is an explicit operator action, not part of the per-VM
    lifecycle.
 
-### The provisioning timeline: create-time bootstrap vs. initialization
+### The Provisioning Timeline: Create-Time Bootstrap vs Initialization
 
 Standing up a VM splits into two stages with different owners and, crucially, different re-run
 behavior. (These are a provisioning-timeline concept, orthogonal to the capability lifecycle stages
@@ -417,7 +417,7 @@ create-time bootstrap; when `None`, every platform defers the join to initializa
 
 The seam between the two stages is the source of the most important gotcha below.
 
-### `reinit` reaches existing VMs; create-time provisioning does not
+### What `reinit` Reaches, and What It Does Not
 
 Because create-time bootstrap is baked into the backend's create mechanism, **a change to it reaches
 new VMs only.** `agw vm reinit` (`manager.reinit_vm`) re-runs initialization (`run_initialization`
@@ -442,9 +442,9 @@ If you find yourself wanting a platform-specific fix to also reach existing VMs 
 is a signal the initializer may need a platform hook. None exists today; raise it rather than
 smearing platform-specific logic into the shared initialization path.
 
-### Things to keep in mind
+### Things to Keep in Mind
 
-#### The backend is not a blank slate: watch what it injects
+#### The Backend Is Not a Blank Slate: Watch What It Injects
 
 The single biggest surprise with a new platform is that the backend creates its own users, groups,
 ID ranges, mounts, and network config before agentworks touches the VM, and those can collide with
@@ -480,7 +480,7 @@ any future platform:
   Lima's `grep -qw <user>` guard means a corrected entry is not re-added on reboot; a different
   backend might stomp your correction on every start, which changes where the fix has to live.
 
-#### A create-time step that needs a reboot: the restart sentinel
+#### A Create-Time Step That Needs a Reboot: the Restart Sentinel
 
 Some bootstrap steps only take effect after a reboot, and rebooting mid-provision is unreliable.
 Currently only the Apple-vz SVE grub mask needs this. The convention (`bootstrap_script.py`'s
@@ -490,14 +490,14 @@ this). The probe stays why-agnostic: the host restarts on the sentinel without n
 step set it, and the sentinel clears itself on the restart. If your backend has a step that only
 lands after a reboot, reuse this convention rather than inventing a second one.
 
-#### No host file sharing by default
+#### No Host File Sharing by Default
 
 agentworks VMs are self-contained. Do not mount host directories into a guest unless there is a
 concrete need: it is an attack surface and a portability trap. Lima defaults to sharing the host
 home; `LIMA_TEMPLATE` sets `mounts: []` explicitly to guarantee none. Hold the same line on any new
 platform, and prefer an explicit "no sharing" over relying on a backend default.
 
-#### Your own cleanup on failure or interrupt is not the orchestrator's unwind
+#### Your Own Cleanup on Failure or Interrupt Is Not the Orchestrator's Unwind
 
 A platform's `create()` may build several backend resources before one fails. Clean up your own
 partial work in a best-effort sweep and re-raise (Azure's `create()` wraps NIC / IP / NSG / VNet /
@@ -512,7 +512,7 @@ back the persisted VM row. Keep the two separate in your head: your sweep undoes
 resources you created inside `create()`; the orchestrator undoes the agentworks-side record on top
 of it.
 
-#### Quoting and escaping when you embed scripts
+#### Quoting and Escaping When You Embed Scripts
 
 Platforms embed shell into YAML or cloud-init, sometimes through several layers (Python `.format`,
 YAML block scalar, remote shell). Two traps that have already occurred:
@@ -523,7 +523,7 @@ YAML block scalar, remote shell). Two traps that have already occurred:
   catches brace and indentation mistakes that are otherwise found only at provision time. See
   `cli/tests/vms/test_lima_template.py` for the pattern.
 
-### Adding a new platform
+### Adding a New Platform
 
 1. Subclass `VMPlatform` and implement the ops. Every op except `display_backend_name` takes
    `ctx: RunContext`, as do the three transport hooks; read declared secrets via `ctx.secret(name)`
@@ -570,7 +570,7 @@ The existing tests under `cli/tests/vms/` are the templates to copy from:
 
 A new `Transport` subclass belongs under `cli/tests/transports/` alongside the platform.
 
-### Cross-references
+### Cross-References
 
 - [`../README.md`](../README.md): the capability lifecycle contract (read this first).
 - `base.py`: the `VMPlatform` ABC, `ProvisionRequest`, `ProvisionResult`.

@@ -1,4 +1,4 @@
-# The orchestration layer
+# The Orchestration Layer
 
 This document is the working guide to the orchestration layer (`cli/agentworks/orchestration/`): the
 code that turns a service-layer command into a walk over a graph of nodes, resolves that command's
@@ -14,7 +14,7 @@ command, no engine and no declarative plan artifact), and what alternatives were
 ADR when you want the rationale and the roads not taken. This guide covers how the pieces work in
 practice, and every claim here is grounded in the code under `orchestration/`.
 
-## The node graph model
+## The Node Graph Model
 
 The layer rests on two complementary contracts, both in `node.py`, and the distinction between them
 is the whole game:
@@ -69,7 +69,7 @@ since one object per key is a construction contract (every edge holder must obse
 the orchestrator later marks realized, so the pending-to-realized flip is seen everywhere without
 rewiring).
 
-## The command execution model
+## The Command Execution Model
 
 A command's stages run in a fixed order, and that order is the contract: **preflight-all, then
 resolve-once at the preflight boundary, then per phase runup-then-ops**. The single resolve pass is
@@ -123,7 +123,7 @@ nothing resolves twice; and **unwind** (`unwind.py`), the command-local `Realiza
 records each pending node as its realizing mutation completes and, on failure, tears them down in
 reverse order, best-effort.
 
-## The readiness fold and enablement
+## The Readiness Fold and Enablement
 
 Distinct from the per-command lifecycle above, and far cheaper than it, is a second question: **can
 this resource run on this host at all?** That is answered once, at registry `finalize`, by a
@@ -184,7 +184,7 @@ union then resolves in **one boundary pass**, and values are **delivered scoped*
 a typed error. An instance therefore cannot read a secret it did not declare and cannot hold a value
 source of its own; scoped delivery over the boundary pass is the only way it ever sees a value.
 
-## Relationship to the capability model
+## Relationship to the Capability Model
 
 This layer is the framework side: it drives every node, resolves secrets, and orders readiness. The
 [capability model](../capabilities/README.md) is the author side: the contract a single capability
