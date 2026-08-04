@@ -73,8 +73,11 @@ install.
   and `model` map to the `--permission-mode` and `--model` CLI flags, and `extra_args` passes
   additional Claude Code CLI arguments through verbatim.
 - **`codex`** (via the `codex` system plugin) drives an interactive Codex session. Like
-  `claude-code`, it launches the tool and, on resume, reattaches to the existing session instead of
-  starting over when a Codex session exists, and offers limited configuration options.
+  `claude-code`, it launches the tool and, on resume, reattaches to the existing conversation
+  instead of starting over when a Codex session exists, and offers limited configuration options.
+  Because Codex mints its own session ids, it learns which conversation is this session's from Codex
+  itself (Codex's `notify` hook), and when it genuinely cannot tell it opens Codex's own session
+  picker in the pane rather than guessing or failing.
 
 ## Session Resume
 
@@ -100,8 +103,10 @@ nothing about the machinery around it. It:
 - **MUST** declare the executables its tool needs on the launch target, so Agentworks can verify
   their presence before starting and surface a missing tool as an actionable error.
 - **MUST**, for a stateful tool, own a durable session identity and refuse to guess it: mint or
-  discover the tool's session id once, store it, read it back verbatim, and raise rather than adopt
-  an ambiguous match that could splice one session's history into another.
+  learn the tool's session id once, store it, and read it back verbatim. An ambiguous match must
+  never be silently adopted, since that splices one session's history into another; resolving the
+  ambiguity by handing the choice to the operator (in the pane, where they can see the candidates)
+  is better than failing the op, and failing the op is better than guessing.
 - **MUST** decide resume-versus-launch at op time from the tool's own on-disk state on the launch
   target, so an interrupted session or a resumed VM recovers its prior work rather than silently
   starting over. Agentworks is built to lose running processes and restart, so an integration
@@ -124,8 +129,11 @@ nothing about the machinery around it. It:
   never baked into the launch command, where it would leak into process listings and terminal
   scrollback. Broader-scope provisioning is a separate, forthcoming concern (see
   [A Note on Scope](#a-note-on-scope)).
-- **SHOULD** surface its launch decision (resumed, started fresh, or adopted by discovery) to the
-  operator, both in the command's output and as the pane's first visible line.
+- **SHOULD** surface its launch decision (resumed, started fresh, adopted by discovery, or handed to
+  the operator to disambiguate) to the operator, both in the command's output and as the pane's
+  first visible line. Every distinct decision needs its own wording: "something happened" is not a
+  decision line, and an operator who cannot tell adoption from a fresh start cannot catch a wrong
+  one.
 
 It does not own the tmux session, the user, the workspace, or attach and detach. Agentworks provides
 those; the integration only decides what runs in the pane.
@@ -153,9 +161,9 @@ Three integrations ship today and serve as references:
   durable session identity, resume-vs-launch detection, tool flag mapping, and the plugin packaging.
 - **`codex`** (`agentworks/plugins/codex/harness_integration.py`): the second tool integration,
   shipped as the opt-in `codex` system plugin. The reference for the OTHER identity form: the tool
-  mints its own session ids, so the integration discovers the id from the tool's on-disk state
-  (scoped by a stored launch-marker anchor and the session's workspace cwd) and stores it, refusing
-  to guess when discovery is ambiguous.
+  mints its own session ids, so the integration gets the id FROM the tool (codex's `notify` hook
+  reports it after every completed turn) and stores it, falling back to source-filtered discovery of
+  the tool's on-disk state and, when that is ambiguous, to codex's own session picker in the pane.
 
 ### Where a Harness Integration Sits
 
@@ -266,8 +274,16 @@ only the op-time probe does).
 - `start` serves `session create`; `resume` serves `session resume`. The orchestrator kills the old
   workload BEFORE calling `resume`, a deliberate ordering guarantee: a stateful integration decides
   resume-vs-launch with the old process dead and its on-disk state settled.
-- `start` and `resume` should be symmetric for a stateful integration (both call one shared decision
-  method); the difference between them is caller-side.
+- **`start` runs against a brand-new session row, and that is load-bearing, not trivia.** `create`
+  inserts the row after the op, so a `start` call means no prior workload of this session exists.
+  Where identity is MINTED (`claude-code`), the two ops can share one decision method and the
+  difference is purely caller-side. Where identity is DISCOVERED, they must not: every discovery
+  channel keys off something the tool wrote earlier under a name or path Agentworks did not reserve
+  (a session name, a workspace directory), so discovering at create time is precisely how a
+  brand-new session inherits a deleted namesake's history or a stranger's conversation. `codex` is
+  the shipped example: its `start` is unconditionally fresh, probes nothing, and clears the stale
+  identity file, and only `resume` ever adopts an id. Asymmetry here is the correct semantics, not a
+  wart. Ask which op could legitimately find work to resume, and let the answer shape the split.
 
 #### The Operator-Facing Decision Line
 
@@ -341,15 +357,21 @@ resumable sessions. Five rules, each earned:
 1. **Own a durable identity; never derive it.** Mint the tool-side session id once (a v4 uuid where
    the tool accepts one) on the first `start`, store it in the state blob, and read it back verbatim
    forever after. If the tool will not accept a caller-supplied id, the same rule holds in its other
-   form: let the tool mint the id, discover it from the tool's own durable state, and store THAT
-   (`codex` is the shipped example: a STORED launch-marker anchor scopes discovery, filtered by the
-   session's workspace cwd, and an ambiguous candidate set raises rather than guesses). Know that
-   discovery is a heuristic, and say so on its surfaces: codex's adoption `launch_note` names the
-   caveat, and its decisions doc records the residual windows honestly, with the operator guidance
-   (avoid two concurrently-fresh codex sessions sharing one agent user and workspace directory). The
-   manager's persistence contract makes either survive restarts. Derivation schemes (from session
-   name, cwd, or the tool's own directory layout) are brittle against renames and tool-version
-   drift; a stored opaque value is not.
+   form: let the tool mint the id, get it FROM THE TOOL, and store THAT. `codex` is the shipped
+   example, and the shape it landed on generalizes: **prefer a channel where the tool reports its
+   own id over inferring which of its files is yours.** Codex's `notify` hook runs a script after
+   every completed turn with the turn's thread id, so the integration provisions a recorder, binds
+   the id it records, and resumes deterministically. Inference is the FALLBACK, filtered as narrowly
+   as the tool's own state allows (for codex, the `"source":"cli"` stamp plus the session's
+   workspace cwd, which is exactly the set codex's own resume picker shows), and genuine ambiguity
+   is handed to the human IN BAND rather than raised: several candidates launch codex's own session
+   picker in the pane, and the next completed turn binds whatever they chose. That ordering is not
+   cosmetic. The marker-and-mtime inference codex shipped first treated every rollout in the
+   workspace as a candidate, and codex subagents write sibling rollouts with the same cwd as their
+   parent, so one session that ran subagents produced 14 indistinguishable candidates and a bricked
+   resume. The manager's persistence contract makes any of these survive restarts. Derivation
+   schemes (from session name, cwd, or the tool's own directory layout) are brittle against renames
+   and tool-version drift; a stored opaque value the tool itself reported is not.
 2. **Decide resume-vs-launch at op time, on the launch target, from the tool's own durable state.**
    Probe for the stored id's artifact (for Claude, the transcript `<sid>.jsonl` under the projects
    dir) over the transport, with the same `$SHELL -lic` environment the pane will get. Do it per op,
@@ -366,8 +388,11 @@ resumable sessions. Five rules, each earned:
    trichotomy: 0 means resume, 1 means launch fresh, anything else (SSH failure, shell that could
    not start) RAISES a typed `StateError` rather than guessing. Guessing "fresh" launches with a
    reserved id the tool may reject as in-use, and the pane dies opaquely.
-5. **Make the decision visible twice.** An `echo` as the pane's first line (the operator attaching
-   sees which way it went) and `launch_note` (the operator running the CLI op sees it too).
+5. **Make the decision visible twice, per leaf.** An `echo` as the pane's first line (the operator
+   attaching sees which way it went) and `launch_note` (the operator running the CLI op sees it
+   too). Every distinct outcome gets its own wording in both places: codex ships five (resumed,
+   adopted by discovery, picker, fresh, archived-or-gone), because a decision line that cannot
+   distinguish adoption from a fresh start cannot tell the operator a heuristic went wrong.
 
 #### Building the Pane Command
 
@@ -387,6 +412,31 @@ resumable sessions. Five rules, each earned:
   integration useful without chasing the tool's whole flag surface. Append `extra_args` after the
   managed flags so operators can override or extend.
 
+#### Integration-Owned Files on the Launch Target
+
+Some integrations need a file on the target that is theirs rather than the tool's: a helper script
+the tool invokes, a small piece of state the tool reports into. Put it under
+**`~/.agentworks/<integration-name>/`** on the launch target (`codex` established this with
+`~/.agentworks/codex/`), never in the tool's own config dir (that is shared user state the scope
+rule forbids mutating) and never in the workspace (every session there would see it).
+
+Three rules make a per-user file legitimate under the session-scoped effects rule
+([A Note on Scope](#a-note-on-scope)):
+
+- **Rewrite it identically on every launch.** If two sessions of the same user would write the same
+  bytes, neither can change what the other's file does, and an Agentworks upgrade cannot leave a
+  stale copy of the same file behind. Write it atomically (stage, `chmod`, `mv`) so the tool never
+  sees a partial one. The corollary of the versioning rule below: an OBSOLETE version (a `-v1` after
+  the integration moved to `-v2`) is deliberately left alone, since a running session may still hold
+  its path, and nothing prunes it today.
+- **Version anything the tool holds a path to.** `codex`'s recorder is `record-thread-v1.sh`: a
+  future recorder taking different arguments becomes `-v2`, so an upgrade mid-session cannot reshape
+  the contract of a script a running tool is about to invoke.
+- **Per-SESSION files are keyed by session name, so treat their contents as suspect.** A session
+  name is reusable: a deleted session's file outlives it and the next namesake finds it. Decide
+  explicitly which ops may READ such a file (`codex`: only `resume`, never `create`, which deletes
+  it), because "the file exists" never means "it belongs to this session".
+
 #### Probing the Launch Target
 
 Run probes as `"$SHELL" -lic '<inner>'` with `check=False`: login+interactive sources the same
@@ -404,8 +454,17 @@ No real tool binary anywhere. The layers, with the shipped tests as templates:
   transport, so one fake serves the readiness probe (keyed on `command -v <tool>`) and the detection
   probe (keyed on the stored id) in a single test. Cover: config vocabulary (accepts, unknown-field
   raises, wrong-type raises), both detection directions (probe hit resumes, miss launches fresh,
-  other exit raises), flag mapping and `extra_args` quoting, the visible-decision line, start/resume
-  symmetry, and state minting.
+  other exit raises), flag mapping and `extra_args` quoting, the visible-decision line, state
+  minting, and whatever the integration promises about `start` versus `resume` (`claude-code` pins
+  that they are symmetric; `codex` pins the opposite, that `start` probes nothing and adopts
+  nothing, since that promise is a safety property rather than a convenience).
+- **Generated shell text, executed:** `cli/tests/test_codex_integration.py`. An exit-code stub
+  proves how a probe's ANSWER is classified; it cannot prove the probe asks the right question, and
+  the interesting logic in a stateful integration often lives in the shell text itself (codex's
+  filter that keeps subagent rollouts out of the candidate set, the recorder script it provisions,
+  the three-layer quoting of a `-c` override). Run that text through a real `sh` against scratch
+  fixtures with `$HOME` pointed at a tmp dir: still no tool binary, but a mis-quoted token or an
+  inverted filter fails in the test rather than in a pane.
 - **Orchestrated:** `cli/tests/sessions/test_claude_code_orchestrated.py`. Real create/resume
   through the orchestrator with stubbed transports: state persisted to the row, pre-existing blob
   read back, substitution does not mangle the returned snippet.
