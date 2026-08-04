@@ -676,25 +676,34 @@ spec:
 ```
 
 The `codex` integration runs Codex the same way: `session create` starts a new Codex session and
-`session resume` resumes the same conversation once Codex has recorded it. Codex mints its own
-session ids, so the integration discovers the id from Codex's on-disk state after the first launch
-and stores it (a session archived with `codex archive` is deliberately treated as not resumable, and
-a fresh one is started). It ships as the opt-in `codex` system plugin, disabled by default with the
-same gating as `claude-code` above. Once enabled, it needs only that `codex` is installed on the
-launch target, and announces the chosen action (resume, adopt-and-resume, or new session) in the
-pane. Its config vocabulary is ten optional fields: `model`, `sandbox`, `approval_policy`, and
-`profile` forward verbatim to `codex -m` / `-s` / `-a` / `-p` (their choice sets are Codex's, not
-validated here); `network` (bool) forwards to Codex's `sandbox_workspace_write.network_access`
-config key (sandboxed network is off by default, so coding sessions usually want `network: true`);
-`approvals_reviewer` (string) forwards to Codex's `approvals_reviewer` config key (who adjudicates
-approval escalations: `user`, the default, prompts the human; `auto_review` routes them to Codex's
-risk-based reviewer subagent, the usual choice for unattended-leaning auto templates, trading a
-person's approval for a model's while the sandbox still enforces the outer boundary);
-`writable_dirs` (list of paths) emits one `codex --add-dir` each; `web_search` (bool) enables the
-live web-search tool (`codex --search`); `disable_strict_config` (bool) suppresses the
-`--strict-config` the integration otherwise always passes (strictness makes a Codex config mistake
-or a Codex-renamed key fail loudly at launch instead of being silently ignored); and `extra_args` is
-the same appended-last escape hatch:
+`session resume` resumes the same conversation once Codex has recorded a turn in it. Codex mints its
+own session ids, so the integration learns which conversation is this session's from Codex itself:
+every launch installs a small recorder script that Codex runs after each completed turn (through
+Codex's `notify` hook, so nothing is added to the conversation), and the next `session resume`
+resumes what it recorded (a session archived with `codex archive` is deliberately treated as not
+resumable: the binding is dropped and the fallback below decides what happens instead, which is not
+always a fresh session). With nothing recorded yet, resume falls back to a single interactive Codex
+conversation recorded in this workspace directory, and on several it opens Codex's own session
+picker in the pane instead of guessing: picking one binds this session to it from its next turn, and
+esc starts a fresh conversation. `session create` is always a brand-new conversation and adopts
+nothing, so reusing a deleted session's name cannot silently pick its conversation back up; the
+fallback remains a heuristic, though, so if that conversation is the only one recorded in the
+workspace the new session's first resume can still adopt it, announced with the id it chose. It
+ships as the opt-in `codex` system plugin, disabled by default with the same gating as `claude-code`
+above. Once enabled, it needs only that `codex` is installed on the launch target, and announces
+which of those it did, both in the command output and in the pane. Its config vocabulary is ten
+optional fields: `model`, `sandbox`, `approval_policy`, and `profile` forward verbatim to `codex -m`
+/ `-s` / `-a` / `-p` (their choice sets are Codex's, not validated here); `network` (bool) forwards
+to Codex's `sandbox_workspace_write.network_access` config key (sandboxed network is off by default,
+so coding sessions usually want `network: true`); `approvals_reviewer` (string) forwards to Codex's
+`approvals_reviewer` config key (who adjudicates approval escalations: `user`, the default, prompts
+the human; `auto_review` routes them to Codex's risk-based reviewer subagent, the usual choice for
+unattended-leaning auto templates, trading a person's approval for a model's while the sandbox still
+enforces the outer boundary); `writable_dirs` (list of paths) emits one `codex --add-dir` each;
+`web_search` (bool) enables the live web-search tool (`codex --search`); `disable_strict_config`
+(bool) suppresses the `--strict-config` the integration otherwise always passes (strictness makes a
+Codex config mistake or a Codex-renamed key fail loudly at launch instead of being silently
+ignored); and `extra_args` is the same appended-last escape hatch:
 
 ```yaml
 apiVersion: agentworks/v1

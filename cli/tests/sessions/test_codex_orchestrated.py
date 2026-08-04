@@ -1,25 +1,25 @@
 """The ``codex`` harness integration driven through the real orchestrator: the carry
 the unit test cannot prove on its own.
 
-- ``session create`` produces the fresh-launch pane string through the
-  real op call site (marker touch included), runs NO discovery probe (a
-  brand-new blob has no stored anchor), and persists the NAMESPACED
-  ``codex`` blob carrying only the minted anchor;
-- the discovery-adoption round trip through a real restart: a session
-  whose stored anchor has one newer matching rollout adopts the
-  codex-minted uuid, resumes it, and persists it to the row (anchor
-  consumed), and the NEXT restart resumes the stored id without
-  re-running discovery;
+- ``session create`` is ALWAYS fresh through the real op call site: it
+  probes no session state at all (a brand-new row owns no codex
+  conversation, and both identity channels are name-derived, so adopting
+  here is how a namesake would inherit a dead session's conversation),
+  provisions the recorder, clears any stale recording, and persists an
+  EMPTY ``codex`` namespace;
+- the binding round trip through a real resume: a session whose recorder
+  file already holds a codex-reported thread id adopts it, resumes it, and
+  persists it to the row, and the NEXT resume reads the stored id back
+  without re-reading anything else;
+- the discovery fallback and the picker leaf through the same call site;
 - ``codex`` and ``claude-code`` state coexist in one row blob without
   collision (the first real two-stateful-integration pairing, pinning the
   namespacing seam's promise);
-- ``session resume`` with a stored id resumes it with the
-  restart-post-kill end state (kill precedes the probe precedes the tmux
-  recreate).
+- the marker-era ``discovery_marker`` key is retired from a legacy row.
 
 No test spawns a real ``codex`` binary: the transport calls the op makes
-(the ``*-<sid>.jsonl`` rollout probe and the ``.launch``-marker discovery
-probe) are stubbed.
+(the recorder read, the ``*-<sid>.jsonl`` rollout probe, and the
+source-filtered discovery probe) are stubbed.
 """
 
 from __future__ import annotations
@@ -37,11 +37,13 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 _SID = "939b1597-7c61-4ace-80f4-14617b7b4257"
+_OTHER_SID = "22222222-3333-4444-8555-666666666666"
 _ROLLOUT = f"/home/me/.codex/sessions/2026/08/01/rollout-2026-08-01T12-00-00-{_SID}.jsonl"
+_OTHER_ROLLOUT = f"/home/me/.codex/sessions/2026/08/01/rollout-2026-08-01T12-05-00-{_OTHER_SID}.jsonl"
 _CLAUDE_SID = "11111111-2222-4333-8444-555555555555"
 
-# A stored discovery anchor, as a previous fresh launch would have minted it.
-_ANCHOR = ".agentworks/codex/s1-deadbeefdeadbeefdeadbeefdeadbeef.launch"
+# A marker-era blob key, retired by the 2026-08-04 notify-bound redesign.
+_LEGACY_MARKER = ".agentworks/codex/s1-deadbeefdeadbeefdeadbeefdeadbeef.launch"
 
 
 @pytest.fixture(autouse=True)
@@ -59,19 +61,23 @@ class _Result:
 
 class _CodexTarget:
     """Transport double for the codex op: answers the readiness
-    ``command -v codex`` probe, the ``*-<sid>.jsonl`` rollout probe, and
-    the ``.launch``-marker discovery probe, recording each into a shared
-    event log. ``rollout_present`` decides the stored-id fork;
-    ``discovered`` (rollout paths, one per line) drives discovery."""
+    ``command -v codex`` probe and the three op-time probes (the recorder
+    read, the ``*-<sid>.jsonl`` rollout presence probe, and the
+    source-filtered discovery probe), recording each into a shared event
+    log. ``recorded`` seeds the recorder file with a codex-reported thread
+    id; ``rollout_present`` decides the bound-id fork; ``discovered``
+    (rollout paths, one per line) drives discovery."""
 
     def __init__(
         self,
         events: list[str],
         *,
+        recorded: str | None = None,
         rollout_present: bool = False,
         discovered: str | None = None,
     ) -> None:
         self._events = events
+        self._recorded = recorded
         self._present = rollout_present
         self._discovered = discovered
 
@@ -79,11 +85,14 @@ class _CodexTarget:
         if "command -v codex" in cmd:
             self._events.append("probe")
             return _Result()
-        if ".launch" in cmd:
+        if ".thread" in cmd:
+            self._events.append("read_recorder")
+            if self._recorded is None:
+                return _Result(returncode=1)  # no recorder file: nothing bound
+            return _Result(returncode=0, stdout=f"{self._recorded}\n")
+        if "-exec awk" in cmd:
             self._events.append("discover")
-            if self._discovered is None:
-                return _Result(returncode=3)  # no marker: definitively fresh
-            return _Result(returncode=0, stdout=self._discovered)
+            return _Result(returncode=0, stdout=self._discovered or "")
         if ".jsonl" in cmd:
             self._events.append("detect")
             return _Result(returncode=0 if self._present else 1)
@@ -141,7 +150,7 @@ def _common_stubs(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(session_manager, "_regenerate_tmuxinator", lambda *a, **k: None)
 
 
-def _restart_stubs(
+def _resume_stubs(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     *,
@@ -172,25 +181,30 @@ def _restart_stubs(
     return db, captured
 
 
-# -- create: fresh launch string + the minted anchor persists -----------------
+def _resume(db: Database) -> None:
+    from agentworks.sessions.manager import resume_session
+
+    resume_session(db, SimpleNamespace(session=SimpleNamespace(history_limit=1)), name="s1", yes=True)  # type: ignore[arg-type]
 
 
-def test_create_launches_fresh_with_no_discovery_and_persists_the_anchor(
+# -- create: always fresh, probing nothing ------------------------------------
+
+
+def test_create_launches_fresh_without_probing_any_session_state(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A fresh create's blob holds no stored anchor, so there is
-    definitively nothing to discover: NO discovery probe runs (the
-    anti-namesake rule: a session recreated under a deleted session's
-    name cannot adopt the dead session's conversation), the op launches
-    fresh with the minted marker touch, and the row's blob carries the
-    codex namespace with only that anchor. The id is codex-minted and
-    adopted only by a later op's discovery, never stored at create."""
+    """``session create`` mints a brand-new row, which by definition owns no
+    codex conversation, so the op adopts nothing and probes nothing: this
+    target would happily report a recording AND a discovery candidate, and
+    neither probe is even issued. Only readiness talks to the target. The
+    row's codex namespace stays empty, and the pane provisions the recorder
+    so the FOLLOWING resume has something to bind."""
     from agentworks.sessions.manager import create_session
 
     db = _seed_db(tmp_path)
     events: list[str] = []
     captured: dict[str, str] = {}
-    _patch_transport(monkeypatch, _CodexTarget(events))
+    _patch_transport(monkeypatch, _CodexTarget(events, recorded=_SID, rollout_present=True, discovered=f"{_ROLLOUT}\n"))
     _common_stubs(monkeypatch)
     _harness_integration_template(monkeypatch)
     _capture_pane_command(monkeypatch, events, captured)
@@ -203,75 +217,57 @@ def test_create_launches_fresh_with_no_discovery_and_persists_the_anchor(
         admin=True,
     )
 
-    assert "discover" not in events  # no anchor stored: no probe at all
+    assert set(events) == {"probe", "tmux_create"}  # readiness only: no state probe
     session = db.get_session("s1")
     assert session is not None
-    namespace = session.harness_integration_state["codex"]
-    assert isinstance(namespace, dict)
-    anchor = namespace.get("discovery_marker")
-    assert isinstance(anchor, str)
-    assert anchor.startswith(".agentworks/codex/s1-") and anchor.endswith(".launch")
-    assert set(namespace) == {"discovery_marker"}  # no id minted at create
+    assert session.harness_integration_state == {"codex": {}}  # no id adopted at create
     command = captured["command"]
     assert "starting new session s1" in command
-    assert anchor in command  # the pane touches exactly the stored marker
-    assert "exec codex" in command
-    assert "resume" not in command
+    assert 'chmod +x "$HOME"/.agentworks/codex/.record-thread-v1.sh."$$"' in command
+    # No namesake's binding survives a create.
+    assert 'rm -f "$HOME"/.agentworks/codex/s1.thread' in command
+    assert "notify=[" in command
+    assert "exec codex " in command
+    assert _SID not in command
     db.close()
 
 
-# -- restart: the discovery-adoption round trip -------------------------------
+# -- resume: the notify-binding round trip ------------------------------------
 
 
-def test_resume_adopts_a_discovered_rollout_and_persists_the_id(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The adoption crux: a session whose stored anchor has exactly one
-    newer matching rollout adopts the codex-minted uuid at the next op,
-    resumes it, and the id lands on the row in the namespaced shape with
-    the anchor consumed."""
-    from agentworks.sessions.manager import resume_session
-
+def test_resume_adopts_the_recorded_thread_id_and_persists_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The binding crux: codex reported this conversation's thread id to
+    the recorder during the last launch, so the next op reads it, resumes
+    it, and the id lands on the row in the namespaced shape."""
     events: list[str] = []
-    target = _CodexTarget(events, discovered=f"{_ROLLOUT}\n")
-    db, captured = _restart_stubs(
-        tmp_path,
-        monkeypatch,
-        target=target,
-        events=events,
-        stored_state={"codex": {"discovery_marker": _ANCHOR}},
-    )
+    target = _CodexTarget(events, recorded=_SID, rollout_present=True)
+    db, captured = _resume_stubs(tmp_path, monkeypatch, target=target, events=events, stored_state={"codex": {}})
 
-    resume_session(db, SimpleNamespace(session=SimpleNamespace(history_limit=1)), name="s1", yes=True)  # type: ignore[arg-type]
+    _resume(db)
 
     assert f"resume {_SID}" in captured["command"]
-    assert "adopted a discovered codex session" in captured["command"]
-    # Restart ordering: discovery runs AFTER the kill (the old process is
+    assert "resuming session s1" in captured["command"]
+    # Resume ordering: the probes run AFTER the kill (the old process is
     # dead before the decision), and the tmux recreate follows.
-    assert events.index("kill") < events.index("discover") < events.index("tmux_create")
+    assert events.index("kill") < events.index("read_recorder") < events.index("tmux_create")
+    assert "discover" not in events  # a bound id needs no fallback
     refreshed = db.get_session("s1")
     assert refreshed is not None
-    assert refreshed.harness_integration_state == {"codex": {"session_id": _SID}}  # anchor consumed
+    assert refreshed.harness_integration_state == {"codex": {"session_id": _SID}}
     db.close()
 
 
-def test_resume_resumes_the_stored_id_without_rediscovery(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The round trip's second half: with the adopted id stored, the next
-    restart probes THAT id's rollout and resumes it verbatim; discovery
-    does not run again."""
-    from agentworks.sessions.manager import resume_session
-
+def test_resume_resumes_the_stored_id_without_a_recording(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The round trip's second half: with the id stored, a later op
+    resumes it verbatim even though the recorder file is gone (the
+    recording is a binding mechanism, not the system of record)."""
     events: list[str] = []
     target = _CodexTarget(events, rollout_present=True)
-    db, captured = _restart_stubs(
-        tmp_path,
-        monkeypatch,
-        target=target,
-        events=events,
-        stored_state={"codex": {"session_id": _SID}},
+    db, captured = _resume_stubs(
+        tmp_path, monkeypatch, target=target, events=events, stored_state={"codex": {"session_id": _SID}}
     )
 
-    resume_session(db, SimpleNamespace(session=SimpleNamespace(history_limit=1)), name="s1", yes=True)  # type: ignore[arg-type]
+    _resume(db)
 
     assert f"resume {_SID}" in captured["command"]
     assert "resuming session s1" in captured["command"]
@@ -283,36 +279,89 @@ def test_resume_resumes_the_stored_id_without_rediscovery(tmp_path: Path, monkey
     db.close()
 
 
+def test_resume_adopts_a_discovered_rollout_when_nothing_is_recorded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The fallback through the real call site: no recording and no stored
+    id, one source-filtered rollout in the workspace, so the op adopts its
+    uuid and persists it."""
+    events: list[str] = []
+    target = _CodexTarget(events, discovered=f"{_ROLLOUT}\n", rollout_present=True)
+    db, captured = _resume_stubs(tmp_path, monkeypatch, target=target, events=events, stored_state={"codex": {}})
+
+    _resume(db)
+
+    assert f"resume {_SID}" in captured["command"]
+    assert "identified this session" in captured["command"]
+    assert events.index("read_recorder") < events.index("discover")
+    refreshed = db.get_session("s1")
+    assert refreshed is not None
+    assert refreshed.harness_integration_state == {"codex": {"session_id": _SID}}
+    db.close()
+
+
+def test_resume_with_several_candidates_opens_the_picker_and_binds_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ambiguity reaches the operator as codex's own session picker in the
+    pane, not as a failed op: the row keeps no id, and the next completed
+    turn binds whatever the human picked."""
+    events: list[str] = []
+    target = _CodexTarget(events, discovered=f"{_ROLLOUT}\n{_OTHER_ROLLOUT}\n")
+    db, captured = _resume_stubs(tmp_path, monkeypatch, target=target, events=events, stored_state={"codex": {}})
+
+    _resume(db)
+
+    assert "exec codex resume -c tui.resume_cwd=current" in captured["command"]
+    assert "could not identify this session" in captured["command"]
+    refreshed = db.get_session("s1")
+    assert refreshed is not None
+    assert refreshed.harness_integration_state == {"codex": {}}  # nothing bound
+    db.close()
+
+
 def test_resume_with_a_gone_rollout_drops_the_id_and_launches_fresh(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The pinned archived policy end to end: a stored id whose rollout is
-    gone (archived or deleted) launches fresh with the stale-specific
-    decision line, and the persisted blob swaps the stale id for a fresh
-    discovery anchor, so the NEXT op rediscovers."""
-    from agentworks.sessions.manager import resume_session
-
+    """The pinned archived policy end to end: a bound id whose rollout is
+    gone (archived or deleted) drops the id, finds nothing to adopt, and
+    launches fresh with the stale-specific decision line."""
     events: list[str] = []
     target = _CodexTarget(events, rollout_present=False)
-    db, captured = _restart_stubs(
-        tmp_path,
-        monkeypatch,
-        target=target,
-        events=events,
-        stored_state={"codex": {"session_id": _SID}},
+    db, captured = _resume_stubs(
+        tmp_path, monkeypatch, target=target, events=events, stored_state={"codex": {"session_id": _SID}}
     )
 
-    resume_session(db, SimpleNamespace(session=SimpleNamespace(history_limit=1)), name="s1", yes=True)  # type: ignore[arg-type]
+    _resume(db)
 
     assert "archived or gone; starting new session s1" in captured["command"]
     refreshed = db.get_session("s1")
     assert refreshed is not None
-    namespace = refreshed.harness_integration_state["codex"]
-    assert isinstance(namespace, dict)
-    assert set(namespace) == {"discovery_marker"}  # stale id gone, anchor stored
-    anchor = namespace["discovery_marker"]
-    assert isinstance(anchor, str)
-    assert anchor in captured["command"]  # the pane touches the stored marker
+    assert refreshed.harness_integration_state == {"codex": {}}  # the stale id is gone
+    db.close()
+
+
+def test_resume_retires_a_marker_era_blob_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A row written by the marker-era integration (2026-08-01 through
+    2026-08-04) still resumes: the retired ``discovery_marker`` key is
+    dropped from the persisted blob and its file removed by the pane."""
+    events: list[str] = []
+    target = _CodexTarget(events, rollout_present=True)
+    db, captured = _resume_stubs(
+        tmp_path,
+        monkeypatch,
+        target=target,
+        events=events,
+        stored_state={"codex": {"session_id": _SID, "discovery_marker": _LEGACY_MARKER}},
+    )
+
+    _resume(db)
+
+    assert f"resume {_SID}" in captured["command"]
+    assert f'rm -f "$HOME"/{_LEGACY_MARKER}' in captured["command"]
+    refreshed = db.get_session("s1")
+    assert refreshed is not None
+    assert refreshed.harness_integration_state == {"codex": {"session_id": _SID}}
     db.close()
 
 
@@ -322,27 +371,22 @@ def test_resume_with_a_gone_rollout_drops_the_id_and_launches_fresh(
 def test_codex_and_claude_code_state_coexist_in_one_blob(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The first real two-stateful-integration pairing: a row whose blob
     already carries a ``claude-code`` namespace (the template was
-    re-pointed to codex) runs a codex op that adopts its own id into the
+    re-pointed to codex) runs a codex op that binds its own id into the
     ``codex`` namespace, and the claude id is neither read (no inherited
     ``session_id``) nor dropped on persist."""
-    from agentworks.sessions.manager import resume_session
-
     events: list[str] = []
-    target = _CodexTarget(events, discovered=f"{_ROLLOUT}\n")
-    db, captured = _restart_stubs(
+    target = _CodexTarget(events, recorded=_SID, rollout_present=True)
+    db, captured = _resume_stubs(
         tmp_path,
         monkeypatch,
         target=target,
         events=events,
-        stored_state={
-            "claude-code": {"session_id": _CLAUDE_SID},
-            "codex": {"discovery_marker": _ANCHOR},
-        },
+        stored_state={"claude-code": {"session_id": _CLAUDE_SID}, "codex": {}},
     )
 
-    resume_session(db, SimpleNamespace(session=SimpleNamespace(history_limit=1)), name="s1", yes=True)  # type: ignore[arg-type]
+    _resume(db)
 
-    # codex did NOT inherit the claude id; it adopted its own by discovery.
+    # codex did NOT inherit the claude id; it bound the one codex reported.
     assert f"resume {_SID}" in captured["command"]
     refreshed = db.get_session("s1")
     assert refreshed is not None
@@ -361,8 +405,8 @@ def test_substitution_leaves_the_generated_snippet_intact_and_substitutes_extra_
 ) -> None:
     """Parity with the claude-code pin: the relocated template-var
     substitution must not mangle the generated ``sh -c`` skeleton (the
-    marker path's ``$HOME`` and quoting included), while an operator
-    ``extra_args`` var still substitutes."""
+    recorder provisioning and the notify override's quoting included),
+    while an operator ``extra_args`` var still substitutes."""
     from agentworks.sessions.manager import create_session
 
     db = _seed_db(tmp_path)
@@ -382,11 +426,13 @@ def test_substitution_leaves_the_generated_snippet_intact_and_substitutes_extra_
     )
 
     command = captured["command"]
-    # The generated skeleton survived substitution unmangled, the minted
-    # marker path included.
+    # The generated skeleton survived substitution unmangled, the recorder
+    # provisioning and the notify override's nested quoting included.
     assert command.startswith("sh -c ")
-    assert 'touch "$HOME"/.agentworks/codex/s1-' in command
-    assert "exec codex" in command
+    assert 'mkdir -p "$HOME"/.agentworks/codex' in command
+    assert 'notify=["' in command
+    assert '"$HOME"/.agentworks/codex/record-thread-v1.sh' in command
+    assert "exec codex " in command
     # The operator's extra_args var WAS substituted (parity with shell).
     assert "profile-s1" in command
     assert "{{session_name}}" not in command

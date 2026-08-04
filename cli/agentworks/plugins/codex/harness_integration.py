@@ -13,50 +13,95 @@ per entry (union-merged across template inheritance, like ``shell``'s
 ``disable_strict_config`` (bool, default false) suppresses the
 ``--strict-config`` the harness integration otherwise always emits; and ``extra_args`` is
 a list of raw argv tokens appended last (the operator escape hatch for any
-flag the harness integration does not model). The integration contract and worked-example guidance
+flag the harness integration does not model). ``extra_args`` lands after the
+generated ``-c notify`` override, so an operator who sets their own ``notify``
+there deliberately disables the id binding below (documented on the field, and
+the fallback layers still hold). The integration contract and worked-example guidance
 live in ``agentworks/capabilities/harness_integration/README.md``; this module keeps the
 Codex-specific command and state invariants next to their implementation.
 
 Addressing is discover-and-store (the harness integration guide's rule 1, second form):
 codex offers no ``--session-id`` analog, so the harness integration never mints an id.
 Instead it stores the codex-minted session uuid in its state namespace under
-``session_id``, populated by DISCOVERY anchored on a stored marker: a fresh
-launch mints a nonce marker filename
-(``~/.agentworks/codex/<session-name>-<nonce>.launch`` on the launch target),
-records it in the state blob under ``discovery_marker``, and touches the file
-just before ``exec codex``. On a later op holding an anchor and no id, the
-harness integration probes for rollout files newer than that marker whose recorded
-session cwd is this session's workspace directory, and adopts the single
-candidate's uuid (zero candidates launch fresh again; multiple raise rather
-than guess, since adopting the wrong id would splice one session's
-conversation into another). A blob with NO stored anchor has definitively
-nothing to discover, so no probe runs at all: a brand-new session (or a
-namesake recreated after a delete) can never adopt some earlier session's
-conversation off a leftover marker file.
+``session_id``, and gets that uuid from codex ITSELF through three layers
+(pinned 2026-08-04 in the decisions doc, after a production incident in which
+inference over every rollout in the workspace directory produced 14
+indistinguishable candidates and a bricked resume: codex SUBAGENTS write
+sibling rollouts with the same cwd as their parent):
 
-Resume-vs-launch for a stored id is an op-time existence probe for the id's
+1. **The notify binding (primary).** Every generated launch provisions a
+   recorder script under ``~/.agentworks/codex/`` and passes
+   ``-c notify=[<recorder>, <destination>]``. Codex runs the recorder after
+   every completed turn, handing it the turn's ``thread-id``; the recorder
+   writes that uuid to ``~/.agentworks/codex/<session-name>.thread``. The next
+   op reads the file and adopts the uuid, so resume is deterministic rather
+   than inferred. Last-write-wins on purpose: a picker-esc fresh conversation
+   rebinds the session to the conversation actually in the pane. The recorder
+   itself, and every target-side path around it, lives in ``recorder.py``.
+2. **Source-filtered discovery (the fallback).** Reached whenever no id is
+   bound: nothing recorded and nothing stored, OR a bound id just dropped
+   because its rollout was archived or deleted. Candidates are rollouts
+   under the sessions tree whose ``session_meta`` line carries BOTH
+   ``"source":"cli"`` and this session's canonicalized workspace cwd. A
+   subagent's ``source`` is a JSON object and an ``exec`` session's is
+   ``"exec"``, so both are structurally excluded, matching what codex's own
+   picker shows by default. Exactly one candidate is adopted.
+3. **The picker (ambiguity is a human decision, not an error).** Several
+   candidates launch bare ``codex resume``, codex's own cwd-scoped picker,
+   with the recorder attached: the operator picks their conversation (or esc
+   for a fresh one) and the next completed turn binds the id through layer 1.
+
+**Only ``resume`` ever adopts an id; ``create`` is always fresh.** Both
+identity channels above are name-derived on the launch target (the recorder
+file is ``<session-name>.thread``, and discovery matches the workspace
+directory), so at create time either would hand a brand-new session the
+conversation of a deleted predecessor that shared its name or its workspace. A
+create means a brand-new session row, which by definition owns no codex
+conversation yet, so ``start`` probes nothing at all and additionally clears
+any leftover recording. That closes the recorder channel outright: a recreated
+namesake can never resume the dead conversation as a BOUND id. It NARROWS but
+does not close layer 2, whose candidate set is the workspace: if the dead
+session's rollout is the only interactive one there, the first resume can still
+adopt it, announced (see ``start`` for why that is tolerable and what closing
+it would cost). The split is the correct semantics for deferred discovery
+rather than an asymmetry to work around.
+
+Resume-vs-launch for a bound id is an op-time existence probe for the id's
 rollout file on disk: the rollout-file boundary was empirically confirmed to
 equal codex's own resume boundary. An archived rollout (moved to
 ``archived_sessions/`` by ``codex archive``) is deliberately treated as
 not-resumable: auto-unarchiving would silently reverse an explicit operator
-action, so the harness integration drops the stale id and launches fresh, leaving the
-archived history recoverable manually.
+action. Not-resumable means the bound id is DROPPED and layers 2/3 decide, not
+that the session starts fresh: the next op can adopt a different conversation
+in the same workspace, or open the picker, and only a workspace with no
+candidate launches fresh. The archived history stays recoverable manually
+(``codex unarchive``), and the leaf reports the drop alongside whatever
+replaced it.
 
-Discovery has two accepted residual windows: concurrent launches by the same user in the same
-working directory can produce multiple candidates and fail loudly rather than guess, and filesystem
-mtime granularity can place a rollout on the launch marker boundary. Keeping these constraints here
-makes them durable beside the code that enforces the safe failure behavior.
+Every layer degrades into the next instead of failing: a recorder that never
+runs (codex ignores a missing notify program silently) costs determinism, not
+correctness, and an over-strict layer-2 filter degrades to the picker.
+
+The wrong-adoption path that remains is layer 2 having exactly one candidate
+that is not this session's conversation, because layer 2's whole filter is the
+workspace directory. Two ways in, and the ORDINARY one matters more than the
+exotic one: a session deleted and replaced in the same workspace (its rollout
+outlives it), or a foreign interactive codex session the same user launched
+manually there. Either way it surfaces in the pane as a visibly wrong
+conversation rather than silently (the adoption leaf echoes the uuid it chose
+on both operator surfaces), the session has typed nothing yet so nothing of its
+own is lost, and the picker plus notify rebinding recover it.
 """
 
 from __future__ import annotations
 
 import re
 import shlex
-import uuid
-from typing import TYPE_CHECKING, ClassVar, Literal
+from typing import TYPE_CHECKING, ClassVar, Literal, NamedTuple
 
 from agentworks.capabilities.harness_integration.base import HarnessIntegration, require_commands
 from agentworks.errors import ConfigError, StateError
+from agentworks.plugins.codex.recorder import home_word, notify_value_word, provision_fragment, thread_tail
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -179,27 +224,86 @@ def _append_dedupe(target: list[str], source: list[str]) -> list[str]:
 # Expanded by the target-side shell inside the probes, never here; kept
 # double-quoted because it is interpolated into shell commands as one word.
 _SESSIONS_DIR = '"${CODEX_HOME:-$HOME/.codex}/sessions"'
-
-# The per-session launch-marker directory, under the launch user's home
-# (target-side expansion, one shell word).
-_MARKER_DIR = '"$HOME"/.agentworks/codex'
+# The same path spelled for a human in an error hint (no shell quoting).
+_SESSIONS_DIR_DISPLAY = "$CODEX_HOME/sessions, by default ~/.codex/sessions"
 
 # Rollout files are ``sessions/<Y>/<M>/<D>/rollout-<timestamp>-<uuid>.jsonl``
-# with the codex-minted session uuid embedded verbatim at the tail; discovery
-# extracts it from each candidate path.
-_ROLLOUT_ID_RE = re.compile(
-    r"rollout-.+-([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\.jsonl$"
-)
+# with the codex-minted session uuid embedded verbatim at the tail. Discovery
+# takes candidate identity from the FILENAME and never from the rollout's
+# ``session_meta.session_id``, which is the PARENT's uuid in a subagent
+# rollout (verified 2026-08-04 against 0.146.0).
+_UUID = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+_ROLLOUT_ID_RE = re.compile(rf"rollout-.+-({_UUID})\.jsonl$")
+_RECORDED_ID_RE = re.compile(rf"^{_UUID}$")
 
-# The discovery probe's distinct exit codes, chosen apart from find's own 1
-# and the shell's 2 so a probe that FAILED can never masquerade as a
-# definitive answer (rule 4: a probe that could not run is not a probe that
-# found nothing). 3 is the one definitive-fresh sentinel; 4/5/6 are raise
-# codes that name their failed precondition.
+# The literal ``session_meta`` needle that keeps a subagent (whose
+# ``source`` is a JSON OBJECT) and an ``exec`` session (``"exec"``) out of
+# the candidate set. Codex serializes the first rollout line as compact
+# JSON, so the literal matches without parsing. That compactness is a
+# verified codex behavior, not an assumption we control: a
+# pretty-printed ``session_meta`` would match nothing, which costs the
+# fallback (never a mis-adoption). Re-verify on codex major bumps.
+_CLI_SOURCE_NEEDLE = '"source":"cli"'
+
+# What the discovery probe prints for a candidate whose first line would
+# not read. Deliberately not rollout-path-shaped, so the stdout parse
+# cannot confuse it with an answer, and deliberately not silence: it
+# counts as an unnamed candidate and sends the operator to the picker.
+_UNREADABLE_SENTINEL = "?agw-unreadable-rollout"
+
+# The marker-era launch-anchor shape (2026-08-01 through 2026-08-04),
+# kept only to validate a legacy blob value before the pane removes that
+# path. See ``_take_legacy_marker``.
+_LEGACY_MARKER_RE = re.compile(r"^\.agentworks/codex/[A-Za-z0-9_.-]+\.launch$")
+
+
+def _probe_hint(returncode: int) -> str:
+    """The recovery hint for a probe that could not answer, forked on WHY.
+
+    A hint that names an action the operator cannot take is worse than no
+    hint: ``_FIND_FAILED_EXIT`` means ``find`` ran and failed against the
+    on-disk sessions tree, so telling them to wait for the target to
+    become reachable would point at a healthy component. Everything else
+    in the non-{0,1} band (an SSH failure's 255, a shell that would not
+    start) really is reachability.
+    """
+    if returncode == _FIND_FAILED_EXIT:
+        return (
+            f"Check that the codex sessions directory ({_SESSIONS_DIR_DISPLAY}) is readable by the "
+            f"launch user and not damaged, then retry."
+        )
+    return "Retry once the launch target is reachable."
+
+
+def _awk_string(value: str) -> str:
+    """``value`` as an awk string literal, for splicing into a generated
+    awk program. Only backslash and double quote need escaping; the
+    needles this encodes contain neither newlines nor control characters.
+    """
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+# The probes' distinct exit codes, chosen apart from find's own 1 and the
+# shell's 2 so a probe that FAILED can never masquerade as a definitive
+# answer (rule 4: a probe that could not run is not a probe that found
+# nothing). 3 is the one definitive-fresh sentinel; 4/5/6 are raise codes
+# that name their failed precondition.
 _NO_SESSIONS_DIR_EXIT = 3  # sessions dir absent: codex never ran here
-_MARKER_MISSING_EXIT = 4  # anchor stored but its file is gone: raise
-_CWD_RESOLVE_EXIT = 5  # workspace dir could not be canonicalized: raise
-_FIND_FAILED_EXIT = 6  # find itself failed (not a mere no-match): raise
+_CWD_RESOLVE_EXIT = 4  # workspace dir could not be canonicalized: raise
+_FIND_FAILED_EXIT = 5  # find itself failed (not a mere no-match): raise
+_READ_FAILED_EXIT = 6  # the recorder file exists but would not read: raise
+
+
+class _Layer2(NamedTuple):
+    """What source-filtered discovery found: the ids it could name, plus
+    whether it also saw a candidate it could NOT name (a rollout that
+    passed the filter but whose filename does not embed a uuid). An
+    unnamed candidate cannot be adopted, and ignoring it could turn a
+    genuinely ambiguous workspace into a confident single adoption, so it
+    forces the picker and lets the human decide."""
+
+    ids: tuple[str, ...]
+    unnamed: bool
 
 
 class CodexIntegration(HarnessIntegration):
@@ -208,9 +312,20 @@ class CodexIntegration(HarnessIntegration):
     name: ClassVar[str] = "codex"
     description: ClassVar[str] = "Run Codex, resuming its session when one exists"
 
-    # Set by _resume_or_launch on each start/restart; drives launch_note().
+    # Set by start / _resume_or_launch on each op; drives launch_note().
     # None until the op runs (nothing decided yet).
-    _decision: Literal["resumed", "adopted", "stale", "fresh"] | None = None
+    _decision: Literal["resumed", "adopted", "picker", "stale", "fresh"] | None = None
+    # The uuid the "adopted" leaf settled on, so both operator surfaces can
+    # NAME it. Adoption is the one leaf that is explicitly a heuristic, and
+    # the whole point of announcing it is that the operator can check it
+    # against the conversation the pane comes up in.
+    _adopted_id: str | None = None
+    # Whether this op DROPPED a bound id whose rollout was gone before
+    # deciding. The leaf that follows composes both facts, because the
+    # drop is news on its own: it is the operator's `codex archive`
+    # taking effect, and it is why the pane may come up in a different
+    # conversation than last time.
+    _dropped_stale: bool = False
 
     @classmethod
     def dependencies(cls, owner: str, config: Mapping[str, object]) -> tuple[ConfigReference, ...]:
@@ -265,57 +380,131 @@ class CodexIntegration(HarnessIntegration):
                 raise ConfigError(f"{owner}.{field_name} must be a list of strings")
 
     def start(self, ctx: RunContext) -> str:
-        """The pane command for ``session create``: resume the stored (or
-        discovered) session if its rollout exists, else launch fresh."""
-        return self._resume_or_launch(ctx)
+        """The pane command for ``session create``: ALWAYS a fresh launch.
+
+        ``session create`` mints a brand-new session row, so by definition
+        no codex conversation belongs to this session yet: there is nothing
+        to resume and nothing legitimate to adopt. So create probes nothing
+        (no recorder read, no rollout probe, no discovery) and needs no
+        launch target: only :meth:`resume` ever adopts an id.
+
+        Both of this integration's identity channels are name-derived on
+        the target (the recorder file is ``<session-name>.thread``;
+        discovery matches the workspace directory), so at create time
+        either would hand a new session the conversation of a deleted
+        predecessor that shared its name or its workspace.
+
+        For the RECORDER channel that is closed outright: create never
+        reads the file, and the fresh command deletes it, so no op can ever
+        resume a dead namesake's id as a BOUND one. The DISCOVERY channel
+        is narrowed, not closed, and this is the honest limit of what
+        ships: if the dead session's rollout is the only interactive one in
+        the workspace, this session's FIRST resume can still adopt it
+        through layer 2. That is tolerable rather than invisible: the
+        adoption is announced on both surfaces and names the uuid, the
+        candidate is a prior Agentworks conversation in the same workspace
+        rather than a stranger's, and the new session has typed nothing
+        yet, so nothing of its own is lost. Closing it needs a
+        creation-time floor on candidate age, which is clock-skew sensitive
+        between controller and target (a wrong floor would exclude the
+        session's OWN rollout and orphan it), so it is recorded as a
+        follow-up in the decisions doc rather than guessed at here.
+
+        This is the correct semantics for deferred discovery rather than an
+        asymmetry to apologize for, and it matches the 2026-08-01 decision
+        that a fresh launch carries no seed prompt and resumes nothing.
+        """
+        self._decision = "fresh"
+        return self._fresh_command(
+            msg=f"agentworks harness integration (codex): starting new session {self._session_name}",
+            legacy_marker=self._take_legacy_marker(),
+        )
 
     def resume(self, ctx: RunContext) -> str:
-        """The pane command for ``session resume``: symmetric with
-        :meth:`start`. The orchestrator kills the old tmux BEFORE calling
-        this, so the probes decide with the old process already dead."""
+        """The pane command for ``session resume``: the full three-layer
+        decision (see :meth:`_resume_or_launch`), and the ONLY op that ever
+        adopts a codex session id.
+
+        The orchestrator kills the old tmux BEFORE calling this, so the
+        probes decide with the old process already dead. Adopting here is
+        safe in the way it would not be at create time: the row has existed
+        continuously since a create that launched fresh and cleared any
+        stale recording, so whatever the recorder now holds was reported by
+        a codex running in THIS session's pane."""
         return self._resume_or_launch(ctx)
 
     def launch_note(self) -> str | None:
+        """The console line for the op that just ran, one per decision
+        leaf (operator-decided 2026-08-04: the console must say what is
+        happening, in the same resume vocabulary as the pane echo).
+
+        A dropped stale binding is composed INTO the leaf it precedes
+        rather than replacing it: an operator who ran ``codex archive``
+        deliberately and then lands in a different conversation needs both
+        halves, that their previous binding is gone and what took its
+        place. Only the drop-then-nothing-found case is the bare
+        archived-or-gone line.
+        """
         if self._decision is None:
             return None
-        return {
-            "resumed": "Existing Codex session found. Resuming...",
-            "adopted": (
-                "Discovered the Codex session from the previous launch (best-effort match; "
-                "concurrent codex use under this user and workspace can mislead it). "
-                "Adopting and resuming..."
-            ),
-            "stale": "Previous Codex session is archived or gone. Starting a new one...",
-            "fresh": "No existing Codex session. Starting a new one...",
-        }[self._decision]
+        dropped = "Previous Codex conversation is archived or gone. " if self._dropped_stale else ""
+        if self._decision == "resumed":
+            return "Existing Codex session found. Resuming..."
+        if self._decision == "adopted":
+            which = (
+                "a different Codex conversation in this workspace" if dropped else "this session's Codex conversation"
+            )
+            return f"{dropped}Identified {which} from Codex's own on-disk state: {self._adopted_id}. Resuming..."
+        if self._decision == "picker":
+            return (
+                f"{dropped}Could not identify this session's Codex conversation with confidence. "
+                f"Codex's session picker is opening in the pane; picking one binds this session to "
+                f"that conversation from its next turn, and esc starts a fresh conversation instead."
+            )
+        if self._decision == "stale":
+            return "Previous Codex session is archived or gone. Starting a new one..."
+        return "No existing Codex session. Starting a new one..."
 
     def _resume_or_launch(self, ctx: RunContext) -> str:
-        """The op decision, from the tool's own durable state on the launch
-        target:
+        """The RESUME decision, from codex's own durable state on the launch
+        target (:meth:`start` never runs this: create is always fresh).
+        Five leaves:
 
-        - stored id whose rollout exists: resume it;
-        - stored id whose rollout is gone (archived or deleted): drop the
-          stale id and launch fresh (the next op's discovery adopts the
-          codex-minted replacement);
-        - no stored id but a stored discovery anchor: run discovery
-          against that marker, adopting a single candidate, launching
-          fresh on none, raising on several;
-        - neither: definitively nothing to discover (a brand-new session,
-          or a namesake recreated after a delete), so launch fresh with
-          no probe at all.
+        - a BOUND id (recorded by the notify recorder, or stored by an
+          earlier op) whose rollout exists: resume it (``resumed``);
+        - a bound id whose rollout is gone (archived or deleted): drop the
+          stale id and fall through to discovery, which lands on
+          ``adopted``, ``picker``, or ``stale``. Note what that means for
+          the archived policy: dropping the id is NOT the same as starting
+          fresh. Layers 2/3 then decide, so an archived conversation can be
+          followed by adopting a DIFFERENT one in the same workspace, or by
+          the picker; only the nothing-found case launches fresh. Whichever
+          it is, the leaf reports the drop as well as the outcome;
+        - nothing bound, one source-filtered candidate in this workspace:
+          adopt its uuid and resume it (``adopted``);
+        - nothing bound, several candidates: launch codex's own session
+          picker and let the human decide (``picker``);
+        - nothing bound, no candidate: launch fresh (``fresh``).
+
+        The recorder's id WINS over a differing stored one: it is what
+        codex reported for the conversation most recently live in this
+        session's pane, so a picker-esc fresh conversation rebinds the
+        session to what the operator is actually looking at.
 
         A stored ``session_id`` of the wrong type is garbage this harness integration
         never wrote (the blob is only as trustworthy as the DB it came
         from): it is swept out of the namespace rather than left to
         confuse a later read. Every path returns a single ``sh -c`` pane
-        command that echoes the visible decision and ``exec``s ``codex``.
+        command that echoes the visible decision, provisions the recorder,
+        and ``exec``s ``codex``.
         """
         launch_target = ctx.admin_target() if self._admin else ctx.agent_target()
         if launch_target is None:
             # Unlike claude-code (which keeps its minted id either way, so
-            # guessing "fresh" is lossless), a codex fresh launch drops
-            # the stored id and replaces the discovery anchor; guessing
-            # here could orphan a resumable conversation, so raise.
+            # guessing "fresh" is lossless), a codex fresh launch drops the
+            # bound id; guessing here could orphan a resumable
+            # conversation, so raise. Create needs no target at all, since
+            # it decides nothing (see start()).
             raise StateError(
                 f"session '{self._session_name}': the op context carries no "
                 f"launch target to probe codex session state on; refusing "
@@ -324,106 +513,210 @@ class CodexIntegration(HarnessIntegration):
                 entity_name=self._session_name,
                 hint="Retry once the launch target is reachable.",
             )
-        stored = self._state.get("session_id")
-        if "session_id" in self._state and not isinstance(stored, str):
-            del self._state["session_id"]  # sweep garbage; never this harness integration's write
-            stored = None
-        sid = stored if isinstance(stored, str) and stored else None
+        legacy_marker = self._take_legacy_marker()
+        sid = self._bound_session_id(launch_target)
         if sid is not None:
             if self._rollout_exists(launch_target, sid):
                 self._decision = "resumed"
                 return self._resume_command(
                     sid,
                     msg=f"agentworks harness integration (codex): resuming session {self._session_name}",
+                    legacy_marker=legacy_marker,
                 )
             # The rollout is gone (archived or deleted): not resumable, by
-            # the pinned archived policy. Drop the stale id so the NEXT
-            # op's discovery can adopt the replacement this launch mints.
-            del self._state["session_id"]
+            # the pinned archived policy. Drop the stale id and let
+            # discovery decide, so an archived conversation does not block
+            # adopting the one actually in this workspace.
+            self._state.pop("session_id", None)
+            self._dropped_stale = True
+        # The drop is composed into whichever leaf follows, never swallowed
+        # by it: the operator archived that conversation on purpose and
+        # needs to know both that the binding is gone and what replaced it.
+        dropped = "previous codex conversation archived or gone; " if self._dropped_stale else ""
+        found = self._discover(launch_target)
+        if len(found.ids) == 1 and not found.unnamed:
+            adopted = found.ids[0]
+            self._state["session_id"] = adopted
+            self._adopted_id = adopted
+            self._decision = "adopted"
+            which = (
+                "a different codex conversation in this workspace" if dropped else "this session's codex conversation"
+            )
+            return self._resume_command(
+                adopted,
+                msg=f"agentworks harness integration (codex): {dropped}identified {which} "
+                f"from codex's on-disk state ({adopted}); resuming session {self._session_name}",
+                legacy_marker=legacy_marker,
+            )
+        if found.ids or found.unnamed:
+            self._decision = "picker"
+            return self._picker_command(
+                msg=f"agentworks harness integration (codex): {dropped}could not identify this "
+                f"session's codex conversation with confidence; opening codex's session picker. "
+                f"Pick one to bind session {self._session_name} to it from its next turn, or press "
+                f"esc to start a fresh conversation.",
+                legacy_marker=legacy_marker,
+            )
+        if self._dropped_stale:
             self._decision = "stale"
             return self._fresh_command(
                 msg=f"agentworks harness integration (codex): previous codex session archived or "
-                f"gone; starting new session {self._session_name}"
+                f"gone; starting new session {self._session_name}",
+                legacy_marker=legacy_marker,
             )
-        anchor = self._state.get("discovery_marker")
-        if isinstance(anchor, str) and anchor:
-            adopted = self._discover(launch_target, anchor)
-            if adopted is not None:
-                self._state["session_id"] = adopted
-                del self._state["discovery_marker"]  # consumed; the pane rm -f's the file
-                self._decision = "adopted"
-                return self._resume_command(
-                    adopted,
-                    msg=f"agentworks harness integration (codex): adopted a discovered codex session; "
-                    f"resuming session {self._session_name}",
-                    consume_marker=anchor,
-                )
-        # No anchor (nothing was ever launched fresh here), or discovery
-        # came back empty: launch fresh.
         self._decision = "fresh"
         return self._fresh_command(
-            msg=f"agentworks harness integration (codex): starting new session {self._session_name}"
+            msg=f"agentworks harness integration (codex): starting new session {self._session_name}",
+            legacy_marker=legacy_marker,
         )
 
-    def _marker_word(self, anchor: str) -> str:
-        """A stored anchor (a ``$HOME``-relative marker path like
-        ``.agentworks/codex/<name>-<nonce>.launch``) as ONE shell word,
-        with ``$HOME`` expanded by the target-side shell and the tail
-        ``shlex.quote``-d (adjacent words concatenate in sh, so the pair
-        stays a single path token even for a name needing quotes)."""
-        return '"$HOME"/' + shlex.quote(anchor)
+    def _take_legacy_marker(self) -> str | None:
+        """Retire the marker-era ``discovery_marker`` blob key, returning
+        the path it held IF it still looks like one this harness
+        integration wrote, so the next pane command can ``rm -f`` it.
 
-    def _resume_command(self, sid: str, *, msg: str, consume_marker: str | None = None) -> str:
+        Compatibility with the 2026-08-01 through 2026-08-04 marker scheme,
+        which anchored discovery on a nonce ``~/.agentworks/codex/<name>-
+        <nonce>.launch`` file. Nothing reads it any more: the key is
+        deleted on the first op that touches the blob and its file is
+        cleaned up best-effort, so no dead marker outlives its blob entry.
+
+        The value is shape-checked against that scheme before it becomes
+        an ``rm -f`` argument, for the same reason the wrong-typed
+        ``session_id`` above is swept: the blob is only as trustworthy as
+        the DB row it came from. ``shlex.quote`` makes an arbitrary value
+        inert as SHELL syntax, but a perfectly ordinary relative path
+        (``../../.ssh/authorized_keys``) is something ``rm -f`` would
+        simply follow. An unrecognized value therefore loses only its
+        cleanup: the key is retired either way, so nothing re-reads it.
+        """
+        marker = self._state.pop("discovery_marker", None)
+        if isinstance(marker, str) and _LEGACY_MARKER_RE.match(marker):
+            return marker
+        return None
+
+    def _bound_session_id(self, transport: Transport) -> str | None:
+        """The id bound to this session, or ``None`` when nothing is: the
+        uuid codex last recorded through the notify recorder if there is
+        one, else the id a previous op stored.
+
+        The recorder's id wins over a differing stored one (last write
+        wins): it names the conversation most recently live in this
+        session's pane. Adopting it into the blob is what makes a
+        picker-esc fresh conversation, or any conversation codex minted
+        after our launch, resumable deterministically next time.
+
+        A stored value that is not a uuid is swept rather than used: the
+        blob is only as trustworthy as the DB row it came from, and
+        handing codex ``resume <garbage>`` would fail the pane opaquely
+        where falling through to discovery self-heals the session. Codex
+        ids are UUIDv7, so every id this integration ever stored passes.
+        """
+        stored = self._state.get("session_id")
+        if "session_id" in self._state and not (isinstance(stored, str) and _RECORDED_ID_RE.match(stored)):
+            del self._state["session_id"]  # sweep garbage; never this harness integration's write
+            stored = None
+        recorded = self._recorded_thread_id(transport)
+        if recorded is not None:
+            if recorded != stored:
+                self._state["session_id"] = recorded
+            return recorded
+        return stored if isinstance(stored, str) else None
+
+    def _pane_command(
+        self,
+        *,
+        msg: str,
+        head: tuple[str, ...],
+        legacy_marker: str | None,
+        clear_binding: bool = False,
+    ) -> str:
+        """The pane command shared by all three launch forms: echo the
+        visible decision, clean up after the retired marker scheme,
+        provision the notify recorder, then ``exec codex`` with ``head``
+        (the form's own leading argv) followed by the config flags.
+
+        A single ``sh -c`` so the whole thing survives the ``exec``
+        wrapping the tmux pane applies (``exec`` takes one simple
+        command). The message and the generated argv carry no ``{{word}}``
+        tokens, so the core template-var substitution does not mangle them.
+        """
+        parts = [f"echo {shlex.quote(msg)}"]
+        if legacy_marker is not None:
+            parts.append(f"rm -f {home_word(legacy_marker)}")
+        if clear_binding:
+            # A fresh launch has no conversation bound yet, so a leftover
+            # recording must not outlive it and re-report a dead id.
+            parts.append(f"rm -f {home_word(thread_tail(self._session_name))}")
+        parts.append(provision_fragment())
+        parts.append(f"exec codex {self._codex_argv(head)}".rstrip())
+        return f"sh -c {shlex.quote('; '.join(parts))}"
+
+    def _resume_command(self, sid: str, *, msg: str, legacy_marker: str | None) -> str:
         """The resume pane command: ``codex resume <sid>`` with
         ``-c tui.resume_cwd=current`` pinning the cross-cwd picker off
         deterministically (the pane has already cd-ed to the workspace
-        dir, so "current" is always the right answer). On the adoption
-        path ``consume_marker`` is the just-consumed anchor, whose file
-        the pane removes so no dead marker file outlives its blob entry."""
-        tokens = ["resume", sid, "-c", "tui.resume_cwd=current", *self._config_flags()]
-        argv = " ".join(shlex.quote(token) for token in tokens)
-        cleanup = f"rm -f {self._marker_word(consume_marker)}; " if consume_marker else ""
-        # A single ``sh -c`` so the whole thing survives the ``exec``
-        # wrapping the tmux pane applies (``exec`` takes one simple
-        # command). The message and the generated argv carry no
-        # ``{{word}}`` tokens, so the core template-var substitution does
-        # not mangle them.
-        inner = f"echo {shlex.quote(msg)}; {cleanup}exec codex {argv}"
-        return f"sh -c {shlex.quote(inner)}"
-
-    def _fresh_command(self, *, msg: str) -> str:
-        """The fresh-launch pane command: mint a NONCE marker filename,
-        record it in the state blob as the discovery anchor (the manager
-        persists the blob before the pane runs), remove the previous
-        anchor's file if one was stored (a prior fresh launch that never
-        got used), touch the new marker, then ``exec codex`` with no
-        positional prompt, so no wrapper-authored turn ever appears in
-        the conversation.
-
-        The nonce ties the on-disk marker to THIS blob entry: a leftover
-        marker from a deleted namesake session can never be mistaken for
-        ours, because discovery only ever probes the stored anchor. If
-        the pane never runs (or the touch fails), the blob holds an
-        anchor whose file does not exist, and the next op's discovery
-        raises rather than guessing; the error's hint names the
-        recovery."""
-        old_anchor = self._state.get("discovery_marker")
-        anchor = f".agentworks/codex/{self._session_name}-{uuid.uuid4().hex}.launch"
-        self._state["discovery_marker"] = anchor
-        cleanup = f"rm -f {self._marker_word(old_anchor)}; " if isinstance(old_anchor, str) and old_anchor else ""
-        flags = self._config_flags()
-        exec_codex = "exec codex" if not flags else "exec codex " + " ".join(shlex.quote(token) for token in flags)
-        inner = (
-            f"echo {shlex.quote(msg)}; "
-            f"{cleanup}mkdir -p {_MARKER_DIR} && touch {self._marker_word(anchor)}; "
-            f"{exec_codex}"
+        dir, so "current" is always the right answer)."""
+        return self._pane_command(
+            msg=msg,
+            head=("resume", sid, "-c", "tui.resume_cwd=current"),
+            legacy_marker=legacy_marker,
         )
-        return f"sh -c {shlex.quote(inner)}"
 
-    def _config_flags(self) -> list[str]:
-        """The managed flags then ``extra_args``, each an argv token.
-        ``extra_args`` is appended verbatim last so it can carry (or
-        override) any flag the harness integration does not model.
+    def _picker_command(self, *, msg: str, legacy_marker: str | None) -> str:
+        """The ambiguity pane command: bare ``codex resume``, codex's own
+        cwd-scoped session picker (which already hides ``exec`` and
+        subagent sessions), with our managed flags and the recorder
+        attached. Verified 2026-08-04 against 0.146.0 under the Agentworks
+        pane wrapper: the picker renders below our echoed decision line,
+        enter resumes the selection, and esc starts a NEW conversation in
+        the same process, inheriting the command line's ``-c`` overrides
+        so the recorder binds either way.
+
+        ``-c tui.resume_cwd=current`` scopes the list to this workspace
+        directory, the same pin the explicit-id form uses."""
+        return self._pane_command(
+            msg=msg,
+            head=("resume", "-c", "tui.resume_cwd=current"),
+            legacy_marker=legacy_marker,
+        )
+
+    def _fresh_command(self, *, msg: str, legacy_marker: str | None) -> str:
+        """The fresh-launch pane command: ``exec codex`` with no
+        positional prompt, so no wrapper-authored turn ever appears in the
+        conversation and nothing is durable until the human submits.
+
+        It also removes any leftover recording (``clear_binding``). A fresh
+        launch means nothing is bound yet, so a stale ``.thread`` file must
+        not survive it and re-report a dead id on the next op. On the
+        create path that is what closes the recorder channel completely
+        (see :meth:`start`): create adopts nothing, and it also clears a
+        dead namesake's recording so no FOLLOWING ``resume`` can bind it
+        either."""
+        return self._pane_command(
+            msg=msg,
+            head=(),
+            legacy_marker=legacy_marker,
+            clear_binding=True,
+        )
+
+    def _codex_argv(self, head: tuple[str, ...]) -> str:
+        """The quoted argv text after ``codex``: the form's leading tokens,
+        the managed flags, the ``notify`` override, then ``extra_args``.
+
+        The ``notify`` override lands after every managed flag and before
+        ``extra_args``, which is what makes an operator ``notify`` in
+        ``extra_args`` win (later codex ``-c`` overrides replace earlier
+        ones). That deliberately disables the id binding, so it is
+        documented on the field; discovery and the picker still hold.
+        """
+        parts = [shlex.quote(token) for token in (*head, *self._managed_flags())]
+        parts += ["-c", notify_value_word(self._session_name)]
+        parts += [shlex.quote(token) for token in self._extra_arg_tokens()]
+        return " ".join(parts)
+
+    def _managed_flags(self) -> list[str]:
+        """The flags the harness integration models, as argv tokens, in emission order.
 
         ``--strict-config`` is emitted by DEFAULT (operator-decided
         2026-08-03): the harness integration owns the emitted config surface, and
@@ -458,20 +751,75 @@ class CodexIntegration(HarnessIntegration):
                     tokens += ["--add-dir", item]
         if self.config.get("web_search") is True:
             tokens.append("--search")
-        extra_args = self.config.get("extra_args")
-        if isinstance(extra_args, list):
-            tokens += [item for item in extra_args if isinstance(item, str)]
         return tokens
 
+    def _extra_arg_tokens(self) -> list[str]:
+        """``extra_args`` as argv tokens, appended verbatim last so it can
+        carry (or override) any flag the harness integration does not model."""
+        extra_args = self.config.get("extra_args")
+        if not isinstance(extra_args, list):
+            return []
+        return [item for item in extra_args if isinstance(item, str)]
+
+    def _recorded_thread_id(self, transport: Transport) -> str | None:
+        """The uuid the notify recorder last wrote for this session, or
+        ``None`` when nothing valid is recorded.
+
+        Absent file means nothing is bound: a session whose codex has not
+        completed a turn yet, or one whose recorder never ran (codex
+        ignores a missing notify program silently). Content that is not a
+        single uuid is likewise treated as nothing bound: the recorder
+        only ever writes one, so anything else is not ours to interpret,
+        and the fresh path clears it. Only a file that EXISTS and would
+        not read raises, since that is a probe that could not run rather
+        than an answer.
+
+        The stdout parse tolerates login-shell noise the same way the
+        discovery probe does: only uuid-shaped lines are considered.
+        """
+        target = home_word(thread_tail(self._session_name))
+        inner = f"[ -f {target} ] || exit 1; cat {target} 2>/dev/null || exit {_READ_FAILED_EXIT}"
+        result = transport.run(f'"$SHELL" -lic {shlex.quote(inner)}', check=False)
+        if result.returncode == 1:
+            return None  # nothing recorded yet: not bound
+        if result.returncode != 0:
+            recording = f"~/{thread_tail(self._session_name)}"
+            raise StateError(
+                f"session '{self._session_name}': could not read the recorded "
+                f"codex thread id ({recording}) on "
+                f"{self._target_label} (exit {result.returncode}); refusing to "
+                f"guess resume-vs-launch.",
+                entity_kind="session",
+                entity_name=self._session_name,
+                hint=(
+                    # The file is there and unreadable, so "retry when the
+                    # target is reachable" would send the operator in a
+                    # circle. Deleting it is safe and sufficient: the next
+                    # resume falls through to discovery and the picker, and
+                    # codex rebinds the id on the session's next turn.
+                    f"Remove {recording} on the launch target (or fix its permissions) and retry; "
+                    f"the next resume identifies the conversation from codex's own state instead, "
+                    f"so nothing is orphaned."
+                    if result.returncode == _READ_FAILED_EXIT
+                    else "Retry once the launch target is reachable."
+                ),
+            )
+        recorded = [line.strip() for line in result.stdout.splitlines() if _RECORDED_ID_RE.match(line.strip())]
+        if len(recorded) != 1:
+            return None  # empty, noise-only, or not something the recorder wrote
+        return recorded[0]
+
     def _rollout_exists(self, transport: Transport, sid: str) -> bool:
-        """True iff the stored session's rollout
+        """True iff the bound session's rollout
         (``rollout-<timestamp>-<sid>.jsonl``, hence the ``*-<sid>.jsonl``
         glob) exists under the sessions dir on the launch target.
         Shell-neutral (the glob is quoted through to find); runs through
         ``$SHELL -lic`` like the readiness probe. ``archived_sessions/``
         is deliberately NOT probed: an archived session reports
-        not-resumable and the harness integration launches fresh rather than silently
-        reversing ``codex archive``.
+        not-resumable and the caller drops the bound id and falls through to
+        discovery, rather than silently reversing ``codex archive``. Note
+        that not-resumable is not the same as fresh: layers 2/3 decide what
+        happens next.
 
         The exit code is read, not just ``.ok``, so a probe that could not
         EXECUTE never masquerades as "no rollout". The inner command keeps
@@ -479,10 +827,10 @@ class CodexIntegration(HarnessIntegration):
         missing sessions dir (codex never ran here) exits 1 up front; a
         printed match exits 0 (a found rollout is definitive even if find
         also stumbled elsewhere); a find that FAILED without printing one
-        exits 6 rather than folding into "no rollout". Anything but
-        {0, 1} (the 6, an SSH failure's 255, a shell that could not
-        start) raises: guessing "fresh" would drop the stored id and
-        orphan a resumable conversation."""
+        exits with the find-failed code rather than folding into "no
+        rollout". Anything but {0, 1} (that code, an SSH failure's 255, a
+        shell that could not start) raises: guessing "fresh" would drop
+        the bound id and orphan a resumable conversation."""
         needle = shlex.quote(f"*-{sid}.jsonl")
         inner = (
             f"[ -d {_SESSIONS_DIR} ] || exit 1; "
@@ -493,87 +841,102 @@ class CodexIntegration(HarnessIntegration):
         if result.returncode == 0:
             return True  # rollout on disk: resume
         if result.returncode == 1:
-            return False  # the probe ran, no match: launch fresh
+            return False  # the probe ran, no match: not resumable
         raise StateError(
             f"session '{self._session_name}': could not probe for the codex "
             f"rollout on {self._target_label} (exit {result.returncode}); "
             f"refusing to guess resume-vs-launch.",
             entity_kind="session",
             entity_name=self._session_name,
-            hint="Retry once the launch target is reachable.",
+            hint=_probe_hint(result.returncode),
         )
 
-    def _discover(self, transport: Transport, anchor: str) -> str | None:
-        """Op-time discovery of the codex-minted session id, run only when
-        the blob holds the stored anchor ``anchor`` and no id: list
-        rollout files newer (by mtime) than the anchor's marker file whose
-        recorded session cwd is this session's workspace directory, and
-        adopt the single candidate's uuid. Returns ``None`` when the probe
-        ran and nothing matched (the human never durably used the previous
-        fresh launch in this workspace, so launching fresh again loses
-        nothing) and raises on anything it cannot vouch for.
+    def _discover(self, transport: Transport) -> _Layer2:
+        """Layer-2 discovery: the rollouts in this session's workspace
+        directory that could be a human's interactive codex conversation.
+
+        A candidate's first JSONL line (its ``session_meta``) must carry
+        BOTH ``"source":"cli"`` and this session's canonicalized workspace
+        cwd. The source needle is what keeps codex SUBAGENTS out: a
+        subagent's rollout sits in the same sessions tree with the same
+        cwd as its parent, and its ``source`` is a JSON OBJECT
+        (``{"subagent":...}``, the guardian reviewer included) rather than
+        the string ``"cli"``; an ``exec`` session stamps ``"exec"``. Both
+        are structurally excluded, which is exactly the set codex's own
+        resume picker shows by default (verified 2026-08-04 against
+        0.146.0). Identity comes from the FILENAME, never from
+        ``session_meta.session_id``, which holds the PARENT's uuid in a
+        subagent rollout.
 
         One purposeful round-trip. The target-side command exits with a
         distinct code per precondition so a probe that FAILED can never
         masquerade as a definitive answer: sessions dir absent is the one
-        definitive-fresh exit (3); the marker file missing while its
-        anchor is stored raises (4: either the fresh pane never ran or
-        someone removed the file, and both mean the anchor's account of
-        history is broken); the workspace dir failing to canonicalize
-        raises (5); find failing raises (6: for an ENUMERATION a partial
-        listing is dangerous, since a missed candidate could turn
-        "multiple" into a wrong single adoption, so unlike the existence
-        probe no output is trusted from a failed find).
+        definitive-empty exit; the workspace dir failing to canonicalize
+        raises; find failing raises (for an ENUMERATION a partial listing
+        is dangerous, since a missed candidate could turn "several" into a
+        confident single adoption, so unlike the existence probe no output
+        is trusted from a failed find).
 
-        The cwd filter compares each rollout's first JSONL line (its
-        session_meta) against the workspace directory canonicalized
-        TARGET-side via ``cd <workspace> && pwd -P``, so a logical-vs-
-        physical symlink mismatch cannot exclude our own rollout.
-        Verified against codex-cli 0.146.0 (decisions doc, "What the CLI
-        actually provides"): codex serializes the session cwd as a
-        PHYSICAL path, even when launched from a symlinked directory, in
-        compact JSON (``"cwd":"<path>"`` with no spaces), which
-        ``grep -F`` matches without parsing. The matched path is not
-        JSON-escaped: a workspace path carrying a JSON-special character
-        (a quote, a backslash) would fail the match and degrade to a
-        fresh launch, never a mis-adoption; workspace names are
-        validated to a safe character set, so this stays theoretical. The
-        stdout parse also tolerates login-shell noise: only lines shaped
-        like a rollout path (containing ``/rollout-`` and ending
-        ``.jsonl``) are considered, so a dotfile that echoes cannot
-        misdiagnose the probe."""
-        marker = self._marker_word(anchor)
+        The cwd filter compares each rollout's ``session_meta`` against
+        the workspace directory canonicalized TARGET-side via
+        ``cd <workspace> && pwd -P``, so a logical-vs-physical symlink
+        mismatch cannot exclude our own rollout. Verified against
+        codex-cli 0.146.0 (decisions doc, "What the CLI actually
+        provides"): codex serializes the session cwd as a PHYSICAL path,
+        even when launched from a symlinked directory, in compact JSON
+        (``"cwd":"<path>"`` with no spaces), which a literal match finds
+        without parsing. The matched path is not JSON-escaped: a workspace
+        path carrying a JSON-special character (a quote, a backslash)
+        would fail the match and degrade to a fresh launch, never a
+        mis-adoption; workspace names are validated to a safe character
+        set, so this stays theoretical. The stdout parse also tolerates
+        login-shell noise: only lines shaped like a rollout path
+        (containing ``/rollout-`` and ending ``.jsonl``) are considered,
+        so a dotfile that echoes cannot misdiagnose the probe.
+
+        Every rollout under the tree is inspected: there is deliberately
+        no mtime window (the retired marker era had one, and it is what
+        let a subagent rollout look like this session's conversation).
+        The filter is therefore ONE batched ``awk`` per ``find`` batch
+        rather than a process per rollout: an agent user with months of
+        codex history has thousands of rollouts, and this runs on every
+        resume of a not-yet-bound session. The awk program is BEGIN-only
+        and pulls one record per file with ``getline``, so it neither
+        spawns per file nor walks a multi-megabyte rollout: the read cost
+        per candidate is the one buffered block that record comes from, not
+        the file. Two details are load-bearing:
+
+        - The workspace path travels in the ENVIRONMENT, not through
+          ``awk -v``, which applies escape processing to its value: a path
+          containing a backslash would arrive as a DIFFERENT needle there,
+          and a needle that silently changes is the one way this filter
+          could mis-adopt rather than merely miss.
+        - A file that will not read emits a sentinel that counts as an
+          unnamed candidate (the picker), rather than being skipped. Same
+          reasoning as raising on a failed ``find``: for an enumeration, a
+          dropped candidate can turn "several" into one confident wrong
+          adoption.
+        """
         workspace = shlex.quote(self._workspace_path)
+        awk = (
+            f"BEGIN{{s={_awk_string(_CLI_SOURCE_NEEDLE)};"
+            f'c="\\"cwd\\":\\"" ENVIRON["agw_ws"] "\\"";'
+            f"for(i=1;i<ARGC;i++){{"
+            f"r=(getline l < ARGV[i]);close(ARGV[i]);"
+            f"if(r<0){{print {_awk_string(_UNREADABLE_SENTINEL)};continue}}"
+            f"if(r>0&&index(l,s)&&index(l,c))print ARGV[i]}}}}"
+        )
         inner = (
-            f"[ -f {marker} ] || exit {_MARKER_MISSING_EXIT}; "
             f"[ -d {_SESSIONS_DIR} ] || exit {_NO_SESSIONS_DIR_EXIT}; "
-            f"w=$(cd {workspace} 2>/dev/null && pwd -P) || exit {_CWD_RESOLVE_EXIT}; "
-            f"out=$(find {_SESSIONS_DIR} -type f -name {shlex.quote('rollout-*.jsonl')} "
-            f"-newer {marker} -print 2>/dev/null) || exit {_FIND_FAILED_EXIT}; "
-            f'[ -n "$out" ] || exit 0; '
-            f"printf '%s\\n' \"$out\" | while IFS= read -r f; do "
-            f'head -n 1 "$f" 2>/dev/null | grep -F -q "\\"cwd\\":\\"$w\\"" && printf \'%s\\n\' "$f"; '
-            f"done; exit 0"
+            f"agw_ws=$(cd {workspace} 2>/dev/null && pwd -P) || exit {_CWD_RESOLVE_EXIT}; "
+            f"export agw_ws; "
+            f"find {_SESSIONS_DIR} -type f -name {shlex.quote('rollout-*.jsonl')} "
+            f"-exec awk {shlex.quote(awk)} {{}} + 2>/dev/null || exit {_FIND_FAILED_EXIT}; "
+            f"exit 0"
         )
         result = transport.run(f'"$SHELL" -lic {shlex.quote(inner)}', check=False)
         if result.returncode == _NO_SESSIONS_DIR_EXIT:
-            return None  # codex never ran on this target: nothing to adopt
-        if result.returncode == _MARKER_MISSING_EXIT:
-            raise StateError(
-                f"session '{self._session_name}': the stored codex launch "
-                f"marker (~/{anchor}) is missing on {self._target_label}; "
-                f"without it, discovery cannot tell whether a codex "
-                f"conversation from the last launch would be orphaned, so "
-                f"refusing to guess.",
-                entity_kind="session",
-                entity_name=self._session_name,
-                hint=(
-                    f"If this session has no codex conversation worth keeping "
-                    f"(or you accept losing an undiscovered one), recreate the "
-                    f"marker with `touch ~/{anchor}` on the launch target and "
-                    f"retry; the next launch will start fresh."
-                ),
-            )
+            return _Layer2((), False)  # codex never ran on this target
         if result.returncode == _CWD_RESOLVE_EXIT:
             raise StateError(
                 f"session '{self._session_name}': could not resolve the "
@@ -591,50 +954,24 @@ class CodexIntegration(HarnessIntegration):
                 f"refusing to guess resume-vs-launch.",
                 entity_kind="session",
                 entity_name=self._session_name,
-                hint="Retry once the launch target is reachable.",
+                hint=_probe_hint(result.returncode),
             )
-        candidates: list[str] = []
+        ids: list[str] = []
+        unnamed = False
         for line in result.stdout.splitlines():
             path = line.strip()
+            if path == _UNREADABLE_SENTINEL:
+                unnamed = True  # a candidate we could not read: the human decides
+                continue
             if "/rollout-" not in path or not path.endswith(".jsonl"):
                 continue  # login-shell dotfile noise, not a probe answer
             match = _ROLLOUT_ID_RE.search(path)
             if match is None:
-                # A rollout-shaped file without an embedded uuid is not a
-                # session this harness integration can adopt OR safely ignore (ignoring
-                # could turn "one real candidate" into a wrong adoption of
-                # another); refuse to guess.
-                raise StateError(
-                    f"session '{self._session_name}': the codex rollout probe "
-                    f"on {self._target_label} matched a file whose name does "
-                    f"not embed a session id ({path!r}); refusing to guess "
-                    f"what it is.",
-                    entity_kind="session",
-                    entity_name=self._session_name,
-                    hint="Remove or rename the unexpected file under the codex sessions directory and retry.",
-                )
-            sid = match.group(1)
-            if sid not in candidates:
-                candidates.append(sid)
-        if not candidates:
-            return None  # the probe ran, no matching rollout: launch fresh
-        if len(candidates) == 1:
-            return candidates[0]
-        raise StateError(
-            f"session '{self._session_name}': found {len(candidates)} codex "
-            f"rollouts newer than this session's launch marker in its "
-            f"workspace directory on {self._target_label} "
-            f"({', '.join(candidates)}); refusing to guess which one is this "
-            f"session's conversation.",
-            entity_kind="session",
-            entity_name=self._session_name,
-            hint=(
-                f"Archive the rollouts that belong to other work (codex "
-                f"archive <id>) and retry, or remove the marker file "
-                f"(~/{anchor} on the launch target) to make the next op raise "
-                f"a recoverable marker-missing error instead."
-            ),
-        )
+                unnamed = True  # a candidate we cannot name: the human decides
+                continue
+            if match.group(1) not in ids:
+                ids.append(match.group(1))
+        return _Layer2(tuple(ids), unnamed)
 
     def _probe_target(self, transport: Transport) -> None:
         """Readiness proves only that ``codex`` is installed; it never

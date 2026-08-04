@@ -1,13 +1,13 @@
 # codex harness: pinned decisions and CLI research
 
-**Status:** Pinned **Repo:** `agentworks` **Path:** `cli/agentworks/plugins/codex/`
+**Status:** Locked **Repo:** `agentworks` **Path:** `cli/agentworks/plugins/codex/`
 
 This effort adds a `codex` session harness in a new opt-in `codex` system plugin, mirroring the
 `claude` plugin end to end. It deliberately runs without a full SDD: the pattern it follows is
 locked (`docs/sdd/2026-07-07-session-harness/`, ADR 0020, the plugin-system SDD), and the harness
-developer guide (`cli/agentworks/capabilities/harness/README.md`) is the contract. This document is
-the codex analog of `claude-code-lld.md`: the empirical CLI research and the pinned tool-specific
-mechanics, so implementation never relies on recalled flags.
+developer guide (`cli/agentworks/capabilities/harness_integration/README.md`) is the contract. This
+document is the codex analog of `claude-code-lld.md`: the empirical CLI research and the pinned
+tool-specific mechanics, so implementation never relies on recalled flags.
 
 ## Verification basis
 
@@ -31,8 +31,12 @@ mechanics, so implementation never relies on recalled flags.
   `threads` table indexes sessions but is a cache, not the source of truth.
 - **The rollout's first JSONL line is its `session_meta`**, serialized as compact JSON (no spaces),
   and its `"cwd"` key records the PHYSICAL working directory: launching from a symlinked directory
-  records the canonical path (verified 2026-08-01 against 0.146.0). This is what makes the discovery
-  filter's `grep -F '"cwd":"<pwd -P of the workspace>"'` comparison sound.
+  records the canonical path (verified 2026-08-01 against 0.146.0). This is the fact that makes the
+  discovery filter's literal `"cwd":"<pwd -P of the workspace>"` comparison sound. (The comparison
+  itself is an `index()` test inside the batched `awk` the probe runs, not a `grep`; the FACT is
+  what this bullet pins.) It holds only while codex serializes `session_meta` COMPACTLY: a
+  pretty-printed line would match neither this needle nor the `"source":"cli"` one, which costs the
+  fallback and never mis-adopts. Re-verify on codex major bumps.
 - **The resume boundary equals rollout-file presence** (verified with an abandoned-at-every-stage
   experiment, the analog of the claude one): file present resumes even with the index row deleted;
   file absent fails even with the row present; archived fails with an actionable "run
@@ -62,96 +66,204 @@ mechanics, so implementation never relies on recalled flags.
 - Codex takes no lock on a rollout: concurrent resume of one session in two panes is allowed
   silently.
 
+The following were verified 2026-08-04 (offline-stub harness driving real turns unauthenticated,
+plus operator-supplied rollout specimens from a production incident), for the resume redesign:
+
+- **The `notify` hook.** `notify = ["<program>"]` is a config key (`-c` accepted, `--strict-config`
+  validated). Codex invokes the program with the JSON payload
+  (`{"type":"agent-turn-complete","thread-id":...,"turn-id":...,"cwd":...,"client":...,...}`) as its
+  FINAL argv argument, which for a single-element `notify` array is the only one (the next bullet
+  covers the multi-element form the integration actually emits), after EVERY successfully completed
+  turn, in every launch mode (TUI, `exec`, `resume <id>`, the picker, picker-esc-new). `thread-id`
+  equals the rollout filename uuid and the id `codex resume` takes. Nothing fires for an abandoned
+  session or a failed turn. A `-c notify` override silently and completely REPLACES a config.toml
+  notify; a nonexistent notify program is a completely silent no-op. The payload's `cwd` is the
+  resume-time cwd, not the session's original.
+- **Extra `notify` list elements are passed as leading argv, before the payload** (verified
+  2026-08-04 at implementation time against 0.146.0, with a real completed turn against the offline
+  stub provider): `notify=["<prog>","<extra>"]` runs `<prog> <extra> <payload>`, so the payload
+  lands in `$2`. `--strict-config` accepts the multi-element form and rejects a bare string
+  (`invalid type: string, expected a sequence`). This is what lets ONE shared recorder script serve
+  every session: `$1` is the session's destination file. The corollary constraint is that the paths
+  inside the array must be ABSOLUTE, since codex spawns the program itself with no shell, so the
+  generated `-c notify=[...]` word leaves `$HOME` for the launching shell to expand.
+- **`-c notify=[...]` is accepted on both resume forms** (reconfirmed 2026-08-04 at implementation
+  time): `codex resume <id>` and bare `codex resume` both parse `-c` overrides under
+  `--strict-config` BEFORE the interactive TTY check, so an unknown key errors out identically on
+  either.
+- **Subagents share everything and fire the parent's notify.** A subagent's rollout lives in the
+  same sessions tree with the SAME cwd as its parent, its `session_meta.source` is a JSON OBJECT
+  (`{"subagent": {...}}`, including the guardian reviewer's `{"subagent":{"other":"guardian"}}`),
+  its `thread_source` is `"subagent"`, its `originator` INHERITS the parent's (`codex-tui`), and,
+  critically, its completed turns fire the PARENT's notify hook carrying the SUBAGENT's `thread-id`.
+  The only in-payload discriminator: real sessions carry a `client` key (`codex-tui` /
+  `codex_exec`); subagent payloads carry none. Also: a subagent rollout's `session_meta.session_id`
+  is the PARENT's uuid (its own is the `id` field and the filename), so code must never read
+  `session_id` off a rollout.
+- **`source` is the picker's own discriminator.** Interactive TUI sessions stamp the STRING
+  `"source":"cli"` with `"thread_source":"user"`; `exec` stamps `"exec"`; subagents stamp the object
+  above. Codex's own resume picker hides non-`cli` sessions by default (`--include-non-interactive`
+  reveals exec ones; subagent sessions never appear at all).
+- **The bare `codex resume` picker works under the Agentworks pane wrapper** (`$SHELL -lic` +
+  `sh -c` + `exec`), accepts `--strict-config`, `-m`/`-s`/`-a`, and repeated `-c` (including
+  `notify`), renders the echoed decision line above itself, and its keys are: enter resumes the
+  selection, esc starts a NEW session in the same process (inheriting the command line's `-c` flags,
+  so notify still binds it), ctrl+c quits.
+- **Codex has a hooks subsystem** (`SessionStart` with `source: startup|resume`, `SubagentStart`,
+  `SubagentStop`, ...) that would be a strictly better binding surface than `notify` (fires at
+  launch, self-labels subagents), but no experiment could get a hook to fire from config alone in
+  0.146.0 (plugin-only installation suspected). Recorded as the follow-up lead, not v1.
+
 ## Pinned decisions
 
-### Addressing: discover-and-store (the guide's rule 1, second form)
+### Addressing: notify-bound, with source-filtered discovery and the picker (redesigned 2026-08-04)
 
-The harness stores the codex-minted session id in its (namespaced) state blob under `session_id`,
-populated by DISCOVERY, never generated. Resume is by UUID only: never by name, never `--last`
-(operator-decided 2026-08-01, matching the research recommendation: `--last` is too implicit for a
-harness that must never silently orphan a conversation).
+The integration stores the codex-minted session id in its (namespaced) state blob under
+`session_id`. Resume is by UUID only: never by name, never `--last` (operator-decided 2026-08-01:
+too implicit for an integration that must never silently orphan a conversation). Fresh launches
+still carry no seed prompt (operator-decided 2026-08-01): no wrapper-authored turn ever appears in
+the conversation, so nothing durable exists until the human's first submission and a resume in that
+window losing nothing.
 
-### Fresh launch: deferred discovery, no seed prompt (operator-decided 2026-08-01)
+This section was redesigned 2026-08-04 after a production incident: the original marker-anchored,
+mtime-plus-cwd discovery treated every rollout in the workspace as a candidate, and codex SUBAGENTS
+write sibling rollouts with the same cwd, so one session that ran subagents produced 14
+indistinguishable candidates, a bricked resume, and error hints whose recovery path orphaned the
+conversation. The marker scheme is REMOVED, not patched: identity now comes from codex itself, with
+inference demoted to a filtered fallback and ambiguity resolved by a human in-band instead of an
+error. Three layers:
 
-A fresh launch runs plain `codex` with no positional prompt, so no wrapper-authored turn ever
-appears in the conversation. `session_id` stays unset until a later op discovers it; until the
-human's first submission there is nothing durable to resume, so a restart in that window launching
-fresh again loses nothing (the same boundary claude has).
+- **Layer 1, the notify binding (primary).** Every generated launch (fresh, `resume <id>`, picker)
+  provisions a recorder script and passes `-c notify=[...]`. On each completed turn codex hands the
+  recorder its `thread-id`; the recorder writes it atomically to
+  `~/.agentworks/codex/<session-name>.thread` ONLY when the payload identifies the interactive TUI
+  client (`"client":"codex-tui"`; a subagent turn fires the parent's notify with the CHILD's id and
+  no `client` key at all, and recording it would splice conversations, the exact failure this
+  redesign kills). The match is POSITIVE on the TUI value rather than a presence test, which is what
+  also excludes an `exec` client, an unknown future client, and a `client` key codex might someday
+  nest in another object: that needle is a substring test, not a field-anchored one like the
+  `thread-id` read below, so mere presence would inherit the nesting hazard byte-order first-match
+  handles there. The next RESUME reads the file, adopts the id into `session_id`, and resumes
+  deterministically; a `create` deletes it instead (see create-is-always-fresh below).
+  Last-write-wins on purpose: a picker-esc fresh session rebinds to the conversation actually in the
+  pane. The `client` discriminator and its value are undocumented (codex-internal `legacy_notify`);
+  re-verify on codex major bumps, noting the failure is safe in the likely direction (a renamed
+  client string records nothing and falls back). The `thread-id` read is field-anchored (the payload
+  is split on JSON field and object boundaries, then a whole field is matched) and takes the FIRST
+  match, so a value that quotes the needle cannot forge it (JSON escapes its quotes) and a
+  `thread-id` nested in a LATER object cannot displace the payload's own. Note the exact guarantee:
+  first-match is BYTE ORDER, not nesting depth, so it is the payload's own only because 0.146.0
+  emits that field before any nested object; a future codex nesting one earlier would bind that
+  instead, costing a recoverable wrong binding the picker fixes. That anchor is also what depends on
+  codex serializing the payload COMPACTLY, as 0.146.0 does (the `"client":` needle survives
+  pretty-printing; the anchored field match does not), so a pretty-printed payload would record
+  NOTHING: that silently costs the binding and falls back to layers 2/3 rather than recording
+  something wrong.
+- **Layer 2, source-filtered discovery (the fallback, reached whenever no id is bound: nothing
+  recorded and nothing stored, OR a bound id just dropped as archived-or-gone).** Candidates are
+  rollouts whose first JSONL line carries BOTH the literal `"source":"cli"` (a subagent's `source`
+  is a JSON object, an exec session's is `"exec"`, so both are structurally excluded, matching what
+  codex's own picker shows by default) and the session's canonicalized workspace cwd
+  (`cd <workspace> && pwd -P`; a rollout's `session_meta.cwd` is immutable across cross-cwd
+  resumes). No marker, no mtime window. Exactly one candidate: adopt and resume. Zero: fresh.
+  Candidate identity comes from the FILENAME uuid only, NEVER `session_meta.session_id` (the
+  parent's uuid in a subagent rollout); the `id` field would also be correct but reading it would
+  mean parsing the line, so it is deliberately unused. A candidate whose filename carries no uuid
+  therefore cannot be named, and rather than being ignored (which could turn a genuinely ambiguous
+  workspace into one confident adoption) it forces layer 3. So does a candidate whose first line
+  will not read.
+- **Layer 3, the picker (ambiguity is a human decision, not an error).** Multiple candidates launch
+  `codex resume` (bare: codex's own cwd-scoped picker, which already hides exec and subagent
+  sessions) with our managed flags and the notify recorder attached. The operator picks their
+  conversation (or esc for a fresh one); either way the next completed turn binds the id through
+  layer 1 and the session self-heals into deterministic resume. The console note and pane echo
+  explain exactly that, including what esc does.
 
-Discovery mechanics (op-time, target-side; redesigned at review 2026-08-01, lead-pinned, replacing
-the original name-derived-marker scheme whose count-only adoption could adopt a foreign session and
-whose leftover markers could leak a dead namesake's conversation into a recreated session):
+All three layers belong to `session resume`. `session create` runs NONE of them and is
+unconditionally fresh: see the create-is-always-fresh decision under Failure modes, which is what
+keeps both name-derived channels from handing a brand-new session someone else's conversation.
 
-- **Stored anchor, nonce marker.** A fresh launch mints a nonce marker filename
-  (`~/.agentworks/codex/<session-name>-<nonce>.launch`), stores it in the state blob under
-  `discovery_marker`, and the pane command touches that file before `exec codex` (removing the
-  previous anchor's file first if the blob held one from an unused earlier fresh launch). The
-  adoption resume command removes the consumed marker file.
-- **Discovery runs ONLY on a stored anchor.** With `discovery_marker` in the blob and no
-  `session_id`, the op probes; a blob holding neither has definitively nothing to discover, so no
-  target round-trip happens at all. A brand-new session, or a namesake recreated after a delete, can
-  therefore never adopt another session's conversation off a leftover marker file.
-- **Marker file missing while its anchor is stored: raise.** Either the fresh pane never ran (the
-  tolerated-touch-failure window) or someone removed the file; both break the anchor's account of
-  history, so the op raises a typed `StateError` whose hint names the recovery (recreate the marker
-  with `touch` if the session has no codex conversation worth keeping; the next launch starts
-  fresh).
-- **Candidates** are rollout files newer (mtime) than the marker whose `session_meta` cwd (the
-  rollout's first JSONL line) equals the session's workspace directory, both sides canonicalized
-  target-side (`cd <workspace> && pwd -P`) so logical-vs-physical symlink mismatches cannot exclude
-  our own rollout. The workspace path reaches the harness through a `workspace_path` keyword on the
-  base harness constructor, threaded from the session node seam. Then:
-  - exactly one candidate: adopt its uuid into `session_id`, clear `discovery_marker`, resume it;
-  - zero candidates: launch fresh (minting a replacement anchor); a foreign rollout in a DIFFERENT
-    directory is benign and must not brick a restart;
-  - multiple candidates: raise a typed `StateError` naming the candidate ids, refusing to guess;
-    adopting the wrong id would silently splice one session's conversation into another.
+An over-strict layer-2 filter therefore degrades to the picker, and a wholly failed recorder
+degrades to layers 2/3: no INFERENCE failure bricks a resume, and none silently orphans. Probes that
+could not RUN still raise, deliberately and per rule 4 (no launch target, a recorder file that
+exists and will not read, a workspace dir that will not canonicalize, a failed `find`, any non-{0,1}
+probe exit): those are refusals to guess, each with a hint naming a recovery the operator can
+actually take, not inference outcomes. Legacy state from the marker era (`discovery_marker` blob
+keys, `*.launch` files) is ignored and opportunistically cleaned; a pre-redesign session's bound
+`session_id` keeps working unchanged.
 
-#### Known residual windows (v1)
+#### Failure modes (replacing the marker-era "Known residual windows")
 
-Recorded honestly rather than claimed away; both are narrow, and the failure they leave is either
-loud or requires a same-user same-directory race:
+- A recorder that never runs (codex ignores a missing notify program SILENTLY) costs determinism,
+  not correctness: every op falls through to layers 2/3.
+- An operator who overrides `notify` via `extra_args` disables the binding (extra_args is
+  deliberately last); documented, and layers 2/3 still hold.
+- The wrong-adoption path left is layer 2 finding exactly one candidate that is not this session's
+  conversation, since layer 2's whole filter is the workspace directory. Two ways in, and the
+  ORDINARY one is the one that matters: (a) **a session deleted and replaced in the same
+  workspace.** Its rollout outlives it (nothing prunes codex state, by design), so if it is the only
+  cli-source rollout there, the replacement's FIRST resume adopts it. `start`-is-always-fresh does
+  not prevent this; it prevents the recorder-channel half (see below), which would have been silent.
+  (b) a FOREIGN interactive codex TUI session the same user launched manually in that directory.
+  Either way the session has completed no turn of its own, so nothing of its own is lost, and it
+  surfaces in the pane as a visibly wrong conversation rather than silently: the adoption leaf names
+  the adopted uuid in both the console note and the pane echo, and the picker plus notify rebinding
+  recover it. Behavioral hardening (a creation-time floor on candidate age) is a recorded follow-up,
+  deliberately not attempted here: it needs new plumbing and is clock-skew sensitive between
+  controller and target, and a floor set wrong would exclude the session's OWN rollout and orphan
+  it, which is worse than the disease.
+- **The recreated namesake and the foreign-workspace conversation, closed by
+  create-is-always-fresh** (found at implementation time 2026-08-04, resolved operator-decided the
+  same day). Both of this integration's identity channels are name-derived ON THE TARGET: the
+  recorder file is `~/.agentworks/codex/<session-name>.thread`, and layer-2 discovery matches the
+  workspace directory. Nothing cleans either up when a session is deleted (a harness integration has
+  no delete hook), so at CREATE time each would hand a brand-new session someone else's
+  conversation: the recorder half gives it a deleted namesake's binding, and the discovery half
+  gives it any `cli`-source rollout already in the workspace (a previous session's, or an operator's
+  manual codex run). The marker scheme prevented both accidentally, through its "discovery runs ONLY
+  on a stored anchor" rule, and the redesign initially dropped that protection.
+- **Therefore, pinned: `start` (the `session create` op) is unconditionally FRESH.** It reads no
+  recorder file, runs no discovery, and probes no rollout, so it needs no launch target at all; it
+  also `rm -f`s any stale `.thread` file, which is what stops the FOLLOWING `resume` from adopting
+  the dead namesake's id. Only `resume` ever adopts an id, and adoption is safe there precisely
+  because the row has existed continuously since a create that launched fresh and cleared the
+  recording. This is the correct semantics for deferred discovery rather than a start/resume
+  asymmetry to work around, and it matches the 2026-08-01 decision that a fresh launch carries no
+  seed prompt and resumes nothing: a create means a brand-new session row, which by definition owns
+  no codex conversation.
 
-- **(a) Same-user, same-cwd foreign fresh launch.** A foreign codex session launched by the same
-  launch user in the SAME workspace directory between our marker touch and our discovery yields a
-  candidate the cwd filter cannot distinguish from ours: a single such candidate would be adopted
-  wrongly (two of them raise). Interim operator guidance: avoid two concurrently-fresh codex
-  sessions sharing one agent user and workspace directory; a future launch-to-rollout binding
-  mechanism closes this properly.
-- **(b) mtime is not creation time.** `find -newer` compares mtime, and codex rollout mtimes advance
-  on every turn, so an OLD conversation resumed in the same cwd after our marker touch enters the
-  candidate set even though it was created earlier. It surfaces as the loud multiple-candidates
-  error, or contributes a wrong single candidate under (a)'s conditions.
-- **(c) Workspace rehome between a fresh launch and its discovery.** `workspace rehome` moves the
-  workspace path, so a rollout recorded at the old path is excluded by the cwd filter and the next
-  op launches fresh, orphaning the undiscovered conversation (recoverable manually via
-  `codex resume`). Requires a rehome inside the create-to-first-restart window of a never-restarted
-  session, so it is narrower than (a) and (b).
+### Resume-vs-launch probe (for a bound id)
 
-### Resume-vs-launch probe
+Unchanged in shape: the `find "${CODEX_HOME:-$HOME/.codex}/sessions" -name '*-<sid>.jsonl'` probe
+with the 0/1/raise exit-code fork. `archived_sessions/` is deliberately NOT probed: an archived
+session reports not-resumable (operator-decided 2026-08-01; auto-unarchive would silently reverse an
+explicit operator action), with the archived history recoverable manually. Not-resumable DROPS the
+bound id and falls through to layers 2/3, so they decide what happens next: adopt a different
+conversation in this workspace, open the picker, or start fresh only when nothing is found. The
+dropped binding is reported alongside whatever replaced it.
 
-Same shape and exit-code fork as claude-code (`0` resume, `1` fresh, anything else raises rather
-than guessing), with the codex glob:
-
-```sh
-find "${CODEX_HOME:-$HOME/.codex}/sessions" -name '*-<sid>.jsonl' -print -quit 2>/dev/null | grep -q .
-```
-
-The filename is `rollout-<ts>-<uuid>.jsonl`, hence `*-<sid>.jsonl`, not `<sid>.jsonl`.
-`archived_sessions/` is deliberately NOT probed: an archived session reports not-resumable and the
-harness launches fresh (operator-decided 2026-08-01; auto-unarchive would silently reverse an
-explicit operator action). The stored id is replaced by the next discovery, and the archived history
-stays recoverable manually.
-
-### Invocation forms
+### Invocation forms (redesigned 2026-08-04)
 
 ```text
-fresh:  sh -c 'echo <msg>; <touch marker>; exec codex [flags] [extra_args...]'
-resume: sh -c 'echo <msg>; exec codex resume <sid> -c tui.resume_cwd=current [flags] [extra_args...]'
+fresh:   sh -c 'echo <msg>; [rm -f <legacy marker>;] rm -f <thread file>; <provision recorder>; exec codex [flags] -c notify=[...] [extra_args...]'
+resume:  sh -c 'echo <msg>; [rm -f <legacy marker>;] <provision recorder>; exec codex resume <sid> -c tui.resume_cwd=current [flags] -c notify=[...] [extra_args...]'
+picker:  sh -c 'echo <msg>; [rm -f <legacy marker>;] <provision recorder>; exec codex resume -c tui.resume_cwd=current [flags] -c notify=[...] [extra_args...]'
 ```
 
-`-c tui.resume_cwd=current` pins the cross-cwd picker off deterministically (the pane has already
-`cd`-ed to the workspace dir, so "current" is always the right answer). All generated tokens are
+`[flags]` is the managed set in its existing order (`--strict-config`, `-m`/`-s`/`-a`/`-p`, `-c`
+network, `-c approvals_reviewer`, `--add-dir`, `--search`). The notify override sits after them and
+before `extra_args` so an operator `notify` in `extra_args` still wins (codex's last-override-wins),
+which is the documented way to switch the binding off. The fresh form also removes any stale
+recording: a fresh launch has no conversation bound yet, so a leftover recording would re-report a
+dead id on the next op, and on the `create` path that deletion is the second half of the
+recreated-namesake guarantee. `session create` always emits the fresh form; the resume and picker
+forms are reachable only from `session resume`.
+
+Every decision leaf (resumed-bound, resumed-adopted, picker, fresh, and a dropped archived-or-gone
+binding composed with whichever of those followed it) carries its own `launch_note` in the
+`agw session resume` console output AND a matching pane echo (operator-decided 2026-08-04: the
+console must say what is happening), in resume vocabulary. `-c tui.resume_cwd=current` pins the
+cross-cwd prompt off (the pane has already `cd`-ed to the workspace dir). All generated tokens are
 `shlex.quote`d; no generated piece emits `{{word}}`.
 
 ### Config vocabulary (all optional; shape-checked here, codex-owned values forwarded unvalidated)
@@ -160,7 +272,7 @@ Extended 2026-08-03 (operator-decided) with the network/writable-dirs/web-search
 strict-config default, after the first real usage showed the `-c` network spelling too arcane and
 its drift mode too silent.
 
-| `harness_config` field         | CLI surface emitted                          | Notes                                        |
+| `harness_integration` field    | CLI surface emitted                          | Notes                                        |
 | ------------------------------ | -------------------------------------------- | -------------------------------------------- |
 | `model` (str)                  | `-m <value>`                                 | codex-owned values                           |
 | `sandbox` (str)                | `-s <value>`                                 | `read-only` / `workspace-write` / ... drift  |
@@ -175,7 +287,7 @@ its drift mode too silent.
 
 Choice sets are codex-owned and drift between releases; invalid values surface as codex's own
 startup error in the pane (the same rule as claude-code); when the rejection kills the pane
-instantly, `session create` / `session restart` capture that output into their own error, so the
+instantly, `session create` / `session resume` capture that output into their own error, so the
 message still reaches the operator. `extra_args` is the escape hatch.
 
 **`--strict-config` is emitted by default (operator-decided 2026-08-03).** Verified against 0.146.0:
@@ -210,12 +322,18 @@ at implementation time; do not recall it).
 
 ### State stored per session (in the namespaced blob)
 
-`session_id` (discovered codex UUIDv7, absent until discovery) and `discovery_marker` (the
-`$HOME`-relative nonce marker path the last fresh launch minted, absent once consumed by adoption).
-The original "the marker-file path is derivable, so likely nothing else" call is superseded by the
-stored-anchor redesign above: deriving the path from the session name is exactly what made the
-stale-namesake adoption possible. The launch cwd is the session's workspace directory, threaded to
-the harness at construction (`workspace_path`).
+`session_id` (the bound codex UUIDv7, absent until the notify recorder or layer-2 discovery binds
+one, which only ever happens on a `resume`). The marker-era `discovery_marker` key (2026-08-01
+through 2026-08-04) is retired: readers ignore it and the integration deletes it opportunistically
+when touching the blob.
+
+The recorder file path is derived from the session name
+(`~/.agentworks/codex/<session-name>.thread`). Being name-derived, it is stale-prone in the same way
+the retired marker was; what makes it safe is not the path but the two rules around it, both of
+which carry their own tests: it is written ONLY with an id codex itself reported for a conversation
+live in this session's pane, and it is read ONLY by `resume`, never by `create`, which instead
+deletes it (see the create-is-always-fresh decision above). The launch cwd is the session's
+workspace directory, threaded to the integration at construction (`workspace_path`).
 
 ### Out of v1 (recorded)
 

@@ -14,7 +14,7 @@ Both rows are present-but-disabled until an operator opts in with
 - The harness integration row publishes with a ``system-plugin`` origin; a
   ``session-template`` naming ``harness_integration = "claude-code"`` STAYS ready (it
   does not propagate), and ``ensure_harness_integration_enabled`` refuses it at session
-  create/restart with the "enable plugin `claude`" hint until enabled.
+  create/resume with the "enable plugin `claude`" hint until enabled.
 - The ``claude`` install-command row publishes weak (add-if-absent) while
   disabled, so a template's ``user_install_commands = ["claude"]`` finalizes
   cleanly (no unknown-name error) and is refused at use by the Phase 7 recipe

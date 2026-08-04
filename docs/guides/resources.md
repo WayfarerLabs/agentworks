@@ -256,32 +256,53 @@ spec:
 - The only requirement checked on the launch target is that `claude` is installed. The chosen action
   (resume vs new session) is announced in the pane on start, so it is never silent.
 
-The `codex` integration runs Codex the same way and ships as the opt-in `codex` system plugin. Codex
-mints its own session ids, so instead of assigning one the integration discovers the id from Codex's
-on-disk state after the first launch and stores it; `session resume` then resumes the same
-conversation whenever its session file still exists (a session archived with `codex archive` is
-deliberately treated as not resumable, and a fresh one is started). Its config is ten optional
-fields: `model`, `sandbox`, `approval_policy`, and `profile` forward verbatim to `codex -m` / `-s` /
-`-a` / `-p` (their choice sets are Codex's, not validated here); `network` (bool) forwards to
-Codex's `sandbox_workspace_write.network_access` config key (Codex sandboxes network OFF by default
-even in `workspace-write`, so a coding session that needs `npm install` or `git push` wants
-`network: true`); `approvals_reviewer` (string) forwards to Codex's `approvals_reviewer` config key
-and selects who adjudicates approval escalations (sandbox escapes, blocked network access): Codex
-documents `user` (the default: escalations prompt the human in the pane) and `auto_review` (Codex's
-risk-based reviewer subagent approves or denies instead, with the sandbox still enforcing the outer
-boundary), so unattended-leaning "auto" templates usually want `auto_review`; `writable_dirs` (list)
-grants extra writable directories alongside the workspace (one `codex --add-dir` each; union-merged
-across template inheritance; entries are passed literally, so use absolute paths: `~` and `$HOME`
-are not expanded); `web_search` (bool) enables Codex's live web-search tool (`codex --search`,
-distinct from sandbox network access); `extra_args` is the same appended-last escape hatch; and
-`disable_strict_config` (bool) is the strictness off-switch described next. The integration always
-passes `--strict-config` so a Codex config mistake (or a Codex-renamed config key) fails loudly at
-launch instead of being silently ignored; `disable_strict_config: true` turns that off when
-strictness itself is the problem: a target whose `config.toml` Codex must tolerate (for example one
-written by a newer Codex than the target runs), or a target Codex old enough to not know the flag
-(it was verified against codex-cli 0.146.0, and an older binary rejects it as an unknown argument at
-launch). The only launch-target requirement is that `codex` is installed, and the chosen action
-(resume, adopt-and-resume, or new session) is announced in the pane on start:
+The `codex` integration runs Codex the same way and ships as the opt-in `codex` system plugin.
+
+Codex mints its own session ids, so instead of assigning one the integration learns the id from
+Codex itself: every launch installs a small recorder script that Codex runs after each completed
+turn (via Codex's `notify` hook, so nothing is ever added to your conversation), which writes down
+which conversation the pane is in. `session resume` then resumes exactly that conversation whenever
+its session file still exists. A session archived with `codex archive` is deliberately treated as
+not resumable, since un-archiving it behind your back would undo a decision you made: the binding is
+dropped, and the fallback below then decides, so the next resume may adopt a different conversation
+in the workspace or open the picker rather than simply starting fresh (`codex unarchive` brings the
+archived one back). When nothing has been recorded yet, `session resume` falls back to looking for a
+single interactive Codex conversation recorded in this workspace directory; if it finds several, it
+opens Codex's own session picker in the pane rather than guessing, so pick the conversation you want
+(the session binds to it from its next turn) or press esc to start a fresh one. `session create`
+does none of that: a new session always starts a brand-new conversation and adopts nothing, so
+reusing a deleted session's name can never silently pick that session's conversation back up. Note
+the limit of that, because the fallback is still a heuristic: if the deleted session's conversation
+is the only Codex conversation recorded in the workspace, the new session's first `session resume`
+can still adopt it. Whichever way it went is announced in the command's output and as the pane's
+first line: `session create` always reports a brand-new conversation, while the adoption and picker
+outcomes belong to `session resume`, and an adoption names the Codex conversation id it chose, so
+you can see it happen and fix it (pick the right conversation from the picker, or archive the stale
+one) rather than discovering it later. Overriding `notify` yourself through `extra_args` turns the
+recording off (yours wins, because `extra_args` is appended last), which leaves resume relying on
+that fallback.
+
+Its config is ten optional fields: `model`, `sandbox`, `approval_policy`, and `profile` forward
+verbatim to `codex -m` / `-s` / `-a` / `-p` (their choice sets are Codex's, not validated here);
+`network` (bool) forwards to Codex's `sandbox_workspace_write.network_access` config key (Codex
+sandboxes network OFF by default even in `workspace-write`, so a coding session that needs
+`npm install` or `git push` wants `network: true`); `approvals_reviewer` (string) forwards to
+Codex's `approvals_reviewer` config key and selects who adjudicates approval escalations (sandbox
+escapes, blocked network access): Codex documents `user` (the default: escalations prompt the human
+in the pane) and `auto_review` (Codex's risk-based reviewer subagent approves or denies instead,
+with the sandbox still enforcing the outer boundary), so unattended-leaning "auto" templates usually
+want `auto_review`; `writable_dirs` (list) grants extra writable directories alongside the workspace
+(one `codex --add-dir` each; union-merged across template inheritance; entries are passed literally,
+so use absolute paths: `~` and `$HOME` are not expanded); `web_search` (bool) enables Codex's live
+web-search tool (`codex --search`, distinct from sandbox network access); `extra_args` is the same
+appended-last escape hatch; and `disable_strict_config` (bool) is the strictness off-switch
+described next. The integration always passes `--strict-config` so a Codex config mistake (or a
+Codex-renamed config key) fails loudly at launch instead of being silently ignored;
+`disable_strict_config: true` turns that off when strictness itself is the problem: a target whose
+`config.toml` Codex must tolerate (for example one written by a newer Codex than the target runs),
+or a target Codex old enough to not know the flag (it was verified against codex-cli 0.146.0, and an
+older binary rejects it as an unknown argument at launch). The only launch-target requirement is
+that `codex` is installed:
 
 ```yaml
 apiVersion: agentworks/v1

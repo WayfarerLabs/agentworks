@@ -140,6 +140,7 @@
     "reprovisioning",
     "reqs",
     "rollbackable",
+    "rollouts",
     "rootfs",
     "rsynced",
     "rsyncs",
