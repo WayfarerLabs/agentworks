@@ -1,6 +1,6 @@
 """The sessions machinery through the orchestrated node model: the
 batch ops' coalesced composition (``_batch_vm_boundary`` under
-``stop_all_sessions`` / ``restart_all_sessions`` / ``list_sessions``'
+``stop_all_sessions`` / ``resume_all_sessions`` / ``list_sessions``'
 status pass) and the singular ops' ``_prepare_vm`` gate span.
 
 Batch pins: the multi-root walk with ONE shared site-node object per

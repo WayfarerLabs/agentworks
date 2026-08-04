@@ -251,8 +251,8 @@ class HarnessIntegration(Capability):
         them)."""
 
     @abstractmethod
-    def restart(self, ctx: RunContext) -> str:
-        """The raw pane command string for ``session restart``. Assembled
+    def resume(self, ctx: RunContext) -> str:
+        """The raw pane command string for ``session resume``. Assembled
         AFTER the old process is killed, so a state-aware harness integration decides
         resume-vs-launch with it already dead."""
 

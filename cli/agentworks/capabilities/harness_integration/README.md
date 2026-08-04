@@ -80,7 +80,7 @@ install.
 
 Where possible, integrations should support resuming a session on restart rather than starting over.
 This is going to mean different things for different tools, but the general idea is that if a
-session is interrupted or restarted, the operator should be able to pick up right where they left
+session is interrupted or resumed, the operator should be able to pick up right where they left
 off rather than losing their work.
 
 Of course, this is not always possible. Some tools, like a plain shell, do not have any concept of a
@@ -93,7 +93,7 @@ nothing about the machinery around it. It:
 
 - **MUST** produce the command that launches its tool for a given session, to run as the target user
   (an agent, or admin) in the session's workspace.
-- **MUST** produce the command that allows the workload to be restarted if the workload is
+- **MUST** produce the command that allows the workload to be resumed if the workload is
   interrupted (e.g. process exit, machine restart, manual session stop, etc.); where possible (i.e.
   for "stateful" tools), the integration **SHOULD** resume the existing session rather than starting
   over.
@@ -103,7 +103,7 @@ nothing about the machinery around it. It:
   discover the tool's session id once, store it, read it back verbatim, and raise rather than adopt
   an ambiguous match that could splice one session's history into another.
 - **MUST** decide resume-versus-launch at op time from the tool's own on-disk state on the launch
-  target, so an interrupted session or a restarted VM recovers its prior work rather than silently
+  target, so an interrupted session or a resumed VM recovers its prior work rather than silently
   starting over. Agentworks is built to lose running processes and restart, so an integration
   **MUST** recover from durable state alone and **MUST NOT** depend on in-memory continuity.
 - While some degree of configuration "understanding" is required, **SHOULD NOT** try to validate
@@ -137,7 +137,7 @@ integration sits in the capability model, its implementation contract, how the s
 consumes it, and the practices that make the shipped integrations robust, especially session resume.
 
 A **harness integration** is a harness's runtime adapter: it knows how a session workload (a plain
-shell, Claude Code, Codex, ...) is configured, started, and restarted, and what the launch target
+shell, Claude Code, Codex, ...) is configured, started, and resumed, and what the launch target
 must provide for that to work. The session is the rich consuming resource: a session node HOLDS an
 integration instance, composes its readiness, and the session manager invokes its ops. The
 integration never touches tmux, the database, or the CLI; it validates its config, probes its
@@ -204,7 +204,7 @@ type-checked. Two rules with teeth:
   values verbatim: the valid choices are the tool's and drift between its releases, so a stale
   integration-side enum would reject values a newer CLI accepts. An invalid value surfaces as the
   tool's own startup error in the pane, which is the right place. That promise holds even when the
-  workload dies too fast for the pane to ever be attached: `session create` / `session restart`
+  workload dies too fast for the pane to ever be attached: `session create` / `session resume`
   detect the instantly-dead pane, capture its output, and fold it into their own error message.
 
 #### Declaring Dependencies: Total and Pure
@@ -262,7 +262,7 @@ only the op-time probe does).
 - The return value is a command string, not an execution: the session manager wraps it (template-var
   substitution, then the tmux pane's `$SHELL -lic 'cd <dir> && exec <command>'`) and runs it. Empty
   string means "just the login shell".
-- `start` serves `session create`; `restart` serves `session restart`. The orchestrator kills the
+- `start` serves `session create`; `restart` serves `session resume`. The orchestrator kills the
   old workload BEFORE calling `restart`, a deliberate ordering guarantee: a stateful integration
   decides resume-vs-launch with the old process dead and its on-disk state settled.
 - `start` and `restart` should be symmetric for a stateful integration (both call one shared
@@ -319,7 +319,7 @@ The surrounding wiring supplies the following behavior and debugging boundaries:
   (`harness_integration_state`) for the manager to persist.
 - **Op context:** the manager assembles an op-start `RunContext` (targets, operation scope, scoped
   secrets) per op (`sessions/manager/_create_roll.py`, `_lifecycle.py`). Readiness runs through the
-  node's composed `preflight` / `runup` on create; the restart path deliberately builds no runup
+  node's composed `preflight` / `runup` on create; the resume path deliberately builds no runup
   context (its only readiness pass is the pre-kill preflight sweep), and on both paths only the op
   context carries secrets. An integration cannot depend on runup firing before `restart`.
 - **Substitution stays outside:** the returned string is passed through `{{session_name}}` /

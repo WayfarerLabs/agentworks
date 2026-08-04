@@ -4,7 +4,7 @@ login shell) as the session workload.
 The plain, default member. Its ``harness_integration_config`` vocabulary is exactly
 the flat session-template fields the harness integration model replaces: ``command``
 (the pane command; empty = login shell), ``restart_command`` (the
-command on ``session restart``, falling back to ``command``), and
+command on ``session resume``, falling back to ``command``), and
 ``required_commands`` (the executables the launch target must have on
 PATH). All optional.
 """
@@ -127,8 +127,8 @@ class ShellIntegration(HarnessIntegration):
         empty string when undeclared (a bare login shell)."""
         return self._command_field("command")
 
-    def restart(self, ctx: RunContext) -> str:
-        """The pane command for ``session restart``: ``restart_command``
+    def resume(self, ctx: RunContext) -> str:
+        """The pane command for ``session resume``: ``restart_command``
         when declared, else ``command`` (empty = login shell)."""
         restart_command = self._command_field("restart_command")
         return restart_command or self._command_field("command")

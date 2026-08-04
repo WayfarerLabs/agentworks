@@ -1,4 +1,4 @@
-"""Stop and restart operations (single and batch)."""
+"""Stop and resume operations (single and batch)."""
 
 from __future__ import annotations
 
@@ -228,7 +228,7 @@ def stop_session(
         output.result(f"Session '{name}' stopped")
 
 
-def restart_session(
+def resume_session(
     db: Database,
     config: Config,
     *,
@@ -355,7 +355,7 @@ def restart_session(
 
         from agentworks.ssh import SSHLogger
 
-        logger = SSHLogger(vm.name, "session-restart")
+        logger = SSHLogger(vm.name, "session-resume")
         admin_target = _mgr.transport(vm, config, logger=logger)
         run_command: RunCommand = admin_target.run
 
@@ -430,7 +430,7 @@ def restart_session(
                     hint="Use --force to restart.",
                 )
             if status == SessionStatus.OK and not yes and not output.confirm(f"Session '{name}' is running. Restart?"):
-                raise UserAbort("restart cancelled")
+                raise UserAbort("resume cancelled")
 
         with output.section("Resolving Secrets"):
             # The graph-union boundary resolve (pass 1). Placed AFTER the
@@ -480,7 +480,7 @@ def restart_session(
             )
 
         with output.section("Starting Session"):
-            output.info(f"Restarting session '{name}'...")
+            output.info(f"Resuming session '{name}'...")
 
             if is_legacy:
                 # Surgical kill of the named session on the default tmux
@@ -528,12 +528,12 @@ def restart_session(
             # Op-start RunContext for the harness_integration's restart op, assembled
             # AFTER the kill (a state-aware harness_integration decides resume-vs-launch
             # with the old process already dead). Mirrors the preflight
-            # readiness ctx above (the restart path builds no runup ctx), plus
+            # readiness ctx above (the resume path builds no runup ctx), plus
             # the scoped graph secrets (empty for the built-in shell harness_integration).
             # Template-var substitution wraps the returned string; restart
             # sources ``workspace_name`` from the session row, as the interim
             # path did.
-            restart_ctx = RunContext(
+            resume_ctx = RunContext(
                 config=config,
                 operation_scope=scope,
                 admin_target=admin_target,
@@ -541,7 +541,7 @@ def restart_session(
                 secrets=ScopedSecrets(graph_secret_values, session_node.secret_refs()),
             )
             command = _mgr._substitute_template_vars(
-                session_node.harness_integration.restart(restart_ctx),
+                session_node.harness_integration.resume(resume_ctx),
                 {"session_name": name, "workspace_name": session.workspace_name},
             )
             if (note := session_node.harness_integration.launch_note()) is not None:
@@ -608,7 +608,7 @@ def restart_session(
             else:
                 output.warn(f"Could not capture PID for session '{name}', will auto-repair on next access")
 
-        output.result(f"Session '{name}' restarted")
+        output.result(f"Session '{name}' resumed")
 
         _mgr._regenerate_tmuxinator(db, config, vm, ws)
         # Don't re-add the session to the legacy vm-console here. The existing
@@ -708,7 +708,7 @@ def stop_all_sessions(
             raise ExternalError(f"{len(failed)} session(s) failed to stop.")
 
 
-def restart_all_sessions(
+def resume_all_sessions(
     db: Database,
     config: Config,
     *,
@@ -722,7 +722,7 @@ def restart_all_sessions(
     """Restart sessions, optionally filtered by VM, workspace, agent, and/or mode.
 
     With include_running=False (--all-stopped), only stopped sessions are
-    restarted. With include_running=True (--all), all sessions are targeted;
+    resumed. With include_running=True (--all), all sessions are targeted;
     if any are running, the caller should have prompted or passed yes=True.
 
     Each name filter accepts a single name or a list of names; lists
@@ -739,7 +739,7 @@ def restart_all_sessions(
     )
 
     # Resolve distinct VMs from the filtered set and anchor them BEFORE the
-    # SSH probes. Each restart_session call also opens its own gate span;
+    # SSH probes. Each resume_session call also opens its own gate span;
     # the redundant inner gate is a no-op on already-active VMs and a cheap
     # extra subprocess on WSL2 (accepted, see PR description).
     distinct_vms = _mgr._distinct_vms_for_sessions(db, sessions)
@@ -753,7 +753,7 @@ def restart_all_sessions(
         # Error if any sessions are still unknown after auto-repair.
         # PID_STOPPED sessions are known-stopped (excluded from status_map by design).
         # Legacy sessions (``socket_path is None``) are also excluded from
-        # status_map by ``batch_check_status``; restart_session migrates them
+        # status_map by ``batch_check_status``; resume_session migrates them
         # to the new model, so don't treat them as "unknown" here.
         unknown = [
             s
@@ -791,11 +791,11 @@ def restart_all_sessions(
             output.info("No matching sessions to restart.")
             return
 
-        output.info(f"Restarting {len(sessions)} session(s)...")
+        output.info(f"Resuming {len(sessions)} session(s)...")
 
         for session in sessions:
             try:
-                restart_session(db, config, name=session.name, force=force, yes=include_running)
+                resume_session(db, config, name=session.name, force=force, yes=include_running)
             except UserAbort:
                 # A confirm-cancellation aborts the whole batch operation, not
                 # just this one session. Propagate so the outer wrapper renders
@@ -806,13 +806,13 @@ def restart_all_sessions(
                     output.warn(f"Skipping '{session.name}': {exc}")
                 else:
                     failed.append((session.name, str(exc)))
-                    output.warn(f"Error restarting '{session.name}': {exc}")
+                    output.warn(f"Error resuming '{session.name}': {exc}")
             except StateError as exc:
                 failed.append((session.name, str(exc)))
-                output.warn(f"Error restarting '{session.name}': {exc}")
+                output.warn(f"Error resuming '{session.name}': {exc}")
             except Exception as exc:
                 failed.append((session.name, str(exc)))
-                output.warn(f"Error restarting '{session.name}': {exc}")
+                output.warn(f"Error resuming '{session.name}': {exc}")
 
     if failed:
         raise ExternalError(f"{len(failed)} session(s) failed to restart.")

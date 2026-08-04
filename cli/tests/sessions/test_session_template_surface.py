@@ -44,7 +44,7 @@ class _FakeHarnessIntegration(HarnessIntegration):
     def start(self, ctx):  # type: ignore[no-untyped-def]
         return ""
 
-    def restart(self, ctx):  # type: ignore[no-untyped-def]
+    def resume(self, ctx):  # type: ignore[no-untyped-def]
         return ""
 
     def _probe_target(self, transport):  # type: ignore[no-untyped-def]

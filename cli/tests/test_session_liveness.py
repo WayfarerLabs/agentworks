@@ -212,7 +212,7 @@ def test_admin_broken_after_setenv_pivot() -> None:
 def test_legacy_admin_session_without_socket_raises_state_error() -> None:
     """A SessionRow predating the env-and-secrets SDD that has socket_path=None
     surfaces as a typed StateError so the CLI's top-level error wrapper
-    renders it cleanly. The hint points the operator at ``session restart``
+    renders it cleanly. The hint points the operator at ``session resume``
     (which migrates the row to the new shape), not ``session delete``."""
     import pytest
 
@@ -225,7 +225,7 @@ def test_legacy_admin_session_without_socket_raises_state_error() -> None:
     assert exc.value.entity_kind == "session"
     assert exc.value.entity_name == "s1"
     assert exc.value.hint is not None
-    assert "session restart" in exc.value.hint
+    assert "session resume" in exc.value.hint
     assert "session delete" not in exc.value.hint
 
 

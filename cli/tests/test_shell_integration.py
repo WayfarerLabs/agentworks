@@ -196,17 +196,17 @@ def test_start_empty_config_is_a_login_shell() -> None:
     assert _harness_integration({}).start(RunContext()) == ""
 
 
-def test_restart_prefers_restart_command() -> None:
+def test_resume_prefers_restart_command() -> None:
     harness_integration = _harness_integration({"command": "claude", "restart_command": "claude --resume"})
-    assert harness_integration.restart(RunContext()) == "claude --resume"
+    assert harness_integration.resume(RunContext()) == "claude --resume"
 
 
-def test_restart_falls_back_to_command() -> None:
-    assert _harness_integration({"command": "claude"}).restart(RunContext()) == "claude"
+def test_resume_falls_back_to_command() -> None:
+    assert _harness_integration({"command": "claude"}).resume(RunContext()) == "claude"
 
 
-def test_restart_empty_config_is_a_login_shell() -> None:
-    assert _harness_integration({}).restart(RunContext()) == ""
+def test_resume_empty_config_is_a_login_shell() -> None:
+    assert _harness_integration({}).resume(RunContext()) == ""
 
 
 def test_shell_leaves_the_state_blob_untouched() -> None:
@@ -215,7 +215,7 @@ def test_shell_leaves_the_state_blob_untouched() -> None:
     state: dict[str, object] = {}
     harness_integration = _harness_integration({"command": "claude"}, state=state)
     harness_integration.start(RunContext())
-    harness_integration.restart(RunContext())
+    harness_integration.resume(RunContext())
     assert state == {}
     assert harness_integration.state == {}
 

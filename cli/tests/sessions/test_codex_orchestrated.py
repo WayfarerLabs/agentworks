@@ -13,7 +13,7 @@ the unit test cannot prove on its own.
 - ``codex`` and ``claude-code`` state coexist in one row blob without
   collision (the first real two-stateful-integration pairing, pinning the
   namespacing seam's promise);
-- ``session restart`` with a stored id resumes it with the
+- ``session resume`` with a stored id resumes it with the
   restart-post-kill end state (kill precedes the probe precedes the tmux
   recreate).
 
@@ -223,14 +223,14 @@ def test_create_launches_fresh_with_no_discovery_and_persists_the_anchor(
 # -- restart: the discovery-adoption round trip -------------------------------
 
 
-def test_restart_adopts_a_discovered_rollout_and_persists_the_id(
+def test_resume_adopts_a_discovered_rollout_and_persists_the_id(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The adoption crux: a session whose stored anchor has exactly one
     newer matching rollout adopts the codex-minted uuid at the next op,
     resumes it, and the id lands on the row in the namespaced shape with
     the anchor consumed."""
-    from agentworks.sessions.manager import restart_session
+    from agentworks.sessions.manager import resume_session
 
     events: list[str] = []
     target = _CodexTarget(events, discovered=f"{_ROLLOUT}\n")
@@ -242,7 +242,7 @@ def test_restart_adopts_a_discovered_rollout_and_persists_the_id(
         stored_state={"codex": {"discovery_marker": _ANCHOR}},
     )
 
-    restart_session(db, SimpleNamespace(session=SimpleNamespace(history_limit=1)), name="s1", yes=True)  # type: ignore[arg-type]
+    resume_session(db, SimpleNamespace(session=SimpleNamespace(history_limit=1)), name="s1", yes=True)  # type: ignore[arg-type]
 
     assert f"resume {_SID}" in captured["command"]
     assert "adopted a discovered codex session" in captured["command"]
@@ -255,11 +255,11 @@ def test_restart_adopts_a_discovered_rollout_and_persists_the_id(
     db.close()
 
 
-def test_restart_resumes_the_stored_id_without_rediscovery(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_resume_resumes_the_stored_id_without_rediscovery(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The round trip's second half: with the adopted id stored, the next
     restart probes THAT id's rollout and resumes it verbatim; discovery
     does not run again."""
-    from agentworks.sessions.manager import restart_session
+    from agentworks.sessions.manager import resume_session
 
     events: list[str] = []
     target = _CodexTarget(events, rollout_present=True)
@@ -271,7 +271,7 @@ def test_restart_resumes_the_stored_id_without_rediscovery(tmp_path: Path, monke
         stored_state={"codex": {"session_id": _SID}},
     )
 
-    restart_session(db, SimpleNamespace(session=SimpleNamespace(history_limit=1)), name="s1", yes=True)  # type: ignore[arg-type]
+    resume_session(db, SimpleNamespace(session=SimpleNamespace(history_limit=1)), name="s1", yes=True)  # type: ignore[arg-type]
 
     assert f"resume {_SID}" in captured["command"]
     assert "resuming session s1" in captured["command"]
@@ -283,14 +283,14 @@ def test_restart_resumes_the_stored_id_without_rediscovery(tmp_path: Path, monke
     db.close()
 
 
-def test_restart_with_a_gone_rollout_drops_the_id_and_launches_fresh(
+def test_resume_with_a_gone_rollout_drops_the_id_and_launches_fresh(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The pinned archived policy end to end: a stored id whose rollout is
     gone (archived or deleted) launches fresh with the stale-specific
     decision line, and the persisted blob swaps the stale id for a fresh
     discovery anchor, so the NEXT op rediscovers."""
-    from agentworks.sessions.manager import restart_session
+    from agentworks.sessions.manager import resume_session
 
     events: list[str] = []
     target = _CodexTarget(events, rollout_present=False)
@@ -302,7 +302,7 @@ def test_restart_with_a_gone_rollout_drops_the_id_and_launches_fresh(
         stored_state={"codex": {"session_id": _SID}},
     )
 
-    restart_session(db, SimpleNamespace(session=SimpleNamespace(history_limit=1)), name="s1", yes=True)  # type: ignore[arg-type]
+    resume_session(db, SimpleNamespace(session=SimpleNamespace(history_limit=1)), name="s1", yes=True)  # type: ignore[arg-type]
 
     assert "archived or gone; starting new session s1" in captured["command"]
     refreshed = db.get_session("s1")
@@ -325,7 +325,7 @@ def test_codex_and_claude_code_state_coexist_in_one_blob(tmp_path: Path, monkeyp
     re-pointed to codex) runs a codex op that adopts its own id into the
     ``codex`` namespace, and the claude id is neither read (no inherited
     ``session_id``) nor dropped on persist."""
-    from agentworks.sessions.manager import restart_session
+    from agentworks.sessions.manager import resume_session
 
     events: list[str] = []
     target = _CodexTarget(events, discovered=f"{_ROLLOUT}\n")
@@ -340,7 +340,7 @@ def test_codex_and_claude_code_state_coexist_in_one_blob(tmp_path: Path, monkeyp
         },
     )
 
-    restart_session(db, SimpleNamespace(session=SimpleNamespace(history_limit=1)), name="s1", yes=True)  # type: ignore[arg-type]
+    resume_session(db, SimpleNamespace(session=SimpleNamespace(history_limit=1)), name="s1", yes=True)  # type: ignore[arg-type]
 
     # codex did NOT inherit the claude id; it adopted its own by discovery.
     assert f"resume {_SID}" in captured["command"]

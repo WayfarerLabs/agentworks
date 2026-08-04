@@ -1,6 +1,6 @@
 """Transport identity for single-session ops (FRD R1).
 
-Pins the contract that ``create_session`` / ``restart_session`` /
+Pins the contract that ``create_session`` / ``resume_session`` /
 ``stop_session`` / ``delete_session`` route destructive tmux operations
 on agent-mode sessions through direct agent SSH (``agent_transport``)
 rather than admin+sudo, and that the pre-rollout SSH probe runs BEFORE
@@ -420,7 +420,7 @@ class _NullCM:
         return None
 
 
-def test_restart_migrates_legacy_session_to_per_session_socket(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_resume_migrates_legacy_session_to_per_session_socket(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Legacy admin sessions (created on the VM's default tmux server,
     ``socket_path=None``) used to surface ``check_session_status`` as a
     typed ``StateError`` and force the operator into a delete-then-create
@@ -502,7 +502,7 @@ def test_restart_migrates_legacy_session_to_per_session_socket(tmp_path: Path, m
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
     # Should not raise: legacy migration flows around check_session_status.
-    session_manager.restart_session(db, config, name="legacy", yes=True)  # type: ignore[arg-type]
+    session_manager.resume_session(db, config, name="legacy", yes=True)  # type: ignore[arg-type]
 
     assert kill_calls == [("legacy", None)], (
         "kill_session must be invoked with the legacy session name and "
@@ -520,11 +520,11 @@ def test_restart_migrates_legacy_session_to_per_session_socket(tmp_path: Path, m
     db.close()
 
 
-def test_restart_dead_workload_error_propagates(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """``restart_session`` routes through the same ``tmux.create_session`` as
+def test_resume_dead_workload_error_propagates(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``resume_session`` routes through the same ``tmux.create_session`` as
     create, so a workload that dies instantly on restart must surface the
     dead-workload ``StateError`` with the captured output. Pins that the
-    restart path's ``except RuntimeError`` clause (the active-server remap)
+    resume path's ``except RuntimeError`` clause (the active-server remap)
     neither swallows nor remaps it: the REAL create_session runs here against
     a scripted transport whose pane_dead probe answers dead."""
     from agentworks.db import SessionMode
@@ -582,11 +582,11 @@ def test_restart_dead_workload_error_propagates(tmp_path: Path, monkeypatch: pyt
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
     with pytest.raises(StateError) as excinfo:
-        session_manager.restart_session(db, config, name="s1", yes=True)  # type: ignore[arg-type]
+        session_manager.resume_session(db, config, name="s1", yes=True)  # type: ignore[arg-type]
 
     msg = str(excinfo.value)
     assert "exited immediately after launch (status 2)" in msg
     assert clap_error in msg
-    # NOT remapped by the restart path's active-server RuntimeError clause.
+    # NOT remapped by the resume path's active-server RuntimeError clause.
     assert "already has an active tmux server" not in msg
     db.close()

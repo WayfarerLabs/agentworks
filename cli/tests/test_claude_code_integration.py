@@ -148,7 +148,7 @@ def test_launch_note_reports_fresh_start() -> None:
 def test_start_and_restart_are_symmetric() -> None:
     target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(0)})
     harness_integration = _harness_integration()
-    assert harness_integration.start(_op_ctx(target)) == harness_integration.restart(_op_ctx(target))
+    assert harness_integration.start(_op_ctx(target)) == harness_integration.resume(_op_ctx(target))
 
 
 def test_probe_is_slug_independent_and_finds_by_stored_id() -> None:
@@ -206,12 +206,12 @@ def test_first_start_mints_and_records_the_session_id() -> None:
     assert minted in command
 
 
-def test_restart_reads_the_stored_id_back_verbatim() -> None:
+def test_resume_reads_the_stored_id_back_verbatim() -> None:
     """The round-trip the manager relies on: an id minted on create (in
     the state blob) is used verbatim on a later restart, never re-minted."""
     target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(0)})
     harness_integration = _harness_integration(state={"session_id": _SID})
-    command = harness_integration.restart(_op_ctx(target))
+    command = harness_integration.resume(_op_ctx(target))
     assert f"--resume {_SID}" in command
     assert harness_integration.state == {"session_id": _SID}  # unchanged
 

@@ -41,10 +41,10 @@ def check_session_status(
     No DB side effects. Raises ``StateError`` when the session row predates
     the per-session-socket model introduced by the env-and-secrets SDD
     (``socket_path is None`` for an admin session). The hint points the
-    operator at ``agw session restart <name>``, which migrates the row to
+    operator at ``agw session resume <name>``, which migrates the row to
     the new shape via a surgical kill of the named session on the default
     tmux server + a fresh ``create_tmux_session`` under a per-session
-    socket. Callers that aren't ``restart_session`` (attach, stop, etc.)
+    socket. Callers that aren't ``resume_session`` (attach, stop, etc.)
     can't safely migrate, so they surface the typed error and let the
     operator restart.
     """
@@ -65,7 +65,7 @@ def check_session_status(
         entity_name=session.name,
         hint=(
             "This session predates the per-session-socket model introduced by "
-            f"the env-and-secrets SDD. Run `agw session restart {session.name}` "
+            f"the env-and-secrets SDD. Run `agw session resume {session.name}` "
             "to migrate it to the new shape."
         ),
     )
@@ -122,13 +122,13 @@ def batch_check_status(
     # legacy and new sessions still surfaces the new ones cleanly; the
     # operator-facing single-session paths (`session attach`, etc.) go
     # through `check_session_status`, which raises a typed StateError
-    # pointing at `agw session restart` (the primitive that auto-migrates).
+    # pointing at `agw session resume` (the primitive that auto-migrates).
     legacy = [s.name for s in checkable if s.socket_path is None]
     if legacy:
         names = ", ".join(sorted(legacy))
         output.warn(
             f"{len(legacy)} session(s) predate the per-session-socket model; "
-            f"`agw session restart` migrates them to the new shape: {names}"
+            f"`agw session resume` migrates them to the new shape: {names}"
         )
 
     parts = []

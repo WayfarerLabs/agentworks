@@ -35,14 +35,14 @@ cd ..
 
 ## Phase 1: Canonical integration and manager APIs
 
-- [ ] Rename `HarnessIntegration.restart(ctx)` to `resume(ctx)` in the abstract base, shell, Claude
+- [x] Rename `HarnessIntegration.restart(ctx)` to `resume(ctx)` in the abstract base, shell, Claude
       Code, and Codex implementations. Rename operation-specific locals and documentation without
       changing algorithms.
-- [ ] Rename `restart_session` and `restart_all_sessions` to `resume_session` and
+- [x] Rename `restart_session` and `restart_all_sessions` to `resume_session` and
       `resume_all_sessions`, including manager exports and every live caller. Rename
       operation-specific contexts, log operation names, output, hints, errors, fixtures, and tests.
-- [ ] Preserve mechanical terminology for actual process, tmux, VM, and service restarts.
-- [ ] Run the integration, session lifecycle, transport, filters, secret-resolution, and
+- [x] Preserve mechanical terminology for actual process, tmux, VM, and service restarts.
+- [x] Run the integration, session lifecycle, transport, filters, secret-resolution, and
       orchestrated test subsets; then run the Python quality gates.
 - DoD: live internal APIs expose only `resume`; the pre-change lifecycle scenarios pass with no
   behavioral assertion weakened; project-specific and fresh-eyes reviews have no unresolved valid

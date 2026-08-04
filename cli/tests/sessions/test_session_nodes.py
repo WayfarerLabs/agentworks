@@ -323,7 +323,7 @@ class _SecretHarnessIntegration(HarnessIntegration):
     def start(self, ctx):  # type: ignore[no-untyped-def]
         return ""
 
-    def restart(self, ctx):  # type: ignore[no-untyped-def]
+    def resume(self, ctx):  # type: ignore[no-untyped-def]
         return ""
 
     def _probe_target(self, transport):  # type: ignore[no-untyped-def]
@@ -874,7 +874,7 @@ def _toy_harness_integration(harness_integration_name: str) -> type:
             self._state["session_id"] = f"{harness_integration_name}-id"
             return ""
 
-        def restart(self, ctx: RunContext) -> str:
+        def resume(self, ctx: RunContext) -> str:
             return self.start(ctx)
 
         def _probe_target(self, transport: object) -> None:

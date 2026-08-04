@@ -198,7 +198,7 @@ def session_restart(
     ``--vm vm1,vm2``); commas within a filter are OR-ed together.
     """
     from agentworks.config import load_config
-    from agentworks.sessions.manager import restart_all_sessions, restart_session
+    from agentworks.sessions.manager import resume_all_sessions, resume_session
 
     parsed_vm = parse_csv_filter(vm)
     parsed_workspace = parse_csv_filter(workspace)
@@ -241,13 +241,13 @@ def session_restart(
             if running:
                 names = ", ".join(s.name for s in running[:5])
                 suffix = f" (and {len(running) - 5} more)" if len(running) > 5 else ""
-                output.warn(f"{len(running)} session(s) are running and will be restarted ({names}{suffix}).")
-                if not output.confirm("Continue? (--all-stopped restarts only the stopped sessions)"):
+                output.warn(f"{len(running)} session(s) are running and will be resumed ({names}{suffix}).")
+                if not output.confirm("Continue? (--all-stopped resumes only the stopped sessions)"):
                     from agentworks.errors import UserAbort
 
-                    raise UserAbort("restart cancelled")
+                    raise UserAbort("resume cancelled")
 
-        restart_all_sessions(
+        resume_all_sessions(
             db,
             config,
             vm_name=parsed_vm,
@@ -258,7 +258,7 @@ def session_restart(
             force=force,
         )
     elif name:
-        restart_session(get_db(), load_config(), name=name, force=force, yes=yes)
+        resume_session(get_db(), load_config(), name=name, force=force, yes=yes)
     else:
         raise typer.BadParameter("provide a session name, --all-stopped, or --all")
 

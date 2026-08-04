@@ -337,7 +337,7 @@ def _start_session_slice(
 
     # The section is closed: the terminal result line and the
     # post-start bookkeeping (tmuxinator regen, console add) render
-    # at column 0, mirroring restart_session. They stay inside the
+    # at column 0, mirroring resume_session. They stay inside the
     # outer try so a failure here still triggers the ephemeral
     # rollback (a completed session itself is never rolled back).
     mode_label = f"agent: {resolved_agent_name}" if resolved_agent_name else "admin"
