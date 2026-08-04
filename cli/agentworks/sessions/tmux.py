@@ -9,9 +9,10 @@ prefix key) while keeping a large scrollback buffer.
 from __future__ import annotations
 
 import shlex
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Literal, NoReturn, Protocol
 
 from agentworks.config.validation import LINUX_USERNAME_MAX_LENGTH
+from agentworks.errors import StateError
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -20,6 +21,13 @@ if TYPE_CHECKING:
 
 RESTRICTED_CONFIG_PATH = "/opt/agentworks/tmux-session.conf"
 DEFAULT_HISTORY_LIMIT = 50_000
+
+# How much of a dead workload's output is folded into the create-time error:
+# the last N nonempty lines (the tail is where a dying tool's own error
+# message lands), each capped to a per-line character budget. Both caps keep
+# the operator-visible message readable.
+DEAD_WORKLOAD_OUTPUT_LINES = 15
+DEAD_WORKLOAD_OUTPUT_LINE_CHARS = 500
 
 # Agent tmux socket infrastructure
 AGENT_SOCKET_ROOT = "/run/agentworks/agent-tmux-sockets"
@@ -418,6 +426,144 @@ def _pane_command(command: str, q_path: str) -> str:
     return f"$SHELL -lic {inner}"
 
 
+def _trim_captured_output(
+    text: str,
+    max_lines: int = DEAD_WORKLOAD_OUTPUT_LINES,
+    max_line_chars: int = DEAD_WORKLOAD_OUTPUT_LINE_CHARS,
+) -> str:
+    """Trim captured pane output for embedding in an error message.
+
+    Drops blank lines (a fresh pane's scrollback is mostly trailing blanks),
+    keeps only the last ``max_lines`` nonempty lines (where a dying
+    workload's own error message lands), and caps each line to
+    ``max_line_chars`` characters.
+    """
+    nonempty = [line.rstrip()[:max_line_chars] for line in text.splitlines() if line.strip()]
+    return "\n".join(nonempty[-max_lines:])
+
+
+_PaneLiveness = Literal["alive", "dead", "unverified"]
+
+
+def _probe_pane_liveness(
+    session_name: str,
+    *,
+    run_command: RunCommand,
+    socket_path: str,
+) -> tuple[_PaneLiveness, str]:
+    """Probe whether the session's pane has died (``remain-on-exit`` kept it).
+
+    Returns ``(liveness, exit_status)``:
+
+    - ``("dead", status)``: the probe ran and tmux reported a dead pane;
+      ``status`` carries ``#{pane_dead_status}`` (may be empty, e.g. for a
+      signal death).
+    - ``("alive", "")``: the probe ran and tmux reported anything else.
+    - ``("unverified", "")``: the probe itself failed twice. This is NOT
+      proof of death: a transient transport failure against a healthy
+      workload lands here too, so callers must neither kill nor diagnose on
+      this answer (the same unreachable-is-not-dead stance as
+      ``stop_session``'s BrokenStateError path).
+
+    Both facts ride one round trip: ``#{pane_dead}`` and
+    ``#{pane_dead_status}`` in a single display-message.
+    """
+    q_session = shlex.quote(session_name)
+    cmd = (
+        tmux_cmd(f"display-message -p -t {q_session} '#{{pane_dead}} #{{pane_dead_status}}'", socket_path)
+        + " 2>/dev/null"
+    )
+    for _attempt in range(2):  # retry once: a single blip must not condemn the create
+        result = run_command(cmd, check=False)
+        if getattr(result, "ok", False):
+            flag, _sep, status = (getattr(result, "stdout", "") or "").strip().partition(" ")
+            if flag == "1":
+                return ("dead", status.strip())
+            return ("alive", "")
+    return ("unverified", "")
+
+
+def _raise_workload_died(
+    session_name: str,
+    *,
+    run_command: RunCommand,
+    socket_path: str,
+    exit_status: str = "",
+) -> NoReturn:
+    """Capture a dead pane's output, kill its server, and raise a typed error.
+
+    The capture must run before the kill (the scrollback dies with the
+    server). The kill is best-effort: the raise is the load-bearing part,
+    and a surviving server either self-removes its socket (server dead) or
+    surfaces as the active-server conflict when the name is reused.
+    """
+    captured = _trim_captured_output(
+        capture_output(session_name, run_command=run_command, socket_path=socket_path, join_wrapped=True),
+    )
+    if not captured:
+        # A TUI that crashed after entering the alternate screen leaves its
+        # message there, invisible to the main-screen capture. One
+        # best-effort attempt; tmux errors out when no alternate screen
+        # exists, hence check=False.
+        q_session = shlex.quote(session_name)
+        alt = run_command(
+            tmux_cmd(f"capture-pane -t {q_session} -p -J -a", socket_path) + " 2>/dev/null",
+            check=False,
+        )
+        captured = _trim_captured_output(getattr(alt, "stdout", "") or "")
+    run_command(tmux_cmd("kill-server", socket_path) + " 2>/dev/null", check=False)
+    status_note = f" (status {exit_status})" if exit_status else ""
+    if captured:
+        indented = "\n".join(f"  {line}" for line in captured.splitlines())
+        detail = f"; its output:\n{indented}"
+    else:
+        detail = " and produced no output"
+    raise StateError(
+        f"session workload exited immediately after launch{status_note}{detail}",
+        entity_kind="session",
+        entity_name=session_name,
+        hint="Check the session template's command and flags.",
+    )
+
+
+def _raise_workload_unverified(session_name: str, *, socket_path: str) -> NoReturn:
+    """Raise for a liveness probe that could not run at all.
+
+    Deliberately kills nothing and captures nothing: an unreachable server
+    is not a dead workload (a transport blip against a healthy session
+    lands here), and killing on suspicion would turn a transient failure
+    into a real outage. The message must not blame the template.
+    """
+    raise StateError(
+        "could not verify the session workload's state after launch "
+        "(transport failure probing the new tmux session); the session may still be running",
+        entity_kind="session",
+        entity_name=session_name,
+        hint=(
+            f"Inspect (attach) or kill the session's tmux server at {socket_path}; "
+            "note remain-on-exit may still be set on it."
+        ),
+    )
+
+
+def _ensure_workload_alive(
+    session_name: str,
+    *,
+    run_command: RunCommand,
+    socket_path: str,
+) -> None:
+    """Liveness gate: return only if the pane is verifiably alive.
+
+    Dead panes raise the capture-and-kill error; an unverifiable probe
+    raises the honest could-not-verify error without touching the server.
+    """
+    liveness, exit_status = _probe_pane_liveness(session_name, run_command=run_command, socket_path=socket_path)
+    if liveness == "dead":
+        _raise_workload_died(session_name, run_command=run_command, socket_path=socket_path, exit_status=exit_status)
+    if liveness == "unverified":
+        _raise_workload_unverified(session_name, socket_path=socket_path)
+
+
 def create_session(
     session_name: str,
     workspace_path: str,
@@ -449,6 +595,20 @@ def create_session(
        runs ``tmux new-session``; tmux inherits.
     2. ``-e KEY=VAL`` on ``tmux new-session`` seeds the session-environment
        table so per-session env stays scoped to this session.
+
+    A workload that exits immediately (e.g. its CLI rejects a flag value in
+    milliseconds) would take the fresh per-session tmux server down with it,
+    losing its error output and leaving the grant machinery to fail opaquely
+    against a dead socket. The session is therefore created with
+    ``remain-on-exit`` chained into the same tmux invocation, liveness-checked
+    before any socket grant work (and re-checked after the healthy path
+    unsets the option), and a dead pane's captured output and exit status are
+    raised as a typed ``StateError``. A transport failure while probing
+    raises a distinct could-not-verify ``StateError`` without killing
+    anything. Deliberate semantic change (2026-08-03): a workload that
+    legitimately exits (status 0 included) within the create window now fails
+    the create with its captured output, where it previously soft-succeeded
+    into a stopped session.
 
     Returns (socket_path, tmux_server_pid).
     """
@@ -490,11 +650,26 @@ def create_session(
         run_command(f"rm -f {q_sock}", check=False)
 
     # Create the session. SetEnv vars travel with run_command; tmux's -e
-    # flags add them to the session-environment table.
+    # flags add them to the session-environment table. remain-on-exit is
+    # chained into the SAME tmux client invocation so it lands microseconds
+    # after the pane spawns: a workload that dies instantly (e.g. a CLI
+    # rejecting an invalid flag value in milliseconds) then leaves a dead
+    # pane holding the server and its scrollback alive, instead of taking
+    # both down before anything can read the error. The healthy path
+    # unsets it again below. Accepted residual window: a death in the
+    # microseconds BEFORE the chained set-option lands fails this whole
+    # check=True invocation as a raw transport error, which is correct: a
+    # genuine new-session failure must not be misread as workload death.
     cmd = f"tmux -S {q_sock} new-session -d -s {q_session} -c {q_path} -f {RESTRICTED_CONFIG_PATH}{env_flags}"
     if pane_cmd:
         cmd += f" {shlex.quote(pane_cmd)}"
+    cmd += f" \\; set-option -t {q_session} remain-on-exit on"
     run_command(cmd, env=env)
+
+    # Liveness check BEFORE the socket grant machinery: a dead workload
+    # must surface as its own captured error, not as the grant loop's
+    # opaque SSH failure against a dead socket.
+    _ensure_workload_alive(session_name, run_command=run_command, socket_path=sock)
 
     # Socket permissions + cross-user access only matter for agent sessions
     # (admin has direct access to its own per-session socket).
@@ -502,11 +677,24 @@ def create_session(
         run_command(f"chmod g+rwx {q_sock}")
         _grant_server_access(run_command, sock)
 
+    # PID fetch while remain-on-exit still holds the server up: a death in
+    # this window cannot take the server down, so a failed fetch here is a
+    # transport hiccup (best-effort; auto-repair recovers on next access),
+    # not the original lost-output bug reborn.
     try:
         pid_out = run_command(tmux_cmd("display-message -p '#{pid}'", sock), check=False)
         pid: int | None = _parse_pid(getattr(pid_out, "stdout", ""), context="after session create")
     except (RuntimeError, ValueError):
-        pid = None  # best-effort; auto-repair will recover on next access
+        pid = None
+
+    # Healthy path: restore normal pane-exit semantics (pane exit ends
+    # session ends server), then re-check once as the LAST act before
+    # return. A workload that died since the first check left a
+    # dead-but-persisted pane; the re-check converts that into the same
+    # capture-and-raise instead of a zombie session. check=False on the
+    # unset: if the server itself vanished, the re-check is what reports it.
+    run_command(tmux_cmd(f"set-option -u -t {q_session} remain-on-exit", sock), check=False)
+    _ensure_workload_alive(session_name, run_command=run_command, socket_path=sock)
     return (sock, pid)
 
 
@@ -561,11 +749,18 @@ def capture_output(
     run_command: RunCommand,
     lines: int = DEFAULT_HISTORY_LIMIT,
     socket_path: str | None = None,
+    join_wrapped: bool = False,
 ) -> str:
-    """Capture the scrollback buffer from a session."""
+    """Capture the scrollback buffer from a session.
+
+    ``join_wrapped`` adds tmux's ``-J`` (join wrapped lines) so a message
+    longer than the pane width survives later per-line trimming as one
+    line; off by default to keep other callers' output shape unchanged.
+    """
     q_session = shlex.quote(session_name)
+    flags = "-p -J" if join_wrapped else "-p"
     result = run_command(
-        tmux_cmd(f"capture-pane -t {q_session} -p -S -{lines}", socket_path),
+        tmux_cmd(f"capture-pane -t {q_session} {flags} -S -{lines}", socket_path),
         check=False,
     )
     return getattr(result, "stdout", "") or ""
