@@ -46,12 +46,13 @@ because it names a real harness, not a shortening of the generic term.
 
 `sessions.harness_state` is a real SQLite column added by migration v29 (`db/migrations.py:582`),
 read/written in `db/database.py`, decoded in `db/converters.py`, and modeled at `db/models.py:158`.
-A **new** numbered migration (the next free number after the current head) runs
-`ALTER TABLE sessions RENAME COLUMN harness_state TO harness_integration_state`. SQLite supports
-`RENAME COLUMN`; there is no data transform, because the JSON blob's inner keys are namespaced by
-the implementation name (`shell`/`claude-code`/`codex`), not the word "harness". Migration v29 is
-never edited. `models.py`, `database.py`, and `converters.py` change in lockstep with the new
-migration.
+A **new** idempotent migration v31 inspects the schema and runs
+`ALTER TABLE sessions RENAME COLUMN harness_state TO harness_integration_state` only while the old
+column remains. This lets the migration runner safely resume if the rename committed but its version
+record did not. SQLite supports `RENAME COLUMN`; there is no data transform, because the JSON blob's
+inner keys are namespaced by the implementation name (`shell`/`claude-code`/`codex`), not the word
+"harness". Migration v29 is never edited. `models.py`, `database.py`, and `converters.py` change in
+lockstep with the new migration.
 
 ### 2b. Kind slug and registry
 
@@ -70,12 +71,17 @@ field pair becomes `harness_integration`/`harness_integration_config`
 (`manifests/decode.py`, `config/loaders_sessions.py`, `migrate/planning.py`), which already hoists a
 deprecated flat shape into the canonical pair. The input matrix:
 
-| Input                                                      | Loads? | Warns?                                   | `resource migrate` output            |
-| ---------------------------------------------------------- | ------ | ---------------------------------------- | ------------------------------------ |
-| TOML session-template (`harness`/`harness_config`)         | yes    | yes: removed in 0.14.0                   | YAML with `harness_integration:`     |
-| YAML tagged, old key: `harness: { name: ... }`             | yes    | yes: `harness` key removed in 0.14.0     | `harness_integration: { name: ... }` |
-| YAML flat, old key: `harness: <name>` + `harness_config:`  | yes    | yes: same aggregated deprecation warning | `harness_integration: { name: ... }` |
-| YAML tagged, new key: `harness_integration: { name: ... }` | yes    | no                                       | unchanged                            |
+| Input                                                               | Loads? | Warns?                                   | `resource migrate` output            |
+| ------------------------------------------------------------------- | ------ | ---------------------------------------- | ------------------------------------ |
+| TOML session-template (`harness`/`harness_config`)                  | yes    | yes: removed in 0.14.0                   | YAML with `harness_integration:`     |
+| TOML canonical (`harness_integration`/`harness_integration_config`) | yes    | no                                       | YAML with `harness_integration:`     |
+| YAML tagged, old key: `harness: { name: ... }`                      | yes    | yes: `harness` key removed in 0.14.0     | `harness_integration: { name: ... }` |
+| YAML flat, old key: `harness: <name>` + `harness_config:`           | yes    | yes: same aggregated deprecation warning | `harness_integration: { name: ... }` |
+| YAML tagged, new key: `harness_integration: { name: ... }`          | yes    | no                                       | unchanged                            |
+
+The legacy TOML flat shell fields remain accepted with the same hoist and conflict behavior under
+both discriminator spellings. The complete compatibility and error matrix is pinned in
+`migration-strategy.md` section 4.
 
 The deprecation warning is a single aggregated message (reusing the existing aggregation in
 `decode_document`/`capability_shape_deprecation`), naming the `harness` key and pointing at
@@ -105,11 +111,12 @@ change with the canonical output (FRD R7).
 
 Rename the package directory and the plugin modules; move and update the capability README under the
 new package; update `capabilities/README.md`, `cli/README.md`, `docs/guides/resources.md`, ADR 0020,
-the sample manifests (`manifests/samples/session-template.yaml`), the shipped claude/codex
-`session-templates.yaml` and the example `agent-templates.yaml`. The root README's "Agentworks Is
-Not a Harness" prose uses "harness" in the industry sense and stays; only its mechanism-sense usages
-and the YAML example change (the operator is authoring the target-state README separately).
-Historical `CHANGELOG.md` entries are left as an immutable record; new entries use the new name.
+the sample manifests (`manifests/samples/session-template.yaml`) and the shipped claude/codex
+`session-templates.yaml`. The example `agent-templates.yaml` files contain no selector and need only
+be verified. The root README's "Agentworks Is Not a Harness" prose uses "harness" in the industry
+sense and stays; only its mechanism-sense usages and the YAML example change (the operator is
+authoring the target-state README separately). Historical `CHANGELOG.md` entries are left as an
+immutable record; new entries use the new name.
 
 ## 3. Enablement and readiness (unchanged mechanism, renamed)
 

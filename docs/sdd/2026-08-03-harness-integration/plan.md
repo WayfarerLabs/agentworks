@@ -17,7 +17,7 @@ plus `./scripts/lint-files.sh` and `./scripts/check-locked-sdds.sh`.
 
 ## Phase 0: Migration strategy (no code)
 
-- [ ] Author `migration-strategy.md`: the current-state inventory (from the rename survey), the
+- [x] Author `migration-strategy.md`: the current-state inventory (from the rename survey), the
       exact new DB migration number and `RENAME COLUMN` statement, the selector shim for only
       previously valid inputs, hard errors for mixed old/new fields, the `agw resource migrate`
       changes, the aggregated-warning wording, and the 0.14.0 removal checklist.
@@ -28,13 +28,14 @@ plus `./scripts/lint-files.sh` and `./scripts/check-locked-sdds.sh`.
 
 Landing this half-done has no value, so all sub-steps ship together.
 
-- [ ] **1a Persisted state.** New numbered DB migration:
-      `ALTER TABLE sessions RENAME COLUMN harness_state TO harness_integration_state`. Update
-      `db/models.py:158`, the INSERT/UPDATE SQL in `db/database.py`, and `db/converters.py`. Do not
-      edit migration v29. DoD: a migration test (analogous to `test_db_migration_harness_state.py`)
-      proves an old-schema DB upgrades, session rows keep their unchanged blob values, and
-      insert/read round-trips on the new column; `agw session create`/`restart` work on the migrated
-      DB.
+- [ ] **1a Persisted state.** Add an idempotent DB migration v31 that inspects the schema and runs
+      `ALTER TABLE sessions RENAME COLUMN harness_state TO harness_integration_state` only when the
+      old column remains. Update `db/models.py:158`, the INSERT/UPDATE SQL and related methods in
+      `db/database.py`, and `db/converters.py`. Do not edit migration v29. DoD: a migration test
+      (analogous to `test_db_migration_harness_state.py`) proves an old-schema DB upgrades, an
+      interrupted post-rename/pre-version-record state resumes, session rows keep their unchanged
+      blob values, and insert/read round-trips on the new column; `agw session create`/`restart`
+      work on the migrated DB.
 - [ ] **1b Kind slug.** Set the kind to `harness-integration` in `capabilities/harness/kinds.py` and
       `plugins/adapters.py`, update the capability-kind set in `resources/graph.py:369`, with no
       deprecated alias. DoD: `agw resource list --kind harness-integration` works; `--kind harness`
@@ -46,10 +47,12 @@ Landing this half-done has no value, so all sub-steps ship together.
       `config/loaders_sessions.py`). Both old `harness` shapes (tagged and flat) load with a single
       aggregated deprecation warning; teach `migrate/planning.py` to rewrite either to the new key;
       previously valid TOML continues to work with a warning. Mixed old/new selector or config
-      fields hard-error. DoD: the input matrix in HLA section 2c is covered by tests: the new key
-      validates clean; every previously valid old form loads with exactly one aggregated warning;
-      mixed forms fail; old and new declarations normalize before inheritance;
-      `agw resource migrate` rewrites old YAML and TOML.
+      fields hard-error. DoD: the complete input matrix in `migration-strategy.md` section 4 is
+      covered by tests: the new key validates clean; every previously valid old form loads with
+      exactly one aggregated warning; mixed forms fail; old and new declarations normalize before
+      inheritance; `agw resource migrate` rewrites old YAML and TOML. Existing YAML migration
+      requires a new atomic in-place rewrite path; preserve rollback behavior and registry
+      equivalence.
 - [ ] **1d Identifier sweep.** Rename the package `capabilities/harness/` ->
       `capabilities/harness_integration/`, the plugin `harness.py` modules ->
       `harness_integration.py`, the classes and registry/accessors per HLA section 1, and the
@@ -59,11 +62,11 @@ Landing this half-done has no value, so all sub-steps ship together.
       (`sessions/manager/_queries.py:352,481`, `_env.py`), and the operator-facing error/hint
       strings (`capabilities/harness/__init__.py:74,105-109`) to the new name. DoD: list/describe
       tests assert the new header/label; no canonical output says "harness" for the mechanism.
-- [ ] **1f Built-in manifests + samples.** Update the shipped claude/codex `session-templates.yaml`,
-      the example `agent-templates.yaml`, and `manifests/samples/session-template.yaml` to the new
-      `harness_integration:` selector. DoD: the six example session-templates load
-      present-but-disabled and validate; `resource sample session-template` emits the new key; live
-      parity test passes.
+- [ ] **1f Built-in manifests + samples.** Update the shipped claude/codex `session-templates.yaml`
+      and `manifests/samples/session-template.yaml` to the new `harness_integration:` selector;
+      verify rather than edit agent-template manifests that contain no selector. DoD: the six
+      example session-templates load present-but-disabled and validate;
+      `resource sample session-template` emits the new key; live parity test passes.
 - [ ] **1g Docs + files/dirs.** Move and update the capability README under the new package dir;
       update `capabilities/README.md`, `cli/README.md`, `sample-config.toml`,
       `docs/guides/resources.md`, ADR 0020, plugin-author docs, completions, and diagrams as needed.
@@ -79,6 +82,10 @@ Landing this half-done has no value, so all sub-steps ship together.
   canonical output uses the new name everywhere.
 
 ## Phase 2: 0.14.0 compatibility removal
+
+This phase is blocked until 0.13.0 has shipped. It is not part of the 0.13.0 implementation PR. "Old
+discriminator-pattern support" here means only the harness selector/config compatibility introduced
+for this rename; removing generic compatibility used by unrelated capabilities is out of scope.
 
 - [ ] Remove acceptance of the old `harness` selector, `harness_config` sibling, and TOML
       discriminator pair together with the old discriminator-pattern support. Remove their warning
