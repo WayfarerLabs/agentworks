@@ -203,6 +203,74 @@ def test_session_template_canonical_selector_is_not_a_capability_shape_deprecati
     assert not manifests.deprecation_issues
 
 
+def test_legacy_session_harness_config_without_selector_is_rejected(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="spec.harness_config needs a spec.harness selector"):
+        _load_one(
+            tmp_path,
+            "ownerless-config",
+            """
+            apiVersion: agentworks/v1
+            kind: session-template
+            metadata:
+              name: htop
+            spec:
+              harness_config:
+                command: htop
+            """,
+        )
+
+
+def test_legacy_session_harness_empty_scalar_is_rejected(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="spec.harness must be a non-empty string or tagged table"):
+        _load_one(
+            tmp_path,
+            "empty-selector",
+            """
+            apiVersion: agentworks/v1
+            kind: session-template
+            metadata:
+              name: htop
+            spec:
+              harness: ""
+            """,
+        )
+
+
+def test_legacy_session_harness_non_string_scalar_is_rejected(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="spec.harness must be a non-empty string or tagged table"):
+        _load_one(
+            tmp_path,
+            "non-string-selector",
+            """
+            apiVersion: agentworks/v1
+            kind: session-template
+            metadata:
+              name: htop
+            spec:
+              harness: 42
+            """,
+        )
+
+
+def test_legacy_session_harness_valid_scalar_normalizes(tmp_path: Path) -> None:
+    manifests = _load_one(
+        tmp_path,
+        "valid-selector",
+        """
+        apiVersion: agentworks/v1
+        kind: session-template
+        metadata:
+          name: htop
+        spec:
+          harness: shell
+        """,
+    )
+    (entry,) = manifests.entries
+    assert entry.resource.harness_integration == "shell"
+    assert entry.resource.harness_integration_config is None
+    assert manifests.deprecated_harness_selectors == ("session-template/htop",)
+
+
 def test_session_template_old_and_canonical_selectors_cannot_mix(tmp_path: Path) -> None:
     with pytest.raises(ConfigError, match="old and new harness selector/config fields cannot be mixed"):
         _load_one(

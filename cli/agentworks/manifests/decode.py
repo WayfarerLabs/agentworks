@@ -92,6 +92,11 @@ def _normalize_session_harness_selector(spec: dict[str, object]) -> bool:
             "use harness_integration: {name: ..., <config keys...>} only"
         )
     if old_fields:
+        if "harness_config" in spec and "harness" not in spec:
+            raise ConfigError(
+                "deprecated spec.harness_config needs a spec.harness selector; "
+                "use a spec.harness_integration tagged table with name: shell"
+            )
         value = spec.pop("harness", None)
         if isinstance(value, dict):
             if "harness_config" in spec:
@@ -110,6 +115,11 @@ def _normalize_session_harness_selector(spec: dict[str, object]) -> bool:
             if config:
                 spec["harness_integration_config"] = config
         else:
+            if not isinstance(value, str) or not value:
+                raise ConfigError(
+                    "deprecated spec.harness must be a non-empty string or tagged table; "
+                    "use a spec.harness_integration tagged table with name: shell"
+                )
             spec["harness_integration"] = value
             if "harness_config" in spec:
                 spec["harness_integration_config"] = spec.pop("harness_config")

@@ -13,7 +13,6 @@ def render_preview(plan: MigrationPlan) -> list[str]:
     """The confirmation-prompt summary: what would be written and edited."""
     lines: list[str] = []
     toml_units = [unit for unit in plan.units if unit.source == "toml"]
-    yaml_units = [unit for unit in plan.units if unit.source == "yaml"]
     if toml_units:
         lines.append(f"Migrating {len(toml_units)} resource(s) from config.toml:")
         for unit in toml_units:
@@ -24,10 +23,11 @@ def render_preview(plan: MigrationPlan) -> list[str]:
             lines.append(f"  {action} {write.path} ({len(write.documents)} document(s))")
         verb = "commented out in" if plan.toml_mode == "comment" else "deleted from"
         lines.append(f"  migrated sections will be {verb} {plan.config_path}")
-    if yaml_units:
-        lines.append(f"Canonicalizing {len(yaml_units)} YAML session-template selector(s):")
-    for rewrite in plan.yaml_rewrites:
-        lines.append(f"  rewrite {rewrite.path}: {', '.join(rewrite.resources)}")
+    if plan.yaml_rewrites:
+        selector_count = sum(len(rewrite.resources) for rewrite in plan.yaml_rewrites)
+        lines.append(f"Canonicalizing {selector_count} YAML session-template selector(s):")
+        for rewrite in plan.yaml_rewrites:
+            lines.append(f"  rewrite {rewrite.path}: {', '.join(rewrite.resources)}")
     if plan.drops_secret_backends:
         lines.append(
             "  deprecated [secret_backends.*] sections will be dropped "

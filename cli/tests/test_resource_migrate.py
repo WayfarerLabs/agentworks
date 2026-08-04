@@ -1096,6 +1096,27 @@ def test_yaml_only_preview_lists_real_replacement_paths_not_config_targets(tmp_p
     assert " -> ?" not in preview
 
 
+def test_preview_rewrite_lines_always_have_a_canonicalizing_header(tmp_path: Path) -> None:
+    """Rendering groups from the rewrite plan itself, even if a caller builds a
+    plan whose informational unit list omits the corresponding YAML units."""
+    from agentworks.migrate.render import render_preview
+
+    cfg = _write_config(tmp_path, resources="")
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    manifest = resources / "sessions.yaml"
+    manifest.write_text(
+        "apiVersion: agentworks/v1\nkind: session-template\nmetadata:\n  name: htop\nspec:\n  harness: shell\n"
+    )
+    _config, plan = _plan(cfg, ["session-template/htop"])
+    plan.units = []
+
+    preview = render_preview(plan)
+
+    assert preview[0] == "Canonicalizing 1 YAML session-template selector(s):"
+    assert preview[1] == f"  rewrite {manifest}: session-template/htop"
+
+
 def test_yaml_only_migration_does_not_replace_config_toml(tmp_path: Path) -> None:
     cfg = _write_config(tmp_path, resources="")
     resources = tmp_path / "resources"
