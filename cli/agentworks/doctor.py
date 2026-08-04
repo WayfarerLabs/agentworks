@@ -110,7 +110,7 @@ def run_checks(*, completion_version: str | None = None) -> HealthReport:
     report.groups.append(_check_required_tools())
     report.groups.append(_check_tailscale())
     # System plugins leads the config-driven groups: it is a fundamental opt-in
-    # (it determines which platforms, backends, and harnesses even exist), so it
+    # (it determines which platforms, backends, and harness integrations even exist), so it
     # reads best up front, before the VM stack it shapes, rather than splitting VM
     # platforms from VM sites. The roster reads config.enabled_system_plugins
     # against SYSTEM_PLUGINS and needs no registry (a plugin is an origin, not a

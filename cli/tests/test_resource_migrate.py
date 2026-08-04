@@ -306,11 +306,11 @@ description = "AZDO access"
     assert doc["metadata"]["description"] == "AZDO access"
 
 
-def test_session_template_flat_fields_nest_under_harness_config(
+def test_session_template_flat_fields_nest_under_harness_integration_config(
     tmp_path: Path,
 ) -> None:
     """The migrator emits the tagged YAML shape: flat command fields
-    fold into the spec.harness table on the 'shell' harness (mirroring
+    fold into the spec.harness_integration table on the 'shell' integration (mirroring
     the git-credential fold); env stays kind-owned at the spec top
     level, and the run's registry-equivalence verification proves the
     hoist and the emission land on the identical value."""
@@ -344,7 +344,7 @@ CLAUDE_LOG_LEVEL = "info"
 
 def test_session_template_declared_pair_passes_through(tmp_path: Path) -> None:
     """A TOML template already spelling the nested pair migrates to the
-    tagged table (harness + harness_config fold together, env stays
+    tagged table (the legacy harness + harness_config pair folds together, env stays
     top-level)."""
     cfg = _write_config(
         tmp_path,

@@ -632,8 +632,9 @@ def test_session_template_inherits_parent_env(tmp_path: Path) -> None:
 
 
 def test_session_template_required_commands_parsed(tmp_path: Path) -> None:
-    """The flat ``required_commands`` hoists into the ``shell`` harness's
-    config blob (the harness surface owns the command vocabulary now)."""
+    """The flat ``required_commands`` hoists into the ``shell`` harness
+    integration's config blob (the integration surface owns the command
+    vocabulary now)."""
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,

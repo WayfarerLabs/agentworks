@@ -4,8 +4,8 @@ workspace templates, and the legacy ``[azure]`` / ``[proxmox]`` vm-site
 sections.
 
 Session-related loaders (``[session.config]``, ``[session_templates.*]``)
-live in ``agentworks.config.loaders_sessions`` instead: the harness-hoisting
-logic there is a large, self-contained unit that would otherwise dominate
+live in ``agentworks.config.loaders_sessions`` instead: the harness-integration
+selection and compatibility-hoisting logic there is a large, self-contained unit that would otherwise dominate
 this module.
 
 Split out of the former monolithic ``agentworks/config.py`` (see

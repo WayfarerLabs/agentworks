@@ -1,4 +1,4 @@
-"""The ``shell`` harness and the shared ``HarnessIntegration`` readiness base.
+"""The ``shell`` harness integration and the shared ``HarnessIntegration`` readiness base.
 
 Covers the config vocabulary (validate/merge), the ops (start/restart
 pane strings), the relocated required-commands probe, the SESSION-level
@@ -340,7 +340,7 @@ def test_identity_guard_raises_on_agent_mismatch() -> None:
 
 
 def test_identity_guard_raises_on_mode_mismatch() -> None:
-    """Admin-wired harness handed an agent-mode scope."""
+    """Admin-wired harness integration handed an agent-mode scope."""
     harness_integration = _harness_integration({"required_commands": ["claude"]}, admin=True)
     ctx = RunContext(
         operation_scope=_session_scope(agent="dev", admin=False),
@@ -363,7 +363,7 @@ def test_identity_guard_passes_the_matching_scope() -> None:
 
 def test_capability_imports_neither_sessions_nor_orchestration() -> None:
     """The capability layer depends only on the framework: importing the
-    harness package must pull in neither its consuming domain
+    harness-integration package must pull in neither its consuming domain
     (``sessions``) nor the orchestration layer.
 
     Runs in a fresh subprocess so the check sees a clean ``sys.modules``
@@ -383,7 +383,7 @@ def test_capability_imports_neither_sessions_nor_orchestration() -> None:
         "    or m == 'agentworks.orchestration'\n"
         "    or m.startswith('agentworks.orchestration.')\n"
         ")\n"
-        "assert not leaked, 'harness leaked forbidden imports: ' + repr(leaked)\n"
+        "assert not leaked, 'harness integration leaked forbidden imports: ' + repr(leaked)\n"
     )
     result = subprocess.run(
         [sys.executable, "-c", probe],

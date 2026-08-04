@@ -1,4 +1,4 @@
-"""The ``claude-code`` harness driven through the real orchestrator: the
+"""The ``claude-code`` harness integration driven through the real orchestrator: the
 carry the unit test cannot prove on its own (plan Tests P2 / P4).
 
 - ``session create`` produces the launch pane string through the real op
@@ -12,8 +12,8 @@ carry the unit test cannot prove on its own (plan Tests P2 / P4).
   persists its id on the first restart;
 - a pre-NAMESPACING row (flat ``{"session_id": ...}``) is hoisted into the
   ``claude-code`` namespace and resumed with the SAME id, a foreign
-  harness's namespace in the blob survives a claude op untouched, and the
-  flat legacy key survives ANOTHER harness's op for a later hoist;
+  integration's namespace in the blob survives a claude op untouched, and the
+  flat legacy key survives ANOTHER integration's op for a later hoist;
 - the visible decision reaches the pane string through the real launch;
 - the relocated template-var substitution does not mangle the generated
   ``sh -c`` snippet, and DOES substitute an operator ``extra_args`` var.
@@ -312,8 +312,8 @@ def test_restart_hoists_a_pre_namespacing_row_and_resumes_its_id(
 
 
 def test_restart_leaves_a_foreign_namespace_untouched(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A foreign harness's namespace in the blob (a template re-pointed
-    from another stateful harness) survives a claude-code op untouched:
+    """A foreign integration's namespace in the blob (a template re-pointed
+    from another stateful integration) survives a claude-code op untouched:
     the claude id lands in its OWN namespace, and the foreign keys are
     neither read (no inherited ``session_id``) nor dropped on persist."""
     from agentworks.sessions.manager import restart_session
@@ -339,12 +339,12 @@ def test_restart_leaves_a_foreign_namespace_untouched(tmp_path: Path, monkeypatc
     db.close()
 
 
-def test_restart_under_another_harness_leaves_the_flat_legacy_key_intact(
+def test_restart_under_another_harness_integration_leaves_the_flat_legacy_key_intact(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Compatibility (pre-namespacing harness_integration_state): DELETE on the next
     major release, with the hoist. The flat legacy ``session_id`` belongs
-    to claude-code; a restart under a DIFFERENT harness (whose hoist is
+    to claude-code; a restart under a DIFFERENT integration (whose hoist is
     the base no-op) must neither adopt nor drop it, so the persisted row
     keeps the flat key verbatim and a later re-point back to claude-code
     can still hoist it."""
@@ -373,7 +373,7 @@ def test_restart_under_another_harness_leaves_the_flat_legacy_key_intact(
 def test_substitution_leaves_the_generated_snippet_intact_and_substitutes_extra_args(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The claude-code snippet is the first harness output carrying literal
+    """The claude-code snippet is the first harness integration output carrying literal
     braces (the ``sh -c '...'`` quoting). The relocated template-var
     substitution must not mangle the generated skeleton, while an operator
     ``extra_args`` var still substitutes."""

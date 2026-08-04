@@ -1,4 +1,4 @@
-"""The ``codex`` harness driven through the real orchestrator: the carry
+"""The ``codex`` harness integration driven through the real orchestrator: the carry
 the unit test cannot prove on its own.
 
 - ``session create`` produces the fresh-launch pane string through the
@@ -11,7 +11,7 @@ the unit test cannot prove on its own.
   consumed), and the NEXT restart resumes the stored id without
   re-running discovery;
 - ``codex`` and ``claude-code`` state coexist in one row blob without
-  collision (the first real two-stateful-harness pairing, pinning the
+  collision (the first real two-stateful-integration pairing, pinning the
   namespacing seam's promise);
 - ``session restart`` with a stored id resumes it with the
   restart-post-kill end state (kill precedes the probe precedes the tmux
@@ -316,11 +316,11 @@ def test_restart_with_a_gone_rollout_drops_the_id_and_launches_fresh(
     db.close()
 
 
-# -- two stateful harnesses share one row blob --------------------------------
+# -- two stateful harness integrations share one row blob ---------------------
 
 
 def test_codex_and_claude_code_state_coexist_in_one_blob(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The first real two-stateful-harness pairing: a row whose blob
+    """The first real two-stateful-integration pairing: a row whose blob
     already carries a ``claude-code`` namespace (the template was
     re-pointed to codex) runs a codex op that adopts its own id into the
     ``codex`` namespace, and the claude id is neither read (no inherited

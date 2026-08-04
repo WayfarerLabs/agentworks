@@ -14,7 +14,7 @@ against a FIXTURE plugin injected two ways at once:
 
 The fixture impls are REAL capability subclasses so they fold through their
 consumers (a ``vm-site`` goes not-ready, a ``session-template`` reaches the
-harness use-gate); the fixture's bundled manifest is a self-contained
+harness integration use-gate); the fixture's bundled manifest is a self-contained
 ``apt-source`` in the ``_manifest_fixture`` package beside this file.
 """
 
@@ -329,18 +329,18 @@ def test_builtin_publish_routes_through_shared_body_preserving_origin() -> None:
     assert origin.source == "agentworks.manifests.builtin/apt-sources.yaml"
 
 
-# -- Phase 4 forward item: a disabled plugin's harness reaches the use-gate ------
+# -- Phase 4 forward item: a disabled plugin's integration reaches the use-gate --
 
 
-def test_disabled_plugin_harness_reaches_use_gate_not_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Seating is unconditional at import, so a DISABLED plugin's harness impl is
+def test_disabled_plugin_harness_integration_reaches_use_gate_not_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Seating is unconditional at import, so a DISABLED plugin's integration impl is
     still seated: ``harness_integration_for`` finds it and ``_resolve_template`` resolves the
-    template to it (no unknown-harness error), leaving the use-gate
+    template to it (no unknown-integration error), leaving the use-gate
     (``ensure_harness_integration_enabled``) as the thing that refuses it with the
     enable-plugin error. This pins the LLD section 3 seating requirement."""
     plugin = _fixture_plugin()
     monkeypatch.setattr("agentworks.plugins.SYSTEM_PLUGINS", {plugin.name: plugin})
-    config = _config()  # NOT opted in -> the harness row is disabled
+    config = _config()  # NOT opted in -> the harness integration row is disabled
     with seated_plugin(plugin):
         registry = Registry.empty()
         publish_plugins(registry, config)
@@ -352,7 +352,7 @@ def test_disabled_plugin_harness_reaches_use_gate_not_unknown(monkeypatch: pytes
         )
         registry.finalize(enablement_sources=[plugin_enablement_source(config)])
 
-        # Seated impl found (no unknown-harness ConfigError from harness_integration_for).
+        # Seated impl found (no unknown-integration ConfigError from harness_integration_for).
         assert harness_integration_for("fixture-harness") is _FixtureHarnessIntegration
         # Template resolution reaches the seated (disabled) harness_integration.
         resolved = _resolve_template(registry, "tmpl")

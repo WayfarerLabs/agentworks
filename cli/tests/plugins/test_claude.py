@@ -1,5 +1,5 @@
 """The ``claude`` system plugin: the opt-in migration of the ``claude-code``
-harness and the ``claude`` install-command out of the core (Phase 9, R11 /
+harness integration and the ``claude`` install-command out of the core (Phase 9, R11 /
 R11.1).
 
 The first manifest-carrying migration, so this is the first REAL-plugin
@@ -7,7 +7,7 @@ end-to-end exercise of Phase 7's manifest present-but-disabled parity: it
 drives ``build_registry`` on real config (no fixture plugin injected via
 ``SYSTEM_PLUGINS``) and pins both halves of the bundle:
 
-- the ``claude-code`` HARNESS: present-but-disabled with a ``system-plugin``
+- the ``claude-code`` HARNESS INTEGRATION: present-but-disabled with a ``system-plugin``
   origin, a ``session-template`` naming it stays ready, and
   ``ensure_harness_integration_enabled`` refuses it at use until ``[plugins] system``;
 - the ``claude`` INSTALL-COMMAND (a bundled ``user-install-command``):
@@ -65,8 +65,8 @@ def _config(tmp_path: Path, body: str = "", *, enabled: bool = False) -> Config:
 
 
 def test_claude_seated_by_plugin() -> None:
-    """The claude-code harness ships as the ``claude`` system plugin, whose
-    adapter re-seats the harness class into the code registry at import (so the
+    """The claude-code harness integration ships as the ``claude`` system plugin, whose
+    adapter re-seats the integration class into the code registry at import (so the
     resolver can stamp it onto the graph node), and the plugin is indexed."""
     from agentworks.capabilities.harness_integration import HARNESS_INTEGRATION_REGISTRY
     from agentworks.plugins import SYSTEM_PLUGINS
@@ -75,8 +75,8 @@ def test_claude_seated_by_plugin() -> None:
     assert "claude-code" in HARNESS_INTEGRATION_REGISTRY
 
 
-def test_harness_row_is_disabled_system_plugin_by_default(tmp_path: Path) -> None:
-    """The ``claude-code`` harness row publishes present-but-disabled with a
+def test_harness_integration_row_is_disabled_system_plugin_by_default(tmp_path: Path) -> None:
+    """The ``claude-code`` harness integration row publishes present-but-disabled with a
     ``system-plugin`` origin until the operator opts in (no longer a
     built-in)."""
     registry = build_registry(_config(tmp_path))
@@ -97,9 +97,9 @@ def test_install_command_row_is_disabled_system_plugin_by_default(tmp_path: Path
     assert registry.graph.enablement_of("user-install-command", "claude") is Enablement.disabled
 
 
-def test_shell_stays_the_default_builtin_harness(tmp_path: Path) -> None:
+def test_shell_stays_the_default_builtin_harness_integration(tmp_path: Path) -> None:
     """The common session path is untouched: ``shell`` remains a built-in,
-    enabled harness after the migration."""
+    enabled harness integration after the migration."""
     registry = build_registry(_config(tmp_path))
     shell = registry.lookup("harness-integration", "shell")
     assert shell.origin.variant == "built-in"
@@ -118,7 +118,7 @@ def test_disabled_rows_hidden_from_list_shown_by_describe(tmp_path: Path) -> Non
         assert "claude" in desc.disabled_reason
 
 
-# -- the harness use-gate (R14, the secret model) ----------------------------
+# -- the harness integration use-gate (R14, the secret model) ----------------
 
 _CC_TEMPLATE = """
 [session_templates.cc]
@@ -127,10 +127,10 @@ description = "Claude Code session"
 """
 
 
-def test_session_template_naming_disabled_harness_finalizes_and_stays_ready(tmp_path: Path) -> None:
+def test_session_template_naming_disabled_harness_integration_finalizes_and_stays_ready(tmp_path: Path) -> None:
     """A ``session-template`` naming ``claude-code`` finalizes cleanly (the
     reference lands on the present-but-disabled row, never an unknown-name
-    error) and stays ready: the harness's disablement does not propagate to the
+    error) and stays ready: the harness integration's disablement does not propagate to the
     template (mirroring how a secret stays ready while its backends are gated)."""
     registry = build_registry(_config(tmp_path, _CC_TEMPLATE))
     assert registry.graph.is_ready("session-template", "cc")
@@ -143,7 +143,7 @@ def test_ensure_harness_integration_enabled_refuses_disabled_claude_code_with_hi
     assert "enable plugin `claude`" in str(exc.value)
 
 
-def test_enabling_claude_lets_the_harness_be_used(tmp_path: Path) -> None:
+def test_enabling_claude_lets_the_harness_integration_be_used(tmp_path: Path) -> None:
     registry = build_registry(_config(tmp_path, _CC_TEMPLATE, enabled=True))
     assert registry.graph.enablement_of("harness-integration", "claude-code") is Enablement.enabled
     ensure_harness_integration_enabled(registry, "claude-code")  # no raise

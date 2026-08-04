@@ -1,6 +1,6 @@
 """Session-related settings/resource loaders: ``[session.config]`` and
-``[session_templates.*]``, including the legacy flat-field-to-harness
-hoisting logic.
+``[session_templates.*]``, including legacy flat fields hoisted into the
+shell harness integration's config.
 
 Split out of the former monolithic ``agentworks/config.py`` (see
 ``agentworks/config/__init__.py`` for the package overview).
@@ -41,10 +41,10 @@ def _load_session_config(data: dict[str, object], issues: list[str]) -> SessionC
     )
 
 
-# The legacy flat fields (``shell``'s config vocabulary) plus the
-# harness pair. The flat fields keep loading verbatim; the loader hoists
-# them into ``harness = "shell"`` + the equivalent ``harness_config``
-# blob (FRD R6), so the internal representation follows the YAML shape.
+# The legacy flat fields (``shell``'s config vocabulary) plus the canonical
+# harness-integration pair and its deprecated aliases. The flat fields keep
+# loading verbatim; the loader hoists them into the canonical
+# ``harness_integration = "shell"`` plus ``harness_integration_config`` shape.
 _SESSION_TEMPLATE_KEYS = {
     "inherits",
     "description",
@@ -107,15 +107,16 @@ def _load_session_templates(
 def _session_harness_integration_pair(
     name: str, tdata: dict[str, object]
 ) -> tuple[str | None, dict[str, object] | None, bool]:
-    """Resolve a TOML session-template's ``(harness, harness_config)``
-    pair, hoisting the legacy flat fields onto the ``shell`` harness
-    (FRD R6). ``None`` on either means "not declared here".
+    """Resolve a TOML session-template's harness-integration selector/config pair.
+
+    The deprecated literals are ``harness`` and ``harness_config``. Legacy flat fields are hoisted
+    onto the ``shell`` harness integration. ``None`` on either result means "not declared here".
 
     The flat form is the lone TOML divergence from the YAML shape; it
     nests into the blob at this boundary, mirroring how the
     git-credential loader nests ``org`` into ``provider_config``. The
-    two conflict cases (flat + a non-``shell`` harness, flat + an
-    explicit ``harness_config``) are load errors: the flat fields ARE
+    two conflict cases (flat + a non-``shell`` integration, flat + an
+    explicit integration config) are load errors: the flat fields ARE
     ``shell``'s config, and mixing spellings in one declaration has no
     operator payoff.
     """
@@ -124,7 +125,8 @@ def _session_harness_integration_pair(
     if old_fields and new_fields:
         names = ", ".join(sorted(old_fields | new_fields))
         raise ConfigError(
-            f"session_templates.{name}: old and new harness selector/config fields cannot be mixed: {names}; "
+            f"session_templates.{name}: old and new harness integration selector/config fields cannot be mixed: "
+            f"{names}; "
             "use harness_integration and harness_integration_config only"
         )
     old = bool(old_fields)
@@ -173,9 +175,9 @@ def _session_harness_integration_pair(
                 f'(a blob with no owner); add {selector} = "..."'
             )
 
-    # The declared/hoisted harness_config blob's shape is validated by
+    # The declared or hoisted harness-integration config blob's shape is validated by
     # the finalize ``validate`` pass (SessionTemplate.validate), not
     # here: capability validation is decoupled from load (R3). The
-    # TOML-shape checks above (flat-vs-nested, blob-needs-harness) stay
+    # TOML-shape checks above (flat-vs-nested, blob-needs-integration) stay
     # at load, in the operator's TOML vocabulary.
     return harness_integration, harness_integration_config, old

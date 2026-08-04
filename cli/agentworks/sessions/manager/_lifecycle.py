@@ -549,7 +549,8 @@ def restart_session(
             # Persist the node's FULL namespaced harness_integration_state blob after the
             # op (mirrors the create-path insert): the harness_integration mutated its own
             # namespace in place, and persisting the full blob keeps foreign
-            # harnesses' namespaces intact across a template's harness_integration switch.
+            # harness integrations' namespaces intact across a template's
+            # harness_integration switch.
             # Usually a no-op (the value was stored on create), but a session
             # predating the harness_integration_state column (backfilled to {}) mints its
             # id on this first restart. Persisting BEFORE create_tmux_session

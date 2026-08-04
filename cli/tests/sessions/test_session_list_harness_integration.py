@@ -1,16 +1,16 @@
-"""The HARNESS column on ``session list`` and the shared table render.
+"""The HARNESS INTEGRATION column on ``session list`` and the shared table render.
 
 ``session list`` resolves every session's template to its concrete
-harness name (a config-only, no-SSH derivation) and shows it in a
-HARNESS column between TEMPLATE and MODE. These pins cover the column
+harness integration name (a config-only, no-SSH derivation) and shows it in a
+HARNESS INTEGRATION column between TEMPLATE and MODE. These pins cover the column
 value for the default (``shell``) and a declared ``claude-code``
 template, the guard that a template which fails to resolve shows ``-``
 without aborting the render, the 20-char truncation the shared
 ``output.render_table`` helper applies, that ``--no-status`` still shows
-the harness, and that ``--names-only`` stays pure (no registry cost).
+the harness integration, and that ``--names-only`` stays pure (no registry cost).
 
 All tests drive ``no_status=True`` so the listing never touches SSH; the
-HARNESS derivation is orthogonal to the STATUS batch.
+HARNESS INTEGRATION derivation is orthogonal to the STATUS batch.
 """
 
 from __future__ import annotations
@@ -75,9 +75,9 @@ def test_list_shows_harness_integration_column_between_template_and_mode(
     # Column order: NAME, WORKSPACE, VM, TEMPLATE, HARNESS INTEGRATION, MODE, STATUS.
     assert header.split() == ["NAME", "WORKSPACE", "VM", "TEMPLATE", "HARNESS", "INTEGRATION", "MODE", "STATUS"]
     by_name = {row.split()[0]: row.split() for row in rows}
-    # The default (undeclared) template resolves to the built-in shell harness.
+    # The default (undeclared) template resolves to the built-in shell integration.
     assert "shell" in by_name["s-shell"]
-    # The declared claude template resolves to its claude-code harness.
+    # The declared claude template resolves to its claude-code integration.
     assert "claude-code" in by_name["s-claude"]
 
 
@@ -87,7 +87,7 @@ def test_list_unresolvable_template_shows_dash_and_still_renders(
     captured_output,  # noqa: ANN001
 ) -> None:
     # A session pointing at a template that is not declared must not
-    # abort the listing: its HARNESS cell is "-" and the good row renders.
+    # abort the listing: its HARNESS INTEGRATION cell is "-" and the good row renders.
     config = make_config()
     _seed_vm(db, "box", "ws-box")
     _seed_session(db, "s-good", "ws-box", "default")
@@ -98,7 +98,7 @@ def test_list_unresolvable_template_shows_dash_and_still_renders(
     _header, rows = _header_and_rows(captured_output.info)
     by_name = {row.split()[0]: row.split() for row in rows}
     assert "shell" in by_name["s-good"]
-    # TEMPLATE cell is "ghost-template", HARNESS cell falls back to "-".
+    # TEMPLATE cell is "ghost-template", HARNESS INTEGRATION cell falls back to "-".
     assert by_name["s-bad"][4] == "-"
 
 
@@ -124,7 +124,7 @@ def test_list_no_status_still_shows_harness_integration(
     make_config,  # noqa: ANN001
     captured_output,  # noqa: ANN001
 ) -> None:
-    # --no-status skips only the SSH STATUS batch; HARNESS is cheap and
+    # --no-status skips only the SSH STATUS batch; HARNESS INTEGRATION is cheap and
     # stays. STATUS renders as "-" for every row.
     config = make_config()
     _seed_vm(db, "box", "ws-box")
@@ -174,7 +174,7 @@ def test_list_bad_registry_degrades_harness_integration_to_dash_and_still_render
     # build_registry runs config validation that can raise for reasons
     # unrelated to session templates (bad secret chain, bad defaults.site,
     # a resource collision). A read-only listing must not abort: the
-    # HARNESS column degrades to "-" for every row and the rest renders.
+    # HARNESS INTEGRATION column degrades to "-" for every row and the rest renders.
     import agentworks.bootstrap as bootstrap
     from agentworks.errors import ConfigError
 
@@ -201,7 +201,7 @@ def test_names_only_stays_pure_and_pays_no_registry_cost(
     captured_output,  # noqa: ANN001
     monkeypatch,  # noqa: ANN001
 ) -> None:
-    # --names-only short-circuits before any harness/registry work: even
+    # --names-only short-circuits before any harness-integration/registry work: even
     # a build_registry that would blow up leaves the name list intact.
     import agentworks.bootstrap as bootstrap
 

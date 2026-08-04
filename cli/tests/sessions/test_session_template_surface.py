@@ -136,7 +136,7 @@ def test_canonical_toml_harness_integration_pair_normalizes_to_internal_pair(tmp
 
 
 def test_toml_harness_old_and_canonical_pairs_cannot_mix(tmp_path: Path) -> None:
-    with pytest.raises(ConfigError, match="old and new harness selector/config fields cannot be mixed"):
+    with pytest.raises(ConfigError, match="old and new harness integration selector/config fields cannot be mixed"):
         _config(
             tmp_path,
             """

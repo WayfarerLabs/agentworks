@@ -124,14 +124,14 @@ consuming resource that holds one.
   from the other three flat-field template families; the reference-plus-blob shape and the pair rule
   are documented to compensate.
 - The migration landed in phases: between the orchestrator swap and the template's surface change,
-  the harness was always `shell`, built from the template's still-flat fields via an interim
-  adapter. Each interim `main` state was complete and honest (the mechanism was real and swapped in;
-  only the template selector was pending), but it was a two-step where a one-step surface change
-  would have been simpler, deliberately, to isolate the orchestrator wiring from the dataclass
-  reshape. `SessionTemplate` now carries only `harness_integration` / `harness_integration_config`;
-  the legacy flat `command` / `restart_command` / `required_commands` spelling is accepted solely as
-  TOML-loader backward compatibility (hoisted into `harness_integration_config` at load) and
-  rejected in manifests.
+  the harness integration was always `shell`, built from the template's still-flat fields via an
+  interim adapter. Each interim `main` state was complete and honest (the mechanism was real and
+  swapped in; only the template selector was pending), but it was a two-step where a one-step
+  surface change would have been simpler, deliberately, to isolate the orchestrator wiring from the
+  dataclass reshape. `SessionTemplate` now carries only `harness_integration` /
+  `harness_integration_config`; the legacy flat `command` / `restart_command` / `required_commands`
+  spelling is accepted solely as TOML-loader backward compatibility (hoisted into
+  `harness_integration_config` at load) and rejected in manifests.
 - The per-session `harness_integration_state` blob is a real, if narrow, expansion of persisted
   surface: the core DB now carries an opaque-to-it, integration-owned blob it never inspects, a
   deliberate reversal of the SDD's original "database unchanged" assumption once `claude-code`'s

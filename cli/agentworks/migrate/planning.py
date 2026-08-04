@@ -766,9 +766,9 @@ def _emit_document(doc: tomlkit.TOMLDocument, unit: MigrationUnit) -> str:
         spec = {"provider": _tagged_capability_table("git-credential", unit.name, provider, provider_config)}
 
     if unit.kind == "session-template":
-        # The legacy flat command fields fold into the tagged harness
-        # table on the 'shell' harness (mirroring the git-credential
-        # fold); a declared harness / harness_config pair folds into the
+        # The legacy flat command fields fold into the tagged harness-integration
+        # table for the ``shell`` integration (mirroring the git-credential
+        # fold); a declared legacy ``harness`` / ``harness_config`` pair folds into the
         # same tagged table. env and inherits are kind-owned and stay at
         # the spec top level. The TOML loader's hoist (``agentworks.config``)
         # and this emission land on the identical internal value, which the
@@ -777,37 +777,37 @@ def _emit_document(doc: tomlkit.TOMLDocument, unit: MigrationUnit) -> str:
         # is written, in the operator's TOML vocabulary, rather than
         # failing verification after the write.
         flat = {key: spec.pop(key) for key in ("command", "restart_command", "required_commands") if key in spec}
-        harness = spec.pop("harness_integration", spec.pop("harness", None))
-        harness_config = spec.pop("harness_integration_config", spec.pop("harness_config", None))
+        integration = spec.pop("harness_integration", spec.pop("harness", None))
+        integration_config = spec.pop("harness_integration_config", spec.pop("harness_config", None))
         if flat:
             # The loader guarantees flat fields never coexist with a
-            # non-shell harness or an explicit harness_config, so this
+            # non-shell integration or an explicit integration config, so this
             # is unambiguously the shell-hoist case.
-            harness = "shell"
-            harness_config = dict(flat)
+            integration = "shell"
+            integration_config = dict(flat)
         rebuilt_session: dict[str, Any] = {}
         if "inherits" in spec:
             rebuilt_session["inherits"] = spec.pop("inherits")
-        if harness is not None:
+        if integration is not None:
             rebuilt_session["harness_integration"] = _tagged_capability_table(
                 "session-template",
                 unit.name,
-                harness,
-                dict(harness_config) if harness_config is not None else None,
+                integration,
+                dict(integration_config) if integration_config is not None else None,
             )
         rebuilt_session.update(spec)  # env and any remaining kind-owned keys
-        if isinstance(harness, str) and harness_config is not None:
+        if isinstance(integration, str) and integration_config is not None:
             from agentworks.capabilities.harness_integration import HARNESS_INTEGRATION_REGISTRY
 
-            harness_cap = HARNESS_INTEGRATION_REGISTRY.get(harness)
-            if harness_cap is not None:
+            integration_capability = HARNESS_INTEGRATION_REGISTRY.get(integration)
+            if integration_capability is not None:
                 try:
-                    harness_cap.validate(f"session-template/{unit.name}", harness_config)
+                    integration_capability.validate(f"session-template/{unit.name}", integration_config)
                 except ConfigError as exc:
                     raise ConfigError(
                         f"cannot migrate session-template/{unit.name}: {exc}",
                         hint=(
-                            "The flat TOML section carries key(s) its harness "
+                            "The flat TOML section carries key(s) its harness integration "
                             "does not accept (silently ignored by the TOML "
                             "loader). Remove them from config.toml, then re-run."
                         ),

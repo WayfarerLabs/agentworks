@@ -8,7 +8,7 @@ model: the parity carries the node layer could not prove on its own.
   right after its realization, through the real command;
 - the session's partial-state teardown runs before the ephemeral
   unwind, reproducing the imperative rollback order end to end;
-- the SESSION operation scope reaches the held harness's readiness.
+- the SESSION operation scope reaches the held harness integration's readiness.
 
 Same fake surfaces as the imperative oracle tests: SimpleNamespace
 config, stubbed registry/gates/transports; the service-layer functions
@@ -436,7 +436,7 @@ def test_create_failure_cleans_session_slice_then_unwinds_ephemerals(
     db.close()
 
 
-# -- the operation scope reaches the harness ---------------------------------
+# -- the operation scope reaches the harness integration ---------------------
 
 
 def test_session_scope_reaches_the_harness_integration(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -474,9 +474,9 @@ def test_session_scope_reaches_the_harness_integration(tmp_path: Path, monkeypat
     db.close()
 
 
-# -- pane-command parity: the harness op string + relocated substitution -----
+# -- pane-command parity: integration op string + relocated substitution -----
 #
-# The command reaching tmux is the harness's start/restart output with the
+# The command reaching tmux is the harness integration's start/restart output with the
 # {{session_name}} / {{workspace_name}} substitution applied at the CALL
 # SITE (lifted out of the deleted _build_session_command). These pin that
 # every template produces the same pane command it did before the swap.
@@ -489,8 +489,8 @@ def _template(
     restart_command: str | None = None,
     required_commands: list[str] | None = None,
 ) -> None:
-    """Stub ``_resolve_template`` with a ``shell``-harness resolved
-    template built from the friendly flat kwargs (the harness now owns
+    """Stub ``_resolve_template`` with a ``shell``-integration resolved
+    template built from the friendly flat kwargs (the integration now owns
     the command strings; the pane command is its start/restart output)."""
     from agentworks.sessions import manager as session_manager
 
@@ -516,7 +516,7 @@ def _capture_pane_command(monkeypatch: pytest.MonkeyPatch, captured: dict[str, s
 def test_create_pane_command_is_the_harness_integration_output_substituted(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """create: the pane command is the shell harness's start() output
+    """create: the pane command is the shell integration's start() output
     (the template's ``command``) with BOTH template vars substituted at
     the call site."""
     from agentworks.sessions.manager import create_session
@@ -543,7 +543,7 @@ def test_create_pane_command_is_the_harness_integration_output_substituted(
 def test_restart_pane_command_uses_restart_command_and_session_workspace(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """restart: the pane command is the harness's restart() output (the
+    """restart: the pane command is the integration's restart() output (the
     template's ``restart_command``, preferred over ``command``) with
     ``workspace_name`` sourced from the SESSION ROW, matching the interim
     path's restart substitution."""
@@ -721,7 +721,7 @@ def test_create_new_agent_on_disabled_plugin_recipe_refuses_before_any_work(
 ) -> None:
     """Phase 7 BLOCKING 2, end-to-end on a live registry: ``session create
     --new-agent`` with an ephemeral agent-template whose recipe is a disabled
-    plugin's is refused at the build phase (the gate added beside the harness
+    plugin's is refused at the build phase (the gate added beside the harness integration
     gate in ``_build_session_graph``), before any transport or session-row
     write. Proves the newly-added ``--new-agent`` gate fires live, not just that
     the call site references it textually (the drift guard's job)."""

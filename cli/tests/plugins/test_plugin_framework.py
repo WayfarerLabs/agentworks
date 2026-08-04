@@ -134,9 +134,9 @@ def test_rejects_intra_descriptor_collision() -> None:
 
 def test_atomic_registration_seats_nothing_on_a_mid_descriptor_collision() -> None:
     class CollidingHarnessIntegration:
-        name = "shell"  # a core built-in harness, different class
+        name = "shell"  # a core built-in harness integration, different class
 
-    # vm-platform seats cleanly first; harness collides at the precheck.
+    # vm-platform seats cleanly first; harness-integration collides at the precheck.
     plugin = Plugin(
         name="p",
         capabilities={

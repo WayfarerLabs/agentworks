@@ -22,12 +22,11 @@ if TYPE_CHECKING:
 class ResolvedSessionTemplate:
     """A fully resolved session template with all inheritance applied.
 
-    The workload is the ``(harness_integration, harness_integration_config)`` pair (FRD R7):
+    The workload is the ``(harness_integration, harness_integration_config)`` pair:
     ``harness_integration`` is always a concrete name (defaulting to ``shell``, the
     plain login shell) and ``harness_integration_config`` is the merged blob the
-    session node hands the harness_integration. ``description`` stays an
-    independently merged display field (pinned "Login shell" default,
-    harness-api-lld section 10), unaffected by the pair.
+    session node hands the harness integration. ``description`` stays an
+    independently merged display field with a "Login shell" default, unaffected by the pair.
     """
 
     name: str
@@ -80,8 +79,8 @@ def _resolve(
     The public wrapper over :func:`_resolve_walk`: it collapses the
     walk's running ``(harness_integration | None, config)`` pair onto the dataclass
     (an undeclared pair becomes the ``shell`` default) and runs the
-    harness_integration's completeness validation once on the MERGED blob, the value
-    no single declaration saw (harness-api-lld section 2).
+    harness integration's completeness validation once on the merged blob, the value
+    no single declaration saw.
     """
     result, harness_integration, harness_integration_config = _resolve_walk(templates, name, _visiting)
     result.harness_integration = harness_integration or "shell"
@@ -99,11 +98,10 @@ def _resolve_walk(
     pair alongside the accumulating ``ResolvedSessionTemplate``.
 
     Returns ``(result, harness_integration | None, harness_integration_config)`` where a ``None``
-    harness_integration means nothing in the lineage declared one (distinct from a
+    integration name means nothing in the lineage declared one (distinct from a
     declared ``shell``): keeping that distinction is what lets a
-    harness-silent later parent leave an earlier parent's pair untouched
-    instead of switching the lineage back to ``shell`` (FRD R5's
-    multi-parent divergence). ``description`` / ``env`` merge exactly as
+    selector-silent later parent leave an earlier parent's pair untouched
+    instead of switching the lineage back to ``shell``. ``description`` / ``env`` merge exactly as
     before, independent of the pair.
 
     ``_visiting`` carries the chain of in-progress resolves so cycles
@@ -147,14 +145,14 @@ def _merge_pair(
     child_config: dict[str, object] | None,
 ) -> tuple[str | None, dict[str, object]]:
     """Fold one declared (or resolved) ``(harness_integration, config)`` into the
-    accumulator (FRD R5, harness-api-lld section 9):
+    accumulator:
 
-    - a child that says nothing about the harness_integration leaves the pair
+    - a child that says nothing about the harness integration leaves the pair
       untouched (a ``harness_integration_config`` without a ``harness_integration`` cannot load,
       so silence is unambiguous);
     - a child naming a DIFFERENT harness integration starts from a fresh blob (the
       parent's blob was addressed to the wrong capability, never leaks);
-    - a child naming the SAME harness_integration merges via that harness_integration's
+    - a child naming the SAME harness integration merges via that integration's
       ``merge_config`` (child-wins per key; ``shell`` unions
       ``required_commands``).
     """
@@ -168,9 +166,9 @@ def _merge_pair(
 
 
 def _validate_merged(resolved: ResolvedSessionTemplate) -> None:
-    """Run the selected harness_integration's completeness validation on the merged
-    blob (harness-api-lld section 2). Both built-ins are shape-only, but
-    the slot is where a future harness_integration's required-field / cross-field
+    """Run the selected harness integration's completeness validation on the merged
+    blob. The shipped integrations are shape-only, but
+    the slot is where a future integration's required-field / cross-field
     rules belong. ``harness_integration_for`` raises a typed ``ConfigError`` on an
     unknown name (defense in depth; typos are normally caught by the
     kind's miss policy at finalize)."""

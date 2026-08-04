@@ -299,11 +299,11 @@ def test_session_create_graph_shares_one_vm_node(db: Database) -> None:
     assert secret_union(nodes) == ("git-token-gh",)
 
 
-# -- the harness_config secret references (#305) -----------------------------
+# -- the harness_integration_config secret references (#305) -----------------
 
 
 class _SecretHarnessIntegration(HarnessIntegration):
-    """A registered secret-declaring harness double: both built-ins
+    """A registered secret-declaring harness integration double: both built-ins
     declare no secrets, so pinning the reference derivation and the
     sweep's prediction needs one that does."""
 
@@ -335,7 +335,7 @@ _EXPECTED_USAGE = "the scanner API key, from the harness_integration_config of s
 
 def _scanner_session(db: Database, monkeypatch: pytest.MonkeyPatch):  # noqa: ANN202
     """A pending admin session whose template selects the
-    secret-declaring harness double."""
+    secret-declaring harness integration double."""
     from agentworks.capabilities.harness_integration import HARNESS_INTEGRATION_REGISTRY
     from agentworks.workspaces.nodes import pending_workspace_node
 
@@ -355,10 +355,12 @@ def _scanner_session(db: Database, monkeypatch: pytest.MonkeyPatch):  # noqa: AN
     )
 
 
-def test_session_node_exposes_the_harness_config_secret_refs(db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The #305 derivation pin: the held harness declares FULL
+def test_session_node_exposes_the_harness_integration_config_secret_refs(
+    db: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The #305 derivation pin: the held harness integration declares FULL
     references (sourced to the session template, with the usage naming
-    the harness_config declaration site), the node exposes them as its
+    the harness_integration_config declaration site), the node exposes them as its
     ``config_secret_refs``, and the bare-name ``secret_refs`` union
     derives from them (one source, no duplicated list)."""
     from agentworks.resources.reference import SecretReference
@@ -373,10 +375,12 @@ def test_session_node_exposes_the_harness_config_secret_refs(db: Database, monke
     assert session.secret_refs() == ("scanner-api-key",)
 
 
-def test_live_session_node_exposes_the_same_harness_refs(db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_live_session_node_exposes_the_same_harness_integration_refs(
+    db: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The live half of the derivation pin: the live node's methods are
     a separate code path from the pending node's, so both are held to
-    the same harness-declared references."""
+    the same harness-integration-declared references."""
     from agentworks.capabilities.harness_integration import HARNESS_INTEGRATION_REGISTRY
     from agentworks.sessions.nodes import live_session_node
 
@@ -399,18 +403,18 @@ def test_live_session_node_exposes_the_same_harness_refs(db: Database, monkeypat
 
 
 @pytest.mark.parametrize("declared", [True, False], ids=["declared", "undeclared"])
-def test_sweep_predicts_a_harness_config_secret_with_owner_usage_framing(
+def test_sweep_predicts_a_harness_integration_config_secret_with_owner_usage_framing(
     db: Database, tmp_path, monkeypatch: pytest.MonkeyPatch, declared: bool
 ) -> None:
     """The #305 fail-fast pin, the whole point of the threading: an
-    unresolvable harness_config secret fails at the preflight sweep,
+    unresolvable harness_integration_config secret fails at the preflight sweep,
     before any prompt or mutation, with the same owner/usage framing
     every other declared config secret gets, instead of surfacing at
     resolve time.
 
     Parametrized over the registry's knowledge of the secret. The
     ``declared`` case is the path a real session create takes: the
-    operator config declares the template, finalize walks its harness
+    operator config declares the template, finalize walks its harness integration
     ``dependencies`` and auto-declares the secret row, and the sweep's
     ``secret_declarations`` finds that row. The ``undeclared`` case
     (no template in the config) drives the lookup-or-synthesize
@@ -425,7 +429,7 @@ def test_sweep_predicts_a_harness_config_secret_with_owner_usage_framing(
 
     # Registered BEFORE the registry builds: in the declared case,
     # finalize reaches through HARNESS_INTEGRATION_REGISTRY to walk the template's
-    # harness_config dependencies (the auto-declaration input).
+    # harness_integration_config dependencies (the auto-declaration input).
     monkeypatch.setitem(HARNESS_INTEGRATION_REGISTRY, "scanner", _SecretHarnessIntegration)
     template_section = '[session_templates.scan]\nharness = "scanner"\n' if declared else ""
     config = write_operator_config(tmp_path, template_section + '[secret_config]\nbackends = ["env-var"]\n')
@@ -449,10 +453,10 @@ def test_sweep_predicts_a_harness_config_secret_with_owner_usage_framing(
     assert "agw secret describe scanner-api-key" in (exc.value.hint or "")
 
 
-def test_sweep_passes_a_resolvable_harness_config_secret(
+def test_sweep_passes_a_resolvable_harness_integration_config_secret(
     db: Database, tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The happy-path half: a resolvable harness_config secret passes
+    """The happy-path half: a resolvable harness_integration_config secret passes
     the sweep, and the name still joins the boundary union exactly as
     before (prediction widened; resolution did not move)."""
     from agentworks.bootstrap import build_registry
@@ -855,7 +859,7 @@ def test_agent_template_node_derives_credential_edges(tmp_path, monkeypatch: pyt
 
 
 def _toy_harness_integration(harness_integration_name: str) -> type:
-    """A minimal stateful harness whose ops write ``session_id`` (the same
+    """A minimal stateful harness integration whose ops write ``session_id`` (the same
     key ``claude-code`` uses) into its own state, to prove the seam keeps
     same-key writers structurally apart."""
     from typing import ClassVar
@@ -900,9 +904,9 @@ def _seam_harness_integration(db: Database, blob: dict[str, object], harness_int
 
 
 def test_same_key_writers_land_in_distinct_namespaces(db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The collision the namespacing exists to prevent: two harnesses
+    """The collision the namespacing exists to prevent: two harness integrations
     writing the SAME state key (a template re-pointed between stateful
-    harnesses) land in distinct per-harness namespaces, so neither ever
+    harness integrations) land in distinct per-integration namespaces, so neither ever
     inherits the other's value."""
     from agentworks.capabilities.harness_integration import HARNESS_INTEGRATION_REGISTRY
     from agentworks.sessions.nodes import _harness_integration_for_template
@@ -954,7 +958,7 @@ def test_seam_hoists_legacy_claude_state_before_the_split(db: Database, monkeypa
     """Compatibility (pre-namespacing harness_integration_state): DELETE with the
     hoist on the next major release. The seam calls the hoist hook with
     the FULL blob before splitting, so a pre-namespacing row's flat
-    ``session_id`` reaches the constructed harness as its own namespaced
+    ``session_id`` reaches the constructed harness integration as its own namespaced
     state (the same shared object the full blob now holds)."""
     from agentworks.capabilities.harness_integration import HARNESS_INTEGRATION_REGISTRY
     from agentworks.plugins.claude.harness_integration import ClaudeCodeIntegration

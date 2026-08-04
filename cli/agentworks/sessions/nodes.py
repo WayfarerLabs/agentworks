@@ -1,14 +1,14 @@
 """Session-domain node implementations.
 
-The session node HOLDS its harness_integration capability instance and composes it;
-the harness_integration is ``Readiness``-only, never walked. The headline
+The session node HOLDS its harness integration capability instance and composes it;
+the harness integration is ``Readiness``-only, never walked. The headline
 construction contract: the factory passes the SAME agent-node object as
-both the session's dependency edge and the harness_integration's ``target``, one
+both the session's dependency edge and the harness integration's ``target``, one
 object per node, so when the orchestrator flips the agent realized, the
-harness_integration sees it. Two constructions of "the same" agent would leave the
-harness_integration watching an object nobody flips, deferring forever.
+harness integration sees it. Two constructions of "the same" agent would leave the
+harness integration watching an object nobody flips, deferring forever.
 
-The harness_integration owns the four-way readiness fork the operation scope's LEVEL
+The harness integration owns the four-way readiness fork the operation scope's LEVEL
 makes explicit (``capabilities/harness_integration/base.py``):
 
 - out of scope for the level (a system-scoped doctor scan reaching a
@@ -21,8 +21,8 @@ makes explicit (``capabilities/harness_integration/base.py``):
   silent skip).
 
 The node is the rich consuming resource of ``capabilities/README.md``:
-its ``preflight`` / ``runup`` fan into the held harness_integration's, and the
-harness_integration's declared config-secret references surface through the node's
+its ``preflight`` / ``runup`` fan into the held harness integration's, and the
+harness integration's declared config-secret references surface through the node's
 ``config_secret_refs`` (the preflight sweep's prediction input), with
 the bare-name ``secret_refs`` union derived from them (empty for the
 built-ins, plumbing present).
@@ -93,10 +93,10 @@ class LiveSessionNode:
     @property
     def harness_integration_state(self) -> dict[str, object]:
         """The session's FULL ``harness_integration_state`` blob, namespaced by
-        harness_integration name. The held harness_integration's ``state`` is a shared sub-object
-        of this dict (``_harness_integration_for_template`` wires them), so harness_integration
+        harness integration name. The held harness integration's ``state`` is a shared sub-object
+        of this dict (``_harness_integration_for_template`` wires them), so harness integration
         mutations during an op are visible here; the manager persists
-        THIS after the op, keeping foreign harnesses' namespaces intact
+        THIS after the op, keeping foreign harness integrations' namespaces intact
         across a template's harness_integration switch."""
         return self._harness_integration_state
 
@@ -188,10 +188,10 @@ class PendingSessionNode:
     @property
     def harness_integration_state(self) -> dict[str, object]:
         """The session's FULL ``harness_integration_state`` blob, namespaced by
-        harness_integration name. The held harness_integration's ``state`` is a shared sub-object
-        of this dict (``_harness_integration_for_template`` wires them), so harness_integration
+        harness integration name. The held harness integration's ``state`` is a shared sub-object
+        of this dict (``_harness_integration_for_template`` wires them), so harness integration
         mutations during an op are visible here; the manager persists
-        THIS after the op, keeping foreign harnesses' namespaces intact
+        THIS after the op, keeping foreign harness integrations' namespaces intact
         across a template's harness_integration switch."""
         return self._harness_integration_state
 
@@ -312,7 +312,7 @@ def _harness_integration_for_template(
     workspace: WorkspaceNode,
     state: dict[str, object],
 ) -> HarnessIntegration:
-    """Build the harness_integration the session node holds, from the resolved
+    """Build the harness integration the session node holds, from the resolved
     template's ``(harness_integration, harness_integration_config)`` pair.
 
     The resolver has already collapsed an undeclared template to the
@@ -320,21 +320,21 @@ def _harness_integration_for_template(
     ``resolved.harness_integration`` / ``resolved.harness_integration_config`` directly; the
     session-template name is the config owner (error framing), and the
     session's captured identity (``session_name``, ancestors, and the
-    one-object ``target``) is the harness_integration's own, distinct from the
+    one-object ``target``) is the harness integration's own, distinct from the
     operation scope it later reads a LEVEL off of.
 
     ``state`` is the session's FULL ``harness_integration_state`` blob, namespaced by
-    harness_integration name (``{"claude-code": {...}}``): ``{}`` for a fresh create
+    harness integration name (``{"claude-code": {...}}``): ``{}`` for a fresh create
     (no row yet), or the stored blob on a live session, so a value minted
     on create (``claude-code``'s session id) survives to restart. This
-    seam is the ONE place the namespacing happens: the harness_integration is
+    seam is the ONE place the namespacing happens: the harness integration is
     constructed with only its own namespace, the SAME dict object that
-    sits in the full blob, so the harness_integration's in-place mutation keeps the
+    sits in the full blob, so the harness integration's in-place mutation keeps the
     blob current and the manager persists the caller-held full blob (the
-    node's ``harness_integration_state``) after the op. A harness_integration never sees another
-    harness_integration's keys, so re-pointing a session's template at a different
-    harness_integration cannot leak one harness_integration's state into another, and the old
-    harness_integration's namespace survives a switch away and back. A stored
+    node's ``harness_integration_state``) after the op. A harness integration never sees another
+    integration's keys, so re-pointing a session's template at a different harness integration
+    cannot leak one integration's state into another, and the old integration's namespace survives
+    a switch away and back. A stored
     namespace value that is not a dict degrades to empty with a warning,
     mirroring ``db/converters._parse_harness_integration_state``'s malformed-blob
     philosophy (this seam only runs on the create/restart op paths, so
@@ -346,7 +346,7 @@ def _harness_integration_for_template(
     # Compatibility (pre-namespacing harness_integration_state): DELETE on the next
     # major release. Rows written before the blob was namespaced carry
     # ``claude-code``'s keys at the top level; the hook adopts them into
-    # that harness_integration's namespace ahead of the split below.
+    # that harness integration's namespace ahead of the split below.
     harness_integration_cls.hoist_legacy_state(state)
     raw_namespace = state.get(harness_integration_cls.name)
     if harness_integration_cls.name in state and not isinstance(raw_namespace, dict):
@@ -387,12 +387,12 @@ def pending_session_node(
 
     ``agent`` (or ``admin=True``) is the launch identity: the SAME
     object is wired as the session's dependency edge AND as the held
-    harness_integration's ``target``, by construction, so the harness_integration observes the
+    harness integration's ``target``, by construction, so the harness integration observes the
     orchestrator's ``mark_realized`` flip. Exactly one of ``agent`` /
     ``admin`` must be given (the session-scope invariant).
 
-    HARNESS ENABLEMENT GATE (R14): this factory threads no registry, so it
-    cannot check whether the template's harness_integration is a disabled plugin. Every
+    HARNESS INTEGRATION ENABLEMENT GATE: this factory threads no registry, so it
+    cannot check whether the template's harness integration is a disabled plugin. Every
     caller MUST call ``ensure_harness_integration_enabled(registry, template.harness_integration)``
     first; the drift guard ``test_every_session_factory_caller_gates_the_harness_integration``
     pins that a future caller cannot silently bypass it."""
@@ -403,7 +403,7 @@ def pending_session_node(
         )
     harness_integration_state: dict[
         str, object
-    ] = {}  # fresh create: no row yet, so the harness_integration starts blank
+    ] = {}  # fresh create: no row yet, so the harness integration starts blank
     harness_integration = _harness_integration_for_template(
         template,
         session_name=name,
@@ -443,8 +443,8 @@ def live_session_node(
     admin user instead of raising). The factory cross-checks both
     directions and raises on mismatch.
 
-    HARNESS ENABLEMENT GATE (R14): this factory threads no registry, so it
-    cannot check whether the template's harness_integration is a disabled plugin. Every
+    HARNESS INTEGRATION ENABLEMENT GATE: this factory threads no registry, so it
+    cannot check whether the template's harness integration is a disabled plugin. Every
     caller MUST call ``ensure_harness_integration_enabled(registry, template.harness_integration)``
     first; the drift guard ``test_every_session_factory_caller_gates_the_harness_integration``
     pins that a future caller cannot silently bypass it."""

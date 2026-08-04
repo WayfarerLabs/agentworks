@@ -1,4 +1,4 @@
-"""Base interface for session harnesses.
+"""Base interface for session harness integrations.
 
 A harness integration is a capability (see ``capabilities/README.md``): it validates
 its own ``harness_integration_config`` block (``validate``), owns the
@@ -160,7 +160,7 @@ class HarnessIntegration(Capability):
     @property
     def state(self) -> dict[str, object]:
         """The harness integration's per-session state dict: its OWN namespace of the
-        session row's ``harness_state`` blob (the platform seam,
+        session row's ``harness_integration_state`` blob (the platform seam,
         ``sessions/nodes._harness_integration_for_template``, splits the stored blob
         by harness integration name, so no harness integration ever sees another's keys). A
         harness integration reads and mutates it in place during its ops
@@ -207,9 +207,9 @@ class HarnessIntegration(Capability):
 
     @classmethod
     def hoist_legacy_state(cls, blob: dict[str, object]) -> None:
-        """Adopt a pre-namespacing ``harness_state`` blob in place.
+        """Adopt a pre-namespacing ``harness_integration_state`` blob in place.
 
-        Compatibility (pre-namespacing harness_state): DELETE on the next
+        Compatibility (pre-namespacing ``harness_integration_state``): DELETE on the next
         major release, together with the ``claude-code`` override and the
         seam call in ``sessions/nodes._harness_integration_for_template``.
 
@@ -220,7 +220,7 @@ class HarnessIntegration(Capability):
         unnamespaced state overrides this to move its keys into its own
         namespace, idempotently. Only ``claude-code`` ever did, so the
         default is a no-op; the hook lives on the base so the platform
-        seam stays harness-agnostic.
+        seam stays integration-agnostic.
         """
 
     @classmethod

@@ -10,8 +10,9 @@ entry (union-merged across template inheritance, like ``shell``'s
 ``disable_strict_config`` (bool, default false) suppresses the
 ``--strict-config`` the harness integration otherwise always emits; and ``extra_args`` is
 a list of raw argv tokens appended last (the operator escape hatch for any
-flag the harness integration does not model). See ``codex-harness-decisions.md`` for the
-pinned CLI research (verified against codex-cli 0.146.0).
+flag the harness integration does not model). The integration contract and worked-example guidance
+live in ``agentworks/capabilities/harness_integration/README.md``; this module keeps the
+Codex-specific command and state invariants next to their implementation.
 
 Addressing is discover-and-store (the harness integration guide's rule 1, second form):
 codex offers no ``--session-id`` analog, so the harness integration never mints an id.
@@ -38,9 +39,10 @@ not-resumable: auto-unarchiving would silently reverse an explicit operator
 action, so the harness integration drops the stale id and launches fresh, leaving the
 archived history recoverable manually.
 
-The discovery residual windows (same-user same-cwd concurrent launches; the
-mtime-vs-creation bound) are recorded honestly in the decisions doc's
-"Known residual windows (v1)", not re-litigated here.
+Discovery has two accepted residual windows: concurrent launches by the same user in the same
+working directory can produce multiple candidates and fail loudly rather than guess, and filesystem
+mtime granularity can place a rollout on the launch marker boundary. Keeping these constraints here
+makes them durable beside the code that enforces the safe failure behavior.
 """
 
 from __future__ import annotations

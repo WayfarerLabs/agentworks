@@ -71,7 +71,7 @@ def test_secret_backend_has_no_sample() -> None:
 
 @pytest.mark.parametrize("kind", _capability_kinds())
 def test_capability_kinds_report_no_sample(kind: str) -> None:
-    """Every capability kind `resource kinds` lists (harness,
+    """Every capability kind `resource kinds` lists (harness-integration,
     secret-backend, vm-platform, git-credential-provider) is a valid
     click.Choice value, so it reaches the service layer instead of
     dying as a raw parse error (issue #276). The service layer rejects

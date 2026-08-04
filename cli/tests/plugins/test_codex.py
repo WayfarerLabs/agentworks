@@ -1,11 +1,11 @@
-"""The ``codex`` system plugin: the opt-in bundle of the ``codex`` harness
+"""The ``codex`` system plugin: the opt-in bundle of the ``codex`` harness integration
 and the ``codex`` install-command, built on the ``claude`` plugin's paved
 road.
 
 Drives ``build_registry`` on real config (no fixture plugin injected via
 ``SYSTEM_PLUGINS``) and pins both halves of the bundle:
 
-- the ``codex`` HARNESS: present-but-disabled with a ``system-plugin``
+- the ``codex`` HARNESS INTEGRATION: present-but-disabled with a ``system-plugin``
   origin, a ``session-template`` naming it stays ready, and
   ``ensure_harness_integration_enabled`` refuses it at use until ``[plugins] system``;
 - the ``codex`` INSTALL-COMMAND (a bundled ``user-install-command``):
@@ -63,8 +63,8 @@ def _config(tmp_path: Path, body: str = "", *, enabled: bool = False) -> Config:
 
 
 def test_codex_seated_by_plugin() -> None:
-    """The codex harness ships as the ``codex`` system plugin, whose
-    adapter re-seats the harness class into the code registry at import (so
+    """The codex harness integration ships as the ``codex`` system plugin, whose
+    adapter re-seats the integration class into the code registry at import (so
     the resolver can stamp it onto the graph node), and the plugin is
     indexed."""
     from agentworks.capabilities.harness_integration import HARNESS_INTEGRATION_REGISTRY
@@ -74,8 +74,8 @@ def test_codex_seated_by_plugin() -> None:
     assert "codex" in HARNESS_INTEGRATION_REGISTRY
 
 
-def test_harness_row_is_disabled_system_plugin_by_default(tmp_path: Path) -> None:
-    """The ``codex`` harness row publishes present-but-disabled with a
+def test_harness_integration_row_is_disabled_system_plugin_by_default(tmp_path: Path) -> None:
+    """The ``codex`` harness integration row publishes present-but-disabled with a
     ``system-plugin`` origin until the operator opts in."""
     registry = build_registry(_config(tmp_path))
     row = registry.lookup("harness-integration", "codex")
@@ -111,7 +111,7 @@ def test_disabled_rows_hidden_from_list_shown_by_describe(tmp_path: Path) -> Non
         assert "codex" in desc.disabled_reason
 
 
-# -- the harness use-gate ------------------------------------------------------
+# -- the harness integration use-gate ----------------------------------------
 
 _CODEX_TEMPLATE = """
 [session_templates.cx]
@@ -120,10 +120,10 @@ description = "Codex session"
 """
 
 
-def test_session_template_naming_disabled_harness_finalizes_and_stays_ready(tmp_path: Path) -> None:
+def test_session_template_naming_disabled_harness_integration_finalizes_and_stays_ready(tmp_path: Path) -> None:
     """A ``session-template`` naming ``codex`` finalizes cleanly (the
     reference lands on the present-but-disabled row, never an unknown-name
-    error) and stays ready: the harness's disablement does not propagate
+    error) and stays ready: the harness integration's disablement does not propagate
     to the template."""
     registry = build_registry(_config(tmp_path, _CODEX_TEMPLATE))
     assert registry.graph.is_ready("session-template", "cx")
@@ -136,7 +136,7 @@ def test_ensure_harness_integration_enabled_refuses_disabled_codex_with_hint(tmp
     assert "enable plugin `codex`" in str(exc.value)
 
 
-def test_enabling_codex_lets_the_harness_be_used(tmp_path: Path) -> None:
+def test_enabling_codex_lets_the_harness_integration_be_used(tmp_path: Path) -> None:
     registry = build_registry(_config(tmp_path, _CODEX_TEMPLATE, enabled=True))
     assert registry.graph.enablement_of("harness-integration", "codex") is Enablement.enabled
     ensure_harness_integration_enabled(registry, "codex")  # no raise

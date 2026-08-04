@@ -1,4 +1,4 @@
-"""The ``claude-code`` harness: config vocabulary, the resume-vs-launch
+"""The ``claude-code`` harness integration: config vocabulary, the resume-vs-launch
 detection (both directions), the flag mapping and ``extra_args``
 passthrough, the visible decision, the stored-id persistence, the legacy
 pre-namespacing state hoist, and that readiness probes ``claude``.
@@ -258,7 +258,7 @@ def test_hoist_replaces_a_non_string_namespaced_id_with_the_legacy_one() -> None
 
 
 def test_hoist_sweeps_an_empty_flat_id_without_adopting_it() -> None:
-    """An empty flat string is garbage this harness never wrote: it is
+    """An empty flat string is garbage this harness integration never wrote: it is
     swept off the top level but not adopted into the namespace."""
     blob: dict[str, object] = {"session_id": ""}
     ClaudeCodeIntegration.hoist_legacy_state(blob)
@@ -266,7 +266,7 @@ def test_hoist_sweeps_an_empty_flat_id_without_adopting_it() -> None:
 
 
 def test_hoist_leaves_a_non_string_top_level_value_alone() -> None:
-    """A non-string top-level ``session_id`` is not this harness's legacy
+    """A non-string top-level ``session_id`` is not this harness integration's legacy
     shape; the hoist does not guess at it."""
     blob: dict[str, object] = {"session_id": 7}
     ClaudeCodeIntegration.hoist_legacy_state(blob)
@@ -274,8 +274,8 @@ def test_hoist_leaves_a_non_string_top_level_value_alone() -> None:
 
 
 def test_base_hoist_is_a_no_op() -> None:
-    """The base hook exists so the platform seam stays harness-agnostic;
-    a harness that never wrote unnamespaced state leaves the blob as-is."""
+    """The base hook exists so the platform seam stays integration-agnostic;
+    an integration that never wrote unnamespaced state leaves the blob as-is."""
     from agentworks.capabilities.harness_integration import ShellIntegration
 
     blob: dict[str, object] = {"session_id": _SID}

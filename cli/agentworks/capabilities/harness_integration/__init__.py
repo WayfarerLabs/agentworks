@@ -75,7 +75,7 @@ def harness_integration_for(name: str) -> type[HarnessIntegration]:
 
 
 def ensure_harness_integration_enabled(registry: Registry, name: str) -> None:
-    """The typed using-a-disabled-harness integration error (R14, the secret model).
+    """The typed error for using a disabled harness integration.
 
     A ``session-template`` that names a disabled plugin harness integration STAYS ready
     (it does not propagate, mirroring how a ``secret`` stays ready while its
@@ -116,7 +116,7 @@ def publish_to(registry: Registry) -> None:
     Each entry lands as a ``HarnessIntegrationEntry`` row, built-in with source
     ``"agentworks.capabilities.harness_integration"``. Read-only rows: a
     ``session-template`` ``spec.harness_integration`` reference validates against
-    them uniformly, and the harnesses list/describe like every other
+    them uniformly, and the harness integrations list/describe like every other
     resource.
 
     A harness integration seated by a system plugin (``claude-code`` via the ``claude``

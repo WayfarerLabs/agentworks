@@ -1,11 +1,11 @@
-"""The ``codex`` harness: config vocabulary, the resume-vs-launch probe
+"""The ``codex`` harness integration: config vocabulary, the resume-vs-launch probe
 (both directions), stored-anchor discovery (adopt / fresh / raise, and the
 no-anchor no-probe rule), the flag mapping and ``extra_args`` passthrough,
 the visible decision, and that readiness probes ``codex``.
 
 Two stub layers, per what each behavior actually lives in:
 
-- ``_FakeTarget`` (exit-code stubs) drives the harness-side forks: which
+- ``_FakeTarget`` (exit-code stubs) drives the integration-side forks: which
   probe runs when, how each exit code is classified, what lands in the
   state blob and the pane string.
 - ``_ShellTarget`` EXECUTES the generated probe against a real scratch
@@ -15,7 +15,6 @@ Two stub layers, per what each behavior actually lives in:
   rollout is filtered out rather than adopted. No real ``codex`` binary
   anywhere; the rollout files are hand-written fixtures.
 
-See ``codex-harness-decisions.md`` for the pinned mechanics these mirror.
 """
 
 from __future__ import annotations
@@ -162,7 +161,7 @@ def test_present_rollout_resumes() -> None:
 
 def test_absent_rollout_launches_fresh_and_drops_the_stale_id() -> None:
     """An archived or deleted rollout is not resumable (the pinned
-    archived policy): the harness launches fresh with the fourth visible
+    archived policy): the harness integration launches fresh with the fourth visible
     decision (stale, not plain fresh) and DROPS the stale id, so the next
     op's discovery can adopt the codex-minted replacement."""
     state: dict[str, object] = {"session_id": _SID}
@@ -257,7 +256,7 @@ def test_fresh_launch_mints_a_nonce_anchor_and_stores_it() -> None:
     assert len(anchor) > len(".agentworks/codex/s1-.launch")  # a real nonce
     inner = shlex.split(command)[2]
     assert f'touch "$HOME"/{anchor}' in inner
-    # A second harness's fresh launch mints a DIFFERENT anchor.
+    # A second harness integration's fresh launch mints a DIFFERENT anchor.
     other: dict[str, object] = {}
     _harness_integration(state=other).start(_op_ctx(_FakeTarget()))
     assert other["discovery_marker"] != anchor
@@ -445,7 +444,7 @@ class _ShellTarget:
 def codex_home(tmp_path: Path) -> Path:
     """A scratch ``$HOME`` with the codex sessions tree, the marker dir
     (with ``_ANCHOR``'s file present and back-dated), and a workspace
-    directory the harness under test points at (``tmp_path/ws1``)."""
+    directory the harness integration under test points at (``tmp_path/ws1``)."""
     home = tmp_path / "home"
     (home / ".codex/sessions/2026/08/01").mkdir(parents=True)
     (home / ".agentworks/codex").mkdir(parents=True)
@@ -607,7 +606,7 @@ def test_config_fields_map_to_their_short_flags() -> None:
 
 
 def test_strict_config_is_emitted_by_default_on_both_paths() -> None:
-    """The harness owns the emitted config surface, so --strict-config is
+    """The harness integration owns the emitted config surface, so --strict-config is
     on by default: codex-owned key drift (the network -c override) fails
     loudly at startup instead of being silently ignored."""
     resume_target = _FakeTarget({_ROLLOUT_PROBE: _FakeResult(0)})
@@ -743,7 +742,7 @@ def test_fresh_string_is_a_single_sh_c_that_echoes_touches_then_execs() -> None:
     assert 'mkdir -p "$HOME"/.agentworks/codex' in inner
     assert f'touch "$HOME"/{state["discovery_marker"]}' in inner
     # No positional prompt, no trailing tokens beyond the default-on
-    # --strict-config (the harness owns the emitted config surface).
+    # --strict-config (the harness integration owns the emitted config surface).
     assert inner.endswith("exec codex --strict-config")
 
 

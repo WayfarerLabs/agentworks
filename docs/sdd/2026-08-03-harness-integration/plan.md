@@ -73,7 +73,7 @@ Landing this half-done has no value, so all sub-steps ship together.
       Leave historical `CHANGELOG.md` entries; touch the root README only for mechanism-sense usages
       and the YAML example (the operator owns the target-state prose). DoD: `lint-files.sh` clean;
       docs, samples, and generated surfaces describe reality at HEAD (renamed, no behavior change).
-- [ ] **1h Residual sweep.** `rg -in harness` across the tree; justify every remaining hit
+- [x] **1h Residual sweep.** `rg -in harness` across the tree; justify every remaining hit
       (industry-sense prose, historical changelog, the ephemeral SDD dirs, the input-compatibility
       code). DoD: no live mechanism-sense `harness` remains outside the intentional input shims and
       justified prose.

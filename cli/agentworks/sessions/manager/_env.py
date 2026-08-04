@@ -48,7 +48,7 @@ def _display_registry(config: Config) -> Registry | None:
     chain, a bad ``defaults.site``, an unrelated resource collision).
     ``session list`` / ``session describe`` are read-only and never
     built the registry before the HARNESS INTEGRATION column existed, so a bad
-    registry must degrade the HARNESS cell to ``"-"`` for every row
+    registry must degrade the HARNESS INTEGRATION cell to ``"-"`` for every row
     rather than abort the whole command. Catching ``AgentworksError``
     keeps the same breadth as the per-template guard below.
     """

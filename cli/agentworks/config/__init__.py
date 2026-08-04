@@ -27,7 +27,7 @@ import path ``agentworks.config`` unchanged:
   (named console, VM/agent/workspace templates, admin config, apt/install
   sections, legacy vm-site sections).
 - ``loaders_sessions``: ``[session.config]`` and ``[session_templates.*]``,
-  including the legacy flat-field-to-harness hoisting.
+  including legacy flat fields hoisted into the shell harness integration's config.
 - ``loaders_secrets``: ``[secrets.*]``, ``[secret_backends.*]``, the
   aggregated deprecated-TOML-section warning, ``[secret_config]``, and
   ``[plugins]``.
