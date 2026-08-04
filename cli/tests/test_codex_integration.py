@@ -105,7 +105,7 @@ def test_dependencies_imply_no_reference() -> None:
     assert CodexIntegration.dependencies("session-template/codex", {"model": 3, "sandbx": "typo"}) == ()
 
 
-def test_validate_accepts_the_nine_fields_and_empty_config() -> None:
+def test_validate_accepts_the_ten_fields_and_empty_config() -> None:
     assert (
         CodexIntegration.validate(
             "session-template/codex",
@@ -115,6 +115,7 @@ def test_validate_accepts_the_nine_fields_and_empty_config() -> None:
                 "approval_policy": "on-request",
                 "profile": "work",
                 "network": True,
+                "approvals_reviewer": "auto_review",
                 "writable_dirs": ["/srv/cache"],
                 "web_search": False,
                 "disable_strict_config": False,
@@ -637,6 +638,38 @@ def test_network_forwards_both_directions_to_the_config_key() -> None:
     assert "network_access" not in absent
 
 
+def test_approvals_reviewer_forwards_as_a_quoted_toml_string() -> None:
+    """The value rides the `approvals_reviewer` config key via -c (codex
+    exposes no dedicated flag), quoted as a TOML string; absent emits
+    nothing. Values are codex-owned and forward unvalidated."""
+    target = _FakeTarget({_ROLLOUT_PROBE: _FakeResult(0)})
+    command = _harness_integration({"approvals_reviewer": "auto_review"}).start(_op_ctx(target))
+    inner_tokens = shlex.split(shlex.split(command)[2])
+    assert 'approvals_reviewer="auto_review"' in inner_tokens
+    assert inner_tokens[inner_tokens.index('approvals_reviewer="auto_review"') - 1] == "-c"
+    absent = _harness_integration().start(_op_ctx(target))
+    assert "approvals_reviewer" not in absent
+
+
+def test_approvals_reviewer_escapes_toml_structural_characters() -> None:
+    """Codex parses -c key=value as a TOML DOCUMENT splice (verified
+    against 0.146.0), so an unescaped newline in the value silently
+    defines EXTRA config keys, even under --strict-config, and an
+    unescaped quote breaks the value into the raw-string fallback.
+    Escaping keeps any operator value one literal string that fails
+    codex's own enum check loudly instead."""
+    target = _FakeTarget({_ROLLOUT_PROBE: _FakeResult(0)})
+    payload = 'user"\nsandbox_mode="danger-full-access'
+    command = _harness_integration({"approvals_reviewer": payload}).start(_op_ctx(target))
+    inner_tokens = shlex.split(shlex.split(command)[2])
+    token = next(t for t in inner_tokens if t.startswith("approvals_reviewer="))
+    # One argv token, no raw newline, quote and newline TOML-escaped: the
+    # smuggled second key stays inert text inside one string value.
+    assert "\n" not in token
+    assert token == 'approvals_reviewer="user\\"\\nsandbox_mode=\\"danger-full-access"'
+    assert not any(t.startswith("sandbox_mode") for t in inner_tokens)
+
+
 def test_writable_dirs_emit_one_add_dir_each_in_order_and_quoted() -> None:
     target = _FakeTarget({_ROLLOUT_PROBE: _FakeResult(0)})
     command = _harness_integration({"writable_dirs": ["/srv/cache", "/data/shared dir"]}).start(_op_ctx(target))
@@ -662,6 +695,7 @@ def test_new_fields_reject_wrong_types() -> None:
         ("network", "yes"),
         ("web_search", 1),
         ("disable_strict_config", "true"),
+        ("approvals_reviewer", True),
         ("writable_dirs", "/srv/cache"),
         ("writable_dirs", [1, 2]),
     ):
@@ -696,14 +730,21 @@ def test_merge_config_never_launders_an_invalid_writable_dirs_entry() -> None:
 def test_extra_args_appended_verbatim_last_and_quoted() -> None:
     target = _FakeTarget({_ROLLOUT_PROBE: _FakeResult(0)})
     command = _harness_integration(
-        {"model": "gpt-5", "network": True, "web_search": True, "extra_args": ["--foo", "bar baz"]}
+        {
+            "model": "gpt-5",
+            "network": True,
+            "approvals_reviewer": "auto_review",
+            "web_search": True,
+            "extra_args": ["--foo", "bar baz"],
+        }
     ).start(_op_ctx(target))
     # One argv token stays one token: "bar baz" is quoted, not re-split.
     assert shlex.quote("bar baz") in command
     # Appended last, after EVERY managed token: the operator-override
     # story depends on an extra_args -c landing after the managed
-    # network -c (later codex config overrides win).
-    for managed in ("-m gpt-5", "network_access=true", "--search"):
+    # network and approvals_reviewer -c overrides (later codex config
+    # overrides win).
+    for managed in ("-m gpt-5", "network_access=true", "approvals_reviewer", "--search"):
         assert command.index(managed) < command.index("--foo")
 
 

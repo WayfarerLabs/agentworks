@@ -682,10 +682,14 @@ and stores it (a session archived with `codex archive` is deliberately treated a
 a fresh one is started). It ships as the opt-in `codex` system plugin, disabled by default with the
 same gating as `claude-code` above. Once enabled, it needs only that `codex` is installed on the
 launch target, and announces the chosen action (resume, adopt-and-resume, or new session) in the
-pane. Its config vocabulary is nine optional fields: `model`, `sandbox`, `approval_policy`, and
+pane. Its config vocabulary is ten optional fields: `model`, `sandbox`, `approval_policy`, and
 `profile` forward verbatim to `codex -m` / `-s` / `-a` / `-p` (their choice sets are Codex's, not
 validated here); `network` (bool) forwards to Codex's `sandbox_workspace_write.network_access`
 config key (sandboxed network is off by default, so coding sessions usually want `network: true`);
+`approvals_reviewer` (string) forwards to Codex's `approvals_reviewer` config key (who adjudicates
+approval escalations: `user`, the default, prompts the human; `auto_review` routes them to Codex's
+risk-based reviewer subagent, the usual choice for unattended-leaning auto templates, trading a
+person's approval for a model's while the sandbox still enforces the outer boundary);
 `writable_dirs` (list of paths) emits one `codex --add-dir` each; `web_search` (bool) enables the
 live web-search tool (`codex --search`); `disable_strict_config` (bool) suppresses the
 `--strict-config` the integration otherwise always passes (strictness makes a Codex config mistake
@@ -703,6 +707,7 @@ spec:
     name: codex
     sandbox: workspace-write
     approval_policy: on-request
+    approvals_reviewer: auto_review
     network: true
 ```
 

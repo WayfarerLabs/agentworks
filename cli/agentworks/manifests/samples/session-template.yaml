@@ -59,13 +59,18 @@
 ## create` starts a new Codex session; `session resume` resumes the same
 ## conversation once Codex has recorded it (the session id is discovered from
 ## Codex's own on-disk state, since Codex mints its ids itself). Its config is
-## nine optional fields:
+## ten optional fields:
 ##   model:           forwarded to `codex -m`
 ##   sandbox:         forwarded to `codex -s`
 ##   approval_policy: forwarded to `codex -a`
 ##   profile:         forwarded to `codex -p`
 ##   network:         bool; sandbox network access (Codex defaults it OFF
 ##                    even in workspace-write; coding sessions usually want true)
+##   approvals_reviewer: who adjudicates approval escalations (sandbox escapes,
+##                    blocked network): `user` (default) prompts the human in
+##                    the pane; `auto_review` lets Codex's risk-based reviewer
+##                    subagent approve or deny instead (the sandbox still
+##                    enforces the outer boundary)
 ##   writable_dirs:   extra writable directories (`codex --add-dir` each;
 ##                    union-merged across template inheritance)
 ##   web_search:      bool; enables the live web-search tool (`codex --search`)
@@ -86,6 +91,7 @@
 #    name: codex
 #    sandbox: workspace-write
 #    approval_policy: on-request
+#    approvals_reviewer: auto_review
 #    network: true
 ##
 ## Run `agw resource list --kind harness-integration --include-disabled` to see

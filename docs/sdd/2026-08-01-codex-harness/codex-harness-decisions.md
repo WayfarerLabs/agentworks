@@ -167,6 +167,7 @@ its drift mode too silent.
 | `approval_policy` (str)        | `-a <value>`                                 | `untrusted` / `on-request` / `never` drift   |
 | `profile` (str)                | `-p <value>`                                 | note: an unknown profile is silently ignored |
 | `network` (bool)               | `-c sandbox_workspace_write.network_access=` | both directions forward; key is codex-owned  |
+| `approvals_reviewer` (str)     | `-c approvals_reviewer="<value>"`            | see the 2026-08-04 note below                |
 | `writable_dirs` (list)         | one `--add-dir <dir>` each                   | union-merged across inheritance              |
 | `web_search` (bool)            | `--search` when true                         | the server-side tool, not sandbox network    |
 | `disable_strict_config` (bool) | omits the default `--strict-config`          | see below                                    |
@@ -186,6 +187,17 @@ sanctioned off-switch, for either regression vector: a config codex must tolerat
 newer codex than the target runs), or a target codex old enough to lack the flag entirely (verified
 present in 0.146.0 on both `codex` and `codex resume`; an older binary rejects it as an unknown
 argument at launch, and harness readiness probes only that `codex` exists, not its version).
+
+**`approvals_reviewer` added 2026-08-04 (operator-decided), for the auto-mode story.** Verified
+against 0.146.0: the config key exists (`--strict-config` accepts it; there is no dedicated flag, so
+the strict-config default is the drift guard), and its enum is `user` / `auto_review` /
+`guardian_subagent`. Codex's own app-server schema documents the semantics: it "configures who
+approval requests are routed to for review" (sandbox escapes, blocked network access, MCP approval
+prompts), defaulting to `user` (the human is prompted); `auto_review` routes them to "a carefully
+prompted subagent" applying "a risk-based decision framework"; `guardian_subagent` is accepted as a
+legacy alias. The value forwards unvalidated as a quoted TOML string. Live behavior of an actual
+escalation under `auto_review` was NOT exercised (needs an authed session); the schema text is the
+verification basis.
 
 ### Readiness, provisioning, auth
 
