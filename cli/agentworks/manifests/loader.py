@@ -264,9 +264,9 @@ def load_manifests(resources_dir: Path) -> ManifestSet:
                 )
             )
 
-    # ONE aggregated deprecation issue for the whole set, mirroring the
-    # TOML resource-section nudge (a warning per document would be
-    # obnoxious on real configs).
+    # Aggregate each deprecation class once across the whole set, mirroring
+    # the TOML resource-section nudge. A warning per document would be
+    # obnoxious on real configs.
     deprecation_messages: list[str] = []
     if deprecated_shapes:
         from agentworks.manifests.decode import capability_shape_deprecation
