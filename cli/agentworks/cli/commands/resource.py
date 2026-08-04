@@ -358,7 +358,7 @@ def resource_migrate(
     """Move resources from config.toml to YAML manifests.
 
     A recurring, incremental mover: run it any time you want to move
-    resources (or a subset) from TOML to YAML and canonicalizes old YAML
+    resources (or a subset) from TOML to YAML or canonicalize old YAML
     session-template selectors. New TOML-derived documents append without
     rewriting existing files; selector rewrites preserve YAML comments. The
     original config.toml is backed up first, and every real run verifies the
@@ -392,7 +392,10 @@ def resource_migrate(
     )
 
     if plan.nothing_to_do:
-        output.info("Nothing to migrate: no TOML-declared resources remain.")
+        output.info(
+            "Nothing to migrate: no migratable TOML-declared resources or legacy YAML "
+            "session-template selectors remain."
+        )
         return
 
     if dry_run:

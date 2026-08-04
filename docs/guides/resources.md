@@ -115,11 +115,20 @@ agw resource migrate --all             # everything (explicit opt-in)
 agw resource migrate --all --dry-run   # see the plan first (--full for the diff)
 ```
 
-The migrator is incremental and repeat-safe: output is append-only (your existing YAML files are
-never rewritten), the original `config.toml` is backed up to `paths.backups` first, migrated
-sections are commented out in place with a `# migrated to ...` marker (or removed with
-`--toml delete`), and every real run finishes by rebuilding the registry and verifying it is
-identical to the pre-migration one, rolling back if not.
+The migrator handles two paths. TOML-declared resources become new YAML documents, appended without
+rewriting existing YAML content; migrated TOML sections are commented out in place with a
+`# migrated to ...` marker (or removed with `--toml delete`). It also canonicalizes selected
+existing `session-template` YAML documents that use the legacy `harness` selector, folding it and an
+optional `harness_config` sibling into `harness_integration` while preserving the document stream
+and YAML comments. The same kind or `kind/name` selectors scope both paths.
+
+Every real run backs up `config.toml`; a run that rewrites legacy YAML also stores recovery copies
+under `paths.backups`. Digest guards refuse to replace files changed after planning, writes are
+atomic, and rollback restores only outputs that still match the run's digest, so concurrent edits
+are not overwritten. Finally, the command rebuilds the registry and verifies it is identical to the
+pre-migration registry, rolling back on a mismatch and reporting any recovery copy needed for manual
+repair. Use `--dry-run --full` to inspect generated documents, in-place YAML diffs, and the TOML
+diff before writing.
 
 ## VM sites and platforms
 

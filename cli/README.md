@@ -756,7 +756,7 @@ mappings, template inheritance chains, resolution previews), reach for the per-k
 | `agw resource kinds`                 | List every kind: category (declarable/capability), counts, purpose   |
 | `agw resource describe KIND/NAME`    | Show the per-resource detail view (header + Referenced by + Used by) |
 | `agw resource edit KIND/NAME`        | Open the declaring YAML manifest in $EDITOR                          |
-| `agw resource migrate [SELECTOR]...` | Move resources from config.toml to YAML manifests                    |
+| `agw resource migrate [SELECTOR]...` | Move TOML resources and canonicalize legacy session-template YAML    |
 | `agw resource sample KIND [--write]` | Print (or save) a kind's commented sample manifest (--all for all)   |
 
 `resource list` accepts `--kind <csv>` (e.g. `--kind secret,vm-template`) and `--origin <variant>`
@@ -767,21 +767,30 @@ emits `kind/name` per line and backs shell completion (`/` cannot appear in reso
 split is unambiguous). The `kind/name` token is the one grammar across the resource group:
 `resource describe secret/npm-token` and `resource migrate vm-template/dev` take the same shape.
 
-`resource migrate` is a recurring, incremental mover -- run it any time you want to move resources
-(or a subset) from TOML to YAML manifests. Selectors scope the run: `KIND` one kind, `KIND/NAME` one
-resource (overlaps union), or `--all` for everything TOML-declared -- a bare invocation errors
-rather than migrating the whole config by accident. `--layout per-kind|single|per-resource` picks
-the file mapping (default one multi-document file per kind, e.g. `resources/vm-templates.yaml`).
-Output is append-only: existing YAML files are never parsed or rewritten, new documents are appended
-after a `---` separator. Because a resource declared in both sources is a hard load error, the
-migrated TOML sections are commented out in place with a `# migrated to resources/<file>` marker
-(default) or removed with `--toml delete`; either way the original `config.toml` is backed up to
-`paths.backups` first and the rewrite is atomic. Deprecated `[secret_backends.*]` sections are
-dropped (with a note) by any run, including a bare run with nothing else to migrate. Every real run
-finishes by rebuilding the registry and verifying it is row-for-row identical to the pre-migration
-one -- on mismatch the run rolls back and reports. `--dry-run` prints a summary of what would
-migrate where and writes nothing; add `--full` for the complete YAML documents and the config.toml
-diff.
+`resource migrate` is a recurring, incremental migration command. It moves resources (or a subset)
+from TOML to YAML manifests and rewrites selected existing `session-template` YAML documents that
+still use the legacy `harness` selector to canonical `harness_integration`. Selectors scope both
+paths: `KIND` selects one kind, `KIND/NAME` one resource (overlaps union), and `--all` selects
+everything migratable; a bare invocation errors rather than migrating the whole config by accident.
+`--layout per-kind|single|per-resource` picks the file mapping for TOML-derived documents (default
+one multi-document file per kind, e.g. `resources/vm-templates.yaml`).
+
+TOML-derived documents append after a `---` separator without rewriting the existing YAML content.
+The legacy session-template exception is a guarded, in-place YAML rewrite: it preserves the document
+stream and YAML comments while folding `harness` plus an optional `harness_config` into the
+canonical tagged table. Before any write, the command backs up `config.toml` and stores recovery
+copies of YAML files it will rewrite under `paths.backups`. Digest checks refuse to replace a TOML
+or YAML file changed since planning. Writes are atomic, and rollback restores only files that still
+match this run's output digest, so a concurrent operator edit is never overwritten; an incomplete
+rollback reports the recovery copy for manual repair.
+
+Migrated TOML sections are commented out in place with a `# migrated to resources/<file>` marker
+(default) or removed with `--toml delete`. Deprecated `[secret_backends.*]` sections are dropped
+(with a note) by any run, including a bare run with nothing else to migrate. Every real run finishes
+by rebuilding the registry and verifying it is row-for-row identical to the pre-migration one; on
+mismatch the run rolls back and reports. `--dry-run` prints a summary of what would migrate or be
+rewritten and writes nothing; add `--full` for complete YAML documents, YAML diffs, and the
+`config.toml` diff.
 
 `resource sample` prints a kind's fully-commented-out sample manifest (`--all` for every kind) --
 the YAML teaching surface, mirroring `agw config sample` for the settings file. `--write <file>`
