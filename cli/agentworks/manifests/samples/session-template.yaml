@@ -36,6 +36,7 @@
 ## and full-featured. This is merely provided as an example of how to use the
 ## shell integration to run a harness without a dedicated integration.
 ##
+#---
 #apiVersion: agentworks/v1
 #kind: session-template
 #metadata:
