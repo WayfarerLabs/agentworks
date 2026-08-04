@@ -39,11 +39,11 @@ presence of `key` / `deps`), never in a renamed verb.
 Composition is a one-line fan-in in the thin case and richer in the rich case. A thin consuming
 resource (a `vm-site` over its platform, a `git-credential` over its provider) names one capability
 plus a config blob and has no behavior of its own, so its `preflight` / `runup` is exactly the held
-instance's, forwarded. A rich node (a session over its harness) has substantial behavior of its own
-and holds one or more instances, so its `preflight` / `runup` runs its own checks and fans into the
-instances' as well. Either way the node folds its held instances' declared secrets into its own
-surface: the bare-name union through `secret_refs` (the resolve union: every name this node's
-readiness and ops consume, whatever the origin), and the richer references through
+instance's, forwarded. A rich node (a session over its harness integration) has substantial behavior
+of its own and holds one or more instances, so its `preflight` / `runup` runs its own checks and
+fans into the instances' as well. Either way the node folds its held instances' declared secrets
+into its own surface: the bare-name union through `secret_refs` (the resolve union: every name this
+node's readiness and ops consume, whatever the origin), and the richer references through
 `config_secret_refs` (only the references that came from a consuming resource's declared config,
 each carrying the `usage` prose that lets an operator-facing error say what the secret is for). The
 two surfaces answer different questions and are not redundant; the preflight sweep predicts
@@ -150,8 +150,8 @@ disabled dependency propagates the carried remediation reason, e.g. "enable plug
 falling back to "enable its unit"; a not-ready dependency propagates its readiness reason; otherwise
 the resource re-asks with its own config). A resource that implements no `not_ready` hook simply
 opts out and is always ready: a `secret` and a `session-template` both do this, and a
-`session-template`'s harness is gated at use instead (`ensure_harness_enabled`, the secret model)
-rather than folded here.
+`session-template`'s harness integration is gated at use instead
+(`ensure_harness_integration_enabled`, the secret model) rather than folded here.
 
 Enablement (`enabled` / `disabled`) is a **separate axis** from readiness, for operator opt-in
 rather than host capability, and `finalize` now **produces** it: it composes injected enablement
@@ -193,5 +193,5 @@ implementation writes to, its five lifecycle stages (`dependencies` / `validate`
 `preflight`, `runup`, `ops`), and the self-versus-context rule for reading config and secrets. The
 two docs form a clean pair with no overlap: when you are extending or debugging how commands
 compose, resolve, and unwind, you are in this document; when you are writing a new `vm-platform`,
-`harness`, `git-credential-provider`, or `secret-backend`, you are in the capability doc, which
-points back here for how the framework drives what you write.
+`harness-integration`, `git-credential-provider`, or `secret-backend`, you are in the capability
+doc, which points back here for how the framework drives what you write.

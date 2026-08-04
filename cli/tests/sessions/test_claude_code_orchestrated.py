@@ -85,15 +85,17 @@ def _seed_db(tmp_path: Path) -> Database:
     return db
 
 
-def _harness_template(
+def _harness_integration_template(
     monkeypatch: pytest.MonkeyPatch,
     config: dict[str, object] | None = None,
     *,
-    harness: str = "claude-code",
+    harness_integration: str = "claude-code",
 ) -> None:
     from agentworks.sessions import manager as session_manager
 
-    resolved = SimpleNamespace(name="claude", harness=harness, harness_config=config or {}, env={})
+    resolved = SimpleNamespace(
+        name="claude", harness_integration=harness_integration, harness_integration_config=config or {}, env={}
+    )
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: resolved)
 
 
@@ -148,7 +150,7 @@ def test_create_produces_launch_string_and_persists_the_minted_id(
     captured: dict[str, str] = {}
     _patch_transport(monkeypatch, _ClaudeTarget(events, transcript_present=False))
     _common_stubs(monkeypatch)
-    _harness_template(monkeypatch)
+    _harness_integration_template(monkeypatch)
     _capture_pane_command(monkeypatch, events, captured)
 
     create_session(
@@ -182,7 +184,7 @@ def test_create_resumes_when_a_transcript_exists(tmp_path: Path, monkeypatch: py
     captured: dict[str, str] = {}
     _patch_transport(monkeypatch, _ClaudeTarget(events, transcript_present=True))
     _common_stubs(monkeypatch)
-    _harness_template(monkeypatch)
+    _harness_integration_template(monkeypatch)
     _capture_pane_command(monkeypatch, events, captured)
 
     create_session(
@@ -208,7 +210,7 @@ def _restart_stubs(
     *,
     transcript_present: bool,
     stored_state: dict[str, object] | None,
-    harness: str = "claude-code",
+    harness_integration: str = "claude-code",
 ) -> tuple[Database, list[str], dict[str, str]]:
     from agentworks.sessions import manager as session_manager
 
@@ -220,7 +222,7 @@ def _restart_stubs(
     captured: dict[str, str] = {}
     _patch_transport(monkeypatch, _ClaudeTarget(events, transcript_present=transcript_present))
     _common_stubs(monkeypatch)
-    _harness_template(monkeypatch, harness=harness)
+    _harness_integration_template(monkeypatch, harness_integration=harness_integration)
     _capture_pane_command(monkeypatch, events, captured)
 
     monkeypatch.setattr(session_manager, "_ensure_pid", lambda session, **k: session)
@@ -354,7 +356,7 @@ def test_restart_under_another_harness_leaves_the_flat_legacy_key_intact(
         monkeypatch,
         transcript_present=False,
         stored_state={"session_id": sid},
-        harness="shell",
+        harness_integration="shell",
     )
 
     restart_session(db, SimpleNamespace(session=SimpleNamespace(history_limit=1)), name="s1", yes=True)  # type: ignore[arg-type]
@@ -382,7 +384,7 @@ def test_substitution_leaves_the_generated_snippet_intact_and_substitutes_extra_
     captured: dict[str, str] = {}
     _patch_transport(monkeypatch, _ClaudeTarget(events, transcript_present=False))
     _common_stubs(monkeypatch)
-    _harness_template(
+    _harness_integration_template(
         monkeypatch,
         {"extra_args": ["--append-system-prompt", "session {{session_name}}"]},
     )

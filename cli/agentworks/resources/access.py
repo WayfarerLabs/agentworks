@@ -101,7 +101,7 @@ def secret_decls(registry: Registry) -> dict[str, SecretDecl]:
 
 def ensure_reference_enabled(registry: Registry, kind: str, name: str) -> None:
     """The single-row use-gate for a declarable reference (Phase 7, LLD b's
-    named-row rule), mirroring ``ensure_harness_enabled``.
+    named-row rule), mirroring ``ensure_harness_integration_enabled``.
 
     A present-but-disabled declarable row (a not-enabled plugin's bundled
     manifest resource) resolves cleanly as a reference (it is present, so not an
@@ -142,7 +142,8 @@ def ensure_recipe_enabled(registry: Registry, kind: str, name: str) -> None:
     node in its ``reachable_from`` closure whose kind is DECLARABLE, refusing on
     the first disabled one. Capability nodes in the closure are deliberately
     EXCLUDED: each capability kind keeps its own R14 use-model (a platform
-    propagates via its site, a harness is gated by ``ensure_harness_enabled``,
+    propagates via its site, a harness integration is gated by
+    ``ensure_harness_integration_enabled``,
     etc.), so the recipe gate neither duplicates nor contradicts them.
 
     Safe no-op for an implicit ``default`` template (a missing start node:

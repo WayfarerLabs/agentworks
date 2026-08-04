@@ -105,7 +105,7 @@ _AGENTWORKS_ROOT = Path(agentworks.__file__).parent
 _CAPABILITY_REGISTRIES = frozenset(
     {
         "VM_PLATFORM_REGISTRY",
-        "HARNESS_REGISTRY",
+        "HARNESS_INTEGRATION_REGISTRY",
         "GIT_CREDENTIAL_PROVIDER_REGISTRY",
         "SECRET_BACKEND_REGISTRY",
     }
@@ -253,7 +253,7 @@ _REGISTRY_READ_ALLOWLIST = frozenset(
     {
         # Publishers (own the registry).
         "capabilities/vm_platform/__init__.py",
-        "capabilities/harness/__init__.py",
+        "capabilities/harness_integration/__init__.py",
         "capabilities/git_credential/__init__.py",
         "secrets/backends.py",
         # Plugin framework: the per-kind adapters SEAT plugin impls into the
@@ -476,7 +476,7 @@ def test_detectors_are_not_vacuous() -> None:
     assert find_registry_reads("cap = vm_platform.VM_PLATFORM_REGISTRY.get(x)") == [1]
     assert find_registry_reads("from x import VM_PLATFORM_REGISTRY as R\ncap = R.get(x)") == [2]
     assert find_registry_reads("from agentworks.x import SECRET_BACKEND_REGISTRY") == []
-    assert find_registry_reads('__all__ = ["HARNESS_REGISTRY"]') == []
+    assert find_registry_reads('__all__ = ["HARNESS_INTEGRATION_REGISTRY"]') == []
     assert find_registry_reads('"""mentions GIT_CREDENTIAL_PROVIDER_REGISTRY in prose."""') == []
 
     # Pattern 3: a not_ready recompute call is caught; a not_ready dict is not.

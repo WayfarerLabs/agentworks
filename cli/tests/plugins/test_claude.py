@@ -9,7 +9,7 @@ drives ``build_registry`` on real config (no fixture plugin injected via
 
 - the ``claude-code`` HARNESS: present-but-disabled with a ``system-plugin``
   origin, a ``session-template`` naming it stays ready, and
-  ``ensure_harness_enabled`` refuses it at use until ``[plugins] system``;
+  ``ensure_harness_integration_enabled`` refuses it at use until ``[plugins] system``;
 - the ``claude`` INSTALL-COMMAND (a bundled ``user-install-command``):
   present-but-disabled (weak), so a template's ``user_install_commands =
   ["claude"]`` finalizes cleanly (never an unknown-name error) and is refused
@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.bootstrap import build_registry
-from agentworks.capabilities.harness import ensure_harness_enabled
+from agentworks.capabilities.harness_integration import ensure_harness_integration_enabled
 from agentworks.config import load_config
 from agentworks.errors import StateError
 from agentworks.resources.access import ensure_recipe_enabled
@@ -68,11 +68,11 @@ def test_claude_seated_by_plugin() -> None:
     """The claude-code harness ships as the ``claude`` system plugin, whose
     adapter re-seats the harness class into the code registry at import (so the
     resolver can stamp it onto the graph node), and the plugin is indexed."""
-    from agentworks.capabilities.harness import HARNESS_REGISTRY
+    from agentworks.capabilities.harness_integration import HARNESS_INTEGRATION_REGISTRY
     from agentworks.plugins import SYSTEM_PLUGINS
 
     assert "claude" in SYSTEM_PLUGINS
-    assert "claude-code" in HARNESS_REGISTRY
+    assert "claude-code" in HARNESS_INTEGRATION_REGISTRY
 
 
 def test_harness_row_is_disabled_system_plugin_by_default(tmp_path: Path) -> None:
@@ -136,17 +136,17 @@ def test_session_template_naming_disabled_harness_finalizes_and_stays_ready(tmp_
     assert registry.graph.is_ready("session-template", "cc")
 
 
-def test_ensure_harness_enabled_refuses_disabled_claude_code_with_hint(tmp_path: Path) -> None:
+def test_ensure_harness_integration_enabled_refuses_disabled_claude_code_with_hint(tmp_path: Path) -> None:
     registry = build_registry(_config(tmp_path, _CC_TEMPLATE))
     with pytest.raises(StateError) as exc:
-        ensure_harness_enabled(registry, "claude-code")
+        ensure_harness_integration_enabled(registry, "claude-code")
     assert "enable plugin `claude`" in str(exc.value)
 
 
 def test_enabling_claude_lets_the_harness_be_used(tmp_path: Path) -> None:
     registry = build_registry(_config(tmp_path, _CC_TEMPLATE, enabled=True))
     assert registry.graph.enablement_of("harness-integration", "claude-code") is Enablement.enabled
-    ensure_harness_enabled(registry, "claude-code")  # no raise
+    ensure_harness_integration_enabled(registry, "claude-code")  # no raise
 
 
 # -- the install-command recipe use-gate (Phase 7 manifest parity) -----------

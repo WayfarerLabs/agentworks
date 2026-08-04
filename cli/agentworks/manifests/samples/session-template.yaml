@@ -1,11 +1,12 @@
-## kind: session-template -- selects the harness that runs a session's workload.
-## A session is a specification to run a specific harness as an agent in a
-## workspace on a VM. The harness owns start/restart and the launch-target
-## readiness check. `spec.harness` is one tagged table: its `name` key selects
-## the harness capability and the remaining keys are the config that harness
-## validates. (The old sibling shape, `harness: <name>` plus a
-## `harness_config:` table, still loads but is deprecated for removal.) An
-## undeclared harness resolves to `shell` (a plain login shell), so a
+## kind: session-template -- selects the harness integration that runs a
+## session's workload. A session is a specification to run a specific harness
+## through an integration as an agent in a workspace on a VM. The integration
+## owns start/restart and the launch-target readiness check.
+## `spec.harness_integration` is one tagged table: its `name` key selects the
+## integration capability and the remaining keys are the config that
+## integration validates. The old `harness` / `harness_config` inputs still
+## load with a deprecation warning through 0.13.0. An undeclared integration
+## resolves to `shell` (a plain login shell), so a
 ## field-less template is still a login shell.
 ##
 ## `shell`'s config vocabulary is the legacy command fields, now nested:
@@ -21,18 +22,18 @@
 #  name: htop
 #  description: Live process monitor
 #spec:
-#  harness:
+#  harness_integration:
 #    name: shell
 #    command: htop
 #    required_commands: [htop]
 #  env:
 #    TERM: xterm-256color
 ##
-## The `claude-code` harness runs Claude Code as the session. It ships as the
+## The `claude-code` integration runs Claude Code as the session. It ships as the
 ## opt-in `claude` system plugin, so enable it with `[plugins] system =
 ## ["claude"]` (otherwise creating a session on this template is refused with an
 ## "enable plugin `claude`" hint). It selects the launch/resume conventions with
-## one table (harness: {name: claude-code}) instead of restating command
+## one table (`harness_integration: {name: claude-code}`) instead of restating command
 ## strings: `session create` starts a new Claude session and `session restart`
 ## resumes the same conversation when its transcript still exists. Its config
 ## is three optional fields:
@@ -48,12 +49,12 @@
 #  name: claude
 #  description: Claude Code session
 #spec:
-#  harness:
+#  harness_integration:
 #    name: claude-code
 #    permission_mode: acceptEdits
 #    model: opus
 ##
-## The `codex` harness runs Codex the same way. It ships as the opt-in `codex`
+## The `codex` integration runs Codex the same way. It ships as the opt-in `codex`
 ## system plugin (enable it with `[plugins] system = ["codex"]`). `session
 ## create` starts a new Codex session; `session restart` resumes the same
 ## conversation once Codex has recorded it (the session id is discovered from
@@ -68,7 +69,7 @@
 ##   writable_dirs:   extra writable directories (`codex --add-dir` each;
 ##                    union-merged across template inheritance)
 ##   web_search:      bool; enables the live web-search tool (`codex --search`)
-##   disable_strict_config: bool; suppresses the `--strict-config` the harness
+##   disable_strict_config: bool; suppresses the `--strict-config` the integration
 ##                    otherwise always passes (strictness fails loudly on a bad
 ##                    or drifted Codex config key instead of ignoring it)
 ##   extra_args:      raw argv tokens appended last (the escape hatch)
@@ -81,10 +82,11 @@
 #  name: codex
 #  description: Codex session
 #spec:
-#  harness:
+#  harness_integration:
 #    name: codex
 #    sandbox: workspace-write
 #    approval_policy: on-request
 #    network: true
 ##
-## See `agw resource kinds` for the harnesses available in your installation.
+## Run `agw resource list --kind harness-integration --include-disabled` to see
+## the harness integrations available in your installation.

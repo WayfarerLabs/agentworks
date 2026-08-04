@@ -1,15 +1,15 @@
-"""``_HarnessKind``: the framework strategy for the ``"harness-integration"`` kind,
-plus the ``HarnessEntry`` capability row.
+"""``_HarnessIntegrationKind``: the framework strategy for the ``"harness-integration"`` kind,
+plus the ``HarnessIntegrationEntry`` capability row.
 
-Lives in the ``capabilities.harness`` package next to the harness
+Lives in the ``capabilities.harness_integration`` package next to the harness integration
 implementations; ``agentworks.resources.kinds.__init__`` imports this
 module so the kind self-registers into ``KIND_REGISTRY`` at load.
 
-``_HarnessKind`` gives the framework a name-keyed marker so a
-``session-template`` ``spec.harness`` value typo surfaces uniformly. The
-harness implementations live in ``agentworks.capabilities.harness``; the
-companion publisher there adds one ``HarnessEntry`` row per known
-harness, built-in with source ``"agentworks.capabilities.harness"``. It
+``_HarnessIntegrationKind`` gives the framework a name-keyed marker so a
+``session-template`` ``spec.harness_integration`` value typo surfaces uniformly. The
+harness integration implementations live in ``agentworks.capabilities.harness_integration``; the
+companion publisher there adds one ``HarnessIntegrationEntry`` row per known
+harness integration, built-in with source ``"agentworks.capabilities.harness_integration"``. It
 mirrors ``_GitCredentialProviderKind`` exactly (``category="capability"``,
 ``miss_policy="error"``, ``builtin_override="reserved"``).
 """
@@ -29,13 +29,13 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True)
-class HarnessEntry:
-    """A name-keyed marker for one harness capability (``"shell"``,
+class HarnessIntegrationEntry:
+    """A name-keyed marker for one harness integration capability (``"shell"``,
     ``"claude-code"``).
 
-    The actual harness class (``ShellHarness``, ``ClaudeCodeHarness``)
-    lives beside this in ``agentworks.capabilities.harness``; this row is
-    what a ``session-template`` ``spec.harness`` reference resolves
+    The actual harness integration class (``ShellIntegration``, ``ClaudeCodeIntegration``)
+    lives beside this in ``agentworks.capabilities.harness_integration``; this row is
+    what a ``session-template`` ``spec.harness_integration`` reference resolves
     against in the framework.
 
     Inbound references live on the dependency graph
@@ -47,7 +47,7 @@ class HarnessEntry:
 
 
 @dataclass(frozen=True)
-class _HarnessKind:
+class _HarnessIntegrationKind:
     """Implementation of ``ResourceKind`` for ``"harness-integration"``."""
 
     kind: str = "harness-integration"
@@ -63,9 +63,9 @@ class _HarnessKind:
         # future change that gives the kind a reserved default has an
         # obvious landing pad.
         raise NoUnreferencedDefaultError(
-            "the harness kind has miss_policy='error'; synthesize should "
+            "the harness integration kind has miss_policy='error'; synthesize should "
             "never be invoked (the framework raises ConfigError first)"
         )
 
 
-KIND_REGISTRY["harness-integration"] = _HarnessKind()
+KIND_REGISTRY["harness-integration"] = _HarnessIntegrationKind()

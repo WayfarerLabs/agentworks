@@ -1,16 +1,16 @@
-"""Drift guard: every caller of a session-node factory gates the harness (R14).
+"""Drift guard: every caller of a session-node factory gates the harness integration (R14).
 
-The harness enablement gate (``ensure_harness_enabled``) sits at the session
+The harness integration enablement gate (``ensure_harness_integration_enabled``) sits at the session
 BUILD CALL SITES, not inside ``pending_session_node`` / ``live_session_node``
 (those factories thread no registry, so gating inside them would mean threading
 a registry through, which is not additive). That places a standing risk: a
 future third caller of either factory could construct a session on a disabled
-plugin harness without gating it.
+plugin harness integration without gating it.
 
 This guard is the analog of the ``CAPABILITY_ADAPTERS.keys()`` adapter-drift
 test: it must FAIL when a real bypass is introduced. The protection is
 per-FUNCTION, not per-file: every function whose body calls a session-node
-factory must also call ``ensure_harness_enabled`` within that same function body.
+factory must also call ``ensure_harness_integration_enabled`` within that same function body.
 A per-file substring check would be defeated by a second, ungated factory call
 in a file that already gates elsewhere; a per-function check is not. It also
 resolves aliased imports (``from ... import live_session_node as lsn``), so an
@@ -28,7 +28,7 @@ import agentworks
 
 _ROOT = Path(agentworks.__file__).parent
 _FACTORIES = frozenset({"pending_session_node", "live_session_node"})
-_GATE = frozenset({"ensure_harness_enabled"})
+_GATE = frozenset({"ensure_harness_integration_enabled"})
 
 
 @dataclass
@@ -64,7 +64,7 @@ def _is_call_to(call: ast.Call, local_names: frozenset[str], attrs: frozenset[st
 def _per_function_reports(source: str) -> list[_FuncReport]:
     """One :class:`_FuncReport` per function in ``source``, recording whether its
     OWN body (innermost scope, so a nested closure is its own function) calls a
-    session-node factory and whether it calls the harness gate."""
+    session-node factory and whether it calls the harness integration gate."""
     tree = ast.parse(source)
     factory_names = _local_names(tree, _FACTORIES)
     gate_names = _local_names(tree, _GATE)
@@ -99,7 +99,7 @@ def _call_counts(source: str) -> tuple[int, int]:
     return factory, gate
 
 
-def test_every_session_factory_caller_gates_the_harness() -> None:
+def test_every_session_factory_caller_gates_the_harness_integration() -> None:
     offenders: list[str] = []
     count_offenders: list[str] = []
     total_factory_calls = 0
@@ -118,12 +118,12 @@ def test_every_session_factory_caller_gates_the_harness() -> None:
             count_offenders.append(f"{rel}: {factory_count} factory call(s) but only {gate_count} gate call(s)")
 
     assert not offenders, (
-        "a function builds a session node without gating the harness in the SAME function body. Call "
-        "ensure_harness_enabled(registry, template.harness) before the factory call (R14, see "
+        "a function builds a session node without gating the harness integration in the SAME function body. Call "
+        "ensure_harness_integration_enabled(registry, template.harness_integration) before the factory call (R14, see "
         "sessions/nodes.py):\n" + "\n".join(offenders)
     )
     assert not count_offenders, (
-        "a module has more session-node factory calls than harness-gate calls; a second call may be "
+        "a module has more session-node factory calls than harness-integration-gate calls; a second call may be "
         "ungated (each factory call must be preceded by its own gate):\n" + "\n".join(count_offenders)
     )
     # Non-vacuity: the two known build sites must still be found, so a factory
@@ -143,8 +143,8 @@ def test_guard_is_not_vacuous() -> None:
 
     gated = (
         "from agentworks.sessions.nodes import live_session_node\n"
-        "from agentworks.capabilities.harness import ensure_harness_enabled\n"
-        "def f():\n    ensure_harness_enabled(r, t.harness)\n    live_session_node(x)\n"
+        "from agentworks.capabilities.harness_integration import ensure_harness_integration_enabled\n"
+        "def f():\n    ensure_harness_integration_enabled(r, t.harness_integration)\n    live_session_node(x)\n"
     )
     (report2,) = _per_function_reports(gated)
     assert report2.calls_factory and report2.calls_gate

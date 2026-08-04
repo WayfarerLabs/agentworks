@@ -93,8 +93,8 @@ def _requiring_template(monkeypatch: pytest.MonkeyPatch, *commands: str) -> None
         "_resolve_template",
         lambda *a, **k: SimpleNamespace(
             name="claude",
-            harness="shell",
-            harness_config={"command": "claude", "required_commands": list(commands)},
+            harness_integration="shell",
+            harness_integration_config={"command": "claude", "required_commands": list(commands)},
             env={},
         ),
     )
@@ -439,9 +439,9 @@ def test_create_failure_cleans_session_slice_then_unwinds_ephemerals(
 # -- the operation scope reaches the harness ---------------------------------
 
 
-def test_session_scope_reaches_the_harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_session_scope_reaches_the_harness_integration(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agentworks.capabilities.base import RunContext, ScopeLevel
-    from agentworks.capabilities.harness.base import Harness
+    from agentworks.capabilities.harness_integration.base import HarnessIntegration
     from agentworks.sessions.manager import create_session
 
     events: list[str] = []
@@ -449,13 +449,13 @@ def test_session_scope_reaches_the_harness(tmp_path: Path, monkeypatch: pytest.M
     db.insert_agent("a1", "vm1", "agt-a1")
 
     scopes: list[object] = []
-    real_preflight = Harness.preflight
+    real_preflight = HarnessIntegration.preflight
 
-    def _recording(self: Harness, ctx: RunContext) -> None:
+    def _recording(self: HarnessIntegration, ctx: RunContext) -> None:
         scopes.append(ctx.operation_scope)
         real_preflight(self, ctx)
 
-    monkeypatch.setattr(Harness, "preflight", _recording)
+    monkeypatch.setattr(HarnessIntegration, "preflight", _recording)
 
     create_session(
         db,
@@ -499,7 +499,7 @@ def _template(
         config["restart_command"] = restart_command
     if required_commands is not None:
         config["required_commands"] = required_commands
-    resolved = SimpleNamespace(name="claude", harness="shell", harness_config=config, env={})
+    resolved = SimpleNamespace(name="claude", harness_integration="shell", harness_integration_config=config, env={})
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: resolved)
 
 
@@ -513,7 +513,9 @@ def _capture_pane_command(monkeypatch: pytest.MonkeyPatch, captured: dict[str, s
     monkeypatch.setattr(tmux_mod, "create_session", _capture)
 
 
-def test_create_pane_command_is_the_harness_output_substituted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_create_pane_command_is_the_harness_integration_output_substituted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """create: the pane command is the shell harness's start() output
     (the template's ``command``) with BOTH template vars substituted at
     the call site."""

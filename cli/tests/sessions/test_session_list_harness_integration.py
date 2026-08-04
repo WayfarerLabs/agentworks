@@ -59,7 +59,7 @@ def _header_and_rows(info: list[str]) -> tuple[str, list[str]]:
     return info[header_idx], rows
 
 
-def test_list_shows_harness_column_between_template_and_mode(
+def test_list_shows_harness_integration_column_between_template_and_mode(
     db: Database,
     make_config,  # noqa: ANN001
     captured_output,  # noqa: ANN001
@@ -72,8 +72,8 @@ def test_list_shows_harness_column_between_template_and_mode(
     session_manager.list_sessions(db, config, no_status=True)
 
     header, rows = _header_and_rows(captured_output.info)
-    # Column order: NAME, WORKSPACE, VM, TEMPLATE, HARNESS, MODE, STATUS.
-    assert header.split() == ["NAME", "WORKSPACE", "VM", "TEMPLATE", "HARNESS", "MODE", "STATUS"]
+    # Column order: NAME, WORKSPACE, VM, TEMPLATE, HARNESS INTEGRATION, MODE, STATUS.
+    assert header.split() == ["NAME", "WORKSPACE", "VM", "TEMPLATE", "HARNESS", "INTEGRATION", "MODE", "STATUS"]
     by_name = {row.split()[0]: row.split() for row in rows}
     # The default (undeclared) template resolves to the built-in shell harness.
     assert "shell" in by_name["s-shell"]
@@ -119,7 +119,7 @@ def test_list_truncates_over_cap_values_with_ellipsis(
     assert long_name not in rows[0]
 
 
-def test_list_no_status_still_shows_harness(
+def test_list_no_status_still_shows_harness_integration(
     db: Database,
     make_config,  # noqa: ANN001
     captured_output,  # noqa: ANN001
@@ -152,20 +152,20 @@ def test_list_resolves_each_distinct_template_at_most_once(
         _seed_session(db, f"s{i}", "ws-box", "default")
 
     seen: list[str] = []
-    real = session_manager._display_harness
+    real = session_manager._display_harness_integration
 
     def _counting(registry: object, template_name: str) -> str:
         seen.append(template_name)
         return real(registry, template_name)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(session_manager, "_display_harness", _counting)
+    monkeypatch.setattr(session_manager, "_display_harness_integration", _counting)
 
     session_manager.list_sessions(db, config, no_status=True)
 
     assert seen == ["default"]
 
 
-def test_list_bad_registry_degrades_harness_to_dash_and_still_renders(
+def test_list_bad_registry_degrades_harness_integration_to_dash_and_still_renders(
     db: Database,
     make_config,  # noqa: ANN001
     captured_output,  # noqa: ANN001

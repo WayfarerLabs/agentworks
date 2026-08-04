@@ -266,14 +266,14 @@ def test_capability_impls_are_stamped_on_nodes(tmp_path: Path) -> None:
     """The builder populates capability nodes' impl off the code registry
     (heterogeneous: classes for platform/harness/provider, an instance for
     secret-backend); declarable nodes carry ``None``."""
-    from agentworks.capabilities.harness import HARNESS_REGISTRY
+    from agentworks.capabilities.harness_integration import HARNESS_INTEGRATION_REGISTRY
     from agentworks.secrets.backends import SECRET_BACKEND_REGISTRY
 
     cfg = _write_cfg(tmp_path, "")
     registry = build_registry(load_config(cfg, warn_issues=False))
     graph = registry.graph
 
-    for name, cls in HARNESS_REGISTRY.items():
+    for name, cls in HARNESS_INTEGRATION_REGISTRY.items():
         assert graph._nodes[("harness-integration", name)].impl is cls
     for name, backend in SECRET_BACKEND_REGISTRY.items():
         assert graph._nodes[("secret-backend", name)].impl is backend

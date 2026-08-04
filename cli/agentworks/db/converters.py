@@ -129,11 +129,11 @@ def _parse_harness_integration_state(raw: str, session_name: str) -> dict[str, o
     The blob is owned by the harness integration and opaque to the core,
     so this only checks it is a JSON object.
 
-    A malformed or non-object blob (a future harness bug, a hand-edited DB)
+    A malformed or non-object blob (a future harness integration bug, a hand-edited DB)
     degrades to ``{}`` with a warning rather than raising: ``_to_session``
     is mapped over every row by ``list_sessions``, so a single corrupt row
     must not break ``session list`` (and every other read) for all the
-    others. A blank harness starts fresh from ``{}``; a stateful one
+    others. A stateless harness integration starts fresh from ``{}``; a stateful one
     re-mints on its next op, the same as an unmigrated row.
     """
     try:

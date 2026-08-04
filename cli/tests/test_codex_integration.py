@@ -30,7 +30,7 @@ import pytest
 
 from agentworks.capabilities.base import OperationScope, RunContext, ScopeLevel
 from agentworks.errors import ConfigError, StateError
-from agentworks.plugins.codex.harness import CodexHarness
+from agentworks.plugins.codex.harness_integration import CodexIntegration
 from tests.conftest import _FakeResult, _FakeTarget
 
 if TYPE_CHECKING:
@@ -51,15 +51,15 @@ _ROLLOUT_PROBE = f"*-{_SID}.jsonl"
 _DISCOVERY_PROBE = ".launch"
 
 
-def _harness(
+def _harness_integration(
     config: Mapping[str, object] | None = None,
     *,
     session_name: str = "s1",
     workspace_path: str = "/srv/ws1",
     state: dict[str, object] | None = None,
     admin: bool = True,
-) -> CodexHarness:
-    return CodexHarness(
+) -> CodexIntegration:
+    return CodexIntegration(
         "codex",
         config or {},
         session_name=session_name,
@@ -96,19 +96,19 @@ def test_dependencies_imply_no_reference() -> None:
     """``codex`` implies no edge, and ``dependencies`` is total: it
     returns ``()`` for the known fields and even for a malformed blob."""
     assert (
-        CodexHarness.dependencies(
+        CodexIntegration.dependencies(
             "session-template/codex",
             {"model": "gpt-5", "sandbox": "workspace-write", "extra_args": ["--foo"]},
         )
         == ()
     )
     # Never raises, even on config that ``validate`` would reject.
-    assert CodexHarness.dependencies("session-template/codex", {"model": 3, "sandbx": "typo"}) == ()
+    assert CodexIntegration.dependencies("session-template/codex", {"model": 3, "sandbx": "typo"}) == ()
 
 
 def test_validate_accepts_the_nine_fields_and_empty_config() -> None:
     assert (
-        CodexHarness.validate(
+        CodexIntegration.validate(
             "session-template/codex",
             {
                 "model": "gpt-5",
@@ -124,28 +124,28 @@ def test_validate_accepts_the_nine_fields_and_empty_config() -> None:
         )
         is None
     )
-    assert CodexHarness.validate("session-template/codex", {}) is None
+    assert CodexIntegration.validate("session-template/codex", {}) is None
 
 
 def test_validate_rejects_unknown_field() -> None:
-    with pytest.raises(ConfigError, match="unknown codex harness field"):
-        CodexHarness.validate("session-template/codex", {"sandbx": "typo"})
+    with pytest.raises(ConfigError, match="unknown codex harness integration field"):
+        CodexIntegration.validate("session-template/codex", {"sandbx": "typo"})
 
 
 @pytest.mark.parametrize("field_name", ["model", "sandbox", "approval_policy", "profile"])
 def test_validate_rejects_non_string_flag_fields(field_name: str) -> None:
     with pytest.raises(ConfigError, match=f"{field_name} must be a string"):
-        CodexHarness.validate("session-template/codex", {field_name: 3})
+        CodexIntegration.validate("session-template/codex", {field_name: 3})
 
 
 def test_validate_rejects_non_list_extra_args() -> None:
     with pytest.raises(ConfigError, match="extra_args must be a list of strings"):
-        CodexHarness.validate("session-template/codex", {"extra_args": "just-a-string"})
+        CodexIntegration.validate("session-template/codex", {"extra_args": "just-a-string"})
 
 
 def test_construct_revalidates_config() -> None:
-    with pytest.raises(ConfigError, match="unknown codex harness field"):
-        _harness({"nope": 1})
+    with pytest.raises(ConfigError, match="unknown codex harness integration field"):
+        _harness_integration({"nope": 1})
 
 
 # -- the stored-id probe: present -> resume, absent -> launch fresh ----------
@@ -153,7 +153,7 @@ def test_construct_revalidates_config() -> None:
 
 def test_present_rollout_resumes() -> None:
     target = _FakeTarget({_ROLLOUT_PROBE: _FakeResult(0)})  # found
-    command = _harness().start(_op_ctx(target))
+    command = _harness_integration().start(_op_ctx(target))
     assert f"resume {_SID}" in command
     assert "tui.resume_cwd=current" in command
     assert "resuming session s1" in command
@@ -167,8 +167,8 @@ def test_absent_rollout_launches_fresh_and_drops_the_stale_id() -> None:
     op's discovery can adopt the codex-minted replacement."""
     state: dict[str, object] = {"session_id": _SID}
     target = _FakeTarget({_ROLLOUT_PROBE: _FakeResult(1)})  # not found
-    harness = _harness(state=state)
-    command = harness.start(_op_ctx(target))
+    harness_integration = _harness_integration(state=state)
+    command = harness_integration.start(_op_ctx(target))
     assert "resume" not in command
     assert "archived or gone; starting new session s1" in command
     assert "touch" in command and ".launch" in command
@@ -183,7 +183,7 @@ def test_probe_that_could_not_execute_raises_rather_than_guessing() -> None:
     error naming the target instead."""
     target = _FakeTarget({_ROLLOUT_PROBE: _FakeResult(255)})
     with pytest.raises(StateError, match="could not probe") as exc:
-        _harness().start(_op_ctx(target))
+        _harness_integration().start(_op_ctx(target))
     assert "exit 255" in str(exc.value)
     assert exc.value.entity_name == "s1"
 
@@ -194,13 +194,13 @@ def test_probe_keeps_find_failure_distinct_from_a_clean_no_match() -> None:
     printing a match exits 6, which the exit-code fork raises on rather
     than folding into "no rollout"."""
     target = _FakeTarget({_ROLLOUT_PROBE: _FakeResult(0)})
-    _harness().start(_op_ctx(target))
+    _harness_integration().start(_op_ctx(target))
     (probe_cmd,) = target.commands
     assert "[ -d " in probe_cmd  # dir-missing is a clean no-match, not a find failure
     assert "exit 6" in probe_cmd  # find failure stays distinguishable
     failing = _FakeTarget({_ROLLOUT_PROBE: _FakeResult(6)})
     with pytest.raises(StateError, match="could not probe"):
-        _harness().start(_op_ctx(failing))
+        _harness_integration().start(_op_ctx(failing))
 
 
 def test_missing_launch_target_raises_rather_than_guessing() -> None:
@@ -208,12 +208,12 @@ def test_missing_launch_target_raises_rather_than_guessing() -> None:
     fresh launch keeps its minted id), a codex fresh launch drops state
     and replaces the discovery anchor, so the op refuses to guess."""
     with pytest.raises(StateError, match="no launch target"):
-        _harness().start(RunContext())
+        _harness_integration().start(RunContext())
 
 
 def test_probe_is_rooted_at_codex_home_and_finds_by_stored_id() -> None:
     target = _FakeTarget({_ROLLOUT_PROBE: _FakeResult(0)})
-    _harness().start(_op_ctx(target))
+    _harness_integration().start(_op_ctx(target))
     (probe_cmd,) = target.commands
     assert f"*-{_SID}.jsonl" in probe_cmd
     assert "find" in probe_cmd
@@ -223,8 +223,8 @@ def test_probe_is_rooted_at_codex_home_and_finds_by_stored_id() -> None:
 
 def test_start_and_restart_are_symmetric() -> None:
     target = _FakeTarget({_ROLLOUT_PROBE: _FakeResult(0)})
-    harness = _harness()
-    assert harness.start(_op_ctx(target)) == harness.restart(_op_ctx(target))
+    harness_integration = _harness_integration()
+    assert harness_integration.start(_op_ctx(target)) == harness_integration.restart(_op_ctx(target))
 
 
 # -- discovery: anchored on the STORED marker only ----------------------------
@@ -238,7 +238,7 @@ def test_brand_new_session_performs_no_discovery() -> None:
     leftover marker file."""
     state: dict[str, object] = {}
     target = _FakeTarget()
-    command = _harness(state=state).start(_op_ctx(target))
+    command = _harness_integration(state=state).start(_op_ctx(target))
     assert target.commands == []  # no probe ran
     assert "starting new session s1" in command
     assert "session_id" not in state
@@ -249,7 +249,7 @@ def test_fresh_launch_mints_a_nonce_anchor_and_stores_it() -> None:
     """The minted anchor is per-launch (a nonce, not just the session
     name) and the pane command touches exactly the stored path."""
     state: dict[str, object] = {}
-    command = _harness(state=state).start(_op_ctx(_FakeTarget()))
+    command = _harness_integration(state=state).start(_op_ctx(_FakeTarget()))
     anchor = state["discovery_marker"]
     assert isinstance(anchor, str)
     assert anchor.startswith(".agentworks/codex/s1-")
@@ -259,7 +259,7 @@ def test_fresh_launch_mints_a_nonce_anchor_and_stores_it() -> None:
     assert f'touch "$HOME"/{anchor}' in inner
     # A second harness's fresh launch mints a DIFFERENT anchor.
     other: dict[str, object] = {}
-    _harness(state=other).start(_op_ctx(_FakeTarget()))
+    _harness_integration(state=other).start(_op_ctx(_FakeTarget()))
     assert other["discovery_marker"] != anchor
 
 
@@ -269,7 +269,7 @@ def test_fresh_launch_removes_the_previous_anchors_marker() -> None:
     file so no dead marker accumulates."""
     state: dict[str, object] = {"discovery_marker": _ANCHOR}
     target = _FakeTarget({_DISCOVERY_PROBE: _FakeResult(0, stdout="")})  # zero candidates
-    command = _harness(state=state).start(_op_ctx(target))
+    command = _harness_integration(state=state).start(_op_ctx(target))
     inner = shlex.split(command)[2]
     assert f'rm -f "$HOME"/{_ANCHOR}' in inner
     new_anchor = state["discovery_marker"]
@@ -284,10 +284,10 @@ def test_discovery_adopts_a_single_candidate_and_resumes_it() -> None:
     resume pane command removes the marker file."""
     state: dict[str, object] = {"discovery_marker": _ANCHOR}
     target = _FakeTarget({_DISCOVERY_PROBE: _FakeResult(0, stdout=f"{_ROLLOUT}\n")})
-    harness = _harness(state=state)
-    command = harness.start(_op_ctx(target))
+    harness_integration = _harness_integration(state=state)
+    command = harness_integration.start(_op_ctx(target))
     assert state == {"session_id": _SID}  # adopted; anchor consumed
-    assert harness.state == {"session_id": _SID}  # in place, via the property
+    assert harness_integration.state == {"session_id": _SID}  # in place, via the property
     assert f"resume {_SID}" in command
     assert "adopted a discovered codex session" in command
     inner = shlex.split(command)[2]
@@ -300,7 +300,7 @@ def test_discovery_zero_candidates_launches_fresh() -> None:
     launching fresh again loses nothing (with a replacement anchor)."""
     state: dict[str, object] = {"discovery_marker": _ANCHOR}
     target = _FakeTarget({_DISCOVERY_PROBE: _FakeResult(0, stdout="")})
-    command = _harness(state=state).start(_op_ctx(target))
+    command = _harness_integration(state=state).start(_op_ctx(target))
     assert "session_id" not in state
     assert "starting new session s1" in command
     assert state["discovery_marker"] != _ANCHOR  # replaced, not reused
@@ -311,7 +311,7 @@ def test_discovery_without_a_sessions_dir_launches_fresh() -> None:
     target, so there is nothing to adopt."""
     state: dict[str, object] = {"discovery_marker": _ANCHOR}
     target = _FakeTarget({_DISCOVERY_PROBE: _FakeResult(3)})
-    command = _harness(state=state).start(_op_ctx(target))
+    command = _harness_integration(state=state).start(_op_ctx(target))
     assert "session_id" not in state
     assert "starting new session s1" in command
 
@@ -324,7 +324,7 @@ def test_discovery_with_a_missing_marker_file_raises() -> None:
     state: dict[str, object] = {"discovery_marker": _ANCHOR}
     target = _FakeTarget({_DISCOVERY_PROBE: _FakeResult(4)})
     with pytest.raises(StateError, match="launch marker .* is missing") as exc:
-        _harness(state=state).start(_op_ctx(target))
+        _harness_integration(state=state).start(_op_ctx(target))
     assert f"touch ~/{_ANCHOR}" in (exc.value.hint or "")
     assert state == {"discovery_marker": _ANCHOR}  # nothing adopted, anchor kept
 
@@ -333,7 +333,7 @@ def test_discovery_with_an_unresolvable_workspace_raises() -> None:
     state: dict[str, object] = {"discovery_marker": _ANCHOR}
     target = _FakeTarget({_DISCOVERY_PROBE: _FakeResult(5)})
     with pytest.raises(StateError, match="could not resolve the workspace directory"):
-        _harness(state=state).start(_op_ctx(target))
+        _harness_integration(state=state).start(_op_ctx(target))
 
 
 def test_discovery_multiple_candidates_raises_naming_the_ids() -> None:
@@ -343,7 +343,7 @@ def test_discovery_multiple_candidates_raises_naming_the_ids() -> None:
     state: dict[str, object] = {"discovery_marker": _ANCHOR}
     target = _FakeTarget({_DISCOVERY_PROBE: _FakeResult(0, stdout=f"{_ROLLOUT}\n{_OTHER_ROLLOUT}\n")})
     with pytest.raises(StateError, match="refusing to guess which one") as exc:
-        _harness(state=state).start(_op_ctx(target))
+        _harness_integration(state=state).start(_op_ctx(target))
     assert _SID in str(exc.value)
     assert _OTHER_SID in str(exc.value)
     assert state == {"discovery_marker": _ANCHOR}  # nothing adopted
@@ -356,7 +356,7 @@ def test_discovery_probe_failure_raises_rather_than_guessing() -> None:
     for code in (6, 255):
         target = _FakeTarget({_DISCOVERY_PROBE: _FakeResult(code)})
         with pytest.raises(StateError, match="could not probe"):
-            _harness(state={"discovery_marker": _ANCHOR}).start(_op_ctx(target))
+            _harness_integration(state={"discovery_marker": _ANCHOR}).start(_op_ctx(target))
 
 
 def test_discovery_ignores_login_shell_noise_lines() -> None:
@@ -367,7 +367,7 @@ def test_discovery_ignores_login_shell_noise_lines() -> None:
     state: dict[str, object] = {"discovery_marker": _ANCHOR}
     noisy = f"Welcome to devbox!\n{_ROLLOUT}\nmise activated\n"
     target = _FakeTarget({_DISCOVERY_PROBE: _FakeResult(0, stdout=noisy)})
-    command = _harness(state=state).start(_op_ctx(target))
+    command = _harness_integration(state=state).start(_op_ctx(target))
     assert state["session_id"] == _SID  # the one real line was adopted
     assert f"resume {_SID}" in command
 
@@ -378,7 +378,7 @@ def test_discovery_unrecognized_rollout_name_raises() -> None:
     weird = "/home/me/.codex/sessions/2026/08/01/rollout-weird.jsonl"
     target = _FakeTarget({_DISCOVERY_PROBE: _FakeResult(0, stdout=f"{weird}\n")})
     with pytest.raises(StateError, match="does not embed a session id"):
-        _harness(state={"discovery_marker": _ANCHOR}).start(_op_ctx(target))
+        _harness_integration(state={"discovery_marker": _ANCHOR}).start(_op_ctx(target))
 
 
 def test_adopted_id_is_resumed_verbatim_on_the_next_op() -> None:
@@ -386,12 +386,12 @@ def test_adopted_id_is_resumed_verbatim_on_the_next_op() -> None:
     from the state blob and resumed directly on the next."""
     state: dict[str, object] = {"discovery_marker": _ANCHOR}
     discover = _FakeTarget({_DISCOVERY_PROBE: _FakeResult(0, stdout=f"{_ROLLOUT}\n")})
-    harness = _harness(state=state)
-    harness.start(_op_ctx(discover))
+    harness_integration = _harness_integration(state=state)
+    harness_integration.start(_op_ctx(discover))
     assert state == {"session_id": _SID}
 
     resume = _FakeTarget({_ROLLOUT_PROBE: _FakeResult(0)})
-    command = _harness(state=state).restart(_op_ctx(resume))
+    command = _harness_integration(state=state).restart(_op_ctx(resume))
     assert f"resume {_SID}" in command
     assert "resuming session s1" in command
     # The second op probed the stored id; it did NOT re-run discovery.
@@ -404,7 +404,7 @@ def test_wrong_typed_stored_id_is_swept_and_treated_as_absent() -> None:
     with no anchor either, the op is a plain no-probe fresh launch."""
     state: dict[str, object] = {"session_id": 7}
     target = _FakeTarget()
-    command = _harness(state=state).start(_op_ctx(target))
+    command = _harness_integration(state=state).start(_op_ctx(target))
     assert "starting new session s1" in command
     assert target.commands == []  # no anchor: no probe at all
     assert "session_id" not in state  # the garbage was swept, not left behind
@@ -467,14 +467,14 @@ def _write_rollout(home: Path, sid: str, cwd: Path, *, ts: str = "2026-08-01T12-
     return path
 
 
-def _sh_harness(tmp_path: Path, state: dict[str, object]) -> CodexHarness:
-    return _harness(state=state, workspace_path=str(tmp_path / "ws1"))
+def _sh_harness_integration(tmp_path: Path, state: dict[str, object]) -> CodexIntegration:
+    return _harness_integration(state=state, workspace_path=str(tmp_path / "ws1"))
 
 
 def test_sh_probe_adopts_the_rollout_recorded_in_our_workspace(codex_home: Path, tmp_path: Path) -> None:
     _write_rollout(codex_home, _SID, tmp_path / "ws1")
     state: dict[str, object] = {"discovery_marker": _ANCHOR}
-    command = _sh_harness(tmp_path, state).start(_op_ctx(_ShellTarget(codex_home)))  # type: ignore[arg-type]
+    command = _sh_harness_integration(tmp_path, state).start(_op_ctx(_ShellTarget(codex_home)))  # type: ignore[arg-type]
     assert state["session_id"] == _SID
     assert f"resume {_SID}" in command
 
@@ -490,7 +490,7 @@ def test_sh_probe_does_not_adopt_a_foreign_workspaces_rollout(codex_home: Path, 
     foreign_ws.mkdir()
     _write_rollout(codex_home, _OTHER_SID, foreign_ws)
     state: dict[str, object] = {"discovery_marker": _ANCHOR}
-    command = _sh_harness(tmp_path, state).start(_op_ctx(_ShellTarget(codex_home)))  # type: ignore[arg-type]
+    command = _sh_harness_integration(tmp_path, state).start(_op_ctx(_ShellTarget(codex_home)))  # type: ignore[arg-type]
     assert "session_id" not in state  # NOT adopted
     assert "starting new session s1" in command
 
@@ -504,7 +504,7 @@ def test_sh_probe_adopts_ours_and_filters_the_foreign_one(codex_home: Path, tmp_
     _write_rollout(codex_home, _SID, tmp_path / "ws1")
     _write_rollout(codex_home, _OTHER_SID, foreign_ws, ts="2026-08-01T12-05-00")
     state: dict[str, object] = {"discovery_marker": _ANCHOR}
-    _sh_harness(tmp_path, state).start(_op_ctx(_ShellTarget(codex_home)))  # type: ignore[arg-type]
+    _sh_harness_integration(tmp_path, state).start(_op_ctx(_ShellTarget(codex_home)))  # type: ignore[arg-type]
     assert state["session_id"] == _SID
 
 
@@ -513,7 +513,7 @@ def test_sh_probe_two_matching_rollouts_raise(codex_home: Path, tmp_path: Path) 
     _write_rollout(codex_home, _OTHER_SID, tmp_path / "ws1", ts="2026-08-01T12-05-00")
     state: dict[str, object] = {"discovery_marker": _ANCHOR}
     with pytest.raises(StateError, match="refusing to guess which one"):
-        _sh_harness(tmp_path, state).start(_op_ctx(_ShellTarget(codex_home)))  # type: ignore[arg-type]
+        _sh_harness_integration(tmp_path, state).start(_op_ctx(_ShellTarget(codex_home)))  # type: ignore[arg-type]
 
 
 def test_sh_probe_ignores_rollouts_older_than_the_marker(codex_home: Path, tmp_path: Path) -> None:
@@ -521,7 +521,7 @@ def test_sh_probe_ignores_rollouts_older_than_the_marker(codex_home: Path, tmp_p
     ancient = time.time() - 1000  # older than the back-dated marker
     os.utime(rollout, (ancient, ancient))
     state: dict[str, object] = {"discovery_marker": _ANCHOR}
-    command = _sh_harness(tmp_path, state).start(_op_ctx(_ShellTarget(codex_home)))  # type: ignore[arg-type]
+    command = _sh_harness_integration(tmp_path, state).start(_op_ctx(_ShellTarget(codex_home)))  # type: ignore[arg-type]
     assert "session_id" not in state
     assert "starting new session s1" in command
 
@@ -530,24 +530,24 @@ def test_sh_probe_missing_marker_file_raises(codex_home: Path, tmp_path: Path) -
     (codex_home / _ANCHOR).unlink()
     state: dict[str, object] = {"discovery_marker": _ANCHOR}
     with pytest.raises(StateError, match="launch marker .* is missing"):
-        _sh_harness(tmp_path, state).start(_op_ctx(_ShellTarget(codex_home)))  # type: ignore[arg-type]
+        _sh_harness_integration(tmp_path, state).start(_op_ctx(_ShellTarget(codex_home)))  # type: ignore[arg-type]
 
 
 def test_sh_probe_missing_workspace_dir_raises(codex_home: Path, tmp_path: Path) -> None:
     state: dict[str, object] = {"discovery_marker": _ANCHOR}
-    harness = _harness(state=state, workspace_path=str(tmp_path / "nonexistent"))
+    harness_integration = _harness_integration(state=state, workspace_path=str(tmp_path / "nonexistent"))
     with pytest.raises(StateError, match="could not resolve the workspace directory"):
-        harness.start(_op_ctx(_ShellTarget(codex_home)))  # type: ignore[arg-type]
+        harness_integration.start(_op_ctx(_ShellTarget(codex_home)))  # type: ignore[arg-type]
 
 
 def test_sh_rollout_probe_forks_on_a_real_filesystem(codex_home: Path, tmp_path: Path) -> None:
     """The stored-id existence probe through the same real-sh layer:
     present resumes, absent launches fresh via the stale path."""
     _write_rollout(codex_home, _SID, tmp_path / "ws1")
-    present = _sh_harness(tmp_path, {"session_id": _SID})
+    present = _sh_harness_integration(tmp_path, {"session_id": _SID})
     assert f"resume {_SID}" in present.start(_op_ctx(_ShellTarget(codex_home)))  # type: ignore[arg-type]
 
-    absent = _sh_harness(tmp_path, {"session_id": _OTHER_SID})
+    absent = _sh_harness_integration(tmp_path, {"session_id": _OTHER_SID})
     assert "archived or gone" in absent.start(_op_ctx(_ShellTarget(codex_home)))  # type: ignore[arg-type]
 
 
@@ -556,23 +556,23 @@ def test_sh_rollout_probe_forks_on_a_real_filesystem(codex_home: Path, tmp_path:
 
 def test_launch_note_reports_resume() -> None:
     target = _FakeTarget({_ROLLOUT_PROBE: _FakeResult(0)})
-    harness = _harness()
-    assert harness.launch_note() is None  # nothing decided before the op
-    harness.start(_op_ctx(target))
-    assert harness.launch_note() == "Existing Codex session found. Resuming..."
+    harness_integration = _harness_integration()
+    assert harness_integration.launch_note() is None  # nothing decided before the op
+    harness_integration.start(_op_ctx(target))
+    assert harness_integration.launch_note() == "Existing Codex session found. Resuming..."
 
 
 def test_launch_note_reports_fresh_start() -> None:
-    harness = _harness(state={})
-    harness.start(_op_ctx(_FakeTarget()))
-    assert harness.launch_note() == "No existing Codex session. Starting a new one..."
+    harness_integration = _harness_integration(state={})
+    harness_integration.start(_op_ctx(_FakeTarget()))
+    assert harness_integration.launch_note() == "No existing Codex session. Starting a new one..."
 
 
 def test_launch_note_reports_adoption() -> None:
     target = _FakeTarget({_DISCOVERY_PROBE: _FakeResult(0, stdout=f"{_ROLLOUT}\n")})
-    harness = _harness(state={"discovery_marker": _ANCHOR})
-    harness.start(_op_ctx(target))
-    note = harness.launch_note()
+    harness_integration = _harness_integration(state={"discovery_marker": _ANCHOR})
+    harness_integration.start(_op_ctx(target))
+    note = harness_integration.launch_note()
     assert note is not None
     assert note.startswith("Discovered the Codex session from the previous launch")
     # The adoption is heuristic and the note must say so (PR 360 review).
@@ -582,9 +582,9 @@ def test_launch_note_reports_adoption() -> None:
 
 def test_launch_note_reports_the_stale_id_drop() -> None:
     target = _FakeTarget({_ROLLOUT_PROBE: _FakeResult(1)})
-    harness = _harness(state={"session_id": _SID})
-    harness.start(_op_ctx(target))
-    assert harness.launch_note() == ("Previous Codex session is archived or gone. Starting a new one...")
+    harness_integration = _harness_integration(state={"session_id": _SID})
+    harness_integration.start(_op_ctx(target))
+    assert harness_integration.launch_note() == ("Previous Codex session is archived or gone. Starting a new one...")
 
 
 # -- the managed flags and extra_args ----------------------------------------
@@ -592,7 +592,7 @@ def test_launch_note_reports_the_stale_id_drop() -> None:
 
 def test_config_fields_map_to_their_short_flags() -> None:
     target = _FakeTarget({_ROLLOUT_PROBE: _FakeResult(0)})
-    command = _harness(
+    command = _harness_integration(
         {
             "model": "gpt-5",
             "sandbox": "workspace-write",
@@ -611,18 +611,18 @@ def test_strict_config_is_emitted_by_default_on_both_paths() -> None:
     on by default: codex-owned key drift (the network -c override) fails
     loudly at startup instead of being silently ignored."""
     resume_target = _FakeTarget({_ROLLOUT_PROBE: _FakeResult(0)})
-    assert "--strict-config" in _harness().start(_op_ctx(resume_target))
-    fresh = _harness(state={}).start(_op_ctx(_FakeTarget()))
+    assert "--strict-config" in _harness_integration().start(_op_ctx(resume_target))
+    fresh = _harness_integration(state={}).start(_op_ctx(_FakeTarget()))
     assert "--strict-config" in fresh
 
 
 def test_disable_strict_config_suppresses_the_flag_on_both_paths() -> None:
     resume_target = _FakeTarget({_ROLLOUT_PROBE: _FakeResult(0)})
-    command = _harness({"disable_strict_config": True}).start(_op_ctx(resume_target))
+    command = _harness_integration({"disable_strict_config": True}).start(_op_ctx(resume_target))
     assert "--strict-config" not in command
     # Fresh path: with strict suppressed and no other config, the inner
     # command ends at the bare exec again (the pre-strict-default shape).
-    fresh = _harness({"disable_strict_config": True}, state={}).start(_op_ctx(_FakeTarget()))
+    fresh = _harness_integration({"disable_strict_config": True}, state={}).start(_op_ctx(_FakeTarget()))
     assert shlex.split(fresh)[2].endswith("exec codex")
 
 
@@ -630,17 +630,17 @@ def test_network_forwards_both_directions_to_the_config_key() -> None:
     """`true` AND `false` forward explicitly (false overrides a profile
     or config.toml that enabled network access); absent emits nothing."""
     target = _FakeTarget({_ROLLOUT_PROBE: _FakeResult(0)})
-    on = _harness({"network": True}).start(_op_ctx(target))
+    on = _harness_integration({"network": True}).start(_op_ctx(target))
     assert "-c sandbox_workspace_write.network_access=true" in on
-    off = _harness({"network": False}).start(_op_ctx(target))
+    off = _harness_integration({"network": False}).start(_op_ctx(target))
     assert "-c sandbox_workspace_write.network_access=false" in off
-    absent = _harness().start(_op_ctx(target))
+    absent = _harness_integration().start(_op_ctx(target))
     assert "network_access" not in absent
 
 
 def test_writable_dirs_emit_one_add_dir_each_in_order_and_quoted() -> None:
     target = _FakeTarget({_ROLLOUT_PROBE: _FakeResult(0)})
-    command = _harness({"writable_dirs": ["/srv/cache", "/data/shared dir"]}).start(_op_ctx(target))
+    command = _harness_integration({"writable_dirs": ["/srv/cache", "/data/shared dir"]}).start(_op_ctx(target))
     assert "--add-dir /srv/cache" in command
     # Peel the sh -c nesting: the spaced dir must survive as ONE argv token.
     inner_tokens = shlex.split(shlex.split(command)[2])
@@ -654,8 +654,8 @@ def test_writable_dirs_emit_one_add_dir_each_in_order_and_quoted() -> None:
 
 def test_web_search_true_emits_search_and_false_emits_nothing() -> None:
     target = _FakeTarget({_ROLLOUT_PROBE: _FakeResult(0)})
-    assert "--search" in _harness({"web_search": True}).start(_op_ctx(target))
-    assert "--search" not in _harness({"web_search": False}).start(_op_ctx(target))
+    assert "--search" in _harness_integration({"web_search": True}).start(_op_ctx(target))
+    assert "--search" not in _harness_integration({"web_search": False}).start(_op_ctx(target))
 
 
 def test_new_fields_reject_wrong_types() -> None:
@@ -667,14 +667,14 @@ def test_new_fields_reject_wrong_types() -> None:
         ("writable_dirs", [1, 2]),
     ):
         with pytest.raises(ConfigError, match=field):
-            CodexHarness.validate("session-template/t", {field: bad})
+            CodexIntegration.validate("session-template/t", {field: bad})
 
 
 def test_merge_config_unions_writable_dirs_and_child_wins_the_rest() -> None:
     """`writable_dirs` is an additive grant list (like shell's
     required_commands): a child adding one dir must not drop the
     parent's. Scalars/bools and extra_args child-win."""
-    merged = CodexHarness.merge_config(
+    merged = CodexIntegration.merge_config(
         {"writable_dirs": ["/srv/a"], "network": True, "extra_args": ["--x"]},
         {"writable_dirs": ["/srv/b", "/srv/a"], "network": False, "extra_args": ["--y"]},
     )
@@ -688,15 +688,15 @@ def test_merge_config_never_launders_an_invalid_writable_dirs_entry() -> None:
     the final validate), so a mixed valid/invalid list must survive the
     merge un-filtered for validate to reject; silently dropping the bad
     entry would produce a valid-looking blob that validate passes."""
-    merged = CodexHarness.merge_config({}, {"writable_dirs": ["/srv/a", 5]})
+    merged = CodexIntegration.merge_config({}, {"writable_dirs": ["/srv/a", 5]})
     assert merged["writable_dirs"] == ["/srv/a", 5]
     with pytest.raises(ConfigError, match="writable_dirs"):
-        CodexHarness.validate("session-template/t", merged)
+        CodexIntegration.validate("session-template/t", merged)
 
 
 def test_extra_args_appended_verbatim_last_and_quoted() -> None:
     target = _FakeTarget({_ROLLOUT_PROBE: _FakeResult(0)})
-    command = _harness(
+    command = _harness_integration(
         {"model": "gpt-5", "network": True, "web_search": True, "extra_args": ["--foo", "bar baz"]}
     ).start(_op_ctx(target))
     # One argv token stays one token: "bar baz" is quoted, not re-split.
@@ -714,7 +714,7 @@ def test_extra_args_with_shell_metacharacters_cannot_inject() -> None:
     into one inert argv token, never shell-active."""
     payload = "a'; touch /tmp/pwned #"
     target = _FakeTarget({_ROLLOUT_PROBE: _FakeResult(0)})
-    command = _harness({"extra_args": ["-c", payload]}).start(_op_ctx(target))
+    command = _harness_integration({"extra_args": ["-c", payload]}).start(_op_ctx(target))
 
     # The command is `sh -c '<inner>'`; the payload is nested-quoted (once
     # into the argv, once into the sh -c wrapper). Peeling both quoting
@@ -736,7 +736,7 @@ def test_fresh_string_is_a_single_sh_c_that_echoes_touches_then_execs() -> None:
     exec codex with NO positional prompt (no wrapper-authored turn ever
     appears in the conversation)."""
     state: dict[str, object] = {}
-    command = _harness(state=state).start(_op_ctx(_FakeTarget()))
+    command = _harness_integration(state=state).start(_op_ctx(_FakeTarget()))
     assert command.startswith("sh -c ")
     assert "echo " in command
     inner = shlex.split(command)[2]
@@ -749,7 +749,7 @@ def test_fresh_string_is_a_single_sh_c_that_echoes_touches_then_execs() -> None:
 
 def test_resume_string_is_a_single_sh_c_that_echoes_then_execs() -> None:
     target = _FakeTarget({_ROLLOUT_PROBE: _FakeResult(0)})
-    command = _harness().start(_op_ctx(target))
+    command = _harness_integration().start(_op_ctx(target))
     assert command.startswith("sh -c ")
     assert "echo " in command
     assert f"exec codex resume {_SID} -c tui.resume_cwd=current" in command
@@ -763,17 +763,17 @@ def test_generated_pieces_carry_no_template_var_tokens() -> None:
     resume = _FakeTarget({_ROLLOUT_PROBE: _FakeResult(0)})
     adopt = _FakeTarget({_DISCOVERY_PROBE: _FakeResult(0, stdout=f"{_ROLLOUT}\n")})
     stale = _FakeTarget({_ROLLOUT_PROBE: _FakeResult(1)})
-    assert "{{" not in _harness(state={}).start(_op_ctx(_FakeTarget()))
-    assert "{{" not in _harness().start(_op_ctx(resume))
-    assert "{{" not in _harness(state={"discovery_marker": _ANCHOR}).start(_op_ctx(adopt))
-    assert "{{" not in _harness(state={"session_id": _SID}).start(_op_ctx(stale))
+    assert "{{" not in _harness_integration(state={}).start(_op_ctx(_FakeTarget()))
+    assert "{{" not in _harness_integration().start(_op_ctx(resume))
+    assert "{{" not in _harness_integration(state={"discovery_marker": _ANCHOR}).start(_op_ctx(adopt))
+    assert "{{" not in _harness_integration(state={"session_id": _SID}).start(_op_ctx(stale))
 
 
 def test_session_name_needing_quotes_stays_one_marker_path_word() -> None:
     """The session name lands in the marker path; a name needing quoting
     is ``shlex.quote``d into the path token rather than splitting it."""
     state: dict[str, object] = {}
-    command = _harness(state=state, session_name="s one").start(_op_ctx(_FakeTarget()))
+    command = _harness_integration(state=state, session_name="s one").start(_op_ctx(_FakeTarget()))
     inner = shlex.split(command)[2]
     anchor = state["discovery_marker"]
     assert isinstance(anchor, str)
@@ -784,15 +784,15 @@ def test_session_name_needing_quotes_stays_one_marker_path_word() -> None:
 
 
 def test_readiness_probes_codex() -> None:
-    harness = _harness()
+    harness_integration = _harness_integration()
     target = _FakeTarget()  # command -v codex -> default ok
-    harness.preflight(RunContext(operation_scope=_session_scope(), admin_target=target))
+    harness_integration.preflight(RunContext(operation_scope=_session_scope(), admin_target=target))
     assert any("command -v codex" in cmd for cmd in target.commands)
 
 
 def test_readiness_missing_codex_is_a_typed_error() -> None:
-    harness = _harness()
+    harness_integration = _harness_integration()
     target = _FakeTarget({"command -v codex": _FakeResult(1)})
     ctx = RunContext(operation_scope=_session_scope(), admin_target=target)
-    with pytest.raises(StateError, match="'codex' harness.*requires 'codex'"):
-        harness.preflight(ctx)
+    with pytest.raises(StateError, match="'codex' harness integration.*requires 'codex'"):
+        harness_integration.preflight(ctx)

@@ -398,13 +398,13 @@ def console_target_factory(monkeypatch: pytest.MonkeyPatch):  # noqa: ANN201 - r
 class _StubSessionTemplate:
     """Minimal stand-in for ``ResolvedSessionTemplate`` used by the helper below.
 
-    Carries the ``(harness, harness_config)`` pair the session-node
-    factory builds the harness from: the default is the ``shell`` harness
-    with an empty config (a plain login shell)."""
+    Carries the ``(harness_integration, harness_integration_config)`` pair the
+    session-node factory builds the harness integration from: the default is
+    the ``shell`` integration with an empty config (a plain login shell)."""
 
     name = "default"
-    harness = "shell"
-    harness_config: dict[str, object] = {}  # noqa: RUF012 - mutable class attr is fine for a stub
+    harness_integration = "shell"
+    harness_integration_config: dict[str, object] = {}  # noqa: RUF012 - mutable class attr is fine for a stub
     env: dict[str, str] = {}  # noqa: RUF012 - mutable class attr is fine for a stub
 
 
@@ -593,8 +593,8 @@ class _StubGraph:
     def enablement_of(self, kind: str, name: str):  # noqa: ANN201 - mirrors DependencyGraph
         # Every node is enabled in the stub (no plugin opt-out producer here),
         # matching the real graph's every-node-is-enabled default. The session
-        # harness gate (``ensure_harness_enabled``) reads this at the build
-        # sites; a built-in harness (``shell``) stays enabled, so the gate is a
+        # harness integration gate (``ensure_harness_integration_enabled``) reads this at
+        # the build sites; a built-in harness integration (``shell``) stays enabled, so the gate is a
         # no-op under the stub.
         from agentworks.resources.graph import Enablement
 

@@ -37,7 +37,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from agentworks.capabilities.git_credential.base import GitCredentialProvider
-    from agentworks.capabilities.harness.base import Harness
+    from agentworks.capabilities.harness_integration.base import HarnessIntegration
     from agentworks.capabilities.vm_platform.base import VMPlatform
     from agentworks.resources.origin import Origin
     from agentworks.secrets.backends import SecretBackend
@@ -116,13 +116,13 @@ class _VMPlatformAdapter:
         return VMPlatformEntry(name=name, description=seated.description, origin=origin)
 
 
-class _HarnessAdapter:
+class _HarnessIntegrationAdapter:
     kind = "harness-integration"
 
     def peek(self, name: str) -> object | None:
-        from agentworks.capabilities.harness import HARNESS_REGISTRY
+        from agentworks.capabilities.harness_integration import HARNESS_INTEGRATION_REGISTRY
 
-        return HARNESS_REGISTRY.get(name)
+        return HARNESS_INTEGRATION_REGISTRY.get(name)
 
     def matches(self, occupant: object, impl_cls: type) -> bool:
         return occupant is impl_cls
@@ -131,17 +131,17 @@ class _HarnessAdapter:
         return impl_cls
 
     def seat(self, name: str, payload: object) -> None:
-        from agentworks.capabilities.harness import HARNESS_REGISTRY
+        from agentworks.capabilities.harness_integration import HARNESS_INTEGRATION_REGISTRY
 
-        HARNESS_REGISTRY[name] = cast("type[Harness]", payload)
+        HARNESS_INTEGRATION_REGISTRY[name] = cast("type[HarnessIntegration]", payload)
 
     def build_row(self, name: str, origin: Origin) -> Any:
-        from agentworks.capabilities.harness import HARNESS_REGISTRY
-        from agentworks.capabilities.harness.kinds import HarnessEntry
+        from agentworks.capabilities.harness_integration import HARNESS_INTEGRATION_REGISTRY
+        from agentworks.capabilities.harness_integration.kinds import HarnessIntegrationEntry
 
-        if HARNESS_REGISTRY.get(name) is None:
+        if HARNESS_INTEGRATION_REGISTRY.get(name) is None:
             raise StateError(_unseated_message(self.kind, name))
-        return HarnessEntry(name=name, origin=origin)
+        return HarnessIntegrationEntry(name=name, origin=origin)
 
 
 class _GitCredentialProviderAdapter:
@@ -217,7 +217,7 @@ def _unseated_message(kind: str, name: str) -> str:
 
 CAPABILITY_ADAPTERS: Mapping[str, CapabilityAdapter] = {
     "vm-platform": _VMPlatformAdapter(),
-    "harness-integration": _HarnessAdapter(),
+    "harness-integration": _HarnessIntegrationAdapter(),
     "git-credential-provider": _GitCredentialProviderAdapter(),
     "secret-backend": _SecretBackendAdapter(),
 }

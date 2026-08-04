@@ -53,21 +53,21 @@ Landing this half-done has no value, so all sub-steps ship together.
       inheritance; `agw resource migrate` rewrites old YAML and TOML. Existing YAML migration
       requires a new atomic in-place rewrite path; preserve rollback behavior and registry
       equivalence.
-- [ ] **1d Identifier sweep.** Rename the package `capabilities/harness/` ->
+- [x] **1d Identifier sweep.** Rename the package `capabilities/harness/` ->
       `capabilities/harness_integration/`, the plugin `harness.py` modules ->
       `harness_integration.py`, the classes and registry/accessors per HLA section 1, and the
       threaded variables/params/comments. DoD: `ruff`, `mypy`, and the full suite pass; no import of
       the old module path remains.
-- [ ] **1e CLI-visible text.** Update the list column, the describe label
+- [x] **1e CLI-visible text.** Update the list column, the describe label
       (`sessions/manager/_queries.py:352,481`, `_env.py`), and the operator-facing error/hint
       strings (`capabilities/harness/__init__.py:74,105-109`) to the new name. DoD: list/describe
       tests assert the new header/label; no canonical output says "harness" for the mechanism.
-- [ ] **1f Built-in manifests + samples.** Update the shipped claude/codex `session-templates.yaml`
+- [x] **1f Built-in manifests + samples.** Update the shipped claude/codex `session-templates.yaml`
       and `manifests/samples/session-template.yaml` to the new `harness_integration:` selector;
       verify rather than edit agent-template manifests that contain no selector. DoD: the six
       example session-templates load present-but-disabled and validate;
       `resource sample session-template` emits the new key; live parity test passes.
-- [ ] **1g Docs + files/dirs.** Move and update the capability README under the new package dir;
+- [x] **1g Docs + files/dirs.** Move and update the capability README under the new package dir;
       update `capabilities/README.md`, `cli/README.md`, `sample-config.toml`,
       `docs/guides/resources.md`, ADR 0020, plugin-author docs, completions, and diagrams as needed.
       Leave historical `CHANGELOG.md` entries; touch the root README only for mechanism-sense usages

@@ -82,7 +82,7 @@ from agentworks.config.loaders_secrets import (
 from agentworks.config.loaders_sessions import (
     _load_session_config,
     _load_session_templates,
-    _session_harness_pair,
+    _session_harness_integration_pair,
 )
 from agentworks.config.models import (
     Config,
@@ -161,7 +161,7 @@ __all__ = [
     "_parse_env_table",
     "_require",
     "_require_string_list",
-    "_session_harness_pair",
+    "_session_harness_integration_pair",
     "_warn_deprecated_resource_sections",
     "_warn_unexpected_keys",
     "_warn_unexpected_top_level_keys",

@@ -1,4 +1,4 @@
-"""The ``shell`` harness and the shared ``Harness`` readiness base.
+"""The ``shell`` harness and the shared ``HarnessIntegration`` readiness base.
 
 Covers the config vocabulary (validate/merge), the ops (start/restart
 pane strings), the relocated required-commands probe, the SESSION-level
@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.capabilities.base import OperationScope, RunContext, ScopeLevel
-from agentworks.capabilities.harness import ShellHarness
+from agentworks.capabilities.harness_integration import ShellIntegration
 from agentworks.errors import ConfigError, StateError
 
 if TYPE_CHECKING:
@@ -34,7 +34,7 @@ class _Probe:
         return SimpleNamespace(ok=ok)
 
 
-def _harness(
+def _harness_integration(
     config: Mapping[str, object] | None = None,
     *,
     session_name: str = "s1",
@@ -43,8 +43,8 @@ def _harness(
     target: object | None = None,
     admin: bool = True,
     state: dict[str, object] | None = None,
-) -> ShellHarness:
-    return ShellHarness(
+) -> ShellIntegration:
+    return ShellIntegration(
         "claude",
         config or {},
         session_name=session_name,
@@ -82,7 +82,7 @@ def test_dependencies_imply_no_reference() -> None:
     """``shell`` implies no edge, and ``dependencies`` is total: it
     returns ``()`` for the known fields and even for a malformed blob."""
     assert (
-        ShellHarness.dependencies(
+        ShellIntegration.dependencies(
             "session-template/claude",
             {
                 "command": "claude",
@@ -93,12 +93,12 @@ def test_dependencies_imply_no_reference() -> None:
         == ()
     )
     # Never raises, even on config that ``validate`` would reject.
-    assert ShellHarness.dependencies("session-template/claude", {"commnad": "typo", "command": 3}) == ()
+    assert ShellIntegration.dependencies("session-template/claude", {"commnad": "typo", "command": 3}) == ()
 
 
 def test_validate_accepts_the_known_fields_and_empty_config() -> None:
     assert (
-        ShellHarness.validate(
+        ShellIntegration.validate(
             "session-template/claude",
             {
                 "command": "claude",
@@ -108,41 +108,41 @@ def test_validate_accepts_the_known_fields_and_empty_config() -> None:
         )
         is None
     )
-    assert ShellHarness.validate("session-template/claude", {}) is None
+    assert ShellIntegration.validate("session-template/claude", {}) is None
 
 
 def test_shell_launch_note_is_silent() -> None:
     # shell has no resume-vs-new notion, so it adds no op-output note.
-    assert _harness().launch_note() is None
+    assert _harness_integration().launch_note() is None
 
 
 def test_validate_rejects_unknown_field() -> None:
-    with pytest.raises(ConfigError, match="unknown shell harness field"):
-        ShellHarness.validate("session-template/claude", {"commnad": "typo"})
+    with pytest.raises(ConfigError, match="unknown shell harness integration field"):
+        ShellIntegration.validate("session-template/claude", {"commnad": "typo"})
 
 
 def test_validate_rejects_non_string_command() -> None:
     with pytest.raises(ConfigError, match="command must be a string"):
-        ShellHarness.validate("session-template/claude", {"command": 3})
+        ShellIntegration.validate("session-template/claude", {"command": 3})
 
 
 def test_validate_rejects_non_string_required_commands() -> None:
     with pytest.raises(ConfigError, match="required_commands must be a list"):
-        ShellHarness.validate("session-template/claude", {"required_commands": [1, 2]})
+        ShellIntegration.validate("session-template/claude", {"required_commands": [1, 2]})
 
 
 def test_construct_revalidates_config() -> None:
     """A shape error dies at construction (the base re-runs
     validate)."""
-    with pytest.raises(ConfigError, match="unknown shell harness field"):
-        _harness({"nope": 1})
+    with pytest.raises(ConfigError, match="unknown shell harness integration field"):
+        _harness_integration({"nope": 1})
 
 
 # -- config vocabulary: merge_config -----------------------------------------
 
 
 def test_merge_child_wins_the_scalars() -> None:
-    merged = ShellHarness.merge_config(
+    merged = ShellIntegration.merge_config(
         {"command": "parent", "restart_command": "parent-r"},
         {"command": "child"},
     )
@@ -151,7 +151,7 @@ def test_merge_child_wins_the_scalars() -> None:
 
 
 def test_merge_unions_required_commands_append_dedupe() -> None:
-    merged = ShellHarness.merge_config(
+    merged = ShellIntegration.merge_config(
         {"required_commands": ["claude", "rg"]},
         {"required_commands": ["rg", "fd"]},
     )
@@ -163,16 +163,16 @@ def test_merge_never_launders_an_invalid_required_commands_entry() -> None:
     the final validate), so a mixed valid/invalid list must survive the
     merge un-filtered for validate to reject; silently dropping the bad
     entry would produce a valid-looking blob that validate passes."""
-    merged = ShellHarness.merge_config({}, {"required_commands": ["rg", 5]})
+    merged = ShellIntegration.merge_config({}, {"required_commands": ["rg", 5]})
     assert merged["required_commands"] == ["rg", 5]
     with pytest.raises(ConfigError, match="required_commands"):
-        ShellHarness.validate("session-template/t", merged)
+        ShellIntegration.validate("session-template/t", merged)
 
 
 def test_merge_child_overriding_only_command_keeps_parent_required() -> None:
     """The reason for the union override: a child that overrides only
     ``command`` must not silently drop the parent's required commands."""
-    merged = ShellHarness.merge_config(
+    merged = ShellIntegration.merge_config(
         {"command": "parent", "required_commands": ["claude"]},
         {"command": "child"},
     )
@@ -181,7 +181,7 @@ def test_merge_child_overriding_only_command_keeps_parent_required() -> None:
 
 
 def test_merge_default_shape_when_neither_declares_required() -> None:
-    merged = ShellHarness.merge_config({"command": "a"}, {"command": "b"})
+    merged = ShellIntegration.merge_config({"command": "a"}, {"command": "b"})
     assert "required_commands" not in merged
 
 
@@ -189,66 +189,66 @@ def test_merge_default_shape_when_neither_declares_required() -> None:
 
 
 def test_start_returns_the_command() -> None:
-    assert _harness({"command": "claude"}).start(RunContext()) == "claude"
+    assert _harness_integration({"command": "claude"}).start(RunContext()) == "claude"
 
 
 def test_start_empty_config_is_a_login_shell() -> None:
-    assert _harness({}).start(RunContext()) == ""
+    assert _harness_integration({}).start(RunContext()) == ""
 
 
 def test_restart_prefers_restart_command() -> None:
-    harness = _harness({"command": "claude", "restart_command": "claude --resume"})
-    assert harness.restart(RunContext()) == "claude --resume"
+    harness_integration = _harness_integration({"command": "claude", "restart_command": "claude --resume"})
+    assert harness_integration.restart(RunContext()) == "claude --resume"
 
 
 def test_restart_falls_back_to_command() -> None:
-    assert _harness({"command": "claude"}).restart(RunContext()) == "claude"
+    assert _harness_integration({"command": "claude"}).restart(RunContext()) == "claude"
 
 
 def test_restart_empty_config_is_a_login_shell() -> None:
-    assert _harness({}).restart(RunContext()) == ""
+    assert _harness_integration({}).restart(RunContext()) == ""
 
 
 def test_shell_leaves_the_state_blob_untouched() -> None:
     """``shell`` keeps no per-session state: the blob it is handed stays
     ``{}`` across both ops, so the manager persists nothing for it."""
     state: dict[str, object] = {}
-    harness = _harness({"command": "claude"}, state=state)
-    harness.start(RunContext())
-    harness.restart(RunContext())
+    harness_integration = _harness_integration({"command": "claude"}, state=state)
+    harness_integration.start(RunContext())
+    harness_integration.restart(RunContext())
     assert state == {}
-    assert harness.state == {}
+    assert harness_integration.state == {}
 
 
 # -- the readiness probe (shared require_commands) ---------------------------
 
 
 def test_probe_fires_once_and_checks_every_required_command() -> None:
-    harness = _harness({"required_commands": ["claude", "rg"]})
+    harness_integration = _harness_integration({"required_commands": ["claude", "rg"]})
     probe = _Probe()
     scope = _session_scope()
     ctx = RunContext(operation_scope=scope, admin_target=probe)
 
-    harness.preflight(ctx)
+    harness_integration.preflight(ctx)
     assert len(probe.commands) == 2  # one probe per required command
-    harness.runup(ctx)
+    harness_integration.runup(ctx)
     assert len(probe.commands) == 2  # single-fire guard: not re-probed
 
 
 def test_missing_command_is_a_typed_error_naming_the_vm() -> None:
-    harness = _harness({"required_commands": ["claude", "rg"]})
+    harness_integration = _harness_integration({"required_commands": ["claude", "rg"]})
     probe = _Probe(missing={"rg"})
     ctx = RunContext(operation_scope=_session_scope(), admin_target=probe)
 
     with pytest.raises(StateError, match="requires 'rg'") as exc:
-        harness.preflight(ctx)
+        harness_integration.preflight(ctx)
     assert "for VM 'box'." in str(exc.value)
     assert "--template" in (exc.value.hint or "")
 
 
 def test_agent_mode_defers_pending_target_then_probes_after_flip() -> None:
     target = SimpleNamespace(name="dev", realized=False)
-    harness = _harness(
+    harness_integration = _harness_integration(
         {"required_commands": ["claude"]},
         target=target,
         admin=False,
@@ -257,24 +257,24 @@ def test_agent_mode_defers_pending_target_then_probes_after_flip() -> None:
     scope = _session_scope(agent="dev", admin=False)
     ctx = RunContext(operation_scope=scope, agent_target=probe)
 
-    harness.preflight(ctx)
+    harness_integration.preflight(ctx)
     assert probe.commands == []  # pending target: deferred
 
     target.realized = True
-    harness.runup(ctx)
+    harness_integration.runup(ctx)
     assert len(probe.commands) == 1  # probed once, post-flip
 
 
 def test_agent_mode_missing_command_names_the_agent() -> None:
     target = SimpleNamespace(name="dev", realized=True)
-    harness = _harness({"required_commands": ["claude"]}, target=target, admin=False)
+    harness_integration = _harness_integration({"required_commands": ["claude"]}, target=target, admin=False)
     probe = _Probe(missing={"claude"})
     ctx = RunContext(
         operation_scope=_session_scope(agent="dev", admin=False),
         agent_target=probe,
     )
     with pytest.raises(StateError, match="requires 'claude'") as exc:
-        harness.preflight(ctx)
+        harness_integration.preflight(ctx)
     assert "agent 'dev'" in str(exc.value)
 
 
@@ -284,15 +284,15 @@ def test_agent_mode_missing_command_names_the_agent() -> None:
 def test_system_level_scan_skips() -> None:
     """Out of scope for the level: no probe, no raise, even with no
     target at all."""
-    harness = _harness({"required_commands": ["claude"]})
-    harness.preflight(RunContext(operation_scope=OperationScope(level=ScopeLevel.SYSTEM)))
-    harness.runup(RunContext(operation_scope=OperationScope(level=ScopeLevel.SYSTEM)))
+    harness_integration = _harness_integration({"required_commands": ["claude"]})
+    harness_integration.preflight(RunContext(operation_scope=OperationScope(level=ScopeLevel.SYSTEM)))
+    harness_integration.runup(RunContext(operation_scope=OperationScope(level=ScopeLevel.SYSTEM)))
 
 
 def test_scope_less_context_is_a_loud_error() -> None:
-    harness = _harness({"required_commands": ["claude"]})
+    harness_integration = _harness_integration({"required_commands": ["claude"]})
     with pytest.raises(StateError, match="no operation scope"):
-        harness.preflight(RunContext())
+        harness_integration.preflight(RunContext())
 
 
 def test_agent_mode_absent_target_is_a_loud_error() -> None:
@@ -301,60 +301,60 @@ def test_agent_mode_absent_target_is_a_loud_error() -> None:
     identity guard (null-safe on ``self._target``) catches the mis-wiring
     first; step 6's own ``refusing to skip`` branch is the same-intent
     backstop for a target that goes absent behind a matching scope."""
-    harness = _harness({"required_commands": ["claude"]}, target=None, admin=False)
+    harness_integration = _harness_integration({"required_commands": ["claude"]}, target=None, admin=False)
     ctx = RunContext(operation_scope=_session_scope(agent="dev", admin=False))
     with pytest.raises(StateError, match="runs as agent None"):
-        harness.preflight(ctx)
+        harness_integration.preflight(ctx)
 
 
 def test_missing_transport_defers_at_preflight_and_is_loud_at_runup() -> None:
-    harness = _harness({"required_commands": ["claude"]})
+    harness_integration = _harness_integration({"required_commands": ["claude"]})
     ctx = RunContext(operation_scope=_session_scope())  # no admin_target
-    harness.preflight(ctx)  # deferred, no raise
+    harness_integration.preflight(ctx)  # deferred, no raise
     with pytest.raises(StateError, match="op-start context"):
-        harness.runup(ctx)
+        harness_integration.runup(ctx)
 
 
 # -- the SESSION-level identity guard ----------------------------------------
 
 
 def test_identity_guard_raises_on_vm_mismatch() -> None:
-    harness = _harness({"required_commands": ["claude"]}, vm_name="box")
+    harness_integration = _harness_integration({"required_commands": ["claude"]}, vm_name="box")
     probe = _Probe()
     ctx = RunContext(operation_scope=_session_scope(vm="other-box"), admin_target=probe)
     with pytest.raises(StateError, match="wired for VM 'box'") as exc:
-        harness.preflight(ctx)
+        harness_integration.preflight(ctx)
     assert exc.value.entity_name == "s1"
     assert probe.commands == []  # never reached the probe
 
 
 def test_identity_guard_raises_on_agent_mismatch() -> None:
     target = SimpleNamespace(name="dev", realized=True)
-    harness = _harness({"required_commands": ["claude"]}, target=target, admin=False)
+    harness_integration = _harness_integration({"required_commands": ["claude"]}, target=target, admin=False)
     ctx = RunContext(
         operation_scope=_session_scope(agent="someone-else", admin=False),
         agent_target=_Probe(),
     )
     with pytest.raises(StateError, match="runs as agent 'dev'"):
-        harness.preflight(ctx)
+        harness_integration.preflight(ctx)
 
 
 def test_identity_guard_raises_on_mode_mismatch() -> None:
     """Admin-wired harness handed an agent-mode scope."""
-    harness = _harness({"required_commands": ["claude"]}, admin=True)
+    harness_integration = _harness_integration({"required_commands": ["claude"]}, admin=True)
     ctx = RunContext(
         operation_scope=_session_scope(agent="dev", admin=False),
         admin_target=_Probe(),
     )
     with pytest.raises(StateError, match="admin"):
-        harness.preflight(ctx)
+        harness_integration.preflight(ctx)
 
 
 def test_identity_guard_passes_the_matching_scope() -> None:
-    harness = _harness({"required_commands": ["claude"]})
+    harness_integration = _harness_integration({"required_commands": ["claude"]})
     probe = _Probe()
     ctx = RunContext(operation_scope=_session_scope(), admin_target=probe)
-    harness.preflight(ctx)  # matching identity: no raise
+    harness_integration.preflight(ctx)  # matching identity: no raise
     assert len(probe.commands) == 1
 
 
@@ -374,7 +374,7 @@ def test_capability_imports_neither_sessions_nor_orchestration() -> None:
     import sys
 
     probe = (
-        "import agentworks.capabilities.harness\n"
+        "import agentworks.capabilities.harness_integration\n"
         "import sys\n"
         "leaked = sorted(\n"
         "    m for m in sys.modules\n"

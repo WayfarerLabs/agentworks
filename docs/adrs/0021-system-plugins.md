@@ -11,12 +11,12 @@ enablement a produced axis. The authoring model and the operator-facing behavior
 
 ## Context
 
-Agentworks ships capability implementations (VM platforms, harnesses, git-credential providers,
-secret backends) and bundled resource manifests baked into the core. Some of these are separable:
-they belong to one backend or vendor, not every install wants them loaded, and a later effort will
-distribute them from outside the core tree. We needed a model for "a bundle of capability
-implementations and manifests that ships with agentworks but is separable and opt-in" without
-reopening the resource model.
+Agentworks ships capability implementations (VM platforms, harness integrations, git-credential
+providers, secret backends) and bundled resource manifests baked into the core. Some of these are
+separable: they belong to one backend or vendor, not every install wants them loaded, and a later
+effort will distribute them from outside the core tree. We needed a model for "a bundle of
+capability implementations and manifests that ships with agentworks but is separable and opt-in"
+without reopening the resource model.
 
 Three questions had to be answered coherently:
 
@@ -118,13 +118,13 @@ completes with a summary.
   strict-versus-lenient question is settled for future config sections rather than re-litigated per
   section.
 - The model is proven, not just built: four world-specific bundles were migrated out of the core
-  into shipped plugins in the same effort, `onepassword` (secret-backend), `claude` (harness + the
-  `claude` install-command), `proxmox` (vm-platform), and `azure` (the `azure-vm` platform, the
-  `azdo` git-credential provider, and the `az-cli` install-command). Together they exercise all four
-  capability kinds and the bundled-manifest path against their real consumers, and they establish
-  the migration pattern (impl `git mv` into the plugin package; the core `publish_to` skips the
-  plugin-seated name so it is published once with a `system-plugin` origin, not twice). The core
-  keeps only the universal path (`lima`/`wsl2`, `shell`, `env-var`/`prompt`, `github`).
+  into shipped plugins in the same effort, `onepassword` (secret-backend), `claude` (harness
+  integration + the `claude` install-command), `proxmox` (vm-platform), and `azure` (the `azure-vm`
+  platform, the `azdo` git-credential provider, and the `az-cli` install-command). Together they
+  exercise all four capability kinds and the bundled-manifest path against their real consumers, and
+  they establish the migration pattern (impl `git mv` into the plugin package; the core `publish_to`
+  skips the plugin-seated name so it is published once with a `system-plugin` origin, not twice).
+  The core keeps only the universal path (`lima`/`wsl2`, `shell`, `env-var`/`prompt`, `github`).
 
 ### Negative
 

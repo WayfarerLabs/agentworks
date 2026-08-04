@@ -82,15 +82,17 @@ def _load_session_templates(
                 context=f"session_templates.{name}",
                 issues=issues,
             )
-        harness, harness_config, used_old_selector = _session_harness_pair(name, tdata)
+        harness_integration, harness_integration_config, used_old_selector = _session_harness_integration_pair(
+            name, tdata
+        )
         if used_old_selector and deprecated_harness_selectors is not None:
             deprecated_harness_selectors.append(f"session-template/{name}")
         templates[name] = SessionTemplate(
             name=name,
             inherits=list(tdata.get("inherits", [])),
             description=str(tdata["description"]) if "description" in tdata else None,
-            harness=harness,
-            harness_config=harness_config,
+            harness_integration=harness_integration,
+            harness_integration_config=harness_integration_config,
             env=env,
             declared_at=decls.lookup("session_templates", name),
         )
@@ -102,7 +104,7 @@ def _load_session_templates(
     return templates
 
 
-def _session_harness_pair(
+def _session_harness_integration_pair(
     name: str, tdata: dict[str, object]
 ) -> tuple[str | None, dict[str, object] | None, bool]:
     """Resolve a TOML session-template's ``(harness, harness_config)``
@@ -129,16 +131,16 @@ def _session_harness_pair(
     selector = "harness" if old else "harness_integration"
     config_selector = "harness_config" if old else "harness_integration_config"
     flat_present = [key for key in _SHELL_FLAT_FIELDS if key in tdata]
-    harness_val = tdata.get(selector)
-    if harness_val is not None and not isinstance(harness_val, str):
+    harness_integration_val = tdata.get(selector)
+    if harness_integration_val is not None and not isinstance(harness_integration_val, str):
         raise ConfigError(f"session_templates.{name}.{selector} must be a string")
 
     if flat_present:
-        if harness_val is not None and harness_val != "shell":
+        if harness_integration_val is not None and harness_integration_val != "shell":
             raise ConfigError(
                 f"session_templates.{name}: the legacy field(s) "
-                f"{', '.join(flat_present)} configure the 'shell' harness "
-                f"and cannot combine with harness = {harness_val!r}; put "
+                f"{', '.join(flat_present)} configure the 'shell' harness integration "
+                f"and cannot combine with {selector} = {harness_integration_val!r}; put "
                 f"the workload under [session_templates.{name}.{config_selector}]"
             )
         if config_selector in tdata:
@@ -155,17 +157,17 @@ def _session_harness_pair(
             blob["restart_command"] = str(tdata["restart_command"])
         if "required_commands" in tdata:
             blob["required_commands"] = _require_string_list(tdata, "required_commands", f"session_templates.{name}")
-        harness: str | None = "shell"
-        harness_config: dict[str, object] | None = blob
+        harness_integration: str | None = "shell"
+        harness_integration_config: dict[str, object] | None = blob
     else:
-        harness = harness_val
-        harness_config = None
+        harness_integration = harness_integration_val
+        harness_integration_config = None
         if config_selector in tdata:
             raw_config = tdata[config_selector]
             if not isinstance(raw_config, dict):
                 raise ConfigError(f"session_templates.{name}.{config_selector} must be a table")
-            harness_config = dict(raw_config)
-        if harness is None and harness_config is not None:
+            harness_integration_config = dict(raw_config)
+        if harness_integration is None and harness_integration_config is not None:
             raise ConfigError(
                 f"session_templates.{name}: {config_selector} needs a selector "
                 f'(a blob with no owner); add {selector} = "..."'
@@ -176,4 +178,4 @@ def _session_harness_pair(
     # here: capability validation is decoupled from load (R3). The
     # TOML-shape checks above (flat-vs-nested, blob-needs-harness) stay
     # at load, in the operator's TOML vocabulary.
-    return harness, harness_config, old
+    return harness_integration, harness_integration_config, old

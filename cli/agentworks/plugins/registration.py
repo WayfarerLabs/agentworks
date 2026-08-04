@@ -186,13 +186,13 @@ def _capability_registries() -> tuple[dict[str, Any], ...]:
     snapshot/restore helper. Restore mutates these dicts IN PLACE (clear +
     update) because other modules hold references to them."""
     from agentworks.capabilities.git_credential import GIT_CREDENTIAL_PROVIDER_REGISTRY
-    from agentworks.capabilities.harness import HARNESS_REGISTRY
+    from agentworks.capabilities.harness_integration import HARNESS_INTEGRATION_REGISTRY
     from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
     from agentworks.secrets.backends import SECRET_BACKEND_REGISTRY
 
     return (
         VM_PLATFORM_REGISTRY,
-        HARNESS_REGISTRY,
+        HARNESS_INTEGRATION_REGISTRY,
         GIT_CREDENTIAL_PROVIDER_REGISTRY,
         SECRET_BACKEND_REGISTRY,
     )

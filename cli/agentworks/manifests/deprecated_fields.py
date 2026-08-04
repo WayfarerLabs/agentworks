@@ -44,8 +44,9 @@ class DeprecatedField:
     """One retired-or-relocated spec field and how to react to it.
 
     ``message`` is a fragment that reads naturally after
-    ``"<kind> spec field(s) <names> "`` (e.g. "are the 'shell' harness's
-    config; ..."), so fields that share a message group into one line.
+    ``"<kind> spec field(s) <names> "`` (e.g. "configure the 'shell'
+    harness integration; ..."), so fields that share a message group into
+    one line.
     """
 
     name: str
@@ -59,7 +60,9 @@ class DeprecatedField:
 # of them groups into one line, reproducing the single grouped message
 # the bespoke reject in ``_decode_session_template`` emitted before this
 # facility replaced it.
-_SHELL_FLAT_FIELD_MESSAGE = "are the 'shell' harness's config; move them into a spec.harness table with name: shell"
+_SHELL_FLAT_FIELD_MESSAGE = (
+    "configure the 'shell' harness integration; move them into a spec.harness_integration tagged table with name: shell"
+)
 
 # Per-kind deprecated-field table, keyed by kind string. Seeding a new
 # entry is the whole authoring surface: no code changes elsewhere.

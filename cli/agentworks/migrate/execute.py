@@ -128,9 +128,7 @@ def execute_plan(plan: MigrationPlan, config: Config) -> ExecutionResult:
             raise StateError(
                 f"migration failed and rollback is incomplete: {exc}",
                 hint=(
-                    "Manual recovery is required. "
-                    + " ".join(recovery_failures)
-                    + f" Config backup: {backup_path}."
+                    "Manual recovery is required. " + " ".join(recovery_failures) + f" Config backup: {backup_path}."
                 ),
             ) from exc
         raise

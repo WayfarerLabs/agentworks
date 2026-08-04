@@ -387,9 +387,7 @@ def _has_explicit_stream_marker(text: str, marker: str, *, reverse: bool = False
 def _stream_comments_outside_markers(text: str) -> tuple[str, str]:
     """Extract comments ruamel cannot retain outside explicit stream markers."""
     lines = text.splitlines(keepends=True)
-    non_comment = [
-        index for index, line in enumerate(lines) if line.strip() and not line.lstrip().startswith("#")
-    ]
+    non_comment = [index for index, line in enumerate(lines) if line.strip() and not line.lstrip().startswith("#")]
     start = non_comment[0] if non_comment and lines[non_comment[0]].strip().startswith("---") else None
     end = non_comment[-1] if non_comment and lines[non_comment[-1]].strip().startswith("...") else None
     preamble = "".join(lines[:start]) if start is not None else ""
@@ -799,9 +797,9 @@ def _emit_document(doc: tomlkit.TOMLDocument, unit: MigrationUnit) -> str:
             )
         rebuilt_session.update(spec)  # env and any remaining kind-owned keys
         if isinstance(harness, str) and harness_config is not None:
-            from agentworks.capabilities.harness import HARNESS_REGISTRY
+            from agentworks.capabilities.harness_integration import HARNESS_INTEGRATION_REGISTRY
 
-            harness_cap = HARNESS_REGISTRY.get(harness)
+            harness_cap = HARNESS_INTEGRATION_REGISTRY.get(harness)
             if harness_cap is not None:
                 try:
                     harness_cap.validate(f"session-template/{unit.name}", harness_config)

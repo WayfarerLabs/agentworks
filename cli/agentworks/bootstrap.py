@@ -57,7 +57,8 @@ def build_registry(config: Config, manifests: ManifestSet | None = None) -> Regi
     operator publishers (the deprecated TOML surface for those two kinds;
     they follow the bundled manifests, which now supply the built-in
     apt/install-command entries), then the built-in capability rows
-    (``git_credential``, ``harness``, ``secrets``, ``vm_platforms``), then
+    (``git_credential``, ``harness_integration``, ``secrets``,
+    ``vm_platforms``), then
     the system plugins (``plugins.publish_plugins``: every shipped plugin's
     capability rows plus the enabled plugins' bundled manifests), then the
     operator sources (``Config.publish_to`` for TOML, then the YAML
@@ -76,7 +77,7 @@ def build_registry(config: Config, manifests: ManifestSet | None = None) -> Regi
     the auto-load.
     """
     from agentworks import apt, install_commands, plugins, secrets
-    from agentworks.capabilities import git_credential, harness
+    from agentworks.capabilities import git_credential, harness_integration
     from agentworks.capabilities import vm_platform as vm_platforms
     from agentworks.errors import StateError
     from agentworks.manifests import RESOURCES_DIRNAME, load_manifests
@@ -113,7 +114,7 @@ def build_registry(config: Config, manifests: ManifestSet | None = None) -> Regi
     apt.publish_to(registry, config)
     install_commands.publish_to(registry, config)
     git_credential.publish_to(registry)
-    harness.publish_to(registry)
+    harness_integration.publish_to(registry)
     secrets.publish_to(registry)
     vm_platforms.publish_to(registry)
     # System plugins publish here, after the built-in capability rows and

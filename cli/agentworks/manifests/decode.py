@@ -79,9 +79,9 @@ CAPABILITY_FIELDS: dict[str, tuple[str, str]] = {
 def _normalize_session_harness_selector(spec: dict[str, object]) -> bool:
     """Normalize the 0.13 harness selector compatibility boundary.
 
-    The shared loader below still consumes the old sibling pair until the
-    identifier sweep. This function is deliberately the only place where old
-    YAML selector input is accepted.
+    This function is deliberately the only place where old YAML selector
+    input is accepted. Both spellings leave this boundary as the canonical
+    internal pair.
     """
     old_fields = {"harness", "harness_config"} & set(spec)
     new_fields = {"harness_integration", "harness_integration_config"} & set(spec)
@@ -92,20 +92,27 @@ def _normalize_session_harness_selector(spec: dict[str, object]) -> bool:
             "use harness_integration: {name: ..., <config keys...>} only"
         )
     if old_fields:
-        value = spec.get("harness")
+        value = spec.pop("harness", None)
         if isinstance(value, dict):
             if "harness_config" in spec:
                 raise ConfigError(
                     "spec.harness is a tagged table, so a sibling spec.harness_config is ambiguous; "
-                    "fold those keys into spec.harness"
+                    "fold those keys into a spec.harness_integration tagged table"
                 )
             name = value.get("name")
             if not isinstance(name, str) or not name:
-                raise ConfigError("spec.harness (table form) requires a 'name' key naming the capability")
+                raise ConfigError(
+                    "deprecated spec.harness table requires a 'name' key; "
+                    "use a spec.harness_integration tagged table with name: shell"
+                )
             config = {key: item for key, item in value.items() if key != "name"}
-            spec["harness"] = name
+            spec["harness_integration"] = name
             if config:
-                spec["harness_config"] = config
+                spec["harness_integration_config"] = config
+        else:
+            spec["harness_integration"] = value
+            if "harness_config" in spec:
+                spec["harness_integration_config"] = spec.pop("harness_config")
         return True
     # A template may intentionally declare no workload here: it inherits a
     # selector from a parent, or remains the default login shell. Preserve
@@ -116,8 +123,7 @@ def _normalize_session_harness_selector(spec: dict[str, object]) -> bool:
     value = spec.pop("harness_integration", None)
     if "harness_integration_config" in spec:
         raise ConfigError(
-            "spec.harness_integration is a tagged table; "
-            "spec.harness_integration_config is not a supported YAML field"
+            "spec.harness_integration is a tagged table; spec.harness_integration_config is not a supported YAML field"
         )
     if not isinstance(value, dict):
         raise ConfigError("spec.harness_integration must be a tagged table with a string 'name' key")
@@ -125,9 +131,9 @@ def _normalize_session_harness_selector(spec: dict[str, object]) -> bool:
     if not isinstance(name, str) or not name:
         raise ConfigError("spec.harness_integration (table form) requires a 'name' key naming the capability")
     config = {key: item for key, item in value.items() if key != "name"}
-    spec["harness"] = name
+    spec["harness_integration"] = name
     if config:
-        spec["harness_config"] = config
+        spec["harness_integration_config"] = config
     return False
 
 
@@ -303,15 +309,16 @@ def _decode_session_template(doc: Document, spec: dict[str, object], issues: lis
     from agentworks.config import _load_session_templates
 
     # The YAML spec is clean (FRD R2): the legacy flat fields are
-    # ``shell``'s config vocabulary and live only under harness_config.
+    # ``shell``'s config vocabulary and live only under
+    # harness_integration_config.
     # A manifest that spells them top-level is rejected (pointing at the
     # nested shape) by the general deprecated-field table (FRD R11),
     # consulted in decode_document before this decoder runs, so no
     # bespoke check lives here.
-    harness_config = spec.get("harness_config")
-    if harness_config is not None and not isinstance(harness_config, dict):
-        raise ConfigError("spec.harness_config must be a mapping")
-    # The harness_config blob's shape is validated by the finalize
+    harness_integration_config = spec.get("harness_integration_config")
+    if harness_integration_config is not None and not isinstance(harness_integration_config, dict):
+        raise ConfigError("spec.harness_integration_config must be a mapping")
+    # The harness_integration_config blob's shape is validated by the finalize
     # ``validate`` pass (SessionTemplate.validate), not here: capability
     # validation is decoupled from decode (R3). The mapping-shape check
     # above is kind-owned decode structure and stays at load.

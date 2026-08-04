@@ -5,7 +5,6 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-
 # These direct uses deliberately stay pure. Every request-serving caller must
 # use ``load_request_registry`` so the old-selector warning is rendered once
 # at the request boundary instead of leaking from ``build_registry``.
@@ -35,9 +34,7 @@ def test_only_intentional_pure_callers_import_build_registry() -> None:
     )
 
 
-def test_build_registry_with_explicit_manifest_set_does_not_render_warnings(
-    tmp_path: Path, monkeypatch
-) -> None:  # type: ignore[no-untyped-def]
+def test_build_registry_with_explicit_manifest_set_does_not_render_warnings(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     """Doctor and verification can safely compose an explicit manifest set."""
     from agentworks.bootstrap import build_registry
     from agentworks.config import load_config
@@ -48,9 +45,7 @@ def test_build_registry_with_explicit_manifest_set_does_not_render_warnings(
     pub.write_text("ssh-ed25519 AAAA")
     priv.write_text("private")
     config_path = tmp_path / "config.toml"
-    config_path.write_text(
-        f"[operator]\nssh_public_key = \"{pub}\"\nssh_private_key = \"{priv}\"\n"
-    )
+    config_path.write_text(f'[operator]\nssh_public_key = "{pub}"\nssh_private_key = "{priv}"\n')
     resources = tmp_path / "resources"
     resources.mkdir()
     (resources / "old.yaml").write_text(

@@ -120,8 +120,8 @@ class Node(Readiness, Protocol):
         Most node kinds declare no config secrets and return ``()``;
         today ``vm-site`` (its platform's API credential),
         ``git-credential`` (its provider's token), ``vm-template`` (its
-        Tailscale auth key), and the session nodes (their harness's
-        ``harness_config`` secrets) are the ones that do.
+        Tailscale auth key), and the session nodes (their harness integration's
+        ``harness_integration_config`` secrets) are the ones that do.
         """
         ...
 

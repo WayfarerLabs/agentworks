@@ -104,10 +104,12 @@ def _seed_db(tmp_path: Path) -> Database:
     return db
 
 
-def _harness_template(monkeypatch: pytest.MonkeyPatch, config: dict[str, object] | None = None) -> None:
+def _harness_integration_template(monkeypatch: pytest.MonkeyPatch, config: dict[str, object] | None = None) -> None:
     from agentworks.sessions import manager as session_manager
 
-    resolved = SimpleNamespace(name="codex", harness="codex", harness_config=config or {}, env={})
+    resolved = SimpleNamespace(
+        name="codex", harness_integration="codex", harness_integration_config=config or {}, env={}
+    )
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: resolved)
 
 
@@ -156,7 +158,7 @@ def _restart_stubs(
     captured: dict[str, str] = {}
     _patch_transport(monkeypatch, target)
     _common_stubs(monkeypatch)
-    _harness_template(monkeypatch)
+    _harness_integration_template(monkeypatch)
     _capture_pane_command(monkeypatch, events, captured)
 
     monkeypatch.setattr(session_manager, "_ensure_pid", lambda session, **k: session)
@@ -190,7 +192,7 @@ def test_create_launches_fresh_with_no_discovery_and_persists_the_anchor(
     captured: dict[str, str] = {}
     _patch_transport(monkeypatch, _CodexTarget(events))
     _common_stubs(monkeypatch)
-    _harness_template(monkeypatch)
+    _harness_integration_template(monkeypatch)
     _capture_pane_command(monkeypatch, events, captured)
 
     create_session(
@@ -368,7 +370,7 @@ def test_substitution_leaves_the_generated_snippet_intact_and_substitutes_extra_
     captured: dict[str, str] = {}
     _patch_transport(monkeypatch, _CodexTarget(events))
     _common_stubs(monkeypatch)
-    _harness_template(monkeypatch, {"extra_args": ["-p", "profile-{{session_name}}"]})
+    _harness_integration_template(monkeypatch, {"extra_args": ["-p", "profile-{{session_name}}"]})
     _capture_pane_command(monkeypatch, events, captured)
 
     create_session(

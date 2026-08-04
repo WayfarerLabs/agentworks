@@ -22,7 +22,7 @@ The contract in brief: the graph is frozen after ``finalize`` and every query
 is a pure read of ``_nodes`` (no recomputation). Nodes are keyed by
 ``(kind, name)`` with exactly one node per published resource, including
 capability rows, which carry their implementation in ``impl`` (a class for
-vm-platform / harness / git-credential-provider, an instance for
+vm-platform / harness-integration / git-credential-provider, an instance for
 secret-backend) so consumers reach a capability's code off the graph rather
 than the live registry. ``readiness_of`` / ``enablement_of`` return stored
 verdicts; ``edges_of`` / ``dependents_of`` are the two edge directions;
@@ -150,7 +150,7 @@ class DependencyState:
     ``readiness`` is ``None`` iff the dep is disabled (readiness is computed
     only for enabled nodes; enablement is the axis that answers for a disabled
     node). ``impl`` is the dependency's capability implementation (a class for
-    vm-platform/harness/git-credential-provider, an instance for secret-backend,
+    vm-platform/harness-integration/git-credential-provider, an instance for secret-backend,
     ``None`` for a non-capability dep), carried so the depending node can run a
     config-dependent capability check WITHOUT reaching into a live registry
     (the impl came from the graph, so this stays guard-clean, R11). See LLD c.
@@ -175,7 +175,7 @@ class _Node:
     ``ReferenceEntry`` list of who points at this node, derived from the same
     edge walk and moved off the resource dataclass (caller inventory E).
     ``impl`` is the capability implementation for capability nodes (a class for
-    vm-platform/harness/git-credential-provider, an instance for
+    vm-platform/harness-integration/git-credential-provider, an instance for
     secret-backend), ``None`` otherwise.
     """
 
@@ -238,7 +238,7 @@ class DependencyGraph:
 
     def impl_of(self, kind: str, name: str) -> object | None:
         """The capability implementation stamped on this node (a class for
-        vm-platform/harness/git-credential-provider, an instance for
+        vm-platform/harness-integration/git-credential-provider, an instance for
         secret-backend), or ``None`` for a non-capability node. The sanctioned
         way for a consumer (secret resolution, LLD d) to reach a capability's
         code off the graph rather than probing the live registry (R11). Raises
@@ -363,7 +363,7 @@ def build_graph(
 # The four capability kinds whose node readiness comes from their impl (a
 # config-independent host-support check), not from a resource-level
 # ``not_ready`` hook. The fold dispatches per kind here because the impl is
-# heterogeneous (a class for platform/harness/provider, an instance for
+# heterogeneous (a class for platform/harness-integration/provider, an instance for
 # secret-backend) and each kind's host-support source differs (LLD c's table).
 _CAPABILITY_KINDS = frozenset(
     {"vm-platform", "harness-integration", "git-credential-provider", "secret-backend"},
@@ -473,7 +473,7 @@ def _capability_node_readiness(kind: str, name: str) -> Readiness:
     """A capability node's own readiness: its impl's config-independent
     host-support check (LLD c's table). ``vm-platform`` wraps
     ``unsupported_reason``; ``secret-backend`` asks the backend instance;
-    ``harness`` / ``git-credential-provider`` have no host-support concept and
+    ``harness-integration`` / ``git-credential-provider`` have no host-support concept and
     are always ready.
     """
     impl = _impl_for(kind, name)
@@ -489,7 +489,7 @@ def _capability_node_readiness(kind: str, name: str) -> Readiness:
         return Readiness.blocked(f"platform '{name}' is unsupported here: {reason}")
     if kind == "secret-backend":
         return cast("SecretBackend", impl).not_ready()
-    # harness, git-credential-provider: no host-support, no override.
+    # harness-integration, git-credential-provider: no host-support, no override.
     return Readiness.ready()
 
 
@@ -534,7 +534,7 @@ def _impl_for(kind: str, name: str) -> object | None:
     to stamp it onto each capability node here. This is the sanctioned
     builder-reads-registry path, distinct from (and not to be confused with) a
     *consumer* probing the live registry at op time, which the guard bans. The
-    impl is heterogeneous by design (a class for platform/harness/provider, an
+    impl is heterogeneous by design (a class for platform/harness-integration/provider, an
     instance for secret-backend); the node just stores whatever the kind's
     registry holds.
 
@@ -562,10 +562,10 @@ def _load_vm_platform_registry() -> Mapping[str, object]:
     return VM_PLATFORM_REGISTRY
 
 
-def _load_harness_registry() -> Mapping[str, object]:
-    from agentworks.capabilities.harness import HARNESS_REGISTRY
+def _load_harness_integration_registry() -> Mapping[str, object]:
+    from agentworks.capabilities.harness_integration import HARNESS_INTEGRATION_REGISTRY
 
-    return HARNESS_REGISTRY
+    return HARNESS_INTEGRATION_REGISTRY
 
 
 def _load_git_credential_provider_registry() -> Mapping[str, object]:
@@ -585,7 +585,7 @@ def _load_secret_backend_registry() -> Mapping[str, object]:
 # is imported by ``agentworks.resources`` before the capability packages.
 _CAPABILITY_REGISTRY_LOADERS: dict[str, Callable[[], Mapping[str, object]]] = {
     "vm-platform": _load_vm_platform_registry,
-    "harness-integration": _load_harness_registry,
+    "harness-integration": _load_harness_integration_registry,
     "git-credential-provider": _load_git_credential_provider_registry,
     "secret-backend": _load_secret_backend_registry,
 }

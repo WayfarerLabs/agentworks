@@ -22,7 +22,7 @@ from ._create import (
     create_session as create_session,
 )
 from ._env import (
-    _display_harness as _display_harness,
+    _display_harness_integration as _display_harness_integration,
 )
 from ._env import (
     _display_registry as _display_registry,

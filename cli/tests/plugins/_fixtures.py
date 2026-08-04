@@ -18,7 +18,7 @@ class FixtureVMPlatform:
     description = "Fixture VM platform"
 
 
-class FixtureHarness:
+class FixtureHarnessIntegration:
     name = "fixture-harness"
     description = "Fixture harness"
 
@@ -40,7 +40,7 @@ def fixture_plugin(name: str = "fixture") -> Plugin:
         description="a test fixture plugin",
         capabilities={
             "vm-platform": (FixtureVMPlatform,),
-            "harness-integration": (FixtureHarness,),
+            "harness-integration": (FixtureHarnessIntegration,),
             "git-credential-provider": (FixtureProvider,),
             "secret-backend": (FixtureBackend,),
         },

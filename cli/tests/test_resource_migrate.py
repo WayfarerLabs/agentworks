@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -811,9 +812,7 @@ spec:
     )
 
     config, plan = _plan(cfg, ["session-template/htop"])
-    assert [(unit.kind, unit.name, unit.source) for unit in plan.units] == [
-        ("session-template", "htop", "yaml")
-    ]
+    assert [(unit.kind, unit.name, unit.source) for unit in plan.units] == [("session-template", "htop", "yaml")]
     assert not plan.writes
     assert len(plan.yaml_rewrites) == 1
 
@@ -825,7 +824,7 @@ spec:
     assert "harness_integration:" in rewritten
     assert "harness_config:" not in rewritten
     registry = build_registry(load_config(cfg, warn_issues=False))
-    assert registry.lookup("session-template", "htop").harness == "shell"
+    assert registry.lookup("session-template", "htop").harness_integration == "shell"
 
 
 def test_yaml_selector_rewrite_preserves_markers_and_all_comment_attachment_kinds(tmp_path: Path) -> None:
@@ -985,16 +984,14 @@ def test_existing_manifest_metadata_failure_happens_before_replacement(
     manifest.write_text(original)
     config, plan = _plan(cfg, ["session-template/htop"])
 
-    import agentworks.migrate.execute as execute_mod
-
-    real_chmod = execute_mod.os.chmod
+    real_chmod = os.chmod
 
     def fail_temp_chmod(path: object, mode: object, *args: object, **kwargs: object) -> None:
         if Path(path).name.startswith(".sessions.yaml."):
             raise OSError("chmod failed")
         real_chmod(path, mode, *args, **kwargs)
 
-    monkeypatch.setattr(execute_mod.os, "chmod", fail_temp_chmod)
+    monkeypatch.setattr(os, "chmod", fail_temp_chmod)
     with pytest.raises(OSError, match="chmod failed"):
         execute_plan(plan, config)
     assert manifest.read_text() == original
@@ -1009,8 +1006,7 @@ def test_post_replace_interrupt_rolls_back_pre_registered_intent(
         target = tmp_path / "resources" / "sessions.yaml"
         target.parent.mkdir()
         original = (
-            "apiVersion: agentworks/v1\nkind: session-template\nmetadata:\n  name: htop\nspec:\n"
-            "  harness: shell\n"
+            "apiVersion: agentworks/v1\nkind: session-template\nmetadata:\n  name: htop\nspec:\n  harness: shell\n"
         )
         target.write_text(original)
         config, plan = _plan(cfg, ["session-template/htop"])
@@ -1023,18 +1019,14 @@ def test_post_replace_interrupt_rolls_back_pre_registered_intent(
             target.write_text(original)
         config, plan = _plan(cfg, ["secret"])
 
-    import agentworks.migrate.execute as execute_mod
-
-    real_replace = execute_mod.os.replace
+    real_replace = os.replace
 
     def interrupt_after_target_replace(source: object, destination: object) -> None:
         real_replace(source, destination)
-        if (mutation != "config" or Path(destination) == cfg) and (
-            mutation == "config" or Path(destination) == target
-        ):
+        if (mutation != "config" or Path(destination) == cfg) and (mutation == "config" or Path(destination) == target):
             raise KeyboardInterrupt()
 
-    monkeypatch.setattr(execute_mod.os, "replace", interrupt_after_target_replace)
+    monkeypatch.setattr(os, "replace", interrupt_after_target_replace)
     with pytest.raises(KeyboardInterrupt):
         execute_plan(plan, config)
     if mutation == "created":
@@ -1132,12 +1124,10 @@ def test_atomic_manifest_writes_leave_no_partial_artifact_when_replacement_fails
         target.write_text(original)
     config, plan = _plan(cfg, ["secret"])
 
-    import agentworks.migrate.execute as execute_mod
-
     def fail_replace(source: object, destination: object) -> None:
         raise OSError("injected replacement failure")
 
-    monkeypatch.setattr(execute_mod.os, "replace", fail_replace)
+    monkeypatch.setattr(os, "replace", fail_replace)
     with pytest.raises(OSError, match="injected replacement failure"):
         execute_plan(plan, config)
     if existing:
@@ -1154,16 +1144,12 @@ def test_failed_later_yaml_replacement_rolls_back_only_completed_rewrites(
     resources.mkdir()
     first = resources / "a.yaml"
     second = resources / "b.yaml"
-    original = (
-        "apiVersion: agentworks/v1\nkind: session-template\nmetadata:\n  name: {name}\nspec:\n  harness: shell\n"
-    )
+    original = "apiVersion: agentworks/v1\nkind: session-template\nmetadata:\n  name: {name}\nspec:\n  harness: shell\n"
     first.write_text(original.format(name="first"))
     second.write_text(original.format(name="second"))
     config, plan = _plan(cfg, [], all_resources=True)
 
-    import agentworks.migrate.execute as execute_mod
-
-    real_replace = execute_mod.os.replace
+    real_replace = os.replace
     calls = 0
 
     def fail_second_replace(source: object, destination: object) -> None:
@@ -1173,7 +1159,7 @@ def test_failed_later_yaml_replacement_rolls_back_only_completed_rewrites(
             raise OSError("second YAML replacement failed")
         real_replace(source, destination)
 
-    monkeypatch.setattr(execute_mod.os, "replace", fail_second_replace)
+    monkeypatch.setattr(os, "replace", fail_second_replace)
     with pytest.raises(OSError, match="second YAML replacement failed"):
         execute_plan(plan, config)
     assert first.read_text() == original.format(name="first")

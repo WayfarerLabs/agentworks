@@ -1,4 +1,4 @@
-"""The ``codex`` harness: run Codex as the session workload, resuming its
+"""The ``codex`` harness integration: run Codex as the session workload, resuming its
 rollout when one exists and launching fresh otherwise.
 
 Config vocabulary (all optional): ``model``, ``sandbox``, ``approval_policy``,
@@ -8,20 +8,20 @@ config key via ``-c``; ``writable_dirs`` (list) emits one ``--add-dir`` per
 entry (union-merged across template inheritance, like ``shell``'s
 ``required_commands``); ``web_search`` (bool) emits ``--search``;
 ``disable_strict_config`` (bool, default false) suppresses the
-``--strict-config`` the harness otherwise always emits; and ``extra_args`` is
+``--strict-config`` the harness integration otherwise always emits; and ``extra_args`` is
 a list of raw argv tokens appended last (the operator escape hatch for any
-flag the harness does not model). See ``codex-harness-decisions.md`` for the
+flag the harness integration does not model). See ``codex-harness-decisions.md`` for the
 pinned CLI research (verified against codex-cli 0.146.0).
 
-Addressing is discover-and-store (the harness guide's rule 1, second form):
-codex offers no ``--session-id`` analog, so the harness never mints an id.
+Addressing is discover-and-store (the harness integration guide's rule 1, second form):
+codex offers no ``--session-id`` analog, so the harness integration never mints an id.
 Instead it stores the codex-minted session uuid in its state namespace under
 ``session_id``, populated by DISCOVERY anchored on a stored marker: a fresh
 launch mints a nonce marker filename
 (``~/.agentworks/codex/<session-name>-<nonce>.launch`` on the launch target),
 records it in the state blob under ``discovery_marker``, and touches the file
 just before ``exec codex``. On a later op holding an anchor and no id, the
-harness probes for rollout files newer than that marker whose recorded
+harness integration probes for rollout files newer than that marker whose recorded
 session cwd is this session's workspace directory, and adopts the single
 candidate's uuid (zero candidates launch fresh again; multiple raise rather
 than guess, since adopting the wrong id would splice one session's
@@ -35,7 +35,7 @@ rollout file on disk: the rollout-file boundary was empirically confirmed to
 equal codex's own resume boundary. An archived rollout (moved to
 ``archived_sessions/`` by ``codex archive``) is deliberately treated as
 not-resumable: auto-unarchiving would silently reverse an explicit operator
-action, so the harness drops the stale id and launches fresh, leaving the
+action, so the harness integration drops the stale id and launches fresh, leaving the
 archived history recoverable manually.
 
 The discovery residual windows (same-user same-cwd concurrent launches; the
@@ -50,7 +50,7 @@ import shlex
 import uuid
 from typing import TYPE_CHECKING, ClassVar, Literal
 
-from agentworks.capabilities.harness.base import Harness, require_commands
+from agentworks.capabilities.harness_integration.base import HarnessIntegration, require_commands
 from agentworks.errors import ConfigError, StateError
 
 if TYPE_CHECKING:
@@ -85,7 +85,7 @@ _FLAG_FIELDS: tuple[tuple[str, str], ...] = (
 
 # The codex config key ``network`` forwards to (via ``-c``). Codex-owned
 # and could drift; a renamed key is SILENTLY ignored by a non-strict
-# codex (verified against 0.146.0), which is exactly why the harness
+# codex (verified against 0.146.0), which is exactly why the harness integration
 # emits ``--strict-config`` by default: with it, drift surfaces as
 # codex's own unknown-field startup error in the pane instead of a
 # session that silently has no network. Re-verify on codex major bumps.
@@ -152,7 +152,7 @@ _CWD_RESOLVE_EXIT = 5  # workspace dir could not be canonicalized: raise
 _FIND_FAILED_EXIT = 6  # find itself failed (not a mere no-match): raise
 
 
-class CodexHarness(Harness):
+class CodexIntegration(HarnessIntegration):
     """Runs Codex, resuming or launching fresh per on-disk state."""
 
     name: ClassVar[str] = "codex"
@@ -170,7 +170,7 @@ class CodexHarness(Harness):
 
     @classmethod
     def merge_config(cls, base: Mapping[str, object], child: Mapping[str, object]) -> dict[str, object]:
-        """Same-harness inheritance merge: scalars and bools child-win via
+        """Same-harness integration inheritance merge: scalars and bools child-win via
         the shallow default; ``writable_dirs`` unions append-dedupe (it is
         an additive grant list, like ``shell``'s ``required_commands``: a
         child adding one dir must not silently drop the parent's).
@@ -200,7 +200,7 @@ class CodexHarness(Harness):
         """
         unknown = sorted(set(config) - _CODEX_FIELDS)
         if unknown:
-            raise ConfigError(f"{owner}: unknown codex harness field(s): {', '.join(unknown)}")
+            raise ConfigError(f"{owner}: unknown codex harness integration field(s): {', '.join(unknown)}")
         for field_name, _flag in _FLAG_FIELDS:
             value = config.get(field_name)
             if value is not None and not isinstance(value, str):
@@ -254,7 +254,7 @@ class CodexHarness(Harness):
           or a namesake recreated after a delete), so launch fresh with
           no probe at all.
 
-        A stored ``session_id`` of the wrong type is garbage this harness
+        A stored ``session_id`` of the wrong type is garbage this harness integration
         never wrote (the blob is only as trustworthy as the DB it came
         from): it is swept out of the namespace rather than left to
         confuse a later read. Every path returns a single ``sh -c`` pane
@@ -276,7 +276,7 @@ class CodexHarness(Harness):
             )
         stored = self._state.get("session_id")
         if "session_id" in self._state and not isinstance(stored, str):
-            del self._state["session_id"]  # sweep garbage; never this harness's write
+            del self._state["session_id"]  # sweep garbage; never this harness integration's write
             stored = None
         sid = stored if isinstance(stored, str) and stored else None
         if sid is not None:
@@ -284,7 +284,7 @@ class CodexHarness(Harness):
                 self._decision = "resumed"
                 return self._resume_command(
                     sid,
-                    msg=f"agentworks harness (codex): resuming session {self._session_name}",
+                    msg=f"agentworks harness integration (codex): resuming session {self._session_name}",
                 )
             # The rollout is gone (archived or deleted): not resumable, by
             # the pinned archived policy. Drop the stale id so the NEXT
@@ -292,7 +292,7 @@ class CodexHarness(Harness):
             del self._state["session_id"]
             self._decision = "stale"
             return self._fresh_command(
-                msg=f"agentworks harness (codex): previous codex session archived or "
+                msg=f"agentworks harness integration (codex): previous codex session archived or "
                 f"gone; starting new session {self._session_name}"
             )
         anchor = self._state.get("discovery_marker")
@@ -304,14 +304,16 @@ class CodexHarness(Harness):
                 self._decision = "adopted"
                 return self._resume_command(
                     adopted,
-                    msg=f"agentworks harness (codex): adopted a discovered codex session; "
+                    msg=f"agentworks harness integration (codex): adopted a discovered codex session; "
                     f"resuming session {self._session_name}",
                     consume_marker=anchor,
                 )
         # No anchor (nothing was ever launched fresh here), or discovery
         # came back empty: launch fresh.
         self._decision = "fresh"
-        return self._fresh_command(msg=f"agentworks harness (codex): starting new session {self._session_name}")
+        return self._fresh_command(
+            msg=f"agentworks harness integration (codex): starting new session {self._session_name}"
+        )
 
     def _marker_word(self, anchor: str) -> str:
         """A stored anchor (a ``$HOME``-relative marker path like
@@ -371,10 +373,10 @@ class CodexHarness(Harness):
     def _config_flags(self) -> list[str]:
         """The managed flags then ``extra_args``, each an argv token.
         ``extra_args`` is appended verbatim last so it can carry (or
-        override) any flag the harness does not model.
+        override) any flag the harness integration does not model.
 
         ``--strict-config`` is emitted by DEFAULT (operator-decided
-        2026-08-03): the harness owns the emitted config surface, and
+        2026-08-03): the harness integration owns the emitted config surface, and
         strictness turns codex-owned key drift (``_NETWORK_KEY``) into a
         loud startup error instead of a silently ignored override. It
         also hardens the target user's own ``config.toml``; that is
@@ -413,7 +415,7 @@ class CodexHarness(Harness):
         Shell-neutral (the glob is quoted through to find); runs through
         ``$SHELL -lic`` like the readiness probe. ``archived_sessions/``
         is deliberately NOT probed: an archived session reports
-        not-resumable and the harness launches fresh rather than silently
+        not-resumable and the harness integration launches fresh rather than silently
         reversing ``codex archive``.
 
         The exit code is read, not just ``.ok``, so a probe that could not
@@ -544,7 +546,7 @@ class CodexHarness(Harness):
             match = _ROLLOUT_ID_RE.search(path)
             if match is None:
                 # A rollout-shaped file without an embedded uuid is not a
-                # session this harness can adopt OR safely ignore (ignoring
+                # session this harness integration can adopt OR safely ignore (ignoring
                 # could turn "one real candidate" into a wrong adoption of
                 # another); refuse to guess.
                 raise StateError(
@@ -585,7 +587,7 @@ class CodexHarness(Harness):
         require_commands(
             ("codex",),
             transport,
-            harness_name=self.name,
+            harness_integration_name=self.name,
             template_name=self.owner_name,
             session_name=self._session_name,
             target_label=self._target_label,

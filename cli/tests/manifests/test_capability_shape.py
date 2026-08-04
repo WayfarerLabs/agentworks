@@ -197,8 +197,8 @@ def test_session_template_canonical_selector_is_not_a_capability_shape_deprecati
         """,
     )
     (entry,) = manifests.entries
-    assert entry.resource.harness == "shell"
-    assert entry.resource.harness_config == {"command": "htop"}
+    assert entry.resource.harness_integration == "shell"
+    assert entry.resource.harness_integration_config == {"command": "htop"}
     assert not manifests.deprecated_harness_selectors
     assert not manifests.deprecation_issues
 
@@ -243,8 +243,8 @@ def test_session_template_without_selector_remains_a_valid_default_or_inheriting
         ),
     )
     (entry,) = manifests.entries
-    assert entry.resource.harness is None
-    assert entry.resource.harness_config is None
+    assert entry.resource.harness_integration is None
+    assert entry.resource.harness_integration_config is None
     assert not manifests.deprecated_harness_selectors
 
 

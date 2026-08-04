@@ -1,16 +1,16 @@
 """Base interface for session harnesses.
 
-A harness is a capability (see ``capabilities/README.md``): it validates
-its own ``harness_config`` block (``validate``), owns the
+A harness integration is a capability (see ``capabilities/README.md``): it validates
+its own ``harness_integration_config`` block (``validate``), owns the
 session's launch-target readiness (the required-commands probe and the
 skip/defer/probe/error fork), and produces the tmux pane command string
 that runs the workload as its ops (``start`` / ``restart``). Unlike the
-thin-wrapper git-credential capability, a harness is HELD by a rich
+thin-wrapper git-credential capability, a harness integration is HELD by a rich
 consuming node (the session node), which composes its readiness rather
 than walking it (``capabilities/README.md``: "Rich (session over
-harness)").
+harness integration)").
 
-The harness addresses the tool through its OWN construction-time
+The harness integration addresses the tool through its OWN construction-time
 identity (``session_name``, its ``target`` object) and reads only the
 LEVEL off the operation scope; the scope's name fields are error framing
 and the SESSION-level identity guard (:meth:`_check_identity`), never
@@ -33,12 +33,12 @@ if TYPE_CHECKING:
     from agentworks.resources.reference import ResourceReference
     from agentworks.transports import Transport
 
-    # Structural, TYPE_CHECKING-only: the harness satisfies Readiness and
-    # reads a target's ``.realized`` / ``.name``, but capabilities/harness/
+    # Structural, TYPE_CHECKING-only: the harness integration satisfies Readiness and
+    # reads a target's ``.realized`` / ``.name``, but capabilities/harness_integration/
     # must not import orchestration/ or sessions/ at runtime (layering
     # rule, FRD R1 / HLA package layout). A Protocol keeps the type
     # without the import edge. The members are read-only properties (the
-    # harness only READS them): the real agent nodes expose ``name`` /
+    # harness integration only READS them): the real agent nodes expose ``name`` /
     # ``realized`` as read-only ``@property``, which a read-write
     # attribute Protocol would not structurally satisfy.
     class _Target(Protocol):
@@ -52,7 +52,7 @@ def require_commands(
     commands: tuple[str, ...],
     transport: Transport,
     *,
-    harness_name: str,
+    harness_integration_name: str,
     template_name: str,
     session_name: str,
     target_label: str,
@@ -104,7 +104,7 @@ def require_commands(
     joined = ", ".join(repr(c) for c in missing)
     verb = "is" if len(missing) == 1 else "are"
     raise StateError(
-        f"the '{harness_name}' harness (session-template "
+        f"the '{harness_integration_name}' harness integration (session-template "
         f"'{template_name}') requires {joined}, which {verb} not "
         f"installed or not on PATH for {target_label}.",
         entity_kind="session",
@@ -117,15 +117,15 @@ def require_commands(
     )
 
 
-class Harness(Capability):
+class HarnessIntegration(Capability):
     """Capability: configures, runs, and manages one session's workload.
 
-    A harness owns the launch-target readiness fork and the
+    A harness integration owns the launch-target readiness fork and the
     required-commands probe, and it ADDS the op surface (:meth:`start` /
     :meth:`restart`, the pane command string) the session's service layer
     consumes to build the tmux pane.
 
-    Subclasses (``ShellHarness``, ``ClaudeCodeHarness``) implement the
+    Subclasses (``ShellIntegration``, ``ClaudeCodeIntegration``) implement the
     two ops and :meth:`_probe_target` (their own required-command set);
     the fork (:meth:`_run_readiness`), the SESSION-level identity guard
     (:meth:`_check_identity`), and the single-fire guard live here so
@@ -137,7 +137,7 @@ class Harness(Capability):
     def __init__(
         self,
         owner_name: str,  # the session-template name (config owner)
-        config: Mapping[str, object],  # the merged harness_config blob
+        config: Mapping[str, object],  # the merged harness_integration_config blob
         *,
         session_name: str,  # the session's own name (addresses the tool)
         vm_name: str,  # the session's VM ancestor
@@ -145,7 +145,7 @@ class Harness(Capability):
         workspace_path: str,  # the workspace's VM-side directory (the pane cd's here)
         target: _Target | None,  # the agent node it runs as; None in admin mode
         admin: bool,  # admin mode (uses ctx.admin_target())
-        state: dict[str, object],  # this harness's OWN namespace of the persisted blob (mutated in place)
+        state: dict[str, object],  # this harness integration's OWN namespace of the persisted blob (mutated in place)
     ) -> None:
         super().__init__(owner_name, config)
         self._session_name = session_name
@@ -159,20 +159,20 @@ class Harness(Capability):
 
     @property
     def state(self) -> dict[str, object]:
-        """The harness's per-session state dict: its OWN namespace of the
+        """The harness integration's per-session state dict: its OWN namespace of the
         session row's ``harness_state`` blob (the platform seam,
-        ``sessions/nodes._harness_for_template``, splits the stored blob
-        by harness name, so no harness ever sees another's keys). A
-        harness reads and mutates it in place during its ops
+        ``sessions/nodes._harness_integration_for_template``, splits the stored blob
+        by harness integration name, so no harness integration ever sees another's keys). A
+        harness integration reads and mutates it in place during its ops
         (``claude-code`` mints and records its Claude session id on the
         first ``start``); the dict is shared with the session node's full
         blob, which the manager persists after the op. Empty for a
-        harness that keeps no state (``shell``).
+        harness integration that keeps no state (``shell``).
         """
         return self._state
 
     def config_secret_refs(self) -> tuple[ResourceReference, ...]:
-        """The full config-secret references this harness declares (the
+        """The full config-secret references this harness integration declares (the
         secret-kind references :meth:`dependencies` returned, bound at
         construct into ``self._secret_refs``), sourced to the owning
         session-template, for the holding session node to expose as its
@@ -185,12 +185,12 @@ class Harness(Capability):
         config secret gets (issue #305). The usage is the capability's
         own prose plus the declaration site: the sweep frames its error
         with the NODE's key (``session/<name>``), which names the
-        session but not the template whose ``harness_config`` named the
+        session but not the template whose ``harness_integration_config`` named the
         secret, so the reference carries that locating info itself. A
         public accessor, so the node never reaches into the base
         ``Capability._secret_refs`` private field. Empty for every
-        shipped harness (none declares a secret); the
-        plumbing is here for a future secret-declaring harness.
+        shipped harness integration (none declares a secret); the
+        plumbing is here for a future secret-declaring harness integration.
         """
         from dataclasses import replace
 
@@ -199,7 +199,7 @@ class Harness(Capability):
         enriched = tuple(
             replace(
                 ref,
-                usage=f"{ref.usage}, from the harness_config of {self.owner_kind} '{self.owner_name}'",
+                usage=f"{ref.usage}, from the harness_integration_config of {self.owner_kind} '{self.owner_name}'",
             )
             for ref in self._secret_refs
         )
@@ -211,12 +211,12 @@ class Harness(Capability):
 
         Compatibility (pre-namespacing harness_state): DELETE on the next
         major release, together with the ``claude-code`` override and the
-        seam call in ``sessions/nodes._harness_for_template``.
+        seam call in ``sessions/nodes._harness_integration_for_template``.
 
         The seam calls this once with the session's FULL stored blob,
-        BEFORE the harness's own namespace is split out of it. Rows
-        written before the blob was namespaced by harness name carry that
-        era's keys at the top level; a harness that ever wrote
+        BEFORE the harness integration's own namespace is split out of it. Rows
+        written before the blob was namespaced by harness integration name carry that
+        era's keys at the top level; a harness integration that ever wrote
         unnamespaced state overrides this to move its keys into its own
         namespace, idempotently. Only ``claude-code`` ever did, so the
         default is a no-op; the hook lives on the base so the platform
@@ -225,7 +225,7 @@ class Harness(Capability):
 
     @classmethod
     def merge_config(cls, base: Mapping[str, object], child: Mapping[str, object]) -> dict[str, object]:
-        """Inheritance-time blob merge for a same-harness parent/child
+        """Inheritance-time blob merge for a parent/child using the same harness integration
         pair (FRD R5). Default: shallow child-wins. Overridden per
         capability where a key needs richer combination (``shell`` unions
         ``required_commands``). Runs classmethod-side from the resolver's
@@ -237,7 +237,7 @@ class Harness(Capability):
     def launch_note(self) -> str | None:
         """A human-facing one-line note about what the last ``start`` /
         ``restart`` decided, surfaced by the session manager in its op
-        output. ``None`` (the default) means the harness has nothing to
+        output. ``None`` (the default) means the harness integration has nothing to
         add, so ``shell`` stays silent; ``claude-code`` reports whether it
         resumed an existing session or started a new one.
         """
@@ -253,12 +253,12 @@ class Harness(Capability):
     @abstractmethod
     def restart(self, ctx: RunContext) -> str:
         """The raw pane command string for ``session restart``. Assembled
-        AFTER the old process is killed, so a state-aware harness decides
+        AFTER the old process is killed, so a state-aware harness integration decides
         resume-vs-launch with it already dead."""
 
     @abstractmethod
     def _probe_target(self, transport: Transport) -> None:
-        """Run the harness's required-command probe against ``transport``
+        """Run the harness integration's required-command probe against ``transport``
         (the resolved launch target). Called by :meth:`_run_readiness` at
         the probe slot; each member names its own commands (``shell``: the
         merged ``required_commands``; ``claude-code``: ``claude``)."""
@@ -286,9 +286,9 @@ class Harness(Capability):
         if scope is None:
             # A scope-less context reaching node readiness is an
             # orchestrator bug, not an out-of-scope level: skipping
-            # here would silently disable the harness forever.
+            # here would silently disable the harness integration forever.
             raise StateError(
-                f"session '{self._session_name}': the harness received a "
+                f"session '{self._session_name}': the harness integration received a "
                 f"context with no operation scope; the orchestrator must "
                 f"attach one (the skip case is out-of-scope-for-the-LEVEL, "
                 f"never scope-less)."
@@ -310,7 +310,7 @@ class Harness(Capability):
                 # selection bug, never something to skip past.
                 raise StateError(
                     f"session '{self._session_name}': no launch target for "
-                    f"the harness readiness (agent mode with no agent "
+                    f"the harness integration readiness (agent mode with no agent "
                     f"node); refusing to skip it."
                 )
             if not self._target.realized:
@@ -322,7 +322,7 @@ class Harness(Capability):
                 # the op-start context must.
                 return
             raise StateError(
-                f"session '{self._session_name}': the harness reached runup "
+                f"session '{self._session_name}': the harness integration reached runup "
                 f"with no launch target on the context; the orchestrator "
                 f"must hand the op-start context the target transport."
             )
@@ -330,10 +330,10 @@ class Harness(Capability):
         self._probed = True
 
     def _check_identity(self, scope: OperationScope) -> None:
-        """SESSION-level identity guard: the harness's construction-time
+        """SESSION-level identity guard: the harness integration's construction-time
         identity must match the operation scope it is handed. A mismatch
         is an orchestrator bug (a context assembled for a different
-        session), and the harness runs commands on a VM as a user, so
+        session), and the harness integration runs commands on a VM as a user, so
         this RAISES rather than warns.
 
         Runs on every non-SKIP readiness call, before the single-fire
@@ -345,21 +345,25 @@ class Harness(Capability):
         """
         mismatches: list[str] = []
         if scope.vm != self._vm_name:
-            mismatches.append(f"names VM {scope.vm!r} but this harness is wired for VM {self._vm_name!r}")
+            mismatches.append(f"names VM {scope.vm!r} but this harness integration is wired for VM {self._vm_name!r}")
         if scope.workspace != self._workspace_name:
             mismatches.append(
-                f"names workspace {scope.workspace!r} but this harness is wired for workspace {self._workspace_name!r}"
+                f"names workspace {scope.workspace!r} but this harness integration is wired for workspace "
+                f"{self._workspace_name!r}"
             )
         if scope.session != self._session_name:
             mismatches.append(
-                f"names session {scope.session!r} but this harness is wired for session {self._session_name!r}"
+                f"names session {scope.session!r} but this harness integration is wired for session "
+                f"{self._session_name!r}"
             )
         if scope.admin != self._admin:
-            mismatches.append(f"is admin={scope.admin} but this harness is wired for admin={self._admin}")
+            mismatches.append(f"is admin={scope.admin} but this harness integration is wired for admin={self._admin}")
         elif not self._admin:
             target_name = self._target.name if self._target is not None else None
             if scope.agent != target_name:
-                mismatches.append(f"names agent {scope.agent!r} but this harness runs as agent {target_name!r}")
+                mismatches.append(
+                    f"names agent {scope.agent!r} but this harness integration runs as agent {target_name!r}"
+                )
         if mismatches:
             raise StateError(
                 f"session '{self._session_name}': the operation scope "
