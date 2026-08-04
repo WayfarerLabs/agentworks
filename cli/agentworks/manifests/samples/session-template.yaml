@@ -29,6 +29,26 @@
 #  env:
 #    TERM: xterm-256color
 ##
+## Note that it is possible to tap into a harness' resume semantics purely
+## through the shell integration and careful construction of the
+## command/resume_command pair. For example, the following generally works
+## with Claude Code. That said, the harness integrations are much more robust
+## and full-featured. This is merely provided as an example of how to use the
+## shell integration to run a harness without a dedicated integration.
+##
+#---
+#apiVersion: agentworks/v1
+#kind: session-template
+#metadata:
+#  name: claude-via-shell
+#  description: Run Claude Code with resume through the shell integration
+#spec:
+#  harness_integration:
+#    name: shell
+#    required_commands: [claude]
+#    command: claude --name {{session_name}}
+#    resume_command: claude --resume {{session_name}}
+##
 ## The `claude-code` integration runs Claude Code as the session workload. It ships as the
 ## opt-in `claude` system plugin, so enable it with `[plugins] system =
 ## ["claude"]` (otherwise creating a session on this template is refused with an
@@ -61,24 +81,24 @@
 ## the integration learns this session's from Codex itself, and opens Codex's own
 ## session picker in the pane when it genuinely cannot tell). Its config is
 ## ten optional fields:
-##   model:           forwarded to `codex -m`
-##   sandbox:         forwarded to `codex -s`
-##   approval_policy: forwarded to `codex -a`
-##   profile:         forwarded to `codex -p`
-##   network:         bool; sandbox network access (Codex defaults it OFF
-##                    even in workspace-write; coding sessions usually want true)
-##   approvals_reviewer: who adjudicates approval escalations (sandbox escapes,
-##                    blocked network): `user` (default) prompts the human in
-##                    the pane; `auto_review` lets Codex's risk-based reviewer
-##                    subagent approve or deny instead (the sandbox still
-##                    enforces the outer boundary)
-##   writable_dirs:   extra writable directories (`codex --add-dir` each;
-##                    union-merged across template inheritance)
-##   web_search:      bool; enables the live web-search tool (`codex --search`)
-##   disable_strict_config: bool; suppresses the `--strict-config` the integration
-##                    otherwise always passes (strictness fails loudly on a bad
-##                    or drifted Codex config key instead of ignoring it)
-##   extra_args:      raw argv tokens appended last (the escape hatch)
+##   model:                  forwarded to `codex -m`
+##   sandbox:                forwarded to `codex -s`
+##   network:                bool; sandbox network access (Codex defaults it OFF
+##                           even in workspace-write; coding sessions usually want true)
+##   web_search:             bool; enables the live web-search tool (`codex --search`)
+##   approval_policy:        forwarded to `codex -a`
+##   approvals_reviewer:     who adjudicates approval escalations (sandbox escapes,
+##                           blocked network): `user` (default) prompts the human in
+##                           the pane; `auto_review` lets Codex's risk-based reviewer
+##                           subagent approve or deny instead (the sandbox still
+##                           enforces the outer boundary)
+##   profile:                forwarded to `codex -p`
+##   writable_dirs:          extra writable directories (`codex --add-dir` each;
+##                           union-merged across template inheritance)
+##   disable_strict_config:  bool; the integration normally passes `--strict-config` to Codex,
+##                           which ensures that we fail loudly if we have bad or drifted config
+##                           keys. This flag set to 'true' removes that default flag.
+##   extra_args:             raw argv tokens appended last (the escape hatch)
 ## The only launch-target requirement is that `codex` is installed.
 ##
 #---
@@ -86,7 +106,7 @@
 #kind: session-template
 #metadata:
 #  name: codex
-#  description: Session running Codex through its harness integration
+#  description: Session running Codex through its harness integration with an auto-ish posture
 #spec:
 #  harness_integration:
 #    name: codex
