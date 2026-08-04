@@ -36,7 +36,8 @@ Status: DRAFT (authored alongside the FRD and HLA; implementation gated, see pre
 
 ### 1.1 Phase 1 LLD (the migrator verification rework is the core)
 
-- [ ] LLD `toml-sunset-lld.md` written and reviewed. It must settle:
+- [x] LLD `toml-sunset-lld.md` written and reviewed (2026-08-04; reviewer approve-with-changes, all
+      nine findings folded in). It must settle:
   - The independent pre-side derivation for migrate verification (FRD FR2, HLA phase 1). Candidate
     to evaluate first: RELOCATE the TOML resource loaders into `migrate/` as the migrator's private
     TOML reader instead of deleting them outright. That satisfies "reads the TOML file directly",
