@@ -1,7 +1,7 @@
 """Tmuxinator config generation for workspace consoles.
 
 Agentworks owns the workspace .tmuxinator.yml file. It is regenerated from DB
-state on any structural change (session create/delete/restart, agent
+state on any structural change (session create/delete/resume, agent
 create/delete). Manual edits will be overwritten.
 
 The generated config produces a workspace console: an admin-shell window plus

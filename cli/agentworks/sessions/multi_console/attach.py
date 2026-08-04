@@ -109,7 +109,7 @@ while true; do
     else
         echo "Session {session_name} exited (status $rc)."
     fi
-    echo 'Waiting for session to restart...'
+    echo 'Waiting for session to resume...'
     while ! {has} 2>/dev/null; do sleep 2; done
 done
 """

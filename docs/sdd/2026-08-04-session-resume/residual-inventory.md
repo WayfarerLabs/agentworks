@@ -21,6 +21,7 @@ Most remaining matches are intentional and fit one of these classifications:
 
 No current documentation, sample manifest, or configuration example uses `restart` terminology as a
 canonical surface. The release notes and operator docs identify the old command and field only as
-temporary compatibility inputs. Canonical manager prompts, hints, errors, comments, and integration
-runtime validation now use `resume`; remaining live-code matches are compatibility identifiers or
-genuinely mechanical restart operations.
+temporary compatibility inputs. Canonical manager prompts, hints, errors, comments, console wait
+messages, and integration runtime validation now use `resume`. The final two review passes found and
+removed the last seven canonical lifecycle references before this inventory was closed. Remaining
+live-code matches are compatibility identifiers or genuinely mechanical restart operations.

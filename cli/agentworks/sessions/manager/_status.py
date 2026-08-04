@@ -46,7 +46,7 @@ def check_session_status(
     tmux server + a fresh ``create_tmux_session`` under a per-session
     socket. Callers that aren't ``resume_session`` (attach, stop, etc.)
     can't safely migrate, so they surface the typed error and let the
-    operator restart.
+    operator resume.
     """
     if session.pid == PID_STOPPED:
         return SessionStatus.STOPPED

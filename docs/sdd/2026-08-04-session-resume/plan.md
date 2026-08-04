@@ -87,7 +87,7 @@ cd ..
 - [x] Leave historical changelog entries and locked historical SDDs unchanged.
 - [x] Run the classified residual searches from `migration-strategy.md`; record or eliminate every
       live match.
-- [ ] Run the documentation linter and full gate.
+- [x] Run the documentation linter and full gate.
 - DoD: no current canonical surface teaches the old name; remaining matches are compatibility,
   migration, history, or real mechanical restarts; reviews and all gates are clear.
 
@@ -97,7 +97,7 @@ cd ..
       `resume_command`, the old config-field warning, downgrade considerations, and the 0.14.0
       removal.
 - [x] Verify the installed CLI command tree and generated completions, not only unit-level specs.
-- [ ] Exercise representative real or orchestrated Claude Code, Codex, and shell sessions through
+- [x] Exercise representative real or orchestrated Claude Code, Codex, and shell sessions through
       `session resume`; exercise the deprecated command once with and once without suppression.
 - DoD: the full gate passes, release-facing docs are complete, observed command behavior matches the
   FRD, and no valid review finding remains.
