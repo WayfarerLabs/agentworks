@@ -299,7 +299,7 @@ description = "AZDO access"
 """,
     )
     config, plan = _plan(cfg, ["git-credential/ado"])
-    execute_plan(plan, config)  # verification passes -> rows equivalent
+    execute_plan(plan, config)  # verification passes, so rows are equivalent
     (doc,) = _loaded_docs(tmp_path / "resources" / "git-credentials.yaml")
     assert doc["spec"] == {
         "provider": {"name": "azdo", "org": "my-org", "token": "git-token-ado"},
@@ -329,7 +329,7 @@ CLAUDE_LOG_LEVEL = "info"
 """,
     )
     config, plan = _plan(cfg, ["session-template/claude"])
-    execute_plan(plan, config)  # verification passes -> rows equivalent
+    execute_plan(plan, config)  # verification passes, so rows are equivalent
     (doc,) = _loaded_docs(tmp_path / "resources" / "session-templates.yaml")
     assert doc["metadata"]["description"] == "Claude session"
     assert doc["spec"] == {
@@ -917,7 +917,7 @@ def test_preview_lists_every_resource_and_the_drop_note(tmp_path: Path) -> None:
     _config, plan = _plan(cfg, [], all_resources=True)
     text = "\n".join(render_preview(plan))
     for unit in plan.units:
-        assert f"{unit.kind}/{unit.name} -> " in text
+        assert f"{unit.kind}/{unit.name} to " in text
     assert "[secret_backends.*] sections will be dropped" in text
 
 
@@ -933,7 +933,7 @@ def test_dry_run_is_plan_only_and_summary_by_default(tmp_path: Path) -> None:
     summary = render_dry_run(plan)
     assert not any("Config.toml changes" in line for line in summary)
     assert any("Pass --full" in line for line in summary)
-    assert any("secret/npm-token -> " in line for line in summary)
+    assert any("secret/npm-token to " in line for line in summary)
     detailed = render_dry_run(plan, full=True)
     assert any("Config.toml changes" in line for line in detailed)
     assert any("apiVersion: agentworks/v1" in line for line in detailed)
@@ -1289,7 +1289,7 @@ def test_yaml_only_preview_lists_real_replacement_paths_not_config_targets(tmp_p
     preview = "\n".join(render_preview(plan))
     assert f"rewrite {manifest}: session-template/htop" in preview
     assert "from config.toml" not in preview
-    assert " -> ?" not in preview
+    assert " to ?" not in preview
 
 
 def test_preview_rewrite_lines_always_have_a_canonicalizing_header(tmp_path: Path) -> None:
@@ -1639,15 +1639,16 @@ def test_verification_mismatch_rolls_back(tmp_path: Path, monkeypatch: pytest.Mo
     monkeypatch.setattr(execute_mod, "first_difference", lambda pre, post: "forced difference")
 
     config, plan = _plan(cfg, [], all_resources=True, layout="per-resource")
-    # Also append into the existing per-kind file to exercise truncation:
+    # Also append into the existing per-kind file to exercise exact restoration
+    # from its verified recovery snapshot:
     # switch one write target to the existing file by planning a second
     # per-kind run for the secret.
-    config_b, plan_b = _plan(cfg, ["secret/npm-token"])  # per-kind -> appends
+    config_b, plan_b = _plan(cfg, ["secret/npm-token"])  # per-kind layout appends
 
     with pytest.raises(StateError, match="migration verification failed"):
         execute_plan(plan_b, config_b)
     assert cfg.read_text() == original  # TOML restored
-    assert existing.read_text() == hand_written  # append truncated
+    assert existing.read_text() == hand_written  # append restored byte-for-byte
 
     with pytest.raises(StateError, match="migration verification failed"):
         execute_plan(plan, config)

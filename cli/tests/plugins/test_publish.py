@@ -340,7 +340,7 @@ def test_disabled_plugin_harness_integration_reaches_use_gate_not_unknown(monkey
     enable-plugin error. This pins the LLD section 3 seating requirement."""
     plugin = _fixture_plugin()
     monkeypatch.setattr("agentworks.plugins.SYSTEM_PLUGINS", {plugin.name: plugin})
-    config = _config()  # NOT opted in -> the harness integration row is disabled
+    config = _config()  # not opted in, so the harness integration row is disabled
     with seated_plugin(plugin):
         registry = Registry.empty()
         publish_plugins(registry, config)

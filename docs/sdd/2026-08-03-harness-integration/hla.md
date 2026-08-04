@@ -93,8 +93,8 @@ canonical internal pair.
 
 ### 2d. Code identifiers (soft)
 
-Rename the package `capabilities/harness/` -> `capabilities/harness_integration/`, the plugin
-modules `plugins/<p>/harness.py` -> `harness_integration.py`, the classes and registry/accessors per
+Rename the package `capabilities/harness/` to `capabilities/harness_integration/`, the plugin
+modules `plugins/<p>/harness.py` to `harness_integration.py`, the classes and registry/accessors per
 the table in section 1, and the threaded variables/params/comments (heaviest in `sessions/nodes.py`,
 `sessions/templates.py`, `sessions/template.py`, `sessions/manager/*`). No behavior change; `ruff`,
 `mypy`, and the full suite are the guardrail.

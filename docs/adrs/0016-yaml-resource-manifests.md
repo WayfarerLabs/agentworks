@@ -101,17 +101,17 @@ Capabilities can optionally carry configuration, and its nature and shape is ent
 capability-specific. For example, an AZDO git credential provider requires an organization name; the
 (future) azure VM platform may need a subscription ID; a (future) 1Password secret backend may need
 an account URL. Where the reference site is a resource spec, that configuration is limited to a
-single sibling key named after the reference field (`provider` -> `spec.provider_config`; future:
-vm-site's `platform` -> `platform_config`, an inline `harness_integration` ->
+single sibling key named after the reference field (`provider` maps to `spec.provider_config`;
+future vm-site `platform` maps to `platform_config`, and an inline `harness_integration` maps to
 `harness_integration_config`): an opaque blob the named capability owns and validates. The
-capability is invoked with its block and returns the resource references it implies, which the
-consuming resource emits those references as its own, so the rest of the spec stays
-provider-agnostic. Fields specific to the resource's kind are generic by definition and live at the
-top level of the resource spec (a `git-credential`'s `provider` selector is top-level, while its
-token secret and `azdo`'s `org` are provider-owned and nest under `provider_config`). Where the
-reference site is per-secret (`backend_mappings`), the mapping value carries the capability-owned
-content (an identifier override or structured store addressing) and is validated the same way: same
-principle, capability-owned config at the reference site.
+capability is invoked with its block and returns the resource references it implies. The consuming
+resource emits those references as its own, so the rest of the spec stays provider-agnostic. Fields
+specific to the resource's kind are generic by definition and live at the top level of the resource
+spec (a `git-credential`'s `provider` selector is top-level, while its token secret and `azdo`'s
+`org` are provider-owned and nest under `provider_config`). Where the reference site is per-secret
+(`backend_mappings`), the mapping value carries the capability-owned content (an identifier override
+or structured store addressing) and is validated the same way: same principle, capability-owned
+config at the reference site.
 
 The INTERNAL resource representation follows the nested shape too
 (`GitCredentialConfig.provider_config`) as this represents the best representation available. For
