@@ -37,9 +37,9 @@ Landing this half-done has no value, so all sub-steps ship together.
       DB.
 - [ ] **1b Kind slug.** Set the kind to `harness-integration` in `capabilities/harness/kinds.py` and
       `plugins/adapters.py`, update the capability-kind set in `resources/graph.py:369`, with no
-      deprecated alias. DoD: `agw resource list --kind     harness-integration` works;
-      `--kind harness` and `harness/<name>` fail as unknown; `resource kinds` and shell completions
-      expose only `harness-integration`; registry/kind and completion tests are updated.
+      deprecated alias. DoD: `agw resource list --kind harness-integration` works; `--kind harness`
+      and `harness/<name>` fail as unknown; `resource kinds` and shell completions expose only
+      `harness-integration`; registry/kind and completion tests are updated.
 - [ ] **1c Selector field + manifest compatibility.** Rename the tagged-table selector key to
       `harness_integration` and the field pair to `harness_integration`/`harness_integration_config`
       (`sessions/templates.py`, `sessions/template.py`, `manifests/decode.py:76`,
@@ -49,7 +49,7 @@ Landing this half-done has no value, so all sub-steps ship together.
       fields hard-error. DoD: the input matrix in HLA section 2c is covered by tests: the new key
       validates clean; every previously valid old form loads with exactly one aggregated warning;
       mixed forms fail; old and new declarations normalize before inheritance;
-      `agw resource     migrate` rewrites old YAML and TOML.
+      `agw resource migrate` rewrites old YAML and TOML.
 - [ ] **1d Identifier sweep.** Rename the package `capabilities/harness/` ->
       `capabilities/harness_integration/`, the plugin `harness.py` modules ->
       `harness_integration.py`, the classes and registry/accessors per HLA section 1, and the
