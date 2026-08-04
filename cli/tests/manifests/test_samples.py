@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -92,8 +93,8 @@ def test_capability_kinds_report_no_sample(kind: str) -> None:
 def test_all_kinds_concatenation_and_unknown_kind() -> None:
     everything = sample_text(all_kinds=True)
     for kind in SAMPLE_KINDS:
-        # Every sample opens with its prose header line.
-        assert f"## kind: {kind} --" in everything
+        # Every sample opens with a semantic kind header; prose punctuation may vary.
+        assert re.search(rf"^## kind: {re.escape(kind)}(?=[:\s])", everything, re.MULTILINE)
     with pytest.raises(ValidationError, match="unknown kind"):
         sample_text("nope")
 
