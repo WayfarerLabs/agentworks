@@ -85,7 +85,7 @@ class LiveSessionNode:
     @property
     def harness_integration(self) -> HarnessIntegration:
         """The held harness_integration instance, for the op call sites (``start`` /
-        ``restart``). Readiness is composed through :meth:`preflight` /
+        ``resume``). Readiness is composed through :meth:`preflight` /
         :meth:`runup`; the op surface is driven directly by the
         service-layer operation."""
         return self._harness_integration
@@ -180,7 +180,7 @@ class PendingSessionNode:
     @property
     def harness_integration(self) -> HarnessIntegration:
         """The held harness_integration instance, for the op call sites (``start`` /
-        ``restart``). Readiness is composed through :meth:`preflight` /
+        ``resume``). Readiness is composed through :meth:`preflight` /
         :meth:`runup`; the op surface is driven directly by the
         service-layer operation."""
         return self._harness_integration
@@ -326,7 +326,7 @@ def _harness_integration_for_template(
     ``state`` is the session's FULL ``harness_integration_state`` blob, namespaced by
     harness integration name (``{"claude-code": {...}}``): ``{}`` for a fresh create
     (no row yet), or the stored blob on a live session, so a value minted
-    on create (``claude-code``'s session id) survives to restart. This
+    on create (``claude-code``'s session id) survives to resume. This
     seam is the ONE place the namespacing happens: the harness integration is
     constructed with only its own namespace, the SAME dict object that
     sits in the full blob, so the harness integration's in-place mutation keeps the
@@ -337,7 +337,7 @@ def _harness_integration_for_template(
     a switch away and back. A stored
     namespace value that is not a dict degrades to empty with a warning,
     mirroring ``db/converters._parse_harness_integration_state``'s malformed-blob
-    philosophy (this seam only runs on the create/restart op paths, so
+    philosophy (this seam only runs on the create/resume op paths, so
     the warning lands in op output).
     """
     from agentworks.capabilities.harness_integration import harness_integration_for

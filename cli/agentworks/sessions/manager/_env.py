@@ -121,7 +121,7 @@ def _substitute_template_vars_in_env(
 
 
 class _SessionEnvScopes(NamedTuple):
-    """Per-scope env dicts for a session create / restart.
+    """Per-scope env dicts for a session create / resume.
 
     Named-tuple shape (rather than a 5-tuple) keeps callers readable and
     leaves room for a new scope without breaking unpacking sites.
@@ -146,7 +146,7 @@ def _resolve_session_env_scopes(
     agent_name: str | None,
 ) -> _SessionEnvScopes:
     """Resolve the per-scope env dicts (vm, workspace, admin, agent, session)
-    for a session create / restart.
+    for a session create / resume.
 
     Returns the dicts ``effective_env`` would consume. Shared by
     ``_resolve_session_env`` (which composes them through
@@ -308,7 +308,7 @@ def _resolve_session_env(
     agent_name: str | None,
     linux_user: str,
 ) -> dict[str, str]:
-    """Compose the shell-open env for a session create / restart.
+    """Compose the shell-open env for a session create / resume.
 
     Resolves the per-VM / per-workspace / per-agent templates, builds the
     ResourceContext, applies template-variable substitution to the session

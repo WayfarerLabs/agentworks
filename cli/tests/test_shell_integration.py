@@ -1,6 +1,6 @@
 """The ``shell`` harness integration and the shared ``HarnessIntegration`` readiness base.
 
-Covers the config vocabulary (validate/merge), the ops (start/restart
+Covers the config vocabulary (validate/merge), the ops (start/resume
 pane strings), the relocated required-commands probe, the SESSION-level
 identity guard, and the layering rule that the capability package
 imports neither ``sessions`` nor ``orchestration``.
@@ -121,6 +121,11 @@ def test_validate_rejects_unknown_field() -> None:
         ShellIntegration.validate("session-template/claude", {"commnad": "typo"})
 
 
+def test_validate_rejects_deprecated_runtime_field() -> None:
+    with pytest.raises(ConfigError, match="unknown shell harness integration field.*restart_command"):
+        ShellIntegration.validate("session-template/claude", {"restart_command": "old"})
+
+
 def test_validate_rejects_non_string_command() -> None:
     with pytest.raises(ConfigError, match="command must be a string"):
         ShellIntegration.validate("session-template/claude", {"command": 3})
@@ -148,18 +153,6 @@ def test_merge_child_wins_the_scalars() -> None:
     )
     assert merged["command"] == "child"
     assert merged["resume_command"] == "parent-r"  # untouched by the child
-
-
-@pytest.mark.parametrize(
-    ("base", "child"),
-    [
-        ({"restart_command": "old"}, {"resume_command": "new"}),
-        ({"resume_command": "new"}, {"restart_command": "old"}),
-    ],
-)
-def test_merge_rejects_mixed_resume_spellings(base: dict[str, object], child: dict[str, object]) -> None:
-    with pytest.raises(ConfigError, match="inheritance cannot combine"):
-        ShellIntegration.merge_config(base, child)
 
 
 def test_merge_unions_required_commands_append_dedupe() -> None:

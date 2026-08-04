@@ -278,6 +278,13 @@ def decode_document(
             if (
                 spec.get("harness_integration") == "shell"
                 and isinstance(config, dict)
+                and "resume_command" in config
+                and "restart_command" in config
+            ):
+                raise ConfigError("resume_command and restart_command cannot be combined; use resume_command only")
+            if (
+                spec.get("harness_integration") == "shell"
+                and isinstance(config, dict)
                 and "restart_command" in config
                 and deprecated_restart_commands is not None
             ):

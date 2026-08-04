@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from agentworks.resources.reference import ConfigReference
     from agentworks.transports import Transport
 
-_SHELL_FIELDS = {"command", "resume_command", "restart_command", "required_commands"}
+_SHELL_FIELDS = {"command", "resume_command", "required_commands"}
 
 
 def _as_str_list(value: object) -> list[str] | None:
@@ -91,11 +91,7 @@ class ShellIntegration(HarnessIntegration):
         unknown = sorted(set(config) - _SHELL_FIELDS)
         if unknown:
             raise ConfigError(f"{owner}: unknown shell harness integration field(s): {', '.join(unknown)}")
-        if "resume_command" in config and "restart_command" in config:
-            raise ConfigError(
-                f"{owner}: resume_command and restart_command cannot be combined; use resume_command only"
-            )
-        for field_name in ("command", "resume_command", "restart_command"):
+        for field_name in ("command", "resume_command"):
             value = config.get(field_name)
             if value is not None and not isinstance(value, str):
                 raise ConfigError(f"{owner}.{field_name} must be a string")
@@ -117,13 +113,6 @@ class ShellIntegration(HarnessIntegration):
         into a valid-looking union would hide the invalid entry from the
         merged-blob ``validate`` pass. An unclean side falls through to
         the shallow merge, so ``validate`` still rejects it."""
-        if ("restart_command" in base and "resume_command" in child) or (
-            "resume_command" in base and "restart_command" in child
-        ):
-            raise ConfigError(
-                "shell harness integration inheritance cannot combine resume_command and restart_command; "
-                "use resume_command throughout the inheritance chain"
-            )
         merged = {**base, **child}
         base_cmds = _as_str_list(base.get("required_commands"))
         child_cmds = _as_str_list(child.get("required_commands"))

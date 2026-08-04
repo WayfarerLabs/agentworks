@@ -8,6 +8,7 @@ import pytest
 from typer.testing import CliRunner
 
 from agentworks.cli import app
+from agentworks.errors import StateError
 from agentworks.sessions import manager as session_manager
 
 
@@ -79,6 +80,38 @@ def test_resume_and_restart_validation_errors_match(arguments: list[str]) -> Non
     assert alias.output.count(warning) == 1
     assert canonical.exception is not None and alias.exception is not None
     assert str(canonical.exception) == str(alias.exception)
+
+
+@pytest.mark.parametrize(
+    ("arguments", "manager_name"),
+    [
+        (["coding"], "resume_session"),
+        (["--all-stopped"], "resume_all_sessions"),
+    ],
+)
+def test_resume_and_restart_lifecycle_errors_match_except_alias_warning(
+    monkeypatch: pytest.MonkeyPatch,
+    arguments: list[str],
+    manager_name: str,
+) -> None:
+    monkeypatch.setattr("agentworks.cli._helpers.get_db", lambda: object())
+    monkeypatch.setattr("agentworks.config.load_config", lambda: object())
+
+    def fail(*args: object, **kwargs: object) -> None:
+        raise StateError("lifecycle failed", hint="repair the session")
+
+    monkeypatch.setattr(session_manager, manager_name, fail)
+    canonical = CliRunner().invoke(app, ["session", "resume", *arguments])
+    alias = CliRunner().invoke(app, ["session", "restart", *arguments])
+
+    assert canonical.exit_code == alias.exit_code != 0
+    assert isinstance(canonical.exception, StateError)
+    assert isinstance(alias.exception, StateError)
+    assert str(canonical.exception) == str(alias.exception) == "lifecycle failed"
+    warning = "'agw session restart' is deprecated; use 'agw session resume'. It will be removed in 0.14.0."
+    assert warning not in canonical.output
+    assert alias.output.count(warning) == 1
+    assert alias.output.replace(f"Warning: {warning}\n", "") == canonical.output
 
 
 def test_restart_warning_is_suppressible(command_calls: list[tuple[str, dict[str, Any]]]) -> None:

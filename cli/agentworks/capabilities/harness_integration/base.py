@@ -4,7 +4,7 @@ A harness integration is a capability (see ``capabilities/README.md``): it valid
 its own ``harness_integration_config`` block (``validate``), owns the
 session's launch-target readiness (the required-commands probe and the
 skip/defer/probe/error fork), and produces the tmux pane command string
-that runs the workload as its ops (``start`` / ``restart``). Unlike the
+that runs the workload as its ops (``start`` / ``resume``). Unlike the
 thin-wrapper git-credential capability, a harness integration is HELD by a rich
 consuming node (the session node), which composes its readiness rather
 than walking it (``capabilities/README.md``: "Rich (session over
@@ -86,7 +86,7 @@ def require_commands(
     per-session tmux server exits, and the next ``server-access``
     call fails against a now-dead socket. Checking up front turns
     that into an actionable error with no partial state to roll
-    back (and, at restart, with the old session still running).
+    back (and, at resume, with the old session still running).
 
     ``target_label`` is passed in (not recomputed): a shared helper
     takes no ``self``, so the caller derives the label the same way the
@@ -122,7 +122,7 @@ class HarnessIntegration(Capability):
 
     A harness integration owns the launch-target readiness fork and the
     required-commands probe, and it ADDS the op surface (:meth:`start` /
-    :meth:`restart`, the pane command string) the session's service layer
+    :meth:`resume`, the pane command string) the session's service layer
     consumes to build the tmux pane.
 
     Subclasses (``ShellIntegration``, ``ClaudeCodeIntegration``) implement the
@@ -236,7 +236,7 @@ class HarnessIntegration(Capability):
 
     def launch_note(self) -> str | None:
         """A human-facing one-line note about what the last ``start`` /
-        ``restart`` decided, surfaced by the session manager in its op
+        ``resume`` decided, surfaced by the session manager in its op
         output. ``None`` (the default) means the harness integration has nothing to
         add, so ``shell`` stays silent; ``claude-code`` reports whether it
         resumed an existing session or started a new one.

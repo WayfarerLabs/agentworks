@@ -87,6 +87,16 @@ def _load_session_templates(
         harness_integration, harness_integration_config, used_old_selector = _session_harness_integration_pair(
             name, tdata
         )
+        if (
+            harness_integration == "shell"
+            and harness_integration_config is not None
+            and "resume_command" in harness_integration_config
+            and "restart_command" in harness_integration_config
+        ):
+            raise ConfigError(
+                f"session_templates.{name}: resume_command and restart_command cannot be combined; "
+                "use resume_command only"
+            )
         uses_restart_command = _uses_restart_command(harness_integration, harness_integration_config)
         if uses_restart_command:
             if deprecated_restart_commands is not None:

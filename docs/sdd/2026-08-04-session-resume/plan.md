@@ -50,28 +50,28 @@ cd ..
 
 ## Phase 2: Canonical CLI and deprecated alias
 
-- [ ] Add `agw session resume` with the existing single and batch interface. Extract one private
+- [x] Add `agw session resume` with the existing single and batch interface. Extract one private
       execution helper shared by canonical and deprecated command callbacks.
-- [ ] Convert `agw session restart` into a one-release wrapper that emits the exact warning in
+- [x] Convert `agw session restart` into a one-release wrapper that emits the exact warning in
       `migration-strategy.md`, respects `--no-deprecations`, and delegates without duplicating
       validation or lifecycle logic.
-- [ ] Update dynamic completion mappings for `session.resume`; retain parity mappings for
+- [x] Update dynamic completion mappings for `session.resume`; retain parity mappings for
       `session.restart` during 0.13.0 and mark the latter deprecated in help.
-- [ ] Add parity tests for successful single and batch execution, validation errors, lifecycle
+- [x] Add parity tests for successful single and batch execution, validation errors, lifecycle
       errors, exactly-one warning behavior, suppression, and help/completion discovery.
 - DoD: `resume` is canonical; both spellings have identical functional behavior in 0.13.0; only the
   old spelling warns; CLI, completion, and targeted lifecycle tests pass; reviews are clear.
 
 ## Phase 3: Shell config rename and compatibility
 
-- [ ] Make `resume_command` canonical in shell validation, merge, and runtime selection, falling
+- [x] Make `resume_command` canonical in shell validation, merge, and runtime selection, falling
       back to `command` as before.
-- [ ] Normalize old `restart_command` inputs before inheritance, aggregate a suppressible
+- [x] Normalize old `restart_command` inputs before inheritance, aggregate a suppressible
       deprecation warning, and reject every local or inherited mixed-spelling case in the migration
       matrix.
-- [ ] Teach `agw resource migrate` to emit `resume_command` and to fail atomically on conflicts.
-- [ ] Update deprecated-field metadata, sample resources, package validation, and relevant fixtures.
-- [ ] Cover every row in `migration-strategy.md` section 4, including YAML, deprecated TOML,
+- [x] Teach `agw resource migrate` to emit `resume_command` and to fail atomically on conflicts.
+- [x] Update deprecated-field metadata, sample resources, package validation, and relevant fixtures.
+- [x] Cover every row in `migration-strategy.md` section 4, including YAML, deprecated TOML,
       inheritance, suppression, migration output, and rollback on migration failure.
 - DoD: canonical input is warning-free; every previously valid old-only input works with guidance;
   ambiguous input fails; emitted config is canonical; config, manifest, migration, and sample tests
@@ -79,13 +79,13 @@ cd ..
 
 ## Phase 4: Current documentation and terminology sweep
 
-- [ ] Update current operator docs, CLI README tables and examples, resource guide, sample manifest,
+- [x] Update current operator docs, CLI README tables and examples, resource guide, sample manifest,
       capability README, ADRs, code comments, and user-visible hints to use `resume`.
 - [x] Update the active `docs/sdd/2026-08-03-harness-integration` artifacts where they specify the
       current integration method or session command. Do not rewrite completed checkbox text; append
       corrective notes or new work items where the SDD mutability rule requires it.
 - [x] Leave historical changelog entries and locked historical SDDs unchanged.
-- [ ] Run the classified residual searches from `migration-strategy.md`; record or eliminate every
+- [x] Run the classified residual searches from `migration-strategy.md`; record or eliminate every
       live match.
 - [ ] Run the documentation linter and full gate.
 - DoD: no current canonical surface teaches the old name; remaining matches are compatibility,

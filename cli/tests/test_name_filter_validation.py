@@ -167,7 +167,7 @@ def test_resume_all_sessions_valid_filter_empty_result_succeeds(
 ) -> None:
     _seed(db)
     session_manager.resume_all_sessions(db, None, vm_name="dev-vm")  # type: ignore[arg-type]
-    assert any("No matching sessions to restart" in m for m in captured_output.info)
+    assert any("No matching sessions to resume" in m for m in captured_output.info)
 
 
 # ---------------------------------------------------------------------------
