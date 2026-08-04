@@ -46,6 +46,7 @@ spec:
     name: codex
     sandbox: workspace-write
     approval_policy: on-request
+    approvals_reviewer: auto_review        # yes, this is snake case per the docs
     network: true
 ---
 apiVersion: agentworks/v1
