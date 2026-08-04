@@ -27,13 +27,13 @@ Record post-lock updates as dated notes below rather than editing the decisions 
   `network: true`.
 - **Notify-bound session resume** (the redesign; see the decisions doc's "Addressing" section).
   Identity comes from codex itself: a recorder script attached through codex's `notify` hook writes
-  down the thread id codex reports after each completed turn, recording only payloads that carry a
-  `client` key, because a subagent's turn fires the PARENT's hook with the CHILD's id. Where no id
-  is bound, discovery falls back to rollouts carrying the literal `"source":"cli"` plus the
-  session's canonicalized workspace cwd, and genuine ambiguity opens codex's own session picker in
-  the pane instead of raising. `session create` is unconditionally fresh and clears any stale
-  recording, so only `session resume` ever adopts an id. Every decision leaf is announced in both
-  the `agw session resume` console output and the pane.
+  down the thread id codex reports after each completed turn, recording only payloads that identify
+  the interactive TUI client, because a subagent's turn fires the PARENT's hook with the CHILD's id
+  and no client key at all. Where no id is bound, discovery falls back to rollouts carrying the
+  literal `"source":"cli"` plus the session's canonicalized workspace cwd, and genuine ambiguity
+  opens codex's own session picker in the pane instead of raising. `session create` is
+  unconditionally fresh and clears any stale recording, so only `session resume` ever adopts an id.
+  Every decision leaf is announced in both the `agw session resume` console output and the pane.
 - **Per-integration namespacing of the session state blob** (`{"<integration>": {...}}`), so two
   stateful integrations cannot collide on a key name. No migration: pre-namespacing rows are adopted
   lazily by a claude-owned hoist, flagged
@@ -75,10 +75,19 @@ empty, and a greedy `sed` that took the last `thread-id` rather than the first.
   controller and target and could orphan a live conversation if wrong;
   [#397](https://github.com/WayfarerLabs/agentworks/issues/397) carries the design.
 - **Two undocumented codex contracts are load-bearing** and must be re-verified on any codex major
-  bump: the `notify` payload's `client` key (the only in-payload discriminator between a real
-  session's turn and a subagent's) and the payload's field ORDER (the recorder takes the first
-  `thread-id` in byte order, which is the payload's own only because 0.146.0 emits it before any
-  nested object). Both failure modes are recoverable: a wrong binding lands in the picker.
+  bump, and their failure modes differ:
+  - The `notify` payload's `client` key and its `codex-tui` value: the only in-payload discriminator
+    between a real session's turn and a subagent's (a subagent payload carries no `client` key at
+    all). The recorder matches the TUI value positively, so the realistic drift (codex renaming the
+    client string) fails SAFE: nothing is recorded, the op falls back to discovery or the picker,
+    and what is lost is determinism rather than correctness. The unsafe direction, a payload that
+    somehow satisfies the needle while belonging to a subagent, would bind that id DIRECTLY (the id
+    names a real rollout, so the probe finds it and resume adopts it, with no picker involved);
+    recovery there is the operator seeing the wrong conversation in the pane, which the
+    announcement's uuid makes checkable, and clearing the binding.
+  - The payload's field ORDER: the recorder takes the first `thread-id` in byte order, which is the
+    payload's own only because 0.146.0 emits it before any nested object. A future codex nesting one
+    earlier would bind that instead; that failure IS picker-recoverable.
 - **No codex-side session name is set.** Codex has no launch-time `--name`, and every binding path
   requires the id first; [#394](https://github.com/WayfarerLabs/agentworks/issues/394) would add one
   for picker legibility and manual recovery, gated on

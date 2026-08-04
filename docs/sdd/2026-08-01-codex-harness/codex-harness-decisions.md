@@ -70,13 +70,15 @@ The following were verified 2026-08-04 (offline-stub harness driving real turns 
 plus operator-supplied rollout specimens from a production incident), for the resume redesign:
 
 - **The `notify` hook.** `notify = ["<program>"]` is a config key (`-c` accepted, `--strict-config`
-  validated). Codex invokes the program with ONE argv argument, a JSON payload
-  (`{"type":"agent-turn-complete","thread-id":...,"turn-id":...,"cwd":...,"client":...,...}`), after
-  EVERY successfully completed turn, in every launch mode (TUI, `exec`, `resume <id>`, the picker,
-  picker-esc-new). `thread-id` equals the rollout filename uuid and the id `codex resume` takes.
-  Nothing fires for an abandoned session or a failed turn. A `-c notify` override silently and
-  completely REPLACES a config.toml notify; a nonexistent notify program is a completely silent
-  no-op. The payload's `cwd` is the resume-time cwd, not the session's original.
+  validated). Codex invokes the program with the JSON payload
+  (`{"type":"agent-turn-complete","thread-id":...,"turn-id":...,"cwd":...,"client":...,...}`) as its
+  FINAL argv argument, which for a single-element `notify` array is the only one (the next bullet
+  covers the multi-element form the integration actually emits), after EVERY successfully completed
+  turn, in every launch mode (TUI, `exec`, `resume <id>`, the picker, picker-esc-new). `thread-id`
+  equals the rollout filename uuid and the id `codex resume` takes. Nothing fires for an abandoned
+  session or a failed turn. A `-c notify` override silently and completely REPLACES a config.toml
+  notify; a nonexistent notify program is a completely silent no-op. The payload's `cwd` is the
+  resume-time cwd, not the session's original.
 - **Extra `notify` list elements are passed as leading argv, before the payload** (verified
   2026-08-04 at implementation time against 0.146.0, with a real completed turn against the offline
   stub provider): `notify=["<prog>","<extra>"]` runs `<prog> <extra> <payload>`, so the payload
@@ -134,22 +136,28 @@ error. Three layers:
 - **Layer 1, the notify binding (primary).** Every generated launch (fresh, `resume <id>`, picker)
   provisions a recorder script and passes `-c notify=[...]`. On each completed turn codex hands the
   recorder its `thread-id`; the recorder writes it atomically to
-  `~/.agentworks/codex/<session-name>.thread` ONLY when the payload carries a `client` key (a
-  subagent turn fires the parent's notify with the CHILD's id and no `client` key; recording it
-  would splice conversations, the exact failure this redesign kills). The next RESUME reads the
-  file, adopts the id into `session_id`, and resumes deterministically; a `create` deletes it
-  instead (see create-is-always-fresh below). Last-write-wins on purpose: a picker-esc fresh session
-  rebinds to the conversation actually in the pane. The `client` discriminator is undocumented
-  (codex-internal `legacy_notify`); re-verify on codex major bumps. The `thread-id` read is
-  field-anchored (the payload is split on JSON field and object boundaries, then a whole field is
-  matched) and takes the FIRST match, so a value that quotes the needle cannot forge it (JSON
-  escapes its quotes) and a `thread-id` nested in a LATER object cannot displace the payload's own.
-  Note the exact guarantee: first-match is BYTE ORDER, not nesting depth, so it is the payload's own
-  only because 0.146.0 emits that field before any nested object; a future codex nesting one earlier
-  would bind that instead, costing a recoverable wrong binding the picker fixes. That anchor is also
-  what depends on codex serializing the payload COMPACTLY, as 0.146.0 does (the `"client":` needle
-  survives pretty-printing; the anchored field match does not), so a pretty-printed payload would
-  record NOTHING: that silently costs the binding and falls back to layers 2/3 rather than recording
+  `~/.agentworks/codex/<session-name>.thread` ONLY when the payload identifies the interactive TUI
+  client (`"client":"codex-tui"`; a subagent turn fires the parent's notify with the CHILD's id and
+  no `client` key at all, and recording it would splice conversations, the exact failure this
+  redesign kills). The match is POSITIVE on the TUI value rather than a presence test, which is what
+  also excludes an `exec` client, an unknown future client, and a `client` key codex might someday
+  nest in another object: that needle is a substring test, not a field-anchored one like the
+  `thread-id` read below, so mere presence would inherit the nesting hazard byte-order first-match
+  handles there. The next RESUME reads the file, adopts the id into `session_id`, and resumes
+  deterministically; a `create` deletes it instead (see create-is-always-fresh below).
+  Last-write-wins on purpose: a picker-esc fresh session rebinds to the conversation actually in the
+  pane. The `client` discriminator and its value are undocumented (codex-internal `legacy_notify`);
+  re-verify on codex major bumps, noting the failure is safe in the likely direction (a renamed
+  client string records nothing and falls back). The `thread-id` read is field-anchored (the payload
+  is split on JSON field and object boundaries, then a whole field is matched) and takes the FIRST
+  match, so a value that quotes the needle cannot forge it (JSON escapes its quotes) and a
+  `thread-id` nested in a LATER object cannot displace the payload's own. Note the exact guarantee:
+  first-match is BYTE ORDER, not nesting depth, so it is the payload's own only because 0.146.0
+  emits that field before any nested object; a future codex nesting one earlier would bind that
+  instead, costing a recoverable wrong binding the picker fixes. That anchor is also what depends on
+  codex serializing the payload COMPACTLY, as 0.146.0 does (the `"client":` needle survives
+  pretty-printing; the anchored field match does not), so a pretty-printed payload would record
+  NOTHING: that silently costs the binding and falls back to layers 2/3 rather than recording
   something wrong.
 - **Layer 2, source-filtered discovery (the fallback, reached whenever no id is bound: nothing
   recorded and nothing stored, OR a bound id just dropped as archived-or-gone).** Candidates are

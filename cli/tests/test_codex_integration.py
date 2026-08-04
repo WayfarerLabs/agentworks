@@ -1334,8 +1334,22 @@ def test_recorder_last_write_wins(tmp_path: Path) -> None:
         # pattern matches.
         '{"type":"agent-turn-complete","thread-id":"' + _OTHER_SID + '","last-assistant-message":'
         '"I wrote \\"client\\": and \\"thread-id\\":\\"' + _THIRD_SID + '\\" here"}',
+        # The client needle is a POSITIVE match on the interactive TUI, not a
+        # presence test, so an exec-client turn is not ours to record.
+        '{"type":"agent-turn-complete","thread-id":"' + _OTHER_SID + '","client":"codex_exec"}',
+        # ... and neither is a client key codex might someday NEST inside
+        # another object, which mere presence would have accepted.
+        '{"type":"agent-turn-complete","thread-id":"' + _OTHER_SID + '","detail":{"client":"whatever"}}',
     ],
-    ids=["empty", "garbage", "no-thread-id", "bad-uuid", "forged-needles"],
+    ids=[
+        "empty",
+        "garbage",
+        "no-thread-id",
+        "bad-uuid",
+        "forged-needles",
+        "exec-client",
+        "nested-client",
+    ],
 )
 def test_recorder_never_breaks_the_turn_and_writes_nothing_on_bad_input(tmp_path: Path, payload: str) -> None:
     """Codex ignores notify failures, but the recorder must not rely on

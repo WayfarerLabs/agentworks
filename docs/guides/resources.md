@@ -274,12 +274,13 @@ does none of that: a new session always starts a brand-new conversation and adop
 reusing a deleted session's name can never silently pick that session's conversation back up. Note
 the limit of that, because the fallback is still a heuristic: if the deleted session's conversation
 is the only Codex conversation recorded in the workspace, the new session's first `session resume`
-can still adopt it. Whichever way it went is announced both in the `session create` /
-`session resume` output and as the pane's first line, and an adoption names the Codex conversation
-id it chose, so you can see it happen and fix it (pick the right conversation from the picker, or
-archive the stale one) rather than discovering it later. Overriding `notify` yourself through
-`extra_args` turns the recording off (yours wins, because `extra_args` is appended last), which
-leaves resume relying on that fallback.
+can still adopt it. Whichever way it went is announced in the command's output and as the pane's
+first line: `session create` always reports a brand-new conversation, while the adoption and picker
+outcomes belong to `session resume`, and an adoption names the Codex conversation id it chose, so
+you can see it happen and fix it (pick the right conversation from the picker, or archive the stale
+one) rather than discovering it later. Overriding `notify` yourself through `extra_args` turns the
+recording off (yours wins, because `extra_args` is appended last), which leaves resume relying on
+that fallback.
 
 Its config is ten optional fields: `model`, `sandbox`, `approval_policy`, and `profile` forward
 verbatim to `codex -m` / `-s` / `-a` / `-p` (their choice sets are Codex's, not validated here);
