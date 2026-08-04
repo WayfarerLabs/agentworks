@@ -651,6 +651,25 @@ def test_approvals_reviewer_forwards_as_a_quoted_toml_string() -> None:
     assert "approvals_reviewer" not in absent
 
 
+def test_approvals_reviewer_escapes_toml_structural_characters() -> None:
+    """Codex parses -c key=value as a TOML DOCUMENT splice (verified
+    against 0.146.0), so an unescaped newline in the value silently
+    defines EXTRA config keys, even under --strict-config, and an
+    unescaped quote breaks the value into the raw-string fallback.
+    Escaping keeps any operator value one literal string that fails
+    codex's own enum check loudly instead."""
+    target = _FakeTarget({_ROLLOUT_PROBE: _FakeResult(0)})
+    payload = 'user"\nsandbox_mode="danger-full-access'
+    command = _harness_integration({"approvals_reviewer": payload}).start(_op_ctx(target))
+    inner_tokens = shlex.split(shlex.split(command)[2])
+    token = next(t for t in inner_tokens if t.startswith("approvals_reviewer="))
+    # One argv token, no raw newline, quote and newline TOML-escaped: the
+    # smuggled second key stays inert text inside one string value.
+    assert "\n" not in token
+    assert token == 'approvals_reviewer="user\\"\\nsandbox_mode=\\"danger-full-access"'
+    assert not any(t.startswith("sandbox_mode") for t in inner_tokens)
+
+
 def test_writable_dirs_emit_one_add_dir_each_in_order_and_quoted() -> None:
     target = _FakeTarget({_ROLLOUT_PROBE: _FakeResult(0)})
     command = _harness_integration({"writable_dirs": ["/srv/cache", "/data/shared dir"]}).start(_op_ctx(target))

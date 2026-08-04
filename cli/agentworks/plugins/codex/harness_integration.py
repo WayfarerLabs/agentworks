@@ -101,6 +101,37 @@ _NETWORK_KEY = "sandbox_workspace_write.network_access"
 # approvals_reviewer (validate type-checks them through one loop).
 _STR_FIELDS: tuple[str, ...] = (*(name for name, _flag in _FLAG_FIELDS), "approvals_reviewer")
 
+
+def _toml_basic_string(value: str) -> str:
+    """Encode ``value`` as a quoted TOML basic string for a ``-c`` override.
+
+    Escaping is encoding, not validation: the value still reaches codex
+    verbatim. It is load-bearing for two reasons (verified against
+    0.146.0): codex parses ``-c key=value`` as a TOML DOCUMENT splice, so
+    an unescaped newline in the value silently defines additional config
+    keys (accepted even under ``--strict-config``), and an unescaped
+    quote makes the value fail TOML parsing into the raw-string fallback.
+    Escaped, both arrive as one literal value and fail codex's own enum
+    check loudly instead.
+    """
+    out: list[str] = []
+    for ch in value:
+        if ch == "\\":
+            out.append("\\\\")
+        elif ch == '"':
+            out.append('\\"')
+        elif ch == "\n":
+            out.append("\\n")
+        elif ch == "\r":
+            out.append("\\r")
+        elif ch == "\t":
+            out.append("\\t")
+        elif ord(ch) < 0x20 or ch == "\x7f":
+            out.append(f"\\u{ord(ch):04X}")
+        else:
+            out.append(ch)
+    return '"' + "".join(out) + '"'
+
 # The codex config key ``approvals_reviewer`` forwards to (via ``-c``;
 # codex exposes no dedicated flag for it, so the strict-config default is
 # the drift guard here too). Values are codex-owned and forward
@@ -416,9 +447,9 @@ class CodexIntegration(HarnessIntegration):
             tokens += ["-c", f"{_NETWORK_KEY}={'true' if network else 'false'}"]
         approvals_reviewer = self.config.get("approvals_reviewer")
         if isinstance(approvals_reviewer, str):
-            # The -c value is parsed as TOML, so the string is quoted
-            # explicitly rather than leaning on codex's raw-string fallback.
-            tokens += ["-c", f'{_APPROVALS_REVIEWER_KEY}="{approvals_reviewer}"']
+            # Encoded as a TOML basic string: see _toml_basic_string for
+            # why raw interpolation would be a silent-injection hole.
+            tokens += ["-c", f"{_APPROVALS_REVIEWER_KEY}={_toml_basic_string(approvals_reviewer)}"]
         writable_dirs = self.config.get("writable_dirs")
         if isinstance(writable_dirs, list):
             for item in writable_dirs:
