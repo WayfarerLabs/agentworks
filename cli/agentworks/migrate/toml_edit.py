@@ -103,7 +103,13 @@ def apply_toml_edits(
             body.insert(index + offset, entry)
         index += len(entries)
 
-    return tomlkit.dumps(doc)
+    rendered = tomlkit.dumps(doc)
+    if "\r\n" in text and "\n" not in text.replace("\r\n", ""):
+        # tomlkit preserves existing CRLF trivia, but new comments use LF.
+        # Keep a uniformly CRLF source uniform without rewriting a file that
+        # already contains intentionally mixed line endings.
+        return rendered.replace("\r\n", "\n").replace("\n", "\r\n")
+    return rendered
 
 
 def _replace_entry(

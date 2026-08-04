@@ -167,7 +167,11 @@ def plan_migration(
             hint="Choose comment (default) or delete.",
         )
     config_path = config.source_path
-    old_text = config_path.read_text(encoding="utf-8")
+    # Hash the exact bytes that execution will compare. ``Path.read_text``
+    # enables universal-newline translation, so a CRLF file would otherwise
+    # be planned from LF text and immediately fail the raw-byte CAS guard.
+    old_bytes = config_path.read_bytes()
+    old_text = old_bytes.decode("utf-8")
     doc = tomlkit.parse(old_text)
 
     resources_dir = config_path.parent / RESOURCES_DIRNAME
@@ -209,7 +213,7 @@ def plan_migration(
         yaml_rewrites=yaml_rewrites,
         toml_mode=toml_mode,
         old_toml_text=old_text,
-        old_toml_digest=sha256(old_text.encode()).hexdigest(),
+        old_toml_digest=sha256(old_bytes).hexdigest(),
         new_toml_text=new_text,
         new_toml_digest=sha256(new_text.encode()).hexdigest(),
         drops_secret_backends=drops,

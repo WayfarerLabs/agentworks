@@ -1329,6 +1329,44 @@ def test_yaml_only_migration_does_not_replace_config_toml(tmp_path: Path) -> Non
     assert before.st_mtime_ns == after.st_mtime_ns
 
 
+def test_yaml_only_migration_accepts_crlf_config_without_replacing_it(tmp_path: Path) -> None:
+    cfg = _write_config(tmp_path, resources="")
+    original = cfg.read_text().replace("\n", "\r\n").encode()
+    cfg.write_bytes(original)
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    manifest = resources / "sessions.yaml"
+    manifest.write_text(
+        "apiVersion: agentworks/v1\nkind: session-template\nmetadata:\n  name: htop\nspec:\n  harness: shell\n"
+    )
+    before = cfg.stat()
+
+    config, plan = _plan(cfg, ["session-template/htop"])
+    result = execute_plan(plan, config)
+
+    after = cfg.stat()
+    assert not result.config_rewritten
+    assert cfg.read_bytes() == original
+    assert before.st_ino == after.st_ino
+    assert before.st_mtime_ns == after.st_mtime_ns
+    assert _loaded_docs(manifest)[0]["spec"]["harness_integration"] == {"name": "shell"}
+
+
+def test_toml_migration_accepts_crlf_config_and_keeps_byte_exact_backup(tmp_path: Path) -> None:
+    cfg = _write_config(tmp_path)
+    original = cfg.read_text().replace("\n", "\r\n").encode()
+    cfg.write_bytes(original)
+
+    config, plan = _plan(cfg, ["secret"])
+    result = execute_plan(plan, config)
+
+    assert result.config_rewritten
+    assert result.backup_path.read_bytes() == original
+    rewritten = cfg.read_bytes()
+    assert b"\r\n" in rewritten
+    assert b"\n" not in rewritten.replace(b"\r\n", b"")
+
+
 @pytest.mark.parametrize("existing", [False, True])
 def test_atomic_manifest_writes_leave_no_partial_artifact_when_replacement_fails(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, existing: bool
@@ -1392,6 +1430,21 @@ def test_config_digest_mismatch_refuses_before_writing(tmp_path: Path) -> None:
         execute_plan(plan, config)
     assert "# concurrent edit" in cfg.read_text()
     assert not (tmp_path / "resources").exists()
+
+
+def test_yaml_only_config_digest_mismatch_reports_validation_not_rewrite(tmp_path: Path) -> None:
+    cfg = _write_config(tmp_path, resources="")
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    manifest = resources / "sessions.yaml"
+    original = "apiVersion: agentworks/v1\nkind: session-template\nmetadata:\n  name: htop\nspec:\n  harness: shell\n"
+    manifest.write_text(original)
+    config, plan = _plan(cfg, ["session-template/htop"])
+    cfg.write_text(cfg.read_text() + "# concurrent edit\n")
+
+    with pytest.raises(StateError, match="cannot validate config.toml: it changed after migration planning"):
+        execute_plan(plan, config)
+    assert manifest.read_text() == original
 
 
 def test_yaml_recovery_copy_restores_only_the_run_output(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

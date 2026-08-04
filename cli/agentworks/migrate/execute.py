@@ -53,7 +53,8 @@ class ExecutionResult:
 def execute_plan(plan: MigrationPlan, config: Config) -> ExecutionResult:
     """Run the plan. Raises ``StateError`` (after rollback) on
     verification mismatch."""
-    _require_digest(plan.config_path, plan.old_toml_digest, "rewrite config.toml")
+    config_guard = "rewrite config.toml" if plan.new_toml_digest != plan.old_toml_digest else "validate config.toml"
+    _require_digest(plan.config_path, plan.old_toml_digest, config_guard)
     backup_path, yaml_backup_path = _take_backup(plan, config)
     result = ExecutionResult(
         backup_path=backup_path,
