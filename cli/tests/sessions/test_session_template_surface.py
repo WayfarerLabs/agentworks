@@ -1,4 +1,4 @@
-"""The Phase 4 template surface: the ``(harness, harness_config)`` pair,
+"""The template surface: the internal ``(harness, harness_config)`` pair,
 the TOML hoist and its two conflict errors, the manifest flat-field
 rejection, the pair-inheritance rules (FRD R5, including the multi-parent
 divergence), and the harness reference / describe surfaces.
@@ -117,6 +117,35 @@ def test_nested_toml_harness_config_passes_through(tmp_path: Path) -> None:
     assert tmpl.harness_config == {"command": "htop", "required_commands": ["htop"]}
 
 
+def test_canonical_toml_harness_integration_pair_normalizes_to_internal_pair(tmp_path: Path) -> None:
+    config = _config(
+        tmp_path,
+        """
+        [session_templates.htop]
+        harness_integration = "shell"
+        [session_templates.htop.harness_integration_config]
+        command = "htop"
+        required_commands = ["htop"]
+        """,
+    )
+    tmpl = _templates(config)["htop"]
+    assert tmpl.harness == "shell"
+    assert tmpl.harness_config == {"command": "htop", "required_commands": ["htop"]}
+    assert not config.deprecated_harness_selectors
+
+
+def test_toml_harness_old_and_canonical_pairs_cannot_mix(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="old and new harness selector/config fields cannot be mixed"):
+        _config(
+            tmp_path,
+            """
+            [session_templates.bad]
+            harness = "shell"
+            harness_integration = "shell"
+            """,
+        )
+
+
 def test_undeclared_template_leaves_the_pair_none(tmp_path: Path) -> None:
     config = _config(
         tmp_path,
@@ -158,7 +187,7 @@ def test_flat_fields_with_explicit_harness_config_is_an_error(
 
 
 def test_harness_config_without_harness_is_an_error(tmp_path: Path) -> None:
-    with pytest.raises(ConfigError, match="harness_config needs a harness"):
+    with pytest.raises(ConfigError, match="harness_config needs a selector"):
         _config(
             tmp_path,
             """
@@ -236,7 +265,7 @@ def test_manifest_unknown_harness_name_errors_at_finalize(tmp_path: Path) -> Non
         """,
     )
     config = load_config(cfg, warn_issues=False)
-    with pytest.raises(ConfigError, match="'typo' references unknown harness 'shel'"):
+    with pytest.raises(ConfigError, match="'typo' references unknown harness-integration 'shel'"):
         build_registry(config)
 
 
@@ -333,7 +362,7 @@ def test_undeclared_default_resolves_to_shell_empty() -> None:
 def test_declared_harness_emits_a_reference() -> None:
     tmpl = SessionTemplate(name="claude", harness="shell", harness_config={"command": "claude"})
     refs = tmpl.dependencies(BuildContext())
-    harness_refs = [r for r in refs if r.kind == "harness"]
+    harness_refs = [r for r in refs if r.kind == "harness-integration"]
     assert len(harness_refs) == 1
     assert harness_refs[0].name == "shell"
     assert harness_refs[0].usage == "the session harness"
@@ -341,7 +370,7 @@ def test_declared_harness_emits_a_reference() -> None:
 
 def test_undeclared_harness_emits_no_reference() -> None:
     tmpl = SessionTemplate(name="plain")
-    assert [r for r in tmpl.dependencies(BuildContext()) if r.kind == "harness"] == []
+    assert [r for r in tmpl.dependencies(BuildContext()) if r.kind == "harness-integration"] == []
 
 
 def test_harness_row_lists_its_declaring_template(tmp_path: Path) -> None:
@@ -355,6 +384,6 @@ def test_harness_row_lists_its_declaring_template(tmp_path: Path) -> None:
         """,
     )
     registry = build_registry(config)
-    desc = describe_resource(registry, "harness", "shell")
+    desc = describe_resource(registry, "harness-integration", "shell")
     sources = {entry.source for entry in desc.references}
     assert ("session-template", "htop") in sources

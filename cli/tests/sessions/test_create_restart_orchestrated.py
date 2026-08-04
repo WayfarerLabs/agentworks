@@ -26,6 +26,7 @@ import pytest
 # installed): the gate-parity tests below need the REAL registry and
 # the REAL env-chain resolve.
 from agentworks.bootstrap import build_registry as _real_build_registry
+from agentworks.bootstrap import load_request_registry as _real_load_request_registry
 from agentworks.db import Database, SessionMode, SessionStatus
 from agentworks.errors import StateError
 from agentworks.output import Role
@@ -594,6 +595,7 @@ def make_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # noqa: ANN20
     # resolve_for_command for the SimpleNamespace-config tests; these
     # tests run the real ones.
     monkeypatch.setattr("agentworks.bootstrap.build_registry", _real_build_registry)
+    monkeypatch.setattr("agentworks.bootstrap.load_request_registry", _real_load_request_registry)
     monkeypatch.setattr(
         "agentworks.secrets.orchestration.resolve_for_command",
         _real_resolve_for_command,

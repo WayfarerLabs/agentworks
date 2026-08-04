@@ -366,7 +366,7 @@ def build_graph(
 # heterogeneous (a class for platform/harness/provider, an instance for
 # secret-backend) and each kind's host-support source differs (LLD c's table).
 _CAPABILITY_KINDS = frozenset(
-    {"vm-platform", "harness", "git-credential-provider", "secret-backend"},
+    {"vm-platform", "harness-integration", "git-credential-provider", "secret-backend"},
 )
 
 
@@ -585,7 +585,7 @@ def _load_secret_backend_registry() -> Mapping[str, object]:
 # is imported by ``agentworks.resources`` before the capability packages.
 _CAPABILITY_REGISTRY_LOADERS: dict[str, Callable[[], Mapping[str, object]]] = {
     "vm-platform": _load_vm_platform_registry,
-    "harness": _load_harness_registry,
+    "harness-integration": _load_harness_registry,
     "git-credential-provider": _load_git_credential_provider_registry,
     "secret-backend": _load_secret_backend_registry,
 }

@@ -545,6 +545,11 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
             f"{', '.join(manifests.deprecated_shape_resources)}: fold the "
             "sibling pair into one tagged table, e.g. platform: {name: lima, ...}",
         )
+    if manifests is not None:
+        from agentworks.bootstrap import harness_selector_deprecation
+
+        if message := harness_selector_deprecation(config, manifests):
+            g.warn("Session templates use the deprecated harness selector", message)
     for section in config.noop_secret_backend_sections:
         g.warn(
             f"Config has a no-op {section} section",

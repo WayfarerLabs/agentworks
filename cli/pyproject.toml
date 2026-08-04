@@ -23,6 +23,7 @@ dependencies = [
     "boto3>=1.43.62",
     "pyyaml>=6.0.3",
     "tomlkit>=0.15.0",
+    "ruamel-yaml==0.19.1",
 ]
 
 [project.urls]

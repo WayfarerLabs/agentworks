@@ -92,7 +92,7 @@ class SessionTemplate(DeclaredResource):
             refs.append(
                 _ResourceRef(
                     name=self.harness,
-                    kind="harness",
+                    kind="harness-integration",
                     usage="the session harness",
                     source=source,
                 )

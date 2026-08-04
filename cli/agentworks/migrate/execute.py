@@ -9,8 +9,9 @@ Ordering is load-bearing (migration-tool LLD):
 3. The TOML rewrite is atomic (write-new-then-rename).
 4. Verification last; a mismatch rolls everything back and raises.
 
-Appends are text-only: existing YAML is never parsed or rewritten, new
-documents arrive after a ``---`` separator (newline-guarded).
+New documents append text-only. The one exception is an existing YAML
+session-template using the deprecated selector: it is round-tripped during
+planning and replaced only when its digest still matches the planned input.
 """
 
 from __future__ import annotations
@@ -18,9 +19,11 @@ from __future__ import annotations
 import contextlib
 import os
 import shutil
+import stat
 import tempfile
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from hashlib import sha256
 from typing import TYPE_CHECKING
 
 from agentworks.errors import StateError
@@ -38,8 +41,11 @@ class ExecutionResult:
     """What a real run did (for the command's summary output)."""
 
     backup_path: Path
+    yaml_backup_path: Path | None = None
+    config_rewritten: bool = False
     created: list[Path] = field(default_factory=list)
     appended: list[Path] = field(default_factory=list)
+    replaced: list[Path] = field(default_factory=list)
     verified_rows: int = 0
     dropped_secret_backends: bool = False
 
@@ -47,39 +53,93 @@ class ExecutionResult:
 def execute_plan(plan: MigrationPlan, config: Config) -> ExecutionResult:
     """Run the plan. Raises ``StateError`` (after rollback) on
     verification mismatch."""
-    backup_path = _take_backup(plan.config_path, config)
+    _require_digest(plan.config_path, plan.old_toml_digest, "rewrite config.toml")
+    backup_path, yaml_backup_path = _take_backup(plan, config)
     result = ExecutionResult(
         backup_path=backup_path,
+        yaml_backup_path=yaml_backup_path,
         dropped_secret_backends=plan.drops_secret_backends,
     )
 
     created_dirs: list[Path] = []
-    appended_lengths: dict[Path, int] = {}
+    appended: dict[Path, tuple[int, str, str]] = {}
+    created: dict[Path, str] = {}
+    replaced: dict[Path, tuple[Path, str, str]] = {}
+    config_replaced = False
     try:
         for write in plan.writes:
             created_dirs.extend(_ensure_parents(write.path, plan.resources_dir))
             if write.path.exists():
-                appended_lengths[write.path] = write.path.stat().st_size
-                _append_documents(write.path, write.documents)
+                original_length = write.path.stat().st_size
+                old_text = write.path.read_text(encoding="utf-8")
+                old_digest = _digest(write.path)
+                new_text = _appended_text(old_text, write.documents)
+                new_digest = sha256(new_text.encode()).hexdigest()
+                appended[write.path] = (original_length, old_digest, new_digest)
+                _atomic_write(write.path, new_text)
                 result.appended.append(write.path)
             else:
-                # Record BEFORE writing so a mid-write failure (disk
-                # full, ...) still gets the partial file removed by
-                # rollback; the append path records its length first for
-                # the same reason.
+                # The atomic replace leaves no destination artifact until
+                # its write completes, so a mid-write failure needs no
+                # speculative rollback record.
+                new_text = "---\n".join(write.documents)
+                created[write.path] = sha256(new_text.encode()).hexdigest()
+                _atomic_write(write.path, new_text)
                 result.created.append(write.path)
-                write.path.write_text("---\n".join(write.documents), encoding="utf-8")
 
-        _atomic_write(plan.config_path, plan.new_toml_text)
+        for rewrite in plan.yaml_rewrites:
+            _require_digest(rewrite.path, rewrite.old_digest, f"rewrite {rewrite.path}")
+            assert yaml_backup_path is not None  # planned rewrites always have recovery copies
+            # Register the intended replacement before os.replace: a platform
+            # can complete replace then interrupt before this call returns.
+            replaced[rewrite.path] = (
+                yaml_backup_path / rewrite.path.relative_to(plan.config_path.parent),
+                rewrite.old_digest,
+                rewrite.new_digest,
+            )
+            _atomic_write(rewrite.path, rewrite.new_text)
+            result.replaced.append(rewrite.path)
+
+        if plan.new_toml_digest != plan.old_toml_digest:
+            # A concurrent edit may arrive after the initial guard while
+            # manifests are being written. Check again immediately before
+            # replacement, but leave a YAML-only plan's config inode intact.
+            _require_digest(plan.config_path, plan.old_toml_digest, "rewrite config.toml")
+            config_replaced = True
+            _atomic_write(plan.config_path, plan.new_toml_text)
+            result.config_rewritten = True
 
         result.verified_rows = _verify(plan)
-    except Exception:
-        _rollback(plan, backup_path, result, created_dirs, appended_lengths)
+    except BaseException as exc:
+        recovery_failures = _rollback(
+            plan,
+            backup_path,
+            result,
+            created_dirs,
+            appended,
+            created,
+            replaced,
+            config_replaced,
+        )
+        if recovery_failures:
+            if not isinstance(exc, Exception):
+                exc.add_note("Manual recovery is required. " + " ".join(recovery_failures))
+                raise
+            raise StateError(
+                f"migration failed and rollback is incomplete: {exc}",
+                hint=(
+                    "Manual recovery is required. "
+                    + " ".join(recovery_failures)
+                    + f" Config backup: {backup_path}."
+                ),
+            ) from exc
         raise
     return result
 
 
-def _take_backup(config_path: Path, config: Config) -> Path:
+def _take_backup(plan: MigrationPlan, config: Config) -> tuple[Path, Path | None]:
+    """Persist the config backup and original YAML rewrite inputs before writes."""
+    config_path = plan.config_path
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     backup_dir = config.paths.backups
     backup_dir.mkdir(parents=True, exist_ok=True)
@@ -91,7 +151,16 @@ def _take_backup(config_path: Path, config: Config) -> Path:
         backup_path = backup_dir / f"config-{stamp}-{counter}.toml"
         counter += 1
     shutil.copy2(config_path, backup_path)
-    return backup_path
+    if not plan.yaml_rewrites:
+        return backup_path, None
+
+    yaml_backup_path = backup_path.parent / f"{backup_path.name}.resources"
+    yaml_backup_path.mkdir()
+    for rewrite in plan.yaml_rewrites:
+        snapshot = yaml_backup_path / rewrite.path.relative_to(config_path.parent)
+        snapshot.parent.mkdir(parents=True, exist_ok=True)
+        snapshot.write_bytes(rewrite.old_bytes)
+    return backup_path, yaml_backup_path
 
 
 def _ensure_parents(path: Path, resources_dir: Path) -> list[Path]:
@@ -110,26 +179,45 @@ def _ensure_parents(path: Path, resources_dir: Path) -> list[Path]:
     return created
 
 
-def _append_documents(path: Path, documents: list[str]) -> None:
-    existing = path.read_bytes()
-    prefix = "" if existing.endswith(b"\n") or not existing else "\n"
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(prefix)
-        for document in documents:
-            handle.write("---\n")
-            handle.write(document)
+def _appended_text(existing: str, documents: list[str]) -> str:
+    prefix = "" if existing.endswith("\n") or not existing else "\n"
+    return existing + prefix + "".join(f"---\n{document}" for document in documents)
 
 
 def _atomic_write(path: Path, text: str) -> None:
+    original = path.stat() if path.exists() else None
     fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             handle.write(text)
+        if original is not None:
+            # Apply metadata to the temp inode before replacement. A chmod or
+            # chown failure must leave the old target intact, not create an
+            # untracked post-replace mutation outside rollback bookkeeping.
+            os.chown(tmp_name, original.st_uid, original.st_gid)
+            os.chmod(tmp_name, stat.S_IMODE(original.st_mode))
         os.replace(tmp_name, path)
     except Exception:
         with contextlib.suppress(OSError):
             os.unlink(tmp_name)
         raise
+
+
+def _require_digest(path: Path, expected: str, operation: str) -> None:
+    """Refuse to replace a file that changed after planning."""
+    if _digest(path) != expected:
+        raise StateError(
+            f"cannot {operation}: it changed after migration planning",
+            hint="Reconcile the edit, then re-run `agw resource migrate`.",
+        )
+
+
+def _digest(path: Path) -> str:
+    """Digest a file, reporting absence as a recovery-safe observed value."""
+    try:
+        return sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return "<unreadable-or-missing>"
 
 
 def _verify(plan: MigrationPlan) -> int:
@@ -143,8 +231,8 @@ def _verify(plan: MigrationPlan) -> int:
         raise StateError(
             f"migration verification failed: {difference}",
             hint=(
-                "This is a migrate-tool bug, not a config problem; the run "
-                "was rolled back and nothing changed. Please report it."
+                "This is a migrate-tool bug, not a config problem. Rollback "
+                "is being attempted; inspect its outcome and report this error."
             ),
         )
     return len(post_rows)
@@ -155,17 +243,73 @@ def _rollback(
     backup_path: Path,
     result: ExecutionResult,
     created_dirs: list[Path],
-    appended_lengths: dict[Path, int],
-) -> None:
-    """Best-effort restore of every artifact the run produced."""
-    with contextlib.suppress(OSError):
-        shutil.copy2(backup_path, plan.config_path)
-    for path in result.created:
-        with contextlib.suppress(OSError):
-            path.unlink()
-    for path, length in appended_lengths.items():
-        with contextlib.suppress(OSError), path.open("r+b") as handle:
-            handle.truncate(length)
+    appended: dict[Path, tuple[int, str, str]],
+    created: dict[Path, str],
+    replaced: dict[Path, tuple[Path, str, str]],
+    config_replaced: bool,
+) -> list[str]:
+    """Restore only outputs still owned by this run, reporting any gaps."""
+    failures: list[str] = []
+    # Do not clobber an operator's edit made after our atomic replacement.
+    # If the run never touched config.toml, there is nothing to restore.
+    if config_replaced:
+        observed = _digest(plan.config_path)
+        if observed == plan.new_toml_digest:
+            try:
+                shutil.copy2(backup_path, plan.config_path)
+            except OSError as rollback_error:
+                failures.append(_recovery_failure(plan.config_path, plan.new_toml_digest, observed, rollback_error))
+        elif observed != plan.old_toml_digest:
+            failures.append(_recovery_failure(plan.config_path, plan.new_toml_digest, observed))
+    for path, expected in created.items():
+        observed = _digest(path)
+        if observed == expected:
+            try:
+                path.unlink()
+            except OSError as rollback_error:
+                failures.append(_recovery_failure(path, expected, observed, rollback_error))
+        elif observed != "<unreadable-or-missing>":
+            failures.append(_recovery_failure(path, expected, observed))
+    for path, (length, old_digest, expected) in appended.items():
+        observed = _digest(path)
+        if observed == expected:
+            try:
+                with path.open("r+b") as handle:
+                    handle.truncate(length)
+            except OSError as rollback_error:
+                failures.append(_recovery_failure(path, expected, observed, rollback_error))
+        elif observed != old_digest:
+            failures.append(_recovery_failure(path, expected, observed))
+    for path, (snapshot, old_digest, new_digest) in replaced.items():
+        observed = _digest(path)
+        if observed == new_digest:
+            try:
+                old_bytes = snapshot.read_bytes()
+                if sha256(old_bytes).hexdigest() == old_digest:
+                    _atomic_write(path, old_bytes.decode("utf-8"))
+                else:
+                    failures.append(_recovery_failure(snapshot, old_digest, sha256(old_bytes).hexdigest()))
+            except OSError as rollback_error:
+                failures.append(_recovery_failure(path, new_digest, observed, rollback_error, recovery=snapshot))
+        elif observed == old_digest:
+            # The temp write failed before replacement; this target was never
+            # mutated despite its pre-registered rollback intent.
+            continue
+        else:
+            failures.append(_recovery_failure(path, new_digest, observed, recovery=snapshot))
     for directory in reversed(created_dirs):
         with contextlib.suppress(OSError):
             directory.rmdir()
+    return failures
+
+
+def _recovery_failure(
+    path: Path, expected: str, observed: str, error: OSError | None = None, recovery: Path | None = None
+) -> str:
+    """An operator-actionable, digest-specific incomplete-recovery fact."""
+    suffix = f"; rollback I/O error: {error}" if error is not None else ""
+    recovery_hint = f" Recovery copy: {recovery}." if recovery is not None else ""
+    return (
+        f"{path}: expected digest {expected}, observed {observed}{suffix}. "
+        f"Preserve the file and recover manually.{recovery_hint}"
+    )

@@ -46,11 +46,11 @@ def create_workspace(
     workspace, exactly the imperative shape), so no realization log
     exists here.
     """
-    from agentworks.bootstrap import build_registry
+    from agentworks.bootstrap import load_request_registry
 
     # build_registry runs first so framework miss-policies fire before
     # any template / DB / VM business logic.
-    registry = build_registry(config)
+    registry = load_request_registry(config)
 
     ws_name = name
     validate_name(ws_name, max_length=MAX_WORKSPACE_NAME_LENGTH)

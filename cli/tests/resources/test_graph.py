@@ -274,7 +274,7 @@ def test_capability_impls_are_stamped_on_nodes(tmp_path: Path) -> None:
     graph = registry.graph
 
     for name, cls in HARNESS_REGISTRY.items():
-        assert graph._nodes[("harness", name)].impl is cls
+        assert graph._nodes[("harness-integration", name)].impl is cls
     for name, backend in SECRET_BACKEND_REGISTRY.items():
         assert graph._nodes[("secret-backend", name)].impl is backend
     # A declarable node carries no impl.

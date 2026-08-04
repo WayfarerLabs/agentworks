@@ -92,9 +92,9 @@ def delete_workspace(
         if vm is not None:
             if vm_node is None:
                 # The standalone composition root: build the boundary here.
-                from agentworks.bootstrap import build_registry
+                from agentworks.bootstrap import load_request_registry
 
-                registry = build_registry(config)
+                registry = load_request_registry(config)
                 _keepalive_stack.enter_context(
                     gated_vm_boundary(
                         db,

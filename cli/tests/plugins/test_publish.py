@@ -82,7 +82,7 @@ def _fixture_plugin(name: str = PLUGIN, *, with_manifests: bool = True) -> Plugi
         description="a publish-test fixture plugin",
         capabilities={
             "vm-platform": (_FixtureVMPlatform,),
-            "harness": (_FixtureHarness,),
+            "harness-integration": (_FixtureHarness,),
         },
         manifests=_MANIFEST_ANCHOR if with_manifests else None,
     )
@@ -191,7 +191,7 @@ def test_unknown_enabled_name_raises_config_error_before_any_publish(monkeypatch
         # Nothing was published: not even the shipped plugin's rows, since the
         # resolution precedes every registry.add.
         assert list(registry.iter_kind_items("vm-platform")) == []
-        assert list(registry.iter_kind_items("harness")) == []
+        assert list(registry.iter_kind_items("harness-integration")) == []
 
 
 # -- build_registry purity: publish mutates no module-level state ---------------
@@ -239,7 +239,7 @@ def test_bad_plugin_manifest_anchor_raises_typed_plugin_attributed_error(monkeyp
     plugin = Plugin(
         name=PLUGIN,
         description="a plugin with a bogus manifest anchor",
-        capabilities={"harness": (_FixtureHarness,)},
+        capabilities={"harness-integration": (_FixtureHarness,)},
         manifests=f"{__package__}._does_not_exist",
     )
     monkeypatch.setattr("agentworks.plugins.SYSTEM_PLUGINS", {plugin.name: plugin})
@@ -268,7 +268,7 @@ def test_plugin_manifest_anchor_without_subdir_raises_typed_plugin_attributed_er
     plugin = Plugin(
         name=PLUGIN,
         description="a plugin whose manifest anchor ships no manifests/ subdir",
-        capabilities={"harness": (_FixtureHarness,)},
+        capabilities={"harness-integration": (_FixtureHarness,)},
         manifests=_NO_SUBDIR_ANCHOR,
     )
     monkeypatch.setattr("agentworks.plugins.SYSTEM_PLUGINS", {plugin.name: plugin})

@@ -182,7 +182,7 @@ def test_list_bad_registry_degrades_harness_to_dash_and_still_renders(
     _seed_vm(db, "box", "ws-box")
     _seed_session(db, "s1", "ws-box", "default")
 
-    def _boom(_config: object) -> object:
+    def _boom(_config: object, *args: object, **kwargs: object) -> object:
         raise ConfigError("unrelated config problem")
 
     monkeypatch.setattr(bootstrap, "build_registry", _boom)

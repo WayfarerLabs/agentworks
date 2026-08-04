@@ -134,6 +134,9 @@ class Config:
     deprecation_issues: tuple[str, ...] = ()
     deprecated_sections: tuple[str, ...] = ()
     noop_secret_backend_sections: tuple[str, ...] = ()
+    # Session-template declarations that still spell the pre-0.13 selector.
+    # The request boundary combines these with manifest facts into one warning.
+    deprecated_harness_selectors: tuple[str, ...] = ()
     # False when loaded with ``load_config(resources=False)`` (settings-only
     # callers); ``build_registry`` refuses such a Config so the TOML side
     # can never silently publish as empty.

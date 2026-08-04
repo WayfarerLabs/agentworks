@@ -120,9 +120,11 @@ def _global_options(
 ) -> None:
     """Global options for all commands."""
     from agentworks import output
+    from agentworks.bootstrap import begin_request_warning_scope
 
     output.set_non_interactive(non_interactive)
     output.set_suppress_deprecations(no_deprecations)
+    begin_request_warning_scope()
     # Authoritative: Click has parsed, so `debug` is the real flag. Recompute
     # the canonical state (flag OR ambient AGW_DEBUG), then mirror it to the
     # env for layers below the CLI. Only this callback writes AGW_DEBUG.

@@ -117,7 +117,7 @@ class _VMPlatformAdapter:
 
 
 class _HarnessAdapter:
-    kind = "harness"
+    kind = "harness-integration"
 
     def peek(self, name: str) -> object | None:
         from agentworks.capabilities.harness import HARNESS_REGISTRY
@@ -217,7 +217,7 @@ def _unseated_message(kind: str, name: str) -> str:
 
 CAPABILITY_ADAPTERS: Mapping[str, CapabilityAdapter] = {
     "vm-platform": _VMPlatformAdapter(),
-    "harness": _HarnessAdapter(),
+    "harness-integration": _HarnessAdapter(),
     "git-credential-provider": _GitCredentialProviderAdapter(),
     "secret-backend": _SecretBackendAdapter(),
 }

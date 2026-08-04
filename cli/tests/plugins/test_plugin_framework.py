@@ -42,7 +42,7 @@ def _snapshot_registries() -> dict[str, dict[str, object]]:
 
     return {
         "vm-platform": dict(VM_PLATFORM_REGISTRY),
-        "harness": dict(HARNESS_REGISTRY),
+        "harness-integration": dict(HARNESS_REGISTRY),
         "git-credential-provider": dict(GIT_CREDENTIAL_PROVIDER_REGISTRY),
         "secret-backend": dict(SECRET_BACKEND_REGISTRY),
     }
@@ -60,7 +60,7 @@ def test_capabilities_normalized_to_immutable_mapping_of_tuples() -> None:
     assert isinstance(plugin.capabilities, MappingProxyType)
     assert plugin.capabilities["vm-platform"] == (FixtureVMPlatform,)
     with pytest.raises(TypeError):
-        plugin.capabilities["harness"] = (FixtureHarness,)  # type: ignore[index]
+        plugin.capabilities["harness-integration"] = (FixtureHarness,)  # type: ignore[index]
 
 
 def test_descriptor_is_constructible_without_a_registry() -> None:
@@ -141,7 +141,7 @@ def test_atomic_registration_seats_nothing_on_a_mid_descriptor_collision() -> No
         name="p",
         capabilities={
             "vm-platform": (FixtureVMPlatform,),
-            "harness": (CollidingHarness,),
+            "harness-integration": (CollidingHarness,),
         },
     )
     before = _snapshot_registries()
@@ -252,7 +252,7 @@ def test_capability_clash_between_two_plugins_names_the_other_plugin() -> None:
     ("kind", "seated_name", "expects_description"),
     [
         ("vm-platform", "fixture-vm", True),
-        ("harness", "fixture-harness", False),
+        ("harness-integration", "fixture-harness", False),
         ("git-credential-provider", "fixture-provider", False),
         ("secret-backend", "fixture-backend", True),
     ],

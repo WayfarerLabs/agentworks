@@ -36,12 +36,12 @@ Landing this half-done has no value, so all sub-steps ship together.
       interrupted post-rename/pre-version-record state resumes, session rows keep their unchanged
       blob values, and insert/read round-trips on the new column; `agw session create`/`restart`
       work on the migrated DB.
-- [ ] **1b Kind slug.** Set the kind to `harness-integration` in `capabilities/harness/kinds.py` and
+- [x] **1b Kind slug.** Set the kind to `harness-integration` in `capabilities/harness/kinds.py` and
       `plugins/adapters.py`, update the capability-kind set in `resources/graph.py:369`, with no
       deprecated alias. DoD: `agw resource list --kind harness-integration` works; `--kind harness`
       and `harness/<name>` fail as unknown; `resource kinds` and shell completions expose only
       `harness-integration`; registry/kind and completion tests are updated.
-- [ ] **1c Selector field + manifest compatibility.** Rename the tagged-table selector key to
+- [x] **1c Selector field + manifest compatibility.** Rename the tagged-table selector key to
       `harness_integration` and the field pair to `harness_integration`/`harness_integration_config`
       (`sessions/templates.py`, `sessions/template.py`, `manifests/decode.py:76`,
       `config/loaders_sessions.py`). Both old `harness` shapes (tagged and flat) load with a single

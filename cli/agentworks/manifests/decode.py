@@ -73,8 +73,62 @@ KIND_SECTIONS: dict[str, tuple[str, ...]] = {
 CAPABILITY_FIELDS: dict[str, tuple[str, str]] = {
     "vm-site": ("platform", "platform_config"),
     "git-credential": ("provider", "provider_config"),
-    "session-template": ("harness", "harness_config"),
 }
+
+
+def _normalize_session_harness_selector(spec: dict[str, object]) -> bool:
+    """Normalize the 0.13 harness selector compatibility boundary.
+
+    The shared loader below still consumes the old sibling pair until the
+    identifier sweep. This function is deliberately the only place where old
+    YAML selector input is accepted.
+    """
+    old_fields = {"harness", "harness_config"} & set(spec)
+    new_fields = {"harness_integration", "harness_integration_config"} & set(spec)
+    if old_fields and new_fields:
+        names = ", ".join(sorted(old_fields | new_fields))
+        raise ConfigError(
+            f"old and new harness selector/config fields cannot be mixed: {names}; "
+            "use harness_integration: {name: ..., <config keys...>} only"
+        )
+    if old_fields:
+        value = spec.get("harness")
+        if isinstance(value, dict):
+            if "harness_config" in spec:
+                raise ConfigError(
+                    "spec.harness is a tagged table, so a sibling spec.harness_config is ambiguous; "
+                    "fold those keys into spec.harness"
+                )
+            name = value.get("name")
+            if not isinstance(name, str) or not name:
+                raise ConfigError("spec.harness (table form) requires a 'name' key naming the capability")
+            config = {key: item for key, item in value.items() if key != "name"}
+            spec["harness"] = name
+            if config:
+                spec["harness_config"] = config
+        return True
+    # A template may intentionally declare no workload here: it inherits a
+    # selector from a parent, or remains the default login shell. Preserve
+    # that established no-selector form rather than treating absence as an
+    # invalid canonical selector.
+    if not new_fields:
+        return False
+    value = spec.pop("harness_integration", None)
+    if "harness_integration_config" in spec:
+        raise ConfigError(
+            "spec.harness_integration is a tagged table; "
+            "spec.harness_integration_config is not a supported YAML field"
+        )
+    if not isinstance(value, dict):
+        raise ConfigError("spec.harness_integration must be a tagged table with a string 'name' key")
+    name = value.get("name")
+    if not isinstance(name, str) or not name:
+        raise ConfigError("spec.harness_integration (table form) requires a 'name' key naming the capability")
+    config = {key: item for key, item in value.items() if key != "name"}
+    spec["harness"] = name
+    if config:
+        spec["harness_config"] = config
+    return False
 
 
 def _normalize_capability_field(kind: str, spec: dict[str, object]) -> bool:
@@ -155,7 +209,12 @@ def _decls(location: SourceLocation) -> _SectionLineMap:
     return cast("_SectionLineMap", _FixedDecls(location))
 
 
-def decode_document(doc: Document, issues: list[str], deprecated_shapes: list[str] | None = None) -> Any:
+def decode_document(
+    doc: Document,
+    issues: list[str],
+    deprecated_shapes: list[str] | None = None,
+    deprecated_harness_selectors: list[str] | None = None,
+) -> Any:
     """Decode one validated envelope into the kind's Resource instance.
 
     Spec-level warnings (unknown keys on warn-mode kinds, env hygiene)
@@ -195,7 +254,10 @@ def decode_document(doc: Document, issues: list[str], deprecated_shapes: list[st
         # sibling pair) runs next, so every decoder and the shared TOML
         # loaders underneath see exactly one shape. Old-shape usage is
         # collected for the caller's aggregated deprecation warning.
-        if _normalize_capability_field(doc.kind, spec) and deprecated_shapes is not None:
+        if doc.kind == "session-template":
+            if _normalize_session_harness_selector(spec) and deprecated_harness_selectors is not None:
+                deprecated_harness_selectors.append(f"{doc.kind}/{doc.name}")
+        elif _normalize_capability_field(doc.kind, spec) and deprecated_shapes is not None:
             deprecated_shapes.append(f"{doc.kind}/{doc.name}")
         resource = decoder(doc, spec, local_issues)
     except AgentworksError as exc:

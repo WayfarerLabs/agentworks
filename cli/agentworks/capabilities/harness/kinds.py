@@ -1,4 +1,4 @@
-"""``_HarnessKind``: the framework strategy for the ``"harness"`` kind,
+"""``_HarnessKind``: the framework strategy for the ``"harness-integration"`` kind,
 plus the ``HarnessEntry`` capability row.
 
 Lives in the ``capabilities.harness`` package next to the harness
@@ -48,9 +48,9 @@ class HarnessEntry:
 
 @dataclass(frozen=True)
 class _HarnessKind:
-    """Implementation of ``ResourceKind`` for ``"harness"``."""
+    """Implementation of ``ResourceKind`` for ``"harness-integration"``."""
 
-    kind: str = "harness"
+    kind: str = "harness-integration"
     description: str = "Capability for running a session workload (shell, claude-code)"
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None
@@ -68,4 +68,4 @@ class _HarnessKind:
         )
 
 
-KIND_REGISTRY["harness"] = _HarnessKind()
+KIND_REGISTRY["harness-integration"] = _HarnessKind()

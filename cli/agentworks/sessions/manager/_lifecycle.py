@@ -246,7 +246,7 @@ def restart_session(
     after the kill is deliberately non-rollbackable (no unwind is
     consulted there), exactly the imperative shape.
     """
-    from agentworks.bootstrap import build_registry
+    from agentworks.bootstrap import load_request_registry
     from agentworks.sessions.tmux import (
         create_session as create_tmux_session,
     )
@@ -254,7 +254,7 @@ def restart_session(
         deploy_restricted_config,
     )
 
-    registry = build_registry(config)
+    registry = load_request_registry(config)
 
     session = _mgr._require_session(db, name)
     ws = _mgr._require_workspace(db, session.workspace_name)

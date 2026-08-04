@@ -180,7 +180,7 @@ def create_session(
             pins the VM; required when no other anchor does. When
             specified alongside other anchors, must agree with them.
     """
-    from agentworks.bootstrap import build_registry
+    from agentworks.bootstrap import load_request_registry
 
     # build_registry runs first so framework miss-policies (e.g. typos
     # in agent template's git_credentials list, future TemplateReference
@@ -190,7 +190,7 @@ def create_session(
     # secrets resolve via resolve_for_command's SecretTarget shape later),
     # but constructing it here makes the entry point's error-surface
     # consistent with create_vm / create_agent / reinit_*.
-    registry = build_registry(config)
+    registry = load_request_registry(config)
 
     # ===== Resolve the plan (S1-S8: flags, prompts, anchors, VM) ============
     #

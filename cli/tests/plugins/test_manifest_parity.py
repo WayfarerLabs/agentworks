@@ -172,7 +172,7 @@ def test_ensure_recipe_enabled_excludes_capability_nodes(monkeypatch: pytest.Mon
     plugin = Plugin(
         name=PLUGIN,
         description="a capability fixture plugin",
-        capabilities={"harness": (_FixtureHarness,)},
+        capabilities={"harness-integration": (_FixtureHarness,)},
     )
     monkeypatch.setattr("agentworks.plugins.SYSTEM_PLUGINS", {plugin.name: plugin})
     config = _config()  # harness NOT enabled -> disabled capability row
@@ -188,7 +188,9 @@ def test_ensure_recipe_enabled_excludes_capability_nodes(monkeypatch: pytest.Mon
         registry.finalize(enablement_sources=[plugin_enablement_source(config)])
 
         # The disabled harness IS in the enabled template's closure...
-        assert ("harness", "fixture-harness") in registry.graph.reachable_from("session-template", "op-session")
+        assert ("harness-integration", "fixture-harness") in registry.graph.reachable_from(
+            "session-template", "op-session"
+        )
         # ...but the recipe gate does NOT refuse on it (capability exclusion).
         ensure_recipe_enabled(registry, "session-template", "op-session")
         # The harness keeps its own R14 use-gate, which WOULD refuse it.

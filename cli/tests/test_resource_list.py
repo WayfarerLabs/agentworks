@@ -12,8 +12,11 @@ from __future__ import annotations
 from pathlib import Path
 from textwrap import dedent
 
+import pytest
+
 from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
+from agentworks.errors import NotFoundError
 from agentworks.resources.inspect import list_resources
 from agentworks.resources.render import format_origin_line
 
@@ -118,19 +121,12 @@ def test_kind_filter_accepts_multiple_kinds(tmp_path: Path) -> None:
     assert kinds_seen == {"vm-template", "secret-backend"}
 
 
-def test_unknown_kind_filter_yields_empty_listing(tmp_path: Path) -> None:
-    """Unknown kinds aren't an error at the service layer -- they just
-    return zero rows. CLI flag validation is a separate concern.
-    """
+def test_unknown_kind_filter_raises_unknown_kind_error(tmp_path: Path) -> None:
     cfg_file = tmp_path / "config.toml"
     _write_base(cfg_file)
     registry = _load(cfg_file)
-    listing = list_resources(registry, kinds=("does_not_exist",))
-
-    assert listing.rows == ()
-    assert listing.operator_count == 0
-    assert listing.auto_count == 0
-    assert listing.code_count == 0
+    with pytest.raises(NotFoundError, match="unknown kind 'does_not_exist'"):
+        list_resources(registry, kinds=("does_not_exist",))
 
 
 # -- Origin filter ----------------------------------------------------------
@@ -344,12 +340,7 @@ def test_cli_kind_csv_filter_tolerates_whitespace(tmp_path: Path, monkeypatch) -
     assert seen_kinds == {"vm-template", "secret"}
 
 
-def test_cli_names_only_with_unknown_kind_emits_nothing(tmp_path: Path, monkeypatch) -> None:
-    """``--names-only`` against a filter that resolves to zero rows
-    emits no output -- no header, no "No resources match." message.
-    Required by the ``--names-only`` cli convention so completion
-    candidate sets stay clean when nothing matches.
-    """
+def test_cli_old_kind_filter_is_an_unknown_kind_error(tmp_path: Path, monkeypatch) -> None:
     from typer.testing import CliRunner
 
     from agentworks.cli import app
@@ -360,10 +351,10 @@ def test_cli_names_only_with_unknown_kind_emits_nothing(tmp_path: Path, monkeypa
 
     result = CliRunner().invoke(
         app,
-        ["resource", "list", "--kind", "does_not_exist", "--names-only"],
+        ["resource", "list", "--kind", "harness", "--names-only"],
     )
-    assert result.exit_code == 0, result.stdout
-    assert result.stdout.strip() == ""
+    assert result.exit_code != 0
+    assert "unknown kind 'harness'" in str(result.exception)
 
 
 def test_cli_empty_kind_csv_is_rejected(tmp_path: Path, monkeypatch) -> None:

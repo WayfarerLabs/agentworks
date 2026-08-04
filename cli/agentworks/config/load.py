@@ -160,7 +160,8 @@ def load_config(
     apt_sources, apt_packages, system_cmds, user_cmds = _load_apt_and_install_sections(resource_data)
 
     session_config = _load_session_config(data, issues)
-    session_templates = _load_session_templates(resource_data, issues, decls)
+    deprecated_harness_selectors: list[str] = []
+    session_templates = _load_session_templates(resource_data, issues, decls, deprecated_harness_selectors)
 
     loaded_vm_templates = _load_vm_templates(resource_data, issues, decls)
     loaded_agent_templates = _load_agent_templates(resource_data, issues, decls)
@@ -204,6 +205,7 @@ def load_config(
         deprecation_issues=tuple(deprecations),
         deprecated_sections=deprecated_sections,
         noop_secret_backend_sections=noop_backend_sections,
+        deprecated_harness_selectors=tuple(deprecated_harness_selectors),
         resources_loaded=resources,
     )
 

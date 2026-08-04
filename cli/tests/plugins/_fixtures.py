@@ -40,7 +40,7 @@ def fixture_plugin(name: str = "fixture") -> Plugin:
         description="a test fixture plugin",
         capabilities={
             "vm-platform": (FixtureVMPlatform,),
-            "harness": (FixtureHarness,),
+            "harness-integration": (FixtureHarness,),
             "git-credential-provider": (FixtureProvider,),
             "secret-backend": (FixtureBackend,),
         },

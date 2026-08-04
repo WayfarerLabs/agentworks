@@ -10,9 +10,11 @@ is therefore just "plan and print".
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from hashlib import sha256
+from io import StringIO
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import tomlkit
 import yaml
@@ -67,6 +69,7 @@ class MigrationUnit:
     kind: str
     name: str  # "default" for singleton kinds
     section: str
+    source: str = "toml"
 
 
 @dataclass
@@ -78,6 +81,18 @@ class FileWrite:
     exists: bool  # target existed at plan time -> append
 
 
+@dataclass(frozen=True)
+class YamlRewrite:
+    """One comment-preserving replacement of an existing manifest file."""
+
+    path: Path
+    old_bytes: bytes
+    old_digest: str
+    new_text: str
+    new_digest: str
+    resources: tuple[str, ...]
+
+
 @dataclass
 class MigrationPlan:
     """Everything a run needs; produced by ``plan_migration``."""
@@ -86,9 +101,12 @@ class MigrationPlan:
     resources_dir: Path
     units: list[MigrationUnit]
     writes: list[FileWrite]
+    yaml_rewrites: list[YamlRewrite]
     toml_mode: str  # validated: "comment" | "delete"
     old_toml_text: str
+    old_toml_digest: str
     new_toml_text: str
+    new_toml_digest: str
     drops_secret_backends: bool
     # (kind, name) -> target path relative to the config dir (e.g.
     # "resources/vm-templates.yaml"); feeds the preview and the
@@ -100,7 +118,7 @@ class MigrationPlan:
 
     @property
     def nothing_to_do(self) -> bool:
-        return not self.units and not self.drops_secret_backends
+        return not self.units and not self.yaml_rewrites and not self.drops_secret_backends
 
 
 def plan_migration(
@@ -152,26 +170,30 @@ def plan_migration(
     old_text = config_path.read_text(encoding="utf-8")
     doc = tomlkit.parse(old_text)
 
-    available = _discover_units(doc)
-    selected = _resolve_selectors(selectors, available)
-    _check_declaration_shapes(doc, selected, registry, old_text, config_path)
-
     resources_dir = config_path.parent / RESOURCES_DIRNAME
-    targets = _targets(selected, layout)
-    writes = _build_writes(doc, selected, layout, resources_dir)
+    available = [*_discover_units(doc), *_discover_yaml_units(resources_dir)]
+    selected = _resolve_selectors(selectors, available)
+    toml_selected = [unit for unit in selected if unit.source == "toml"]
+    yaml_selected = [unit for unit in selected if unit.source == "yaml"]
+    _check_declaration_shapes(doc, toml_selected, registry, old_text, config_path)
+
+    targets = _targets(toml_selected, layout)
+    writes = _build_writes(doc, toml_selected, layout, resources_dir)
+    yaml_rewrites = _plan_yaml_rewrites(yaml_selected)
+    writes, yaml_rewrites = _coalesce_writes_and_rewrites(writes, yaml_rewrites)
 
     drops = any(key is not None and key_name(key) == _SECRET_BACKENDS_SECTION for key, _item in doc.body)
-    markers = {(u.section, u.name): targets[(u.kind, u.name)] for u in selected}
+    markers = {(u.section, u.name): targets[(u.kind, u.name)] for u in toml_selected}
     # vm-site sections rewrite whole (like singletons); the editor's
     # singleton path looks markers up under the "default" name.
-    for u in selected:
+    for u in toml_selected:
         if u.kind == "vm-site":
             markers[(u.section, "default")] = targets[(u.kind, u.name)]
-    if selected or drops:
+    if toml_selected or drops:
         new_text = apply_toml_edits(
             old_text,
-            units={(u.section, u.name) for u in selected},
-            singleton_sections={u.section for u in selected if u.kind in _WHOLE_SECTION_KINDS},
+            units={(u.section, u.name) for u in toml_selected},
+            singleton_sections={u.section for u in toml_selected if u.kind in _WHOLE_SECTION_KINDS},
             mode=toml_mode,
             markers=markers,
             drop_sections={_SECRET_BACKENDS_SECTION} if drops else set(),
@@ -184,9 +206,12 @@ def plan_migration(
         resources_dir=resources_dir,
         units=selected,
         writes=writes,
+        yaml_rewrites=yaml_rewrites,
         toml_mode=toml_mode,
         old_toml_text=old_text,
+        old_toml_digest=sha256(old_text.encode()).hexdigest(),
         new_toml_text=new_text,
+        new_toml_digest=sha256(new_text.encode()).hexdigest(),
         drops_secret_backends=drops,
         targets=targets,
         pre_rows=normalized_rows(registry),
@@ -238,6 +263,219 @@ def _discover_units(doc: tomlkit.TOMLDocument) -> list[MigrationUnit]:
     return units
 
 
+def _discover_yaml_units(resources_dir: Path) -> list[MigrationUnit]:
+    """Find only old-selector session-template documents, in loader order."""
+    from ruamel.yaml import YAML
+
+    yaml = YAML(typ="rt")
+    units: list[MigrationUnit] = []
+    # This is the manifest loader's source-order contract (files first in a
+    # directory, then child directories), not a globally sorted rglob.
+    from agentworks.manifests.loader import _iter_manifest_files
+
+    for path in _iter_manifest_files(resources_dir):
+        for value in yaml.load_all(path.read_text(encoding="utf-8")):
+            if not isinstance(value, dict) or value.get("kind") != "session-template":
+                continue
+            metadata = value.get("metadata")
+            spec = value.get("spec")
+            if isinstance(metadata, dict) and isinstance(spec, dict) and "harness" in spec:
+                name = metadata.get("name")
+                if isinstance(name, str):
+                    units.append(MigrationUnit("session-template", name, str(path), source="yaml"))
+    return units
+
+
+def _plan_yaml_rewrites(selected: list[MigrationUnit]) -> list[YamlRewrite]:
+    """Produce round-trip manifest replacements, grouped by source path."""
+    from ruamel.yaml import YAML
+    from ruamel.yaml.comments import CommentedMap
+
+    wanted: dict[Path, set[str]] = {}
+    for unit in selected:
+        wanted.setdefault(Path(unit.section), set()).add(unit.name)
+    rewrites: list[YamlRewrite] = []
+    yaml = YAML(typ="rt")
+    for path, names in wanted.items():
+        old_bytes = path.read_bytes()
+        old_text = old_bytes.decode("utf-8")
+        preamble, trailing = _stream_comments_outside_markers(old_text)
+        documents = list(yaml.load_all(old_text))
+        changed: list[str] = []
+        for document in documents:
+            if not isinstance(document, dict) or document.get("kind") != "session-template":
+                continue
+            metadata = document.get("metadata")
+            spec = document.get("spec")
+            if not isinstance(metadata, dict) or not isinstance(spec, dict) or metadata.get("name") not in names:
+                continue
+            if "harness" not in spec:
+                continue
+            roundtrip_spec = cast("Any", spec)
+            value = roundtrip_spec["harness"]
+            index = list(roundtrip_spec).index("harness")
+            comments = roundtrip_spec.ca.items.get("harness")
+            if isinstance(value, str):
+                config = roundtrip_spec.get("harness_config", {})
+                config_comments = roundtrip_spec.ca.items.get("harness_config")
+                table = CommentedMap()
+                table["name"] = value
+                if isinstance(config, CommentedMap):
+                    # Assign the original nodes, then carry every comment
+                    # attachment (key, value, and nested map comments) into
+                    # the canonical tagged table.
+                    for key, item in config.items():
+                        table[key] = item
+                    for key, item in config.ca.items.items():
+                        table.ca.items[key] = item
+                elif isinstance(config, dict):
+                    table.update(config)
+                if "harness_config" in roundtrip_spec:
+                    del roundtrip_spec["harness_config"]
+            else:
+                table = value
+                config_comments = None
+            del roundtrip_spec["harness"]
+            roundtrip_spec.insert(index, "harness_integration", table)
+            comments = _merge_selector_comments(comments, config_comments)
+            if comments is not None:
+                roundtrip_spec.ca.items["harness_integration"] = comments
+            elif config_comments is not None:
+                roundtrip_spec.ca.items["harness_integration"] = config_comments
+            changed.append(f"session-template/{metadata['name']}")
+        if changed:
+            # ruamel stores comments inside documents but not each document's
+            # start/end marker spelling. Emit one document at a time so a
+            # mixed stream (implicit first document, explicit second; only
+            # one `...`; marker comments) round-trips its own boundaries.
+            markers = _document_markers(old_text, len(documents))
+            parts: list[str] = []
+            for document, (explicit_start, explicit_end, start_comment, end_comment) in zip(
+                documents, markers, strict=True
+            ):
+                yaml.explicit_start = explicit_start
+                yaml.explicit_end = explicit_end
+                document_stream = StringIO()
+                yaml.dump(document, document_stream)
+                parts.append(_restore_outer_marker_comments(document_stream.getvalue(), start_comment, end_comment))
+            dumped = "".join(parts)
+            new_text = preamble + dumped + trailing
+            rewrites.append(
+                YamlRewrite(
+                    path=path,
+                    old_bytes=old_bytes,
+                    old_digest=sha256(old_bytes).hexdigest(),
+                    new_text=new_text,
+                    new_digest=sha256(new_text.encode()).hexdigest(),
+                    resources=tuple(changed),
+                )
+            )
+    return rewrites
+
+
+def _has_explicit_stream_marker(text: str, marker: str, *, reverse: bool = False) -> bool:
+    """Find a stream marker after/before comment-only preamble text."""
+    lines = reversed(text.splitlines()) if reverse else iter(text.splitlines())
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        return stripped == marker or stripped.startswith(f"{marker} #")
+    return False
+
+
+def _stream_comments_outside_markers(text: str) -> tuple[str, str]:
+    """Extract comments ruamel cannot retain outside explicit stream markers."""
+    lines = text.splitlines(keepends=True)
+    non_comment = [
+        index for index, line in enumerate(lines) if line.strip() and not line.lstrip().startswith("#")
+    ]
+    start = non_comment[0] if non_comment and lines[non_comment[0]].strip().startswith("---") else None
+    end = non_comment[-1] if non_comment and lines[non_comment[-1]].strip().startswith("...") else None
+    preamble = "".join(lines[:start]) if start is not None else ""
+    trailing = "".join(lines[end + 1 :]) if end is not None else ""
+    return preamble, trailing
+
+
+def _restore_outer_marker_comments(text: str, opening: str | None, closing: str | None) -> str:
+    """Reattach outer marker suffixes dropped by ruamel's emitter."""
+    lines = text.splitlines(keepends=True)
+    nonempty = [index for index, line in enumerate(lines) if line.strip()]
+    if opening is not None and nonempty and lines[nonempty[0]].strip() == "---":
+        ending = "\n" if lines[nonempty[0]].endswith("\n") else ""
+        lines[nonempty[0]] = f"---{opening}{ending}"
+    if closing is not None and nonempty and lines[nonempty[-1]].strip() == "...":
+        ending = "\n" if lines[nonempty[-1]].endswith("\n") else ""
+        lines[nonempty[-1]] = f"...{closing}{ending}"
+    return "".join(lines)
+
+
+def _document_markers(text: str, count: int) -> list[tuple[bool, bool, str | None, str | None]]:
+    """Capture explicit marker presence and inline comments per document."""
+    result: list[list[object]] = [[False, False, None, None] for _ in range(count)]
+    document = 0
+    seen_content = False
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if stripped.startswith("---") and (stripped == "---" or stripped.startswith("--- #")):
+            if seen_content:
+                document += 1
+            if document < count:
+                result[document][0] = True
+                result[document][2] = stripped[3:]
+            continue
+        if stripped.startswith("...") and (stripped == "..." or stripped.startswith("... #")):
+            if document < count:
+                result[document][1] = True
+                result[document][3] = stripped[3:]
+            continue
+        seen_content = True
+    return [
+        (bool(a), bool(b), c if isinstance(c, str) else None, d if isinstance(d, str) else None)
+        for a, b, c, d in result
+    ]
+
+
+def _coalesce_writes_and_rewrites(
+    writes: list[FileWrite], rewrites: list[YamlRewrite]
+) -> tuple[list[FileWrite], list[YamlRewrite]]:
+    """Atomically combine an append targeting a selector-rewrite file."""
+    pending = {write.path: write for write in writes}
+    merged: list[YamlRewrite] = []
+    for rewrite in rewrites:
+        write = pending.pop(rewrite.path, None)
+        if write is None:
+            merged.append(rewrite)
+            continue
+        new_text = _appended_yaml_text(rewrite.new_text, write.documents)
+        merged.append(replace(rewrite, new_text=new_text, new_digest=sha256(new_text.encode()).hexdigest()))
+    return list(pending.values()), merged
+
+
+def _appended_yaml_text(existing: str, documents: list[str]) -> str:
+    prefix = "" if existing.endswith("\n") or not existing else "\n"
+    return existing + prefix + "".join(f"---\n{document}" for document in documents)
+
+
+def _merge_selector_comments(selector: Any, config: Any) -> Any:
+    """Keep comments attached to both old keys on the one canonical key."""
+    if selector is None:
+        return config
+    if config is None:
+        return selector
+    merged = list(selector)
+    selector_token = merged[2] if len(merged) > 2 else None
+    config_token = config[2] if len(config) > 2 else None
+    if selector_token is not None and config_token is not None:
+        # The key's value comment is emitted before the nested tagged table;
+        # indent the former sibling-key comment beneath it so neither is lost.
+        config_value = config_token.value.rstrip("\n").replace("\n", "\n    ")
+        selector_token.value = f"{selector_token.value.rstrip()}\n    {config_value}\n"
+    return merged
+
+
 def _mapping_child_names(item: toml_items.Item) -> list[str]:
     try:
         value = item.unwrap()
@@ -277,10 +515,11 @@ def _resolve_selectors(selectors: list[str], available: list[MigrationUnit]) -> 
             wanted = by_key.get((kind, name))
             if wanted is None:
                 raise ValidationError(
-                    f"no TOML-declared {kind} named {name!r}",
+                    f"no migratable {kind} named {name!r}",
                     hint=(
-                        "The resource may already be YAML-declared or "
-                        "auto-declared; only TOML-declared resources migrate. "
+                        "The resource may already use the canonical YAML selector or "
+                        "be auto-declared; only TOML resources and YAML session "
+                        "templates using the old selector can migrate. "
                         "See `agw resource list`."
                     ),
                 )
@@ -289,8 +528,11 @@ def _resolve_selectors(selectors: list[str], available: list[MigrationUnit]) -> 
             matches = by_kind.get(kind, [])
             if not matches:
                 raise ValidationError(
-                    f"no TOML-declared resources of kind {kind!r}",
-                    hint=("They may already be YAML-declared or auto-declared; only TOML-declared resources migrate."),
+                    f"no migratable resources of kind {kind!r}",
+                    hint=(
+                        "They may already use canonical YAML declarations or be auto-declared; "
+                        "only TOML resources and YAML session templates using the old selector migrate."
+                    ),
                 )
             for unit in matches:
                 picked[(unit.kind, unit.name)] = unit
@@ -537,8 +779,8 @@ def _emit_document(doc: tomlkit.TOMLDocument, unit: MigrationUnit) -> str:
         # is written, in the operator's TOML vocabulary, rather than
         # failing verification after the write.
         flat = {key: spec.pop(key) for key in ("command", "restart_command", "required_commands") if key in spec}
-        harness = spec.pop("harness", None)
-        harness_config = spec.pop("harness_config", None)
+        harness = spec.pop("harness_integration", spec.pop("harness", None))
+        harness_config = spec.pop("harness_integration_config", spec.pop("harness_config", None))
         if flat:
             # The loader guarantees flat fields never coexist with a
             # non-shell harness or an explicit harness_config, so this
@@ -549,7 +791,7 @@ def _emit_document(doc: tomlkit.TOMLDocument, unit: MigrationUnit) -> str:
         if "inherits" in spec:
             rebuilt_session["inherits"] = spec.pop("inherits")
         if harness is not None:
-            rebuilt_session["harness"] = _tagged_capability_table(
+            rebuilt_session["harness_integration"] = _tagged_capability_table(
                 "session-template",
                 unit.name,
                 harness,

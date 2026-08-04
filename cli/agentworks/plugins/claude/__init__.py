@@ -39,7 +39,7 @@ from agentworks.plugins.claude.harness import ClaudeCodeHarness
 PLUGIN = Plugin(
     name="claude",
     description="Claude Code session harness and CLI install command",
-    capabilities={"harness": (ClaudeCodeHarness,)},
+    capabilities={"harness-integration": (ClaudeCodeHarness,)},
     # Anchor at this package so its ``manifests/`` subdir (the claude
     # install-command) is found by the bundled-manifest loader.
     manifests="agentworks.plugins.claude",

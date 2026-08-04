@@ -31,7 +31,7 @@ from agentworks.plugins.codex.harness import CodexHarness
 PLUGIN = Plugin(
     name="codex",
     description="Codex session harness and CLI install command",
-    capabilities={"harness": (CodexHarness,)},
+    capabilities={"harness-integration": (CodexHarness,)},
     # Anchor at this package so its ``manifests/`` subdir (the codex
     # install-command) is found by the bundled-manifest loader.
     manifests="agentworks.plugins.codex",

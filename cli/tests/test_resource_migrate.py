@@ -331,7 +331,7 @@ CLAUDE_LOG_LEVEL = "info"
     (doc,) = _loaded_docs(tmp_path / "resources" / "session-templates.yaml")
     assert doc["metadata"]["description"] == "Claude session"
     assert doc["spec"] == {
-        "harness": {
+        "harness_integration": {
             "name": "shell",
             "command": "claude",
             "restart_command": "claude --resume",
@@ -360,7 +360,7 @@ required_commands = ["htop"]
     execute_plan(plan, config)
     (doc,) = _loaded_docs(tmp_path / "resources" / "session-templates.yaml")
     assert doc["spec"] == {
-        "harness": {"name": "shell", "command": "htop", "required_commands": ["htop"]},
+        "harness_integration": {"name": "shell", "command": "htop", "required_commands": ["htop"]},
     }
 
 
@@ -405,7 +405,7 @@ def test_unknown_kind_selector_errors(tmp_path: Path) -> None:
 
 def test_explicit_selector_matching_nothing_errors(tmp_path: Path) -> None:
     cfg = _write_config(tmp_path)
-    with pytest.raises(ValidationError, match="no TOML-declared secret"):
+    with pytest.raises(ValidationError, match="no migratable secret"):
         _plan(cfg, ["secret/nope"])
 
 
@@ -415,7 +415,7 @@ def test_kind_selector_with_no_toml_rows_errors(tmp_path: Path) -> None:
     cfg = _write_config(tmp_path)
     config, plan = _plan(cfg, ["secret"])
     execute_plan(plan, config)
-    with pytest.raises(ValidationError, match="no TOML-declared resources"):
+    with pytest.raises(ValidationError, match="no migratable resources"):
         _plan(cfg, ["secret"])
 
 
@@ -786,6 +786,487 @@ def test_partial_migration_verifies(tmp_path: Path) -> None:
     config, plan = _plan(cfg, ["secret"])
     result = execute_plan(plan, config)
     assert result.verified_rows > 0
+
+
+def test_old_yaml_session_selector_migrates_with_comments_and_digest_guard(tmp_path: Path) -> None:
+    """A selector can target a YAML-only old form; migration round-trips
+    its comments and verification confirms canonical YAML resolves alike."""
+    cfg = _write_config(tmp_path, resources="")
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    manifest = resources / "sessions.yaml"
+    manifest.write_text(
+        """\
+# file comment
+apiVersion: agentworks/v1
+kind: session-template
+metadata:
+  name: htop
+spec:
+  # selector comment
+  harness: shell
+  harness_config:
+    command: htop
+"""
+    )
+
+    config, plan = _plan(cfg, ["session-template/htop"])
+    assert [(unit.kind, unit.name, unit.source) for unit in plan.units] == [
+        ("session-template", "htop", "yaml")
+    ]
+    assert not plan.writes
+    assert len(plan.yaml_rewrites) == 1
+
+    result = execute_plan(plan, config)
+    rewritten = manifest.read_text()
+    assert result.replaced == [manifest]
+    assert "# file comment" in rewritten
+    assert "# selector comment" in rewritten
+    assert "harness_integration:" in rewritten
+    assert "harness_config:" not in rewritten
+    registry = build_registry(load_config(cfg, warn_issues=False))
+    assert registry.lookup("session-template", "htop").harness == "shell"
+
+
+def test_yaml_selector_rewrite_preserves_markers_and_all_comment_attachment_kinds(tmp_path: Path) -> None:
+    cfg = _write_config(tmp_path, resources="")
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    manifest = resources / "sessions.yaml"
+    manifest.write_text(
+        """---
+apiVersion: agentworks/v1
+kind: session-template
+metadata:
+  name: htop
+spec:
+  harness: shell # selector value comment
+  harness_config: # config key comment
+    # nested map comment
+    command: htop # nested value comment
+...
+"""
+    )
+    config, plan = _plan(cfg, ["session-template/htop"])
+    execute_plan(plan, config)
+
+    rewritten = manifest.read_text()
+    assert rewritten.startswith("---\n")
+    assert rewritten.endswith("...\n")
+    assert "harness_integration: shell # selector value comment" not in rewritten
+    assert "selector value comment" in rewritten
+    assert "config key comment" in rewritten
+    assert "nested map comment" in rewritten
+    assert "command: htop # nested value comment" in rewritten
+
+
+def test_yaml_selector_rewrite_preserves_preamble_before_explicit_start_marker(tmp_path: Path) -> None:
+    cfg = _write_config(tmp_path, resources="")
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    manifest = resources / "sessions.yaml"
+    manifest.write_text(
+        """# preamble
+--- # opening marker
+apiVersion: agentworks/v1
+kind: session-template
+metadata:
+  name: htop
+spec:
+  harness: shell
+... # closing marker
+# trailing comment
+"""
+    )
+    config, plan = _plan(cfg, ["session-template/htop"])
+    execute_plan(plan, config)
+
+    rewritten = manifest.read_text()
+    assert rewritten.startswith("# preamble\n--- # opening marker\n")
+    assert rewritten.endswith("... # closing marker\n# trailing comment\n")
+    assert "harness_integration:" in rewritten
+
+
+def test_yaml_rewrite_does_not_duplicate_an_implicit_first_document(tmp_path: Path) -> None:
+    cfg = _write_config(tmp_path, resources="")
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    manifest = resources / "sessions.yaml"
+    manifest.write_text(
+        """apiVersion: agentworks/v1
+kind: session-template
+metadata:
+  name: first
+spec:
+  harness: shell
+---
+apiVersion: agentworks/v1
+kind: session-template
+metadata:
+  name: second
+spec:
+  harness: shell
+"""
+    )
+    config, plan = _plan(cfg, [], all_resources=True)
+    execute_plan(plan, config)
+    documents = _loaded_docs(manifest)
+    assert [document["metadata"]["name"] for document in documents] == ["first", "second"]
+
+
+def test_yaml_rewrite_preserves_heterogeneous_per_document_markers(tmp_path: Path) -> None:
+    cfg = _write_config(tmp_path, resources="")
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    manifest = resources / "sessions.yaml"
+    manifest.write_text(
+        """apiVersion: agentworks/v1
+kind: session-template
+metadata:
+  name: first
+spec:
+  harness: shell
+--- # second start
+apiVersion: agentworks/v1
+kind: session-template
+metadata:
+  name: second
+spec:
+  harness: shell
+... # second end
+"""
+    )
+    config, plan = _plan(cfg, [], all_resources=True)
+    execute_plan(plan, config)
+    rewritten = manifest.read_text()
+    assert not rewritten.startswith("---")
+    assert "--- # second start" in rewritten
+    assert rewritten.endswith("... # second end\n")
+
+
+def test_interrupt_after_mutation_rolls_back_then_reraises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    cfg = _write_config(tmp_path)
+    original = cfg.read_text()
+    config, plan = _plan(cfg, ["secret"])
+
+    import agentworks.migrate.execute as execute_mod
+
+    monkeypatch.setattr(execute_mod, "_verify", lambda plan: (_ for _ in ()).throw(KeyboardInterrupt()))
+    with pytest.raises(KeyboardInterrupt):
+        execute_plan(plan, config)
+    assert cfg.read_text() == original
+    assert not (tmp_path / "resources" / "secrets.yaml").exists()
+
+
+def test_yaml_rewrite_preserves_existing_file_mode(tmp_path: Path) -> None:
+    import stat
+
+    cfg = _write_config(tmp_path, resources="")
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    manifest = resources / "sessions.yaml"
+    manifest.write_text(
+        "apiVersion: agentworks/v1\nkind: session-template\nmetadata:\n  name: htop\nspec:\n  harness: shell\n"
+    )
+    manifest.chmod(0o640)
+    config, plan = _plan(cfg, ["session-template/htop"])
+    execute_plan(plan, config)
+    assert stat.S_IMODE(manifest.stat().st_mode) == 0o640
+
+
+def test_existing_manifest_metadata_failure_happens_before_replacement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg = _write_config(tmp_path, resources="")
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    manifest = resources / "sessions.yaml"
+    original = "apiVersion: agentworks/v1\nkind: session-template\nmetadata:\n  name: htop\nspec:\n  harness: shell\n"
+    manifest.write_text(original)
+    config, plan = _plan(cfg, ["session-template/htop"])
+
+    import agentworks.migrate.execute as execute_mod
+
+    real_chmod = execute_mod.os.chmod
+
+    def fail_temp_chmod(path: object, mode: object, *args: object, **kwargs: object) -> None:
+        if Path(path).name.startswith(".sessions.yaml."):
+            raise OSError("chmod failed")
+        real_chmod(path, mode, *args, **kwargs)
+
+    monkeypatch.setattr(execute_mod.os, "chmod", fail_temp_chmod)
+    with pytest.raises(OSError, match="chmod failed"):
+        execute_plan(plan, config)
+    assert manifest.read_text() == original
+
+
+@pytest.mark.parametrize("mutation", ["created", "appended", "yaml", "config"])
+def test_post_replace_interrupt_rolls_back_pre_registered_intent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutation: str
+) -> None:
+    if mutation == "yaml":
+        cfg = _write_config(tmp_path, resources="")
+        target = tmp_path / "resources" / "sessions.yaml"
+        target.parent.mkdir()
+        original = (
+            "apiVersion: agentworks/v1\nkind: session-template\nmetadata:\n  name: htop\nspec:\n"
+            "  harness: shell\n"
+        )
+        target.write_text(original)
+        config, plan = _plan(cfg, ["session-template/htop"])
+    else:
+        cfg = _write_config(tmp_path)
+        target = tmp_path / "resources" / "secrets.yaml"
+        original = "# existing\n"
+        if mutation == "appended":
+            target.parent.mkdir()
+            target.write_text(original)
+        config, plan = _plan(cfg, ["secret"])
+
+    import agentworks.migrate.execute as execute_mod
+
+    real_replace = execute_mod.os.replace
+
+    def interrupt_after_target_replace(source: object, destination: object) -> None:
+        real_replace(source, destination)
+        if (mutation != "config" or Path(destination) == cfg) and (
+            mutation == "config" or Path(destination) == target
+        ):
+            raise KeyboardInterrupt()
+
+    monkeypatch.setattr(execute_mod.os, "replace", interrupt_after_target_replace)
+    with pytest.raises(KeyboardInterrupt):
+        execute_plan(plan, config)
+    if mutation == "created":
+        assert not target.exists()
+    elif mutation == "config":
+        assert "[secrets.npm-token]" in cfg.read_text()
+    else:
+        assert target.read_text() == original
+
+
+def test_toml_append_and_yaml_selector_rewrite_same_target_are_coalesced(tmp_path: Path) -> None:
+    cfg = _write_config(
+        tmp_path,
+        resources="""\
+[session_templates.toml-template]
+command = "toml-command"
+""",
+    )
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    manifest = resources / "session-templates.yaml"
+    manifest.write_text(
+        "apiVersion: agentworks/v1\nkind: session-template\nmetadata:\n  name: yaml-template\nspec:\n  harness: shell\n"
+    )
+    config, plan = _plan(cfg, [], all_resources=True)
+    assert not plan.writes
+    assert [rewrite.path for rewrite in plan.yaml_rewrites] == [manifest]
+    execute_plan(plan, config)
+    documents = _loaded_docs(manifest)
+    assert [document["metadata"]["name"] for document in documents] == ["yaml-template", "toml-template"]
+    assert documents[0]["spec"]["harness_integration"]["name"] == "shell"
+    assert documents[1]["spec"]["harness_integration"]["name"] == "shell"
+
+
+def test_yaml_migration_order_matches_manifest_loader_files_then_directories(tmp_path: Path) -> None:
+    cfg = _write_config(tmp_path, resources="")
+    resources = tmp_path / "resources"
+    nested = resources / "a"
+    nested.mkdir(parents=True)
+    (resources / "z.yaml").write_text(
+        "apiVersion: agentworks/v1\nkind: session-template\nmetadata:\n  name: root\nspec:\n  harness: shell\n"
+    )
+    (nested / "first.yaml").write_text(
+        "apiVersion: agentworks/v1\nkind: session-template\nmetadata:\n  name: nested\nspec:\n  harness: shell\n"
+    )
+    _config, plan = _plan(cfg, [], all_resources=True)
+    assert [(unit.name, unit.section) for unit in plan.units] == [
+        ("root", str(resources / "z.yaml")),
+        ("nested", str(nested / "first.yaml")),
+    ]
+
+
+def test_yaml_only_preview_lists_real_replacement_paths_not_config_targets(tmp_path: Path) -> None:
+    from agentworks.migrate.render import render_preview
+
+    cfg = _write_config(tmp_path, resources="")
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    manifest = resources / "sessions.yaml"
+    manifest.write_text(
+        "apiVersion: agentworks/v1\nkind: session-template\nmetadata:\n  name: htop\nspec:\n  harness: shell\n"
+    )
+    _config, plan = _plan(cfg, ["session-template/htop"])
+    preview = "\n".join(render_preview(plan))
+    assert f"rewrite {manifest}: session-template/htop" in preview
+    assert "from config.toml" not in preview
+    assert " -> ?" not in preview
+
+
+def test_yaml_only_migration_does_not_replace_config_toml(tmp_path: Path) -> None:
+    cfg = _write_config(tmp_path, resources="")
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    (resources / "sessions.yaml").write_text(
+        "apiVersion: agentworks/v1\nkind: session-template\nmetadata:\n  name: htop\nspec:\n  harness: shell\n"
+    )
+    before = cfg.stat()
+    config, plan = _plan(cfg, ["session-template/htop"])
+    result = execute_plan(plan, config)
+    after = cfg.stat()
+    assert not result.config_rewritten
+    assert before.st_ino == after.st_ino
+    assert before.st_mtime_ns == after.st_mtime_ns
+
+
+@pytest.mark.parametrize("existing", [False, True])
+def test_atomic_manifest_writes_leave_no_partial_artifact_when_replacement_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, existing: bool
+) -> None:
+    cfg = _write_config(tmp_path)
+    target = tmp_path / "resources" / "secrets.yaml"
+    original = "# pre-existing\n"
+    if existing:
+        target.parent.mkdir()
+        target.write_text(original)
+    config, plan = _plan(cfg, ["secret"])
+
+    import agentworks.migrate.execute as execute_mod
+
+    def fail_replace(source: object, destination: object) -> None:
+        raise OSError("injected replacement failure")
+
+    monkeypatch.setattr(execute_mod.os, "replace", fail_replace)
+    with pytest.raises(OSError, match="injected replacement failure"):
+        execute_plan(plan, config)
+    if existing:
+        assert target.read_text() == original
+    else:
+        assert not target.exists()
+
+
+def test_failed_later_yaml_replacement_rolls_back_only_completed_rewrites(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg = _write_config(tmp_path, resources="")
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    first = resources / "a.yaml"
+    second = resources / "b.yaml"
+    original = (
+        "apiVersion: agentworks/v1\nkind: session-template\nmetadata:\n  name: {name}\nspec:\n  harness: shell\n"
+    )
+    first.write_text(original.format(name="first"))
+    second.write_text(original.format(name="second"))
+    config, plan = _plan(cfg, [], all_resources=True)
+
+    import agentworks.migrate.execute as execute_mod
+
+    real_replace = execute_mod.os.replace
+    calls = 0
+
+    def fail_second_replace(source: object, destination: object) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise OSError("second YAML replacement failed")
+        real_replace(source, destination)
+
+    monkeypatch.setattr(execute_mod.os, "replace", fail_second_replace)
+    with pytest.raises(OSError, match="second YAML replacement failed"):
+        execute_plan(plan, config)
+    assert first.read_text() == original.format(name="first")
+    assert second.read_text() == original.format(name="second")
+
+
+def test_config_digest_mismatch_refuses_before_writing(tmp_path: Path) -> None:
+    cfg = _write_config(tmp_path)
+    config, plan = _plan(cfg, ["secret"])
+    cfg.write_text(cfg.read_text() + "# concurrent edit\n")
+
+    with pytest.raises(StateError, match="cannot rewrite config.toml: it changed after migration planning"):
+        execute_plan(plan, config)
+    assert "# concurrent edit" in cfg.read_text()
+    assert not (tmp_path / "resources").exists()
+
+
+def test_yaml_recovery_copy_restores_only_the_run_output(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """YAML rewrites snapshot the original on disk, and rollback uses that
+    copy only while the target still has this run's planned digest."""
+    cfg = _write_config(tmp_path, resources="")
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    manifest = resources / "sessions.yaml"
+    original = (
+        "apiVersion: agentworks/v1\nkind: session-template\nmetadata:\n  name: htop\nspec:\n"
+        "  harness: shell\n  harness_config:\n    command: htop\n"
+    )
+    manifest.write_text(original)
+    config, plan = _plan(cfg, ["session-template/htop"])
+
+    import agentworks.migrate.execute as execute_mod
+
+    monkeypatch.setattr(execute_mod, "first_difference", lambda pre, post: "forced difference")
+    with pytest.raises(StateError, match="migration verification failed"):
+        execute_plan(plan, config)
+
+    snapshots = list((tmp_path / "backups").glob("config-*.toml.resources/resources/sessions.yaml"))
+    assert len(snapshots) == 1
+    assert snapshots[0].read_text() == original
+    assert manifest.read_text() == original
+
+
+def test_yaml_rollback_preserves_a_post_write_concurrent_edit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    cfg = _write_config(tmp_path, resources="")
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    manifest = resources / "sessions.yaml"
+    manifest.write_text(
+        "apiVersion: agentworks/v1\nkind: session-template\nmetadata:\n  name: htop\nspec:\n  harness: shell\n"
+    )
+    config, plan = _plan(cfg, ["session-template/htop"])
+
+    import agentworks.migrate.execute as execute_mod
+
+    def concurrent_edit(pre: object, post: object) -> str:
+        manifest.write_text("# operator edit after migration write\n")
+        return "forced difference"
+
+    monkeypatch.setattr(execute_mod, "first_difference", concurrent_edit)
+    with pytest.raises(StateError, match="rollback is incomplete") as exc:
+        execute_plan(plan, config)
+    assert manifest.read_text() == "# operator edit after migration write\n"
+    assert str(manifest) in (exc.value.hint or "")
+    assert "expected digest" in (exc.value.hint or "")
+    assert "observed" in (exc.value.hint or "")
+    assert "recover manually" in (exc.value.hint or "")
+
+
+@pytest.mark.parametrize("existing", [False, True])
+def test_rollback_does_not_delete_or_truncate_concurrently_edited_toml_outputs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, existing: bool
+) -> None:
+    cfg = _write_config(tmp_path)
+    resources = tmp_path / "resources"
+    if existing:
+        resources.mkdir()
+        target = resources / "secrets.yaml"
+        target.write_text("# existing manifest\n")
+    config, plan = _plan(cfg, ["secret"])
+    target = plan.writes[0].path
+
+    import agentworks.migrate.execute as execute_mod
+
+    def concurrent_edit(pre: object, post: object) -> str:
+        target.write_text("# concurrent operator edit\n")
+        return "forced difference"
+
+    monkeypatch.setattr(execute_mod, "first_difference", concurrent_edit)
+    with pytest.raises(StateError, match="rollback is incomplete") as exc:
+        execute_plan(plan, config)
+    assert target.read_text() == "# concurrent operator edit\n"
+    assert str(target) in (exc.value.hint or "")
 
 
 # ---------------------------------------------------------------------------

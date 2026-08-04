@@ -80,10 +80,10 @@ def test_harness_row_is_disabled_system_plugin_by_default(tmp_path: Path) -> Non
     ``system-plugin`` origin until the operator opts in (no longer a
     built-in)."""
     registry = build_registry(_config(tmp_path))
-    row = registry.lookup("harness", "claude-code")
+    row = registry.lookup("harness-integration", "claude-code")
     assert row.origin.variant == "system-plugin"
     assert row.origin.plugin == "claude"
-    assert registry.graph.enablement_of("harness", "claude-code") is Enablement.disabled
+    assert registry.graph.enablement_of("harness-integration", "claude-code") is Enablement.disabled
 
 
 def test_install_command_row_is_disabled_system_plugin_by_default(tmp_path: Path) -> None:
@@ -101,18 +101,18 @@ def test_shell_stays_the_default_builtin_harness(tmp_path: Path) -> None:
     """The common session path is untouched: ``shell`` remains a built-in,
     enabled harness after the migration."""
     registry = build_registry(_config(tmp_path))
-    shell = registry.lookup("harness", "shell")
+    shell = registry.lookup("harness-integration", "shell")
     assert shell.origin.variant == "built-in"
-    assert registry.graph.enablement_of("harness", "shell") is Enablement.enabled
+    assert registry.graph.enablement_of("harness-integration", "shell") is Enablement.enabled
 
 
 def test_disabled_rows_hidden_from_list_shown_by_describe(tmp_path: Path) -> None:
     registry = build_registry(_config(tmp_path))
     default_rows = {(r.kind, r.name) for r in list_resources(registry).rows}
-    assert ("harness", "claude-code") not in default_rows
+    assert ("harness-integration", "claude-code") not in default_rows
     assert ("user-install-command", "claude") not in default_rows
 
-    for kind, name in (("harness", "claude-code"), ("user-install-command", "claude")):
+    for kind, name in (("harness-integration", "claude-code"), ("user-install-command", "claude")):
         desc = describe_resource(registry, kind, name)
         assert desc.disabled_reason is not None
         assert "claude" in desc.disabled_reason
@@ -145,7 +145,7 @@ def test_ensure_harness_enabled_refuses_disabled_claude_code_with_hint(tmp_path:
 
 def test_enabling_claude_lets_the_harness_be_used(tmp_path: Path) -> None:
     registry = build_registry(_config(tmp_path, _CC_TEMPLATE, enabled=True))
-    assert registry.graph.enablement_of("harness", "claude-code") is Enablement.enabled
+    assert registry.graph.enablement_of("harness-integration", "claude-code") is Enablement.enabled
     ensure_harness_enabled(registry, "claude-code")  # no raise
 
 

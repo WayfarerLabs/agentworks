@@ -62,10 +62,10 @@ def restore_session(
       every live shell pane in it with it (plus, for a single-member console,
       the console's last window, and with it the whole tmux session).
     """
-    from agentworks.bootstrap import build_registry
+    from agentworks.bootstrap import load_request_registry
 
     console = _require_console(db, console_name)
-    registry = build_registry(config)
+    registry = load_request_registry(config)
     member = db.get_console_session(console_name, session_name)
     if member is None:
         raise NotFoundError(

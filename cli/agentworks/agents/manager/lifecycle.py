@@ -64,14 +64,14 @@ def create_agent(
     """
 
     from agentworks.agents.templates import resolve_template
-    from agentworks.bootstrap import build_registry
+    from agentworks.bootstrap import load_request_registry
 
     # build_registry runs first so framework miss-policies (e.g.
     # GitCredentialKind's error policy on agent template's
     # git_credentials list, future TemplateReference typos on
     # inherits) fire before any template / DB / VM business logic
     # surfaces its own NotFoundError.
-    registry = build_registry(config)
+    registry = load_request_registry(config)
 
     agent_tmpl = resolve_template(registry, template)
 
@@ -263,9 +263,9 @@ def delete_agent(
     output.info(f"Deleting agent '{name}' on VM '{vm.name}'...")
     if vm_node is None:
         # The standalone composition root: build the boundary here.
-        from agentworks.bootstrap import build_registry
+        from agentworks.bootstrap import load_request_registry
 
-        registry = build_registry(config)
+        registry = load_request_registry(config)
         boundary: AbstractContextManager[object] = gated_vm_boundary(
             db, config, registry, vm, scope=agent_scope(db, vm.name, name)
         )
@@ -397,11 +397,11 @@ def reinit_agent(
     """
 
     from agentworks.agents.templates import resolve_template
-    from agentworks.bootstrap import build_registry
+    from agentworks.bootstrap import load_request_registry
 
     # build_registry runs first so framework miss-policies fire before
     # template / DB / VM business logic.
-    registry = build_registry(config)
+    registry = load_request_registry(config)
 
     agent = db.get_agent(name)
     if agent is None:

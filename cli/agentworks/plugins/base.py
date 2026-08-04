@@ -66,7 +66,7 @@ class Plugin:
     fields optional except ``name``.
 
     - ``capabilities`` is keyed by capability kind (``"vm-platform"``,
-      ``"harness"``, ``"git-credential-provider"``, ``"secret-backend"``);
+      ``"harness-integration"``, ``"git-credential-provider"``, ``"secret-backend"``);
       each value is a tuple of impl CLASSES, uniformly, even for
       ``secret-backend`` (whose registry holds instances). The
       class-vs-instance reconciliation is the adapter's job, not the

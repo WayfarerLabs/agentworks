@@ -131,10 +131,10 @@ def add_sessions(
     """Append sessions to an existing console in argument order. Atomic at the
     DB layer; if the console's tmux session is live, also adds the windows
     immediately (best-effort)."""
-    from agentworks.bootstrap import build_registry
+    from agentworks.bootstrap import load_request_registry
 
     console = _require_console(db, console_name)
-    registry = build_registry(config)
+    registry = load_request_registry(config)
     specs = [parse_session_spec(s) for s in session_specs]
     _dedupe_specs(specs)
 
@@ -404,11 +404,11 @@ def add_shell(
 ) -> None:
     """Append a single shell entry to a session's window in a console. If the
     console is live, also splits the pane immediately (best-effort)."""
-    from agentworks.bootstrap import build_registry
+    from agentworks.bootstrap import load_request_registry
 
     _validate_cwd(cwd)
     console = _require_console(db, console_name)
-    registry = build_registry(config)
+    registry = load_request_registry(config)
     cs = db.get_console_session(console_name, session_name)
     if cs is None:
         raise NotFoundError(

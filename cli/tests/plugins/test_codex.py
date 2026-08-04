@@ -78,10 +78,10 @@ def test_harness_row_is_disabled_system_plugin_by_default(tmp_path: Path) -> Non
     """The ``codex`` harness row publishes present-but-disabled with a
     ``system-plugin`` origin until the operator opts in."""
     registry = build_registry(_config(tmp_path))
-    row = registry.lookup("harness", "codex")
+    row = registry.lookup("harness-integration", "codex")
     assert row.origin.variant == "system-plugin"
     assert row.origin.plugin == "codex"
-    assert registry.graph.enablement_of("harness", "codex") is Enablement.disabled
+    assert registry.graph.enablement_of("harness-integration", "codex") is Enablement.disabled
 
 
 def test_install_command_row_is_disabled_system_plugin_by_default(tmp_path: Path) -> None:
@@ -102,10 +102,10 @@ def test_install_command_row_is_disabled_system_plugin_by_default(tmp_path: Path
 def test_disabled_rows_hidden_from_list_shown_by_describe(tmp_path: Path) -> None:
     registry = build_registry(_config(tmp_path))
     default_rows = {(r.kind, r.name) for r in list_resources(registry).rows}
-    assert ("harness", "codex") not in default_rows
+    assert ("harness-integration", "codex") not in default_rows
     assert ("user-install-command", "codex") not in default_rows
 
-    for kind, name in (("harness", "codex"), ("user-install-command", "codex")):
+    for kind, name in (("harness-integration", "codex"), ("user-install-command", "codex")):
         desc = describe_resource(registry, kind, name)
         assert desc.disabled_reason is not None
         assert "codex" in desc.disabled_reason
@@ -138,7 +138,7 @@ def test_ensure_harness_enabled_refuses_disabled_codex_with_hint(tmp_path: Path)
 
 def test_enabling_codex_lets_the_harness_be_used(tmp_path: Path) -> None:
     registry = build_registry(_config(tmp_path, _CODEX_TEMPLATE, enabled=True))
-    assert registry.graph.enablement_of("harness", "codex") is Enablement.enabled
+    assert registry.graph.enablement_of("harness-integration", "codex") is Enablement.enabled
     ensure_harness_enabled(registry, "codex")  # no raise
 
 

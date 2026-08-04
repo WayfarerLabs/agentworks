@@ -52,10 +52,10 @@ def _display_registry(config: Config) -> Registry | None:
     rather than abort the whole command. Catching ``AgentworksError``
     keeps the same breadth as the per-template guard below.
     """
-    from agentworks.bootstrap import build_registry
+    from agentworks.bootstrap import load_request_registry
 
     try:
-        return build_registry(config)
+        return load_request_registry(config)
     except AgentworksError:
         return None
 

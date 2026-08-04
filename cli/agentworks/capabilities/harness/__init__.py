@@ -81,7 +81,7 @@ def ensure_harness_enabled(registry: Registry, name: str) -> None:
     (it does not propagate, mirroring how a ``secret`` stays ready while its
     backends are gated at resolution); the harness is instead gated at USE.
     This reads the harness's opt-in axis off the graph
-    (``enablement_of("harness", name)``) and, when disabled, raises naming the
+    (``enablement_of("harness-integration", name)``) and, when disabled, raises naming the
     plugin to enable. The plugin name is derived from the harness row's
     ``system-plugin`` origin (``registry.lookup(...).origin.plugin``), since the
     mark's reason is not persisted on the frozen node; a disabled harness with a
@@ -97,14 +97,14 @@ def ensure_harness_enabled(registry: Registry, name: str) -> None:
     from agentworks.errors import StateError
     from agentworks.resources.graph import Enablement
 
-    if registry.graph.enablement_of("harness", name) is not Enablement.disabled:
+    if registry.graph.enablement_of("harness-integration", name) is not Enablement.disabled:
         return
-    origin = getattr(registry.lookup("harness", name), "origin", None)
+    origin = getattr(registry.lookup("harness-integration", name), "origin", None)
     plugin = getattr(origin, "plugin", None)
     tail = f"enable plugin `{plugin}`" if plugin else "enable its unit"
     raise StateError(
         f"harness '{name}' is disabled; {tail}",
-        entity_kind="harness",
+        entity_kind="harness-integration",
         entity_name=name,
         hint="`agw doctor` lists each plugin's state; enable the plugin providing this harness",
     )
@@ -130,13 +130,13 @@ def publish_to(registry: Registry) -> None:
     from agentworks.plugins.registration import plugin_seated_names
     from agentworks.resources import Origin
 
-    seated_by_plugin = plugin_seated_names("harness")
+    seated_by_plugin = plugin_seated_names("harness-integration")
     code_origin = Origin.built_in(source="agentworks.capabilities.harness")
     for type_name in sorted(HARNESS_REGISTRY):
         if type_name in seated_by_plugin:
             continue
         registry.add(
-            "harness",
+            "harness-integration",
             type_name,
             HarnessEntry(name=type_name),
             code_origin,

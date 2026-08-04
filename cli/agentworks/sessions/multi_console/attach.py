@@ -361,10 +361,10 @@ def attach_console(
             hint="Pass --allow-nesting to override.",
         )
 
-    from agentworks.bootstrap import build_registry
+    from agentworks.bootstrap import load_request_registry
 
     console = _require_console(db, name)
-    registry = build_registry(config)
+    registry = load_request_registry(config)
     # The gate's held-active span covers the build and the interactive
     # attach (the hold this caller used to open itself).
     with _mc._prepare_vm_target_for_attach(db, config, console.vm_name, registry=registry) as (vm, target):

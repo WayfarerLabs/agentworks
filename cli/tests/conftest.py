@@ -602,15 +602,15 @@ class _StubGraph:
 
 
 def stub_build_registry(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Stub ``agentworks.bootstrap.build_registry`` with ``_StubRegistry``.
+    """Stub registry composition with ``_StubRegistry``.
 
-    Manager entries call ``build_registry(config)`` before business
+    Manager entries call ``load_request_registry(config)`` before business
     logic and thread the result to every resource read (Phase 1 of the
     resource-manifests SDD). Tests that pass ``SimpleNamespace`` configs
     (which don't carry ``publish_to``) need this stub so those entries
     get a Registry-shaped object that answers reads from the fake
     config. Real ``Config`` flows still exercise the real
-    ``build_registry`` via ``tests/resources/`` and the integration
+    the pure ``build_registry`` via ``tests/resources/`` and the integration
     suites.
 
     Usage: bind to an autouse fixture in each test module that uses
@@ -621,6 +621,7 @@ def stub_build_registry(monkeypatch: pytest.MonkeyPatch) -> None:
             stub_build_registry(monkeypatch)
     """
     monkeypatch.setattr("agentworks.bootstrap.build_registry", _StubRegistry)
+    monkeypatch.setattr("agentworks.bootstrap.load_request_registry", _StubRegistry)
 
     # Namespace configs lack secret_config_data (and the stub registry
     # carries no backend rows), so stub the orchestration seam: eager

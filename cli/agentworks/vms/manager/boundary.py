@@ -146,7 +146,7 @@ def _live_vm_boundary(
     exists to clean up), and describe only READS state (a status
     probe is its op; inspecting a stopped VM must never start it).
     """
-    from agentworks.bootstrap import build_registry
+    from agentworks.bootstrap import load_request_registry
     from agentworks.orchestration.readiness import preflight_all
     from agentworks.orchestration.secrets import secret_union
     from agentworks.orchestration.walk import walk
@@ -154,7 +154,7 @@ def _live_vm_boundary(
     from agentworks.vms.nodes import live_vm_node
 
     if registry is None:
-        registry = build_registry(config)
+        registry = load_request_registry(config)
     resolver = Resolver(config, registry)
     vm_node = live_vm_node(db, config, registry, vm)
     nodes = walk(vm_node)

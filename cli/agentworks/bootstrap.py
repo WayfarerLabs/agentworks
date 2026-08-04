@@ -22,6 +22,7 @@ calls + ``finalize``.
 
 from __future__ import annotations
 
+from contextvars import ContextVar
 from typing import TYPE_CHECKING
 
 from agentworks.resources import Registry
@@ -29,6 +30,23 @@ from agentworks.resources import Registry
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.manifests import ManifestSet
+
+
+_warned_request_configs: ContextVar[frozenset[str]] = ContextVar("warned_request_configs", default=frozenset())
+"""Config paths whose ambient manifest warnings were rendered this request."""
+
+
+def begin_request_warning_scope() -> None:
+    """Reset per-request warning aggregation at the CLI boundary.
+
+    Managers may build a registry more than once during a single command
+    (for example an orchestration preflight followed by realization). The
+    warning belongs to the command request, so only its first composition
+    root emits it. ``ContextVar`` keeps concurrent in-process callers
+    independent; library callers that do not establish a scope still get one
+    warning for their current context.
+    """
+    _warned_request_configs.set(frozenset())
 
 
 def build_registry(config: Config, manifests: ManifestSet | None = None) -> Registry:
@@ -52,11 +70,12 @@ def build_registry(config: Config, manifests: ManifestSet | None = None) -> Regi
 
     When ``manifests`` is None (the standard path), the resources
     directory next to the loaded config file (``<config-dir>/resources/``)
-    is auto-loaded and its spec-level warnings are surfaced (mirroring
-    ``load_config``'s ``config_issues`` behavior). Pass an explicit
-    ``ManifestSet`` (e.g. ``ManifestSet.empty()``) to skip the auto-load.
+    is auto-loaded without rendering warnings. Request entrypoints use
+    ``load_request_registry`` when they need to render manifest warnings.
+    Pass an explicit ``ManifestSet`` (e.g. ``ManifestSet.empty()``) to skip
+    the auto-load.
     """
-    from agentworks import apt, install_commands, output, plugins, secrets
+    from agentworks import apt, install_commands, plugins, secrets
     from agentworks.capabilities import git_credential, harness
     from agentworks.capabilities import vm_platform as vm_platforms
     from agentworks.errors import StateError
@@ -74,14 +93,6 @@ def build_registry(config: Config, manifests: ManifestSet | None = None) -> Regi
     if manifests is None:
         resources_dir = config.source_path.parent / RESOURCES_DIRNAME
         manifests = load_manifests(resources_dir)
-        for issue in manifests.issues:
-            output.warn(f"Manifest: {issue}")
-        # Deprecation nudges ride their own channel, mirroring
-        # ``load_config``'s handling of ``Config.deprecation_issues``:
-        # silenceable per-invocation with --no-deprecations.
-        if manifests.deprecation_issues and not output.deprecations_suppressed():
-            for issue in manifests.deprecation_issues:
-                output.warn(f"Manifest: {issue}")
 
     # Host support is NOT a bootstrap concern: every platform publishes its
     # capability row unconditionally (R13; host support is the row's folded
@@ -122,4 +133,38 @@ def build_registry(config: Config, manifests: ManifestSet | None = None) -> Regi
     # resource-touching command fails fast with config vocabulary.
     secrets.validate_chain(config, registry)
     vm_sites.validate_sites(config, registry)
+    return registry
+
+
+def harness_selector_deprecation(config: Config, manifests: ManifestSet) -> str | None:
+    """Return the one combined old-selector warning, without emitting it."""
+    resources = (*config.deprecated_harness_selectors, *manifests.deprecated_harness_selectors)
+    if not resources:
+        return None
+    return (
+        f"deprecated session-template selector in: {', '.join(resources)}. "
+        "`harness` is deprecated; use `harness_integration` instead. "
+        "It will be removed in 0.14.0. Run `agw resource migrate` to rewrite these declarations. "
+        "Silence this warning with --no-deprecations."
+    )
+
+
+def load_request_registry(config: Config, manifests: ManifestSet | None = None, *, warn: bool = True) -> Registry:
+    """Build a registry and render request-scoped warnings once."""
+    from agentworks import output
+    from agentworks.manifests import RESOURCES_DIRNAME, load_manifests
+
+    resolved = manifests if manifests is not None else load_manifests(config.source_path.parent / RESOURCES_DIRNAME)
+    registry = build_registry(config, resolved)
+    request_key = str(config.source_path)
+    already_warned = request_key in _warned_request_configs.get()
+    if warn and not already_warned:
+        _warned_request_configs.set(_warned_request_configs.get() | {request_key})
+        for issue in resolved.issues:
+            output.warn(f"Manifest: {issue}")
+        if not output.deprecations_suppressed():
+            for issue in resolved.deprecation_issues:
+                output.warn(f"Manifest: {issue}")
+            if message := harness_selector_deprecation(config, resolved):
+                output.warn(message)
     return registry
