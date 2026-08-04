@@ -8,6 +8,12 @@ readme = "README.md"
 authors = [
     { name = "Scot Hastings (Wayfarer Labs)" },
 ]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+]
 dependencies = [
     "typer>=0.24.1",
     # click is a direct dep because agentworks/completions/spec.py and
