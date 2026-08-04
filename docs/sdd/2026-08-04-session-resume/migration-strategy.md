@@ -158,6 +158,9 @@ remaining match must fit one of these categories:
 
 Unclassified matches block completion.
 
+The 0.13.0 documentation sweep's classifications are recorded in
+[`residual-inventory.md`](residual-inventory.md).
+
 ## 7. Rollback and failure behavior
 
 The change does not mutate stored sessions, so rollback to the previous release requires no data

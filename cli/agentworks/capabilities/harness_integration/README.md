@@ -26,7 +26,7 @@ including checking dependencies, configuring it, and implementing its exact star
 This allows tight integration with harnesses such as Claude Code or Codex without confusing the
 Agentworks integration layer with the harness it drives.
 
-The initial implementation focuses narrowly on basic configuration and start/restart semantics, but
+The initial implementation focuses narrowly on basic configuration and start/resume semantics, but
 the integration is designed to grow: richer per-session behavior now, and, as the scope model
 described below matures, tooling logic at the user and workspace levels too (auth, rule/skill/hook
 publishing, and the like).
@@ -63,25 +63,25 @@ install.
 
 - **`shell`** (built in) is the default. By default it simply opens the configured shell for the
   session's target user (agent or admin user). It can further be configured to run a specific
-  command with additional support for running a different command on restart vs the initial start
+  command with `resume_command` for a different command on `session resume` versus the initial start
   (via `session create`). From here, an operator can do whatever they want in terms of configuring
   the environment and launching their desired tooling. They're just largely on their own.
 - **`claude-code`** (via the `claude` system plugin) drives an interactive Claude Code session. It
-  knows how to launch Claude Code and, on restart, how to check for an existing session and reattach
+  knows how to launch Claude Code and, on resume, how to check for an existing session and reattach
   if found so that the operator experience is seamless and they can pick up right where they left
   off. Limited configuration is supported, expressed in Claude Code's own terms: `permission_mode`
   and `model` map to the `--permission-mode` and `--model` CLI flags, and `extra_args` passes
   additional Claude Code CLI arguments through verbatim.
 - **`codex`** (via the `codex` system plugin) drives an interactive Codex session. Like
-  `claude-code`, it launches the tool and, on restart, reattaches to the existing session instead of
+  `claude-code`, it launches the tool and, on resume, reattaches to the existing session instead of
   starting over when a Codex session exists, and offers limited configuration options.
 
 ## Session Resume
 
-Where possible, integrations should support resuming a session on restart rather than starting over.
-This is going to mean different things for different tools, but the general idea is that if a
-session is interrupted or resumed, the operator should be able to pick up right where they left
-off rather than losing their work.
+Where possible, integrations should support resuming a session on `session resume` rather than
+starting over. This is going to mean different things for different tools, but the general idea is
+that if a session is interrupted or resumed, the operator should be able to pick up right where they
+left off rather than losing their work.
 
 Of course, this is not always possible. Some tools, like a plain shell, do not have any concept of a
 session to resume, so the integration simply starts a new workload.
@@ -93,9 +93,9 @@ nothing about the machinery around it. It:
 
 - **MUST** produce the command that launches its tool for a given session, to run as the target user
   (an agent, or admin) in the session's workspace.
-- **MUST** produce the command that allows the workload to be resumed if the workload is
-  interrupted (e.g. process exit, machine restart, manual session stop, etc.); where possible (i.e.
-  for "stateful" tools), the integration **SHOULD** resume the existing session rather than starting
+- **MUST** produce the command that allows the workload to be resumed if the workload is interrupted
+  (e.g. process exit, machine restart, manual session stop, etc.); where possible (i.e. for
+  "stateful" tools), the integration **SHOULD** resume the existing session rather than starting
   over.
 - **MUST** declare the executables its tool needs on the launch target, so Agentworks can verify
   their presence before starting and surface a missing tool as an actionable error.
@@ -137,8 +137,8 @@ integration sits in the capability model, its implementation contract, how the s
 consumes it, and the practices that make the shipped integrations robust, especially session resume.
 
 A **harness integration** is a harness's runtime adapter: it knows how a session workload (a plain
-shell, Claude Code, Codex, ...) is configured, started, and resumed, and what the launch target
-must provide for that to work. The session is the rich consuming resource: a session node HOLDS an
+shell, Claude Code, Codex, ...) is configured, started, and resumed, and what the launch target must
+provide for that to work. The session is the rich consuming resource: a session node HOLDS an
 integration instance, composes its readiness, and the session manager invokes its ops. The
 integration never touches tmux, the database, or the CLI; it validates its config, probes its
 target, and returns pane command strings.
@@ -146,7 +146,8 @@ target, and returns pane command strings.
 Three integrations ship today and serve as references:
 
 - **`shell`** (`shell.py`): the core built-in and default. Operator-authored `command` /
-  `restart_command` / `required_commands`. The minimal member: no state, no tool conventions.
+  `resume_command` / `required_commands`. The minimal member: no state, no tool conventions.
+  `restart_command` remains a deprecated 0.13.0 input only.
 - **`claude-code`** (`agentworks/plugins/claude/harness_integration.py`): the first tool
   integration, shipped as the opt-in `claude` system plugin. The reference for everything stateful:
   durable session identity, resume-vs-launch detection, tool flag mapping, and the plugin packaging.
@@ -254,7 +255,7 @@ the shared `require_commands` helper with the executables the launch target must
 
 Keep readiness to tool PRESENCE. Session state (is there something to resume?) is an op-time
 concern: readiness is read-only and re-runnable by contract, and it runs at command start against a
-world the op changes (on restart, the resume decision must see the old process already dead, which
+world the op changes (on resume, the resume decision must see the old process already dead, which
 only the op-time probe does).
 
 #### Ops: Returning the Pane Command String
@@ -262,11 +263,11 @@ only the op-time probe does).
 - The return value is a command string, not an execution: the session manager wraps it (template-var
   substitution, then the tmux pane's `$SHELL -lic 'cd <dir> && exec <command>'`) and runs it. Empty
   string means "just the login shell".
-- `start` serves `session create`; `restart` serves `session resume`. The orchestrator kills the
-  old workload BEFORE calling `restart`, a deliberate ordering guarantee: a stateful integration
-  decides resume-vs-launch with the old process dead and its on-disk state settled.
-- `start` and `restart` should be symmetric for a stateful integration (both call one shared
-  decision method); the difference between them is caller-side.
+- `start` serves `session create`; `resume` serves `session resume`. The orchestrator kills the old
+  workload BEFORE calling `resume`, a deliberate ordering guarantee: a stateful integration decides
+  resume-vs-launch with the old process dead and its on-disk state settled.
+- `start` and `resume` should be symmetric for a stateful integration (both call one shared decision
+  method); the difference between them is caller-side.
 
 #### The Operator-Facing Decision Line
 
@@ -283,7 +284,7 @@ JSON column after each op. The persistence contract the manager provides (and te
 
 - On create, the op runs BEFORE the row insert, so state minted during `start` lands with the new
   row atomically.
-- On restart, the updated blob is persisted BEFORE the new tmux session is created, so a failed
+- On resume, the updated blob is persisted BEFORE the new tmux session is created, so a failed
   launch retried later still sees the same identity.
 - A malformed stored blob degrades to `{}` with a warning, never a crash; likewise a stored
   namespace value that is not a dict degrades to empty with a warning at the seam.
@@ -306,8 +307,8 @@ is compatibility code slated for DELETION on the next major release.
 The surrounding wiring supplies the following behavior and debugging boundaries:
 
 - **Enablement gate:** `ensure_harness_integration_enabled` (`__init__.py`) runs at session create
-  and restart (`sessions/manager/_create_build.py`, `_lifecycle.py`; restart also covers recovering
-  a broken session). A template naming a disabled plugin integration stays ready (listing works);
+  and resume (`sessions/manager/_create_build.py`, `_lifecycle.py`; resume also covers recovering a
+  broken session). A template naming a disabled plugin integration stays ready (listing works);
   USING it raises with an "enable plugin `<name>`" hint. Plain `session attach` never constructs an
   integration, so it does not gate. The node factories do not gate either (they thread no registry);
   an AST drift guard (`cli/tests/sessions/test_harness_integration_gate_drift.py`) enforces that
@@ -321,7 +322,7 @@ The surrounding wiring supplies the following behavior and debugging boundaries:
   secrets) per op (`sessions/manager/_create_roll.py`, `_lifecycle.py`). Readiness runs through the
   node's composed `preflight` / `runup` on create; the resume path deliberately builds no runup
   context (its only readiness pass is the pre-kill preflight sweep), and on both paths only the op
-  context carries secrets. An integration cannot depend on runup firing before `restart`.
+  context carries secrets. An integration cannot depend on runup firing before `resume`.
 - **Substitution stays outside:** the returned string is passed through `{{session_name}}` /
   `{{workspace_name}}` substitution at the call site. The resulting constraints appear under
   "Building the pane command" below.
@@ -352,8 +353,8 @@ resumable sessions. Five rules, each earned:
 2. **Decide resume-vs-launch at op time, on the launch target, from the tool's own durable state.**
    Probe for the stored id's artifact (for Claude, the transcript `<sid>.jsonl` under the projects
    dir) over the transport, with the same `$SHELL -lic` environment the pane will get. Do it per op,
-   not cached: the world changes between ops, and restart runs with the old process dead precisely
-   so this probe sees settled state.
+   not cached: the world changes between ops, and resume runs with the old process dead precisely so
+   this probe sees settled state.
 3. **Verify empirically that the probe boundary equals the tool's resume boundary.** The claude work
    ran a controlled experiment (sessions abandoned at every stage) to confirm transcript presence
    and Claude's own resume boundary are the SAME line, which is what makes both failure modes (blind
@@ -403,9 +404,9 @@ No real tool binary anywhere. The layers, with the shipped tests as templates:
   transport, so one fake serves the readiness probe (keyed on `command -v <tool>`) and the detection
   probe (keyed on the stored id) in a single test. Cover: config vocabulary (accepts, unknown-field
   raises, wrong-type raises), both detection directions (probe hit resumes, miss launches fresh,
-  other exit raises), flag mapping and `extra_args` quoting, the visible-decision line,
-  start/restart symmetry, and state minting.
-- **Orchestrated:** `cli/tests/sessions/test_claude_code_orchestrated.py`. Real create/restart
+  other exit raises), flag mapping and `extra_args` quoting, the visible-decision line, start/resume
+  symmetry, and state minting.
+- **Orchestrated:** `cli/tests/sessions/test_claude_code_orchestrated.py`. Real create/resume
   through the orchestrator with stubbed transports: state persisted to the row, pre-existing blob
   read back, substitution does not mangle the returned snippet.
 - **Plugin end-to-end:** `cli/tests/plugins/test_claude.py`. Through `build_registry`:
@@ -464,6 +465,6 @@ Known holes the current contract leaves open on purpose, so v1 boundaries read a
   including secret-backed entries, is the supported way to put an env var (an API key, a tool
   config-dir override) into the pane today; what does not exist is a way for an integration to
   contribute env from its OWN config. No design record yet; a first-class surface is future work.
-- **Liveness and headless ops.** The integration knows start/restart, not "is the workload healthy"
+- **Liveness and headless ops.** The integration knows start/resume, not "is the workload healthy"
   and not a non-TTY exec mode. Both are plausible extensions of the op surface; no design record
   yet.

@@ -70,7 +70,7 @@ The `harness-integration` capability decides what an agent session actually runs
 workload is configured, launched, and managed. This is where a session becomes a plain `shell`, an
 interactive `claude-code` or `codex` session, or another agentic harness entirely, without
 Agentworks needing to know the details of any one of them. An integration launches its harness,
-brings it back on restart (resuming where the harness allows), and checks the harness's binaries are
+brings it back on resume (resuming where the harness allows), and checks the harness's binaries are
 present, while Agentworks owns the tmux session, the user, and the workspace around it. See
 [`harness_integration/README.md`](harness_integration/README.md) for the integration contract and
 the shipped options.

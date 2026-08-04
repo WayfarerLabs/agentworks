@@ -90,14 +90,14 @@ site.
    machinery (which Kubernetes External Secrets Operator and similar systems need because they
    materialize values into long-lived stores). Operator rotates a secret in their vault → the next
    shell-open picks up the new value automatically. Existing shells retain the env they captured at
-   create time, consistent with FRD R5 "Attach inherits create-time env" and the broader "restart to
+   create time, consistent with FRD R5 "Attach inherits create-time env" and the broader "resume to
    pick up new values" contract.
 
 ### Negative
 
 1. **The CLI handles secrets on every invocation that opens a shell.** In the file model, the
    create-time command was the only place secrets had to be known; later commands that open new
-   shells (`session restart`, `console add-shell`, `agent exec`, `vm exec`, etc.) didn't need them.
+   shells (`session resume`, `console add-shell`, `agent exec`, `vm exec`, etc.) didn't need them.
    With CLI injection, every such command needs the secret available through the active backend
    chain. (`session attach` is unaffected: it joins the existing tmux server's captured env, no
    re-resolution.) In practice operators wrap their shell with `op run --` or equivalent so

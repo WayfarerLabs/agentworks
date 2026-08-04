@@ -81,10 +81,10 @@ cd ..
 
 - [ ] Update current operator docs, CLI README tables and examples, resource guide, sample manifest,
       capability README, ADRs, code comments, and user-visible hints to use `resume`.
-- [ ] Update the active `docs/sdd/2026-08-03-harness-integration` artifacts where they specify the
+- [x] Update the active `docs/sdd/2026-08-03-harness-integration` artifacts where they specify the
       current integration method or session command. Do not rewrite completed checkbox text; append
       corrective notes or new work items where the SDD mutability rule requires it.
-- [ ] Leave historical changelog entries and locked historical SDDs unchanged.
+- [x] Leave historical changelog entries and locked historical SDDs unchanged.
 - [ ] Run the classified residual searches from `migration-strategy.md`; record or eliminate every
       live match.
 - [ ] Run the documentation linter and full gate.
@@ -93,10 +93,10 @@ cd ..
 
 ## Phase 5: 0.13.0 release readiness
 
-- [ ] Add release notes describing `session resume`, the one-release command alias,
+- [x] Add release notes describing `session resume`, the one-release command alias,
       `resume_command`, the old config-field warning, downgrade considerations, and the 0.14.0
       removal.
-- [ ] Verify the installed CLI command tree and generated completions, not only unit-level specs.
+- [x] Verify the installed CLI command tree and generated completions, not only unit-level specs.
 - [ ] Exercise representative real or orchestrated Claude Code, Codex, and shell sessions through
       `session resume`; exercise the deprecated command once with and once without suppression.
 - DoD: the full gate passes, release-facing docs are complete, observed command behavior matches the

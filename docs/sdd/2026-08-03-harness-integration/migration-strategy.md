@@ -5,6 +5,11 @@ implementation contract for plan Phase 1a through 1c, not a second plan. The ren
 behavior-preserving: the session workload, its implementation-owned configuration, and its JSON
 state values do not change. Only the generic capability name changes.
 
+> Correction (2026-08-04): the later session-resume SDD changes the shell lifecycle vocabulary in
+> the same compatibility release. `resume_command` is now canonical and migration emits it.
+> References to `restart_command` below describe accepted deprecated input only; it warns in 0.13.0
+> and is removed in 0.14.0.
+
 ## 1. Decisions and invariants
 
 - The only canonical kind is `harness-integration`. `harness` receives no registry alias, so
@@ -82,14 +87,14 @@ The compatibility shim lives only at the source boundaries. The matrix below is 
 accepted surface. "Selector warning" means the rename-specific aggregate; the existing general
 TOML-resource deprecation remains independent.
 
-| Source and spelling                                                                   | 0.13.0 load | Selector warning            | Normalized internal pair                              | `agw resource migrate` result                                             |
-| ------------------------------------------------------------------------------------- | ----------- | --------------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------- |
-| TOML: `harness = "shell"` with optional `[...harness_config]`                         | Accept.     | Yes.                        | `harness_integration` / `harness_integration_config`. | Emits canonical YAML tagged table.                                        |
-| TOML: `harness_integration = "shell"` with optional `[...harness_integration_config]` | Accept.     | No rename-specific warning. | Already canonical.                                    | Emits canonical YAML tagged table.                                        |
-| TOML legacy shell fields: `command`, `restart_command`, and `required_commands`       | Accept.     | Only with old `harness`.    | Canonical pair with `shell`.                          | Emits canonical YAML tagged table.                                        |
-| YAML tagged old: `harness: {name: shell, command: htop}`                              | Accept.     | Yes.                        | Canonical pair.                                       | Rewrites in place to `harness_integration: {name: shell, command: htop}`. |
-| YAML sibling old: `harness: shell` plus `harness_config: {...}`                       | Accept.     | Yes.                        | Canonical pair.                                       | Rewrites in place to one canonical tagged table.                          |
-| YAML tagged new: `harness_integration: {name: shell, command: htop}`                  | Accept.     | No.                         | Canonical pair.                                       | No content change.                                                        |
+| Source and spelling                                                                   | 0.13.0 load | Selector warning                                                | Normalized internal pair                              | `agw resource migrate` result                                             |
+| ------------------------------------------------------------------------------------- | ----------- | --------------------------------------------------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------- |
+| TOML: `harness = "shell"` with optional `[...harness_config]`                         | Accept.     | Yes.                                                            | `harness_integration` / `harness_integration_config`. | Emits canonical YAML tagged table.                                        |
+| TOML: `harness_integration = "shell"` with optional `[...harness_integration_config]` | Accept.     | No rename-specific warning.                                     | Already canonical.                                    | Emits canonical YAML tagged table.                                        |
+| TOML legacy shell fields: `command`, `restart_command`, and `required_commands`       | Accept.     | Old selector warning, plus field warning for `restart_command`. | Canonical pair with `shell`.                          | Emits canonical YAML with `resume_command`.                               |
+| YAML tagged old: `harness: {name: shell, command: htop}`                              | Accept.     | Yes.                                                            | Canonical pair.                                       | Rewrites in place to `harness_integration: {name: shell, command: htop}`. |
+| YAML sibling old: `harness: shell` plus `harness_config: {...}`                       | Accept.     | Yes.                                                            | Canonical pair.                                       | Rewrites in place to one canonical tagged table.                          |
+| YAML tagged new: `harness_integration: {name: shell, command: htop}`                  | Accept.     | No.                                                             | Canonical pair.                                       | No content change.                                                        |
 
 The new YAML selector has exactly one authoring form: the tagged table. A newly invented new-name
 sibling pair (`harness_integration: shell` plus `harness_integration_config`) is not accepted. It
@@ -104,15 +109,16 @@ to the new internal fields. The old pair stays in the accepted-key set only for 
 maps to the same new fields, and contributes the rename-warning token.
 
 The existing flat shell fields (`command`, `restart_command`, `required_commands`) stay supported
-with exactly their current hoist semantics: when present, they construct the canonical
-`harness_integration = "shell"` plus `harness_integration_config` blob before inheritance. They may
-coexist only with an explicit old or canonical selector that is `"shell"`; an old selector adds the
-rename token and a canonical selector does not. They cannot coexist with a non-shell selector or
-with either old or canonical explicit config table. The error remains a hard load error naming the
-flat fields and the conflicting selector/config field. Mixed old/new fields are hard errors before
-this hoist, so flat fields never create an exception to the no-precedence rule. Tests retain each
-current flat-shell success and conflict case, then add old-selector, canonical-selector,
-old/new-mixed, and canonical-config conflict coverage.
+with their hoist semantics: when present, they construct the canonical
+`harness_integration = "shell"` plus `harness_integration_config` blob before inheritance. The
+resume rename then normalizes `restart_command` to `resume_command` and emits its field deprecation
+warning. They may coexist only with an explicit old or canonical selector that is `"shell"`; an old
+selector adds the rename token and a canonical selector does not. They cannot coexist with a
+non-shell selector or with either old or canonical explicit config table. The error remains a hard
+load error naming the flat fields and the conflicting selector/config field. Mixed old/new fields
+are hard errors before this hoist, so flat fields never create an exception to the no-precedence
+rule. Tests retain each current flat-shell success and conflict case, then add old-selector,
+canonical-selector, old/new-mixed, and canonical-config conflict coverage.
 
 ### Mixed-style hard errors
 

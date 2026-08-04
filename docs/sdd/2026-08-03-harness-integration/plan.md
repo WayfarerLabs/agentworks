@@ -77,6 +77,12 @@ Landing this half-done has no value, so all sub-steps ship together.
       (industry-sense prose, historical changelog, the ephemeral SDD dirs, the input-compatibility
       code). DoD: no live mechanism-sense `harness` remains outside the intentional input shims and
       justified prose.
+
+Correction (2026-08-04): completed Phase 1 checkbox text is intentionally immutable. The later
+session-resume SDD changes the current lifecycle command and integration method to `resume`, and the
+canonical shell field to `resume_command`. The old command and `restart_command` are 0.13.0
+compatibility inputs only; see `docs/sdd/2026-08-04-session-resume/`.
+
 - DoD (phase, and release readiness): full gate green; a session round-trips on the renamed column
   and selector; `agw resource migrate` moves both old YAML shapes and TOML; old kind tokens fail;
   canonical output uses the new name everywhere.
