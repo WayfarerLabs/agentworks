@@ -606,10 +606,10 @@ integration is a [capability](../docs/guides/resources.md#harness-integrations) 
 starting/resuming the harness or shell and checking its required executables; the template's
 `spec.harness_integration` is one tagged table whose `name` key selects the integration and whose
 remaining keys are the config block that integration validates. The old `harness` / `harness_config`
-inputs still load with a deprecation warning in 0.13.0 and can be rewritten with
-`agw resource migrate`. A template that names no integration runs the built-in `shell` integration
-(a login shell, `$SHELL --login`, or an operator-supplied command), which is the built-in `default`
-template's behavior. Define custom templates as `session-template` resources:
+inputs still load with one aggregated deprecation warning per command/request in 0.13.0 and can be
+rewritten with `agw resource migrate`. A template that names no integration runs the built-in
+`shell` integration (a login shell, `$SHELL --login`, or an operator-supplied command), which is the
+built-in `default` template's behavior. Define custom templates as `session-template` resources:
 
 ```yaml
 apiVersion: agentworks/v1
@@ -734,8 +734,9 @@ errors. One inheritance interaction worth noting: a legacy flat-field child unde
 `harness_integration: claude-code` parent hoists to `harness_integration = "shell"`, which (per the
 different-integration rule) switches the lineage back to `shell` with a fresh config.
 
-The old TOML `harness` / `harness_config` pair remains accepted with a deprecation warning through
-0.13.0. It cannot be mixed with the canonical pair; run `agw resource migrate` to rewrite it.
+The old TOML `harness` / `harness_config` pair remains accepted through 0.13.0 and contributes to
+that once-per-command/request aggregated warning. It cannot be mixed with the canonical pair; run
+`agw resource migrate` to rewrite it.
 
 ### Config
 
@@ -786,10 +787,10 @@ TOML-derived documents append after a `---` separator without rewriting the exis
 The legacy session-template exception is a guarded, in-place YAML rewrite: it preserves the document
 stream and YAML comments while folding `harness` plus an optional `harness_config` into the
 canonical tagged table. Before any write, the command backs up `config.toml` and stores recovery
-copies of YAML files it will rewrite under `paths.backups`. Digest checks refuse to replace a TOML
-or YAML file changed since planning. Writes are atomic, and rollback restores only files that still
-match this run's output digest, so a concurrent operator edit is never overwritten; an incomplete
-rollback reports the recovery copy for manual repair.
+copies of existing YAML files it will append to or rewrite under `paths.backups`. Digest checks
+refuse to replace a TOML or YAML file changed since planning. Writes are atomic, and rollback
+restores only files that still match this run's output digest, so a concurrent operator edit is
+never overwritten; an incomplete rollback reports the recovery copy for manual repair.
 
 Migrated TOML sections are commented out in place with a `# migrated to resources/<file>` marker
 (default) or removed with `--toml delete`. Deprecated `[secret_backends.*]` sections are dropped
@@ -815,9 +816,10 @@ Configuration splits into two surfaces:
 - **Resources** (secrets, templates, git credentials, vm-sites, apt / install-command entries) are
   declared as YAML manifests under `~/.config/agentworks/resources/`, auto-loaded whenever a command
   needs them. `agw resource sample <kind>` prints a commented starter (`--all` for every kind). The
-  classic TOML resource sections keep working (deprecated, with one aggregated load warning naming
-  the sections present; silence it with the global `--no-deprecations` flag); `agw resource migrate`
-  moves them to YAML whenever you like. See [docs/guides/resources.md](../docs/guides/resources.md).
+  classic TOML resource sections keep working (deprecated, with one aggregated load warning per
+  command/request naming the sections present; silence it with the global `--no-deprecations` flag);
+  `agw resource migrate` moves them to YAML whenever you like. See
+  [docs/guides/resources.md](../docs/guides/resources.md).
 
 Settings sections (`config.toml`, permanent):
 

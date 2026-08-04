@@ -53,7 +53,8 @@ class ExecutionResult:
 def execute_plan(plan: MigrationPlan, config: Config) -> ExecutionResult:
     """Run the plan. Raises ``StateError`` (after rollback) on
     verification mismatch."""
-    _require_digest(plan.config_path, plan.old_toml_digest, "rewrite config.toml")
+    config_guard = "rewrite config.toml" if plan.new_toml_digest != plan.old_toml_digest else "validate config.toml"
+    _require_digest(plan.config_path, plan.old_toml_digest, config_guard)
     backup_path, yaml_backup_path = _take_backup(plan, config)
     result = ExecutionResult(
         backup_path=backup_path,
@@ -62,7 +63,7 @@ def execute_plan(plan: MigrationPlan, config: Config) -> ExecutionResult:
     )
 
     created_dirs: list[Path] = []
-    appended: dict[Path, tuple[int, str, str]] = {}
+    appended: dict[Path, tuple[str, str, Path]] = {}
     created: dict[Path, str] = {}
     replaced: dict[Path, tuple[Path, str, str]] = {}
     config_replaced = False
@@ -70,13 +71,21 @@ def execute_plan(plan: MigrationPlan, config: Config) -> ExecutionResult:
         for write in plan.writes:
             created_dirs.extend(_ensure_parents(write.path, plan.resources_dir))
             if write.path.exists():
-                original_length = write.path.stat().st_size
-                old_text = write.path.read_text(encoding="utf-8")
-                old_digest = _digest(write.path)
+                assert yaml_backup_path is not None  # existing outputs always have recovery copies
+                snapshot = yaml_backup_path / write.path.relative_to(plan.config_path.parent)
+                old_bytes = snapshot.read_bytes()
+                old_digest = sha256(old_bytes).hexdigest()
+                _require_digest(write.path, old_digest, f"append to {write.path}")
+                old_text = old_bytes.decode("utf-8")
                 new_text = _appended_text(old_text, write.documents)
                 new_digest = sha256(new_text.encode()).hexdigest()
-                appended[write.path] = (original_length, old_digest, new_digest)
-                _atomic_write(write.path, new_text)
+                appended[write.path] = (old_digest, new_digest, snapshot)
+                _atomic_write(
+                    write.path,
+                    new_text,
+                    expected_old_digest=old_digest,
+                    operation=f"append to {write.path}",
+                )
                 result.appended.append(write.path)
             else:
                 # The atomic replace leaves no destination artifact until
@@ -84,7 +93,7 @@ def execute_plan(plan: MigrationPlan, config: Config) -> ExecutionResult:
                 # speculative rollback record.
                 new_text = "---\n".join(write.documents)
                 created[write.path] = sha256(new_text.encode()).hexdigest()
-                _atomic_write(write.path, new_text)
+                _atomic_write(write.path, new_text, expect_absent=True, operation=f"create {write.path}")
                 result.created.append(write.path)
 
         for rewrite in plan.yaml_rewrites:
@@ -97,7 +106,12 @@ def execute_plan(plan: MigrationPlan, config: Config) -> ExecutionResult:
                 rewrite.old_digest,
                 rewrite.new_digest,
             )
-            _atomic_write(rewrite.path, rewrite.new_text)
+            _atomic_write(
+                rewrite.path,
+                rewrite.new_text,
+                expected_old_digest=rewrite.old_digest,
+                operation=f"rewrite {rewrite.path}",
+            )
             result.replaced.append(rewrite.path)
 
         if plan.new_toml_digest != plan.old_toml_digest:
@@ -106,7 +120,12 @@ def execute_plan(plan: MigrationPlan, config: Config) -> ExecutionResult:
             # replacement, but leave a YAML-only plan's config inode intact.
             _require_digest(plan.config_path, plan.old_toml_digest, "rewrite config.toml")
             config_replaced = True
-            _atomic_write(plan.config_path, plan.new_toml_text)
+            _atomic_write(
+                plan.config_path,
+                plan.new_toml_text,
+                expected_old_digest=plan.old_toml_digest,
+                operation="rewrite config.toml",
+            )
             result.config_rewritten = True
 
         result.verified_rows = _verify(plan)
@@ -136,7 +155,7 @@ def execute_plan(plan: MigrationPlan, config: Config) -> ExecutionResult:
 
 
 def _take_backup(plan: MigrationPlan, config: Config) -> tuple[Path, Path | None]:
-    """Persist the config backup and original YAML rewrite inputs before writes."""
+    """Persist config and existing YAML originals before any migration write."""
     config_path = plan.config_path
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     backup_dir = config.paths.backups
@@ -149,15 +168,19 @@ def _take_backup(plan: MigrationPlan, config: Config) -> tuple[Path, Path | None
         backup_path = backup_dir / f"config-{stamp}-{counter}.toml"
         counter += 1
     shutil.copy2(config_path, backup_path)
-    if not plan.yaml_rewrites:
+    yaml_originals = {rewrite.path: rewrite.old_bytes for rewrite in plan.yaml_rewrites}
+    for write in plan.writes:
+        if write.exists:
+            yaml_originals.setdefault(write.path, write.path.read_bytes())
+    if not yaml_originals:
         return backup_path, None
 
     yaml_backup_path = backup_path.parent / f"{backup_path.name}.resources"
     yaml_backup_path.mkdir()
-    for rewrite in plan.yaml_rewrites:
-        snapshot = yaml_backup_path / rewrite.path.relative_to(config_path.parent)
+    for path, original in yaml_originals.items():
+        snapshot = yaml_backup_path / path.relative_to(config_path.parent)
         snapshot.parent.mkdir(parents=True, exist_ok=True)
-        snapshot.write_bytes(rewrite.old_bytes)
+        snapshot.write_bytes(original)
     return backup_path, yaml_backup_path
 
 
@@ -182,18 +205,67 @@ def _appended_text(existing: str, documents: list[str]) -> str:
     return existing + prefix + "".join(f"---\n{document}" for document in documents)
 
 
-def _atomic_write(path: Path, text: str) -> None:
+def _atomic_write(
+    path: Path,
+    text: str,
+    *,
+    expected_old_digest: str | None = None,
+    expect_absent: bool = False,
+    operation: str | None = None,
+) -> None:
+    _atomic_write_bytes(
+        path,
+        text.encode(),
+        expected_old_digest=expected_old_digest,
+        expect_absent=expect_absent,
+        operation=operation,
+    )
+
+
+def _atomic_write_bytes(
+    path: Path,
+    content: bytes,
+    *,
+    expected_old_digest: str | None = None,
+    expect_absent: bool = False,
+    operation: str | None = None,
+) -> None:
+    """Durably replace ``path``, with a final portable concurrent-edit guard.
+
+    When replacing an existing target, callers provide its expected digest. New
+    targets use ``expect_absent``. The
+    check runs after the temp file is durable and immediately before
+    ``os.replace``. POSIX and Windows expose no portable atomic
+    compare-and-replace-by-content operation, so an infinitesimal check-to-rename
+    race remains; this is the narrowest portable guard without claiming an
+    advisory lock protects against non-cooperating editors.
+    """
+    if expected_old_digest is not None and expect_absent:
+        raise ValueError("expected_old_digest and expect_absent are mutually exclusive")
     original = path.stat() if path.exists() else None
     fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(text)
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
         if original is not None:
             # Apply metadata to the temp inode before replacement. A chmod or
             # chown failure must leave the old target intact, not create an
             # untracked post-replace mutation outside rollback bookkeeping.
-            os.chown(tmp_name, original.st_uid, original.st_gid)
+            if chown := getattr(os, "chown", None):
+                chown(tmp_name, original.st_uid, original.st_gid)
             os.chmod(tmp_name, stat.S_IMODE(original.st_mode))
+        if expected_old_digest is not None:
+            _require_digest(path, expected_old_digest, operation or f"replace {path}")
+        elif expect_absent:
+            if path.exists():
+                raise StateError(
+                    f"cannot {operation or f'create {path}'}: the target appeared after migration planning",
+                    hint="Reconcile the new file, then re-run `agw resource migrate`.",
+                )
+        elif original is not None:
+            raise StateError(f"cannot replace existing file without an expected digest: {path}")
         os.replace(tmp_name, path)
     except Exception:
         with contextlib.suppress(OSError):
@@ -241,7 +313,7 @@ def _rollback(
     backup_path: Path,
     result: ExecutionResult,
     created_dirs: list[Path],
-    appended: dict[Path, tuple[int, str, str]],
+    appended: dict[Path, tuple[str, str, Path]],
     created: dict[Path, str],
     replaced: dict[Path, tuple[Path, str, str]],
     config_replaced: bool,
@@ -254,9 +326,22 @@ def _rollback(
         observed = _digest(plan.config_path)
         if observed == plan.new_toml_digest:
             try:
-                shutil.copy2(backup_path, plan.config_path)
-            except OSError as rollback_error:
-                failures.append(_recovery_failure(plan.config_path, plan.new_toml_digest, observed, rollback_error))
+                _atomic_write_bytes(
+                    plan.config_path,
+                    backup_path.read_bytes(),
+                    expected_old_digest=plan.new_toml_digest,
+                    operation="roll back config.toml",
+                )
+            except (OSError, StateError) as rollback_error:
+                failures.append(
+                    _recovery_failure(
+                        plan.config_path,
+                        plan.new_toml_digest,
+                        _digest(plan.config_path),
+                        rollback_error,
+                        recovery=backup_path,
+                    )
+                )
         elif observed != plan.old_toml_digest:
             failures.append(_recovery_failure(plan.config_path, plan.new_toml_digest, observed))
     for path, expected in created.items():
@@ -268,27 +353,41 @@ def _rollback(
                 failures.append(_recovery_failure(path, expected, observed, rollback_error))
         elif observed != "<unreadable-or-missing>":
             failures.append(_recovery_failure(path, expected, observed))
-    for path, (length, old_digest, expected) in appended.items():
+    for path, (old_digest, expected, snapshot) in appended.items():
         observed = _digest(path)
         if observed == expected:
             try:
-                with path.open("r+b") as handle:
-                    handle.truncate(length)
-            except OSError as rollback_error:
-                failures.append(_recovery_failure(path, expected, observed, rollback_error))
+                old_bytes = snapshot.read_bytes()
+                snapshot_digest = sha256(old_bytes).hexdigest()
+                if snapshot_digest == old_digest:
+                    _atomic_write_bytes(
+                        path,
+                        old_bytes,
+                        expected_old_digest=expected,
+                        operation=f"roll back {path}",
+                    )
+                else:
+                    failures.append(_recovery_failure(snapshot, old_digest, snapshot_digest))
+            except (OSError, StateError) as rollback_error:
+                failures.append(_recovery_failure(path, expected, _digest(path), rollback_error, recovery=snapshot))
         elif observed != old_digest:
-            failures.append(_recovery_failure(path, expected, observed))
+            failures.append(_recovery_failure(path, expected, observed, recovery=snapshot))
     for path, (snapshot, old_digest, new_digest) in replaced.items():
         observed = _digest(path)
         if observed == new_digest:
             try:
                 old_bytes = snapshot.read_bytes()
                 if sha256(old_bytes).hexdigest() == old_digest:
-                    _atomic_write(path, old_bytes.decode("utf-8"))
+                    _atomic_write_bytes(
+                        path,
+                        old_bytes,
+                        expected_old_digest=new_digest,
+                        operation=f"roll back {path}",
+                    )
                 else:
                     failures.append(_recovery_failure(snapshot, old_digest, sha256(old_bytes).hexdigest()))
-            except OSError as rollback_error:
-                failures.append(_recovery_failure(path, new_digest, observed, rollback_error, recovery=snapshot))
+            except (OSError, StateError) as rollback_error:
+                failures.append(_recovery_failure(path, new_digest, _digest(path), rollback_error, recovery=snapshot))
         elif observed == old_digest:
             # The temp write failed before replacement; this target was never
             # mutated despite its pre-registered rollback intent.
@@ -302,7 +401,7 @@ def _rollback(
 
 
 def _recovery_failure(
-    path: Path, expected: str, observed: str, error: OSError | None = None, recovery: Path | None = None
+    path: Path, expected: str, observed: str, error: Exception | None = None, recovery: Path | None = None
 ) -> str:
     """An operator-actionable, digest-specific incomplete-recovery fact."""
     suffix = f"; rollback I/O error: {error}" if error is not None else ""

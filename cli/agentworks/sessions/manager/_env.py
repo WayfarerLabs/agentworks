@@ -42,8 +42,9 @@ def _display_registry(config: Config) -> Registry | None:
     """Build the registry for a read-only display column, degrading to
     ``None`` when config validation fails.
 
-    ``build_registry`` runs ``finalize`` / ``validate_chain`` /
-    ``validate_sites`` and can raise ``AgentworksError`` for reasons
+    ``load_request_registry`` builds and validates the registry and renders
+    manifest/deprecation warnings at most once in the current request. It can
+    raise ``AgentworksError`` for reasons
     unrelated to session templates (a misconfigured secret backend
     chain, a bad ``defaults.site``, an unrelated resource collision).
     ``session list`` / ``session describe`` are read-only and never
@@ -63,7 +64,7 @@ def _display_registry(config: Config) -> Registry | None:
 def _display_harness_integration(registry: Registry | None, template_name: str) -> str:
     """Resolve a session template to its concrete harness integration name for display.
 
-    ``build_registry`` and ``resolve_template`` are config-only (no SSH),
+    ``load_request_registry`` and ``resolve_template`` are config-only (no SSH),
     so this is cheap enough to show in listings. Returns ``"-"`` when the
     registry is unavailable (see :func:`_display_registry`) or the
     template fails to resolve (unknown name, bad harness_integration), so one bad

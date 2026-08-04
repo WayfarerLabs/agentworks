@@ -113,7 +113,7 @@ contract, generalizing the Claude-specific user-provisioning debt, superseding
 `harness-user-provisioner`) is its own follow-up SDD and PR, started after this rename ships. It is
 listed here only so the boundary is explicit.
 
-## Traceability (FRD -> plan)
+## Traceability (FRD to plan)
 
 - R1 (complete rename): Phases 1a-1g, verified by 1h.
 - R2 (no functional change): the full suite passing after 1d, plus 1a/1c behavioral round-trips.

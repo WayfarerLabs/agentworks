@@ -175,7 +175,7 @@ def test_ensure_recipe_enabled_excludes_capability_nodes(monkeypatch: pytest.Mon
         capabilities={"harness-integration": (_FixtureHarnessIntegration,)},
     )
     monkeypatch.setattr("agentworks.plugins.SYSTEM_PLUGINS", {plugin.name: plugin})
-    config = _config()  # harness integration NOT enabled -> disabled capability row
+    config = _config()  # harness integration not enabled, so its capability row is disabled
     with seated_plugin(plugin):
         registry = Registry.empty()
         publish_plugins(registry, config)
@@ -204,7 +204,7 @@ def test_ensure_recipe_enabled_excludes_capability_nodes(monkeypatch: pytest.Mon
 def test_operator_row_wins_over_disabled_plugin_manifest_both_orders(monkeypatch: pytest.MonkeyPatch) -> None:
     plugin = _plugin()
     monkeypatch.setattr("agentworks.plugins.SYSTEM_PLUGINS", {plugin.name: plugin})
-    config = _config()  # plugin NOT enabled -> its manifest rows are weak/disabled
+    config = _config()  # plugin not enabled, so its manifest rows are weak/disabled
 
     def _op_cmd() -> UserInstallCommandEntry:
         return UserInstallCommandEntry(name="fixture-user-cmd", description="operator", command="echo op")

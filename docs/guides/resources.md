@@ -102,9 +102,9 @@ store lines and in provider-side logs; remotes are never rewritten.
 The classic TOML resource sections (`[secrets.*]`, `[vm_templates.*]`, `[git_credentials.*]`, ...)
 keep working with exactly their historical semantics for now, but declaring resources in
 `config.toml` is deprecated and will be removed in a future release. Their presence emits one
-aggregated deprecation warning naming the sections found (silence it with the global
-`--no-deprecations` flag). You may mix sources freely (some resources in YAML, some in TOML), but
-declaring the SAME resource in both is an error citing both locations.
+aggregated deprecation warning per command/request naming the sections found (silence it with the
+global `--no-deprecations` flag). You may mix sources freely (some resources in YAML, some in TOML),
+but declaring the SAME resource in both is an error citing both locations.
 
 Move resources over whenever you like:
 
@@ -122,13 +122,13 @@ existing `session-template` YAML documents that use the legacy `harness` selecto
 optional `harness_config` sibling into `harness_integration` while preserving the document stream
 and YAML comments. The same kind or `kind/name` selectors scope both paths.
 
-Every real run backs up `config.toml`; a run that rewrites legacy YAML also stores recovery copies
-under `paths.backups`. Digest guards refuse to replace files changed after planning, writes are
-atomic, and rollback restores only outputs that still match the run's digest, so concurrent edits
-are not overwritten. Finally, the command rebuilds the registry and verifies it is identical to the
-pre-migration registry, rolling back on a mismatch and reporting any recovery copy needed for manual
-repair. Use `--dry-run --full` to inspect generated documents, in-place YAML diffs, and the TOML
-diff before writing.
+Every real run backs up `config.toml`; a run that modifies an existing YAML file also stores its
+original as a recovery copy under `paths.backups`. Digest guards refuse to replace files changed
+after planning, writes are atomic, and rollback restores only outputs that still match the run's
+digest, so concurrent edits are not overwritten. Finally, the command rebuilds the registry and
+verifies it is identical to the pre-migration registry, rolling back on a mismatch and reporting any
+recovery copy needed for manual repair. Use `--dry-run --full` to inspect generated documents,
+in-place YAML diffs, and the TOML diff before writing.
 
 ## VM sites and platforms
 
@@ -205,8 +205,8 @@ spec:
   row, and the remaining keys are the config block that integration owns and validates (unknown keys
   are errors). A template that names no integration resolves to the built-in `shell` integration (a
   plain login shell, or an operator command), which is the built-in `default` template. The old
-  `harness` / `harness_config` inputs still load with a deprecation warning in 0.13.0; run
-  `agw resource migrate` to rewrite them.
+  `harness` / `harness_config` inputs still load in 0.13.0 and contribute to one aggregated
+  deprecation warning per command/request; run `agw resource migrate` to rewrite them.
 - The `shell` integration's config vocabulary is `command` (the pane command; empty is a login
   shell), `resume_command` (used by `session resume`, falling back to `command`), and
   `required_commands` (executables checked on the launch target before any state mutation).
