@@ -14,7 +14,7 @@ stand; see "Relationship to ADRs 0013 and 0014" below).
 The resource registry gave agentworks a publisher-agnostic home for named, referenceable entities
 (secrets, templates, git credentials, catalog entries): publishers add Resources, the registry
 finalizes (auto-declares, attaches references, detects cycles) and freezes, and the runtime reads
-only from the registry. Until this decision, the only operator publisher was `config.toml` -- one
+only from the registry. Until this decision, the only operator publisher was `config.toml`, one
 sprawling TOML file holding both machine settings and resource declarations, with single conceptual
 resources split across sections (`[session_templates.x]` plus `[session_templates.x.env]`).
 
@@ -23,9 +23,9 @@ Three pressures converged:
 1. Operators want resources as reviewable, shareable files rather than sections of one config.
 2. The app itself (and future plugins) needs to ship built-in resources through the same mechanism
    operators use, not through bespoke code paths.
-3. The secrets subsystem had conflated three different things -- settings, resources, and code
-   capabilities -- and the resulting interim designs (resolver objects, caches, pseudo-resource rows
-   for configuration) kept telling us the model was wrong.
+3. The secrets subsystem had conflated three different things: settings, resources, and code
+   capabilities. The resulting interim designs (resolver objects, caches, pseudo-resource rows for
+   configuration) kept telling us the model was wrong.
 
 ## Decision
 
@@ -38,8 +38,8 @@ Everything the CLI works with belongs to exactly one of two layers:
 | Config    | Settings: SSH keys, paths, defaults, the active backend chain, (future) plugins | TOML (`config.toml`), the `Config` object | section/field names |
 | Resources | Named, referenceable things: secrets, templates, credentials, capabilities      | the resource Registry, fed by publishers  | `kind` + `name`     |
 
-**A resource is a named, referenceable registry entry -- `kind` + `name` -- regardless of where it
-comes from.** Kinds split by whether operators can declare them:
+**A resource is a named, referenceable registry entry (`kind` + `name`) regardless of where it comes
+from.** Kinds split by whether operators can declare them:
 
 - **Declarable kinds** hold data: operator-declared (TOML/YAML), auto-declared, or built-in.
 - **Capability kinds** (today `secret-backend`, `git-credential-provider`, `vm-platform`, and
@@ -48,19 +48,19 @@ comes from.** Kinds split by whether operators can declare them:
   (`SECRET_BACKEND_REGISTRY`, keyed by the resource name); the manifest loader rejects documents of
   these kinds with a "provided by the app" error.
 
-The classifier is a per-kind field (`ResourceKind.category`) -- two resources of one kind can never
-differ here -- so its display home is `agw resource kinds` (the read-only, code-defined kind
+The classifier is a per-kind field (`ResourceKind.category`); two resources of one kind can never
+differ here. Its display home is therefore `agw resource kinds` (the read-only, code-defined kind
 inventory: category, row count, description per kind), not a per-row column. Kinds are baked into
 the app: plugins publish resources of existing kinds, declarable and capability alike (a
 harness-integration plugin ships its session templates; a vm-platform plugin ships a default site),
 never new kinds. Code placement follows ownership: each domain package defines and registers its own
-kinds -- the declarable row dataclasses AND the capability kinds live next to the code that
-implements them -- while `resources/` owns only the framework (the kind registry and protocol,
-finalize, origins, references) plus a one-line-per-domain registration index. `config.py` holds
-settings and the legacy TOML resource loaders/publisher, nothing else.
+kinds. The declarable row dataclasses and capability kinds live next to the code that implements
+them, while `resources/` owns only the framework (the kind registry and protocol, finalize, origins,
+references) plus a one-line-per-domain registration index. `config.py` holds settings and the legacy
+TOML resource loaders/publisher, nothing else.
 
 **The vocabulary law: `kind` is a resource-registry concept, full stop.** Nothing outside the
-resource registry may use the word "kind" for its identity -- lifecycle entities (VMs, workspaces,
+resource registry may use the word "kind" for its identity. Lifecycle entities (VMs, workspaces,
 agents, sessions, consoles) are NOT resources, and code calls their type `instance_kind`.
 
 Config is just config: settings that name resources (like `[secret_config].backends`) are never
@@ -77,25 +77,25 @@ session-template names its harness integration. There is no dedicated "exposure"
 resource and a capability: whether a kind exists is ordinary domain modeling (is there a real noun
 operators reason about, referenced from more than one place?), not a pattern requirement. A
 credential is such a noun; "a configured place to create VMs" (the plugin SDD's vm-site) is such a
-noun. (A declarable "backend instance" kind was considered and rejected -- the instance identity
-carried no content.) If a capability someday genuinely needs multiple configured instances (two
-1Password accounts with different credentials), a declarable instance kind for THAT capability is an
-additive graduation, not a redesign.
+noun. (A declarable "backend instance" kind was considered and rejected because its identity carried
+no content.) If a capability someday genuinely needs multiple configured instances (two 1Password
+accounts with different credentials), a declarable instance kind for THAT capability is an additive
+graduation, not a redesign.
 
-**Naming**: each domain calls its capability by its natural noun -- `secret-backend`,
-`git-credential-provider`, `vm-platform`, or `harness-integration` -- adding a disambiguating suffix
+**Naming**: each domain calls its capability by its natural noun (`secret-backend`,
+`git-credential-provider`, `vm-platform`, or `harness-integration`), adding a disambiguating suffix
 only when the bare noun would collide with a resource kind or lifecycle entity (`git-credential`
 forced `git-credential-provider`). Where a domain has distinct natural nouns for the capability and
 its declarable, no suffix appears at all: (future) `vm-platform` is the capability (the technology:
-lima, azure, wsl2, proxmox -- what operators mean by "platform" today) and `vm-site` is the
+lima, azure, wsl2, proxmox, which is what operators mean by "platform" today) and `vm-site` is the
 declarable (the configured place where VMs are created and managed; the CLI's `--platform` becomes
 `--site` when sites land, a sanctioned break, because the released flag names the capability and the
 selector must name the site). Symbols spell the domain out (`SECRET_BACKEND_REGISTRY`). The bare
-word "provider" is never a domain noun -- it is the generic cross-domain term for the pattern, the
+word "provider" is never a domain noun. It is the generic cross-domain term for the pattern, the
 possibility of a (future, not certain) generic provider registry, and the conventional
 capability-reference field name where the capability has no domain noun of its own (`spec.provider`
 on a git-credential); where it does, the field takes it (`harness_integration`, vm-site's
-`platform`) -- a reference field is named for what it references.
+`platform`), because a reference field is named for what it references.
 
 Capabilities can optionally carry configuration, and its nature and shape is entirely
 capability-specific. For example, an AZDO git credential provider requires an organization name; the
@@ -103,15 +103,15 @@ capability-specific. For example, an AZDO git credential provider requires an or
 an account URL. Where the reference site is a resource spec, that configuration is limited to a
 single sibling key named after the reference field (`provider` -> `spec.provider_config`; future:
 vm-site's `platform` -> `platform_config`, an inline `harness_integration` ->
-`harness_integration_config`): an opaque blob the named capability owns and validates -- the
+`harness_integration_config`): an opaque blob the named capability owns and validates. The
 capability is invoked with its block and returns the resource references it implies, which the
-consuming resource emits as its own -- so the rest of the spec stays provider-agnostic. Fields
-specific to the resource's kind are generic by definition and live at the top level of the resource
-spec (a `git-credential`'s `provider` selector is top-level, while its token secret and `azdo`'s
-`org` are provider-owned and nest under `provider_config`). Where the reference site is per-secret
-(`backend_mappings`), the mapping value carries the capability-owned content (an identifier override
-or structured store addressing) and is validated the same way: same principle, capability-owned
-config at the reference site.
+consuming resource emits those references as its own, so the rest of the spec stays
+provider-agnostic. Fields specific to the resource's kind are generic by definition and live at the
+top level of the resource spec (a `git-credential`'s `provider` selector is top-level, while its
+token secret and `azdo`'s `org` are provider-owned and nest under `provider_config`). Where the
+reference site is per-secret (`backend_mappings`), the mapping value carries the capability-owned
+content (an identifier override or structured store addressing) and is validated the same way: same
+principle, capability-owned config at the reference site.
 
 The INTERNAL resource representation follows the nested shape too
 (`GitCredentialConfig.provider_config`) as this represents the best representation available. For
@@ -131,7 +131,7 @@ opt-outs, store addressing) lives in `backend_mappings`, keyed by backend name.
 ### YAML manifests, auto-loaded, Kubernetes envelope
 
 Operator resources are declared as YAML documents under `<config-dir>/resources/` (any file layout;
-the loader walks everything), using the familiar envelope -- `apiVersion: agentworks/v1`, `kind`
+the loader walks everything), using the familiar envelope: `apiVersion: agentworks/v1`, `kind`
 (lower-kebab), `metadata` (framework-uniform: `name`, `description`), `spec` (kind-specific).
 Manifests are auto-loaded whenever a command builds the registry: there is no `apply` step and no
 persisted registry state to reconcile. App-bundled built-in resources ship through the same loader
@@ -181,10 +181,10 @@ teaching surface, while `agw config init/edit/sample` continue to own the perman
 
 ## Relationship to ADRs 0013 and 0014
 
-ADR 0013's decision (CLI-side secret injection at command time -- no VM-side secret storage) and ADR
-0014's decision (`AcceptEnv AW_*` wildcard transport via SSH `SetEnv`) both stand unchanged. What
-this ADR supersedes is the resolution _mechanism_ those documents describe in passing: the "env var,
-then prompt" sourcing is no longer a hardcoded resolver but the default backend chain
+ADR 0013's decision (CLI-side secret injection at command time, with no VM-side secret storage) and
+ADR 0014's decision (`AcceptEnv AW_*` wildcard transport via SSH `SetEnv`) both stand unchanged.
+What this ADR supersedes is the resolution _mechanism_ those documents describe in passing: the "env
+var, then prompt" sourcing is no longer a hardcoded resolver but the default backend chain
 (`[secret_config].backends = ["env-var", "prompt"]`) over registered backend capabilities, resolved
 by the loop described above. Where 0013/0014 say "the CLI resolves secret values", read "the active
 backend chain resolves them through the `SecretBackend` API".
