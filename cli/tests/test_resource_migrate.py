@@ -1437,9 +1437,16 @@ def test_cli_migrate_all_nothing_to_do_exits_zero(tmp_path: Path, monkeypatch: p
     result = _cli(tmp_path, monkeypatch, ["resource", "migrate", "--all", "--yes"])
     assert result.exit_code == 0, result.stdout
     assert (
-        "Nothing to migrate: no migratable TOML-declared resources or legacy YAML session-template selectors remain."
-        in result.stdout
+        "Nothing to migrate: no migratable TOML-declared resources, legacy YAML session-template "
+        "selectors, or deprecated YAML fields remain." in result.stdout
     )
+
+
+def test_cli_migrate_help_mentions_deprecated_yaml_fields(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    result = _cli(tmp_path, monkeypatch, ["resource", "migrate", "--help"])
+
+    assert result.exit_code == 0, result.stdout
+    assert "rewrite deprecated YAML fields" in result.stdout
 
 
 def test_cli_migrate_dry_run_writes_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -291,11 +291,7 @@ def _session_yaml_needs_migration(spec: dict[str, Any]) -> bool:
     if "harness" in spec:
         return True
     integration = spec.get("harness_integration")
-    return (
-        isinstance(integration, dict)
-        and integration.get("name") == "shell"
-        and "restart_command" in integration
-    )
+    return isinstance(integration, dict) and integration.get("name") == "shell" and "restart_command" in integration
 
 
 def _plan_yaml_rewrites(selected: list[MigrationUnit]) -> list[YamlRewrite]:
@@ -395,8 +391,7 @@ def _rename_restart_command(integration: dict[str, Any], resource: str) -> None:
         return
     if "resume_command" in integration:
         raise ConfigError(
-            f"cannot migrate {resource}: resume_command and restart_command cannot be combined; "
-            "use resume_command only"
+            f"cannot migrate {resource}: resume_command and restart_command cannot be combined; use resume_command only"
         )
     index = list(integration).index("restart_command")
     value = integration["restart_command"]
@@ -553,9 +548,9 @@ def _resolve_selectors(selectors: list[str], available: list[MigrationUnit]) -> 
                 raise ValidationError(
                     f"no migratable {kind} named {name!r}",
                     hint=(
-                        "The resource may already use the canonical YAML selector or "
-                        "be auto-declared; only TOML resources and YAML session "
-                        "templates using the old selector can migrate. "
+                        "The resource may already be fully canonical or auto-declared; "
+                        "only TOML resources and YAML session templates using an old "
+                        "selector or deprecated field can migrate. "
                         "See `agw resource list`."
                     ),
                 )
@@ -566,8 +561,8 @@ def _resolve_selectors(selectors: list[str], available: list[MigrationUnit]) -> 
                 raise ValidationError(
                     f"no migratable resources of kind {kind!r}",
                     hint=(
-                        "They may already use canonical YAML declarations or be auto-declared; "
-                        "only TOML resources and YAML session templates using the old selector migrate."
+                        "They may already be fully canonical or auto-declared; only TOML resources "
+                        "and YAML session templates using an old selector or deprecated field migrate."
                     ),
                 )
             for unit in matches:
