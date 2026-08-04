@@ -3,12 +3,13 @@
 - Status: Draft
 - Builds on: `frd.md`, `hla.md`
 
-A complete, standalone rename of `harness` to `harness-integration`, shippable in the next release
-as one PR, no functional change. Definitions of done are objective and testable. Completed
-checkboxes are an immutable record: once checked, do not edit, move, or uncheck them; if the plan
-changes, add new checkboxes. LLD-level detail (`migration-strategy.md`) and per-step implementation
-are delegated to `agentworks-dev`; the lead owns this plan. Every step is reviewed by
-`agentworks-reviewer` before merge.
+A complete, standalone rename of `harness` to `harness-integration`, introduced in 0.13.0 with its
+input-compatibility removal in 0.14.0, with no functional change. The SDD stays open across both
+releases. Definitions of done are objective and testable. Completed checkboxes are an immutable
+record: once checked, do not edit, move, or uncheck them; if the plan changes, add new checkboxes.
+LLD-level detail (`migration-strategy.md`) and per-step implementation are delegated to
+`agentworks-dev`; the lead owns this plan. Every step is reviewed by `agentworks-reviewer` before
+merge.
 
 Gate for every phase:
 `cd cli && uv run ruff check . && uv run ruff format --check . && uv run mypy . && uv run pytest -q`,
@@ -17,13 +18,13 @@ plus `./scripts/lint-files.sh` and `./scripts/check-locked-sdds.sh`.
 ## Phase 0: Migration strategy (no code)
 
 - [ ] Author `migration-strategy.md`: the current-state inventory (from the rename survey), the
-      exact new DB migration number and `RENAME COLUMN` statement, the kind-slug alias mechanics
-      (D1), the selector-shim design reusing the legacy-flat-field hoist, the `agw resource migrate`
-      changes, the aggregated-warning wording, and the next-release removal checklist.
-- DoD: `migration-strategy.md` exists and is reviewed; the alias-vs-cutover and selector-spelling
-  decisions (FRD D1/D2) are recorded.
+      exact new DB migration number and `RENAME COLUMN` statement, the selector shim for only
+      previously valid inputs, hard errors for mixed old/new fields, the `agw resource migrate`
+      changes, the aggregated-warning wording, and the 0.14.0 removal checklist.
+- DoD: `migration-strategy.md` exists and is reviewed; the hard kind-slug cutover, settled selector
+  spelling, valid-input matrix, and 0.14.0 removal are recorded.
 
-## Phase 1: The rename (one PR)
+## Phase 1: 0.13.0 rename (one PR)
 
 Landing this half-done has no value, so all sub-steps ship together.
 
@@ -34,19 +35,21 @@ Landing this half-done has no value, so all sub-steps ship together.
       proves an old-schema DB upgrades, session rows keep their unchanged blob values, and
       insert/read round-trips on the new column; `agw session create`/`restart` work on the migrated
       DB.
-- [ ] **1b Kind slug + alias.** Set the kind to `harness-integration` in
-      `capabilities/harness/kinds.py` and `plugins/adapters.py`, update the capability-kind set in
-      `resources/graph.py:369`, and add the deprecated `harness` slug alias per D1. DoD:
-      `agw resource list --kind harness-integration` works; `--kind harness` and `harness/<name>`
-      resolve with a deprecation notice; registry/kind tests updated.
+- [ ] **1b Kind slug.** Set the kind to `harness-integration` in `capabilities/harness/kinds.py` and
+      `plugins/adapters.py`, update the capability-kind set in `resources/graph.py:369`, with no
+      deprecated alias. DoD: `agw resource list --kind     harness-integration` works;
+      `--kind harness` and `harness/<name>` fail as unknown; `resource kinds` and shell completions
+      expose only `harness-integration`; registry/kind and completion tests are updated.
 - [ ] **1c Selector field + manifest compatibility.** Rename the tagged-table selector key to
       `harness_integration` and the field pair to `harness_integration`/`harness_integration_config`
       (`sessions/templates.py`, `sessions/template.py`, `manifests/decode.py:76`,
       `config/loaders_sessions.py`). Both old `harness` shapes (tagged and flat) load with a single
       aggregated deprecation warning; teach `migrate/planning.py` to rewrite either to the new key;
-      TOML continues to work as-is. DoD: the input matrix in HLA section 2c is covered by tests: new
-      key validates clean; both old shapes load with exactly one aggregated warning;
-      `agw resource migrate` rewrites them; TOML round-trips.
+      previously valid TOML continues to work with a warning. Mixed old/new selector or config
+      fields hard-error. DoD: the input matrix in HLA section 2c is covered by tests: the new key
+      validates clean; every previously valid old form loads with exactly one aggregated warning;
+      mixed forms fail; old and new declarations normalize before inheritance;
+      `agw resource     migrate` rewrites old YAML and TOML.
 - [ ] **1d Identifier sweep.** Rename the package `capabilities/harness/` ->
       `capabilities/harness_integration/`, the plugin `harness.py` modules ->
       `harness_integration.py`, the classes and registry/accessors per HLA section 1, and the
@@ -62,30 +65,33 @@ Landing this half-done has no value, so all sub-steps ship together.
       present-but-disabled and validate; `resource sample session-template` emits the new key; live
       parity test passes.
 - [ ] **1g Docs + files/dirs.** Move and update the capability README under the new package dir;
-      update `capabilities/README.md`, `cli/README.md`, `docs/guides/resources.md`, ADR 0020. Leave
-      historical `CHANGELOG.md` entries; touch the root README only for mechanism-sense usages and
-      the YAML example (the operator owns the target-state prose). DoD: `lint-files.sh` clean; docs
-      describe reality at HEAD (renamed, no behavior change).
+      update `capabilities/README.md`, `cli/README.md`, `sample-config.toml`,
+      `docs/guides/resources.md`, ADR 0020, plugin-author docs, completions, and diagrams as needed.
+      Leave historical `CHANGELOG.md` entries; touch the root README only for mechanism-sense usages
+      and the YAML example (the operator owns the target-state prose). DoD: `lint-files.sh` clean;
+      docs, samples, and generated surfaces describe reality at HEAD (renamed, no behavior change).
 - [ ] **1h Residual sweep.** `rg -in harness` across the tree; justify every remaining hit
-      (industry-sense prose, historical changelog, the ephemeral SDD dirs, the
-      deprecation-shim/alias code). DoD: no live mechanism-sense `harness` remains outside the
-      intentional compatibility shims and justified prose.
+      (industry-sense prose, historical changelog, the ephemeral SDD dirs, the input-compatibility
+      code). DoD: no live mechanism-sense `harness` remains outside the intentional input shims and
+      justified prose.
 - DoD (phase, and release readiness): full gate green; a session round-trips on the renamed column
-  and selector; `agw resource migrate` moves both old YAML shapes and TOML; `--kind harness` warns
-  and resolves; canonical output uses the new name everywhere.
+  and selector; `agw resource migrate` moves both old YAML shapes and TOML; old kind tokens fail;
+  canonical output uses the new name everywhere.
 
-## Phase 2: Closeout
+## Phase 2: 0.14.0 compatibility removal
+
+- [ ] Remove acceptance of the old `harness` selector, `harness_config` sibling, and TOML
+      discriminator pair together with the old discriminator-pattern support. Remove their warning
+      and migration-only compatibility paths where no longer needed; record the removal in the
+      changelog. DoD: old inputs fail clearly, canonical 0.13.0 inputs remain unchanged, the full
+      gate passes, and the residual sweep has no compatibility-code exceptions.
+
+## Phase 3: Closeout
 
 - [ ] Promote any load-bearing naming/decision content out of this SDD into the permanent capability
       README so the SDD stays deletable (SDD-not-permanent rule).
 - [ ] Write `locked.md` summarizing the final state; land it with the last edits.
 - DoD: full gate green; `locked.md` present; permanent docs reflect reality at HEAD.
-
-## Next release (tracked, not in this effort)
-
-- [ ] Remove the deprecation shims: the `harness` kind-slug alias and the `harness` selector-key
-      acceptance (and the aggregated warning). This is scheduled for the release after the one that
-      ships this rename; record the removal in the changelog when it lands.
 
 ## Deferred to a separate SDD (not this effort)
 
@@ -100,7 +106,8 @@ listed here only so the boundary is explicit.
 - R2 (no functional change): the full suite passing after 1d, plus 1a/1c behavioral round-trips.
 - R3 (session data migration): Phase 1a.
 - R4 (TOML compatibility): Phase 1c.
-- R5 (YAML compatibility + deprecation): Phase 1c.
-- R6 (kind-slug compatibility + deprecation): Phase 1b.
+- R5 (YAML compatibility + deprecation): Phase 1c; removal in Phase 2.
+- R6 (kind-slug hard cutover): Phase 1b.
 - R7 (canonical output uses new name): Phases 1e, 1f, 1g.
-- D1/D2 (deprecation mechanics, selector spelling): Phase 0 (`migration-strategy.md`).
+- D1/D2 (deprecation mechanics, selector spelling): Phase 0 (`migration-strategy.md`); removal in
+  Phase 2.

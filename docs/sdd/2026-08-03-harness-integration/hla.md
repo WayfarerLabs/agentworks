@@ -7,11 +7,11 @@
 ## 1. Shape of the change
 
 A pure rename of the existing session-scoped capability from `harness` to `harness-integration`,
-with no behavior change and full backward compatibility on a one-release deprecation window. The
-architecture is entirely "what changes, on which surface, and how compatibility is preserved." There
-is no new runtime component and no new interface; the `Harness` capability's five-stage lifecycle,
-its `start`/`restart` ops, its readiness machinery, and the three implementations are unchanged
-except for their names.
+with no behavior change. Version 0.13.0 keeps previously valid persisted and configured objects
+working while making the new name canonical. Version 0.14.0 removes the old selector and
+discriminator compatibility. There is no new runtime component and no new interface; `dependencies`,
+`validate`, readiness, `preflight`, `runup`, `start`, and `restart`, plus the three implementations,
+are unchanged except for their names.
 
 Target names (used consistently across all surfaces):
 
@@ -57,11 +57,9 @@ migration.
 
 The slug is registered in `capabilities/harness/kinds.py:53,71` and again in `plugins/adapters.py`
 (the `_HarnessAdapter.kind`), and is a member of the hardcoded capability-kind set in
-`resources/graph.py:369`. All three become `harness-integration`. For the deprecation window, the
-registry accepts the old `harness` slug as an alias that resolves to `harness-integration` and emits
-a deprecation notice (`--kind harness`, `harness/<name>` addressing keep working). The alias is
-removed next release. (Alias mechanics versus a hard cutover are settled in `migration-strategy.md`,
-per FRD D1; recommendation is the alias for a softer ramp.)
+`resources/graph.py:369`. All three become `harness-integration`. This is a hard cutover: the
+registry has no alias, old kind tokens fail as unknown, and kind listings and completions expose
+only the new slug.
 
 ### 2c. Selector field and manifest compatibility
 
@@ -72,17 +70,20 @@ field pair becomes `harness_integration`/`harness_integration_config`
 (`manifests/decode.py`, `config/loaders_sessions.py`, `migrate/planning.py`), which already hoists a
 deprecated flat shape into the canonical pair. The input matrix:
 
-| Input                                                      | Loads? | Warns?                                              | `resource migrate` output            |
-| ---------------------------------------------------------- | ------ | --------------------------------------------------- | ------------------------------------ |
-| TOML session-template (`harness`/`harness_config`)         | yes    | existing TOML-deprecation status, unchanged         | YAML with `harness_integration:`     |
-| YAML tagged, old key: `harness: { name: ... }`             | yes    | yes: `harness` key deprecated, removed next release | `harness_integration: { name: ... }` |
-| YAML flat, old key: `harness: <name>` + `harness_config:`  | yes    | yes: same aggregated deprecation warning            | `harness_integration: { name: ... }` |
-| YAML tagged, new key: `harness_integration: { name: ... }` | yes    | no                                                  | unchanged                            |
+| Input                                                      | Loads? | Warns?                                   | `resource migrate` output            |
+| ---------------------------------------------------------- | ------ | ---------------------------------------- | ------------------------------------ |
+| TOML session-template (`harness`/`harness_config`)         | yes    | yes: removed in 0.14.0                   | YAML with `harness_integration:`     |
+| YAML tagged, old key: `harness: { name: ... }`             | yes    | yes: `harness` key removed in 0.14.0     | `harness_integration: { name: ... }` |
+| YAML flat, old key: `harness: <name>` + `harness_config:`  | yes    | yes: same aggregated deprecation warning | `harness_integration: { name: ... }` |
+| YAML tagged, new key: `harness_integration: { name: ... }` | yes    | no                                       | unchanged                            |
 
 The deprecation warning is a single aggregated message (reusing the existing aggregation in
 `decode_document`/`capability_shape_deprecation`), naming the `harness` key and pointing at
 `harness_integration` and `agw resource migrate`. Canonical emitted form is always the new key (FRD
-R7).
+R7). Any combination of old and new selector or config fields is a hard error. The compatibility
+layer recognizes only inputs that were valid before 0.13.0; it does not define hybrid forms or
+precedence rules. After normalization, inheritance and default-shell behavior operate only on the
+canonical internal pair.
 
 ### 2d. Code identifiers (soft)
 
@@ -126,18 +127,20 @@ renamed).
 - Manifest parity/decode tests updated to assert: the new `harness_integration:` key validates; both
   old `harness` shapes load with exactly one aggregated deprecation warning; `resource migrate`
   rewrites them to the new key.
-- Registry/kind tests assert `--kind harness-integration` resolves and `--kind harness` resolves
-  with a deprecation notice.
+- Registry/kind tests assert `--kind harness-integration` resolves, `--kind harness` and
+  `harness/<name>` fail as unknown, and completions expose only the canonical slug.
+- Compatibility tests assert every previously valid TOML and YAML form works in 0.13.0, mixed
+  old/new forms hard-error, and old/new declarations normalize before inheritance.
 - Session list/describe tests assert the new column header and label.
 - The full existing suite passes after the identifier sweep (behavior unchanged).
 
 ## 5. Migration and deprecation summary
 
-- **This release:** new name is canonical everywhere; old `harness` kind slug and `harness` selector
-  key accepted as deprecated input with an aggregated warning; `agw resource migrate` rewrites
-  operator manifests; the DB column is renamed by the new migration on first run.
-- **Next release:** the deprecation shims are removed (old kind slug, old selector key). Tracked as
-  a follow-up removal item in the plan; the removal itself is trivial once the ramp has elapsed.
+- **0.13.0:** new name is canonical everywhere; the old kind slug is gone; previously valid TOML and
+  YAML session-template forms remain accepted with an aggregated warning; `agw resource migrate`
+  rewrites them; the DB column is renamed by the new migration on first run.
+- **0.14.0:** old selector and discriminator compatibility is removed. The SDD stays open across
+  both releases and is closed and locked only after this removal lands.
 
 ## 6. Deferred (separate SDD)
 
@@ -149,8 +152,10 @@ does not constrain that design; the only thing it settles for the future work is
 
 - **Persisted-column rename** is the only at-rest data risk; a botched migration corrupts live
   session state. Mitigation: `RENAME COLUMN` is lossless and gated by the migration test.
-- **Operator-script breakage** on `--kind harness` / `harness/<name>` / `harness:` selector.
-  Mitigation: the alias and selector shim plus `agw resource migrate`, with a one-release ramp.
+- **Operator-script breakage** on `--kind harness` / `harness/<name>`. Mitigation: intentional hard
+  cutover in 0.13.0; canonical completions and documentation expose only the new slug.
+- **Operator-config breakage** on previously valid `harness:` declarations. Mitigation: 0.13.0
+  accepts them with a warning and `agw resource migrate` rewrites them before removal in 0.14.0.
 - **Sweep miss** leaving a stale identifier or CLI string. Mitigation: the plan's residual sweep
   greps case-insensitively for `harness` and justifies every remaining hit (industry-sense prose,
   historical changelog, the ephemeral SDD dirs).

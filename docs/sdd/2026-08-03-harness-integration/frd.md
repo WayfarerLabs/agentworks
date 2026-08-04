@@ -59,8 +59,10 @@ session-template selector field, the persisted database column, all code identif
 directories, CLI-visible text, and documentation. No behavior changes; a session created before the
 rename keeps working after it.
 
-Because the name is operator-facing and persisted, the rename ships with full backward compatibility
-and a migration path, on a one-release deprecation window.
+Because the name is operator-facing and persisted, version 0.13.0 keeps every previously valid
+session-template input working with a deprecation warning and provides database and resource
+migrations. Version 0.14.0 removes that compatibility together with the old discriminator pattern.
+The SDD remains open across both releases and is locked only after the removal lands.
 
 ## Functional requirements
 
@@ -78,8 +80,9 @@ and a migration path, on a one-release deprecation window.
   transformation and no loss; a database created before the rename MUST upgrade cleanly and its
   sessions MUST still start and restart.
 - **R4 (TOML compatibility).** TOML-declared session-templates MUST continue to work as-is (they are
-  already deprecated in favor of YAML resources; that status is unchanged). `agw resource migrate`
-  MUST produce YAML resources that use the new selector name.
+  already deprecated in favor of YAML resources) in 0.13.0. `agw resource migrate` MUST produce YAML
+  resources that use the new selector name. This compatibility is removed in 0.14.0 with the old
+  discriminator pattern.
 - **R5 (YAML compatibility with deprecation).** Existing YAML session-templates MUST continue to
   load, in both current shapes:
   - the tagged-table shape (`harness: { name: ..., <config> }`), and
@@ -87,13 +90,15 @@ and a migration path, on a one-release deprecation window.
 
   Any use of the old `harness` selector key MUST emit a single aggregated deprecation warning
   stating that the `harness` key is deprecated in favor of `harness_integration` and will be removed
-  in the next release. `agw resource migrate` MUST rewrite either old shape to the canonical
-  `harness_integration: { name: ..., <config> }` form.
+  in 0.14.0. `agw resource migrate` MUST rewrite either old shape to the canonical
+  `harness_integration: { name: ..., <config> }` form. Inputs that mix old and new selector or
+  config fields were not previously valid and MUST be hard errors; no hybrid compatibility forms are
+  introduced.
 
-- **R6 (kind-slug compatibility with deprecation).** Operator references to the old kind slug
-  (`agw resource list --kind harness`, `harness/<name>` addressing) MUST keep resolving for this
-  release with a deprecation notice, and be removed in the next release. (Alias versus hard-cutover
-  mechanics are an HLA and migration-strategy decision; the requirement is a one-release ramp.)
+- **R6 (kind-slug hard cutover).** The capability kind changes directly to `harness-integration` in
+  0.13.0. The old `harness` slug is not an alias: `agw resource list --kind harness` and
+  `harness/<name>` addressing fail as unknown-kind input. Canonical completion and kind listings
+  expose only `harness-integration`.
 - **R7 (canonical output uses the new name).** Everything Agentworks emits or displays (CLI columns
   and labels, `resource sample` and `resource migrate` output, sample manifests, docs) MUST use
   `harness-integration`/`harness_integration`. The old name survives only as an
@@ -111,23 +116,21 @@ and a migration path, on a one-release deprecation window.
 
 ## Personas
 
-- **Operator**: has `harness:` in session-templates, has typed `--kind harness` and
-  `harness/<name>`, and has sessions already running. Needs the rename to break none of that on
-  upgrade, and a clear path (a warning plus `agw resource migrate`) to the new name.
+- **Operator**: has `harness:` in session-templates and sessions already running. Needs those
+  persisted objects to keep working in 0.13.0 and a clear path (a warning plus
+  `agw resource migrate`) to the new name before compatibility is removed in 0.14.0.
 - **Maintainer / reader**: wants the capability's name to match reality (the Agentworks integration
   for a harness, not the harness), with the codebase, DB, CLI, and docs all agreeing on one name.
 
 ## Open decisions
 
-- **D1 (deprecation mechanics).** The exact form of the compatibility layer (a kind-slug alias in
-  the registry versus a hard cutover with a `doctor`/error hint; how the selector shim reuses the
-  existing legacy-flat-field hoist) is settled in `migration-strategy.md`. The requirement is fixed:
-  both old shapes load with an aggregated warning this release, canonical output is the new name,
-  removal is next release.
-- **D2 (selector spelling).** Recommendation: `harness_integration` (snake case, matching the
-  internal field pair `harness_integration`/`harness_integration_config` and the other capability
-  selectors `platform`/`provider`). It is a longer key than `harness:`; the length is accepted for
-  consistency with the kind and vocabulary. Confirm in the HLA.
+- **D1 (deprecation mechanics).** The selector shim reuses the existing legacy-flat-field hoist;
+  both previously valid old shapes load with an aggregated warning in 0.13.0, canonical output uses
+  the new name, and the compatibility is removed in 0.14.0. Mixed old/new shapes are hard errors.
+  There is no kind-slug alias.
+- **D2 (selector spelling).** Settled: `harness_integration` (snake case, matching the internal
+  field pair `harness_integration`/`harness_integration_config` and the other capability selectors
+  `platform`/`provider`). Its length is accepted for consistency with the kind and vocabulary.
 
 ## Deferred: multi-scope integration (separate follow-up SDD and PR)
 
