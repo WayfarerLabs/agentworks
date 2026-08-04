@@ -90,15 +90,20 @@ Declaration:
   merge into one table carrying an internal `name` discriminator, `name` being the resource model's
   standard term for the second half of a `kind/name` address (the hosting surface fixes the kind,
   the tag supplies the name), so `spec.platform: {name: lima, ...}` replaces `platform` plus
-  `platform_config`, and likewise for `provider` and `harness`. Secret `backend_mappings` keeps its
-  map-keyed-by-backend shape (the map key is already the discriminator). Unions are assembled from
-  the capability registry so plugin-registered capabilities join automatically. This is a deliberate
-  breaking manifest schema change, made now because the schema model makes it cheapest now.
-  Pre-support shipped ahead of this SDD (PR #349): decode accepts both shapes with an aggregated
-  deprecation warning on the old one, and `agw resource migrate` already emits the tagged form. This
-  effort's remaining job is hardening: the old shape becomes a hard error naming the exact rewrite,
-  and `agw resource migrate` gains a manifest-upgrade mode that rewrites YAML files in place under
-  its existing backup-first discipline.
+  `platform_config`, and likewise for `provider`. The harness surface already reached this shape on
+  main: the harness-integration rename (PR #383, 2026-08-04) made
+  `spec.harness_integration: {name: ...}` canonical, with the legacy `harness`/`harness_config`
+  spellings warned and their removal owned by that effort's own 0.14.0 phase, so this effort hardens
+  the vm-site and git-credential surfaces and coordinates with (never duplicates) the harness
+  selector removal. Secret `backend_mappings` keeps its map-keyed-by-backend shape (the map key is
+  already the discriminator). Unions are assembled from the capability registry so plugin-registered
+  capabilities join automatically. This is a deliberate breaking manifest schema change, made now
+  because the schema model makes it cheapest now. Pre-support shipped ahead of this SDD (PR #349):
+  decode accepts both shapes with an aggregated deprecation warning on the old one, and
+  `agw resource migrate` already emits the tagged form. This effort's remaining job is hardening:
+  the old shape becomes a hard error naming the exact rewrite, and `agw resource migrate` gains a
+  manifest-upgrade mode that rewrites YAML files in place under its existing backup-first
+  discipline.
 - **FR17.** Inheritance is not a dependency. An inheritance edge (a session template's `inherits`,
   and any future inheriting surface) is source composition: it participates in existence checking,
   cycle detection, and merge ordering, and is EXCLUDED from runtime-need traversal (the secret

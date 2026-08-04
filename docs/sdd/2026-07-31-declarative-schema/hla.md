@@ -116,6 +116,14 @@ it on the kind's registry entry. Secret `backend_mappings` keeps its map-keyed-b
 map key dispatches to the backend's `mapping_model` and the emitted schema expresses it as per-key
 properties.
 
+The harness surface is already fully tagged on main: the harness-integration rename (PR #383) made
+`spec.harness_integration: {name: ...}` canonical, built a comment-preserving YAML-rewrite mechanism
+in the migrator (ruamel round-trip plus document-marker text patching, digest/CAS guards,
+backup-first rollback, YAML-native migration units), and scheduled the legacy selector's hard cut
+for its own 0.14.0 phase. This effort's manifest-upgrade mode GENERALIZES that shipped machinery to
+the platform/provider sibling fold rather than building anew, and its hardening step leaves the
+harness selector's removal to the owning SDD.
+
 Pre-support already shipped ahead of this SDD (PR #349): manifest decode accepts both shapes and
 warns once, aggregated, on the old one, and `agw resource migrate` emits the tagged form (so the
 phase 1 migrator work inherits tagged emission; there is no shape flip to schedule). What lands here

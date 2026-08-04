@@ -21,11 +21,16 @@ Status: DRAFT (authored alongside the FRD and HLA; implementation gated, see pre
 - [x] The codex harness effort has landed on `main` (operator direction, 2026-08-01: wait for it,
       then start; landed via PR #360 on 2026-08-02, alongside the EC2 vm-platform, PR #359). Its
       capability joins the phase 2 model inventory like any other.
-- [ ] PR #315 (TOML deprecation warning) and PR #349 (tagged-shape pre-support) are both in a
-      shipped release. Phase 1's hard error and phase 2's shape hardening each require one released
-      warning version of runway (FRD dependencies).
-- [ ] Branch rebased onto `main` after the above; capability inventory re-enumerated (new
-      capabilities, e.g. codex, added to step 2.3's list).
+- [x] PR #315 (TOML deprecation warning) and PR #349 (tagged-shape pre-support) are both in a
+      shipped release (v0.13.0, cut 2026-08-04). Phase 1's hard error and phase 2's shape hardening
+      each require one released warning version of runway (FRD dependencies).
+- [x] Branch rebased onto `main` after the above (2026-08-04); capability inventory re-enumerated:
+      the harness kind is now `harness-integration` (PR #383 rename; canonical field
+      `spec.harness_integration: {name: ...}`, legacy selector warned until that SDD's 0.14.0
+      removal phase), integrations are shell / claude-code / codex, and shell's config vocabulary is
+      `command` / `resume_command` / `required_commands` (`restart_command` deprecated by the
+      concurrent session-resume SDD, riding the same migrator rewrite pass). Steps 2.3, 2.4, and 2.5
+      updated below.
 
 ## Phase 1: remove TOML resource declarations
 
@@ -123,10 +128,12 @@ Status: DRAFT (authored alongside the FRD and HLA; implementation gated, see pre
       aws-ec2 (new, renamed from ec2 by PR #363; nested `credentials` model with `access_key_secret`
       as a `SecretRef` defaulting to the well-known name, plus the `instance_types` catalog);
       git-credential-provider github (scope union: repos/owner mutual exclusion as a model
-      validator; `token` as `SecretRef` with the `git-token-{owner}` template), azdo; harness shell,
-      claude-code, codex (new; `extra_args` list plus flag fields); secret backends env-var, prompt
-      (no mapping), onepassword (mapping is itself a union: `op://` string or account/reference
-      table).
+      validator; `token` as `SecretRef` with the `git-token-{owner}` template), azdo;
+      harness-integration (the kind renamed by PR #383) shell (config: command, resume_command,
+      required_commands; the deprecated restart_command alias is the session-resume SDD's to
+      remove), claude-code, codex (`extra_args` list plus flag fields); secret backends env-var,
+      prompt (no mapping), onepassword (mapping is itself a union: `op://` string or
+      account/reference table).
 - [ ] Core-driven validation and extraction wired: registry name-to-model maps per capability kind;
       `Capability.validate` / `Capability.dependencies` classmethods and
       `SecretBackend.validate_mapping` retired; per-capability hand-rolled validate code deleted;
@@ -147,13 +154,19 @@ Status: DRAFT (authored alongside the FRD and HLA; implementation gated, see pre
 
 ### 2.4 Tagged-shape hardening
 
-- [ ] `tagged-hardening-lld.md` written and reviewed: the old-shape detection and error text, the
-      manifest-upgrade mode's in-place YAML rewrite mechanics and comment-handling policy, and how
-      the old-shape error survives 2.5's decoder-to-model swap.
-- [ ] Old sibling shape (`platform` + `platform_config` and kin) becomes a hard error naming the
-      exact rewrite; #349's dual-shape normalization, its aggregated warning channel
-      (`ManifestSet.deprecation_issues` for shape), and the bundle-gate special case are removed
-      (the hard error makes the gate redundant).
+- [ ] `tagged-hardening-lld.md` written and reviewed: the old-shape detection and error text, how
+      the old-shape error survives 2.5's decoder-to-model swap, and the manifest-upgrade mode as a
+      GENERALIZATION of the migrator's shipped YAML-rewrite machinery (PR #383's `YamlRewrite`:
+      ruamel round-trip with document-marker text patching, digest/CAS guards, backup-first
+      rollback, YAML-native units), extended from the bespoke session-template selector fold to the
+      platform/provider sibling fold. Coordination is part of this LLD: the legacy
+      `harness`/`harness_config` selector's hard cut belongs to the harness-integration SDD's 0.14.0
+      phase and the `restart_command` removal to the session-resume SDD; this step must neither
+      remove nor break their still-supported warning paths if it lands first.
+- [ ] Old sibling shape (`platform` + `platform_config`, `provider` + `provider_config`) becomes a
+      hard error naming the exact rewrite; #349's dual-shape normalization, its aggregated warning
+      channel (`ManifestSet.deprecation_issues` for shape), and the bundle-gate special case are
+      removed (the hard error makes the gate redundant).
 - [ ] The old-sibling-shape entry joins the representative-mistakes corpus here, pinned end to end
       so 2.5's swap cannot degrade it to a generic unknown-key error (in the model regime the old
       shape would otherwise surface as exactly that on `platform` plus `platform_config`).
@@ -168,7 +181,11 @@ Status: DRAFT (authored alongside the FRD and HLA; implementation gated, see pre
 
 - [ ] `kind-spec-models-lld.md` written and reviewed: the per-kind model-vs-thin-wrapper calls,
       semantic-validator placement (name/length caps, cross-field rules), and the decode entry point
-      contract the swap preserves.
+      contract the swap preserves. The session-template model must absorb or sequence around the
+      bespoke `_normalize_session_harness_selector` decode shim (the legacy `harness` selector's
+      warning path, owned by the harness-integration SDD until its 0.14.0 removal) and the
+      `restart_command` alias (session-resume SDD); if those removals land first, the shims are
+      simply gone, else the model keeps their behavior byte-compatible.
 - [ ] Kind-by-kind migration behind the stable decode entry points, smallest first to bed in the
       pattern: apt-package, apt-source, system/user-install-command, workspace-template,
       named-console-template, admin-template, agent-template, vm-template, secret, git-credential,
@@ -232,11 +249,12 @@ Status: DRAFT (authored alongside the FRD and HLA; implementation gated, see pre
       (narrative-necessary ones may stay).
 - [ ] Permanent-doc promotion: `capabilities/README.md` rewritten for the declare-schema contract
       (the invoked-validation sections and their standing deprecation notes retire);
-      `capabilities/harness/README.md` (the harness developer guide, added 2026-08-02, whose
-      `validate`/`dependencies` sections document the retired contract) updated the same way;
-      `cli/agentworks/plugins/README.md` documents `config_model` for plugin capability authors;
-      `docs/guides/resources.md` updated; the superseding ADR extended or a sibling ADR added for
-      the schema model if the phase 1 ADR did not already cover it.
+      `capabilities/harness_integration/README.md` (the harness developer guide, added 2026-08-02
+      and renamed with the kind, whose `validate`/`dependencies` sections document the retired
+      contract) updated the same way; `cli/agentworks/plugins/README.md` documents `config_model`
+      for plugin capability authors; `docs/guides/resources.md` updated; the superseding ADR
+      extended or a sibling ADR added for the schema model if the phase 1 ADR did not already cover
+      it.
 - [ ] Dated lockfile entries: resource-manifests (Phase 5.7 invoked-validation contract retired;
       sample machinery replaced) and vm-sites (its "schema-registration is future work" deferral
       resolved).
