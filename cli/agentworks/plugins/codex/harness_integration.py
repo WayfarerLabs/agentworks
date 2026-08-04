@@ -132,6 +132,7 @@ def _toml_basic_string(value: str) -> str:
             out.append(ch)
     return '"' + "".join(out) + '"'
 
+
 # The codex config key ``approvals_reviewer`` forwards to (via ``-c``;
 # codex exposes no dedicated flag for it, so the strict-config default is
 # the drift guard here too). Values are codex-owned and forward
