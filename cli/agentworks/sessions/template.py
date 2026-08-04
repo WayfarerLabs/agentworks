@@ -62,6 +62,7 @@ class SessionTemplate(DeclaredResource):
     inherits: list[str] = field(default_factory=list)
     harness_integration: str | None = None
     harness_integration_config: dict[str, object] | None = None
+    restart_command_compat: bool = False
     env: dict[str, EnvEntry] | None = None
 
     def dependencies(self, context: BuildContext) -> list[ResourceReference]:

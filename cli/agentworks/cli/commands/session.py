@@ -170,33 +170,19 @@ def session_stop(
         raise typer.BadParameter("provide a session name or use --all")
 
 
-@session_app.command("restart")
-def session_restart(
-    name: Annotated[str | None, typer.Argument(help="Session name")] = None,
-    all_stopped: Annotated[bool, typer.Option("--all-stopped", help="Restart all stopped sessions")] = False,
-    all_sessions: Annotated[bool, typer.Option("--all", help="Restart all sessions (prompts for running)")] = False,
-    vm: Annotated[str | None, typer.Option("--vm", help="Filter by VM (with --all/--all-stopped)")] = None,
-    workspace: Annotated[
-        str | None,
-        typer.Option("--workspace", help="Filter by workspace (with --all/--all-stopped)"),
-    ] = None,
-    agent: Annotated[
-        str | None,
-        typer.Option("--agent", help="Filter by agent (with --all/--all-stopped)"),
-    ] = None,
-    admin: Annotated[
-        bool,
-        typer.Option("--admin", help="Only admin-mode sessions (with --all/--all-stopped)"),
-    ] = False,
-    force: Annotated[bool, typer.Option("--force", help="Force-kill broken sessions via PID")] = False,
-    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation prompts")] = False,
+def _resume_sessions(
+    name: str | None,
+    *,
+    all_stopped: bool,
+    all_sessions: bool,
+    vm: str | None,
+    workspace: str | None,
+    agent: str | None,
+    admin: bool,
+    force: bool,
+    yes: bool,
 ) -> None:
-    """Restart a session, or batch restart with --all-stopped / --all.
-
-    Filters compose with AND. ``--vm``, ``--workspace``, and ``--agent``
-    accept a single value or a comma-separated list (e.g.
-    ``--vm vm1,vm2``); commas within a filter are OR-ed together.
-    """
+    """Validate and execute the single or batch session resume operation."""
     from agentworks.config import load_config
     from agentworks.sessions.manager import resume_all_sessions, resume_session
 
@@ -261,6 +247,85 @@ def session_restart(
         resume_session(get_db(), load_config(), name=name, force=force, yes=yes)
     else:
         raise typer.BadParameter("provide a session name, --all-stopped, or --all")
+
+
+@session_app.command("resume")
+def session_resume(
+    name: Annotated[str | None, typer.Argument(help="Session name")] = None,
+    all_stopped: Annotated[bool, typer.Option("--all-stopped", help="Resume all stopped sessions")] = False,
+    all_sessions: Annotated[bool, typer.Option("--all", help="Resume all sessions (prompts for running)")] = False,
+    vm: Annotated[str | None, typer.Option("--vm", help="Filter by VM (with --all/--all-stopped)")] = None,
+    workspace: Annotated[
+        str | None,
+        typer.Option("--workspace", help="Filter by workspace (with --all/--all-stopped)"),
+    ] = None,
+    agent: Annotated[
+        str | None,
+        typer.Option("--agent", help="Filter by agent (with --all/--all-stopped)"),
+    ] = None,
+    admin: Annotated[
+        bool,
+        typer.Option("--admin", help="Only admin-mode sessions (with --all/--all-stopped)"),
+    ] = False,
+    force: Annotated[bool, typer.Option("--force", help="Force-kill broken sessions via PID")] = False,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation prompts")] = False,
+) -> None:
+    """Resume a session, or batch resume with --all-stopped / --all.
+
+    Filters compose with AND. ``--vm``, ``--workspace``, and ``--agent``
+    accept a single value or a comma-separated list (e.g.
+    ``--vm vm1,vm2``); commas within a filter are OR-ed together.
+    """
+    _resume_sessions(
+        name,
+        all_stopped=all_stopped,
+        all_sessions=all_sessions,
+        vm=vm,
+        workspace=workspace,
+        agent=agent,
+        admin=admin,
+        force=force,
+        yes=yes,
+    )
+
+
+@session_app.command("restart")
+def session_restart(
+    name: Annotated[str | None, typer.Argument(help="Session name")] = None,
+    all_stopped: Annotated[bool, typer.Option("--all-stopped", help="Resume all stopped sessions")] = False,
+    all_sessions: Annotated[bool, typer.Option("--all", help="Resume all sessions (prompts for running)")] = False,
+    vm: Annotated[str | None, typer.Option("--vm", help="Filter by VM (with --all/--all-stopped)")] = None,
+    workspace: Annotated[
+        str | None,
+        typer.Option("--workspace", help="Filter by workspace (with --all/--all-stopped)"),
+    ] = None,
+    agent: Annotated[
+        str | None,
+        typer.Option("--agent", help="Filter by agent (with --all/--all-stopped)"),
+    ] = None,
+    admin: Annotated[
+        bool,
+        typer.Option("--admin", help="Only admin-mode sessions (with --all/--all-stopped)"),
+    ] = False,
+    force: Annotated[bool, typer.Option("--force", help="Force-kill broken sessions via PID")] = False,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation prompts")] = False,
+) -> None:
+    """[Deprecated] Resume a session. Use ``agw session resume`` instead."""
+    from agentworks import output
+
+    if not output.deprecations_suppressed():
+        output.warn("'agw session restart' is deprecated; use 'agw session resume'. It will be removed in 0.14.0.")
+    _resume_sessions(
+        name,
+        all_stopped=all_stopped,
+        all_sessions=all_sessions,
+        vm=vm,
+        workspace=workspace,
+        agent=agent,
+        admin=admin,
+        force=force,
+        yes=yes,
+    )
 
 
 @session_app.command("attach")

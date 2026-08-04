@@ -11,7 +11,7 @@
 ##
 ## `shell`'s config vocabulary is the legacy command fields, now nested:
 ##   command:           the pane command (empty/omitted = login shell)
-##   restart_command:   used by `agw session resume`; falls back to command
+##   resume_command:    used by `agw session resume`; falls back to command
 ##   required_commands: executables checked on the launch target first
 ## Commands support the {{session_name}} and {{workspace_name}} variables.
 ## Env maps merge during inheritance (child wins); required_commands union.

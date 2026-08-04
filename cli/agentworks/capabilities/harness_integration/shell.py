@@ -3,7 +3,7 @@ login shell) as the session workload.
 
 The plain, default member. Its ``harness_integration_config`` vocabulary is exactly
 the flat session-template fields the harness integration model replaces: ``command``
-(the pane command; empty = login shell), ``restart_command`` (the
+(the pane command; empty = login shell), ``resume_command`` (the
 command on ``session resume``, falling back to ``command``), and
 ``required_commands`` (the executables the launch target must have on
 PATH). All optional.
@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from agentworks.resources.reference import ConfigReference
     from agentworks.transports import Transport
 
-_SHELL_FIELDS = {"command", "restart_command", "required_commands"}
+_SHELL_FIELDS = {"command", "resume_command", "restart_command", "required_commands"}
 
 
 def _as_str_list(value: object) -> list[str] | None:
@@ -91,7 +91,11 @@ class ShellIntegration(HarnessIntegration):
         unknown = sorted(set(config) - _SHELL_FIELDS)
         if unknown:
             raise ConfigError(f"{owner}: unknown shell harness integration field(s): {', '.join(unknown)}")
-        for field_name in ("command", "restart_command"):
+        if "resume_command" in config and "restart_command" in config:
+            raise ConfigError(
+                f"{owner}: resume_command and restart_command cannot be combined; use resume_command only"
+            )
+        for field_name in ("command", "resume_command", "restart_command"):
             value = config.get(field_name)
             if value is not None and not isinstance(value, str):
                 raise ConfigError(f"{owner}.{field_name} must be a string")
@@ -113,6 +117,13 @@ class ShellIntegration(HarnessIntegration):
         into a valid-looking union would hide the invalid entry from the
         merged-blob ``validate`` pass. An unclean side falls through to
         the shallow merge, so ``validate`` still rejects it."""
+        if ("restart_command" in base and "resume_command" in child) or (
+            "resume_command" in base and "restart_command" in child
+        ):
+            raise ConfigError(
+                "shell harness integration inheritance cannot combine resume_command and restart_command; "
+                "use resume_command throughout the inheritance chain"
+            )
         merged = {**base, **child}
         base_cmds = _as_str_list(base.get("required_commands"))
         child_cmds = _as_str_list(child.get("required_commands"))
@@ -128,10 +139,10 @@ class ShellIntegration(HarnessIntegration):
         return self._command_field("command")
 
     def resume(self, ctx: RunContext) -> str:
-        """The pane command for ``session resume``: ``restart_command``
+        """The pane command for ``session resume``: ``resume_command``
         when declared, else ``command`` (empty = login shell)."""
-        restart_command = self._command_field("restart_command")
-        return restart_command or self._command_field("command")
+        resume_command = self._command_field("resume_command")
+        return resume_command or self._command_field("command")
 
     def _command_field(self, field_name: str) -> str:
         value = self.config.get(field_name, "")

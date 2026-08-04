@@ -776,9 +776,28 @@ def _emit_document(doc: tomlkit.TOMLDocument, unit: MigrationUnit) -> str:
         # the rebuilt blob pre-write so a bad blob fails BEFORE anything
         # is written, in the operator's TOML vocabulary, rather than
         # failing verification after the write.
-        flat = {key: spec.pop(key) for key in ("command", "restart_command", "required_commands") if key in spec}
+        if "resume_command" in spec and "restart_command" in spec:
+            raise ConfigError(
+                f"cannot migrate session-template/{unit.name}: resume_command and restart_command cannot be combined; "
+                "use resume_command only"
+            )
+        flat = {
+            key: spec.pop(key)
+            for key in ("command", "resume_command", "restart_command", "required_commands")
+            if key in spec
+        }
+        if "restart_command" in flat:
+            flat["resume_command"] = flat.pop("restart_command")
         integration = spec.pop("harness_integration", spec.pop("harness", None))
         integration_config = spec.pop("harness_integration_config", spec.pop("harness_config", None))
+        if isinstance(integration_config, dict) and "restart_command" in integration_config:
+            if "resume_command" in integration_config:
+                raise ConfigError(
+                    f"cannot migrate session-template/{unit.name}: resume_command and restart_command cannot be "
+                    "combined; use resume_command only"
+                )
+            integration_config = dict(integration_config)
+            integration_config["resume_command"] = integration_config.pop("restart_command")
         if flat:
             # The loader guarantees flat fields never coexist with a
             # non-shell integration or an explicit integration config, so this

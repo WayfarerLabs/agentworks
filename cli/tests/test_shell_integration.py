@@ -86,7 +86,7 @@ def test_dependencies_imply_no_reference() -> None:
             "session-template/claude",
             {
                 "command": "claude",
-                "restart_command": "claude --resume",
+                "resume_command": "claude --resume",
                 "required_commands": ["claude", "rg"],
             },
         )
@@ -102,7 +102,7 @@ def test_validate_accepts_the_known_fields_and_empty_config() -> None:
             "session-template/claude",
             {
                 "command": "claude",
-                "restart_command": "claude --resume",
+                "resume_command": "claude --resume",
                 "required_commands": ["claude", "rg"],
             },
         )
@@ -143,11 +143,23 @@ def test_construct_revalidates_config() -> None:
 
 def test_merge_child_wins_the_scalars() -> None:
     merged = ShellIntegration.merge_config(
-        {"command": "parent", "restart_command": "parent-r"},
+        {"command": "parent", "resume_command": "parent-r"},
         {"command": "child"},
     )
     assert merged["command"] == "child"
-    assert merged["restart_command"] == "parent-r"  # untouched by the child
+    assert merged["resume_command"] == "parent-r"  # untouched by the child
+
+
+@pytest.mark.parametrize(
+    ("base", "child"),
+    [
+        ({"restart_command": "old"}, {"resume_command": "new"}),
+        ({"resume_command": "new"}, {"restart_command": "old"}),
+    ],
+)
+def test_merge_rejects_mixed_resume_spellings(base: dict[str, object], child: dict[str, object]) -> None:
+    with pytest.raises(ConfigError, match="inheritance cannot combine"):
+        ShellIntegration.merge_config(base, child)
 
 
 def test_merge_unions_required_commands_append_dedupe() -> None:
@@ -196,8 +208,8 @@ def test_start_empty_config_is_a_login_shell() -> None:
     assert _harness_integration({}).start(RunContext()) == ""
 
 
-def test_resume_prefers_restart_command() -> None:
-    harness_integration = _harness_integration({"command": "claude", "restart_command": "claude --resume"})
+def test_resume_prefers_resume_command() -> None:
+    harness_integration = _harness_integration({"command": "claude", "resume_command": "claude --resume"})
     assert harness_integration.resume(RunContext()) == "claude --resume"
 
 

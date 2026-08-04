@@ -97,9 +97,40 @@ def test_flat_toml_hoists_to_the_shell_pair(tmp_path: Path) -> None:
     assert tmpl.harness_integration == "shell"
     assert tmpl.harness_integration_config == {
         "command": "claude",
-        "restart_command": "claude --resume",
+        "resume_command": "claude --resume",
         "required_commands": ["claude"],
     }
+    assert len(config.deprecation_issues) == 2
+    assert "restart_command is deprecated; use resume_command instead" in "\n".join(config.deprecation_issues)
+
+
+def test_flat_toml_resume_command_is_canonical(tmp_path: Path) -> None:
+    config = _config(
+        tmp_path,
+        """
+        [session_templates.claude]
+        command = "claude"
+        resume_command = "claude --resume"
+        """,
+    )
+    tmpl = _templates(config)["claude"]
+    assert tmpl.harness_integration_config == {
+        "command": "claude",
+        "resume_command": "claude --resume",
+    }
+    assert not any("restart_command" in issue for issue in config.deprecation_issues)
+
+
+def test_local_resume_and_restart_command_conflict(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="resume_command and restart_command cannot be combined"):
+        _config(
+            tmp_path,
+            """
+            [session_templates.bad]
+            resume_command = "new"
+            restart_command = "old"
+            """,
+        )
 
 
 def test_nested_toml_harness_config_passes_through(tmp_path: Path) -> None:
@@ -306,6 +337,70 @@ def test_child_silent_inherits_the_pair_unchanged() -> None:
     resolved = resolve_from_dict(templates, "child")
     assert resolved.harness_integration == "shell"
     assert resolved.harness_integration_config == {"command": "claude"}
+
+
+@pytest.mark.parametrize(("parent_old", "child_old"), [(True, False), (False, True)])
+def test_inheritance_rejects_mixed_resume_spellings(parent_old: bool, child_old: bool) -> None:
+    templates = {
+        "base": SessionTemplate(
+            name="base",
+            harness_integration="shell",
+            harness_integration_config={"resume_command": "parent"},
+            restart_command_compat=parent_old,
+        ),
+        "child": SessionTemplate(
+            name="child",
+            inherits=["base"],
+            harness_integration="shell",
+            harness_integration_config={"resume_command": "child"},
+            restart_command_compat=child_old,
+        ),
+    }
+    with pytest.raises(ConfigError, match="inheritance cannot combine"):
+        resolve_from_dict(templates, "child")
+
+
+def test_old_parent_with_unrelated_child_override_normalizes() -> None:
+    templates = {
+        "base": SessionTemplate(
+            name="base",
+            harness_integration="shell",
+            harness_integration_config={"resume_command": "parent"},
+            restart_command_compat=True,
+        ),
+        "child": SessionTemplate(
+            name="child",
+            inherits=["base"],
+            harness_integration="shell",
+            harness_integration_config={"command": "child"},
+        ),
+    }
+    resolved = resolve_from_dict(templates, "child")
+    assert resolved.harness_integration_config == {
+        "command": "child",
+        "resume_command": "parent",
+    }
+
+
+def test_yaml_restart_command_warns_and_normalizes(tmp_path: Path) -> None:
+    root = _manifest(
+        tmp_path,
+        """
+        apiVersion: agentworks/v1
+        kind: session-template
+        metadata:
+          name: old-shell
+        spec:
+          harness_integration:
+            name: shell
+            restart_command: old-resume
+        """,
+    )
+    manifests = load_manifests(root)
+    assert len(manifests.deprecation_issues) == 1
+    assert "restart_command is deprecated; use resume_command instead" in manifests.deprecation_issues[0]
+    template = manifests.entries[0].resource
+    assert template.harness_integration_config == {"resume_command": "old-resume"}
 
 
 def test_child_different_harness_integration_starts_fresh(fake_harness_integration: None) -> None:

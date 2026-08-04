@@ -159,6 +159,19 @@ class TestOptionFlagsInSpec:
         opts = [opt for param in resource_list.params for opt in param.opts]
         assert "--include-disabled" in opts
 
+    def test_session_resume_and_deprecated_restart_are_discoverable(self) -> None:
+        spec = build_spec(app)
+        session = _walk_commands(spec)["agentworks.session"]
+        assert "resume" in session.subcommands
+        assert "restart" in session.subcommands
+        assert "Deprecated" in session.subcommands["restart"].help
+
+        for parameter in ("name", "vm", "workspace", "agent"):
+            assert (
+                DYNAMIC_COMPLETIONS[("session.resume", parameter)]
+                == DYNAMIC_COMPLETIONS[("session.restart", parameter)]
+            )
+
 
 class TestGeneration:
     """Smoke tests for completion script generation."""

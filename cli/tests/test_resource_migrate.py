@@ -335,7 +335,7 @@ CLAUDE_LOG_LEVEL = "info"
         "harness_integration": {
             "name": "shell",
             "command": "claude",
-            "restart_command": "claude --resume",
+            "resume_command": "claude --resume",
             "required_commands": ["claude"],
         },
         "env": {"CLAUDE_LOG_LEVEL": "info"},
@@ -363,6 +363,49 @@ required_commands = ["htop"]
     assert doc["spec"] == {
         "harness_integration": {"name": "shell", "command": "htop", "required_commands": ["htop"]},
     }
+
+
+def test_session_template_nested_restart_command_migrates_to_resume_command(tmp_path: Path) -> None:
+    cfg = _write_config(
+        tmp_path,
+        resources="""\
+[session_templates.shell]
+harness_integration = "shell"
+
+[session_templates.shell.harness_integration_config]
+command = "tool"
+restart_command = "tool --resume"
+""",
+    )
+    config, plan = _plan(cfg, ["session-template/shell"])
+    execute_plan(plan, config)
+    (doc,) = _loaded_docs(tmp_path / "resources" / "session-templates.yaml")
+    assert doc["spec"]["harness_integration"] == {
+        "name": "shell",
+        "command": "tool",
+        "resume_command": "tool --resume",
+    }
+
+
+def test_session_template_mixed_resume_spellings_fail_without_writes(tmp_path: Path) -> None:
+    cfg = _write_config(
+        tmp_path,
+        resources="""\
+[session_templates.shell]
+harness_integration = "shell"
+
+[session_templates.shell.harness_integration_config]
+resume_command = "new"
+restart_command = "old"
+""",
+    )
+    original = cfg.read_text()
+
+    with pytest.raises(ConfigError, match="resume_command and restart_command cannot be combined"):
+        _plan(cfg, ["session-template/shell"])
+
+    assert cfg.read_text() == original
+    assert not (tmp_path / "resources").exists()
 
 
 def test_singletons_emit_default_documents(tmp_path: Path) -> None:

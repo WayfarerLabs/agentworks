@@ -157,7 +157,7 @@ def test_session_resume_agent_filter_flows_to_manager(
 
     result = CliRunner().invoke(
         app,
-        ["session", "restart", "--all-stopped", "--agent", "a1"],
+        ["session", "resume", "--all-stopped", "--agent", "a1"],
     )
     assert result.exit_code == 0, result.output
     assert captured.get("agent_name") == "a1"
@@ -174,7 +174,7 @@ def test_session_resume_agent_without_batch_errors(
     monkeypatch.setattr("agentworks.cli._helpers.get_db", lambda: object())
     monkeypatch.setattr("agentworks.config.load_config", lambda: object())
 
-    result = CliRunner().invoke(app, ["session", "restart", "--agent", "a1"])
+    result = CliRunner().invoke(app, ["session", "resume", "--agent", "a1"])
     assert result.exit_code != 0
     assert "--agent" in _plain(result.output)
 
