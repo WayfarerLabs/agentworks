@@ -870,6 +870,96 @@ spec:
     assert registry.lookup("session-template", "htop").harness_integration == "shell"
 
 
+def test_canonical_yaml_restart_command_migrates_in_place_and_verifies(tmp_path: Path) -> None:
+    """A canonical selector with the deprecated nested key remains migratable."""
+    from agentworks.migrate.render import render_dry_run
+
+    cfg = _write_config(tmp_path, resources="")
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    manifest = resources / "sessions.yaml"
+    manifest.write_text(
+        """\
+apiVersion: agentworks/v1
+kind: session-template
+metadata:
+  name: tool
+spec:
+  harness_integration:
+    name: shell
+    command: tool
+    restart_command: tool --resume # keep this comment
+"""
+    )
+    original = manifest.read_text()
+
+    config, plan = _plan(cfg, ["session-template/tool"])
+    assert "restart_command" in "\n".join(render_dry_run(plan, full=True))
+    full_preview = "\n".join(render_dry_run(plan, full=True))
+    assert "+    resume_command: tool --resume" in full_preview
+    assert "keep this comment" in full_preview
+    assert manifest.read_text() == original
+
+    result = execute_plan(plan, config)
+    assert result.replaced == [manifest]
+    assert "restart_command" not in manifest.read_text()
+    assert "resume_command: tool --resume" in manifest.read_text()
+    assert "keep this comment" in manifest.read_text()
+    registry = build_registry(load_config(cfg, warn_issues=False))
+    template = registry.lookup("session-template", "tool")
+    assert template.harness_integration_config == {
+        "command": "tool",
+        "resume_command": "tool --resume",
+    }
+
+
+def test_canonical_yaml_restart_command_conflict_fails_without_modification(tmp_path: Path) -> None:
+    cfg = _write_config(tmp_path, resources="")
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    manifest = resources / "sessions.yaml"
+    manifest.write_text(
+        """\
+apiVersion: agentworks/v1
+kind: session-template
+metadata:
+  name: tool
+spec:
+  harness_integration:
+    name: shell
+    resume_command: new
+    restart_command: old
+"""
+    )
+    original = manifest.read_text()
+
+    with pytest.raises(ConfigError, match="resume_command and restart_command cannot be combined"):
+        _plan(cfg, ["session-template/tool"])
+
+    assert manifest.read_text() == original
+
+
+def test_fully_canonical_yaml_session_template_is_not_migratable(tmp_path: Path) -> None:
+    cfg = _write_config(tmp_path, resources="")
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    (resources / "sessions.yaml").write_text(
+        """\
+apiVersion: agentworks/v1
+kind: session-template
+metadata:
+  name: tool
+spec:
+  harness_integration:
+    name: shell
+    resume_command: tool --resume
+"""
+    )
+
+    with pytest.raises(ValidationError, match="no migratable session-template named 'tool'"):
+        _plan(cfg, ["session-template/tool"])
+
+
 def test_yaml_selector_rewrite_preserves_markers_and_all_comment_attachment_kinds(tmp_path: Path) -> None:
     cfg = _write_config(tmp_path, resources="")
     resources = tmp_path / "resources"

@@ -264,7 +264,7 @@ def _discover_units(doc: tomlkit.TOMLDocument) -> list[MigrationUnit]:
 
 
 def _discover_yaml_units(resources_dir: Path) -> list[MigrationUnit]:
-    """Find only old-selector session-template documents, in loader order."""
+    """Find session-template documents with a canonicalizable YAML shape."""
     from ruamel.yaml import YAML
 
     yaml = YAML(typ="rt")
@@ -279,11 +279,23 @@ def _discover_yaml_units(resources_dir: Path) -> list[MigrationUnit]:
                 continue
             metadata = value.get("metadata")
             spec = value.get("spec")
-            if isinstance(metadata, dict) and isinstance(spec, dict) and "harness" in spec:
+            if isinstance(metadata, dict) and isinstance(spec, dict) and _session_yaml_needs_migration(spec):
                 name = metadata.get("name")
                 if isinstance(name, str):
                     units.append(MigrationUnit("session-template", name, str(path), source="yaml"))
     return units
+
+
+def _session_yaml_needs_migration(spec: dict[str, Any]) -> bool:
+    """Whether a YAML session template contains a supported legacy spelling."""
+    if "harness" in spec:
+        return True
+    integration = spec.get("harness_integration")
+    return (
+        isinstance(integration, dict)
+        and integration.get("name") == "shell"
+        and "restart_command" in integration
+    )
 
 
 def _plan_yaml_rewrites(selected: list[MigrationUnit]) -> list[YamlRewrite]:
@@ -309,39 +321,41 @@ def _plan_yaml_rewrites(selected: list[MigrationUnit]) -> list[YamlRewrite]:
             spec = document.get("spec")
             if not isinstance(metadata, dict) or not isinstance(spec, dict) or metadata.get("name") not in names:
                 continue
-            if "harness" not in spec:
-                continue
             roundtrip_spec = cast("Any", spec)
-            value = roundtrip_spec["harness"]
-            index = list(roundtrip_spec).index("harness")
-            comments = roundtrip_spec.ca.items.get("harness")
-            if isinstance(value, str):
-                config = roundtrip_spec.get("harness_config", {})
-                config_comments = roundtrip_spec.ca.items.get("harness_config")
-                table = CommentedMap()
-                table["name"] = value
-                if isinstance(config, CommentedMap):
-                    # Assign the original nodes, then carry every comment
-                    # attachment (key, value, and nested map comments) into
-                    # the canonical tagged table.
-                    for key, item in config.items():
-                        table[key] = item
-                    for key, item in config.ca.items.items():
-                        table.ca.items[key] = item
-                elif isinstance(config, dict):
-                    table.update(config)
-                if "harness_config" in roundtrip_spec:
-                    del roundtrip_spec["harness_config"]
-            else:
-                table = value
-                config_comments = None
-            del roundtrip_spec["harness"]
-            roundtrip_spec.insert(index, "harness_integration", table)
-            comments = _merge_selector_comments(comments, config_comments)
-            if comments is not None:
-                roundtrip_spec.ca.items["harness_integration"] = comments
-            elif config_comments is not None:
-                roundtrip_spec.ca.items["harness_integration"] = config_comments
+            if "harness" in spec:
+                value = roundtrip_spec["harness"]
+                index = list(roundtrip_spec).index("harness")
+                comments = roundtrip_spec.ca.items.get("harness")
+                if isinstance(value, str):
+                    config = roundtrip_spec.get("harness_config", {})
+                    config_comments = roundtrip_spec.ca.items.get("harness_config")
+                    table = CommentedMap()
+                    table["name"] = value
+                    if isinstance(config, CommentedMap):
+                        # Assign the original nodes, then carry every comment
+                        # attachment (key, value, and nested map comments) into
+                        # the canonical tagged table.
+                        for key, item in config.items():
+                            table[key] = item
+                        for key, item in config.ca.items.items():
+                            table.ca.items[key] = item
+                    elif isinstance(config, dict):
+                        table.update(config)
+                    if "harness_config" in roundtrip_spec:
+                        del roundtrip_spec["harness_config"]
+                else:
+                    table = value
+                    config_comments = None
+                del roundtrip_spec["harness"]
+                roundtrip_spec.insert(index, "harness_integration", table)
+                comments = _merge_selector_comments(comments, config_comments)
+                if comments is not None:
+                    roundtrip_spec.ca.items["harness_integration"] = comments
+                elif config_comments is not None:
+                    roundtrip_spec.ca.items["harness_integration"] = config_comments
+            integration = roundtrip_spec.get("harness_integration")
+            if isinstance(integration, dict) and integration.get("name") == "shell":
+                _rename_restart_command(integration, f"session-template/{metadata['name']}")
             changed.append(f"session-template/{metadata['name']}")
         if changed:
             # ruamel stores comments inside documents but not each document's
@@ -371,6 +385,30 @@ def _plan_yaml_rewrites(selected: list[MigrationUnit]) -> list[YamlRewrite]:
                 )
             )
     return rewrites
+
+
+def _rename_restart_command(integration: dict[str, Any], resource: str) -> None:
+    """Rename the deprecated shell key in place, preserving round-trip comments."""
+    from ruamel.yaml.comments import CommentedMap
+
+    if "restart_command" not in integration:
+        return
+    if "resume_command" in integration:
+        raise ConfigError(
+            f"cannot migrate {resource}: resume_command and restart_command cannot be combined; "
+            "use resume_command only"
+        )
+    index = list(integration).index("restart_command")
+    value = integration["restart_command"]
+    comments = getattr(integration, "ca", None)
+    key_comments = comments.items.get("restart_command") if comments is not None else None
+    del integration["restart_command"]
+    if isinstance(integration, CommentedMap):
+        integration.insert(index, "resume_command", value)
+        if key_comments is not None:
+            integration.ca.items["resume_command"] = key_comments
+    else:
+        integration["resume_command"] = value
 
 
 def _has_explicit_stream_marker(text: str, marker: str, *, reverse: bool = False) -> bool:
