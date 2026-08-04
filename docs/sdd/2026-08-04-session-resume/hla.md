@@ -16,7 +16,7 @@ transports, teardown, integration operation, and tmux creation path.
 ```text
 agw session resume  ------------------+
                                        +--> shared CLI implementation
-agw session restart -- warn in 0.13 --+             |
+agw session restart [warn in 0.13] ---+             |
                                                      v
                                          resume_session / resume_all_sessions
                                                      |
