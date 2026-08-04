@@ -1,5 +1,5 @@
 """Decode parity: the same resource declared via TOML and via a manifest
-must produce the same Resource (resource-manifests SDD, Phase 2).
+must produce the same Resource.
 
 Parity is structural because the decoders literally call the TOML
 loaders; these tests pin that wiring (and the metadata.description
@@ -122,9 +122,9 @@ def _strip(resource: Any) -> Any:
             """,
         ),
         (
-            # The deliberate shape divergence for the harness pair: flat
+            # The deliberate shape divergence for the harness-integration pair: flat
             # TOML (command/required_commands top-level) and clean YAML
-            # (nested under harness_config on the shell harness) decode to
+            # (nested under the legacy harness_config key for the shell integration) decode to
             # the same row -- the loader hoists, manifests nest.
             "session-template",
             "claude",

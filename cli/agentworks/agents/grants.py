@@ -86,9 +86,9 @@ def grant_workspaces(
 
     vm = _require_vm(db, agent.vm_name)
 
-    from agentworks.bootstrap import build_registry
+    from agentworks.bootstrap import load_request_registry
 
-    registry = build_registry(config)
+    registry = load_request_registry(config)
     with gated_vm_boundary(db, config, registry, vm, scope=agent_scope(db, vm.name, agent_name)):
         if grant_all:
             db.update_agent_grant_all(agent_name, True)
@@ -145,9 +145,9 @@ def revoke_workspaces(
 
     vm = _require_vm(db, agent.vm_name)
 
-    from agentworks.bootstrap import build_registry
+    from agentworks.bootstrap import load_request_registry
 
-    registry = build_registry(config)
+    registry = load_request_registry(config)
     with gated_vm_boundary(db, config, registry, vm, scope=agent_scope(db, vm.name, agent_name)):
         if revoke_all:
             # Snapshot the granted workspaces BEFORE deleting any rows.

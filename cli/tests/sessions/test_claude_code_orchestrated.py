@@ -1,19 +1,19 @@
-"""The ``claude-code`` harness driven through the real orchestrator: the
+"""The ``claude-code`` harness integration driven through the real orchestrator: the
 carry the unit test cannot prove on its own (plan Tests P2 / P4).
 
 - ``session create`` produces the launch pane string through the real op
   call site, and the minted Claude session id persists to the row's
-  ``harness_state`` in the NAMESPACED shape
+  ``harness_integration_state`` in the NAMESPACED shape
   (``{"claude-code": {"session_id": ...}}``);
 - ``session restart`` produces the resume string, reading the stored id
   back, with the restart-post-kill end state (row survives, kill precedes
   the tmux recreate);
-- a session predating the ``harness_state`` column (blob ``{}``) mints and
+- a session predating the ``harness_integration_state`` column (blob ``{}``) mints and
   persists its id on the first restart;
 - a pre-NAMESPACING row (flat ``{"session_id": ...}``) is hoisted into the
   ``claude-code`` namespace and resumed with the SAME id, a foreign
-  harness's namespace in the blob survives a claude op untouched, and the
-  flat legacy key survives ANOTHER harness's op for a later hoist;
+  integration's namespace in the blob survives a claude op untouched, and the
+  flat legacy key survives ANOTHER integration's op for a later hoist;
 - the visible decision reaches the pane string through the real launch;
 - the relocated template-var substitution does not mangle the generated
   ``sh -c`` snippet, and DOES substitute an operator ``extra_args`` var.
@@ -85,15 +85,17 @@ def _seed_db(tmp_path: Path) -> Database:
     return db
 
 
-def _harness_template(
+def _harness_integration_template(
     monkeypatch: pytest.MonkeyPatch,
     config: dict[str, object] | None = None,
     *,
-    harness: str = "claude-code",
+    harness_integration: str = "claude-code",
 ) -> None:
     from agentworks.sessions import manager as session_manager
 
-    resolved = SimpleNamespace(name="claude", harness=harness, harness_config=config or {}, env={})
+    resolved = SimpleNamespace(
+        name="claude", harness_integration=harness_integration, harness_integration_config=config or {}, env={}
+    )
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: resolved)
 
 
@@ -116,10 +118,10 @@ def _capture_pane_command(monkeypatch: pytest.MonkeyPatch, events: list[str], ca
 
 def _claude_ns(db: Database, name: str = "s1") -> dict[str, object]:
     """The persisted row's ``claude-code`` namespace of the (namespaced)
-    ``harness_state`` blob."""
+    ``harness_integration_state`` blob."""
     session = db.get_session(name)
     assert session is not None
-    namespace = session.harness_state["claude-code"]
+    namespace = session.harness_integration_state["claude-code"]
     assert isinstance(namespace, dict)
     return namespace
 
@@ -148,7 +150,7 @@ def test_create_produces_launch_string_and_persists_the_minted_id(
     captured: dict[str, str] = {}
     _patch_transport(monkeypatch, _ClaudeTarget(events, transcript_present=False))
     _common_stubs(monkeypatch)
-    _harness_template(monkeypatch)
+    _harness_integration_template(monkeypatch)
     _capture_pane_command(monkeypatch, events, captured)
 
     create_session(
@@ -164,7 +166,7 @@ def test_create_produces_launch_string_and_persists_the_minted_id(
     # launch (no transcript on disk).
     session = db.get_session("s1")
     assert session is not None
-    assert set(session.harness_state) == {"claude-code"}
+    assert set(session.harness_integration_state) == {"claude-code"}
     sid = _claude_ns(db)["session_id"]
     assert isinstance(sid, str) and len(sid) == 36
     assert f"--session-id {sid}" in captured["command"]
@@ -182,7 +184,7 @@ def test_create_resumes_when_a_transcript_exists(tmp_path: Path, monkeypatch: py
     captured: dict[str, str] = {}
     _patch_transport(monkeypatch, _ClaudeTarget(events, transcript_present=True))
     _common_stubs(monkeypatch)
-    _harness_template(monkeypatch)
+    _harness_integration_template(monkeypatch)
     _capture_pane_command(monkeypatch, events, captured)
 
     create_session(
@@ -208,19 +210,19 @@ def _restart_stubs(
     *,
     transcript_present: bool,
     stored_state: dict[str, object] | None,
-    harness: str = "claude-code",
+    harness_integration: str = "claude-code",
 ) -> tuple[Database, list[str], dict[str, str]]:
     from agentworks.sessions import manager as session_manager
 
     db = _seed_db(tmp_path)
-    db.insert_session("s1", "ws1", "claude", SessionMode.ADMIN, harness_state=stored_state)
+    db.insert_session("s1", "ws1", "claude", SessionMode.ADMIN, harness_integration_state=stored_state)
     db.update_session_pid("s1", 4242, boot_id="boot-x")
 
     events: list[str] = []
     captured: dict[str, str] = {}
     _patch_transport(monkeypatch, _ClaudeTarget(events, transcript_present=transcript_present))
     _common_stubs(monkeypatch)
-    _harness_template(monkeypatch, harness=harness)
+    _harness_integration_template(monkeypatch, harness_integration=harness_integration)
     _capture_pane_command(monkeypatch, events, captured)
 
     monkeypatch.setattr(session_manager, "_ensure_pid", lambda session, **k: session)
@@ -255,20 +257,22 @@ def test_restart_reads_stored_id_and_resumes_after_the_kill(tmp_path: Path, monk
     assert events.index("kill") < events.index("detect") < events.index("tmux_create")
     refreshed = db.get_session("s1")
     assert refreshed is not None
-    assert refreshed.harness_state == {"claude-code": {"session_id": "939b1597-7c61-5ace-80f4-14617b7b4257"}}
+    assert refreshed.harness_integration_state == {
+        "claude-code": {"session_id": "939b1597-7c61-5ace-80f4-14617b7b4257"}
+    }
     db.close()
 
 
 def test_restart_of_a_pre_column_session_mints_and_persists_the_id(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A session predating the harness_state column backfilled to ``{}``:
+    """A session predating the harness_integration_state column backfilled to ``{}``:
     its first restart under claude-code mints a fresh id (no transcript to
     resume) and persists it, so the NEXT restart can resume."""
     from agentworks.sessions.manager import restart_session
 
     db, events, captured = _restart_stubs(tmp_path, monkeypatch, transcript_present=False, stored_state=None)
-    assert db.get_session("s1").harness_state == {}  # type: ignore[union-attr]
+    assert db.get_session("s1").harness_integration_state == {}  # type: ignore[union-attr]
 
     restart_session(db, SimpleNamespace(session=SimpleNamespace(history_limit=1)), name="s1", yes=True)  # type: ignore[arg-type]
 
@@ -282,7 +286,7 @@ def test_restart_of_a_pre_column_session_mints_and_persists_the_id(
 def test_restart_hoists_a_pre_namespacing_row_and_resumes_its_id(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Compatibility (pre-namespacing harness_state): DELETE on the next
+    """Compatibility (pre-namespacing harness_integration_state): DELETE on the next
     major release, with the hoist. A row written before the blob was
     namespaced stores ``session_id`` at the top level. Its first restart
     hoists the id into the ``claude-code`` namespace and RESUMES with the
@@ -303,13 +307,13 @@ def test_restart_hoists_a_pre_namespacing_row_and_resumes_its_id(
     assert f"--resume {sid}" in captured["command"]
     refreshed = db.get_session("s1")
     assert refreshed is not None
-    assert refreshed.harness_state == {"claude-code": {"session_id": sid}}
+    assert refreshed.harness_integration_state == {"claude-code": {"session_id": sid}}
     db.close()
 
 
 def test_restart_leaves_a_foreign_namespace_untouched(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A foreign harness's namespace in the blob (a template re-pointed
-    from another stateful harness) survives a claude-code op untouched:
+    """A foreign integration's namespace in the blob (a template re-pointed
+    from another stateful integration) survives a claude-code op untouched:
     the claude id lands in its OWN namespace, and the foreign keys are
     neither read (no inherited ``session_id``) nor dropped on persist."""
     from agentworks.sessions.manager import restart_session
@@ -331,16 +335,16 @@ def test_restart_leaves_a_foreign_namespace_untouched(tmp_path: Path, monkeypatc
     # The foreign namespace survived the persist verbatim.
     refreshed = db.get_session("s1")
     assert refreshed is not None
-    assert refreshed.harness_state["other-harness"] == {"session_id": foreign_sid}
+    assert refreshed.harness_integration_state["other-harness"] == {"session_id": foreign_sid}
     db.close()
 
 
-def test_restart_under_another_harness_leaves_the_flat_legacy_key_intact(
+def test_restart_under_another_harness_integration_leaves_the_flat_legacy_key_intact(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Compatibility (pre-namespacing harness_state): DELETE on the next
+    """Compatibility (pre-namespacing harness_integration_state): DELETE on the next
     major release, with the hoist. The flat legacy ``session_id`` belongs
-    to claude-code; a restart under a DIFFERENT harness (whose hoist is
+    to claude-code; a restart under a DIFFERENT integration (whose hoist is
     the base no-op) must neither adopt nor drop it, so the persisted row
     keeps the flat key verbatim and a later re-point back to claude-code
     can still hoist it."""
@@ -352,14 +356,14 @@ def test_restart_under_another_harness_leaves_the_flat_legacy_key_intact(
         monkeypatch,
         transcript_present=False,
         stored_state={"session_id": sid},
-        harness="shell",
+        harness_integration="shell",
     )
 
     restart_session(db, SimpleNamespace(session=SimpleNamespace(history_limit=1)), name="s1", yes=True)  # type: ignore[arg-type]
 
     refreshed = db.get_session("s1")
     assert refreshed is not None
-    assert refreshed.harness_state == {"session_id": sid, "shell": {}}
+    assert refreshed.harness_integration_state == {"session_id": sid, "shell": {}}
     db.close()
 
 
@@ -369,7 +373,7 @@ def test_restart_under_another_harness_leaves_the_flat_legacy_key_intact(
 def test_substitution_leaves_the_generated_snippet_intact_and_substitutes_extra_args(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The claude-code snippet is the first harness output carrying literal
+    """The claude-code snippet is the first harness integration output carrying literal
     braces (the ``sh -c '...'`` quoting). The relocated template-var
     substitution must not mangle the generated skeleton, while an operator
     ``extra_args`` var still substitutes."""
@@ -380,7 +384,7 @@ def test_substitution_leaves_the_generated_snippet_intact_and_substitutes_extra_
     captured: dict[str, str] = {}
     _patch_transport(monkeypatch, _ClaudeTarget(events, transcript_present=False))
     _common_stubs(monkeypatch)
-    _harness_template(
+    _harness_integration_template(
         monkeypatch,
         {"extra_args": ["--append-system-prompt", "session {{session_name}}"]},
     )

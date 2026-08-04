@@ -167,7 +167,8 @@ def list_resources(
     filtering so the header reflects what the operator actually sees.
     Raises ``ValidationError`` when ``origin_filter`` isn't one of the
     keys of ``_ORIGIN_FILTER_MAP`` (``operator`` / ``auto`` / ``builtin`` /
-    ``plugin``). The CLI layer stays thin per the
+    ``plugin``), and ``NotFoundError`` when a requested kind is not registered.
+    The CLI layer stays thin per the
     service-layer-is-the-authority rule.
 
     ``include_disabled`` sets the default-surface rule (the plugin work is the
@@ -183,7 +184,8 @@ def list_resources(
     tests that don't care about the dynamic dimension), every row's
     ``used_by_count`` stays ``None`` -- the list renderer shows ``-``.
     """
-    from agentworks.errors import ValidationError
+    from agentworks.errors import NotFoundError, ValidationError
+    from agentworks.resources import KIND_REGISTRY
 
     if origin_filter is not None and origin_filter not in _ORIGIN_FILTER_MAP:
         raise ValidationError(
@@ -195,6 +197,16 @@ def list_resources(
             "kinds= must contain at least one kind (or pass None for all)",
             entity_kind="resource",
         )
+    if kinds is not None:
+        unknown_kinds = sorted(set(kinds).difference(KIND_REGISTRY))
+        if unknown_kinds:
+            unknown = unknown_kinds[0]
+            raise NotFoundError(
+                f"unknown kind {unknown!r}",
+                entity_kind="resource-kind",
+                entity_name=unknown,
+                hint=f"known kinds: {', '.join(sorted(KIND_REGISTRY))}",
+            )
 
     target_kinds = tuple(kinds) if kinds else tuple(sorted(registry.iter_kinds()))
 

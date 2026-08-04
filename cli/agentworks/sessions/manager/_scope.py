@@ -89,7 +89,7 @@ def _prepare_vm(
     an SSHLogger attaches to the Transport so all calls log
     automatically.
     """
-    from agentworks.bootstrap import build_registry
+    from agentworks.bootstrap import load_request_registry
     from agentworks.ssh import SSHLogger
 
     ws = _mgr._require_workspace(db, session.workspace_name)
@@ -111,7 +111,7 @@ def _prepare_vm(
             entity_name=vm.name,
         )
 
-    registry = build_registry(config)
+    registry = load_request_registry(config)
     with gated_vm_boundary(db, config, registry, vm, scope=_session_scope(db, session, ws, vm)):
         logger = SSHLogger(vm.name, operation) if operation else None
         target = _mgr.transport(vm, config, logger=logger)
@@ -252,7 +252,7 @@ def _batch_vm_boundary(db: Database, config: Config, vms: Sequence[VMRow]) -> It
         yield
         return
 
-    from agentworks.bootstrap import build_registry
+    from agentworks.bootstrap import load_request_registry
     from agentworks.capabilities.base import (
         OperationScope,
         RunContext,
@@ -266,7 +266,7 @@ def _batch_vm_boundary(db: Database, config: Config, vms: Sequence[VMRow]) -> It
     from agentworks.secrets.resolver import Resolver
     from agentworks.vms.nodes import VMSiteNode, live_vm_node
 
-    registry = build_registry(config)
+    registry = load_request_registry(config)
     resolver = Resolver(config, registry)
     site_nodes: dict[str, VMSiteNode] = {}
     vm_nodes = [live_vm_node(db, config, registry, vm, site_nodes=site_nodes) for vm in vms]

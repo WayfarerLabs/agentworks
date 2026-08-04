@@ -393,11 +393,11 @@ def test_default_config_builds_green_with_zero_enabled_system_plugins(tmp_path: 
     # Every shipped plugin's contributed capability rows are present-but-disabled.
     disabled_rows = {
         ("secret-backend", "onepassword"),  # onepassword plugin
-        ("harness", "claude-code"),  # claude plugin
+        ("harness-integration", "claude-code"),  # claude plugin
         ("vm-platform", "proxmox"),  # proxmox plugin
         ("vm-platform", "azure-vm"),  # azure plugin
         ("git-credential-provider", "azdo"),  # azure plugin
-        ("harness", "codex"),  # codex plugin
+        ("harness-integration", "codex"),  # codex plugin
     }
     for kind, name in disabled_rows:
         assert registry.graph.enablement_of(kind, name) is Enablement.disabled, (kind, name)
@@ -406,7 +406,7 @@ def test_default_config_builds_green_with_zero_enabled_system_plugins(tmp_path: 
     enabled_rows = {
         ("vm-platform", "lima"),
         ("vm-platform", "wsl2"),
-        ("harness", "shell"),
+        ("harness-integration", "shell"),
         ("secret-backend", "env-var"),
         ("secret-backend", "prompt"),
         ("git-credential-provider", "github"),

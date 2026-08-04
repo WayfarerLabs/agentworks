@@ -81,7 +81,7 @@ def resource_list(
     whose registration record has none show empty.
     """
     from agentworks import output
-    from agentworks.bootstrap import build_registry
+    from agentworks.bootstrap import load_request_registry
     from agentworks.config import load_config
     from agentworks.resources.inspect import (
         list_resources,
@@ -96,7 +96,7 @@ def resource_list(
         kinds = tuple(k.strip() for k in kind.split(",") if k.strip())
 
     config = load_config()
-    registry = build_registry(config)
+    registry = load_request_registry(config)
     db = get_db()
     # ``list_resources`` validates ``origin_filter`` (typed
     # ``ValidationError`` from the service layer; see inspect.py); the
@@ -159,12 +159,12 @@ def resource_kinds(
             output.info(name)
         return
 
-    from agentworks.bootstrap import build_registry
+    from agentworks.bootstrap import load_request_registry
     from agentworks.config import load_config
     from agentworks.resources.inspect import list_kinds, render_kind_table
 
     config = load_config()
-    registry = build_registry(config)
+    registry = load_request_registry(config)
     render_kind_table(list_kinds(registry))
 
 
@@ -187,7 +187,7 @@ def resource_describe(
     ``agw secret describe`` etc. for kind-specific detail (backend
     mappings, inheritance chains, resolution preview).
     """
-    from agentworks.bootstrap import build_registry
+    from agentworks.bootstrap import load_request_registry
     from agentworks.config import load_config
     from agentworks.errors import ValidationError
     from agentworks.resources.inspect import (
@@ -206,7 +206,7 @@ def resource_describe(
         )
 
     config = load_config()
-    registry = build_registry(config)
+    registry = load_request_registry(config)
     db = get_db()
     desc = describe_resource(registry, kind, name, db=db)
     render_resource_description(desc)
@@ -231,7 +231,7 @@ def resource_edit(
     import subprocess
 
     from agentworks import output
-    from agentworks.bootstrap import build_registry
+    from agentworks.bootstrap import load_request_registry
     from agentworks.config import load_config
     from agentworks.errors import ValidationError
     from agentworks.resources.inspect import edit_location
@@ -255,7 +255,7 @@ def resource_edit(
 
     try:
         config = load_config()
-        registry = build_registry(config)
+        registry = load_request_registry(config)
         path, line = edit_location(registry, kind, name)
     except ConfigError as exc:
         # The fix-it path: a config failing validation is exactly when
@@ -358,10 +358,11 @@ def resource_migrate(
     """Move resources from config.toml to YAML manifests.
 
     A recurring, incremental mover: run it any time you want to move
-    resources (or a subset) from TOML to YAML. Output is append-only
-    (existing YAML files are never rewritten), the original config.toml
-    is backed up first, and every real run verifies the resulting
-    registry is identical before it counts as done.
+    resources (or a subset) from TOML to YAML or canonicalize old YAML
+    session-template selectors. New TOML-derived documents append without
+    rewriting existing files; selector rewrites preserve YAML comments. The
+    original config.toml is backed up first, and every real run verifies the
+    resulting registry is identical before it counts as done.
     """
     from agentworks import output
     from agentworks.bootstrap import build_registry
@@ -391,7 +392,10 @@ def resource_migrate(
     )
 
     if plan.nothing_to_do:
-        output.info("Nothing to migrate: no TOML-declared resources remain.")
+        output.info(
+            "Nothing to migrate: no migratable TOML-declared resources or legacy YAML "
+            "session-template selectors remain."
+        )
         return
 
     if dry_run:
@@ -412,7 +416,14 @@ def resource_migrate(
         output.detail(f"Created {path}")
     for path in result.appended:
         output.detail(f"Appended to {path}")
-    output.detail(f"Rewrote {plan.config_path} (backup: {result.backup_path})")
+    for path in result.replaced:
+        output.detail(f"Rewrote {path}")
+    if result.config_rewritten:
+        output.detail(f"Rewrote {plan.config_path} (backup: {result.backup_path})")
+    else:
+        output.detail(f"Backup: {result.backup_path}")
+    if result.yaml_backup_path is not None:
+        output.detail(f"YAML recovery copies: {result.yaml_backup_path}")
     if result.dropped_secret_backends:
         output.detail("Dropped deprecated [secret_backends.*] sections.")
     output.result(f"verified: registry unchanged ({result.verified_rows} resources)")

@@ -1,8 +1,8 @@
-"""The ``shell`` harness: run an operator-authored command (or a bare
+"""The ``shell`` harness integration: run an operator-authored command (or a bare
 login shell) as the session workload.
 
-The plain, default member. Its ``harness_config`` vocabulary is exactly
-the flat session-template fields the harness model replaces: ``command``
+The plain, default member. Its ``harness_integration_config`` vocabulary is exactly
+the flat session-template fields the harness integration model replaces: ``command``
 (the pane command; empty = login shell), ``restart_command`` (the
 command on ``session restart``, falling back to ``command``), and
 ``required_commands`` (the executables the launch target must have on
@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, ClassVar
 
-from agentworks.capabilities.harness.base import Harness, require_commands
+from agentworks.capabilities.harness_integration.base import HarnessIntegration, require_commands
 from agentworks.errors import ConfigError
 
 if TYPE_CHECKING:
@@ -69,7 +69,7 @@ def _append_dedupe(target: list[str], source: list[str]) -> list[str]:
     return result
 
 
-class ShellHarness(Harness):
+class ShellIntegration(HarnessIntegration):
     """Runs an operator command (or a login shell) as the session."""
 
     name: ClassVar[str] = "shell"
@@ -90,7 +90,7 @@ class ShellHarness(Harness):
         """
         unknown = sorted(set(config) - _SHELL_FIELDS)
         if unknown:
-            raise ConfigError(f"{owner}: unknown shell harness field(s): {', '.join(unknown)}")
+            raise ConfigError(f"{owner}: unknown shell harness integration field(s): {', '.join(unknown)}")
         for field_name in ("command", "restart_command"):
             value = config.get(field_name)
             if value is not None and not isinstance(value, str):
@@ -103,7 +103,7 @@ class ShellHarness(Harness):
 
     @classmethod
     def merge_config(cls, base: Mapping[str, object], child: Mapping[str, object]) -> dict[str, object]:
-        """Same-harness inheritance merge (FRD R5): scalars child-win via
+        """Same-harness integration inheritance merge (FRD R5): scalars child-win via
         the shallow default; ``required_commands`` unions append-dedupe so
         a child overriding only ``command`` never silently drops the
         parent's required commands.
@@ -141,7 +141,7 @@ class ShellHarness(Harness):
         require_commands(
             tuple(_run_str_list(self.config.get("required_commands"))),
             transport,
-            harness_name=self.name,
+            harness_integration_name=self.name,
             template_name=self.owner_name,
             session_name=self._session_name,
             target_label=self._target_label,

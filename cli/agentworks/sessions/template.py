@@ -45,23 +45,23 @@ class NamedConsoleConfig(DeclaredResource):
 class SessionTemplate(DeclaredResource):
     """Session template definition. All fields optional (None = inherit/default).
 
-    The workload the session runs is selected by the ``harness`` /
-    ``harness_config`` pair (the inline capability reference, ADR
-    0016): ``harness`` names the capability and ``harness_config`` is
+    The workload the session runs is selected by the ``harness_integration`` /
+    ``harness_integration_config`` pair (the inline capability reference, ADR
+    0016): ``harness_integration`` names the capability and ``harness_integration_config`` is
     the blob that capability owns and validates. ``None`` on either
     means "not declared here" (distinct from a declared-empty blob),
     so inheritance can tell a restating child from a silent one (FRD
-    R5). An undeclared harness resolves to the ``shell`` built-in (a
-    plain login shell), preserving the pre-harness behavior. The legacy
+    R5). An undeclared harness_integration resolves to the ``shell`` built-in (a
+    plain login shell), preserving the behavior from before harness integrations. The legacy
     flat ``command`` / ``restart_command`` / ``required_commands``
     fields are gone: they are ``shell``'s config vocabulary and live
-    under ``harness_config`` now; the TOML loader hoists them for
+    under ``harness_integration_config`` now; the TOML loader hoists them for
     backward compatibility, manifests reject them (FRD R2/R6).
     """
 
     inherits: list[str] = field(default_factory=list)
-    harness: str | None = None
-    harness_config: dict[str, object] | None = None
+    harness_integration: str | None = None
+    harness_integration_config: dict[str, object] | None = None
     env: dict[str, EnvEntry] | None = None
 
     def dependencies(self, context: BuildContext) -> list[ResourceReference]:
@@ -84,47 +84,47 @@ class SessionTemplate(DeclaredResource):
                     source=source,
                 )
             )
-        if self.harness is not None:
-            # The selector edge: a declared harness references the
+        if self.harness_integration is not None:
+            # The selector edge: a declared harness_integration references the
             # capability row, so a typo is a finalize-time miss-policy
-            # error naming this template, and the harness row's
+            # error naming this template, and the harness integration row's
             # "Referenced by:" lists its templates (FRD R2).
             refs.append(
                 _ResourceRef(
-                    name=self.harness,
-                    kind="harness",
-                    usage="the session harness",
+                    name=self.harness_integration,
+                    kind="harness-integration",
+                    usage="the session harness integration",
                     source=source,
                 )
             )
-            # Plus whatever the selected harness's config block implies
-            # (a future secret-declaring harness gets auto-declaration
+            # Plus whatever the selected harness_integration's config block implies
+            # (a future secret-declaring harness_integration gets auto-declaration
             # and reachability for free; both built-ins imply nothing).
             # Unknown names skip: the miss policy reports them.
-            from agentworks.capabilities.harness import HARNESS_REGISTRY
+            from agentworks.capabilities.harness_integration import HARNESS_INTEGRATION_REGISTRY
 
-            capability = HARNESS_REGISTRY.get(self.harness)
+            capability = HARNESS_INTEGRATION_REGISTRY.get(self.harness_integration)
             if capability is not None:
                 refs.extend(
                     sourced_references(
-                        capability.dependencies(f"session-template/{self.name}", self.harness_config or {}),
+                        capability.dependencies(f"session-template/{self.name}", self.harness_integration_config or {}),
                         source,
                     )
                 )
         return refs
 
     def validate(self, enabled_backends: frozenset[str]) -> None:
-        """Throwing shape check for the ``harness_config`` blob, run by
+        """Throwing shape check for the ``harness_integration_config`` blob, run by
         the finalize ``validate`` pass (``enabled_backends`` is the
         secret-only R9.9 input, ignored here). Mirrors ``dependencies``:
-        only a declared harness has a blob to validate, and its named
-        capability validates it. An undeclared harness (``None``) or an
+        only a declared harness_integration has a blob to validate, and its named
+        capability validates it. An undeclared harness_integration (``None``) or an
         unknown name is a no-op here (the miss policy reports the latter).
         """
-        if self.harness is None:
+        if self.harness_integration is None:
             return
-        from agentworks.capabilities.harness import HARNESS_REGISTRY
+        from agentworks.capabilities.harness_integration import HARNESS_INTEGRATION_REGISTRY
 
-        capability = HARNESS_REGISTRY.get(self.harness)
+        capability = HARNESS_INTEGRATION_REGISTRY.get(self.harness_integration)
         if capability is not None:
-            capability.validate(f"session-template/{self.name}", self.harness_config or {})
+            capability.validate(f"session-template/{self.name}", self.harness_integration_config or {})

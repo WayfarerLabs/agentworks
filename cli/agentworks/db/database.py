@@ -548,12 +548,12 @@ class Database:
         created_workspace: bool = False,
         created_agent: bool = False,
         socket_path: str | None = None,
-        harness_state: dict[str, object] | None = None,
+        harness_integration_state: dict[str, object] | None = None,
     ) -> SessionRow:
         self._conn.execute(
             "INSERT INTO sessions "
             "(name, workspace_name, template, mode, agent_name, created_workspace, "
-            "created_agent, socket_path, harness_state)"
+            "created_agent, socket_path, harness_integration_state)"
             " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 name,
@@ -564,7 +564,7 @@ class Database:
                 int(created_workspace),
                 int(created_agent),
                 socket_path,
-                json.dumps(harness_state or {}),
+                json.dumps(harness_integration_state or {}),
             ),
         )
         self._conn.commit()
@@ -644,15 +644,18 @@ class Database:
         )
         self._conn.commit()
 
-    def update_session_harness_state(self, name: str, harness_state: dict[str, object]) -> None:
-        """Persist the harness's per-session state blob (harness-owned,
-        opaque to the core) after the harness op. Usually a no-op on
-        restart (the value was minted and stored on create), but a
-        session predating the ``harness_state`` column (backfilled to
+    def update_session_harness_integration_state(self, name: str, harness_integration_state: dict[str, object]) -> None:
+        """Persist the harness integration's per-session state blob.
+
+        The blob is owned by the harness integration and opaque to the core.
+        Persistence happens after the harness integration op. Usually this is
+        a no-op on restart (the value was minted and stored on create), but a
+        session predating the ``harness_integration_state`` column (backfilled to
         ``{}``) mints and stores here on its first restart."""
         self._conn.execute(
-            "UPDATE sessions SET harness_state = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE name = ?",
-            (json.dumps(harness_state), name),
+            "UPDATE sessions SET harness_integration_state = ?, "
+            "updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE name = ?",
+            (json.dumps(harness_integration_state), name),
         )
         self._conn.commit()
 

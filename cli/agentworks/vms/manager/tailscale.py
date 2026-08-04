@@ -95,7 +95,7 @@ def port_forward_vm(
     validation and the no-Tailscale guard stay pre-gate: a refused
     forward costs zero prompts, zero resolves, and zero gate events.
     """
-    from agentworks.bootstrap import build_registry
+    from agentworks.bootstrap import load_request_registry
 
     vm = _require_vm(db, name)
     _guard_failed_vm(vm)
@@ -166,7 +166,7 @@ def port_forward_vm(
         output.info("Use --verbose for detailed SSH output.")
 
     # Run in foreground until interrupted
-    registry = build_registry(config)
+    registry = load_request_registry(config)
     with gated_vm_boundary(db, config, registry, vm):
         try:
             proc = subprocess.Popen(ssh_cmd)
@@ -253,11 +253,11 @@ def _ensure_tailscale(
         # only knowable after starting the VM and watching the node fail to
         # reconnect, so it gets its own late resolve rather than prompting
         # every start for a key that is almost never used.
-        from agentworks.bootstrap import build_registry
+        from agentworks.bootstrap import load_request_registry
         from agentworks.secrets import resolve_for_command
         from agentworks.vms.templates import resolve_template
 
-        registry = build_registry(config)
+        registry = load_request_registry(config)
         rejoin_vm_tmpl = resolve_template(registry, vm.template)
         ts_decl = _lookup_or_synthesize_secret(registry, rejoin_vm_tmpl.tailscale_auth_key)
         resolved = resolve_for_command([], config, registry, extra_decls=[ts_decl])

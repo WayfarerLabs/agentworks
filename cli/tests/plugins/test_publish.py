@@ -14,7 +14,7 @@ against a FIXTURE plugin injected two ways at once:
 
 The fixture impls are REAL capability subclasses so they fold through their
 consumers (a ``vm-site`` goes not-ready, a ``session-template`` reaches the
-harness use-gate); the fixture's bundled manifest is a self-contained
+harness integration use-gate); the fixture's bundled manifest is a self-contained
 ``apt-source`` in the ``_manifest_fixture`` package beside this file.
 """
 
@@ -25,8 +25,8 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
-from agentworks.capabilities.harness import ensure_harness_enabled, harness_for
-from agentworks.capabilities.harness.base import Harness
+from agentworks.capabilities.harness_integration import ensure_harness_integration_enabled, harness_integration_for
+from agentworks.capabilities.harness_integration.base import HarnessIntegration
 from agentworks.capabilities.vm_platform.base import VMPlatform
 from agentworks.errors import ConfigError, StateError
 from agentworks.manifests.package import publish_manifest_package
@@ -71,7 +71,7 @@ class _FixtureVMPlatform(VMPlatform):
         return None
 
 
-class _FixtureHarness(Harness):
+class _FixtureHarnessIntegration(HarnessIntegration):
     name = "fixture-harness"
     description = "Fixture harness (plugin publish test)"
 
@@ -82,7 +82,7 @@ def _fixture_plugin(name: str = PLUGIN, *, with_manifests: bool = True) -> Plugi
         description="a publish-test fixture plugin",
         capabilities={
             "vm-platform": (_FixtureVMPlatform,),
-            "harness": (_FixtureHarness,),
+            "harness-integration": (_FixtureHarnessIntegration,),
         },
         manifests=_MANIFEST_ANCHOR if with_manifests else None,
     )
@@ -191,7 +191,7 @@ def test_unknown_enabled_name_raises_config_error_before_any_publish(monkeypatch
         # Nothing was published: not even the shipped plugin's rows, since the
         # resolution precedes every registry.add.
         assert list(registry.iter_kind_items("vm-platform")) == []
-        assert list(registry.iter_kind_items("harness")) == []
+        assert list(registry.iter_kind_items("harness-integration")) == []
 
 
 # -- build_registry purity: publish mutates no module-level state ---------------
@@ -239,7 +239,7 @@ def test_bad_plugin_manifest_anchor_raises_typed_plugin_attributed_error(monkeyp
     plugin = Plugin(
         name=PLUGIN,
         description="a plugin with a bogus manifest anchor",
-        capabilities={"harness": (_FixtureHarness,)},
+        capabilities={"harness-integration": (_FixtureHarnessIntegration,)},
         manifests=f"{__package__}._does_not_exist",
     )
     monkeypatch.setattr("agentworks.plugins.SYSTEM_PLUGINS", {plugin.name: plugin})
@@ -268,7 +268,7 @@ def test_plugin_manifest_anchor_without_subdir_raises_typed_plugin_attributed_er
     plugin = Plugin(
         name=PLUGIN,
         description="a plugin whose manifest anchor ships no manifests/ subdir",
-        capabilities={"harness": (_FixtureHarness,)},
+        capabilities={"harness-integration": (_FixtureHarnessIntegration,)},
         manifests=_NO_SUBDIR_ANCHOR,
     )
     monkeypatch.setattr("agentworks.plugins.SYSTEM_PLUGINS", {plugin.name: plugin})
@@ -329,34 +329,34 @@ def test_builtin_publish_routes_through_shared_body_preserving_origin() -> None:
     assert origin.source == "agentworks.manifests.builtin/apt-sources.yaml"
 
 
-# -- Phase 4 forward item: a disabled plugin's harness reaches the use-gate ------
+# -- Phase 4 forward item: a disabled plugin's integration reaches the use-gate --
 
 
-def test_disabled_plugin_harness_reaches_use_gate_not_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Seating is unconditional at import, so a DISABLED plugin's harness impl is
-    still seated: ``harness_for`` finds it and ``_resolve_template`` resolves the
-    template to it (no unknown-harness error), leaving the use-gate
-    (``ensure_harness_enabled``) as the thing that refuses it with the
+def test_disabled_plugin_harness_integration_reaches_use_gate_not_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Seating is unconditional at import, so a DISABLED plugin's integration impl is
+    still seated: ``harness_integration_for`` finds it and ``_resolve_template`` resolves the
+    template to it (no unknown-integration error), leaving the use-gate
+    (``ensure_harness_integration_enabled``) as the thing that refuses it with the
     enable-plugin error. This pins the LLD section 3 seating requirement."""
     plugin = _fixture_plugin()
     monkeypatch.setattr("agentworks.plugins.SYSTEM_PLUGINS", {plugin.name: plugin})
-    config = _config()  # NOT opted in -> the harness row is disabled
+    config = _config()  # not opted in, so the harness integration row is disabled
     with seated_plugin(plugin):
         registry = Registry.empty()
         publish_plugins(registry, config)
         registry.add(
             "session-template",
             "tmpl",
-            SessionTemplate(name="tmpl", harness="fixture-harness"),
+            SessionTemplate(name="tmpl", harness_integration="fixture-harness"),
             _operator(),
         )
         registry.finalize(enablement_sources=[plugin_enablement_source(config)])
 
-        # Seated impl found (no unknown-harness ConfigError from harness_for).
-        assert harness_for("fixture-harness") is _FixtureHarness
-        # Template resolution reaches the seated (disabled) harness.
+        # Seated impl found (no unknown-integration ConfigError from harness_integration_for).
+        assert harness_integration_for("fixture-harness") is _FixtureHarnessIntegration
+        # Template resolution reaches the seated (disabled) harness_integration.
         resolved = _resolve_template(registry, "tmpl")
-        assert resolved.harness == "fixture-harness"
+        assert resolved.harness_integration == "fixture-harness"
         # The use-gate is what refuses it, naming the plugin to enable.
         with pytest.raises(StateError, match="enable plugin `pub-plugin`"):
-            ensure_harness_enabled(registry, resolved.harness)
+            ensure_harness_integration_enabled(registry, resolved.harness_integration)

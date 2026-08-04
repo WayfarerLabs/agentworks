@@ -43,7 +43,7 @@ def test_capability_kinds_are_exactly_the_code_backed_ones() -> None:
         "secret-backend",
         "git-credential-provider",
         "vm-platform",
-        "harness",
+        "harness-integration",
     }
 
 
@@ -60,6 +60,8 @@ def test_names_only_needs_no_config(tmp_path: Path, monkeypatch) -> None:
     assert result.exit_code == 0, result.output
     lines = [line for line in result.output.splitlines() if line]
     assert lines == sorted(KIND_REGISTRY)
+    assert "harness-integration" in lines
+    assert "harness" not in lines
 
 
 def test_table_shows_categories_and_counts(tmp_path: Path, monkeypatch) -> None:

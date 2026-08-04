@@ -64,15 +64,16 @@ Agentworks drives through that one admin foothold. See
 [`vm_platform/README.md`](vm_platform/README.md) for what a platform must provide and the specifics
 of each.
 
-### Harness
+### Harness Integration
 
-The `harness` capability decides what an agent session actually runs and how that workload is
-configured, launched, and managed. This is where a session becomes a plain `shell`, an interactive
-`claude-code` or `codex` session, or another agentic tool entirely, without Agentworks needing to
-know the details of any one of them. A harness just launches its tool, brings it back on restart
-(resuming where the tool allows), and checks the tool's binaries are present, while Agentworks owns
-the tmux session, the user, and the workspace around it. See
-[`harness/README.md`](harness/README.md) for what a harness must provide and the shipped options.
+The `harness-integration` capability decides what an agent session actually runs and how that
+workload is configured, launched, and managed. This is where a session becomes a plain `shell`, an
+interactive `claude-code` or `codex` session, or another agentic harness entirely, without
+Agentworks needing to know the details of any one of them. An integration launches its harness,
+brings it back on restart (resuming where the harness allows), and checks the harness's binaries are
+present, while Agentworks owns the tmux session, the user, and the workspace around it. See
+[`harness_integration/README.md`](harness_integration/README.md) for the integration contract and
+the shipped options.
 
 ### Secret Backend
 
@@ -106,13 +107,10 @@ shipped providers.
 
 As of 0.13.0, the following capabilities are being considered for future implementation:
 
-- A `harness-user-provisioner` that handles the user-facing side of a harness, provisioning and
-  configuring the user account that will run the harness workload. This is a separate concern from
-  the harness itself, which is only concerned with running the workload once the user exists.
-  Depending on the harness, this may include things like auth, installing plugins, user-level
-  configuration and permissions, etc. Splitting it out means one harness can be paired with
-  different provisioning strategies (a shared service account, a per-agent user, a locked-down
-  sandbox) without the harness code changing.
+- Expanding `harness-integration` across machine, user, workspace, and session scopes. The current
+  capability owns only the session workload; the follow-up will let the same integration provision
+  harness authentication, plugins, configuration, and permissions at the scopes where those effects
+  belong.
 - `agent-feature`, `vm-feature`, and `session-feature` capabilities that enable optional, composable
   behaviors at each level: `agent-feature/az-cli` installs and configures the Azure CLI from
   provided secrets; `vm-feature/ca` exposes a certificate authority for cryptographic verification;
@@ -149,8 +147,9 @@ Because a capability is a resource, its vocabulary parallels the resource model 
 ladder from type to running object:
 
 - A **capability kind** is a resource kind of the capability category (`vm-platform`,
-  `git-credential-provider`, `secret-backend`, `harness`). It defines the interface every capability
-  of that kind implements. Fixed by the core; neither the app nor a plugin adds one.
+  `git-credential-provider`, `secret-backend`, `harness-integration`). It defines the interface
+  every capability of that kind implements. Fixed by the core; neither the app nor a plugin adds
+  one.
 - A **capability**, precisely a _capability resource_, shortened to "capability" throughout, is a
   concrete implementation of a capability kind, registered as a read-only resource:
   `vm-platform/lima`, `git-credential-provider/github`. It is what `agw resource list` shows under
@@ -175,9 +174,10 @@ capability with rich ops, like a credential provider that mints tokens):
   the consuming resource names one capability plus a config blob and has no behavior of its own. Its
   runtime _is_ a single capability instance. The capability behind it may still do real work; the
   consuming resource does not.
-- **Rich** (`session` over `harness`): the consuming resource has substantial behavior of its own
-  _and_ holds one or more capability instances. A session manages panes, env, and lifecycle, and
-  holds a private harness instance. It has its own readiness concerns _and_ composes its instances'.
+- **Rich** (`session` over `harness-integration`): the consuming resource has substantial behavior
+  of its own _and_ holds one or more capability instances. A session manages panes, env, and
+  lifecycle, and holds a private harness-integration instance. It has its own readiness concerns
+  _and_ composes its instances'.
 
 The rule this produces, and the one to hold onto: **the base capability class is instance-scoped,
 not resource-scoped.** Capability implementations extend it; the consuming resources, decls and
@@ -287,7 +287,7 @@ are:
   dispatched on, so the same methods serve config hosted in a dedicated kind, inline in a consumer,
   or in a keyed map (see hosting shapes under Related). They are _not_ the consuming resource; if
   they were, they could serve only one host. Examples: `git-credential/ado`, or a session template's
-  `harness_config` site.
+  `harness_integration_config` site.
 
 The references `dependencies` returns are sourceless. The consuming resource attaches itself as the
 source when it emits them, in its `dependencies()` at finalize ("whoever hosts the config that names
@@ -308,9 +308,9 @@ an unreachable API, a missing tool, are preflight's job, not this.) Construction
 no network, no secret resolution, no prompt.
 
 This is uniform across hosting shapes. Whether a consuming resource is dedicated to one capability
-(`vm-site`) or holds it as one field among many (a `session` with a harness), the instance is
+(`vm-site`) or holds it as one field among many (a `session` with an integration), the instance is
 constructed and held the same way, bound to its config. What preflight and ops take per call is
-_runtime_ execution context (a harness's command channel, a platform's provision target), which
+_runtime_ execution context (an integration's command channel, a platform's provision target), which
 every capability needs as it runs; that is not a hosting difference. Config binds at construction
 for all of them; runtime context passes per call for all of them.
 
@@ -431,8 +431,8 @@ deliberate handling by the caller.
 #### Stage 5: Ops
 
 The domain methods: `create` / `destroy` for a platform, credential-materials for a provider,
-`start` / `probe` for a harness. These belong to the subclass, not the base; do not try to unify
-them.
+`start` / `probe` for an integration. These belong to the subclass, not the base; do not try to
+unify them.
 
 Production of a value that requires a mutation lives here, cached and only after the resolve pass,
 never in a readiness stage. This is what dissolves the old `acquire_token`-style method entirely:
@@ -497,8 +497,8 @@ The shared surface is real (it is a lifecycle, not a boilerplate default), so it
   node, and the capabilities with nothing to check or authenticate get the right behavior for free);
 - the capability's identity (`name`, `description`) as the registry sees it.
 
-Subclasses add their ops. `GitHubCredentialProvider`, `VMPlatform`, `Harness` extend it. Consuming
-resources do not.
+Subclasses add their ops. `GitHubCredentialProvider`, `VMPlatform`, and `HarnessIntegration` extend
+it. Consuming resources do not.
 
 The base lives at the top of the `capabilities/` subtree, not in `resources/`: it is capability
 machinery, not framework machinery.
@@ -602,8 +602,8 @@ in ways worth recording before that change, because it is a different animal:
 
 - **Each capability kind has a detailed companion README** with more depth on that specific kind:
   [`vm_platform/README.md`](vm_platform/README.md) (running VMs: exposure, credentials, rollback,
-  and the bring-up pitfalls), [`harness/README.md`](harness/README.md) (session harnesses: the
-  contract, how the session machinery consumes it, session resume), and
+  and the bring-up pitfalls), [`harness_integration/README.md`](harness_integration/README.md)
+  (harness integrations: the contract, how the session machinery consumes one, session resume), and
   [`git_credential/README.md`](git_credential/README.md) (sourcing and provisioning git credentials:
   the provider contract, the github and azdo providers, the credential-helper path). These guides
   provide the kind-specific details needed for implementation and for tracing shipped behavior.
@@ -613,8 +613,8 @@ in ways worth recording before that change, because it is a different animal:
   framework context whenever a stage's contract depends on _when_ or _how_ that stage is driven.
 - **Hosting shapes.** A consuming resource can host a capability's config three ways: as a dedicated
   kind (reference + a config blob, like `vm-site`), inline in a richer consumer (like a
-  session-template's inline harness block), or in a map keyed by name (the planned shape for an
-  agent template's feature map, once `agent-feature` ships). `dependencies` / `validate`'s
+  session-template's inline harness-integration block), or in a map keyed by name (the planned shape
+  for an agent template's feature map, once `agent-feature` ships). `dependencies` / `validate`'s
   host-agnostic `owner` is exactly what lets one capability serve any of these without knowing which
   consumer hosts it.
 - `owner` is a host-agnostic string today. If a second consumer (preflight's richer context is the

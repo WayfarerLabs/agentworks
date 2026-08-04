@@ -147,15 +147,17 @@ class SessionRow:
     socket_path: str | None = None
     pid: int | None = None
     boot_id: str | None = None
-    # The session's harness-state blob (harness-owned and OPAQUE to the
-    # core: JSON object stored as TEXT), namespaced by harness name:
-    # ``{"<harness-name>": {<that harness's keys>}}``. The harness reads
+    # The session's harness-integration-state blob (owned by the harness integration
+    # and OPAQUE to the core: JSON object stored as TEXT),
+    # namespaced by harness integration name:
+    # ``{"<harness-integration-name>": {<that harness integration's keys>}}``.
+    # The harness integration reads
     # and mutates only its own namespace during its ops; the session
     # manager persists the full blob back after the op. The seam always
-    # materializes the current harness's namespace, so a stateless
-    # harness persists an empty one (``{"shell": {}}``); ``claude-code``
+    # materializes the current harness integration's namespace, so a stateless
+    # integration persists an empty one (``{"shell": {}}``); ``claude-code``
     # stores its minted Claude session id in its namespace.
-    harness_state: dict[str, object] = field(default_factory=dict)
+    harness_integration_state: dict[str, object] = field(default_factory=dict)
 
 
 class ShellEntry(TypedDict):

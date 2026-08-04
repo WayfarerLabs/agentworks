@@ -1,5 +1,6 @@
 """Drift guard: every command path that reaches a declarable-consuming runner
-gates its recipe first (Phase 7, LLD b's reference-side use-gate).
+gates its recipe first. The gate must remain beside each consumption site so a
+new caller cannot silently bypass disabled-resource enforcement.
 
 The recipe gate (``ensure_recipe_enabled``) sits at each COMMAND ENTRY, not at
 the runners (``_run_install_commands`` / ``_run_agent_install_commands``) nor at
@@ -9,7 +10,7 @@ themselves gated. The runner call graph is multi-hop and fans out, so a shallow
 open (notably the ``session create --new-agent`` path, whose realize happens in
 ``_realize_ephemerals`` while the gate lives in ``_build_session_graph``). This
 guard is therefore two structural assertions, mirroring the
-``CAPABILITY_ADAPTERS.keys()`` / harness-factory-caller pattern:
+``CAPABILITY_ADAPTERS.keys()`` / harness-integration-factory-caller pattern:
 
 1. The CALLER SETS of the two runners and the two choreography functions are
    exactly the enumerated set, so a NEW caller of any of them fails the test
@@ -138,7 +139,7 @@ def test_every_command_entry_gates_its_recipe() -> None:
         calls = entry_calls.get(entry, {})
         assert _GATE in calls, (
             f"command entry {entry!r} does not call {_GATE}; a disabled plugin's declarable "
-            "resource could be consumed ungated on this path (Phase 7, LLD b)."
+            "resource could be consumed ungated on this path."
         )
         if realize is not None:
             assert realize in calls, f"expected {entry!r} to call {realize!r} (the scan drifted from HEAD)"

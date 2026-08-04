@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, cast
 import pytest
 
 from agentworks.capabilities.base import OperationScope, RunContext, ScopeLevel
-from agentworks.capabilities.harness import Harness
+from agentworks.capabilities.harness_integration import HarnessIntegration
 from agentworks.errors import ConfigError, StateError
 from agentworks.sessions.nodes import pending_session_node
 from agentworks.sessions.templates import ResolvedSessionTemplate
@@ -77,7 +77,7 @@ def _session(
 
     vm_node = vm if vm is not None else _vm_node(db)
     workspace = pending_workspace_node(db, _stub_config(), "ws1", vm_node, None)
-    template = ResolvedSessionTemplate(name="claude", harness_config={"required_commands": list(required)})
+    template = ResolvedSessionTemplate(name="claude", harness_integration_config={"required_commands": list(required)})
     return pending_session_node(
         db,
         _stub_config(),
@@ -299,11 +299,11 @@ def test_session_create_graph_shares_one_vm_node(db: Database) -> None:
     assert secret_union(nodes) == ("git-token-gh",)
 
 
-# -- the harness_config secret references (#305) -----------------------------
+# -- the harness_integration_config secret references (#305) -----------------
 
 
-class _SecretHarness(Harness):
-    """A registered secret-declaring harness double: both built-ins
+class _SecretHarnessIntegration(HarnessIntegration):
+    """A registered secret-declaring harness integration double: both built-ins
     declare no secrets, so pinning the reference derivation and the
     sweep's prediction needs one that does."""
 
@@ -330,19 +330,19 @@ class _SecretHarness(Harness):
         return None
 
 
-_EXPECTED_USAGE = "the scanner API key, from the harness_config of session-template 'scan'"
+_EXPECTED_USAGE = "the scanner API key, from the harness_integration_config of session-template 'scan'"
 
 
 def _scanner_session(db: Database, monkeypatch: pytest.MonkeyPatch):  # noqa: ANN202
     """A pending admin session whose template selects the
-    secret-declaring harness double."""
-    from agentworks.capabilities.harness import HARNESS_REGISTRY
+    secret-declaring harness integration double."""
+    from agentworks.capabilities.harness_integration import HARNESS_INTEGRATION_REGISTRY
     from agentworks.workspaces.nodes import pending_workspace_node
 
-    monkeypatch.setitem(HARNESS_REGISTRY, "scanner", _SecretHarness)
+    monkeypatch.setitem(HARNESS_INTEGRATION_REGISTRY, "scanner", _SecretHarnessIntegration)
     vm = _vm_node(db)
     workspace = pending_workspace_node(db, _stub_config(), "ws1", vm, None)
-    template = ResolvedSessionTemplate(name="scan", harness="scanner")
+    template = ResolvedSessionTemplate(name="scan", harness_integration="scanner")
     return pending_session_node(
         db,
         _stub_config(),
@@ -355,10 +355,12 @@ def _scanner_session(db: Database, monkeypatch: pytest.MonkeyPatch):  # noqa: AN
     )
 
 
-def test_session_node_exposes_the_harness_config_secret_refs(db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The #305 derivation pin: the held harness declares FULL
+def test_session_node_exposes_the_harness_integration_config_secret_refs(
+    db: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The #305 derivation pin: the held harness integration declares FULL
     references (sourced to the session template, with the usage naming
-    the harness_config declaration site), the node exposes them as its
+    the harness_integration_config declaration site), the node exposes them as its
     ``config_secret_refs``, and the bare-name ``secret_refs`` union
     derives from them (one source, no duplicated list)."""
     from agentworks.resources.reference import SecretReference
@@ -373,18 +375,20 @@ def test_session_node_exposes_the_harness_config_secret_refs(db: Database, monke
     assert session.secret_refs() == ("scanner-api-key",)
 
 
-def test_live_session_node_exposes_the_same_harness_refs(db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_live_session_node_exposes_the_same_harness_integration_refs(
+    db: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The live half of the derivation pin: the live node's methods are
     a separate code path from the pending node's, so both are held to
-    the same harness-declared references."""
-    from agentworks.capabilities.harness import HARNESS_REGISTRY
+    the same harness-integration-declared references."""
+    from agentworks.capabilities.harness_integration import HARNESS_INTEGRATION_REGISTRY
     from agentworks.sessions.nodes import live_session_node
 
-    monkeypatch.setitem(HARNESS_REGISTRY, "scanner", _SecretHarness)
+    monkeypatch.setitem(HARNESS_INTEGRATION_REGISTRY, "scanner", _SecretHarnessIntegration)
     vm = _vm_node(db)
     session = live_session_node(
         _session_row(agent_name=None),  # type: ignore[arg-type]
-        ResolvedSessionTemplate(name="scan", harness="scanner"),
+        ResolvedSessionTemplate(name="scan", harness_integration="scanner"),
         agent=None,
         workspace=_live_workspace(db, vm),
         vm=vm,
@@ -399,18 +403,18 @@ def test_live_session_node_exposes_the_same_harness_refs(db: Database, monkeypat
 
 
 @pytest.mark.parametrize("declared", [True, False], ids=["declared", "undeclared"])
-def test_sweep_predicts_a_harness_config_secret_with_owner_usage_framing(
+def test_sweep_predicts_a_harness_integration_config_secret_with_owner_usage_framing(
     db: Database, tmp_path, monkeypatch: pytest.MonkeyPatch, declared: bool
 ) -> None:
     """The #305 fail-fast pin, the whole point of the threading: an
-    unresolvable harness_config secret fails at the preflight sweep,
+    unresolvable harness_integration_config secret fails at the preflight sweep,
     before any prompt or mutation, with the same owner/usage framing
     every other declared config secret gets, instead of surfacing at
     resolve time.
 
     Parametrized over the registry's knowledge of the secret. The
     ``declared`` case is the path a real session create takes: the
-    operator config declares the template, finalize walks its harness
+    operator config declares the template, finalize walks its harness integration
     ``dependencies`` and auto-declares the secret row, and the sweep's
     ``secret_declarations`` finds that row. The ``undeclared`` case
     (no template in the config) drives the lookup-or-synthesize
@@ -418,15 +422,15 @@ def test_sweep_predicts_a_harness_config_secret_with_owner_usage_framing(
     (the sweep's message is built from the node's declared reference,
     not the registry row)."""
     from agentworks.bootstrap import build_registry
-    from agentworks.capabilities.harness import HARNESS_REGISTRY
+    from agentworks.capabilities.harness_integration import HARNESS_INTEGRATION_REGISTRY
     from agentworks.orchestration.readiness import preflight_all
     from agentworks.secrets.kinds import SECRET_KIND_NAME
     from tests.orchestrated_fixtures import write_operator_config
 
     # Registered BEFORE the registry builds: in the declared case,
-    # finalize reaches through HARNESS_REGISTRY to walk the template's
-    # harness_config dependencies (the auto-declaration input).
-    monkeypatch.setitem(HARNESS_REGISTRY, "scanner", _SecretHarness)
+    # finalize reaches through HARNESS_INTEGRATION_REGISTRY to walk the template's
+    # harness_integration_config dependencies (the auto-declaration input).
+    monkeypatch.setitem(HARNESS_INTEGRATION_REGISTRY, "scanner", _SecretHarnessIntegration)
     template_section = '[session_templates.scan]\nharness = "scanner"\n' if declared else ""
     config = write_operator_config(tmp_path, template_section + '[secret_config]\nbackends = ["env-var"]\n')
     registry = build_registry(config)
@@ -449,10 +453,10 @@ def test_sweep_predicts_a_harness_config_secret_with_owner_usage_framing(
     assert "agw secret describe scanner-api-key" in (exc.value.hint or "")
 
 
-def test_sweep_passes_a_resolvable_harness_config_secret(
+def test_sweep_passes_a_resolvable_harness_integration_config_secret(
     db: Database, tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The happy-path half: a resolvable harness_config secret passes
+    """The happy-path half: a resolvable harness_integration_config secret passes
     the sweep, and the name still joins the boundary union exactly as
     before (prediction widened; resolution did not move)."""
     from agentworks.bootstrap import build_registry
@@ -739,7 +743,7 @@ def test_live_session_probes_its_realized_agent_at_preflight(
     agent = _live_agent(db, vm)
     session = live_session_node(
         _session_row(agent_name="dev"),  # type: ignore[arg-type]
-        ResolvedSessionTemplate(name="claude", harness_config={"required_commands": ["claude"]}),
+        ResolvedSessionTemplate(name="claude", harness_integration_config={"required_commands": ["claude"]}),
         agent=agent,
         workspace=_live_workspace(db, vm),
         vm=vm,
@@ -755,7 +759,7 @@ def test_live_session_admin_mode_comes_from_the_row(db: Database) -> None:
     vm = _vm_node(db)
     session = live_session_node(
         _session_row(agent_name=None),  # type: ignore[arg-type]
-        ResolvedSessionTemplate(name="claude", harness_config={"required_commands": ["claude"]}),
+        ResolvedSessionTemplate(name="claude", harness_integration_config={"required_commands": ["claude"]}),
         agent=None,
         workspace=_live_workspace(db, vm),
         vm=vm,
@@ -851,23 +855,23 @@ def test_agent_template_node_derives_credential_edges(tmp_path, monkeypatch: pyt
     assert node.secret_refs() == ()  # tokens ride the credential nodes
 
 
-# -- the harness_state namespacing seam --------------------------------------
+# -- the harness_integration_state namespacing seam --------------------------------------
 
 
-def _toy_harness(harness_name: str) -> type:
-    """A minimal stateful harness whose ops write ``session_id`` (the same
+def _toy_harness_integration(harness_integration_name: str) -> type:
+    """A minimal stateful harness integration whose ops write ``session_id`` (the same
     key ``claude-code`` uses) into its own state, to prove the seam keeps
     same-key writers structurally apart."""
     from typing import ClassVar
 
-    from agentworks.capabilities.harness import Harness
+    from agentworks.capabilities.harness_integration import HarnessIntegration
 
-    class _Toy(Harness):
-        name: ClassVar[str] = harness_name
+    class _ToyIntegration(HarnessIntegration):
+        name: ClassVar[str] = harness_integration_name
         description: ClassVar[str] = "toy"
 
         def start(self, ctx: RunContext) -> str:
-            self._state["session_id"] = f"{harness_name}-id"
+            self._state["session_id"] = f"{harness_integration_name}-id"
             return ""
 
         def restart(self, ctx: RunContext) -> str:
@@ -876,19 +880,19 @@ def _toy_harness(harness_name: str) -> type:
         def _probe_target(self, transport: object) -> None:
             return None
 
-    return _Toy
+    return _ToyIntegration
 
 
-def _seam_harness(db: Database, blob: dict[str, object], harness_name: str):
-    """Drive ``_harness_for_template`` (the ONE construction point, and the
-    namespacing seam) for ``harness_name`` over the full blob ``blob``."""
-    from agentworks.sessions.nodes import _harness_for_template
+def _seam_harness_integration(db: Database, blob: dict[str, object], harness_integration_name: str):
+    """Drive ``_harness_integration_for_template`` (the ONE construction point, and the
+    namespacing seam) for ``harness_integration_name`` over the full blob ``blob``."""
+    from agentworks.sessions.nodes import _harness_integration_for_template
     from agentworks.workspaces.nodes import pending_workspace_node
 
     vm_node = _vm_node(db)
     workspace = pending_workspace_node(db, _stub_config(), "ws1", vm_node, None)
-    template = ResolvedSessionTemplate(name="t", harness=harness_name)
-    return _harness_for_template(
+    template = ResolvedSessionTemplate(name="t", harness_integration=harness_integration_name)
+    return _harness_integration_for_template(
         template,
         session_name="s1",
         target=None,
@@ -900,22 +904,22 @@ def _seam_harness(db: Database, blob: dict[str, object], harness_name: str):
 
 
 def test_same_key_writers_land_in_distinct_namespaces(db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The collision the namespacing exists to prevent: two harnesses
+    """The collision the namespacing exists to prevent: two harness integrations
     writing the SAME state key (a template re-pointed between stateful
-    harnesses) land in distinct per-harness namespaces, so neither ever
+    harness integrations) land in distinct per-integration namespaces, so neither ever
     inherits the other's value."""
-    from agentworks.capabilities.harness import HARNESS_REGISTRY
-    from agentworks.sessions.nodes import _harness_for_template
+    from agentworks.capabilities.harness_integration import HARNESS_INTEGRATION_REGISTRY
+    from agentworks.sessions.nodes import _harness_integration_for_template
     from agentworks.workspaces.nodes import pending_workspace_node
 
     vm_node = _vm_node(db)
     workspace = pending_workspace_node(db, _stub_config(), "ws1", vm_node, None)
     for hname in ("toy-a", "toy-b"):
-        monkeypatch.setitem(HARNESS_REGISTRY, hname, _toy_harness(hname))
+        monkeypatch.setitem(HARNESS_INTEGRATION_REGISTRY, hname, _toy_harness_integration(hname))
     blob: dict[str, object] = {}
     for hname in ("toy-a", "toy-b"):
-        harness = _harness_for_template(
-            ResolvedSessionTemplate(name="t", harness=hname),
+        harness_integration = _harness_integration_for_template(
+            ResolvedSessionTemplate(name="t", harness_integration=hname),
             session_name="s1",
             target=None,
             admin=True,
@@ -923,7 +927,7 @@ def test_same_key_writers_land_in_distinct_namespaces(db: Database, monkeypatch:
             workspace=workspace,
             state=blob,
         )
-        harness.start(cast("RunContext", object()))
+        harness_integration.start(cast("RunContext", object()))
     assert blob == {
         "toy-a": {"session_id": "toy-a-id"},
         "toy-b": {"session_id": "toy-b-id"},
@@ -936,33 +940,33 @@ def test_a_non_dict_namespace_value_degrades_to_empty_with_a_warning(
     """A stored namespace value that is not a dict (a hand-edited DB, a
     future bug) degrades to empty at the seam WITH a warning naming the
     session and the namespace, mirroring the malformed-blob philosophy of
-    ``db/converters._parse_harness_state``; the replacement dict is the
+    ``db/converters._parse_harness_integration_state``; the replacement dict is the
     live shared object, so mutations still reach the full blob."""
-    from agentworks.capabilities.harness import HARNESS_REGISTRY
+    from agentworks.capabilities.harness_integration import HARNESS_INTEGRATION_REGISTRY
 
-    monkeypatch.setitem(HARNESS_REGISTRY, "toy-a", _toy_harness("toy-a"))
+    monkeypatch.setitem(HARNESS_INTEGRATION_REGISTRY, "toy-a", _toy_harness_integration("toy-a"))
     blob: dict[str, object] = {"toy-a": "garbage"}
-    harness = _seam_harness(db, blob, "toy-a")
-    assert harness.state == {}
-    assert blob["toy-a"] is harness.state
+    harness_integration = _seam_harness_integration(db, blob, "toy-a")
+    assert harness_integration.state == {}
+    assert blob["toy-a"] is harness_integration.state
     assert any("'s1'" in msg and "'toy-a'" in msg and "got str" in msg for msg in captured_output.warnings)
-    harness.start(cast("RunContext", object()))
+    harness_integration.start(cast("RunContext", object()))
     assert blob == {"toy-a": {"session_id": "toy-a-id"}}
 
 
 def test_seam_hoists_legacy_claude_state_before_the_split(db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Compatibility (pre-namespacing harness_state): DELETE with the
+    """Compatibility (pre-namespacing harness_integration_state): DELETE with the
     hoist on the next major release. The seam calls the hoist hook with
     the FULL blob before splitting, so a pre-namespacing row's flat
-    ``session_id`` reaches the constructed harness as its own namespaced
+    ``session_id`` reaches the constructed harness integration as its own namespaced
     state (the same shared object the full blob now holds)."""
-    from agentworks.capabilities.harness import HARNESS_REGISTRY
-    from agentworks.plugins.claude.harness import ClaudeCodeHarness
+    from agentworks.capabilities.harness_integration import HARNESS_INTEGRATION_REGISTRY
+    from agentworks.plugins.claude.harness_integration import ClaudeCodeIntegration
 
-    monkeypatch.setitem(HARNESS_REGISTRY, "claude-code", ClaudeCodeHarness)
+    monkeypatch.setitem(HARNESS_INTEGRATION_REGISTRY, "claude-code", ClaudeCodeIntegration)
     sid = "939b1597-7c61-5ace-80f4-14617b7b4257"
     blob: dict[str, object] = {"session_id": sid}
-    harness = _seam_harness(db, blob, "claude-code")
-    assert harness.state == {"session_id": sid}
+    harness_integration = _seam_harness_integration(db, blob, "claude-code")
+    assert harness_integration.state == {"session_id": sid}
     assert blob == {"claude-code": {"session_id": sid}}
-    assert blob["claude-code"] is harness.state
+    assert blob["claude-code"] is harness_integration.state

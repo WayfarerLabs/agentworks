@@ -186,9 +186,9 @@ def attach_console(
             entity_name=vm_name,
         )
 
-    from agentworks.bootstrap import build_registry
+    from agentworks.bootstrap import load_request_registry
 
-    registry = build_registry(config)
+    registry = load_request_registry(config)
 
     with gated_vm_boundary(db, config, registry, vm):
         from agentworks.transports import transport

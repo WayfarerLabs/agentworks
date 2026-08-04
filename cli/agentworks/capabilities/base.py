@@ -71,7 +71,7 @@ class ScopeLevel(Enum):
     VM = "vm"  # a VM
     WORKSPACE = "workspace"  # a workspace on a VM
     AGENT = "agent"  # an agent user on a VM (workspace access is a grant)
-    SESSION = "session"  # a harness as agent-or-admin, in a workspace, on a VM
+    SESSION = "session"  # a harness integration as agent-or-admin, in a workspace, on a VM
 
 
 # The level-to-fields invariant, per level: (required name fields,

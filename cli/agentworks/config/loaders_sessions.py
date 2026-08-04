@@ -1,6 +1,6 @@
 """Session-related settings/resource loaders: ``[session.config]`` and
-``[session_templates.*]``, including the legacy flat-field-to-harness
-hoisting logic.
+``[session_templates.*]``, including legacy flat fields hoisted into the
+shell harness integration's config.
 
 Split out of the former monolithic ``agentworks/config.py`` (see
 ``agentworks/config/__init__.py`` for the package overview).
@@ -41,15 +41,17 @@ def _load_session_config(data: dict[str, object], issues: list[str]) -> SessionC
     )
 
 
-# The legacy flat fields (``shell``'s config vocabulary) plus the
-# harness pair. The flat fields keep loading verbatim; the loader hoists
-# them into ``harness = "shell"`` + the equivalent ``harness_config``
-# blob (FRD R6), so the internal representation follows the YAML shape.
+# The legacy flat fields (``shell``'s config vocabulary) plus the canonical
+# harness-integration pair and its deprecated aliases. The flat fields keep
+# loading verbatim; the loader hoists them into the canonical
+# ``harness_integration = "shell"`` plus ``harness_integration_config`` shape.
 _SESSION_TEMPLATE_KEYS = {
     "inherits",
     "description",
     "harness",
     "harness_config",
+    "harness_integration",
+    "harness_integration_config",
     "command",
     "restart_command",
     "required_commands",
@@ -62,6 +64,7 @@ def _load_session_templates(
     data: dict[str, object],
     issues: list[str],
     decls: _SectionLineMap,
+    deprecated_harness_selectors: list[str] | None = None,
 ) -> dict[str, SessionTemplate]:
     raw = data.get("session_templates", {})
     if not isinstance(raw, dict):
@@ -79,13 +82,17 @@ def _load_session_templates(
                 context=f"session_templates.{name}",
                 issues=issues,
             )
-        harness, harness_config = _session_harness_pair(name, tdata)
+        harness_integration, harness_integration_config, used_old_selector = _session_harness_integration_pair(
+            name, tdata
+        )
+        if used_old_selector and deprecated_harness_selectors is not None:
+            deprecated_harness_selectors.append(f"session-template/{name}")
         templates[name] = SessionTemplate(
             name=name,
             inherits=list(tdata.get("inherits", [])),
             description=str(tdata["description"]) if "description" in tdata else None,
-            harness=harness,
-            harness_config=harness_config,
+            harness_integration=harness_integration,
+            harness_integration_config=harness_integration_config,
             env=env,
             declared_at=decls.lookup("session_templates", name),
         )
@@ -97,38 +104,53 @@ def _load_session_templates(
     return templates
 
 
-def _session_harness_pair(name: str, tdata: dict[str, object]) -> tuple[str | None, dict[str, object] | None]:
-    """Resolve a TOML session-template's ``(harness, harness_config)``
-    pair, hoisting the legacy flat fields onto the ``shell`` harness
-    (FRD R6). ``None`` on either means "not declared here".
+def _session_harness_integration_pair(
+    name: str, tdata: dict[str, object]
+) -> tuple[str | None, dict[str, object] | None, bool]:
+    """Resolve a TOML session-template's harness-integration selector/config pair.
+
+    The deprecated literals are ``harness`` and ``harness_config``. Legacy flat fields are hoisted
+    onto the ``shell`` harness integration. ``None`` on either result means "not declared here".
 
     The flat form is the lone TOML divergence from the YAML shape; it
     nests into the blob at this boundary, mirroring how the
     git-credential loader nests ``org`` into ``provider_config``. The
-    two conflict cases (flat + a non-``shell`` harness, flat + an
-    explicit ``harness_config``) are load errors: the flat fields ARE
+    two conflict cases (flat + a non-``shell`` integration, flat + an
+    explicit integration config) are load errors: the flat fields ARE
     ``shell``'s config, and mixing spellings in one declaration has no
     operator payoff.
     """
+    old_fields = {"harness", "harness_config"} & set(tdata)
+    new_fields = {"harness_integration", "harness_integration_config"} & set(tdata)
+    if old_fields and new_fields:
+        names = ", ".join(sorted(old_fields | new_fields))
+        raise ConfigError(
+            f"session_templates.{name}: old and new harness integration selector/config fields cannot be mixed: "
+            f"{names}; "
+            "use harness_integration and harness_integration_config only"
+        )
+    old = bool(old_fields)
+    selector = "harness" if old else "harness_integration"
+    config_selector = "harness_config" if old else "harness_integration_config"
     flat_present = [key for key in _SHELL_FLAT_FIELDS if key in tdata]
-    harness_val = tdata.get("harness")
-    if harness_val is not None and not isinstance(harness_val, str):
-        raise ConfigError(f"session_templates.{name}.harness must be a string")
+    harness_integration_val = tdata.get(selector)
+    if harness_integration_val is not None and not isinstance(harness_integration_val, str):
+        raise ConfigError(f"session_templates.{name}.{selector} must be a string")
 
     if flat_present:
-        if harness_val is not None and harness_val != "shell":
+        if harness_integration_val is not None and harness_integration_val != "shell":
             raise ConfigError(
                 f"session_templates.{name}: the legacy field(s) "
-                f"{', '.join(flat_present)} configure the 'shell' harness "
-                f"and cannot combine with harness = {harness_val!r}; put "
-                f"the workload under [session_templates.{name}.harness_config]"
+                f"{', '.join(flat_present)} configure the 'shell' harness integration "
+                f"and cannot combine with {selector} = {harness_integration_val!r}; put "
+                f"the workload under [session_templates.{name}.{config_selector}]"
             )
-        if "harness_config" in tdata:
+        if config_selector in tdata:
             raise ConfigError(
                 f"session_templates.{name}: the legacy field(s) "
                 f"{', '.join(flat_present)} cannot combine with an explicit "
-                f"harness_config table (one spelling per declaration); put "
-                f"the commands under harness_config instead"
+                f"{config_selector} table (one spelling per declaration); put "
+                f"the commands under {config_selector} instead"
             )
         blob: dict[str, object] = {}
         if "command" in tdata:
@@ -137,24 +159,25 @@ def _session_harness_pair(name: str, tdata: dict[str, object]) -> tuple[str | No
             blob["restart_command"] = str(tdata["restart_command"])
         if "required_commands" in tdata:
             blob["required_commands"] = _require_string_list(tdata, "required_commands", f"session_templates.{name}")
-        harness: str | None = "shell"
-        harness_config: dict[str, object] | None = blob
+        harness_integration: str | None = "shell"
+        harness_integration_config: dict[str, object] | None = blob
     else:
-        harness = harness_val
-        harness_config = None
-        if "harness_config" in tdata:
-            raw_config = tdata["harness_config"]
+        harness_integration = harness_integration_val
+        harness_integration_config = None
+        if config_selector in tdata:
+            raw_config = tdata[config_selector]
             if not isinstance(raw_config, dict):
-                raise ConfigError(f"session_templates.{name}.harness_config must be a table")
-            harness_config = dict(raw_config)
-        if harness is None and harness_config is not None:
+                raise ConfigError(f"session_templates.{name}.{config_selector} must be a table")
+            harness_integration_config = dict(raw_config)
+        if harness_integration is None and harness_integration_config is not None:
             raise ConfigError(
-                f'session_templates.{name}: harness_config needs a harness (a blob with no owner); add harness = "..."'
+                f"session_templates.{name}: {config_selector} needs a selector "
+                f'(a blob with no owner); add {selector} = "..."'
             )
 
-    # The declared/hoisted harness_config blob's shape is validated by
+    # The declared or hoisted harness-integration config blob's shape is validated by
     # the finalize ``validate`` pass (SessionTemplate.validate), not
     # here: capability validation is decoupled from load (R3). The
-    # TOML-shape checks above (flat-vs-nested, blob-needs-harness) stay
+    # TOML-shape checks above (flat-vs-nested, blob-needs-integration) stay
     # at load, in the operator's TOML vocabulary.
-    return harness, harness_config
+    return harness_integration, harness_integration_config, old

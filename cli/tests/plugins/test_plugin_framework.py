@@ -28,7 +28,7 @@ from agentworks.resources.kind import KIND_REGISTRY
 from agentworks.resources.origin import Origin
 from tests.plugins._fixtures import (
     FixtureBackend,
-    FixtureHarness,
+    FixtureHarnessIntegration,
     FixtureVMPlatform,
     fixture_plugin,
 )
@@ -36,13 +36,13 @@ from tests.plugins._fixtures import (
 
 def _snapshot_registries() -> dict[str, dict[str, object]]:
     from agentworks.capabilities.git_credential import GIT_CREDENTIAL_PROVIDER_REGISTRY
-    from agentworks.capabilities.harness import HARNESS_REGISTRY
+    from agentworks.capabilities.harness_integration import HARNESS_INTEGRATION_REGISTRY
     from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
     from agentworks.secrets.backends import SECRET_BACKEND_REGISTRY
 
     return {
         "vm-platform": dict(VM_PLATFORM_REGISTRY),
-        "harness": dict(HARNESS_REGISTRY),
+        "harness-integration": dict(HARNESS_INTEGRATION_REGISTRY),
         "git-credential-provider": dict(GIT_CREDENTIAL_PROVIDER_REGISTRY),
         "secret-backend": dict(SECRET_BACKEND_REGISTRY),
     }
@@ -60,7 +60,7 @@ def test_capabilities_normalized_to_immutable_mapping_of_tuples() -> None:
     assert isinstance(plugin.capabilities, MappingProxyType)
     assert plugin.capabilities["vm-platform"] == (FixtureVMPlatform,)
     with pytest.raises(TypeError):
-        plugin.capabilities["harness"] = (FixtureHarness,)  # type: ignore[index]
+        plugin.capabilities["harness-integration"] = (FixtureHarnessIntegration,)  # type: ignore[index]
 
 
 def test_descriptor_is_constructible_without_a_registry() -> None:
@@ -133,15 +133,15 @@ def test_rejects_intra_descriptor_collision() -> None:
 
 
 def test_atomic_registration_seats_nothing_on_a_mid_descriptor_collision() -> None:
-    class CollidingHarness:
-        name = "shell"  # a core built-in harness, different class
+    class CollidingHarnessIntegration:
+        name = "shell"  # a core built-in harness integration, different class
 
-    # vm-platform seats cleanly first; harness collides at the precheck.
+    # vm-platform seats cleanly first; harness-integration collides at the precheck.
     plugin = Plugin(
         name="p",
         capabilities={
             "vm-platform": (FixtureVMPlatform,),
-            "harness": (CollidingHarness,),
+            "harness-integration": (CollidingHarnessIntegration,),
         },
     )
     before = _snapshot_registries()
@@ -252,7 +252,7 @@ def test_capability_clash_between_two_plugins_names_the_other_plugin() -> None:
     ("kind", "seated_name", "expects_description"),
     [
         ("vm-platform", "fixture-vm", True),
-        ("harness", "fixture-harness", False),
+        ("harness-integration", "fixture-harness", False),
         ("git-credential-provider", "fixture-provider", False),
         ("secret-backend", "fixture-backend", True),
     ],

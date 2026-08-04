@@ -1,13 +1,13 @@
-"""The ``claude-code`` harness: run Claude Code as the session workload,
+"""The ``claude-code`` harness integration: run Claude Code as the session workload,
 resuming its transcript when one exists and launching fresh otherwise.
 
 Config vocabulary (all optional): ``permission_mode`` and ``model`` map to
 the ``--permission-mode`` / ``--model`` flags verbatim, and ``extra_args``
 is a list of raw argv tokens appended last (the operator escape hatch for
-any flag the harness does not model). See ``claude-code-lld.md``.
+any flag the harness integration does not model). See ``claude-code-lld.md``.
 
 Addressing uses a stored per-session Claude session id (a v4 uuid) kept in
-the harness's state namespace under ``session_id``: minted once on the first
+the harness integration's state namespace under ``session_id``: minted once on the first
 ``start`` and read back on every ``restart``, because the session manager
 persists the blob to the session row after each op. Resume-vs-launch is an
 op-time existence probe for that id's transcript on disk (slug-independent,
@@ -25,7 +25,7 @@ import shlex
 import uuid
 from typing import TYPE_CHECKING, ClassVar
 
-from agentworks.capabilities.harness.base import Harness, require_commands
+from agentworks.capabilities.harness_integration.base import HarnessIntegration, require_commands
 from agentworks.errors import ConfigError, StateError
 
 if TYPE_CHECKING:
@@ -44,7 +44,7 @@ _CLAUDE_CODE_FIELDS = {"permission_mode", "model", "extra_args"}
 _PROJECTS_DIR = "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects"
 
 
-class ClaudeCodeHarness(Harness):
+class ClaudeCodeIntegration(HarnessIntegration):
     """Runs Claude Code, resuming or launching fresh per on-disk state."""
 
     name: ClassVar[str] = "claude-code"
@@ -65,17 +65,17 @@ class ClaudeCodeHarness(Harness):
         """Compatibility (pre-namespacing harness_state): DELETE on the
         next major release, together with the base hook and its seam call.
 
-        Pre-namespacing rows stored this harness's ``session_id`` at the
+        Pre-namespacing rows stored this harness integration's ``session_id`` at the
         blob's top level; adopt it into the ``claude-code`` namespace so
         the session resumes with the same id after the seam split. One
-        coherent rule: a NON-EMPTY string is the only value this harness
+        coherent rule: a NON-EMPTY string is the only value this harness integration
         ever wrote, so only that shape is adopted, and it is adopted
         whenever the namespaced ``session_id`` is not itself a non-empty
         string (a valid namespaced id wins; hand-edited garbage there
         does not get to discard a real legacy id). The flat key is
         removed for ANY string (empty-string garbage is swept too),
         which also makes the hoist idempotent; a non-string flat value
-        is not this harness's legacy shape and is left alone.
+        is not this harness integration's legacy shape and is left alone.
 
         "Namespaced wins" assumes forward-only history, consistent with
         the repo's forward-only migration doctrine: after the namespacing
@@ -107,7 +107,7 @@ class ClaudeCodeHarness(Harness):
         """
         unknown = sorted(set(config) - _CLAUDE_CODE_FIELDS)
         if unknown:
-            raise ConfigError(f"{owner}: unknown claude-code harness field(s): {', '.join(unknown)}")
+            raise ConfigError(f"{owner}: unknown claude-code harness integration field(s): {', '.join(unknown)}")
         for field_name in ("permission_mode", "model"):
             value = config.get(field_name)
             if value is not None and not isinstance(value, str):
@@ -150,10 +150,10 @@ class ClaudeCodeHarness(Harness):
 
         if resume:
             identity = ["--resume", sid]
-            msg = f"agentworks harness (claude-code): resuming session {self._session_name}"
+            msg = f"agentworks harness integration (claude-code): resuming session {self._session_name}"
         else:
             identity = ["--session-id", sid]
-            msg = f"agentworks harness (claude-code): starting new session {self._session_name}"
+            msg = f"agentworks harness integration (claude-code): starting new session {self._session_name}"
         tokens = [*identity, "--name", self._session_name, *self._config_flags()]
         argv = " ".join(shlex.quote(token) for token in tokens)
         # A single ``sh -c`` so the whole thing survives the ``exec``
@@ -187,7 +187,7 @@ class ClaudeCodeHarness(Harness):
     def _config_flags(self) -> list[str]:
         """The managed flags then ``extra_args``, each an argv token.
         ``extra_args`` is appended verbatim last so it can carry any flag
-        the harness does not model (FRD R4)."""
+        the harness integration does not model (FRD R4)."""
         tokens: list[str] = []
         permission_mode = self.config.get("permission_mode")
         if isinstance(permission_mode, str):
@@ -250,7 +250,7 @@ class ClaudeCodeHarness(Harness):
         require_commands(
             ("claude",),
             transport,
-            harness_name=self.name,
+            harness_integration_name=self.name,
             template_name=self.owner_name,
             session_name=self._session_name,
             target_label=self._target_label,

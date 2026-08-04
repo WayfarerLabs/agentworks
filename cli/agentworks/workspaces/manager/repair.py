@@ -75,13 +75,13 @@ def repair_workspace(
     zero resolves, and zero gate events.
     """
     from agentworks.agents.manager import AGENT_PREFIX
-    from agentworks.bootstrap import build_registry
+    from agentworks.bootstrap import load_request_registry
     from agentworks.ssh import SSHError
     from agentworks.transports import transport
 
     # build_registry runs first so framework miss-policies fire before
     # any DB / VM business logic.
-    registry = build_registry(config)
+    registry = load_request_registry(config)
 
     ws = db.get_workspace(name)
     if ws is None:

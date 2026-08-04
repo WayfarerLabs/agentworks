@@ -310,7 +310,7 @@ def describe_session(
     status probes against the idle timer.
     """
     session = _mgr._require_session(db, name)
-    # Resolve the harness for the display block (config-only, no
+    # Resolve the harness_integration for the display block (config-only, no
     # vm/target dependency) before entering the boundary span.
     # ``_display_registry`` guards the build for consistency with
     # ``list_sessions``, but note ``_prepare_vm`` below ALSO builds the
@@ -318,7 +318,7 @@ def describe_session(
     # needs a valid registry to probe live status, so a truly broken
     # registry aborts describe there regardless. The "-" fallback here
     # is thus defensive, not a graceful-degrade path describe can reach.
-    harness_label = _mgr._display_harness(_mgr._display_registry(config), session.template)
+    harness_integration_label = _mgr._display_harness_integration(_mgr._display_registry(config), session.template)
     with _mgr._prepare_vm(db, config, session, operation=None) as (
         _ws,
         vm,
@@ -349,7 +349,7 @@ def describe_session(
         output.info(f"Workspace:  {session.workspace_name}")
         output.info(f"VM:         {vm.name}")
         output.info(f"Template:   {session.template}")
-        output.info(f"Harness:    {harness_label}")
+        output.info(f"Harness integration: {harness_integration_label}")
         output.info(f"Mode:       {mode_label}")
         output.info(f"Status:     {status_label}")
         output.info(f"Created:    {session.created_at}")
@@ -413,19 +413,19 @@ def list_sessions(
             sessions = _mgr.ensure_pids_batch(sessions, db=db, config=config)
             status_map = _mgr.batch_check_all_sessions(sessions, db=db, config=config)
 
-    # Resolve each session's concrete harness for the HARNESS column.
+    # Resolve each session's concrete harness integration for the display column.
     # build_registry and resolve_template are config-only (no SSH), so
     # this is cheap; still, resolve each DISTINCT template at most once
     # and guard both the registry build and each resolution so a bad
     # registry or one bad template shows "-" rather than aborting the
     # whole listing.
     registry = _mgr._display_registry(config)
-    harness_by_template: dict[str, str] = {}
+    harness_integration_by_template: dict[str, str] = {}
 
-    def _harness_for(template_name: str) -> str:
-        if template_name not in harness_by_template:
-            harness_by_template[template_name] = _mgr._display_harness(registry, template_name)
-        return harness_by_template[template_name]
+    def _harness_integration_for(template_name: str) -> str:
+        if template_name not in harness_integration_by_template:
+            harness_integration_by_template[template_name] = _mgr._display_harness_integration(registry, template_name)
+        return harness_integration_by_template[template_name]
 
     # Build table rows grouped by workspace
     by_workspace: dict[str, list[SessionRow]] = {}
@@ -464,7 +464,7 @@ def list_sessions(
                     ws_name,
                     vm_name,
                     session.template,
-                    _harness_for(session.template),
+                    _harness_integration_for(session.template),
                     mode_label,
                     status,
                 )
@@ -478,7 +478,7 @@ def list_sessions(
         output.info("No sessions found.")
         return
 
-    headers = ["NAME", "WORKSPACE", "VM", "TEMPLATE", "HARNESS", "MODE", "STATUS"]
+    headers = ["NAME", "WORKSPACE", "VM", "TEMPLATE", "HARNESS INTEGRATION", "MODE", "STATUS"]
     for line in output.render_table(headers, rows):
         output.info(line)
 

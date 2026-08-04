@@ -128,13 +128,13 @@ def create_vm(
     any DB or backend work.
     """
     import agentworks.vms.manager as _mgr
-    from agentworks.bootstrap import build_registry
+    from agentworks.bootstrap import load_request_registry
     from agentworks.vms.templates import resolve_template
 
     # build_registry runs first so framework miss-policies (typo'd git
     # credential, future TemplateReference typos on inherits, etc.)
     # surface before any template / DB / VM business logic.
-    registry = build_registry(config)
+    registry = load_request_registry(config)
 
     vm_tmpl = resolve_template(registry, template)
 
@@ -506,12 +506,12 @@ def reinit_vm(
     before.
     """
     import agentworks.vms.manager as _mgr
-    from agentworks.bootstrap import build_registry
+    from agentworks.bootstrap import load_request_registry
     from agentworks.transports import transport
 
     # build_registry runs first so framework miss-policies surface
     # before any template / DB / VM business logic.
-    registry = build_registry(config)
+    registry = load_request_registry(config)
 
     vm = _require_vm(db, name)
 

@@ -8,7 +8,7 @@ model: the parity carries the node layer could not prove on its own.
   right after its realization, through the real command;
 - the session's partial-state teardown runs before the ephemeral
   unwind, reproducing the imperative rollback order end to end;
-- the SESSION operation scope reaches the held harness's readiness.
+- the SESSION operation scope reaches the held harness integration's readiness.
 
 Same fake surfaces as the imperative oracle tests: SimpleNamespace
 config, stubbed registry/gates/transports; the service-layer functions
@@ -26,6 +26,7 @@ import pytest
 # installed): the gate-parity tests below need the REAL registry and
 # the REAL env-chain resolve.
 from agentworks.bootstrap import build_registry as _real_build_registry
+from agentworks.bootstrap import load_request_registry as _real_load_request_registry
 from agentworks.db import Database, SessionMode, SessionStatus
 from agentworks.errors import StateError
 from agentworks.output import Role
@@ -92,8 +93,8 @@ def _requiring_template(monkeypatch: pytest.MonkeyPatch, *commands: str) -> None
         "_resolve_template",
         lambda *a, **k: SimpleNamespace(
             name="claude",
-            harness="shell",
-            harness_config={"command": "claude", "required_commands": list(commands)},
+            harness_integration="shell",
+            harness_integration_config={"command": "claude", "required_commands": list(commands)},
             env={},
         ),
     )
@@ -435,12 +436,12 @@ def test_create_failure_cleans_session_slice_then_unwinds_ephemerals(
     db.close()
 
 
-# -- the operation scope reaches the harness ---------------------------------
+# -- the operation scope reaches the harness integration ---------------------
 
 
-def test_session_scope_reaches_the_harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_session_scope_reaches_the_harness_integration(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agentworks.capabilities.base import RunContext, ScopeLevel
-    from agentworks.capabilities.harness.base import Harness
+    from agentworks.capabilities.harness_integration.base import HarnessIntegration
     from agentworks.sessions.manager import create_session
 
     events: list[str] = []
@@ -448,13 +449,13 @@ def test_session_scope_reaches_the_harness(tmp_path: Path, monkeypatch: pytest.M
     db.insert_agent("a1", "vm1", "agt-a1")
 
     scopes: list[object] = []
-    real_preflight = Harness.preflight
+    real_preflight = HarnessIntegration.preflight
 
-    def _recording(self: Harness, ctx: RunContext) -> None:
+    def _recording(self: HarnessIntegration, ctx: RunContext) -> None:
         scopes.append(ctx.operation_scope)
         real_preflight(self, ctx)
 
-    monkeypatch.setattr(Harness, "preflight", _recording)
+    monkeypatch.setattr(HarnessIntegration, "preflight", _recording)
 
     create_session(
         db,
@@ -473,9 +474,9 @@ def test_session_scope_reaches_the_harness(tmp_path: Path, monkeypatch: pytest.M
     db.close()
 
 
-# -- pane-command parity: the harness op string + relocated substitution -----
+# -- pane-command parity: integration op string + relocated substitution -----
 #
-# The command reaching tmux is the harness's start/restart output with the
+# The command reaching tmux is the harness integration's start/restart output with the
 # {{session_name}} / {{workspace_name}} substitution applied at the CALL
 # SITE (lifted out of the deleted _build_session_command). These pin that
 # every template produces the same pane command it did before the swap.
@@ -488,8 +489,8 @@ def _template(
     restart_command: str | None = None,
     required_commands: list[str] | None = None,
 ) -> None:
-    """Stub ``_resolve_template`` with a ``shell``-harness resolved
-    template built from the friendly flat kwargs (the harness now owns
+    """Stub ``_resolve_template`` with a ``shell``-integration resolved
+    template built from the friendly flat kwargs (the integration now owns
     the command strings; the pane command is its start/restart output)."""
     from agentworks.sessions import manager as session_manager
 
@@ -498,7 +499,7 @@ def _template(
         config["restart_command"] = restart_command
     if required_commands is not None:
         config["required_commands"] = required_commands
-    resolved = SimpleNamespace(name="claude", harness="shell", harness_config=config, env={})
+    resolved = SimpleNamespace(name="claude", harness_integration="shell", harness_integration_config=config, env={})
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: resolved)
 
 
@@ -512,8 +513,10 @@ def _capture_pane_command(monkeypatch: pytest.MonkeyPatch, captured: dict[str, s
     monkeypatch.setattr(tmux_mod, "create_session", _capture)
 
 
-def test_create_pane_command_is_the_harness_output_substituted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """create: the pane command is the shell harness's start() output
+def test_create_pane_command_is_the_harness_integration_output_substituted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """create: the pane command is the shell integration's start() output
     (the template's ``command``) with BOTH template vars substituted at
     the call site."""
     from agentworks.sessions.manager import create_session
@@ -540,7 +543,7 @@ def test_create_pane_command_is_the_harness_output_substituted(tmp_path: Path, m
 def test_restart_pane_command_uses_restart_command_and_session_workspace(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """restart: the pane command is the harness's restart() output (the
+    """restart: the pane command is the integration's restart() output (the
     template's ``restart_command``, preferred over ``command``) with
     ``workspace_name`` sourced from the SESSION ROW, matching the interim
     path's restart substitution."""
@@ -594,6 +597,7 @@ def make_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # noqa: ANN20
     # resolve_for_command for the SimpleNamespace-config tests; these
     # tests run the real ones.
     monkeypatch.setattr("agentworks.bootstrap.build_registry", _real_build_registry)
+    monkeypatch.setattr("agentworks.bootstrap.load_request_registry", _real_load_request_registry)
     monkeypatch.setattr(
         "agentworks.secrets.orchestration.resolve_for_command",
         _real_resolve_for_command,
@@ -717,7 +721,7 @@ def test_create_new_agent_on_disabled_plugin_recipe_refuses_before_any_work(
 ) -> None:
     """Phase 7 BLOCKING 2, end-to-end on a live registry: ``session create
     --new-agent`` with an ephemeral agent-template whose recipe is a disabled
-    plugin's is refused at the build phase (the gate added beside the harness
+    plugin's is refused at the build phase (the gate added beside the harness integration
     gate in ``_build_session_graph``), before any transport or session-row
     write. Proves the newly-added ``--new-agent`` gate fires live, not just that
     the call site references it textually (the drift guard's job)."""

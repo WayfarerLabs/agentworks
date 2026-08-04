@@ -228,13 +228,13 @@ def _start_session_slice(
                     add_to_workspace_group(vm, config, db, linux_user, workspace_name)
                 db.insert_agent_grant(resolved_agent_name, workspace_name, "implicit", session_name=name)
 
-            # Op-start RunContext for the harness's start op: mirrors
+            # Op-start RunContext for the harness_integration's start op: mirrors
             # the runup readiness ctx above (targets), plus the scoped
             # secrets (the session node's declared union, empty for the
-            # built-in shell harness; ScopedSecrets never delivers).
-            # Template-var substitution lifts OUT of the harness and
+            # built-in shell harness_integration; ScopedSecrets never delivers).
+            # Template-var substitution lifts OUT of the harness_integration and
             # wraps its returned string. The op runs BEFORE the insert
-            # so a freshly minted harness_state (claude-code's session
+            # so a freshly minted harness_integration_state (claude-code's session
             # id) lands with the new row; it does only read-only work
             # (a login-shell string for shell, a find probe for
             # claude-code), so it stays ahead of any tmux mutation.
@@ -246,15 +246,15 @@ def _start_session_slice(
                 secrets=ScopedSecrets(secret_values, session_node.secret_refs()),
             )
             command = _mgr._substitute_template_vars(
-                session_node.harness.start(start_ctx),
+                session_node.harness_integration.start(start_ctx),
                 {"session_name": name, "workspace_name": workspace_name},
             )
-            if (note := session_node.harness.launch_note()) is not None:
+            if (note := session_node.harness_integration.launch_note()) is not None:
                 output.detail(note)
 
             # Insert DB record before any tmux work so a crash mid-create
             # leaves a recoverable row (and the teardown can find it to
-            # delete). The harness's start op ran just above, so its
+            # delete). The harness_integration's start op ran just above, so its
             # state (mutated in place inside the node's full namespaced
             # blob) lands with the new row.
             db.insert_session(
@@ -266,7 +266,7 @@ def _start_session_slice(
                 created_workspace=pending_workspace is not None,
                 created_agent=pending_agent is not None,
                 socket_path=expected_socket,
-                harness_state=session_node.harness_state,
+                harness_integration_state=session_node.harness_integration_state,
             )
 
             deploy_restricted_config(run_command, history_limit=config.session.history_limit)

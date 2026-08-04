@@ -15,9 +15,9 @@ Coverage, kind by kind through the ACTUAL consumer (R9 capability side, R14):
 - git-credential-provider: a ``git-credential`` on a disabled plugin provider is
   not-ready (new propagate hook), ``resolve_git_credential_providers`` refuses
   it, and ``remote_advisories`` skips it.
-- harness: a ``session-template`` on a disabled plugin harness lists ready, but
-  ``ensure_harness_enabled`` raises the enable-plugin error while the read-only
-  ``_display_harness`` still shows the name.
+- harness integration: a ``session-template`` on a disabled plugin harness integration lists ready, but
+  ``ensure_harness_integration_enabled`` raises the enable-plugin error while the read-only
+  ``_display_harness_integration`` still shows the name.
 
 Plus the R13 multi-source seam (a stub second source composes; first-source-wins
 the reason) and additive-ness (no source fires -> all-enabled, as the landed
@@ -33,8 +33,8 @@ from typing import TYPE_CHECKING, cast
 import pytest
 
 from agentworks.capabilities.git_credential.base import GitCredentialProvider
-from agentworks.capabilities.harness import ensure_harness_enabled
-from agentworks.capabilities.harness.base import Harness
+from agentworks.capabilities.harness_integration import ensure_harness_integration_enabled
+from agentworks.capabilities.harness_integration.base import HarnessIntegration
 from agentworks.capabilities.vm_platform.base import VMPlatform
 from agentworks.errors import ConfigError, StateError
 from agentworks.git_credentials import remote_advisories
@@ -52,7 +52,7 @@ from agentworks.resources.origin import Origin
 from agentworks.resources.registry import Registry
 from agentworks.secrets.base import SecretDecl
 from agentworks.secrets.resolve import active_backends
-from agentworks.sessions.manager._env import _display_harness
+from agentworks.sessions.manager._env import _display_harness_integration
 from agentworks.sessions.template import SessionTemplate
 from agentworks.vms.initializer.credentials import resolve_git_credential_providers
 from agentworks.vms.sites import VMSiteDecl, resolve_site
@@ -101,7 +101,7 @@ class _FixtureVMPlatform(VMPlatform):
         return None
 
 
-class _FixtureHarness(Harness):
+class _FixtureHarnessIntegration(HarnessIntegration):
     name = "fixture-harness"
     description = "Fixture harness (test plugin)"
 
@@ -148,7 +148,7 @@ def _capable_plugin(name: str = PLUGIN) -> Plugin:
         description="a capable test fixture plugin",
         capabilities={
             "vm-platform": (_FixtureVMPlatform,),
-            "harness": (_FixtureHarness,),
+            "harness-integration": (_FixtureHarnessIntegration,),
             "git-credential-provider": (_FixtureProvider,),
             "secret-backend": (_FixtureBackend,),
         },
@@ -389,52 +389,52 @@ def test_remote_advisories_skips_a_disabled_git_credential() -> None:
         assert remote_advisories(registry, "https://github.com/acme/repo.git") == []
 
 
-# -- harness (the secret model: lists ready, gated at use) ----------------------
+# -- harness integration (the secret model: lists ready, gated at use) --------
 
 
-def _harness_registry() -> Registry:
+def _harness_integration_registry() -> Registry:
     registry = Registry.empty()
-    _publish_capability(registry, "harness", "fixture-harness")
+    _publish_capability(registry, "harness-integration", "fixture-harness")
     registry.add(
         "session-template",
         "tmpl",
-        SessionTemplate(name="tmpl", harness="fixture-harness"),
+        SessionTemplate(name="tmpl", harness_integration="fixture-harness"),
         _operator(),
     )
     return registry
 
 
-def test_session_template_on_disabled_plugin_harness_lists_ready() -> None:
+def test_session_template_on_disabled_plugin_harness_integration_lists_ready() -> None:
     with seated_plugin(_capable_plugin()):
-        registry = _harness_registry()
+        registry = _harness_integration_registry()
         registry.finalize(enablement_sources=[_plugin_source()])
-        # The template does NOT propagate the harness's disabled state.
+        # The template does NOT propagate the harness integration's disabled state.
         assert registry.graph.is_ready("session-template", "tmpl")
-        assert registry.graph.enablement_of("harness", "fixture-harness") is Enablement.disabled
+        assert registry.graph.enablement_of("harness-integration", "fixture-harness") is Enablement.disabled
 
 
-def test_ensure_harness_enabled_raises_for_a_disabled_plugin_harness() -> None:
+def test_ensure_harness_integration_enabled_raises_for_a_disabled_plugin_integration() -> None:
     with seated_plugin(_capable_plugin()):
-        registry = _harness_registry()
+        registry = _harness_integration_registry()
         registry.finalize(enablement_sources=[_plugin_source()])
         with pytest.raises(StateError, match="enable plugin `cap-plugin`"):
-            ensure_harness_enabled(registry, "fixture-harness")
+            ensure_harness_integration_enabled(registry, "fixture-harness")
 
 
-def test_ensure_harness_enabled_passes_when_enabled() -> None:
+def test_ensure_harness_integration_enabled_passes_when_enabled() -> None:
     with seated_plugin(_capable_plugin()):
-        registry = _harness_registry()
+        registry = _harness_integration_registry()
         registry.finalize(enablement_sources=[_plugin_source(PLUGIN)])
-        ensure_harness_enabled(registry, "fixture-harness")  # no raise
+        ensure_harness_integration_enabled(registry, "fixture-harness")  # no raise
 
 
-def test_display_harness_still_shows_a_disabled_plugin_harness_name() -> None:
+def test_display_harness_integration_still_shows_a_disabled_plugin_integration_name() -> None:
     """The read-only listing path is deliberately UNGATED (R14): an enabled
-    session-template referencing a disabled harness still shows the name."""
+    session-template referencing a disabled harness integration still shows the name."""
     with seated_plugin(_capable_plugin()):
-        registry = _harness_registry()
+        registry = _harness_integration_registry()
         registry.finalize(enablement_sources=[_plugin_source()])
-        assert _display_harness(registry, "tmpl") == "fixture-harness"
+        assert _display_harness_integration(registry, "tmpl") == "fixture-harness"
 
 
 # -- R13 multi-source seam ------------------------------------------------------
@@ -450,10 +450,10 @@ def _stub_source(key: tuple[str, str], reason: str) -> EnablementSource:
 def test_compose_enablement_unions_sources_and_first_source_wins_the_reason() -> None:
     a = _stub_source(("vm-platform", "x"), "from-a")
     b = _stub_source(("vm-platform", "x"), "from-b")
-    c = _stub_source(("harness", "y"), "from-c")
+    c = _stub_source(("harness-integration", "y"), "from-c")
     # Union across sources.
     marks = compose_enablement([a, c], {})
-    assert set(marks) == {("vm-platform", "x"), ("harness", "y")}
+    assert set(marks) == {("vm-platform", "x"), ("harness-integration", "y")}
     # First source in the list wins the reason when two disable the same node.
     assert compose_enablement([a, b], {})[("vm-platform", "x")].reason == "from-a"
     assert compose_enablement([b, a], {})[("vm-platform", "x")].reason == "from-b"
@@ -463,7 +463,7 @@ def test_second_stub_source_composes_through_finalize_and_precedence_holds() -> 
     with seated_plugin(_capable_plugin()):
         registry = Registry.empty()
         _publish_capability(registry, "vm-platform", "fixture-platform")
-        _publish_capability(registry, "harness", "fixture-harness")
+        _publish_capability(registry, "harness-integration", "fixture-harness")
         registry.add(
             "vm-site",
             "s",
@@ -472,15 +472,15 @@ def test_second_stub_source_composes_through_finalize_and_precedence_holds() -> 
         )
         # The plugin source disables both plugin rows. A stub ALSO disables the
         # platform (a shared node, testing precedence) AND is the only source
-        # that would disable the harness were the plugin opted in; here it stays
+        # that would disable the harness integration were the plugin opted in; here it stays
         # a union check across two present nodes end to end.
         stub_platform = _stub_source(("vm-platform", "fixture-platform"), "stub-reason")
-        stub_harness = _stub_source(("harness", "fixture-harness"), "stub-harness-reason")
-        registry.finalize(enablement_sources=[_plugin_source(), stub_platform, stub_harness])
+        stub_harness_integration = _stub_source(("harness-integration", "fixture-harness"), "stub-harness-reason")
+        registry.finalize(enablement_sources=[_plugin_source(), stub_platform, stub_harness_integration])
 
         # Union across sources: both present nodes are disabled through finalize.
         assert registry.graph.enablement_of("vm-platform", "fixture-platform") is Enablement.disabled
-        assert registry.graph.enablement_of("harness", "fixture-harness") is Enablement.disabled
+        assert registry.graph.enablement_of("harness-integration", "fixture-harness") is Enablement.disabled
         # Precedence: the plugin source (first in the list) wins the shared
         # platform's reason over the stub.
         verdict = registry.graph.readiness_of("vm-site", "s")

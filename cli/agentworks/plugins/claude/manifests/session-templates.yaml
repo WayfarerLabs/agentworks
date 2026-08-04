@@ -30,7 +30,7 @@ metadata:
   name: example-claude-strict
   description: "Claude Code, strict posture: prompts before each action (default mode)"
 spec:
-  harness:
+  harness_integration:
     name: claude-code
     permission_mode: default
 ---
@@ -40,7 +40,7 @@ metadata:
   name: example-claude-auto
   description: "Claude Code, auto posture: actions auto-approved by a classifier (auto mode)"
 spec:
-  harness:
+  harness_integration:
     name: claude-code
     permission_mode: auto
 ---
@@ -50,6 +50,6 @@ metadata:
   name: example-claude-yolo
   description: "Claude Code, yolo posture: skips every permission prompt (bypassPermissions)"
 spec:
-  harness:
+  harness_integration:
     name: claude-code
     permission_mode: bypassPermissions

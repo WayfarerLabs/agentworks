@@ -1,4 +1,4 @@
-"""The ``claude-code`` harness: config vocabulary, the resume-vs-launch
+"""The ``claude-code`` harness integration: config vocabulary, the resume-vs-launch
 detection (both directions), the flag mapping and ``extra_args``
 passthrough, the visible decision, the stored-id persistence, the legacy
 pre-namespacing state hoist, and that readiness probes ``claude``.
@@ -17,7 +17,7 @@ import pytest
 
 from agentworks.capabilities.base import OperationScope, RunContext, ScopeLevel
 from agentworks.errors import ConfigError, StateError
-from agentworks.plugins.claude.harness import ClaudeCodeHarness
+from agentworks.plugins.claude.harness_integration import ClaudeCodeIntegration
 from tests.conftest import _FakeResult, _FakeTarget
 
 if TYPE_CHECKING:
@@ -26,14 +26,14 @@ if TYPE_CHECKING:
 _SID = "939b1597-7c61-5ace-80f4-14617b7b4257"  # a fixed stored uuid
 
 
-def _harness(
+def _harness_integration(
     config: Mapping[str, object] | None = None,
     *,
     session_name: str = "s1",
     state: dict[str, object] | None = None,
     admin: bool = True,
-) -> ClaudeCodeHarness:
-    return ClaudeCodeHarness(
+) -> ClaudeCodeIntegration:
+    return ClaudeCodeIntegration(
         "claude",
         config or {},
         session_name=session_name,
@@ -70,45 +70,45 @@ def test_dependencies_imply_no_reference() -> None:
     """``claude-code`` implies no edge, and ``dependencies`` is total: it
     returns ``()`` for the known fields and even for a malformed blob."""
     assert (
-        ClaudeCodeHarness.dependencies(
+        ClaudeCodeIntegration.dependencies(
             "session-template/claude",
             {"permission_mode": "acceptEdits", "model": "opus", "extra_args": ["--foo"]},
         )
         == ()
     )
     # Never raises, even on config that ``validate`` would reject.
-    assert ClaudeCodeHarness.dependencies("session-template/claude", {"model": 3, "permision_mode": "typo"}) == ()
+    assert ClaudeCodeIntegration.dependencies("session-template/claude", {"model": 3, "permision_mode": "typo"}) == ()
 
 
 def test_validate_accepts_the_three_fields_and_empty_config() -> None:
     assert (
-        ClaudeCodeHarness.validate(
+        ClaudeCodeIntegration.validate(
             "session-template/claude",
             {"permission_mode": "acceptEdits", "model": "opus", "extra_args": ["--foo"]},
         )
         is None
     )
-    assert ClaudeCodeHarness.validate("session-template/claude", {}) is None
+    assert ClaudeCodeIntegration.validate("session-template/claude", {}) is None
 
 
 def test_validate_rejects_unknown_field() -> None:
-    with pytest.raises(ConfigError, match="unknown claude-code harness field"):
-        ClaudeCodeHarness.validate("session-template/claude", {"permision_mode": "typo"})
+    with pytest.raises(ConfigError, match="unknown claude-code harness integration field"):
+        ClaudeCodeIntegration.validate("session-template/claude", {"permision_mode": "typo"})
 
 
 def test_validate_rejects_non_string_model() -> None:
     with pytest.raises(ConfigError, match="model must be a string"):
-        ClaudeCodeHarness.validate("session-template/claude", {"model": 3})
+        ClaudeCodeIntegration.validate("session-template/claude", {"model": 3})
 
 
 def test_validate_rejects_non_list_extra_args() -> None:
     with pytest.raises(ConfigError, match="extra_args must be a list of strings"):
-        ClaudeCodeHarness.validate("session-template/claude", {"extra_args": "just-a-string"})
+        ClaudeCodeIntegration.validate("session-template/claude", {"extra_args": "just-a-string"})
 
 
 def test_construct_revalidates_config() -> None:
-    with pytest.raises(ConfigError, match="unknown claude-code harness field"):
-        _harness({"nope": 1})
+    with pytest.raises(ConfigError, match="unknown claude-code harness integration field"):
+        _harness_integration({"nope": 1})
 
 
 # -- detection: present -> resume, absent -> launch fresh --------------------
@@ -116,7 +116,7 @@ def test_construct_revalidates_config() -> None:
 
 def test_present_transcript_resumes() -> None:
     target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(0)})  # found
-    command = _harness().start(_op_ctx(target))
+    command = _harness_integration().start(_op_ctx(target))
     assert f"--resume {_SID}" in command
     assert "--session-id" not in command
     assert "resuming session s1" in command
@@ -124,7 +124,7 @@ def test_present_transcript_resumes() -> None:
 
 def test_absent_transcript_launches_fresh() -> None:
     target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(1)})  # not found
-    command = _harness().start(_op_ctx(target))
+    command = _harness_integration().start(_op_ctx(target))
     assert f"--session-id {_SID}" in command
     assert "--resume" not in command
     assert "starting new session s1" in command
@@ -132,28 +132,28 @@ def test_absent_transcript_launches_fresh() -> None:
 
 def test_launch_note_reports_resume() -> None:
     target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(0)})  # found
-    harness = _harness()
-    assert harness.launch_note() is None  # nothing decided before the op
-    harness.start(_op_ctx(target))
-    assert harness.launch_note() == "Existing Claude Code session found. Resuming..."
+    harness_integration = _harness_integration()
+    assert harness_integration.launch_note() is None  # nothing decided before the op
+    harness_integration.start(_op_ctx(target))
+    assert harness_integration.launch_note() == "Existing Claude Code session found. Resuming..."
 
 
 def test_launch_note_reports_fresh_start() -> None:
     target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(1)})  # not found
-    harness = _harness()
-    harness.start(_op_ctx(target))
-    assert harness.launch_note() == "No existing Claude Code session. Starting a new one..."
+    harness_integration = _harness_integration()
+    harness_integration.start(_op_ctx(target))
+    assert harness_integration.launch_note() == "No existing Claude Code session. Starting a new one..."
 
 
 def test_start_and_restart_are_symmetric() -> None:
     target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(0)})
-    harness = _harness()
-    assert harness.start(_op_ctx(target)) == harness.restart(_op_ctx(target))
+    harness_integration = _harness_integration()
+    assert harness_integration.start(_op_ctx(target)) == harness_integration.restart(_op_ctx(target))
 
 
 def test_probe_is_slug_independent_and_finds_by_stored_id() -> None:
     target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(0)})
-    _harness().start(_op_ctx(target))
+    _harness_integration().start(_op_ctx(target))
     (probe_cmd,) = target.commands
     assert f"{_SID}.jsonl" in probe_cmd
     assert "find" in probe_cmd
@@ -169,14 +169,14 @@ def test_probe_keeps_find_failure_distinct_from_a_clean_no_match() -> None:
     answers by exit code alone; the structure is what guarantees those
     codes mean what the fork thinks they mean."""
     target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(0)})
-    _harness().start(_op_ctx(target))
+    _harness_integration().start(_op_ctx(target))
     (probe_cmd,) = target.commands
     assert "[ -d " in probe_cmd  # dir-missing is a clean no-match, not a find failure
     assert "exit 6" in probe_cmd  # find failure stays distinguishable
     # And the fork raises on that distinct code.
     failing = _FakeTarget({f"{_SID}.jsonl": _FakeResult(6)})
     with pytest.raises(StateError, match="could not probe"):
-        _harness().start(_op_ctx(failing))
+        _harness_integration().start(_op_ctx(failing))
 
 
 def test_probe_that_could_not_execute_raises_rather_than_guessing() -> None:
@@ -186,7 +186,7 @@ def test_probe_that_could_not_execute_raises_rather_than_guessing() -> None:
     raises a typed error naming the target instead."""
     target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(255)})
     with pytest.raises(StateError, match="could not probe") as exc:
-        _harness().start(_op_ctx(target))
+        _harness_integration().start(_op_ctx(target))
     assert "exit 255" in str(exc.value)
     assert exc.value.entity_name == "s1"
 
@@ -196,13 +196,13 @@ def test_probe_that_could_not_execute_raises_rather_than_guessing() -> None:
 
 def test_first_start_mints_and_records_the_session_id() -> None:
     state: dict[str, object] = {}
-    harness = _harness(state=state)
+    harness_integration = _harness_integration(state=state)
     target = _FakeTarget()  # empty state means no id yet; find returns default ok
-    command = harness.start(_op_ctx(target))
+    command = harness_integration.start(_op_ctx(target))
 
     minted = state["session_id"]
     assert isinstance(minted, str) and len(minted) == 36  # a uuid
-    assert harness.state == {"session_id": minted}  # persisted via the property
+    assert harness_integration.state == {"session_id": minted}  # persisted via the property
     assert minted in command
 
 
@@ -210,10 +210,10 @@ def test_restart_reads_the_stored_id_back_verbatim() -> None:
     """The round-trip the manager relies on: an id minted on create (in
     the state blob) is used verbatim on a later restart, never re-minted."""
     target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(0)})
-    harness = _harness(state={"session_id": _SID})
-    command = harness.restart(_op_ctx(target))
+    harness_integration = _harness_integration(state={"session_id": _SID})
+    command = harness_integration.restart(_op_ctx(target))
     assert f"--resume {_SID}" in command
-    assert harness.state == {"session_id": _SID}  # unchanged
+    assert harness_integration.state == {"session_id": _SID}  # unchanged
 
 
 # -- the legacy state hoist (compatibility, pre-namespacing) -----------------
@@ -226,14 +226,14 @@ def test_hoist_moves_a_legacy_top_level_id_into_the_namespace() -> None:
     hoist adopts it into the ``claude-code`` namespace and removes the
     flat key, so the session keeps its id (and its resumable history)."""
     blob: dict[str, object] = {"session_id": _SID}
-    ClaudeCodeHarness.hoist_legacy_state(blob)
+    ClaudeCodeIntegration.hoist_legacy_state(blob)
     assert blob == {"claude-code": {"session_id": _SID}}
 
 
 def test_hoist_is_idempotent() -> None:
     blob: dict[str, object] = {"session_id": _SID}
-    ClaudeCodeHarness.hoist_legacy_state(blob)
-    ClaudeCodeHarness.hoist_legacy_state(blob)
+    ClaudeCodeIntegration.hoist_legacy_state(blob)
+    ClaudeCodeIntegration.hoist_legacy_state(blob)
     assert blob == {"claude-code": {"session_id": _SID}}
 
 
@@ -245,7 +245,7 @@ def test_hoist_never_clobbers_an_already_namespaced_id() -> None:
         "session_id": "00000000-0000-4000-8000-000000000000",
         "claude-code": {"session_id": _SID},
     }
-    ClaudeCodeHarness.hoist_legacy_state(blob)
+    ClaudeCodeIntegration.hoist_legacy_state(blob)
     assert blob == {"claude-code": {"session_id": _SID}}
 
 
@@ -253,33 +253,33 @@ def test_hoist_replaces_a_non_string_namespaced_id_with_the_legacy_one() -> None
     """Hand-edited garbage in the namespaced slot does not get to discard
     a real legacy id: only a non-empty string namespaced value wins."""
     blob: dict[str, object] = {"session_id": _SID, "claude-code": {"session_id": 7}}
-    ClaudeCodeHarness.hoist_legacy_state(blob)
+    ClaudeCodeIntegration.hoist_legacy_state(blob)
     assert blob == {"claude-code": {"session_id": _SID}}
 
 
 def test_hoist_sweeps_an_empty_flat_id_without_adopting_it() -> None:
-    """An empty flat string is garbage this harness never wrote: it is
+    """An empty flat string is garbage this harness integration never wrote: it is
     swept off the top level but not adopted into the namespace."""
     blob: dict[str, object] = {"session_id": ""}
-    ClaudeCodeHarness.hoist_legacy_state(blob)
+    ClaudeCodeIntegration.hoist_legacy_state(blob)
     assert blob == {}
 
 
 def test_hoist_leaves_a_non_string_top_level_value_alone() -> None:
-    """A non-string top-level ``session_id`` is not this harness's legacy
+    """A non-string top-level ``session_id`` is not this harness integration's legacy
     shape; the hoist does not guess at it."""
     blob: dict[str, object] = {"session_id": 7}
-    ClaudeCodeHarness.hoist_legacy_state(blob)
+    ClaudeCodeIntegration.hoist_legacy_state(blob)
     assert blob == {"session_id": 7}
 
 
 def test_base_hoist_is_a_no_op() -> None:
-    """The base hook exists so the platform seam stays harness-agnostic;
-    a harness that never wrote unnamespaced state leaves the blob as-is."""
-    from agentworks.capabilities.harness import ShellHarness
+    """The base hook exists so the platform seam stays integration-agnostic;
+    an integration that never wrote unnamespaced state leaves the blob as-is."""
+    from agentworks.capabilities.harness_integration import ShellIntegration
 
     blob: dict[str, object] = {"session_id": _SID}
-    ShellHarness.hoist_legacy_state(blob)
+    ShellIntegration.hoist_legacy_state(blob)
     assert blob == {"session_id": _SID}
 
 
@@ -288,14 +288,14 @@ def test_base_hoist_is_a_no_op() -> None:
 
 def test_permission_mode_and_model_map_to_their_flags() -> None:
     target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(1)})
-    command = _harness({"permission_mode": "acceptEdits", "model": "sonnet"}).start(_op_ctx(target))
+    command = _harness_integration({"permission_mode": "acceptEdits", "model": "sonnet"}).start(_op_ctx(target))
     assert "--permission-mode acceptEdits" in command
     assert "--model sonnet" in command
 
 
 def test_extra_args_appended_verbatim_last_and_quoted() -> None:
     target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(1)})
-    command = _harness({"model": "opus", "extra_args": ["--foo", "bar baz"]}).start(_op_ctx(target))
+    command = _harness_integration({"model": "opus", "extra_args": ["--foo", "bar baz"]}).start(_op_ctx(target))
     # One argv token stays one token: "bar baz" is quoted, not re-split.
     assert shlex.quote("bar baz") in command
     # Appended last: after the managed --model flag.
@@ -308,7 +308,7 @@ def test_extra_args_with_shell_metacharacters_cannot_inject() -> None:
     must be ``shlex.quote``d into one inert argv token, never shell-active."""
     payload = "a'; touch /tmp/pwned #"
     target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(1)})
-    command = _harness({"extra_args": ["--append-system-prompt", payload]}).start(_op_ctx(target))
+    command = _harness_integration({"extra_args": ["--append-system-prompt", payload]}).start(_op_ctx(target))
 
     # The command is `sh -c '<inner>'`; the payload is nested-quoted (once
     # into the argv, once into the sh -c wrapper). Peeling both quoting
@@ -324,8 +324,8 @@ def test_extra_args_with_shell_metacharacters_cannot_inject() -> None:
 def test_name_is_set_on_both_branches_as_the_display_label() -> None:
     present = _FakeTarget({f"{_SID}.jsonl": _FakeResult(0)})
     absent = _FakeTarget({f"{_SID}.jsonl": _FakeResult(1)})
-    assert "--name s1" in _harness().start(_op_ctx(present))
-    assert "--name s1" in _harness().start(_op_ctx(absent))
+    assert "--name s1" in _harness_integration().start(_op_ctx(present))
+    assert "--name s1" in _harness_integration().start(_op_ctx(absent))
 
 
 # -- the returned pane string shape ------------------------------------------
@@ -335,7 +335,7 @@ def test_returned_string_is_a_single_sh_c_that_echoes_then_execs() -> None:
     """A single ``sh -c`` (so it survives the pane's ``exec`` wrapping),
     echoing the visible decision before exec-ing claude."""
     target = _FakeTarget({f"{_SID}.jsonl": _FakeResult(1)})
-    command = _harness().start(_op_ctx(target))
+    command = _harness_integration().start(_op_ctx(target))
     assert command.startswith("sh -c ")
     assert "echo " in command
     assert "exec claude" in command
@@ -345,15 +345,15 @@ def test_returned_string_is_a_single_sh_c_that_echoes_then_execs() -> None:
 
 
 def test_readiness_probes_claude() -> None:
-    harness = _harness()
+    harness_integration = _harness_integration()
     target = _FakeTarget()  # command -v claude -> default ok
-    harness.preflight(RunContext(operation_scope=_session_scope(), admin_target=target))
+    harness_integration.preflight(RunContext(operation_scope=_session_scope(), admin_target=target))
     assert any("command -v claude" in cmd for cmd in target.commands)
 
 
 def test_readiness_missing_claude_is_a_typed_error() -> None:
-    harness = _harness()
+    harness_integration = _harness_integration()
     target = _FakeTarget({"command -v claude": _FakeResult(1)})
     ctx = RunContext(operation_scope=_session_scope(), admin_target=target)
-    with pytest.raises(StateError, match="'claude-code' harness.*requires 'claude'"):
-        harness.preflight(ctx)
+    with pytest.raises(StateError, match="'claude-code' harness integration.*requires 'claude'"):
+        harness_integration.preflight(ctx)

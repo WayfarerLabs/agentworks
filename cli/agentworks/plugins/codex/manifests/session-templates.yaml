@@ -31,7 +31,7 @@ metadata:
   name: example-codex-strict
   description: "Codex, strict posture: read-only sandbox, prompts for requests beyond it"
 spec:
-  harness:
+  harness_integration:
     name: codex
     sandbox: read-only
     approval_policy: on-request
@@ -42,7 +42,7 @@ metadata:
   name: example-codex-auto
   description: "Codex, auto posture: writes the workspace with network access, prompts for requests beyond the sandbox"
 spec:
-  harness:
+  harness_integration:
     name: codex
     sandbox: workspace-write
     approval_policy: on-request
@@ -54,7 +54,7 @@ metadata:
   name: example-codex-yolo
   description: "Codex, yolo posture: full access, no approvals, web search on"
 spec:
-  harness:
+  harness_integration:
     name: codex
     sandbox: danger-full-access
     approval_policy: never

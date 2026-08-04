@@ -95,9 +95,9 @@ def show_env(
 
     # Per-scope env dicts (each scope contributes only its own EnvEntry map;
     # template inheritance is already merged into the resolved templates).
-    from agentworks.bootstrap import build_registry
+    from agentworks.bootstrap import load_request_registry
 
-    registry = build_registry(config)
+    registry = load_request_registry(config)
     vm_env, workspace_env, admin_env, agent_env, session_env = _resolve_scope_envs(registry, ctx)
 
     # Build the resource context for identity vars.

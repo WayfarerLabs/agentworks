@@ -116,7 +116,7 @@ def _rehome_vm(
     the operator confirms.
     """
 
-    from agentworks.bootstrap import build_registry
+    from agentworks.bootstrap import load_request_registry
     from agentworks.ssh import SSHError, SSHLogger
     from agentworks.transports import transport
     from agentworks.workspaces.acls import apply_workspace_acls
@@ -135,7 +135,7 @@ def _rehome_vm(
         )
 
     _guard_vm_status(vm)
-    registry = build_registry(config)
+    registry = load_request_registry(config)
     with gated_vm_boundary(db, config, registry, vm, scope=_workspace_scope(db, vm, ws_name)):
         target = transport(vm, config)
 

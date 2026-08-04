@@ -113,10 +113,10 @@ def describe_vm(db: Database, config: Config, name: str) -> None:
     # operator wants to look at, so a stranded site degrades to a
     # warning (with the manifest hint) rather than erroring: the row's
     # own fields still render.
-    from agentworks.bootstrap import build_registry
+    from agentworks.bootstrap import load_request_registry
     from agentworks.vms.sites import lookup_site
 
-    registry = build_registry(config)
+    registry = load_request_registry(config)
     site_platform = "-"
     backend_label = "-"
     status_label = "-"
@@ -524,7 +524,7 @@ def rekey_vm(
     import shlex
     import time
 
-    from agentworks.bootstrap import build_registry
+    from agentworks.bootstrap import load_request_registry
     from agentworks.orchestration.activation import activation_gate
     from agentworks.orchestration.readiness import preflight_all
     from agentworks.orchestration.secrets import secret_union
@@ -552,7 +552,7 @@ def rekey_vm(
     # ``os.environ`` at ``would_attempt`` time, so removing the var
     # skips it cleanly across BOTH the preflight prediction and the
     # resolve, and the prompt backend takes over).
-    registry = build_registry(config)
+    registry = load_request_registry(config)
     resolver = Resolver(config, registry)
     vm_node = live_vm_node(db, config, registry, vm)
     rekey_vm_tmpl = resolve_template(registry, vm.template)

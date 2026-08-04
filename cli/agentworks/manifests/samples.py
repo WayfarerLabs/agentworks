@@ -105,7 +105,7 @@ def _validated_kinds(kind: str | None, all_kinds: bool) -> tuple[str, ...]:
         known = ", ".join(SAMPLE_KINDS)
         handler = KIND_REGISTRY.get(kind)
         if handler is not None and handler.category == "capability":
-            # Capability kinds (harness, secret-backend, vm-platform,
+            # Capability kinds (harness-integration, secret-backend, vm-platform,
             # git-credential-provider) are code-backed and carry no
             # manifest, so there is nothing to sample. `resource kinds`
             # lists them alongside the declarable kinds, so a curious

@@ -246,7 +246,7 @@ def restart_session(
     after the kill is deliberately non-rollbackable (no unwind is
     consulted there), exactly the imperative shape.
     """
-    from agentworks.bootstrap import build_registry
+    from agentworks.bootstrap import load_request_registry
     from agentworks.sessions.tmux import (
         create_session as create_tmux_session,
     )
@@ -254,7 +254,7 @@ def restart_session(
         deploy_restricted_config,
     )
 
-    registry = build_registry(config)
+    registry = load_request_registry(config)
 
     session = _mgr._require_session(db, name)
     ws = _mgr._require_workspace(db, session.workspace_name)
@@ -302,15 +302,15 @@ def restart_session(
                 entity_name=session.agent_name,
             )
         agent_node = live_agent_node(agent_row, vm_node)
-    # Gate a disabled plugin harness at USE (R14, the secret model): a live
-    # session on a disabled harness refuses to restart / reattach with the
+    # Gate a disabled plugin harness_integration at USE (R14, the secret model): a live
+    # session on a disabled harness_integration refuses to restart / reattach with the
     # enable-plugin error. The gate lives at this call site (not inside
     # ``live_session_node``, which threads no registry); a drift guard pins that
     # every caller of the node factory gates.
-    from agentworks.capabilities.harness import ensure_harness_enabled
+    from agentworks.capabilities.harness_integration import ensure_harness_integration_enabled
     from agentworks.resources.access import ensure_recipe_enabled
 
-    ensure_harness_enabled(registry, template.harness)
+    ensure_harness_integration_enabled(registry, template.harness_integration)
     # Refuse a session-template recipe drawing on a disabled plugin's declarable
     # resource before the restart / reattach (Phase 7, LLD b). Drift guard:
     # tests/agents/test_recipe_gate_drift.py.
@@ -438,11 +438,11 @@ def restart_session(
             # refused or declined restart never prompts. Gate-resolved values
             # are already seeded, so nothing resolves twice.
             resolver.resolve()
-            # Capture the graph boundary union for the harness's op-start
+            # Capture the graph boundary union for the harness_integration's op-start
             # context (matching the create path, which captures
             # ``resolver.values`` at its boundary). Inert for the built-in
-            # shell harness (empty ``config_secret_refs()``), but keeps the restart
-            # op ctx shape-correct for a future secret-declaring harness; the
+            # shell harness_integration (empty ``config_secret_refs()``), but keeps the restart
+            # op ctx shape-correct for a future secret-declaring harness_integration; the
             # env-chain resolve (``resolve_for_command`` below) is a SEPARATE
             # pass, not this graph union.
             graph_secret_values = resolver.values
@@ -525,11 +525,11 @@ def restart_session(
 
             deploy_restricted_config(run_command, history_limit=config.session.history_limit)
 
-            # Op-start RunContext for the harness's restart op, assembled
-            # AFTER the kill (a state-aware harness decides resume-vs-launch
+            # Op-start RunContext for the harness_integration's restart op, assembled
+            # AFTER the kill (a state-aware harness_integration decides resume-vs-launch
             # with the old process already dead). Mirrors the preflight
             # readiness ctx above (the restart path builds no runup ctx), plus
-            # the scoped graph secrets (empty for the built-in shell harness).
+            # the scoped graph secrets (empty for the built-in shell harness_integration).
             # Template-var substitution wraps the returned string; restart
             # sources ``workspace_name`` from the session row, as the interim
             # path did.
@@ -541,22 +541,23 @@ def restart_session(
                 secrets=ScopedSecrets(graph_secret_values, session_node.secret_refs()),
             )
             command = _mgr._substitute_template_vars(
-                session_node.harness.restart(restart_ctx),
+                session_node.harness_integration.restart(restart_ctx),
                 {"session_name": name, "workspace_name": session.workspace_name},
             )
-            if (note := session_node.harness.launch_note()) is not None:
+            if (note := session_node.harness_integration.launch_note()) is not None:
                 output.detail(note)
-            # Persist the node's FULL namespaced harness_state blob after the
-            # op (mirrors the create-path insert): the harness mutated its own
+            # Persist the node's FULL namespaced harness_integration_state blob after the
+            # op (mirrors the create-path insert): the harness_integration mutated its own
             # namespace in place, and persisting the full blob keeps foreign
-            # harnesses' namespaces intact across a template's harness switch.
+            # harness integrations' namespaces intact across a template's
+            # harness_integration switch.
             # Usually a no-op (the value was stored on create), but a session
-            # predating the harness_state column (backfilled to {}) mints its
+            # predating the harness_integration_state column (backfilled to {}) mints its
             # id on this first restart. Persisting BEFORE create_tmux_session
             # is intentional: a stable id that survives a tmux-recreate retry
             # beats re-minting a new one each attempt (the id is the
             # session's, whether or not the pane came up).
-            db.update_session_harness_state(name, session_node.harness_state)
+            db.update_session_harness_integration_state(name, session_node.harness_integration_state)
             linux_user = _mgr._resolve_session_linux_user(db, session, vm)
             session_env = _mgr._resolve_session_env(
                 registry,

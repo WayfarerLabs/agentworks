@@ -632,8 +632,9 @@ def test_session_template_inherits_parent_env(tmp_path: Path) -> None:
 
 
 def test_session_template_required_commands_parsed(tmp_path: Path) -> None:
-    """The flat ``required_commands`` hoists into the ``shell`` harness's
-    config blob (the harness surface owns the command vocabulary now)."""
+    """The flat ``required_commands`` hoists into the ``shell`` harness
+    integration's config blob (the integration surface owns the command
+    vocabulary now)."""
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
@@ -645,8 +646,8 @@ def test_session_template_required_commands_parsed(tmp_path: Path) -> None:
     )
     cfg = load_config(cfg_file, warn_issues=False)
     tmpl = cfg.session_templates["claude"]
-    assert tmpl.harness == "shell"
-    assert tmpl.harness_config == {
+    assert tmpl.harness_integration == "shell"
+    assert tmpl.harness_integration_config == {
         "command": "claude --name {{session_name}}",
         "required_commands": ["claude"],
     }
@@ -708,8 +709,8 @@ def test_session_template_required_commands_union_on_inherit(tmp_path: Path) -> 
     from agentworks.sessions.templates import resolve_from_dict
 
     resolved = resolve_from_dict(cfg.session_templates, "child")
-    assert resolved.harness == "shell"
-    assert resolved.harness_config["required_commands"] == ["tmux", "claude", "jq"]
+    assert resolved.harness_integration == "shell"
+    assert resolved.harness_integration_config["required_commands"] == ["tmux", "claude", "jq"]
 
 
 def test_undeclared_secret_in_parent_no_longer_errors_at_load(

@@ -1,4 +1,4 @@
-"""The ``codex`` harness driven through the real orchestrator: the carry
+"""The ``codex`` harness integration driven through the real orchestrator: the carry
 the unit test cannot prove on its own.
 
 - ``session create`` produces the fresh-launch pane string through the
@@ -11,7 +11,7 @@ the unit test cannot prove on its own.
   consumed), and the NEXT restart resumes the stored id without
   re-running discovery;
 - ``codex`` and ``claude-code`` state coexist in one row blob without
-  collision (the first real two-stateful-harness pairing, pinning the
+  collision (the first real two-stateful-integration pairing, pinning the
   namespacing seam's promise);
 - ``session restart`` with a stored id resumes it with the
   restart-post-kill end state (kill precedes the probe precedes the tmux
@@ -104,10 +104,12 @@ def _seed_db(tmp_path: Path) -> Database:
     return db
 
 
-def _harness_template(monkeypatch: pytest.MonkeyPatch, config: dict[str, object] | None = None) -> None:
+def _harness_integration_template(monkeypatch: pytest.MonkeyPatch, config: dict[str, object] | None = None) -> None:
     from agentworks.sessions import manager as session_manager
 
-    resolved = SimpleNamespace(name="codex", harness="codex", harness_config=config or {}, env={})
+    resolved = SimpleNamespace(
+        name="codex", harness_integration="codex", harness_integration_config=config or {}, env={}
+    )
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: resolved)
 
 
@@ -150,13 +152,13 @@ def _restart_stubs(
     from agentworks.sessions import manager as session_manager
 
     db = _seed_db(tmp_path)
-    db.insert_session("s1", "ws1", "codex", SessionMode.ADMIN, harness_state=stored_state)
+    db.insert_session("s1", "ws1", "codex", SessionMode.ADMIN, harness_integration_state=stored_state)
     db.update_session_pid("s1", 4242, boot_id="boot-x")
 
     captured: dict[str, str] = {}
     _patch_transport(monkeypatch, target)
     _common_stubs(monkeypatch)
-    _harness_template(monkeypatch)
+    _harness_integration_template(monkeypatch)
     _capture_pane_command(monkeypatch, events, captured)
 
     monkeypatch.setattr(session_manager, "_ensure_pid", lambda session, **k: session)
@@ -190,7 +192,7 @@ def test_create_launches_fresh_with_no_discovery_and_persists_the_anchor(
     captured: dict[str, str] = {}
     _patch_transport(monkeypatch, _CodexTarget(events))
     _common_stubs(monkeypatch)
-    _harness_template(monkeypatch)
+    _harness_integration_template(monkeypatch)
     _capture_pane_command(monkeypatch, events, captured)
 
     create_session(
@@ -204,7 +206,7 @@ def test_create_launches_fresh_with_no_discovery_and_persists_the_anchor(
     assert "discover" not in events  # no anchor stored: no probe at all
     session = db.get_session("s1")
     assert session is not None
-    namespace = session.harness_state["codex"]
+    namespace = session.harness_integration_state["codex"]
     assert isinstance(namespace, dict)
     anchor = namespace.get("discovery_marker")
     assert isinstance(anchor, str)
@@ -249,7 +251,7 @@ def test_restart_adopts_a_discovered_rollout_and_persists_the_id(
     assert events.index("kill") < events.index("discover") < events.index("tmux_create")
     refreshed = db.get_session("s1")
     assert refreshed is not None
-    assert refreshed.harness_state == {"codex": {"session_id": _SID}}  # anchor consumed
+    assert refreshed.harness_integration_state == {"codex": {"session_id": _SID}}  # anchor consumed
     db.close()
 
 
@@ -277,7 +279,7 @@ def test_restart_resumes_the_stored_id_without_rediscovery(tmp_path: Path, monke
     assert events.index("kill") < events.index("detect") < events.index("tmux_create")
     refreshed = db.get_session("s1")
     assert refreshed is not None
-    assert refreshed.harness_state == {"codex": {"session_id": _SID}}  # unchanged
+    assert refreshed.harness_integration_state == {"codex": {"session_id": _SID}}  # unchanged
     db.close()
 
 
@@ -305,7 +307,7 @@ def test_restart_with_a_gone_rollout_drops_the_id_and_launches_fresh(
     assert "archived or gone; starting new session s1" in captured["command"]
     refreshed = db.get_session("s1")
     assert refreshed is not None
-    namespace = refreshed.harness_state["codex"]
+    namespace = refreshed.harness_integration_state["codex"]
     assert isinstance(namespace, dict)
     assert set(namespace) == {"discovery_marker"}  # stale id gone, anchor stored
     anchor = namespace["discovery_marker"]
@@ -314,11 +316,11 @@ def test_restart_with_a_gone_rollout_drops_the_id_and_launches_fresh(
     db.close()
 
 
-# -- two stateful harnesses share one row blob --------------------------------
+# -- two stateful harness integrations share one row blob ---------------------
 
 
 def test_codex_and_claude_code_state_coexist_in_one_blob(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The first real two-stateful-harness pairing: a row whose blob
+    """The first real two-stateful-integration pairing: a row whose blob
     already carries a ``claude-code`` namespace (the template was
     re-pointed to codex) runs a codex op that adopts its own id into the
     ``codex`` namespace, and the claude id is neither read (no inherited
@@ -344,7 +346,7 @@ def test_codex_and_claude_code_state_coexist_in_one_blob(tmp_path: Path, monkeyp
     assert f"resume {_SID}" in captured["command"]
     refreshed = db.get_session("s1")
     assert refreshed is not None
-    assert refreshed.harness_state == {
+    assert refreshed.harness_integration_state == {
         "claude-code": {"session_id": _CLAUDE_SID},
         "codex": {"session_id": _SID},
     }
@@ -368,7 +370,7 @@ def test_substitution_leaves_the_generated_snippet_intact_and_substitutes_extra_
     captured: dict[str, str] = {}
     _patch_transport(monkeypatch, _CodexTarget(events))
     _common_stubs(monkeypatch)
-    _harness_template(monkeypatch, {"extra_args": ["-p", "profile-{{session_name}}"]})
+    _harness_integration_template(monkeypatch, {"extra_args": ["-p", "profile-{{session_name}}"]})
     _capture_pane_command(monkeypatch, events, captured)
 
     create_session(

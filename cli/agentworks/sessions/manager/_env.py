@@ -42,40 +42,41 @@ def _display_registry(config: Config) -> Registry | None:
     """Build the registry for a read-only display column, degrading to
     ``None`` when config validation fails.
 
-    ``build_registry`` runs ``finalize`` / ``validate_chain`` /
-    ``validate_sites`` and can raise ``AgentworksError`` for reasons
+    ``load_request_registry`` builds and validates the registry and renders
+    manifest/deprecation warnings at most once in the current request. It can
+    raise ``AgentworksError`` for reasons
     unrelated to session templates (a misconfigured secret backend
     chain, a bad ``defaults.site``, an unrelated resource collision).
     ``session list`` / ``session describe`` are read-only and never
-    built the registry before the HARNESS column existed, so a bad
-    registry must degrade the HARNESS cell to ``"-"`` for every row
+    built the registry before the HARNESS INTEGRATION column existed, so a bad
+    registry must degrade the HARNESS INTEGRATION cell to ``"-"`` for every row
     rather than abort the whole command. Catching ``AgentworksError``
     keeps the same breadth as the per-template guard below.
     """
-    from agentworks.bootstrap import build_registry
+    from agentworks.bootstrap import load_request_registry
 
     try:
-        return build_registry(config)
+        return load_request_registry(config)
     except AgentworksError:
         return None
 
 
-def _display_harness(registry: Registry | None, template_name: str) -> str:
-    """Resolve a session template to its concrete harness name for display.
+def _display_harness_integration(registry: Registry | None, template_name: str) -> str:
+    """Resolve a session template to its concrete harness integration name for display.
 
-    ``build_registry`` and ``resolve_template`` are config-only (no SSH),
+    ``load_request_registry`` and ``resolve_template`` are config-only (no SSH),
     so this is cheap enough to show in listings. Returns ``"-"`` when the
     registry is unavailable (see :func:`_display_registry`) or the
-    template fails to resolve (unknown name, bad harness), so one bad
+    template fails to resolve (unknown name, bad harness_integration), so one bad
     template never aborts a whole listing or a describe. The resolved
-    ``harness`` is always a concrete string (defaulting to ``shell``).
+    ``harness_integration`` is always a concrete string (defaulting to ``shell``).
     """
     if registry is None:
         return "-"
     from agentworks.sessions.templates import resolve_template
 
     try:
-        return resolve_template(registry, template_name).harness
+        return resolve_template(registry, template_name).harness_integration
     except AgentworksError:
         return "-"
 
@@ -101,7 +102,7 @@ def _substitute_template_vars_in_env(
 
     Preserves the legacy template-variable hook the session-command build
     carried before the EnvEntry migration (the pane command itself now
-    substitutes at the harness op call site). Secret-ref entries pass
+    substitutes at the harness integration op call site). Secret-ref entries pass
     through unchanged (variable substitution applies to the resolved
     string at backend time, not the secret name).
     """

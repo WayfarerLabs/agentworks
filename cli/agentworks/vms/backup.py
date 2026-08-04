@@ -37,7 +37,7 @@ def backup_vm(
     just-in-time values seed the boundary resolver), and the
     held-active span covers the whole snapshot-archive-transfer body.
     """
-    from agentworks.bootstrap import build_registry
+    from agentworks.bootstrap import load_request_registry
     from agentworks.ssh import SSHError, SSHLogger
     from agentworks.transports import SSHTransport, transport
 
@@ -58,7 +58,7 @@ def backup_vm(
             entity_kind="vm",
             entity_name=vm_name,
         )
-    registry = build_registry(config)
+    registry = load_request_registry(config)
 
     with gated_vm_boundary(db, config, registry, vm):
         # Create backup directory first so the log goes inside it

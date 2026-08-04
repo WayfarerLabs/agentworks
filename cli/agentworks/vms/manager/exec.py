@@ -107,9 +107,9 @@ def shell_vm(
     # vm.template (DB row), not the config-default template, which may
     # not match and would silently route the wrong env into a shell on
     # a non-default-template VM.
-    from agentworks.bootstrap import build_registry
+    from agentworks.bootstrap import load_request_registry
 
-    registry = build_registry(config)
+    registry = load_request_registry(config)
     scopes = _mgr._resolve_vm_admin_env_scopes(registry, vm, ws=ws)
 
     with contextlib.ExitStack() as stack:
@@ -212,9 +212,9 @@ def exec_vm(
     # The same scope dicts feed both the SecretTarget and compose_env
     # so the two consumers can't drift. The vm scope comes from
     # vm.template (DB row), not the config-default template.
-    from agentworks.bootstrap import build_registry
+    from agentworks.bootstrap import load_request_registry
 
-    registry = build_registry(config)
+    registry = load_request_registry(config)
     scopes = _mgr._resolve_vm_admin_env_scopes(registry, vm, ws=ws)
 
     with gated_vm_boundary(
@@ -269,7 +269,7 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
     context (``ctx.secret``, with the gate's scoped reader as the
     source for gate-driven ops).
     """
-    from agentworks.bootstrap import build_registry
+    from agentworks.bootstrap import load_request_registry
     from agentworks.git_credentials.nodes import git_credential_node
     from agentworks.orchestration.activation import (
         activation_gate,
@@ -284,7 +284,7 @@ def add_git_credential(db: Database, config: Config, name: str, credential_name:
     # build_registry runs first so framework miss-policies (e.g.
     # GitCredentialKind's error policy on a typo'd credential name)
     # surface before any DB / VM / config-key business logic.
-    registry = build_registry(config)
+    registry = load_request_registry(config)
 
     vm = _require_vm(db, name)
     _guard_failed_vm(vm)

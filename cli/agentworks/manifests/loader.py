@@ -102,6 +102,7 @@ class ManifestSet:
     issues: tuple[str, ...]
     deprecation_issues: tuple[str, ...] = ()
     deprecated_shape_resources: tuple[str, ...] = ()
+    deprecated_harness_selectors: tuple[str, ...] = ()
 
     @classmethod
     def empty(cls) -> ManifestSet:
@@ -232,6 +233,7 @@ def load_manifests(resources_dir: Path) -> ManifestSet:
     entries: list[ManifestEntry] = []
     issues: list[str] = []
     deprecated_shapes: list[str] = []
+    deprecated_harness_selectors: list[str] = []
     seen: dict[tuple[str, str], SourceLocation] = {}
 
     for path in _iter_manifest_files(resources_dir):
@@ -245,7 +247,7 @@ def load_manifests(resources_dir: Path) -> ManifestSet:
                     f'"{doc.name}" (also declared at {first.file}:{first.line})',
                 )
             seen[key] = location
-            resource = decode_document(doc, issues, deprecated_shapes)
+            resource = decode_document(doc, issues, deprecated_shapes, deprecated_harness_selectors)
             entries.append(
                 ManifestEntry(
                     kind=doc.kind,
@@ -269,4 +271,5 @@ def load_manifests(resources_dir: Path) -> ManifestSet:
         issues=tuple(issues),
         deprecation_issues=deprecations,
         deprecated_shape_resources=tuple(deprecated_shapes),
+        deprecated_harness_selectors=tuple(deprecated_harness_selectors),
     )

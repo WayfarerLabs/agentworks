@@ -102,9 +102,9 @@ store lines and in provider-side logs; remotes are never rewritten.
 The classic TOML resource sections (`[secrets.*]`, `[vm_templates.*]`, `[git_credentials.*]`, ...)
 keep working with exactly their historical semantics for now, but declaring resources in
 `config.toml` is deprecated and will be removed in a future release. Their presence emits one
-aggregated deprecation warning naming the sections found (silence it with the global
-`--no-deprecations` flag). You may mix sources freely (some resources in YAML, some in TOML), but
-declaring the SAME resource in both is an error citing both locations.
+aggregated deprecation warning per command/request naming the sections found (silence it with the
+global `--no-deprecations` flag). You may mix sources freely (some resources in YAML, some in TOML),
+but declaring the SAME resource in both is an error citing both locations.
 
 Move resources over whenever you like:
 
@@ -115,11 +115,20 @@ agw resource migrate --all             # everything (explicit opt-in)
 agw resource migrate --all --dry-run   # see the plan first (--full for the diff)
 ```
 
-The migrator is incremental and repeat-safe: output is append-only (your existing YAML files are
-never rewritten), the original `config.toml` is backed up to `paths.backups` first, migrated
-sections are commented out in place with a `# migrated to ...` marker (or removed with
-`--toml delete`), and every real run finishes by rebuilding the registry and verifying it is
-identical to the pre-migration one, rolling back if not.
+The migrator handles two paths. TOML-declared resources become new YAML documents, appended without
+rewriting existing YAML content; migrated TOML sections are commented out in place with a
+`# migrated to ...` marker (or removed with `--toml delete`). It also canonicalizes selected
+existing `session-template` YAML documents that use the legacy `harness` selector, folding it and an
+optional `harness_config` sibling into `harness_integration` while preserving the document stream
+and YAML comments. The same kind or `kind/name` selectors scope both paths.
+
+Every real run backs up `config.toml`; a run that modifies an existing YAML file also stores its
+original as a recovery copy under `paths.backups`. Digest guards refuse to replace files changed
+after planning, writes are atomic, and rollback restores only outputs that still match the run's
+digest, so concurrent edits are not overwritten. Finally, the command rebuilds the registry and
+verifies it is identical to the pre-migration registry, rolling back on a mismatch and reporting any
+recovery copy needed for manual repair. Use `--dry-run --full` to inspect generated documents,
+in-place YAML diffs, and the TOML diff before writing.
 
 ## VM sites and platforms
 
@@ -172,12 +181,12 @@ spec:
 - The legacy flat `[azure]` / `[proxmox]` TOML sections keep loading as deprecated vm-site
   declarations; `agw resource migrate vm-site` moves them to manifests.
 
-## Session harnesses
+## Harness integrations
 
-What a session runs is declared as a **harness**: the capability (registered code) that knows how a
-particular tool is started, restarted, and what executables it needs. A session template pairs a
-harness with that harness's configuration in one tagged table, exactly the way a vm-site pairs a
-platform with its config:
+What a session runs is declared as a **harness integration**: the Agentworks capability (registered
+code) that knows how a particular harness or shell is started, restarted, and what executables it
+needs. A session template pairs an integration with its configuration in one tagged table, exactly
+the way a vm-site pairs a platform with its config:
 
 ```yaml
 apiVersion: agentworks/v1
@@ -186,32 +195,33 @@ metadata:
   name: htop
   description: Live process monitor
 spec:
-  harness:
+  harness_integration:
     name: shell
     command: htop
     required_commands: [htop]
 ```
 
-- `spec.harness` is one table: its `name` key names a `harness` capability row, and the remaining
-  keys are the config block that harness owns and validates (unknown keys are errors). A template
-  that names no harness resolves to the built-in `shell` harness (a plain login shell, or an
-  operator command), which is the built-in `default` template. The old sibling shape
-  (`harness: shell` as a string plus a `harness_config:` table) still loads unchanged but is
-  deprecated and will be removed; fold the pair into the tagged table.
-- The `shell` harness's config vocabulary is `command` (the pane command; empty is a login shell),
-  `restart_command` (used by `session restart`, falling back to `command`), and `required_commands`
-  (executables checked on the launch target before any state mutation). `command` /
-  `restart_command` support the `{{session_name}}` and `{{workspace_name}}` variables.
-- The harness-plus-config pair inherits as a unit: a child restating the same harness merges its
-  config keys into the parent's (child wins per key; `shell` unions `required_commands`), while a
-  child naming a _different_ harness starts fresh. `env`, `inherits`, and the description merge as
-  usual.
+- `spec.harness_integration` is one table: its `name` key names a `harness-integration` capability
+  row, and the remaining keys are the config block that integration owns and validates (unknown keys
+  are errors). A template that names no integration resolves to the built-in `shell` integration (a
+  plain login shell, or an operator command), which is the built-in `default` template. The old
+  `harness` / `harness_config` inputs still load in 0.13.0 and contribute to one aggregated
+  deprecation warning per command/request; run `agw resource migrate` to rewrite them.
+- The `shell` integration's config vocabulary is `command` (the pane command; empty is a login
+  shell), `restart_command` (used by `session restart`, falling back to `command`), and
+  `required_commands` (executables checked on the launch target before any state mutation).
+  `command` / `restart_command` support the `{{session_name}}` and `{{workspace_name}}` variables.
+- The integration-plus-config pair inherits as a unit: a child restating the same integration merges
+  its config keys into the parent's (child wins per key; `shell` unions `required_commands`), while
+  a child naming a _different_ integration starts fresh. `env`, `inherits`, and the description
+  merge as usual.
 - The legacy flat `command` / `restart_command` / `required_commands` keys keep loading in TOML
-  (hoisted onto `harness = "shell"`); YAML manifests spell them inside the `harness` table.
-  `agw resource describe harness/shell` shows the harness row and the templates that reference it.
+  (hoisted onto `harness_integration = "shell"`); YAML manifests spell them inside the
+  `harness_integration` table. `agw resource describe harness-integration/shell` shows the
+  integration row and the templates that reference it.
 
-The `claude-code` harness runs Claude Code as the session. It ships as the opt-in `claude` system
-plugin (see "System plugins" below), so a `session-template` naming it still lists ready, but
+The `claude-code` integration runs Claude Code as the session. It ships as the opt-in `claude`
+system plugin (see "System plugins" below), so a `session-template` naming it still lists ready, but
 creating a session on it is refused with an "enable plugin `claude`" hint until you set
 `[plugins] system = ["claude"]`. It selects the launch-and-resume conventions in one table instead
 of restating command strings: `session create` starts a new Claude session, and `session restart`
@@ -225,7 +235,7 @@ metadata:
   name: claude
   description: Claude Code session
 spec:
-  harness:
+  harness_integration:
     name: claude-code
     permission_mode: acceptEdits # optional; forwarded to `claude --permission-mode`
     model: opus # optional; forwarded to `claude --model`
@@ -236,14 +246,14 @@ spec:
   `claude --permission-mode` / `--model` (their choice sets are Claude's, not validated here: an
   invalid value fails at launch with the tool's own error, which `session create` /
   `session restart` capture into their error message when the workload exits immediately), and
-  `extra_args` is a list of raw argv tokens appended last, the escape hatch for any flag the harness
-  does not model. Unknown fields are errors. `extra_args` elements support the `{{session_name}}` /
-  `{{workspace_name}}` variables.
+  `extra_args` is a list of raw argv tokens appended last, the escape hatch for any flag the
+  integration does not model. Unknown fields are errors. `extra_args` elements support the
+  `{{session_name}}` / `{{workspace_name}}` variables.
 - The only requirement checked on the launch target is that `claude` is installed. The chosen action
   (resume vs new session) is announced in the pane on start, so it is never silent.
 
-The `codex` harness runs Codex the same way and ships as the opt-in `codex` system plugin. Codex
-mints its own session ids, so instead of assigning one the harness discovers the id from Codex's
+The `codex` integration runs Codex the same way and ships as the opt-in `codex` system plugin. Codex
+mints its own session ids, so instead of assigning one the integration discovers the id from Codex's
 on-disk state after the first launch and stores it; `session restart` then resumes the same
 conversation whenever its session file still exists (a session archived with `codex archive` is
 deliberately treated as not resumable, and a fresh one is started). Its config is nine optional
@@ -256,7 +266,7 @@ even in `workspace-write`, so a coding session that needs `npm install` or `git 
 so use absolute paths: `~` and `$HOME` are not expanded); `web_search` (bool) enables Codex's live
 web-search tool (`codex --search`, distinct from sandbox network access); `extra_args` is the same
 appended-last escape hatch; and `disable_strict_config` (bool) is the strictness off-switch
-described next. The harness always passes `--strict-config` so a Codex config mistake (or a
+described next. The integration always passes `--strict-config` so a Codex config mistake (or a
 Codex-renamed config key) fails loudly at launch instead of being silently ignored;
 `disable_strict_config: true` turns that off when strictness itself is the problem: a target whose
 `config.toml` Codex must tolerate (for example one written by a newer Codex than the target runs),
@@ -272,19 +282,19 @@ metadata:
   name: codex
   description: Codex session
 spec:
-  harness:
+  harness_integration:
     name: codex
     sandbox: workspace-write # optional; forwarded to `codex -s`
     approval_policy: on-request # optional; forwarded to `codex -a`
     network: true # optional; sandbox network access (off by default)
 ```
 
-`shell` is the built-in default harness; `claude-code` and `codex` ship as the opt-in `claude` and
-`codex` system plugins. None of them is the whole set the platform is built around. The `harness`
-kind is extensible: another tool or agent runtime, whatever the provider, is added as its own
-harness with its own config vocabulary. `claude-code` above (and its Claude-specific `model` /
-`permission_mode` fields) is one worked example; the core assumes no particular runtime, and a
-session runs whatever harness its template selects.
+`shell` is the built-in default integration; `claude-code` and `codex` ship as the opt-in `claude`
+and `codex` system plugins. None of them is the whole set the platform is built around. The
+`harness-integration` kind is extensible: another harness or shell runtime, whatever the provider,
+is added as its own integration with its own config vocabulary. `claude-code` above (and its
+Claude-specific `model` / `permission_mode` fields) is one worked example; the core assumes no
+particular runtime, and a session runs whatever integration its template selects.
 
 ## Built-ins and overrides
 
@@ -302,22 +312,23 @@ policy is per kind:
 - **Secret backends** (`env-var`, `prompt`; `onepassword` ships as an opt-in system plugin, see
   below), **VM platforms** (`lima`, `wsl2`; `proxmox` and `azure-vm` ship as the opt-in `proxmox`
   and `azure` system plugins, see below), **git-credential providers** (`github`; `azdo` ships in
-  the opt-in `azure` system plugin), and **session harnesses** (`shell`; `claude-code` and `codex`
-  ship as the opt-in `claude` and `codex` system plugins, see below): registered capabilities, shown
-  as read-only rows. You cannot declare or override them; secrets customize per secret via
-  `backend_mappings`, platforms configure per site via the `spec.platform` table, and harnesses
-  configure per session-template via the `spec.harness` table. Every installed platform publishes a
-  row regardless of host support: a platform whose host requirements are not met (e.g. `wsl2` off
-  Windows) publishes a present, not-ready row (`agw resource list` and `agw doctor` show it with the
-  reason), and a site referencing it is not-ready rather than erroring.
+  the opt-in `azure` system plugin), and **harness integrations** (`shell`; `claude-code` and
+  `codex` ship as the opt-in `claude` and `codex` system plugins, see below): registered
+  capabilities, shown as read-only rows. You cannot declare or override them; secrets customize per
+  secret via `backend_mappings`, platforms configure per site via the `spec.platform` table, and
+  integrations configure per session-template via the `spec.harness_integration` table. Every
+  installed platform publishes a row regardless of host support: a platform whose host requirements
+  are not met (e.g. `wsl2` off Windows) publishes a present, not-ready row (`agw resource list` and
+  `agw doctor` show it with the reason), and a site referencing it is not-ready rather than
+  erroring.
 
 ## System plugins
 
-A **system plugin** bundles capability implementations (VM platforms, harnesses, git-credential
-providers, secret backends) and optional resource manifests that ship with agentworks but are
-separable and opt-in. Its contributed resources carry the fourth origin, **system-plugin**, and are
-attributed on the surfaces as `from plugin <name>`. A plugin is not a resource kind of its own: it
-publishes resources of the existing kinds.
+A **system plugin** bundles capability implementations (VM platforms, harness integrations,
+git-credential providers, secret backends) and optional resource manifests that ship with agentworks
+but are separable and opt-in. Its contributed resources carry the fourth origin, **system-plugin**,
+and are attributed on the surfaces as `from plugin <name>`. A plugin is not a resource kind of its
+own: it publishes resources of the existing kinds.
 
 Plugins are off by default. Opt in by name in `config.toml`:
 
@@ -348,10 +359,10 @@ is the opt-in state and hides the row, while a **not-ready** resource (enabled b
 this host) still lists with its reason.
 
 The shipped build installs the `onepassword` (1Password secret backend), `claude` (Claude Code
-session harness and its `claude` CLI install-command), `codex` (Codex session harness and its
-`codex` CLI install-command), `proxmox` (Proxmox VE VM platform), and `azure` (Azure VM platform,
-`azdo` git-credential provider, and `az-cli` install-command) plugins, all disabled until opted in.
-Authoring a system plugin is documented in the plugins package README
+harness integration and its `claude` CLI install-command), `codex` (Codex harness integration and
+its `codex` CLI install-command), `proxmox` (Proxmox VE VM platform), and `azure` (Azure VM
+platform, `azdo` git-credential provider, and `az-cli` install-command) plugins, all disabled until
+opted in. Authoring a system plugin is documented in the plugins package README
 (`cli/agentworks/plugins/README.md`).
 
 **Config errors in a not-enabled plugin's resources surface only once you enable it.** Validation
@@ -375,12 +386,12 @@ system = ["azure", "proxmox", "onepassword", "claude"]  # only the ones you use
 Concretely, enable `onepassword` if a secret maps the `onepassword` backend; `proxmox` if a
 `vm-site` (or a legacy `[proxmox]` section) uses the `proxmox` platform; `azure` if you use the
 `azure-vm` platform, the `azdo` (Azure DevOps) git-credential provider, or the `az-cli`
-install-command; and `claude` if a `session-template` uses the `claude-code` harness or a template
-installs the `claude` CLI. Until you do, a resource that references one is not-ready (or refused at
-use) with an "enable plugin `<name>`" hint, never a silent failure. The default local path (the
-`lima` / `wsl2` platforms, the `shell` harness, the `env-var` / `prompt` secret backends, and the
-`github` git-credential provider) is unchanged and needs no `[plugins]` entry. `agw doctor` lists
-every installed plugin and whether it is enabled.
+install-command; and `claude` if a `session-template` uses the `claude-code` integration or a
+template installs the `claude` CLI. Until you do, a resource that references one is not-ready (or
+refused at use) with an "enable plugin `<name>`" hint, never a silent failure. The default local
+path (the `lima` / `wsl2` platforms, the `shell` harness integration, the `env-var` / `prompt`
+secret backends, and the `github` git-credential provider) is unchanged and needs no `[plugins]`
+entry. `agw doctor` lists every installed plugin and whether it is enabled.
 
 ## Secrets: backends and the chain
 

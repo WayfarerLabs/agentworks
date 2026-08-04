@@ -22,19 +22,18 @@ if TYPE_CHECKING:
 class ResolvedSessionTemplate:
     """A fully resolved session template with all inheritance applied.
 
-    The workload is the ``(harness, harness_config)`` pair (FRD R7):
-    ``harness`` is always a concrete name (defaulting to ``shell``, the
-    plain login shell) and ``harness_config`` is the merged blob the
-    session node hands the harness. ``description`` stays an
-    independently merged display field (pinned "Login shell" default,
-    harness-api-lld section 10), unaffected by the pair.
+    The workload is the ``(harness_integration, harness_integration_config)`` pair:
+    ``harness_integration`` is always a concrete name (defaulting to ``shell``, the
+    plain login shell) and ``harness_integration_config`` is the merged blob the
+    session node hands the harness integration. ``description`` stays an
+    independently merged display field with a "Login shell" default, unaffected by the pair.
     """
 
     name: str
     description: str = "Login shell"
     env: dict[str, EnvEntry] = field(default_factory=dict)
-    harness: str = "shell"
-    harness_config: dict[str, object] = field(default_factory=dict)
+    harness_integration: str = "shell"
+    harness_integration_config: dict[str, object] = field(default_factory=dict)
 
 
 def _merge_map(target: dict[str, EnvEntry], source: dict[str, EnvEntry]) -> dict[str, EnvEntry]:
@@ -78,14 +77,14 @@ def _resolve(
     """Depth-first, left-to-right resolution.
 
     The public wrapper over :func:`_resolve_walk`: it collapses the
-    walk's running ``(harness | None, config)`` pair onto the dataclass
+    walk's running ``(harness_integration | None, config)`` pair onto the dataclass
     (an undeclared pair becomes the ``shell`` default) and runs the
-    harness's completeness validation once on the MERGED blob, the value
-    no single declaration saw (harness-api-lld section 2).
+    harness integration's completeness validation once on the merged blob, the value
+    no single declaration saw.
     """
-    result, harness, harness_config = _resolve_walk(templates, name, _visiting)
-    result.harness = harness or "shell"
-    result.harness_config = harness_config
+    result, harness_integration, harness_integration_config = _resolve_walk(templates, name, _visiting)
+    result.harness_integration = harness_integration or "shell"
+    result.harness_integration_config = harness_integration_config
     _validate_merged(result)
     return result
 
@@ -95,15 +94,14 @@ def _resolve_walk(
     name: str,
     _visiting: tuple[str, ...] = (),
 ) -> tuple[ResolvedSessionTemplate, str | None, dict[str, object]]:
-    """Depth-first, left-to-right resolution, threading the raw harness
+    """Depth-first, left-to-right resolution, threading the raw harness_integration
     pair alongside the accumulating ``ResolvedSessionTemplate``.
 
-    Returns ``(result, harness | None, harness_config)`` where a ``None``
-    harness means nothing in the lineage declared one (distinct from a
+    Returns ``(result, harness_integration | None, harness_integration_config)`` where a ``None``
+    integration name means nothing in the lineage declared one (distinct from a
     declared ``shell``): keeping that distinction is what lets a
-    harness-silent later parent leave an earlier parent's pair untouched
-    instead of switching the lineage back to ``shell`` (FRD R5's
-    multi-parent divergence). ``description`` / ``env`` merge exactly as
+    selector-silent later parent leave an earlier parent's pair untouched
+    instead of switching the lineage back to ``shell``. ``description`` / ``env`` merge exactly as
     before, independent of the pair.
 
     ``_visiting`` carries the chain of in-progress resolves so cycles
@@ -121,58 +119,64 @@ def _resolve_walk(
 
     tmpl = templates[name]
     result = ResolvedSessionTemplate(name=name)
-    harness: str | None = None
-    harness_config: dict[str, object] = {}
+    harness_integration: str | None = None
+    harness_integration_config: dict[str, object] = {}
     next_visiting = (*_visiting, name)
 
     for parent_name in tmpl.inherits:
-        parent, parent_harness, parent_config = _resolve_walk(templates, parent_name, next_visiting)
+        parent, parent_harness_integration, parent_config = _resolve_walk(templates, parent_name, next_visiting)
         _merge(result, parent)
-        harness, harness_config = _merge_pair(harness, harness_config, parent_harness, parent_config)
+        harness_integration, harness_integration_config = _merge_pair(
+            harness_integration, harness_integration_config, parent_harness_integration, parent_config
+        )
 
     _merge_template(result, tmpl)
-    harness, harness_config = _merge_pair(harness, harness_config, tmpl.harness, tmpl.harness_config)
+    harness_integration, harness_integration_config = _merge_pair(
+        harness_integration, harness_integration_config, tmpl.harness_integration, tmpl.harness_integration_config
+    )
     result.name = name
-    return result, harness, harness_config
+    return result, harness_integration, harness_integration_config
 
 
 def _merge_pair(
-    acc_harness: str | None,
+    acc_harness_integration: str | None,
     acc_config: dict[str, object],
-    child_harness: str | None,
+    child_harness_integration: str | None,
     child_config: dict[str, object] | None,
 ) -> tuple[str | None, dict[str, object]]:
-    """Fold one declared (or resolved) ``(harness, config)`` into the
-    accumulator (FRD R5, harness-api-lld section 9):
+    """Fold one declared (or resolved) ``(harness_integration, config)`` into the
+    accumulator:
 
-    - a child that says nothing about the harness leaves the pair
-      untouched (a ``harness_config`` without a ``harness`` cannot load,
+    - a child that says nothing about the harness integration leaves the pair
+      untouched (a ``harness_integration_config`` without a ``harness_integration`` cannot load,
       so silence is unambiguous);
-    - a child naming a DIFFERENT harness starts from a fresh blob (the
+    - a child naming a DIFFERENT harness integration starts from a fresh blob (the
       parent's blob was addressed to the wrong capability, never leaks);
-    - a child naming the SAME harness merges via that harness's
+    - a child naming the SAME harness integration merges via that integration's
       ``merge_config`` (child-wins per key; ``shell`` unions
       ``required_commands``).
     """
-    if child_harness is None:
-        return acc_harness, acc_config
-    from agentworks.capabilities.harness import harness_for
+    if child_harness_integration is None:
+        return acc_harness_integration, acc_config
+    from agentworks.capabilities.harness_integration import harness_integration_for
 
-    base = acc_config if child_harness == acc_harness else {}
-    merged = harness_for(child_harness).merge_config(base, child_config or {})
-    return child_harness, merged
+    base = acc_config if child_harness_integration == acc_harness_integration else {}
+    merged = harness_integration_for(child_harness_integration).merge_config(base, child_config or {})
+    return child_harness_integration, merged
 
 
 def _validate_merged(resolved: ResolvedSessionTemplate) -> None:
-    """Run the selected harness's completeness validation on the merged
-    blob (harness-api-lld section 2). Both built-ins are shape-only, but
-    the slot is where a future harness's required-field / cross-field
-    rules belong. ``harness_for`` raises a typed ``ConfigError`` on an
+    """Run the selected harness integration's completeness validation on the merged
+    blob. The shipped integrations are shape-only, but
+    the slot is where a future integration's required-field / cross-field
+    rules belong. ``harness_integration_for`` raises a typed ``ConfigError`` on an
     unknown name (defense in depth; typos are normally caught by the
     kind's miss policy at finalize)."""
-    from agentworks.capabilities.harness import harness_for
+    from agentworks.capabilities.harness_integration import harness_integration_for
 
-    harness_for(resolved.harness).validate(f"session-template/{resolved.name}", resolved.harness_config)
+    harness_integration_for(resolved.harness_integration).validate(
+        f"session-template/{resolved.name}", resolved.harness_integration_config
+    )
 
 
 def _merge(target: ResolvedSessionTemplate, source: ResolvedSessionTemplate) -> None:

@@ -35,12 +35,12 @@ def secret_list(
     Values are never resolved.
     """
     from agentworks import output
-    from agentworks.bootstrap import build_registry
+    from agentworks.bootstrap import load_request_registry
     from agentworks.config import load_config
     from agentworks.secrets.inspect import build_secret_table, render_secret_table
 
     config = load_config()
-    registry = build_registry(config)
+    registry = load_request_registry(config)
     table = build_secret_table(config, registry)
     if names_only:
         for row in table.rows:
@@ -71,12 +71,12 @@ def secret_describe(
     names that something references; ``agw secret list`` shows every
     such name).
     """
-    from agentworks.bootstrap import build_registry
+    from agentworks.bootstrap import load_request_registry
     from agentworks.config import load_config
     from agentworks.secrets.inspect import describe_secret, render_secret_description
 
     config = load_config()
-    registry = build_registry(config)
+    registry = load_request_registry(config)
     db = get_db()
     desc = describe_secret(config, registry, name, db=db)
     render_secret_description(desc)

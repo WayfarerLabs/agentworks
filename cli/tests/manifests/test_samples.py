@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -71,7 +72,7 @@ def test_secret_backend_has_no_sample() -> None:
 
 @pytest.mark.parametrize("kind", _capability_kinds())
 def test_capability_kinds_report_no_sample(kind: str) -> None:
-    """Every capability kind `resource kinds` lists (harness,
+    """Every capability kind `resource kinds` lists (harness-integration,
     secret-backend, vm-platform, git-credential-provider) is a valid
     click.Choice value, so it reaches the service layer instead of
     dying as a raw parse error (issue #276). The service layer rejects
@@ -92,8 +93,8 @@ def test_capability_kinds_report_no_sample(kind: str) -> None:
 def test_all_kinds_concatenation_and_unknown_kind() -> None:
     everything = sample_text(all_kinds=True)
     for kind in SAMPLE_KINDS:
-        # Every sample opens with its prose header line.
-        assert f"## kind: {kind} --" in everything
+        # Every sample opens with a semantic kind header; prose punctuation may vary.
+        assert re.search(rf"^## kind: {re.escape(kind)}(?=[:\s])", everything, re.MULTILINE)
     with pytest.raises(ValidationError, match="unknown kind"):
         sample_text("nope")
 
@@ -200,14 +201,14 @@ def test_sample_capability_kind_is_a_clean_cli_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """End-to-end error contract for issue #276: `resource sample
-    harness` exits non-zero with a single clean `Error:` line, no
+    harness-integration` exits non-zero with a single clean `Error:` line, no
     traceback, and (being a domain error, not an unexpected failure)
     leaves error.log untouched. Regression guard against the raw
     click.Choice traceback that used to escape the top-level handler."""
     from agentworks import cli as cli_mod
 
     monkeypatch.setattr("agentworks.config.CONFIG_DIR", tmp_path)
-    monkeypatch.setattr("sys.argv", ["agentworks", "resource", "sample", "harness"])
+    monkeypatch.setattr("sys.argv", ["agentworks", "resource", "sample", "harness-integration"])
     monkeypatch.setenv("AGW_DEBUG", "")
 
     with pytest.raises(SystemExit) as excinfo:
@@ -215,7 +216,7 @@ def test_sample_capability_kind_is_a_clean_cli_error(
 
     assert excinfo.value.code == 1
     err = capsys.readouterr().err
-    assert "'harness' is a capability kind; it has no sample manifest" in err
+    assert "'harness-integration' is a capability kind; it has no sample manifest" in err
     assert "Traceback" not in err
     assert "StopIteration" not in err
     # Domain errors are clean-line, not logged: error.log must not appear.

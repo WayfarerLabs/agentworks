@@ -1,15 +1,15 @@
 """Session-domain node implementations.
 
-The session node HOLDS its harness capability instance and composes it;
-the harness is ``Readiness``-only, never walked. The headline
+The session node HOLDS its harness integration capability instance and composes it;
+the harness integration is ``Readiness``-only, never walked. The headline
 construction contract: the factory passes the SAME agent-node object as
-both the session's dependency edge and the harness's ``target``, one
+both the session's dependency edge and the harness integration's ``target``, one
 object per node, so when the orchestrator flips the agent realized, the
-harness sees it. Two constructions of "the same" agent would leave the
-harness watching an object nobody flips, deferring forever.
+harness integration sees it. Two constructions of "the same" agent would leave the
+harness integration watching an object nobody flips, deferring forever.
 
-The harness owns the four-way readiness fork the operation scope's LEVEL
-makes explicit (``capabilities/harness/base.py``):
+The harness integration owns the four-way readiness fork the operation scope's LEVEL
+makes explicit (``capabilities/harness_integration/base.py``):
 
 - out of scope for the level (a system-scoped doctor scan reaching a
   session): SKIP, legitimately, a no-op;
@@ -21,8 +21,8 @@ makes explicit (``capabilities/harness/base.py``):
   silent skip).
 
 The node is the rich consuming resource of ``capabilities/README.md``:
-its ``preflight`` / ``runup`` fan into the held harness's, and the
-harness's declared config-secret references surface through the node's
+its ``preflight`` / ``runup`` fan into the held harness integration's, and the
+harness integration's declared config-secret references surface through the node's
 ``config_secret_refs`` (the preflight sweep's prediction input), with
 the bare-name ``secret_refs`` union derived from them (empty for the
 built-ins, plumbing present).
@@ -36,7 +36,7 @@ from agentworks.errors import StateError
 
 if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
-    from agentworks.capabilities.harness import Harness
+    from agentworks.capabilities.harness_integration import HarnessIntegration
     from agentworks.config import Config
     from agentworks.db import Database, SessionRow
     from agentworks.orchestration.node import Node
@@ -54,25 +54,25 @@ if TYPE_CHECKING:
 class LiveSessionNode:
     """An existing session, from its DB row: edges to its agent (or
     none in admin mode), workspace, and VM nodes; composes its held
-    harness (whose target, an existing agent, is realized, so the probe
+    harness_integration (whose target, an existing agent, is realized, so the probe
     fires at preflight: the earlier-failure win)."""
 
     def __init__(
         self,
         row: SessionRow,
-        harness: Harness,
+        harness_integration: HarnessIntegration,
         agent: AgentNode | None,
         workspace: WorkspaceNode,
         vm: LiveVMNode,
         *,
-        harness_state: dict[str, object],
+        harness_integration_state: dict[str, object],
     ) -> None:
         self._row = row
-        self._harness = harness
+        self._harness_integration = harness_integration
         self._agent = agent
         self._workspace = workspace
         self._vm = vm
-        self._harness_state = harness_state
+        self._harness_integration_state = harness_integration_state
 
     @property
     def key(self) -> str:
@@ -83,22 +83,22 @@ class LiveSessionNode:
         return self._row
 
     @property
-    def harness(self) -> Harness:
-        """The held harness instance, for the op call sites (``start`` /
+    def harness_integration(self) -> HarnessIntegration:
+        """The held harness_integration instance, for the op call sites (``start`` /
         ``restart``). Readiness is composed through :meth:`preflight` /
         :meth:`runup`; the op surface is driven directly by the
         service-layer operation."""
-        return self._harness
+        return self._harness_integration
 
     @property
-    def harness_state(self) -> dict[str, object]:
-        """The session's FULL ``harness_state`` blob, namespaced by
-        harness name. The held harness's ``state`` is a shared sub-object
-        of this dict (``_harness_for_template`` wires them), so harness
+    def harness_integration_state(self) -> dict[str, object]:
+        """The session's FULL ``harness_integration_state`` blob, namespaced by
+        harness integration name. The held harness integration's ``state`` is a shared sub-object
+        of this dict (``_harness_integration_for_template`` wires them), so harness integration
         mutations during an op are visible here; the manager persists
-        THIS after the op, keeping foreign harnesses' namespaces intact
-        across a template's harness switch."""
-        return self._harness_state
+        THIS after the op, keeping foreign harness integrations' namespaces intact
+        across a template's harness_integration switch."""
+        return self._harness_integration_state
 
     def deps(self) -> tuple[Node, ...]:
         deps: tuple[Node, ...] = (self._workspace, self._vm)
@@ -107,43 +107,43 @@ class LiveSessionNode:
         return deps
 
     def secret_refs(self) -> tuple[str, ...]:
-        return tuple(ref.name for ref in self._harness.config_secret_refs())
+        return tuple(ref.name for ref in self._harness_integration.config_secret_refs())
 
     def config_secret_refs(self) -> tuple[ResourceReference, ...]:
-        # The harness_config secrets, as the harness's declared full
+        # The harness_integration_config secrets, as the harness_integration's declared full
         # references (owner/usage-bearing, sourced to the session
         # template). The preflight sweep predicts resolvability over
         # these; the session itself does not, because how a secret gets
         # a value is the operation's concern and not the session's.
-        return self._harness.config_secret_refs()
+        return self._harness_integration.config_secret_refs()
 
     def preflight(self, ctx: RunContext) -> None:
-        """Fan into the held harness's readiness fork.
+        """Fan into the held harness_integration's readiness fork.
 
         Deliberately NO ``require_declared_refs`` intactness check over
-        the harness refs, unlike the vm-site and git-credential nodes.
+        the harness_integration refs, unlike the vm-site and git-credential nodes.
         The dangling-declaration case that check guards (a disabled
         plugin's session-template, whose referenced secrets the R12
         materialization pass leaves unmaterialized) is refused at every
         factory call site by the drift-guard-pinned
         ``ensure_recipe_enabled`` gate, before a node exists; the
-        sibling ``ensure_harness_enabled`` gate at the same sites
-        refuses the OTHER disabled state (a disabled harness under a
+        sibling ``ensure_harness_integration_enabled`` gate at the same sites
+        refuses the OTHER disabled state (a disabled harness_integration under a
         still-ready template, whose secrets stay materialized and so
         never dangle). The session nodes also thread no registry
         (the R14 gate comments lean on that fact), so the check would
         add a registry edge to guard a state the call-site gates
         already make unreachable.
         """
-        self._harness.preflight(ctx)
+        self._harness_integration.preflight(ctx)
 
     def runup(self, ctx: RunContext) -> None:
-        self._harness.runup(ctx)
+        self._harness_integration.runup(ctx)
 
 
 class PendingSessionNode:
     """The session a create command will make: name chosen up front,
-    edges attached at construction, holding its harness whose ``target``
+    edges attached at construction, holding its harness_integration whose ``target``
     IS the same agent object as the dependency edge (the one-object
     contract this module's docstring pins)."""
 
@@ -152,21 +152,21 @@ class PendingSessionNode:
         db: Database,
         config: Config,
         name: str,
-        harness: Harness,
+        harness_integration: HarnessIntegration,
         agent: AgentNode | None,
         workspace: WorkspaceNode,
         vm: LiveVMNode,
         *,
-        harness_state: dict[str, object],
+        harness_integration_state: dict[str, object],
     ) -> None:
         self._db = db
         self._config = config
         self._name = name
-        self._harness = harness
+        self._harness_integration = harness_integration
         self._agent = agent
         self._workspace = workspace
         self._vm = vm
-        self._harness_state = harness_state
+        self._harness_integration_state = harness_integration_state
         self._realized = False
 
     @property
@@ -178,22 +178,22 @@ class PendingSessionNode:
         return self._name
 
     @property
-    def harness(self) -> Harness:
-        """The held harness instance, for the op call sites (``start`` /
+    def harness_integration(self) -> HarnessIntegration:
+        """The held harness_integration instance, for the op call sites (``start`` /
         ``restart``). Readiness is composed through :meth:`preflight` /
         :meth:`runup`; the op surface is driven directly by the
         service-layer operation."""
-        return self._harness
+        return self._harness_integration
 
     @property
-    def harness_state(self) -> dict[str, object]:
-        """The session's FULL ``harness_state`` blob, namespaced by
-        harness name. The held harness's ``state`` is a shared sub-object
-        of this dict (``_harness_for_template`` wires them), so harness
+    def harness_integration_state(self) -> dict[str, object]:
+        """The session's FULL ``harness_integration_state`` blob, namespaced by
+        harness integration name. The held harness integration's ``state`` is a shared sub-object
+        of this dict (``_harness_integration_for_template`` wires them), so harness integration
         mutations during an op are visible here; the manager persists
-        THIS after the op, keeping foreign harnesses' namespaces intact
-        across a template's harness switch."""
-        return self._harness_state
+        THIS after the op, keeping foreign harness integrations' namespaces intact
+        across a template's harness_integration switch."""
+        return self._harness_integration_state
 
     def deps(self) -> tuple[Node, ...]:
         deps: tuple[Node, ...] = (self._workspace, self._vm)
@@ -202,38 +202,38 @@ class PendingSessionNode:
         return deps
 
     def secret_refs(self) -> tuple[str, ...]:
-        return tuple(ref.name for ref in self._harness.config_secret_refs())
+        return tuple(ref.name for ref in self._harness_integration.config_secret_refs())
 
     def config_secret_refs(self) -> tuple[ResourceReference, ...]:
-        # The harness_config secrets, as the harness's declared full
+        # The harness_integration_config secrets, as the harness_integration's declared full
         # references (owner/usage-bearing, sourced to the session
         # template). The preflight sweep predicts resolvability over
         # these; the session itself does not, because how a secret gets
         # a value is the operation's concern and not the session's.
-        return self._harness.config_secret_refs()
+        return self._harness_integration.config_secret_refs()
 
     def preflight(self, ctx: RunContext) -> None:
-        """Fan into the held harness's readiness fork.
+        """Fan into the held harness_integration's readiness fork.
 
         Deliberately NO ``require_declared_refs`` intactness check over
-        the harness refs, unlike the vm-site and git-credential nodes.
+        the harness_integration refs, unlike the vm-site and git-credential nodes.
         The dangling-declaration case that check guards (a disabled
         plugin's session-template, whose referenced secrets the R12
         materialization pass leaves unmaterialized) is refused at every
         factory call site by the drift-guard-pinned
         ``ensure_recipe_enabled`` gate, before a node exists; the
-        sibling ``ensure_harness_enabled`` gate at the same sites
-        refuses the OTHER disabled state (a disabled harness under a
+        sibling ``ensure_harness_integration_enabled`` gate at the same sites
+        refuses the OTHER disabled state (a disabled harness_integration under a
         still-ready template, whose secrets stay materialized and so
         never dangle). The session nodes also thread no registry
         (the R14 gate comments lean on that fact), so the check would
         add a registry edge to guard a state the call-site gates
         already make unreachable.
         """
-        self._harness.preflight(ctx)
+        self._harness_integration.preflight(ctx)
 
     def runup(self, ctx: RunContext) -> None:
-        self._harness.runup(ctx)
+        self._harness_integration.runup(ctx)
 
     @property
     def realized(self) -> bool:
@@ -302,7 +302,7 @@ class PendingSessionNode:
                 )
 
 
-def _harness_for_template(
+def _harness_integration_for_template(
     template: ResolvedSessionTemplate,
     *,
     session_name: str,
@@ -311,57 +311,57 @@ def _harness_for_template(
     vm: LiveVMNode,
     workspace: WorkspaceNode,
     state: dict[str, object],
-) -> Harness:
-    """Build the harness the session node holds, from the resolved
-    template's ``(harness, harness_config)`` pair.
+) -> HarnessIntegration:
+    """Build the harness integration the session node holds, from the resolved
+    template's ``(harness_integration, harness_integration_config)`` pair.
 
     The resolver has already collapsed an undeclared template to the
     ``shell`` default and merged the config, so this reads
-    ``resolved.harness`` / ``resolved.harness_config`` directly; the
+    ``resolved.harness_integration`` / ``resolved.harness_integration_config`` directly; the
     session-template name is the config owner (error framing), and the
     session's captured identity (``session_name``, ancestors, and the
-    one-object ``target``) is the harness's own, distinct from the
+    one-object ``target``) is the harness integration's own, distinct from the
     operation scope it later reads a LEVEL off of.
 
-    ``state`` is the session's FULL ``harness_state`` blob, namespaced by
-    harness name (``{"claude-code": {...}}``): ``{}`` for a fresh create
+    ``state`` is the session's FULL ``harness_integration_state`` blob, namespaced by
+    harness integration name (``{"claude-code": {...}}``): ``{}`` for a fresh create
     (no row yet), or the stored blob on a live session, so a value minted
     on create (``claude-code``'s session id) survives to restart. This
-    seam is the ONE place the namespacing happens: the harness is
+    seam is the ONE place the namespacing happens: the harness integration is
     constructed with only its own namespace, the SAME dict object that
-    sits in the full blob, so the harness's in-place mutation keeps the
+    sits in the full blob, so the harness integration's in-place mutation keeps the
     blob current and the manager persists the caller-held full blob (the
-    node's ``harness_state``) after the op. A harness never sees another
-    harness's keys, so re-pointing a session's template at a different
-    harness cannot leak one harness's state into another, and the old
-    harness's namespace survives a switch away and back. A stored
+    node's ``harness_integration_state``) after the op. A harness integration never sees another
+    integration's keys, so re-pointing a session's template at a different harness integration
+    cannot leak one integration's state into another, and the old integration's namespace survives
+    a switch away and back. A stored
     namespace value that is not a dict degrades to empty with a warning,
-    mirroring ``db/converters._parse_harness_state``'s malformed-blob
+    mirroring ``db/converters._parse_harness_integration_state``'s malformed-blob
     philosophy (this seam only runs on the create/restart op paths, so
     the warning lands in op output).
     """
-    from agentworks.capabilities.harness import harness_for
+    from agentworks.capabilities.harness_integration import harness_integration_for
 
-    harness_cls = harness_for(template.harness)
-    # Compatibility (pre-namespacing harness_state): DELETE on the next
+    harness_integration_cls = harness_integration_for(template.harness_integration)
+    # Compatibility (pre-namespacing harness_integration_state): DELETE on the next
     # major release. Rows written before the blob was namespaced carry
     # ``claude-code``'s keys at the top level; the hook adopts them into
-    # that harness's namespace ahead of the split below.
-    harness_cls.hoist_legacy_state(state)
-    raw_namespace = state.get(harness_cls.name)
-    if harness_cls.name in state and not isinstance(raw_namespace, dict):
+    # that harness integration's namespace ahead of the split below.
+    harness_integration_cls.hoist_legacy_state(state)
+    raw_namespace = state.get(harness_integration_cls.name)
+    if harness_integration_cls.name in state and not isinstance(raw_namespace, dict):
         from agentworks import output
 
         output.warn(
-            f"session '{session_name}': ignoring malformed harness_state "
-            f"namespace {harness_cls.name!r} (expected a JSON object, got "
+            f"session '{session_name}': ignoring malformed harness_integration_state "
+            f"namespace {harness_integration_cls.name!r} (expected a JSON object, got "
             f"{type(raw_namespace).__name__}); treating it as empty."
         )
     namespace: dict[str, object] = raw_namespace if isinstance(raw_namespace, dict) else {}
-    state[harness_cls.name] = namespace
-    return harness_cls(
+    state[harness_integration_cls.name] = namespace
+    return harness_integration_cls(
         template.name,
-        template.harness_config,
+        template.harness_integration_config,
         session_name=session_name,
         vm_name=vm.row.name,
         workspace_name=workspace.name,
@@ -387,31 +387,42 @@ def pending_session_node(
 
     ``agent`` (or ``admin=True``) is the launch identity: the SAME
     object is wired as the session's dependency edge AND as the held
-    harness's ``target``, by construction, so the harness observes the
+    harness integration's ``target``, by construction, so the harness integration observes the
     orchestrator's ``mark_realized`` flip. Exactly one of ``agent`` /
     ``admin`` must be given (the session-scope invariant).
 
-    HARNESS ENABLEMENT GATE (R14): this factory threads no registry, so it
-    cannot check whether the template's harness is a disabled plugin. Every
-    caller MUST call ``ensure_harness_enabled(registry, template.harness)``
-    first; the drift guard ``test_every_session_factory_caller_gates_the_harness``
+    HARNESS INTEGRATION ENABLEMENT GATE: this factory threads no registry, so it
+    cannot check whether the template's harness integration is a disabled plugin. Every
+    caller MUST call ``ensure_harness_integration_enabled(registry, template.harness_integration)``
+    first; the drift guard ``test_every_session_factory_caller_gates_the_harness_integration``
     pins that a future caller cannot silently bypass it."""
     if (agent is not None) == admin:
         raise StateError(
             f"session '{name}': exactly one of an agent node or "
             f"admin=True must be given (the session runs as one of them)."
         )
-    harness_state: dict[str, object] = {}  # fresh create: no row yet, so the harness starts blank
-    harness = _harness_for_template(
+    harness_integration_state: dict[
+        str, object
+    ] = {}  # fresh create: no row yet, so the harness integration starts blank
+    harness_integration = _harness_integration_for_template(
         template,
         session_name=name,
         target=agent,
         admin=admin,
         vm=vm,
         workspace=workspace,
-        state=harness_state,
+        state=harness_integration_state,
     )
-    return PendingSessionNode(db, config, name, harness, agent, workspace, vm, harness_state=harness_state)
+    return PendingSessionNode(
+        db,
+        config,
+        name,
+        harness_integration,
+        agent,
+        workspace,
+        vm,
+        harness_integration_state=harness_integration_state,
+    )
 
 
 def live_session_node(
@@ -432,10 +443,10 @@ def live_session_node(
     admin user instead of raising). The factory cross-checks both
     directions and raises on mismatch.
 
-    HARNESS ENABLEMENT GATE (R14): this factory threads no registry, so it
-    cannot check whether the template's harness is a disabled plugin. Every
-    caller MUST call ``ensure_harness_enabled(registry, template.harness)``
-    first; the drift guard ``test_every_session_factory_caller_gates_the_harness``
+    HARNESS INTEGRATION ENABLEMENT GATE: this factory threads no registry, so it
+    cannot check whether the template's harness integration is a disabled plugin. Every
+    caller MUST call ``ensure_harness_integration_enabled(registry, template.harness_integration)``
+    first; the drift guard ``test_every_session_factory_caller_gates_the_harness_integration``
     pins that a future caller cannot silently bypass it."""
     if row.agent_name is not None:
         if agent is None:
@@ -455,14 +466,21 @@ def live_session_node(
         raise StateError(
             f"session '{row.name}' is an admin session but an agent node ('{agent.name}') was handed to the factory."
         )
-    harness_state = row.harness_state  # the stored full blob: a create-minted id survives here
-    harness = _harness_for_template(
+    harness_integration_state = row.harness_integration_state  # stored full blob; a create-minted id survives
+    harness_integration = _harness_integration_for_template(
         template,
         session_name=row.name,
         target=agent,
         admin=row.agent_name is None,
         vm=vm,
         workspace=workspace,
-        state=harness_state,
+        state=harness_integration_state,
     )
-    return LiveSessionNode(row, harness, agent, workspace, vm, harness_state=harness_state)
+    return LiveSessionNode(
+        row,
+        harness_integration,
+        agent,
+        workspace,
+        vm,
+        harness_integration_state=harness_integration_state,
+    )

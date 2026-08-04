@@ -12,16 +12,22 @@ if TYPE_CHECKING:
 def render_preview(plan: MigrationPlan) -> list[str]:
     """The confirmation-prompt summary: what would be written and edited."""
     lines: list[str] = []
-    if plan.units:
-        lines.append(f"Migrating {len(plan.units)} resource(s) from config.toml:")
-        for unit in plan.units:
+    toml_units = [unit for unit in plan.units if unit.source == "toml"]
+    if toml_units:
+        lines.append(f"Migrating {len(toml_units)} resource(s) from config.toml:")
+        for unit in toml_units:
             target = plan.targets.get((unit.kind, unit.name), "?")
-            lines.append(f"  {unit.kind}/{unit.name} -> {target}")
+            lines.append(f"  {unit.kind}/{unit.name} to {target}")
         for write in plan.writes:
             action = "append to" if write.exists else "create"
             lines.append(f"  {action} {write.path} ({len(write.documents)} document(s))")
         verb = "commented out in" if plan.toml_mode == "comment" else "deleted from"
         lines.append(f"  migrated sections will be {verb} {plan.config_path}")
+    if plan.yaml_rewrites:
+        selector_count = sum(len(rewrite.resources) for rewrite in plan.yaml_rewrites)
+        lines.append(f"Canonicalizing {selector_count} YAML session-template selector(s):")
+        for rewrite in plan.yaml_rewrites:
+            lines.append(f"  rewrite {rewrite.path}: {', '.join(rewrite.resources)}")
     if plan.drops_secret_backends:
         lines.append(
             "  deprecated [secret_backends.*] sections will be dropped "
@@ -48,6 +54,18 @@ def render_dry_run(plan: MigrationPlan, *, full: bool = False) -> list[str]:
             if index or write.exists:
                 lines.append("---")
             lines.extend(document.rstrip("\n").splitlines())
+    for rewrite in plan.yaml_rewrites:
+        lines.append("")
+        lines.append(f"YAML changes: {rewrite.path}")
+        lines.extend(
+            difflib.unified_diff(
+                rewrite.old_bytes.decode("utf-8").splitlines(),
+                rewrite.new_text.splitlines(),
+                fromfile=f"{rewrite.path} (current)",
+                tofile=f"{rewrite.path} (after)",
+                lineterm="",
+            )
+        )
     diff = list(
         difflib.unified_diff(
             plan.old_toml_text.splitlines(),

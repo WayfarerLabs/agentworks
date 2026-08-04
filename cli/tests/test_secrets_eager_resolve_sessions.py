@@ -46,8 +46,8 @@ def test_session_create_eager_resolve_fires_before_db_insert(
 
     class _Tmpl:
         name = "default"
-        harness = "shell"
-        harness_config: dict[str, object] = {}
+        harness_integration = "shell"
+        harness_integration_config: dict[str, object] = {}
         env: dict[str, str] = {}
 
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: _Tmpl())
@@ -107,8 +107,8 @@ def test_session_create_calls_resolve_with_session_target(
 
     class _Tmpl:
         name = "default"
-        harness = "shell"
-        harness_config: dict[str, object] = {}
+        harness_integration = "shell"
+        harness_integration_config: dict[str, object] = {}
         env: dict[str, str] = {}
 
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: _Tmpl())
@@ -256,8 +256,8 @@ def test_session_restart_eager_resolve_fires_before_kill(
 
     class _Tmpl:
         name = "default"
-        harness = "shell"
-        harness_config: dict[str, object] = {}
+        harness_integration = "shell"
+        harness_integration_config: dict[str, object] = {}
         env: dict[str, str] = {}
 
     monkeypatch.setattr(session_manager, "_resolve_template", lambda *a, **k: _Tmpl())

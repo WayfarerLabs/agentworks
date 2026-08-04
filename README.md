@@ -6,15 +6,15 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 A comprehensive toolkit for managing agentic workloads: VMs, workspaces, agents, sessions,
-harnesses, secrets/config, and the tools that glue them together. Built around the conviction that
-autonomy, security, and control are not mutually exclusive: a good platform makes it possible and
-straightforward to have it all.
+harnesses, secrets/config, and the supporting systems that glue them together. Built around the
+conviction that autonomy, security, and control are not mutually exclusive: a good platform makes it
+possible and straightforward to have it all.
 
-Run a fleet from one workstation. **Durable agents** keep their own tools, git credentials, and
-accumulated tool state (a coding assistant's context and memory, interactive logins), each as an
-isolated Linux user on a VM you control. **Disposable sessions** spin up against them for a single
-piece of work and are thrown away when done. One `agw` CLI drives all of it, declaratively, over an
-SSH-on-Tailscale control plane.
+Run a fleet from one workstation. **Durable agents** keep their own software, git credentials, and
+accumulated application state (a coding assistant's context and memory, interactive logins), each as
+an isolated Linux user on a VM you control. **Disposable sessions** spin up against them for a
+single piece of work and are thrown away when done. One `agw` CLI drives all of it, declaratively,
+over an SSH-on-Tailscale control plane.
 
 ## Architecture at a Glance
 
@@ -34,12 +34,13 @@ workloads:
   capabilities and access.
 - Agentic workloads (simple shell, Claude Code, Codex, etc.) can be run as **sessions** via tmux,
   which provides for both persistence and the ability to attach to and detach as needed.
-- Each session launches a **harness** that knows how to run a particular tool (e.g. a Claude Code or
-  Codex instance, or just a plain login shell). The harness owns start/restart semantics (e.g.
-  resuming a Claude Code or Codex conversation right where it left off) as well as validating the
-  target environment for its tooling. Additionally, since each harness is tightly coupled to its
-  target tooling, it is the perfect place to grow further tool-specific functionality
-  (authentication handling, specific configuration, deeper integrations, ...).
+- Each session invokes a **harness integration** that knows how to run a particular workload (e.g. a
+  full agentic harness such as Claude Code, Codex, etc. or just a plain login shell). The harness
+  integration owns start/restart semantics (e.g. resuming a Claude Code or Codex conversation right
+  where it left off) as well as validating the target environment for its workload. Additionally,
+  since each harness integration is built for a specific workload, it is the perfect place to grow
+  further harness-specific functionality (user and workspace setup, authentication handling,
+  specific configuration, deeper integrations, ...).
 - Sessions can be organized into **named consoles**: curated tmux views that organize active
   sessions along with optional extra shell panes.
 - Both **config** and **secrets** (together with **secret backends**) can be managed and securely
@@ -49,11 +50,11 @@ And all of this is managed via a **declarative, idempotent configuration system*
 for operators to define, evolve, and scale their infrastructure over time.
 
 Zooming in on a single VM, the diagram below shows how these primitives fit together inside one
-machine: sessions (each running a harness and drawing on injected secrets/config) run as isolated
-Linux users, work in workspaces, and can be grouped into named consoles, all reachable over the
-tailnet.
+machine: sessions invoke a harness integration to launch a harness or shell workload inside tmux,
+with injected secrets/config. Sessions run as dedicated Linux users, work in workspaces, and can be
+grouped into named consoles, all reachable over the tailnet.
 
-![Agentworks VM internals: an Agentworks VM at a vm-site runs sessions, each pairing a tmux session and harness with injected secrets and config. Sessions run as fully isolated Linux users (the admin user or an agent user) and work inside workspaces backed by git repos. Any number of sessions can be organized into named consoles, and a tailnet NIC connects the VM directly to the tailnet regardless of platform. The VM sits on a configured platform instance, alongside other VMs in the site and other vm-sites.](docs/images/agw-vm-internals.png)
+![Agentworks VM internals: an Agentworks VM at a vm-site runs sessions, each invoking a harness integration that launches a harness or shell workload inside tmux, complete with injected secrets and config. Sessions run as dedicated Linux users (the admin user or an agent user) and work inside workspaces backed by git repos. Any number of sessions can be organized into named consoles, and a tailnet NIC connects the VM directly to the tailnet regardless of platform. The VM sits on a configured platform instance, alongside other VMs in the site and other vm-sites.](docs/images/agw-vm-internals.png)
 
 ## Getting Started
 
@@ -77,7 +78,7 @@ stand up a VM and drive your first session:
 ```bash
 agw config init        # writes ~/.config/agentworks/config.toml
 agw config edit        # fill in required fields (at minimum, your operator SSH keys, plus any plugins you need)
-agw doctor             # sanity-check tools, Tailscale, config, and the local DB
+agw doctor             # sanity-check dependencies, Tailscale, config, and the local DB
                        # note that you must have at least one active vm-site to create a VM
                        # follow hints and/or enable plugins to address any issues
 
@@ -110,18 +111,19 @@ work?" Agentworks sits solidly in the virtual machine camp. The reasoning is sim
 seal a good developer inside a single locked-down container and expect their best work. A capable
 agent is no different. Containers and other less-than-full-machine primitives might work for basic
 development but, just like with human devs, the more you expect, the more friction this introduces:
-no system services, no room to install a real toolchain or spin up containers of their own, no
-ability to collaborate with other users, etc.
+no system services, no room to install a real development environment or spin up containers of their
+own, no ability to collaborate with other users, etc.
 
 Agentworks gives workloads a **shared, full-featured Linux VM**, complete with the whole tapestry
-that a full machine entails: massive libraries of standard tools, daemonized services, the ability
-to run containers when needed, and genuine multi-user collaboration between agents. Underlying
-platforms that support nested virtualization can run nested VMs too. On the security side, this
-choice taps into decades of multi-user Linux development and experience. While the VM itself
-provides a strong isolation boundary, further isolation between workloads is possible using the
-battle-tested Linux primitives of users, groups, and permissioned filesystem subtrees, all mapped to
-the concepts described below, thus allowing many workloads to securely share a single VM. For
-additional reasoning on the VM choice, see [ADR 0001](docs/adrs/0001-vm-based-infrastructure.md).
+that a full machine entails: massive libraries of standard software, daemonized services, the
+ability to run containers when needed, and genuine multi-user collaboration between agents.
+Underlying platforms that support nested virtualization can run nested VMs too. On the security
+side, this choice taps into decades of multi-user Linux development and experience. While the VM
+itself provides a strong isolation boundary, further isolation between workloads is possible using
+the battle-tested Linux primitives of users, groups, and permissioned filesystem subtrees, all
+mapped to the concepts described below, thus allowing many workloads to securely share a single VM.
+For additional reasoning on the VM choice, see
+[ADR 0001](docs/adrs/0001-vm-based-infrastructure.md).
 
 And to support the [consistency principle](docs/why-agentworks.md#consistency), Agentworks demands
 that every VM uses the same base OS (Debian Bookworm), the same admin user setup, and the same
@@ -137,8 +139,9 @@ operators to evolve their VMs over time without having to tear them down and sta
 
 A workspace is the **project scope**: a root directory, optionally cloned from a git repository,
 mapped to a Linux group whose permissions and ACLs give every member collaborative access.
-Workspace-level configuration (e.g. Claude Code's project settings) shapes how tools behave inside
-it. Any number of workspaces can map to the same repository; each is a full independent clone.
+Workspace-level configuration (e.g. Claude Code's project settings) shapes how harnesses behave
+inside it. Any number of workspaces can map to the same repository; each is a full independent
+clone.
 
 ### Agents - The Actor
 
@@ -151,18 +154,19 @@ lifting when a stronger one is needed. Agents are mapped to workspaces (explicit
 implicitly via sessions), and that mapping drives the group and filesystem permissions that bound
 what they can reach.
 
-### Sessions and Harnesses - The Workloads
+### Sessions and Harness Integrations - The Workloads
 
-A **session** runs a specific **harness** as an agent user (or the admin user) in a workspace on a
-VM. The session is the outer wrapper (the tmux session, config/secret specifications); the harness
-is the piece that knows how to run a particular tool (a Claude Code instance, or just a plain login
-shell), owning start/restart semantics and checking the tool's executables are present. A session
-template selects a harness with a tagged table (e.g. `harness: {name: claude-code}`); a template
-that names none gets the built-in `shell` harness, which just runs a login shell. Because harnesses
-are a distinct extension layer, they can integrate tightly with their target tool. A unique name,
-persistent tmux session, and harness-specific resume let the operator run any number of concurrent
-workloads and attach, detach, stop, restart, and delete them at will. Whatever the harness, tmux
-always owns the pane and its tty; the harness only decides what runs inside it.
+A **session** runs an agentic workload in a persistent tmux session as a target user (agent or
+admin) in a workspace on a VM. Every session invokes a **harness integration**: Agentworks code that
+knows how to launch and resume a particular **agentic harness** (e.g. Claude Code or Codex) or a
+plain shell, and that checks whether the target environment can support the workload. A unique name,
+persistent tmux session, and integration-specific resume semantics let the operator run any number
+of concurrent workloads and attach, detach, stop, restart, create, and delete them at will. Tmux
+always owns the pane and its tty; the harness integration only decides what runs inside it.
+
+Session templates make workload configuration reusable and predictable. Because the harness
+integration is a distinct extension layer, it is the natural place for optimized, harness-specific
+logic and for adding support for new harnesses over time.
 
 ### Named Consoles - Organizing Active Work
 
@@ -174,6 +178,25 @@ owning them: a session can appear in any number of consoles (or none), and addin
 never affects the session itself, so you can slice the same pool of running work into whatever
 task-focused views make sense (one per feature, incident, or review). See
 [Named Consoles](cli/README.md#named-consoles) in the CLI reference for the command surface.
+
+### Agentworks Is Not a Harness
+
+One point is absolutely critical to understanding the Agentworks model: **Agentworks is not a
+harness**. There are many incredible options for running agentic workloads, from first-party
+harnesses (Anthropic's Claude Code, OpenAI's Codex, etc.) to independent alternatives (OpenCode,
+Aider, etc.). Agentworks does not try to be any of those. Rather, it strives to be the platform that
+makes it easy to run them, and to run them securely, consistently, and at scale. A harness
+integration is the Agentworks layer that makes a particular harness easy to run. That's as far as we
+want to go.
+
+Harnesses are getting better and better every day. Our belief is that, before long, custom harnesses
+simply won't be able to compete with vanilla harnesses running the latest models. Context will
+always matter, but the harness minutiae will matter less and less (and even get in the way) as the
+models get better and better at autonomous operation.
+
+In that world, though, standing up and managing least-privilege environments for those agents and
+harnesses will become increasingly important. Agentworks is designed to solve that problem, and to
+do so in a way that is consistent, secure, and scalable.
 
 ## Why It's Built This Way
 
@@ -187,10 +210,10 @@ A few convictions shape the whole design. The short version:
   users, groups, and filesystem permissions, graduated privilege between cooperating agents (a
   low-privilege researcher handing artifacts to a privileged actor) is an everyday pattern, not a
   special case.
-- **Durable agents, disposable sessions.** A durable agent is set up once and accrues the state a
-  template cannot reproduce (tool context, memory, interactive logins); disposable sessions run
-  against it and are thrown away. The agent carries the identity and its accumulated state; the
-  session is just the unit of work.
+- **Support for differing levels of ephemerality.** Different operators have different needs for how
+  long-lived their workloads and related resources are. Robust, declarative templates facilitate
+  rapid setup and scale, while idempotent reinitialization and reuse of resources across workloads
+  allow durable resources such as agents to accumulate state and context.
 - **Declarative and idempotent.** Every layer is templated and declared, and the long-lived
   resources (VMs and agents) can be reinitialized to pick up changes, so environments stay
   consistent and evolve predictably rather than drifting.
@@ -198,18 +221,18 @@ A few convictions shape the whole design. The short version:
 The full reasoning, including the threat model Agentworks is designed against and how it bounds
 blast radius (and what it deliberately does not do), is in [Why Agentworks](docs/why-agentworks.md).
 
-## Tightly Integrated Tools
+## Tightly Integrated Software
 
-In the spirit of opinionated consistency, Agentworks tightly integrates a small set of excellent
-tools rather than abstracting over interchangeable alternatives. Users are encouraged to embrace
-them rather than work around them.
+In the spirit of opinionated consistency, Agentworks standardizes on a small set of excellent
+software rather than abstracting over interchangeable alternatives. Users are encouraged to embrace
+these choices rather than work around them.
 
 - **SSH** is the control plane after provisioning: initialization, agent and session management,
   file transfer, and command execution. Provisioning uses the platform's native transport (Lima
   shell, SSH over a scoped Azure or EC2 public route, WSL2 exec, or Proxmox guest agent). The
   operator's key (configured in `[operator]`) is deployed during provisioning and is the sole SSH
   authentication mechanism thereafter. Once Tailscale is joined, routine access goes over the
-  tailnet, and `~/.ssh/config` entries are managed automatically so standard tools (scp, ssh, VS
+  tailnet, and `~/.ssh/config` entries are managed automatically so standard clients (scp, ssh, VS
   Code Remote) work seamlessly.
 - **[Tailscale](https://tailscale.com/)** is the network fabric. VMs join a tailnet during
   provisioning and routine SSH access rides it. Azure and EC2 temporarily open TCP/22 on their
@@ -224,9 +247,9 @@ them rather than work around them.
   isolation), and consoles layer over them for multitasking. See
   [tmux Architecture](cli/README.md#tmux-architecture) for the full picture.
 
-A few other tools are integrated but not fundamental: **Git** (workspace templates around
+A few other integrations are useful but not fundamental: **Git** (workspace templates around
 repositories, plus scoped git credential management for GitHub, Azure DevOps, and more), **VS Code**
-(auto-generated Remote - SSH workspaces), **[Mise en Place](https://mise.jdx.dev/)** (tool
+(auto-generated Remote - SSH workspaces), **[Mise en Place](https://mise.jdx.dev/)** (software
 installation with checksum validation), and
 **[dotfiles](https://www.datacamp.com/tutorial/dotfiles)** (consistent shell/editor setup for the
 admin user and agents).

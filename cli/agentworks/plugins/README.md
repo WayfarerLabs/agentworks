@@ -3,9 +3,9 @@
 A **system plugin** bundles capability implementations (and, optionally, resource manifests) that
 ship with agentworks but are separable and opt-in. A plugin is not a resource kind and never
 publishes a new kind: it contributes implementations of the four existing capability kinds
-(`vm-platform`, `harness`, `git-credential-provider`, `secret-backend`) and, optionally, declarable
-resources bundled as YAML manifests. A plugin is an **origin** (`system-plugin`), the fourth
-alongside `operator-declared`, `built-in`, and `auto-declared`.
+(`vm-platform`, `harness-integration`, `git-credential-provider`, `secret-backend`) and, optionally,
+declarable resources bundled as YAML manifests. A plugin is an **origin** (`system-plugin`), the
+fourth alongside `operator-declared`, `built-in`, and `auto-declared`.
 
 This document is for authoring a system plugin. For the operator-facing model (how origins and the
 enablement axis read on the surfaces) see `docs/guides/resources.md`; for the decision record see
@@ -115,7 +115,8 @@ from the soft warn-on-unknown-key convention other config sections use; see
 A plugin contributes implementations of existing capability kinds only:
 
 - **`vm-platform`**: a backend that runs VMs (paired with a `vm-site` resource's config).
-- **`harness`**: what a session runs (paired with a `session-template`'s config).
+- **`harness-integration`**: how a session runs its harness or shell workload (paired with a
+  `session-template`'s config).
 - **`git-credential-provider`**: how a git token is obtained and served.
 - **`secret-backend`**: where a secret's value is read from.
 

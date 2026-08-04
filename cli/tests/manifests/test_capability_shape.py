@@ -1,12 +1,11 @@
 """The tagged capability-config shape (declarative-schema pre-support).
 
-The three hosting surfaces (vm-site's platform, git-credential's
-provider, session-template's harness) accept the capability as ONE
-tagged table whose ``name`` key selects it and whose remaining keys are
-its config. The old sibling shape (naming string plus ``*_config``
-table) still loads identically but is deprecated: its usage aggregates
-into ONE ``ManifestSet.deprecation_issues`` warning. Mixing the shapes
-on one resource is ambiguous and errors.
+The two stable hosting surfaces (vm-site's platform and git-credential's
+provider) accept the capability as ONE tagged table whose ``name`` key
+selects it and whose remaining keys are its config. Session templates use
+their distinct ``harness_integration`` selector. Old forms still load
+identically but record deprecation facts; mixing old and canonical forms
+on one resource is a hard error.
 """
 
 from __future__ import annotations
@@ -93,7 +92,7 @@ _OLD_NEW_PAIRS = [
         metadata:
           name: htop
         spec:
-          harness:
+          harness_integration:
             name: shell
             command: htop
             required_commands: [htop]
@@ -128,8 +127,12 @@ def test_old_shape_warns_and_new_shape_does_not(
     tmp_path: Path, kind: str, name: str, old_doc: str, new_doc: str
 ) -> None:
     old = _load_one(tmp_path, "old", old_doc)
-    assert old.deprecated_shape_resources == (f"{kind}/{name}",)
-    assert len(old.deprecation_issues) == 1
+    if kind == "session-template":
+        assert old.deprecated_harness_selectors == (f"{kind}/{name}",)
+        assert not old.deprecation_issues
+    else:
+        assert old.deprecated_shape_resources == (f"{kind}/{name}",)
+        assert len(old.deprecation_issues) == 1
     # Deprecation rides its own channel, not the issue channel (which
     # bundles treat as fatal and doctor renders as generic warnings).
     assert not old.issues
@@ -137,6 +140,7 @@ def test_old_shape_warns_and_new_shape_does_not(
     new = _load_one(tmp_path, "new", new_doc)
     assert not new.deprecation_issues
     assert not new.deprecated_shape_resources
+    assert not new.deprecated_harness_selectors
     assert not new.issues
 
 
@@ -149,8 +153,8 @@ def test_old_shape_warning_aggregates_once_and_names_resources(tmp_path: Path) -
     assert manifests.deprecated_shape_resources == (
         "vm-site/gpu-box",
         "git-credential/ado",
-        "session-template/htop",
     )
+    assert manifests.deprecated_harness_selectors == ("session-template/htop",)
     (message,) = manifests.deprecation_issues
     for token in manifests.deprecated_shape_resources:
         assert token in message
@@ -175,6 +179,141 @@ def test_old_string_without_sibling_config_counts_as_old_shape(tmp_path: Path) -
         """,
     )
     assert manifests.deprecated_shape_resources == ("vm-site/bare",)
+
+
+def test_session_template_canonical_selector_is_not_a_capability_shape_deprecation(tmp_path: Path) -> None:
+    manifests = _load_one(
+        tmp_path,
+        "canonical",
+        """
+        apiVersion: agentworks/v1
+        kind: session-template
+        metadata:
+          name: htop
+        spec:
+          harness_integration:
+            name: shell
+            command: htop
+        """,
+    )
+    (entry,) = manifests.entries
+    assert entry.resource.harness_integration == "shell"
+    assert entry.resource.harness_integration_config == {"command": "htop"}
+    assert not manifests.deprecated_harness_selectors
+    assert not manifests.deprecation_issues
+
+
+def test_legacy_session_harness_config_without_selector_is_rejected(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="spec.harness_config needs a spec.harness selector"):
+        _load_one(
+            tmp_path,
+            "ownerless-config",
+            """
+            apiVersion: agentworks/v1
+            kind: session-template
+            metadata:
+              name: htop
+            spec:
+              harness_config:
+                command: htop
+            """,
+        )
+
+
+def test_legacy_session_harness_empty_scalar_is_rejected(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="spec.harness must be a non-empty string or tagged table"):
+        _load_one(
+            tmp_path,
+            "empty-selector",
+            """
+            apiVersion: agentworks/v1
+            kind: session-template
+            metadata:
+              name: htop
+            spec:
+              harness: ""
+            """,
+        )
+
+
+def test_legacy_session_harness_non_string_scalar_is_rejected(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="spec.harness must be a non-empty string or tagged table"):
+        _load_one(
+            tmp_path,
+            "non-string-selector",
+            """
+            apiVersion: agentworks/v1
+            kind: session-template
+            metadata:
+              name: htop
+            spec:
+              harness: 42
+            """,
+        )
+
+
+def test_legacy_session_harness_valid_scalar_normalizes(tmp_path: Path) -> None:
+    manifests = _load_one(
+        tmp_path,
+        "valid-selector",
+        """
+        apiVersion: agentworks/v1
+        kind: session-template
+        metadata:
+          name: htop
+        spec:
+          harness: shell
+        """,
+    )
+    (entry,) = manifests.entries
+    assert entry.resource.harness_integration == "shell"
+    assert entry.resource.harness_integration_config is None
+    assert manifests.deprecated_harness_selectors == ("session-template/htop",)
+
+
+def test_session_template_old_and_canonical_selectors_cannot_mix(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="old and new harness selector/config fields cannot be mixed"):
+        _load_one(
+            tmp_path,
+            "mixed-selector",
+            """
+            apiVersion: agentworks/v1
+            kind: session-template
+            metadata:
+              name: htop
+            spec:
+              harness: shell
+              harness_integration:
+                name: shell
+            """,
+        )
+
+
+@pytest.mark.parametrize(
+    "spec",
+    ["env:\n    TERM: xterm-256color", "inherits: parent"],
+)
+def test_session_template_without_selector_remains_a_valid_default_or_inheriting_template(
+    tmp_path: Path, spec: str
+) -> None:
+    manifests = _load_one(
+        tmp_path,
+        "no-selector",
+        "\n".join(
+            (
+                "apiVersion: agentworks/v1",
+                "kind: session-template",
+                "metadata:",
+                "  name: child",
+                "spec:",
+                *(f"  {line}" for line in spec.splitlines()),
+            )
+        ),
+    )
+    (entry,) = manifests.entries
+    assert entry.resource.harness_integration is None
+    assert entry.resource.harness_integration_config is None
+    assert not manifests.deprecated_harness_selectors
 
 
 @pytest.mark.parametrize(
@@ -208,20 +347,6 @@ def test_old_string_without_sibling_config_counts_as_old_shape(tmp_path: Path) -
                 org: my-org
             """,
             "provider",
-        ),
-        (
-            """
-            apiVersion: agentworks/v1
-            kind: session-template
-            metadata:
-              name: htop
-            spec:
-              harness:
-                name: shell
-              harness_config:
-                command: htop
-            """,
-            "harness",
         ),
     ],
 )
@@ -360,11 +485,36 @@ def test_cli_warns_ambiently_and_no_deprecations_silences(tmp_path: Path, monkey
 
     with_warning = CliRunner().invoke(app, ["resource", "list", "--names-only"])
     assert with_warning.exit_code == 0, with_warning.output
-    assert "deprecated capability config shape in: session-template/htop" in with_warning.output
+    assert "deprecated session-template selector in: session-template/htop" in with_warning.output
 
     silenced = CliRunner().invoke(app, ["--no-deprecations", "resource", "list", "--names-only"])
     assert silenced.exit_code == 0, silenced.output
-    assert "deprecated capability config shape" not in silenced.output
+    assert "deprecated session-template selector" not in silenced.output
+
+
+def test_cli_aggregates_toml_and_yaml_old_selectors_into_one_warning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The warning is a request fact, not one emission per input source."""
+    from typer.testing import CliRunner
+
+    from agentworks import output
+    from agentworks.cli import app
+
+    cfg = _write_config(tmp_path)
+    with cfg.open("a", encoding="utf-8") as handle:
+        handle.write('\n[session_templates.toml-old]\nharness = "shell"\n')
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    (resources / "res.yaml").write_text(dedent(_OLD_SHAPE_MANIFEST))
+    monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
+    monkeypatch.setattr(output, "_suppress_deprecations", False)
+
+    result = CliRunner().invoke(app, ["resource", "list", "--names-only"])
+    assert result.exit_code == 0, result.output
+    assert result.output.count("deprecated session-template selector in:") == 1
+    assert "session-template/toml-old" in result.output
+    assert "session-template/htop" in result.output
 
 
 def test_cli_new_shape_does_not_warn(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -383,7 +533,7 @@ def test_cli_new_shape_does_not_warn(tmp_path: Path, monkeypatch: pytest.MonkeyP
         metadata:
           name: htop
         spec:
-          harness:
+          harness_integration:
             name: shell
             command: htop
         """)
@@ -393,7 +543,7 @@ def test_cli_new_shape_does_not_warn(tmp_path: Path, monkeypatch: pytest.MonkeyP
 
     result = CliRunner().invoke(app, ["resource", "list", "--names-only"])
     assert result.exit_code == 0, result.output
-    assert "deprecated capability config shape" not in result.output
+    assert "deprecated session-template selector" not in result.output
 
 
 def test_doctor_surfaces_deprecated_shape_row(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -409,10 +559,10 @@ def test_doctor_surfaces_deprecated_shape_row(tmp_path: Path, monkeypatch: pytes
 
     g, _, _ = _check_config()
     warns = [(c.name, c.message or "") for c in g.checks if c.status == Status.WARN]
-    ((name, message),) = [w for w in warns if "capability config shape" in w[0]]
-    assert name == "Manifests use the deprecated capability config shape"
+    ((name, message),) = [w for w in warns if "deprecated harness selector" in w[0]]
+    assert name == "Session templates use the deprecated harness selector"
     assert "session-template/htop" in message
-    assert "tagged table" in message
+    assert "harness_integration" in message
 
 
 def test_builtin_bundle_publishes_cleanly() -> None:

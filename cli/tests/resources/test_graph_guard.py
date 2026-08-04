@@ -1,13 +1,11 @@
-"""The R11 anti-bypass guard (registry-readiness-refactor, plan phase 6).
+"""Keep graph consumers on the retained ``DependencyGraph`` query surface.
 
-The refactor forced the whole system onto the retained ``DependencyGraph`` as
-the single access path for structural and derived facts, and removed the bypass
-paths. This guard pins that the four banned patterns cannot silently return: it
-is the enforcement mechanism that keeps the migration from eroding one careless
-commit at a time. Its baseline is the caller inventory's "Guard baseline"
-section (``docs/sdd/2026-07-27-registry-readiness-refactor/caller-inventory.md``);
-the precise banned-pattern definitions and exemptions are LLD (b),
-``finalize-ordering-lld.md`` -> "The anti-bypass guard (R11)".
+The graph is the single access path for structural and derived resource facts.
+These guards prevent four bypass patterns from returning and reintroducing
+competing derivations of edges, readiness, capability availability, or inbound
+references. Each exemption below names the module and the architectural reason
+the otherwise-banned operation is legitimate there, making this file the
+self-contained enforcement contract.
 
 THE FOUR BANNED PATTERNS (each a way to re-derive the graph outside the build):
 
@@ -42,7 +40,7 @@ allow-listed modules are trusted; each is justified inline on its allow-list.
   walks each resource's ``dependencies(context)`` (handing it the build
   context), reads the four capability code registries to stamp each capability
   node's impl (``_impl_for`` / ``build_context``), and calls ``not_ready`` in
-  the fold. The sanctioned builder-reads-registry path (LLD b exemptions).
+  the fold. This is the sanctioned builder-reads-registry path.
 - ``vms/sites.py`` / ``git_credentials/credential.py`` / ``sessions/template.py``:
   edge production. A resource's own ``dependencies(context)`` fetches its
   capability CLASS from the code registry (a host-agnostic type lookup, not an
@@ -105,7 +103,7 @@ _AGENTWORKS_ROOT = Path(agentworks.__file__).parent
 _CAPABILITY_REGISTRIES = frozenset(
     {
         "VM_PLATFORM_REGISTRY",
-        "HARNESS_REGISTRY",
+        "HARNESS_INTEGRATION_REGISTRY",
         "GIT_CREDENTIAL_PROVIDER_REGISTRY",
         "SECRET_BACKEND_REGISTRY",
     }
@@ -253,7 +251,7 @@ _REGISTRY_READ_ALLOWLIST = frozenset(
     {
         # Publishers (own the registry).
         "capabilities/vm_platform/__init__.py",
-        "capabilities/harness/__init__.py",
+        "capabilities/harness_integration/__init__.py",
         "capabilities/git_credential/__init__.py",
         "secrets/backends.py",
         # Plugin framework: the per-kind adapters SEAT plugin impls into the
@@ -359,8 +357,8 @@ def test_pattern4_no_references_field_or_getattr_on_resources() -> None:
 
 
 # -- Positive assertions: the honest path is present (not just the banned path
-#    absent). LLD (b) asks the guard to confirm the migrated consumers read the
-#    graph query API, so a future refactor cannot quietly swap them back.
+#    absent). These confirm migrated consumers read the graph query API, so a
+#    future refactor cannot quietly swap them back.
 
 
 def _read(rel: str) -> str:
@@ -476,7 +474,7 @@ def test_detectors_are_not_vacuous() -> None:
     assert find_registry_reads("cap = vm_platform.VM_PLATFORM_REGISTRY.get(x)") == [1]
     assert find_registry_reads("from x import VM_PLATFORM_REGISTRY as R\ncap = R.get(x)") == [2]
     assert find_registry_reads("from agentworks.x import SECRET_BACKEND_REGISTRY") == []
-    assert find_registry_reads('__all__ = ["HARNESS_REGISTRY"]') == []
+    assert find_registry_reads('__all__ = ["HARNESS_INTEGRATION_REGISTRY"]') == []
     assert find_registry_reads('"""mentions GIT_CREDENTIAL_PROVIDER_REGISTRY in prose."""') == []
 
     # Pattern 3: a not_ready recompute call is caught; a not_ready dict is not.

@@ -74,9 +74,9 @@ def shell_agent(
     # held-active span covers the whole interactive session. The same
     # scope dicts feed both the SecretTarget and compose_env below so
     # the two consumers can't drift.
-    from agentworks.bootstrap import build_registry
+    from agentworks.bootstrap import load_request_registry
 
-    registry = build_registry(config)
+    registry = load_request_registry(config)
     scopes = _mgr._resolve_agent_direct_env_scopes(registry, vm, agent, ws=ws)
 
     with gated_vm_boundary(
@@ -181,9 +181,9 @@ def exec_agent(
     # preflight; the gate's held-active span covers the streamed
     # remote command. The same scope dicts feed both the SecretTarget
     # and compose_env below so the two consumers can't drift.
-    from agentworks.bootstrap import build_registry
+    from agentworks.bootstrap import load_request_registry
 
-    registry = build_registry(config)
+    registry = load_request_registry(config)
     scopes = _mgr._resolve_agent_direct_env_scopes(registry, vm, agent, ws=ws)
 
     with gated_vm_boundary(

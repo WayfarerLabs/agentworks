@@ -49,7 +49,7 @@ def copy_workspace(
     from pathlib import Path
 
     from agentworks.agents.grants import materialize_grant_all_agents, workspace_group
-    from agentworks.bootstrap import build_registry
+    from agentworks.bootstrap import load_request_registry
     from agentworks.ssh import SSHLogger
     from agentworks.transports import SSHTransport, transport
     from agentworks.workspaces.acls import apply_workspace_acls
@@ -85,7 +85,7 @@ def copy_workspace(
                     entity_name=src_ws.vm_name,
                 )
             _guard_vm_status(src_vm)
-            registry = build_registry(config)
+            registry = load_request_registry(config)
             _keepalive_stack.enter_context(
                 gated_vm_boundary(
                     db,

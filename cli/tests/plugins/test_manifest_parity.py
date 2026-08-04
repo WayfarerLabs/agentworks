@@ -18,8 +18,8 @@ from typing import TYPE_CHECKING, cast
 import pytest
 
 from agentworks.agents.template import AgentTemplate
-from agentworks.capabilities.harness import ensure_harness_enabled
-from agentworks.capabilities.harness.base import Harness
+from agentworks.capabilities.harness_integration import ensure_harness_integration_enabled
+from agentworks.capabilities.harness_integration.base import HarnessIntegration
 from agentworks.errors import ConfigError, StateError
 from agentworks.install_commands import UserInstallCommandEntry
 from agentworks.plugins import Plugin, plugin_enablement_source, publish_plugins, seated_plugin
@@ -157,7 +157,7 @@ def test_ensure_recipe_enabled_is_noop_for_implicit_default(monkeypatch: pytest.
     ensure_recipe_enabled(registry, "agent-template", "no-such-template")  # no raise
 
 
-class _FixtureHarness(Harness):
+class _FixtureHarnessIntegration(HarnessIntegration):
     name = "fixture-harness"
     description = "Fixture harness (manifest-parity capability-exclusion test)"
 
@@ -165,35 +165,37 @@ class _FixtureHarness(Harness):
 def test_ensure_recipe_enabled_excludes_capability_nodes(monkeypatch: pytest.MonkeyPatch) -> None:
     # A CAPABILITY node in the closure keeps its own R14 model and is NOT
     # refused by the recipe gate: an ENABLED operator session-template whose
-    # harness edge lands on a DISABLED plugin harness passes ensure_recipe_enabled
-    # (the harness is a capability, excluded from the closure check), while
-    # ensure_harness_enabled WOULD refuse it. This proves the exclusion, not just
+    # harness-integration edge lands on a DISABLED plugin integration and passes
+    # ensure_recipe_enabled (the integration is a capability, excluded from the closure check), while
+    # ensure_harness_integration_enabled WOULD refuse it. This proves the exclusion, not just
     # a named-declarable refusal.
     plugin = Plugin(
         name=PLUGIN,
         description="a capability fixture plugin",
-        capabilities={"harness": (_FixtureHarness,)},
+        capabilities={"harness-integration": (_FixtureHarnessIntegration,)},
     )
     monkeypatch.setattr("agentworks.plugins.SYSTEM_PLUGINS", {plugin.name: plugin})
-    config = _config()  # harness NOT enabled -> disabled capability row
+    config = _config()  # harness integration not enabled, so its capability row is disabled
     with seated_plugin(plugin):
         registry = Registry.empty()
         publish_plugins(registry, config)
         registry.add(
             "session-template",
             "op-session",
-            SessionTemplate(name="op-session", harness="fixture-harness"),
+            SessionTemplate(name="op-session", harness_integration="fixture-harness"),
             _operator(),
         )
         registry.finalize(enablement_sources=[plugin_enablement_source(config)])
 
-        # The disabled harness IS in the enabled template's closure...
-        assert ("harness", "fixture-harness") in registry.graph.reachable_from("session-template", "op-session")
+        # The disabled harness integration IS in the enabled template's closure...
+        assert ("harness-integration", "fixture-harness") in registry.graph.reachable_from(
+            "session-template", "op-session"
+        )
         # ...but the recipe gate does NOT refuse on it (capability exclusion).
         ensure_recipe_enabled(registry, "session-template", "op-session")
-        # The harness keeps its own R14 use-gate, which WOULD refuse it.
+        # The harness integration keeps its own R14 use-gate, which WOULD refuse it.
         with pytest.raises(StateError, match=f"enable plugin `{PLUGIN}`"):
-            ensure_harness_enabled(registry, "fixture-harness")
+            ensure_harness_integration_enabled(registry, "fixture-harness")
 
 
 # -- Operator resource wins over a disabled plugin manifest, both orders ---------
@@ -202,7 +204,7 @@ def test_ensure_recipe_enabled_excludes_capability_nodes(monkeypatch: pytest.Mon
 def test_operator_row_wins_over_disabled_plugin_manifest_both_orders(monkeypatch: pytest.MonkeyPatch) -> None:
     plugin = _plugin()
     monkeypatch.setattr("agentworks.plugins.SYSTEM_PLUGINS", {plugin.name: plugin})
-    config = _config()  # plugin NOT enabled -> its manifest rows are weak/disabled
+    config = _config()  # plugin not enabled, so its manifest rows are weak/disabled
 
     def _op_cmd() -> UserInstallCommandEntry:
         return UserInstallCommandEntry(name="fixture-user-cmd", description="operator", command="echo op")
