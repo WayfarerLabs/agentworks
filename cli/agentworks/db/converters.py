@@ -1,7 +1,7 @@
 """Query-building and row-conversion helpers shared by Database's CRUD
 methods: turning ``sqlite3.Row`` results into the typed row dataclasses,
 and decoding the JSON-encoded columns (``platform_metadata``,
-``harness_state``, ``shells``) those rows carry.
+``harness_integration_state``, ``shells``) those rows carry.
 """
 
 from __future__ import annotations
@@ -119,13 +119,15 @@ def _to_session(row: sqlite3.Row) -> SessionRow:
         socket_path=row["socket_path"],
         pid=row["pid"],
         boot_id=row["boot_id"],
-        harness_state=_parse_harness_state(row["harness_state"], row["name"]),
+        harness_integration_state=_parse_harness_integration_state(row["harness_integration_state"], row["name"]),
     )
 
 
-def _parse_harness_state(raw: str, session_name: str) -> dict[str, object]:
-    """Decode the harness_state JSON column. The blob is harness-owned and
-    opaque to the core, so this only checks it is a JSON object.
+def _parse_harness_integration_state(raw: str, session_name: str) -> dict[str, object]:
+    """Decode the harness_integration_state JSON column.
+
+    The blob is owned by the harness integration and opaque to the core,
+    so this only checks it is a JSON object.
 
     A malformed or non-object blob (a future harness bug, a hand-edited DB)
     degrades to ``{}`` with a warning rather than raising: ``_to_session``
@@ -137,18 +139,20 @@ def _parse_harness_state(raw: str, session_name: str) -> dict[str, object]:
     try:
         decoded = json.loads(raw)
     except json.JSONDecodeError as exc:
-        _warn_bad_harness_state(session_name, f"invalid JSON ({exc})")
+        _warn_bad_harness_integration_state(session_name, f"invalid JSON ({exc})")
         return {}
     if not isinstance(decoded, dict):
-        _warn_bad_harness_state(session_name, f"expected a JSON object, got {type(decoded).__name__}")
+        _warn_bad_harness_integration_state(session_name, f"expected a JSON object, got {type(decoded).__name__}")
         return {}
     return decoded
 
 
-def _warn_bad_harness_state(session_name: str, detail: str) -> None:
+def _warn_bad_harness_integration_state(session_name: str, detail: str) -> None:
     from agentworks import output
 
-    output.warn(f"session '{session_name}': ignoring malformed harness_state ({detail}); treating it as empty.")
+    output.warn(
+        f"session '{session_name}': ignoring malformed harness_integration_state ({detail}); treating it as empty."
+    )
 
 
 def _to_vm_event(row: sqlite3.Row) -> VMEventRow:

@@ -217,6 +217,26 @@ def _migrate_vm_sites(conn: sqlite3.Connection, context: MigrationContext) -> No
             output.warn(f"vm-site '{site}': " + site_manifest_hint(site, vm_host=ssh_host))
 
 
+def _rename_harness_integration_state(conn: sqlite3.Connection, _context: MigrationContext) -> None:
+    """v31: rename the session harness-integration-state column, resumably."""
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(sessions)")}
+    old_column = "harness_state"
+    new_column = "harness_integration_state"
+    old_exists = old_column in columns
+    new_exists = new_column in columns
+
+    if old_exists and not new_exists:
+        conn.execute("ALTER TABLE sessions RENAME COLUMN harness_state TO harness_integration_state")
+        return
+    if new_exists and not old_exists:
+        return
+
+    found = sorted(columns & {old_column, new_column})
+    raise sqlite3.IntegrityError(
+        f"sessions state-column migration expected exactly one of {old_column!r} or {new_column!r}; found {found!r}"
+    )
+
+
 MIGRATIONS: dict[int, str | Callable[[sqlite3.Connection, MigrationContext], None]] = {
     1: """
         CREATE TABLE vm_hosts (
@@ -589,6 +609,11 @@ MIGRATIONS: dict[int, str | Callable[[sqlite3.Connection, MigrationContext], Non
     30: """
         ALTER TABLE vms ADD COLUMN admin_template TEXT;
     """,
+    # -- Rename the persisted capability state for harness-integration. ---
+    # -- The Python step is resumable across the DDL-to-version-record -----
+    # -- crash window: seeing only the new column means the rename already -
+    # -- committed and v31 only needs its schema-version record. -----------
+    31: _rename_harness_integration_state,
 }
 
 LATEST_VERSION = max(MIGRATIONS)

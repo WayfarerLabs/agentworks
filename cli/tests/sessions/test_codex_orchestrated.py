@@ -150,7 +150,7 @@ def _restart_stubs(
     from agentworks.sessions import manager as session_manager
 
     db = _seed_db(tmp_path)
-    db.insert_session("s1", "ws1", "codex", SessionMode.ADMIN, harness_state=stored_state)
+    db.insert_session("s1", "ws1", "codex", SessionMode.ADMIN, harness_integration_state=stored_state)
     db.update_session_pid("s1", 4242, boot_id="boot-x")
 
     captured: dict[str, str] = {}
@@ -204,7 +204,7 @@ def test_create_launches_fresh_with_no_discovery_and_persists_the_anchor(
     assert "discover" not in events  # no anchor stored: no probe at all
     session = db.get_session("s1")
     assert session is not None
-    namespace = session.harness_state["codex"]
+    namespace = session.harness_integration_state["codex"]
     assert isinstance(namespace, dict)
     anchor = namespace.get("discovery_marker")
     assert isinstance(anchor, str)
@@ -249,7 +249,7 @@ def test_restart_adopts_a_discovered_rollout_and_persists_the_id(
     assert events.index("kill") < events.index("discover") < events.index("tmux_create")
     refreshed = db.get_session("s1")
     assert refreshed is not None
-    assert refreshed.harness_state == {"codex": {"session_id": _SID}}  # anchor consumed
+    assert refreshed.harness_integration_state == {"codex": {"session_id": _SID}}  # anchor consumed
     db.close()
 
 
@@ -277,7 +277,7 @@ def test_restart_resumes_the_stored_id_without_rediscovery(tmp_path: Path, monke
     assert events.index("kill") < events.index("detect") < events.index("tmux_create")
     refreshed = db.get_session("s1")
     assert refreshed is not None
-    assert refreshed.harness_state == {"codex": {"session_id": _SID}}  # unchanged
+    assert refreshed.harness_integration_state == {"codex": {"session_id": _SID}}  # unchanged
     db.close()
 
 
@@ -305,7 +305,7 @@ def test_restart_with_a_gone_rollout_drops_the_id_and_launches_fresh(
     assert "archived or gone; starting new session s1" in captured["command"]
     refreshed = db.get_session("s1")
     assert refreshed is not None
-    namespace = refreshed.harness_state["codex"]
+    namespace = refreshed.harness_integration_state["codex"]
     assert isinstance(namespace, dict)
     assert set(namespace) == {"discovery_marker"}  # stale id gone, anchor stored
     anchor = namespace["discovery_marker"]
@@ -344,7 +344,7 @@ def test_codex_and_claude_code_state_coexist_in_one_blob(tmp_path: Path, monkeyp
     assert f"resume {_SID}" in captured["command"]
     refreshed = db.get_session("s1")
     assert refreshed is not None
-    assert refreshed.harness_state == {
+    assert refreshed.harness_integration_state == {
         "claude-code": {"session_id": _CLAUDE_SID},
         "codex": {"session_id": _SID},
     }

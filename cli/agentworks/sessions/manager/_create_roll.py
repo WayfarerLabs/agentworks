@@ -234,7 +234,7 @@ def _start_session_slice(
             # built-in shell harness; ScopedSecrets never delivers).
             # Template-var substitution lifts OUT of the harness and
             # wraps its returned string. The op runs BEFORE the insert
-            # so a freshly minted harness_state (claude-code's session
+            # so a freshly minted harness_integration_state (claude-code's session
             # id) lands with the new row; it does only read-only work
             # (a login-shell string for shell, a find probe for
             # claude-code), so it stays ahead of any tmux mutation.
@@ -266,7 +266,7 @@ def _start_session_slice(
                 created_workspace=pending_workspace is not None,
                 created_agent=pending_agent is not None,
                 socket_path=expected_socket,
-                harness_state=session_node.harness_state,
+                harness_integration_state=session_node.harness_integration_state,
             )
 
             deploy_restricted_config(run_command, history_limit=config.session.history_limit)

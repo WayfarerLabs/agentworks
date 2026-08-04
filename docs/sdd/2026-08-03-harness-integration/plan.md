@@ -28,7 +28,7 @@ plus `./scripts/lint-files.sh` and `./scripts/check-locked-sdds.sh`.
 
 Landing this half-done has no value, so all sub-steps ship together.
 
-- [ ] **1a Persisted state.** Add an idempotent DB migration v31 that inspects the schema and runs
+- [x] **1a Persisted state.** Add an idempotent DB migration v31 that inspects the schema and runs
       `ALTER TABLE sessions RENAME COLUMN harness_state TO harness_integration_state` only when the
       old column remains. Update `db/models.py:158`, the INSERT/UPDATE SQL and related methods in
       `db/database.py`, and `db/converters.py`. Do not edit migration v29. DoD: a migration test

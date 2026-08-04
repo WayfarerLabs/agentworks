@@ -851,7 +851,7 @@ def test_agent_template_node_derives_credential_edges(tmp_path, monkeypatch: pyt
     assert node.secret_refs() == ()  # tokens ride the credential nodes
 
 
-# -- the harness_state namespacing seam --------------------------------------
+# -- the harness_integration_state namespacing seam --------------------------------------
 
 
 def _toy_harness(harness_name: str) -> type:
@@ -936,7 +936,7 @@ def test_a_non_dict_namespace_value_degrades_to_empty_with_a_warning(
     """A stored namespace value that is not a dict (a hand-edited DB, a
     future bug) degrades to empty at the seam WITH a warning naming the
     session and the namespace, mirroring the malformed-blob philosophy of
-    ``db/converters._parse_harness_state``; the replacement dict is the
+    ``db/converters._parse_harness_integration_state``; the replacement dict is the
     live shared object, so mutations still reach the full blob."""
     from agentworks.capabilities.harness import HARNESS_REGISTRY
 
@@ -951,7 +951,7 @@ def test_a_non_dict_namespace_value_degrades_to_empty_with_a_warning(
 
 
 def test_seam_hoists_legacy_claude_state_before_the_split(db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Compatibility (pre-namespacing harness_state): DELETE with the
+    """Compatibility (pre-namespacing harness_integration_state): DELETE with the
     hoist on the next major release. The seam calls the hoist hook with
     the FULL blob before splitting, so a pre-namespacing row's flat
     ``session_id`` reaches the constructed harness as its own namespaced

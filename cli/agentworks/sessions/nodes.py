@@ -65,14 +65,14 @@ class LiveSessionNode:
         workspace: WorkspaceNode,
         vm: LiveVMNode,
         *,
-        harness_state: dict[str, object],
+        harness_integration_state: dict[str, object],
     ) -> None:
         self._row = row
         self._harness = harness
         self._agent = agent
         self._workspace = workspace
         self._vm = vm
-        self._harness_state = harness_state
+        self._harness_integration_state = harness_integration_state
 
     @property
     def key(self) -> str:
@@ -91,14 +91,14 @@ class LiveSessionNode:
         return self._harness
 
     @property
-    def harness_state(self) -> dict[str, object]:
-        """The session's FULL ``harness_state`` blob, namespaced by
+    def harness_integration_state(self) -> dict[str, object]:
+        """The session's FULL ``harness_integration_state`` blob, namespaced by
         harness name. The held harness's ``state`` is a shared sub-object
         of this dict (``_harness_for_template`` wires them), so harness
         mutations during an op are visible here; the manager persists
         THIS after the op, keeping foreign harnesses' namespaces intact
         across a template's harness switch."""
-        return self._harness_state
+        return self._harness_integration_state
 
     def deps(self) -> tuple[Node, ...]:
         deps: tuple[Node, ...] = (self._workspace, self._vm)
@@ -157,7 +157,7 @@ class PendingSessionNode:
         workspace: WorkspaceNode,
         vm: LiveVMNode,
         *,
-        harness_state: dict[str, object],
+        harness_integration_state: dict[str, object],
     ) -> None:
         self._db = db
         self._config = config
@@ -166,7 +166,7 @@ class PendingSessionNode:
         self._agent = agent
         self._workspace = workspace
         self._vm = vm
-        self._harness_state = harness_state
+        self._harness_integration_state = harness_integration_state
         self._realized = False
 
     @property
@@ -186,14 +186,14 @@ class PendingSessionNode:
         return self._harness
 
     @property
-    def harness_state(self) -> dict[str, object]:
-        """The session's FULL ``harness_state`` blob, namespaced by
+    def harness_integration_state(self) -> dict[str, object]:
+        """The session's FULL ``harness_integration_state`` blob, namespaced by
         harness name. The held harness's ``state`` is a shared sub-object
         of this dict (``_harness_for_template`` wires them), so harness
         mutations during an op are visible here; the manager persists
         THIS after the op, keeping foreign harnesses' namespaces intact
         across a template's harness switch."""
-        return self._harness_state
+        return self._harness_integration_state
 
     def deps(self) -> tuple[Node, ...]:
         deps: tuple[Node, ...] = (self._workspace, self._vm)
@@ -323,7 +323,7 @@ def _harness_for_template(
     one-object ``target``) is the harness's own, distinct from the
     operation scope it later reads a LEVEL off of.
 
-    ``state`` is the session's FULL ``harness_state`` blob, namespaced by
+    ``state`` is the session's FULL ``harness_integration_state`` blob, namespaced by
     harness name (``{"claude-code": {...}}``): ``{}`` for a fresh create
     (no row yet), or the stored blob on a live session, so a value minted
     on create (``claude-code``'s session id) survives to restart. This
@@ -331,19 +331,19 @@ def _harness_for_template(
     constructed with only its own namespace, the SAME dict object that
     sits in the full blob, so the harness's in-place mutation keeps the
     blob current and the manager persists the caller-held full blob (the
-    node's ``harness_state``) after the op. A harness never sees another
+    node's ``harness_integration_state``) after the op. A harness never sees another
     harness's keys, so re-pointing a session's template at a different
     harness cannot leak one harness's state into another, and the old
     harness's namespace survives a switch away and back. A stored
     namespace value that is not a dict degrades to empty with a warning,
-    mirroring ``db/converters._parse_harness_state``'s malformed-blob
+    mirroring ``db/converters._parse_harness_integration_state``'s malformed-blob
     philosophy (this seam only runs on the create/restart op paths, so
     the warning lands in op output).
     """
     from agentworks.capabilities.harness import harness_for
 
     harness_cls = harness_for(template.harness)
-    # Compatibility (pre-namespacing harness_state): DELETE on the next
+    # Compatibility (pre-namespacing harness_integration_state): DELETE on the next
     # major release. Rows written before the blob was namespaced carry
     # ``claude-code``'s keys at the top level; the hook adopts them into
     # that harness's namespace ahead of the split below.
@@ -353,7 +353,7 @@ def _harness_for_template(
         from agentworks import output
 
         output.warn(
-            f"session '{session_name}': ignoring malformed harness_state "
+            f"session '{session_name}': ignoring malformed harness_integration_state "
             f"namespace {harness_cls.name!r} (expected a JSON object, got "
             f"{type(raw_namespace).__name__}); treating it as empty."
         )
@@ -401,7 +401,7 @@ def pending_session_node(
             f"session '{name}': exactly one of an agent node or "
             f"admin=True must be given (the session runs as one of them)."
         )
-    harness_state: dict[str, object] = {}  # fresh create: no row yet, so the harness starts blank
+    harness_integration_state: dict[str, object] = {}  # fresh create: no row yet, so the harness starts blank
     harness = _harness_for_template(
         template,
         session_name=name,
@@ -409,9 +409,18 @@ def pending_session_node(
         admin=admin,
         vm=vm,
         workspace=workspace,
-        state=harness_state,
+        state=harness_integration_state,
     )
-    return PendingSessionNode(db, config, name, harness, agent, workspace, vm, harness_state=harness_state)
+    return PendingSessionNode(
+        db,
+        config,
+        name,
+        harness,
+        agent,
+        workspace,
+        vm,
+        harness_integration_state=harness_integration_state,
+    )
 
 
 def live_session_node(
@@ -455,7 +464,7 @@ def live_session_node(
         raise StateError(
             f"session '{row.name}' is an admin session but an agent node ('{agent.name}') was handed to the factory."
         )
-    harness_state = row.harness_state  # the stored full blob: a create-minted id survives here
+    harness_integration_state = row.harness_integration_state  # stored full blob; a create-minted id survives
     harness = _harness_for_template(
         template,
         session_name=row.name,
@@ -463,6 +472,13 @@ def live_session_node(
         admin=row.agent_name is None,
         vm=vm,
         workspace=workspace,
-        state=harness_state,
+        state=harness_integration_state,
     )
-    return LiveSessionNode(row, harness, agent, workspace, vm, harness_state=harness_state)
+    return LiveSessionNode(
+        row,
+        harness,
+        agent,
+        workspace,
+        vm,
+        harness_integration_state=harness_integration_state,
+    )
