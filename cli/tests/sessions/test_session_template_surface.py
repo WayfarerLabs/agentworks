@@ -44,7 +44,7 @@ class _FakeHarnessIntegration(HarnessIntegration):
     def start(self, ctx):  # type: ignore[no-untyped-def]
         return ""
 
-    def restart(self, ctx):  # type: ignore[no-untyped-def]
+    def resume(self, ctx):  # type: ignore[no-untyped-def]
         return ""
 
     def _probe_target(self, transport):  # type: ignore[no-untyped-def]
@@ -97,9 +97,54 @@ def test_flat_toml_hoists_to_the_shell_pair(tmp_path: Path) -> None:
     assert tmpl.harness_integration == "shell"
     assert tmpl.harness_integration_config == {
         "command": "claude",
-        "restart_command": "claude --resume",
+        "resume_command": "claude --resume",
         "required_commands": ["claude"],
     }
+    assert len(config.deprecation_issues) == 2
+    assert "restart_command is deprecated; use resume_command instead" in "\n".join(config.deprecation_issues)
+
+
+def test_flat_toml_resume_command_is_canonical(tmp_path: Path) -> None:
+    config = _config(
+        tmp_path,
+        """
+        [session_templates.claude]
+        command = "claude"
+        resume_command = "claude --resume"
+        """,
+    )
+    tmpl = _templates(config)["claude"]
+    assert tmpl.harness_integration_config == {
+        "command": "claude",
+        "resume_command": "claude --resume",
+    }
+    assert not any("restart_command" in issue for issue in config.deprecation_issues)
+
+
+def test_local_resume_and_restart_command_conflict(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="resume_command and restart_command cannot be combined"):
+        _config(
+            tmp_path,
+            """
+            [session_templates.bad]
+            resume_command = "new"
+            restart_command = "old"
+            """,
+        )
+
+
+def test_nested_toml_resume_and_restart_command_conflict(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="resume_command and restart_command cannot be combined"):
+        _config(
+            tmp_path,
+            """
+            [session_templates.bad]
+            harness_integration = "shell"
+            [session_templates.bad.harness_integration_config]
+            resume_command = "new"
+            restart_command = "old"
+            """,
+        )
 
 
 def test_nested_toml_harness_config_passes_through(tmp_path: Path) -> None:
@@ -306,6 +351,180 @@ def test_child_silent_inherits_the_pair_unchanged() -> None:
     resolved = resolve_from_dict(templates, "child")
     assert resolved.harness_integration == "shell"
     assert resolved.harness_integration_config == {"command": "claude"}
+
+
+@pytest.mark.parametrize(("parent_old", "child_old"), [(True, False), (False, True)])
+def test_inheritance_rejects_mixed_resume_spellings(parent_old: bool, child_old: bool) -> None:
+    templates = {
+        "base": SessionTemplate(
+            name="base",
+            harness_integration="shell",
+            harness_integration_config={"resume_command": "parent"},
+            restart_command_compat=parent_old,
+        ),
+        "child": SessionTemplate(
+            name="child",
+            inherits=["base"],
+            harness_integration="shell",
+            harness_integration_config={"resume_command": "child"},
+            restart_command_compat=child_old,
+        ),
+    }
+    with pytest.raises(ConfigError, match="inheritance cannot combine"):
+        resolve_from_dict(templates, "child")
+
+
+def test_old_parent_with_unrelated_child_override_normalizes() -> None:
+    templates = {
+        "base": SessionTemplate(
+            name="base",
+            harness_integration="shell",
+            harness_integration_config={"resume_command": "parent"},
+            restart_command_compat=True,
+        ),
+        "child": SessionTemplate(
+            name="child",
+            inherits=["base"],
+            harness_integration="shell",
+            harness_integration_config={"command": "child"},
+        ),
+    }
+    resolved = resolve_from_dict(templates, "child")
+    assert resolved.harness_integration_config == {
+        "command": "child",
+        "resume_command": "parent",
+    }
+
+
+def test_yaml_restart_command_warns_and_normalizes(tmp_path: Path) -> None:
+    root = _manifest(
+        tmp_path,
+        """
+        apiVersion: agentworks/v1
+        kind: session-template
+        metadata:
+          name: old-shell
+        spec:
+          harness_integration:
+            name: shell
+            restart_command: old-resume
+        """,
+    )
+    manifests = load_manifests(root)
+    assert len(manifests.deprecation_issues) == 1
+    assert "restart_command is deprecated; use resume_command instead" in manifests.deprecation_issues[0]
+    template = manifests.entries[0].resource
+    assert template.harness_integration_config == {"resume_command": "old-resume"}
+
+
+def test_tagged_yaml_resume_and_restart_command_conflict(tmp_path: Path) -> None:
+    root = _manifest(
+        tmp_path,
+        """
+        apiVersion: agentworks/v1
+        kind: session-template
+        metadata:
+          name: bad
+        spec:
+          harness_integration:
+            name: shell
+            resume_command: new
+            restart_command: old
+        """,
+    )
+    with pytest.raises(ConfigError, match="resume_command and restart_command cannot be combined"):
+        load_manifests(root)
+
+
+@pytest.mark.parametrize(
+    ("parent_field", "child_body", "errors"),
+    [
+        ("restart_command", 'resume_command = "child"', True),
+        ("resume_command", 'restart_command = "child"', True),
+        ("restart_command", 'command = "child"', False),
+    ],
+)
+def test_deprecated_toml_inheritance_through_loader_and_registry(
+    tmp_path: Path,
+    parent_field: str,
+    child_body: str,
+    errors: bool,
+) -> None:
+    config = _config(
+        tmp_path,
+        f"""
+        [session_templates.parent]
+        {parent_field} = "parent"
+
+        [session_templates.child]
+        inherits = ["parent"]
+        {child_body}
+        """,
+    )
+    registry = build_registry(config)
+    from agentworks.sessions.templates import resolve_template
+
+    if errors:
+        with pytest.raises(ConfigError, match="inheritance cannot combine"):
+            resolve_template(registry, "child")
+    else:
+        resolved = resolve_template(registry, "child")
+        assert resolved.harness_integration_config == {
+            "command": "child",
+            "resume_command": "parent",
+        }
+
+
+@pytest.mark.parametrize(
+    ("parent_field", "child_field", "errors"),
+    [
+        ("restart_command", "resume_command", True),
+        ("resume_command", "restart_command", True),
+        ("restart_command", "command", False),
+    ],
+)
+def test_yaml_inheritance_through_loader_and_registry(
+    tmp_path: Path,
+    parent_field: str,
+    child_field: str,
+    errors: bool,
+) -> None:
+    root = _manifest(
+        tmp_path,
+        f"""
+        apiVersion: agentworks/v1
+        kind: session-template
+        metadata:
+          name: parent
+        spec:
+          harness_integration:
+            name: shell
+            {parent_field}: parent
+        ---
+        apiVersion: agentworks/v1
+        kind: session-template
+        metadata:
+          name: child
+        spec:
+          inherits: [parent]
+          harness_integration:
+            name: shell
+            {child_field}: child
+        """,
+    )
+    config = _config(tmp_path, "")
+    registry = build_registry(config, load_manifests(root))
+    from agentworks.sessions.templates import resolve_template
+
+    if errors:
+        with pytest.raises(ConfigError, match="inheritance cannot combine"):
+            resolve_template(registry, "child")
+    else:
+        resolved = resolve_template(registry, "child")
+        assert resolved.harness_integration_config == {
+            "command": "child",
+            "resume_command": "parent",
+        }
 
 
 def test_child_different_harness_integration_starts_fresh(fake_harness_integration: None) -> None:

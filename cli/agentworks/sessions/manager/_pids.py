@@ -67,7 +67,7 @@ def _build_session_target(
     if the agent's authorized_keys aren't provisioned.
     For admin sessions, returns the admin target unchanged.
 
-    Single-session paths use this to make kill / restart operations
+    Single-session paths use this to make kill / resume operations
     consistent with create: every destructive step on an agent session
     goes via direct agent SSH. Because the returned target always owns
     the session it will operate on, callers can issue destructive commands

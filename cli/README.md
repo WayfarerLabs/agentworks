@@ -37,7 +37,7 @@ agw session attach my-session
 agw session attach my-session    # You'll pick up right where you left off
 agw session stop my-session      # Sessions can be stopped (or can exit on their own)
 agw session list
-agw session restart my-session
+agw session resume my-session
 agw session attach my-session
 agw session delete my-session    # When you're done with it. Agent and workspace are preserved unless this was their last session (see below).
 
@@ -369,7 +369,8 @@ Manage sessions (persistent tmux sessions running in workspaces). Session names 
 | `agw session list`            | List sessions with status      |
 | `agw session attach <name>`   | Attach to a running session    |
 | `agw session stop <name>`     | Stop a running session         |
-| `agw session restart <name>`  | Restart a session              |
+| `agw session resume <name>`   | Resume a session               |
+| `agw session restart <name>`  | Deprecated alias for `resume`  |
 | `agw session delete <name>`   | Stop and delete a session      |
 | `agw session logs <name>`     | Dump session scrollback buffer |
 | `agw console attach <name>`   | Attach to a named console      |
@@ -380,14 +381,18 @@ or a comma-separated list (`--vm vm1,vm2`); commas within a filter are OR-ed tog
 name in a filter is an error, not an empty result. `--agent <name>` matches agent-mode sessions
 only; `--admin` matches admin-mode sessions only (the two are mutually exclusive).
 
-`session stop` and `session restart` operate on a single session by default. Pass `--all`
-(`session stop`/`session restart`) or `--all-stopped` (`session restart`) to batch over the sessions
+`session stop` and `session resume` operate on a single session by default. Pass `--all`
+(`session stop`/`session resume`) or `--all-stopped` (`session resume`) to batch over the sessions
 on the VM. The batch form accepts `--vm <vm>`, `--workspace <ws>`, `--agent <agent>`, and `--admin`
 to narrow the set; filters compose with AND and require one of the batch flags. The name filters
 accept a single value or a comma-separated list (`--vm vm1,vm2`); commas within a filter are OR-ed
 together, and an unknown name in a filter is an error, not an empty result. `--agent` matches
 agent-mode sessions only; `--admin` matches admin-mode sessions only (the two are mutually
-exclusive). Pass `--force` to stop/restart broken sessions via PID kill.
+exclusive). Pass `--force` to stop/resume broken sessions via PID kill.
+
+`agw session restart` remains a deprecated compatibility alias in 0.13.0. It has the same arguments
+and behavior as `resume`, but warns once per invocation unless you pass `--no-deprecations`. Update
+scripts to `session resume` before 0.14.0, when the alias is removed.
 
 `session create <name>` takes the session name as a required positional. Optional flags:
 `--workspace`, `--template`, `--admin`, and `--agent`. If `--workspace` / `--new-workspace` is
@@ -598,7 +603,7 @@ via `--workspace <ws>`). Use these when you just need a terminal without the con
 
 A session template selects the **harness integration** that runs the session's workload. The
 integration is a [capability](../docs/guides/resources.md#harness-integrations) that owns
-starting/restarting the harness or shell and checking its required executables; the template's
+starting/resuming the harness or shell and checking its required executables; the template's
 `spec.harness_integration` is one tagged table whose `name` key selects the integration and whose
 remaining keys are the config block that integration validates. The old `harness` / `harness_config`
 inputs still load with one aggregated deprecation warning per command/request in 0.13.0 and can be
@@ -624,9 +629,10 @@ level:
 
 - `command`: the pane command (empty/omitted is a plain login shell). Supports `{{session_name}}`
   and `{{workspace_name}}` variable substitution (double-brace syntax).
-- `restart_command`: used by `session restart`, for a tool that needs a different invocation on
-  restart. If omitted, `command` is used. (To run Claude Code, prefer the dedicated `claude-code`
-  integration below, which resumes the previous conversation on its own.)
+- `resume_command`: used by `session resume`, for a tool that needs a different invocation on
+  resume. If omitted, `command` is used. `restart_command` remains an old, warning-producing input
+  through 0.13.0 only. (To run Claude Code, prefer the dedicated `claude-code` integration below,
+  which resumes the previous conversation on its own.)
 - `required_commands`: executables the command needs, checked on the session's launch target (the
   agent, or the VM admin for admin sessions) before any state mutation, so launching a session whose
   tool is not installed fails fast with a clear error instead of a cryptic downstream tmux failure.
@@ -640,7 +646,7 @@ behavior, otherwise a warning that `agw doctor` also surfaces). It is separate f
 flat-field handling below, which is a permanent supported spelling, not a deprecation.
 
 The `claude-code` integration runs Claude Code as the session: `session create` starts a new Claude
-session and `session restart` resumes the same conversation when its transcript still exists on disk
+session and `session resume` resumes the same conversation when its transcript still exists on disk
 (launching fresh when Claude never wrote one). It ships as the opt-in `claude` system plugin (see
 [System Plugins](#system-plugins)), disabled by default: a session-template naming it still lists
 ready, but creating a session on it is refused with an "enable plugin `claude`" hint until you add
@@ -670,7 +676,7 @@ spec:
 ```
 
 The `codex` integration runs Codex the same way: `session create` starts a new Codex session and
-`session restart` resumes the same conversation once Codex has recorded it. Codex mints its own
+`session resume` resumes the same conversation once Codex has recorded it. Codex mints its own
 session ids, so the integration discovers the id from Codex's on-disk state after the first launch
 and stores it (a session archived with `codex archive` is deliberately treated as not resumable, and
 a fresh one is started). It ships as the opt-in `codex` system plugin, disabled by default with the
@@ -719,9 +725,10 @@ required_commands = ["htop"]
 
 For `shell`, the legacy flat keys `command` / `restart_command` / `required_commands` keep working
 at the section top level and are hoisted into `harness_integration = "shell"` plus the equivalent
-`harness_integration_config`. The flat form is the documented default TOML shape; YAML manifests are
-the primary authoring surface (run `agw resource sample session-template`). The flat fields cannot
-be combined with a non-`shell` `harness_integration` or with an explicit
+`harness_integration_config`. The flat form is the documented default TOML shape; use
+`resume_command` for new declarations. `restart_command` warns in 0.13.0 and is removed in 0.14.0.
+YAML manifests are the primary authoring surface (run `agw resource sample session-template`). The
+flat fields cannot be combined with a non-`shell` `harness_integration` or with an explicit
 `harness_integration_config` table (one spelling per declaration), and both conflicts are load
 errors. One inheritance interaction worth noting: a legacy flat-field child under a
 `harness_integration: claude-code` parent hoists to `harness_integration = "shell"`, which (per the

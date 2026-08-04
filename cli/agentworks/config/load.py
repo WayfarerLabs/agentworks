@@ -161,7 +161,14 @@ def load_config(
 
     session_config = _load_session_config(data, issues)
     deprecated_harness_selectors: list[str] = []
-    session_templates = _load_session_templates(resource_data, issues, decls, deprecated_harness_selectors)
+    deprecated_restart_commands: list[str] = []
+    session_templates = _load_session_templates(
+        resource_data,
+        issues,
+        decls,
+        deprecated_harness_selectors,
+        deprecated_restart_commands,
+    )
 
     loaded_vm_templates = _load_vm_templates(resource_data, issues, decls)
     loaded_agent_templates = _load_agent_templates(resource_data, issues, decls)
@@ -171,6 +178,12 @@ def load_config(
 
     secrets = _load_secrets(resource_data, issues, decls)
     deprecations: list[str] = []
+    if deprecated_restart_commands:
+        names = ", ".join(sorted(deprecated_restart_commands))
+        deprecations.append(
+            "restart_command is deprecated; use resume_command instead. It will be removed in 0.14.0. "
+            f"Silence this warning with --no-deprecations. Affected resources: {names}"
+        )
     noop_backend_sections = _load_secret_backends(resource_data, deprecations)
     deprecated_sections = _warn_deprecated_resource_sections(resource_data, deprecations)
     secret_config_data = _load_secret_config(data, issues, decls)

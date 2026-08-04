@@ -1,4 +1,4 @@
-"""Stop and restart operations (single and batch)."""
+"""Stop and resume operations (single and batch)."""
 
 from __future__ import annotations
 
@@ -228,7 +228,7 @@ def stop_session(
         output.result(f"Session '{name}' stopped")
 
 
-def restart_session(
+def resume_session(
     db: Database,
     config: Config,
     *,
@@ -236,7 +236,7 @@ def restart_session(
     force: bool = False,
     yes: bool = False,
 ) -> None:
-    """Restart a session. Prompts if running (--yes to skip). --force for BROKEN.
+    """Resume a session. Prompts if running (--yes to skip). --force for BROKEN.
 
     Orchestrated: the live graph derives from the session's rows, the
     activation gate replaces the imperative ensure_active + hold, and
@@ -303,7 +303,7 @@ def restart_session(
             )
         agent_node = live_agent_node(agent_row, vm_node)
     # Gate a disabled plugin harness_integration at USE (R14, the secret model): a live
-    # session on a disabled harness_integration refuses to restart / reattach with the
+    # session on a disabled harness_integration refuses to resume / reattach with the
     # enable-plugin error. The gate lives at this call site (not inside
     # ``live_session_node``, which threads no registry); a drift guard pins that
     # every caller of the node factory gates.
@@ -312,7 +312,7 @@ def restart_session(
 
     ensure_harness_integration_enabled(registry, template.harness_integration)
     # Refuse a session-template recipe drawing on a disabled plugin's declarable
-    # resource before the restart / reattach (Phase 7, LLD b). Drift guard:
+    # resource before the resume / reattach (Phase 7, LLD b). Drift guard:
     # tests/agents/test_recipe_gate_drift.py.
     ensure_recipe_enabled(registry, "session-template", template.name)
     session_node = live_session_node(
@@ -355,7 +355,7 @@ def restart_session(
 
         from agentworks.ssh import SSHLogger
 
-        logger = SSHLogger(vm.name, "session-restart")
+        logger = SSHLogger(vm.name, "session-resume")
         admin_target = _mgr.transport(vm, config, logger=logger)
         run_command: RunCommand = admin_target.run
 
@@ -384,7 +384,7 @@ def restart_session(
             # For agent sessions this builds an agent Transport and probes it
             # so a pre-rollout agent surfaces as an actionable StateError up
             # front rather than leaving us with a stopped session we can't
-            # restart. Same transport is used for kill (above) and create
+            # resume. Same transport is used for kill (above) and create
             # (below): every destructive step on an agent session goes via
             # direct agent SSH. _build_session_target always returns a
             # same-uid target, so no sudo is needed for kill.
@@ -397,7 +397,7 @@ def restart_session(
             # against the one command-start context: the required-commands
             # check's target (an existing agent, or the admin) is realized,
             # so it probes NOW, pre-resolve and PRE-KILL, and a missing
-            # binary aborts the restart with the old session still running.
+            # binary aborts the resume with the old session still running.
             # Preflight is read-only (no prompt), so it stays ahead of the
             # gates below; both secret-resolving passes run AFTER them.
             preflight_all(
@@ -416,32 +416,32 @@ def restart_session(
             # --force) or declines the confirm (OK + interactive 'no'). BOTH
             # secret-resolving passes (the graph-union boundary resolve and
             # the env-chain resolve below) run AFTER these checks so a
-            # refused or declined restart never prompts for secrets it was
+            # refused or declined resume never prompts for secrets it was
             # about to discard.
             # UNKNOWN is impossible here (_ensure_pid raises on unresolvable
             # sessions). Legacy sessions short-circuit at ``status =
             # SessionStatus.STOPPED`` above, so neither gate fires for them;
-            # migration is implicit in the operator's restart opt-in.
+            # migration is implicit in the operator's resume opt-in.
             if status == SessionStatus.BROKEN and not force:
                 raise BrokenStateError(
                     f"session '{name}' is broken (PID alive but tmux unreachable).",
                     entity_kind="session",
                     entity_name=name,
-                    hint="Use --force to restart.",
+                    hint="Use --force to resume.",
                 )
-            if status == SessionStatus.OK and not yes and not output.confirm(f"Session '{name}' is running. Restart?"):
-                raise UserAbort("restart cancelled")
+            if status == SessionStatus.OK and not yes and not output.confirm(f"Session '{name}' is running. Resume?"):
+                raise UserAbort("resume cancelled")
 
         with output.section("Resolving Secrets"):
             # The graph-union boundary resolve (pass 1). Placed AFTER the
             # gates above, symmetric with the env-chain pass below, so a
-            # refused or declined restart never prompts. Gate-resolved values
+            # refused or declined resume never prompts. Gate-resolved values
             # are already seeded, so nothing resolves twice.
             resolver.resolve()
             # Capture the graph boundary union for the harness_integration's op-start
             # context (matching the create path, which captures
             # ``resolver.values`` at its boundary). Inert for the built-in
-            # shell harness_integration (empty ``config_secret_refs()``), but keeps the restart
+            # shell harness_integration (empty ``config_secret_refs()``), but keeps the resume
             # op ctx shape-correct for a future secret-declaring harness_integration; the
             # env-chain resolve (``resolve_for_command`` below) is a SEPARATE
             # pass, not this graph union.
@@ -454,8 +454,8 @@ def restart_session(
             # is the recorded bail-before-prompt exception to the
             # one-boundary-resolve contract: the graph's union (the site's
             # config secrets) and this env chain BOTH resolve here, after the
-            # BROKEN/--force refusal and the "Restart?" confirm, so a declined
-            # restart never prompts for secrets it was about to discard.
+            # BROKEN/--force refusal and the "Resume?" confirm, so a declined
+            # resume never prompts for secrets it was about to discard.
             # Folding the env chain into the boundary would trade that
             # operator protection for one fewer prompt session on proxmox
             # only.
@@ -480,7 +480,7 @@ def restart_session(
             )
 
         with output.section("Starting Session"):
-            output.info(f"Restarting session '{name}'...")
+            output.info(f"Resuming session '{name}'...")
 
             if is_legacy:
                 # Surgical kill of the named session on the default tmux
@@ -518,22 +518,22 @@ def restart_session(
                 sock = session.socket_path
                 if not _mgr._kill_session(name, run_command=session_run_command, socket_path=sock):
                     raise ExternalError(
-                        f"failed to stop session '{name}' for restart",
+                        f"failed to stop session '{name}' for resume",
                         entity_kind="session",
                         entity_name=name,
                     )
 
             deploy_restricted_config(run_command, history_limit=config.session.history_limit)
 
-            # Op-start RunContext for the harness_integration's restart op, assembled
+            # Op-start RunContext for the harness_integration's resume op, assembled
             # AFTER the kill (a state-aware harness_integration decides resume-vs-launch
             # with the old process already dead). Mirrors the preflight
-            # readiness ctx above (the restart path builds no runup ctx), plus
+            # readiness ctx above (the resume path builds no runup ctx), plus
             # the scoped graph secrets (empty for the built-in shell harness_integration).
-            # Template-var substitution wraps the returned string; restart
+            # Template-var substitution wraps the returned string; resume
             # sources ``workspace_name`` from the session row, as the interim
             # path did.
-            restart_ctx = RunContext(
+            resume_ctx = RunContext(
                 config=config,
                 operation_scope=scope,
                 admin_target=admin_target,
@@ -541,7 +541,7 @@ def restart_session(
                 secrets=ScopedSecrets(graph_secret_values, session_node.secret_refs()),
             )
             command = _mgr._substitute_template_vars(
-                session_node.harness_integration.restart(restart_ctx),
+                session_node.harness_integration.resume(resume_ctx),
                 {"session_name": name, "workspace_name": session.workspace_name},
             )
             if (note := session_node.harness_integration.launch_note()) is not None:
@@ -553,7 +553,7 @@ def restart_session(
             # harness_integration switch.
             # Usually a no-op (the value was stored on create), but a session
             # predating the harness_integration_state column (backfilled to {}) mints its
-            # id on this first restart. Persisting BEFORE create_tmux_session
+            # id on this first resume. Persisting BEFORE create_tmux_session
             # is intentional: a stable id that survives a tmux-recreate retry
             # beats re-minting a new one each attempt (the id is the
             # session's, whether or not the pane came up).
@@ -608,7 +608,7 @@ def restart_session(
             else:
                 output.warn(f"Could not capture PID for session '{name}', will auto-repair on next access")
 
-        output.result(f"Session '{name}' restarted")
+        output.result(f"Session '{name}' resumed")
 
         _mgr._regenerate_tmuxinator(db, config, vm, ws)
         # Don't re-add the session to the legacy vm-console here. The existing
@@ -708,7 +708,7 @@ def stop_all_sessions(
             raise ExternalError(f"{len(failed)} session(s) failed to stop.")
 
 
-def restart_all_sessions(
+def resume_all_sessions(
     db: Database,
     config: Config,
     *,
@@ -719,10 +719,10 @@ def restart_all_sessions(
     include_running: bool = False,
     force: bool = False,
 ) -> None:
-    """Restart sessions, optionally filtered by VM, workspace, agent, and/or mode.
+    """Resume sessions, optionally filtered by VM, workspace, agent, and/or mode.
 
     With include_running=False (--all-stopped), only stopped sessions are
-    restarted. With include_running=True (--all), all sessions are targeted;
+    resumed. With include_running=True (--all), all sessions are targeted;
     if any are running, the caller should have prompted or passed yes=True.
 
     Each name filter accepts a single name or a list of names; lists
@@ -739,7 +739,7 @@ def restart_all_sessions(
     )
 
     # Resolve distinct VMs from the filtered set and anchor them BEFORE the
-    # SSH probes. Each restart_session call also opens its own gate span;
+    # SSH probes. Each resume_session call also opens its own gate span;
     # the redundant inner gate is a no-op on already-active VMs and a cheap
     # extra subprocess on WSL2 (accepted, see PR description).
     distinct_vms = _mgr._distinct_vms_for_sessions(db, sessions)
@@ -753,7 +753,7 @@ def restart_all_sessions(
         # Error if any sessions are still unknown after auto-repair.
         # PID_STOPPED sessions are known-stopped (excluded from status_map by design).
         # Legacy sessions (``socket_path is None``) are also excluded from
-        # status_map by ``batch_check_status``; restart_session migrates them
+        # status_map by ``batch_check_status``; resume_session migrates them
         # to the new model, so don't treat them as "unknown" here.
         unknown = [
             s
@@ -788,14 +788,14 @@ def restart_all_sessions(
             sessions = [s for s in sessions if s.pid == PID_STOPPED or status_map.get(s.name) == SessionStatus.STOPPED]
 
         if not sessions:
-            output.info("No matching sessions to restart.")
+            output.info("No matching sessions to resume.")
             return
 
-        output.info(f"Restarting {len(sessions)} session(s)...")
+        output.info(f"Resuming {len(sessions)} session(s)...")
 
         for session in sessions:
             try:
-                restart_session(db, config, name=session.name, force=force, yes=include_running)
+                resume_session(db, config, name=session.name, force=force, yes=include_running)
             except UserAbort:
                 # A confirm-cancellation aborts the whole batch operation, not
                 # just this one session. Propagate so the outer wrapper renders
@@ -806,13 +806,13 @@ def restart_all_sessions(
                     output.warn(f"Skipping '{session.name}': {exc}")
                 else:
                     failed.append((session.name, str(exc)))
-                    output.warn(f"Error restarting '{session.name}': {exc}")
+                    output.warn(f"Error resuming '{session.name}': {exc}")
             except StateError as exc:
                 failed.append((session.name, str(exc)))
-                output.warn(f"Error restarting '{session.name}': {exc}")
+                output.warn(f"Error resuming '{session.name}': {exc}")
             except Exception as exc:
                 failed.append((session.name, str(exc)))
-                output.warn(f"Error restarting '{session.name}': {exc}")
+                output.warn(f"Error resuming '{session.name}': {exc}")
 
     if failed:
-        raise ExternalError(f"{len(failed)} session(s) failed to restart.")
+        raise ExternalError(f"{len(failed)} session(s) failed to resume.")

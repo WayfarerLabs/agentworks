@@ -234,6 +234,7 @@ def load_manifests(resources_dir: Path) -> ManifestSet:
     issues: list[str] = []
     deprecated_shapes: list[str] = []
     deprecated_harness_selectors: list[str] = []
+    deprecated_restart_commands: list[str] = []
     seen: dict[tuple[str, str], SourceLocation] = {}
 
     for path in _iter_manifest_files(resources_dir):
@@ -247,7 +248,13 @@ def load_manifests(resources_dir: Path) -> ManifestSet:
                     f'"{doc.name}" (also declared at {first.file}:{first.line})',
                 )
             seen[key] = location
-            resource = decode_document(doc, issues, deprecated_shapes, deprecated_harness_selectors)
+            resource = decode_document(
+                doc,
+                issues,
+                deprecated_shapes,
+                deprecated_harness_selectors,
+                deprecated_restart_commands,
+            )
             entries.append(
                 ManifestEntry(
                     kind=doc.kind,
@@ -257,19 +264,25 @@ def load_manifests(resources_dir: Path) -> ManifestSet:
                 )
             )
 
-    # ONE aggregated deprecation issue for the whole set, mirroring the
-    # TOML resource-section nudge (a warning per document would be
-    # obnoxious on real configs).
-    deprecations: tuple[str, ...] = ()
+    # Aggregate each deprecation class once across the whole set, mirroring
+    # the TOML resource-section nudge. A warning per document would be
+    # obnoxious on real configs.
+    deprecation_messages: list[str] = []
     if deprecated_shapes:
         from agentworks.manifests.decode import capability_shape_deprecation
 
-        deprecations = (capability_shape_deprecation(deprecated_shapes),)
+        deprecation_messages.append(capability_shape_deprecation(deprecated_shapes))
+    if deprecated_restart_commands:
+        names = ", ".join(sorted(deprecated_restart_commands))
+        deprecation_messages.append(
+            "restart_command is deprecated; use resume_command instead. It will be removed in 0.14.0. "
+            f"Silence this warning with --no-deprecations. Affected resources: {names}"
+        )
 
     return ManifestSet(
         entries=tuple(entries),
         issues=tuple(issues),
-        deprecation_issues=deprecations,
+        deprecation_issues=tuple(deprecation_messages),
         deprecated_shape_resources=tuple(deprecated_shapes),
         deprecated_harness_selectors=tuple(deprecated_harness_selectors),
     )

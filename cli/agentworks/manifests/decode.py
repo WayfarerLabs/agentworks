@@ -230,6 +230,7 @@ def decode_document(
     issues: list[str],
     deprecated_shapes: list[str] | None = None,
     deprecated_harness_selectors: list[str] | None = None,
+    deprecated_restart_commands: list[str] | None = None,
 ) -> Any:
     """Decode one validated envelope into the kind's Resource instance.
 
@@ -273,6 +274,21 @@ def decode_document(
         if doc.kind == "session-template":
             if _normalize_session_harness_selector(spec) and deprecated_harness_selectors is not None:
                 deprecated_harness_selectors.append(f"{doc.kind}/{doc.name}")
+            config = spec.get("harness_integration_config")
+            if (
+                spec.get("harness_integration") == "shell"
+                and isinstance(config, dict)
+                and "resume_command" in config
+                and "restart_command" in config
+            ):
+                raise ConfigError("resume_command and restart_command cannot be combined; use resume_command only")
+            if (
+                spec.get("harness_integration") == "shell"
+                and isinstance(config, dict)
+                and "restart_command" in config
+                and deprecated_restart_commands is not None
+            ):
+                deprecated_restart_commands.append(f"{doc.kind}/{doc.name}")
         elif _normalize_capability_field(doc.kind, spec) and deprecated_shapes is not None:
             deprecated_shapes.append(f"{doc.kind}/{doc.name}")
         resource = decoder(doc, spec, local_issues)

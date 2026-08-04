@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.13.0] (2026-08-04)
+
+### Features
+
+* **sessions:** add `agw session resume` as the canonical lifecycle command. It continues the same
+  logical Agentworks session and, when durable state permits, the same Claude Code or Codex
+  conversation.
+* **harness-integration:** add `resume_command` as the canonical shell integration field. `agw
+  resource migrate` rewrites the old field to the canonical YAML form.
+
+### Deprecations
+
+* **sessions:** `agw session restart` remains as a one-release alias for `agw session resume`. It
+  warns once per invocation unless `--no-deprecations` is set, and is removed in 0.14.0.
+* **harness-integration:** `restart_command` continues to load in 0.13.0 with a suppressible
+  deprecation warning. Replace it with `resume_command`; configurations that mix both names fail.
+  The old field is removed in 0.14.0.
+
+### Downgrade notes
+
+Configurations using `resume_command` require 0.13.0 or later. Before downgrading to 0.12.0, restore
+`restart_command`; no stored-session data migration or rollback is needed.
+
 ## [0.12.0](https://github.com/WayfarerLabs/agentworks/compare/v0.11.0...v0.12.0) (2026-07-27)
 
 

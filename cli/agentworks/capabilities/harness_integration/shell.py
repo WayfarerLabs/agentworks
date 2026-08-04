@@ -3,8 +3,8 @@ login shell) as the session workload.
 
 The plain, default member. Its ``harness_integration_config`` vocabulary is exactly
 the flat session-template fields the harness integration model replaces: ``command``
-(the pane command; empty = login shell), ``restart_command`` (the
-command on ``session restart``, falling back to ``command``), and
+(the pane command; empty = login shell), ``resume_command`` (the
+command on ``session resume``, falling back to ``command``), and
 ``required_commands`` (the executables the launch target must have on
 PATH). All optional.
 """
@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from agentworks.resources.reference import ConfigReference
     from agentworks.transports import Transport
 
-_SHELL_FIELDS = {"command", "restart_command", "required_commands"}
+_SHELL_FIELDS = {"command", "resume_command", "required_commands"}
 
 
 def _as_str_list(value: object) -> list[str] | None:
@@ -91,7 +91,7 @@ class ShellIntegration(HarnessIntegration):
         unknown = sorted(set(config) - _SHELL_FIELDS)
         if unknown:
             raise ConfigError(f"{owner}: unknown shell harness integration field(s): {', '.join(unknown)}")
-        for field_name in ("command", "restart_command"):
+        for field_name in ("command", "resume_command"):
             value = config.get(field_name)
             if value is not None and not isinstance(value, str):
                 raise ConfigError(f"{owner}.{field_name} must be a string")
@@ -127,11 +127,11 @@ class ShellIntegration(HarnessIntegration):
         empty string when undeclared (a bare login shell)."""
         return self._command_field("command")
 
-    def restart(self, ctx: RunContext) -> str:
-        """The pane command for ``session restart``: ``restart_command``
+    def resume(self, ctx: RunContext) -> str:
+        """The pane command for ``session resume``: ``resume_command``
         when declared, else ``command`` (empty = login shell)."""
-        restart_command = self._command_field("restart_command")
-        return restart_command or self._command_field("command")
+        resume_command = self._command_field("resume_command")
+        return resume_command or self._command_field("command")
 
     def _command_field(self, field_name: str) -> str:
         value = self.config.get(field_name, "")

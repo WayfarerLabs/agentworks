@@ -31,6 +31,12 @@ contract it relies on (validate / construct / preflight / runup / ops) is docume
 > Claude Code and Codex are harnesses; Agentworks supplies integrations that run those harnesses.
 > The rename changes the kind, selector, identifiers, and persisted column without changing the
 > model or behavior decided here.
+>
+> Note (2026-08-04): `session resume` is now the canonical lifecycle command and integration method.
+> `session restart` remains a warning-producing compatibility alias in 0.13.0 and is removed in
+> 0.14.0. Similarly, `resume_command` is the canonical shell config field; `restart_command` is a
+> warning-producing compatibility input for 0.13.0. The older vocabulary below records the decision
+> as it stood when this ADR was accepted.
 
 ## Context
 
@@ -79,10 +85,10 @@ consuming resource that holds one.
   integration raises if handed a context assembled for a different session). The one-object target
   contract carries over: the same agent node is both the session's dependency edge and the
   integration's `target`, so a `mark_realized` flip is observed without rewiring.
-- **`start` / `restart` are the integration ops.** They return the raw pane command string; the
+- **`start` / `resume` are the integration ops.** They return the raw pane command string; the
   service layer assembles an op-start `RunContext` (execution targets, scoped secrets) at the call
   site and wraps the returned string with the existing `{{session_name}}` / `{{workspace_name}}`
-  template-var substitution (lifted out of the deleted `_build_session_command`). `restart` is
+  template-var substitution (lifted out of the deleted `_build_session_command`). `resume` is
   assembled after the old process is killed, so a state-aware integration (claude-code) decides
   resume-vs-launch with it dead.
 - **An integration gets a per-session state blob, persisted on the session row.** This reverses the
@@ -91,7 +97,7 @@ consuming resource that holds one.
   integration constructor, writes `harness_integration.state` back after each op), and an
   integration reads and mutates it in place through `self._state`. `shell` uses none of it;
   `claude-code` is the first user, minting and storing a Claude session id there on the first
-  `start` so it survives to `restart`. `claude-code` then decides resume-vs-launch with an op-time,
+  `start` so it survives to `resume`. `claude-code` then decides resume-vs-launch with an op-time,
   file-presence probe: it checks whether that stored session id's transcript exists on the launch
   target (a slug-independent `find` under the Claude config dir), empirically confirmed to equal
   Claude's own resume boundary, rather than trusting any in-memory or derived state.

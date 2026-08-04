@@ -4,7 +4,7 @@
 Each harness integration implementation is a ``Capability`` (see
 ``capabilities/README.md``): it validates its ``harness_integration_config``, owns the
 session's launch-target readiness, and produces the tmux pane command as its
-op (``start`` / ``restart``). The consuming resource is the ``session`` node,
+op (``start`` / ``resume``). The consuming resource is the ``session`` node,
 which HOLDS a harness integration instance and composes its readiness; that node lives in
 the ``sessions`` domain, not here. Capabilities depend only on the framework,
 never on their consuming domain (FRD R1): this package imports neither
@@ -88,7 +88,7 @@ def ensure_harness_integration_enabled(registry: Registry, name: str) -> None:
     non-plugin origin (a direct test) falls back to a generic tail.
 
     Called at the two session-build call sites that hold the registry and the
-    resolved template (``_create_build.py`` create, ``_lifecycle.py`` restart /
+    resolved template (``_create_build.py`` create, ``_lifecycle.py`` resume /
     reattach), NOT inside the node factories (which thread no registry) and NOT
     on the read-only ``_display_harness_integration`` listing path (an enabled template that
     references a disabled harness integration still shows the harness integration name; only its use

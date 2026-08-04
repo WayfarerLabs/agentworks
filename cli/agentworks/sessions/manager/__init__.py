@@ -52,10 +52,10 @@ from ._lifecycle import (
     _execute_stop as _execute_stop,
 )
 from ._lifecycle import (
-    restart_all_sessions as restart_all_sessions,
+    resume_all_sessions as resume_all_sessions,
 )
 from ._lifecycle import (
-    restart_session as restart_session,
+    resume_session as resume_session,
 )
 from ._lifecycle import (
     stop_all_sessions as stop_all_sessions,
@@ -160,8 +160,8 @@ __all__ = [
     "list_sessions",
     "stop_session",
     "stop_all_sessions",
-    "restart_session",
-    "restart_all_sessions",
+    "resume_session",
+    "resume_all_sessions",
     "delete_session",
     "attach_session",
     "session_logs",

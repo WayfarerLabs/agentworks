@@ -69,6 +69,7 @@ _SHELL_FLAT_FIELD_MESSAGE = (
 DEPRECATED_FIELDS: dict[str, tuple[DeprecatedField, ...]] = {
     "session-template": (
         DeprecatedField("command", "error", _SHELL_FLAT_FIELD_MESSAGE),
+        DeprecatedField("resume_command", "error", _SHELL_FLAT_FIELD_MESSAGE),
         DeprecatedField("restart_command", "error", _SHELL_FLAT_FIELD_MESSAGE),
         DeprecatedField("required_commands", "error", _SHELL_FLAT_FIELD_MESSAGE),
     ),

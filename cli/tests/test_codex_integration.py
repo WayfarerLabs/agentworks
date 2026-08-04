@@ -223,7 +223,7 @@ def test_probe_is_rooted_at_codex_home_and_finds_by_stored_id() -> None:
 def test_start_and_restart_are_symmetric() -> None:
     target = _FakeTarget({_ROLLOUT_PROBE: _FakeResult(0)})
     harness_integration = _harness_integration()
-    assert harness_integration.start(_op_ctx(target)) == harness_integration.restart(_op_ctx(target))
+    assert harness_integration.start(_op_ctx(target)) == harness_integration.resume(_op_ctx(target))
 
 
 # -- discovery: anchored on the STORED marker only ----------------------------
@@ -390,7 +390,7 @@ def test_adopted_id_is_resumed_verbatim_on_the_next_op() -> None:
     assert state == {"session_id": _SID}
 
     resume = _FakeTarget({_ROLLOUT_PROBE: _FakeResult(0)})
-    command = _harness_integration(state=state).restart(_op_ctx(resume))
+    command = _harness_integration(state=state).resume(_op_ctx(resume))
     assert f"resume {_SID}" in command
     assert "resuming session s1" in command
     # The second op probed the stored id; it did NOT re-run discovery.

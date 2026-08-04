@@ -17,7 +17,7 @@ guard is therefore two structural assertions, mirroring the
    until its command entry is added here and gated.
 2. Each of the six COMMAND ENTRIES calls ``ensure_recipe_enabled``, and
    the two entries that call the realize/init function in-body gate BEFORE it.
-   ``restart_session`` is entry-only: its gate guards the restart/reattach
+   ``resume_session`` is entry-only: its gate guards the restart/reattach
    recipe merge and it sits on NO runner chain (restart re-runs no install
    commands), so the caller-set walk cannot anchor it and gate PRESENCE is
    its whole pin.
@@ -68,7 +68,7 @@ _ENTRY_GATES: dict[str, str | None] = {
     "create_agent": "realize_agent",
     "reinit_agent": "create_agent_on_vm",
     "_build_session_graph": None,  # session create + --new-agent
-    "restart_session": None,  # session restart / reattach; no runner chain (see docstring)
+    "resume_session": None,  # session resume / reattach; no runner chain (see docstring)
 }
 
 _GATE = "ensure_recipe_enabled"

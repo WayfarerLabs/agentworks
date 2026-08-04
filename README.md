@@ -36,7 +36,7 @@ workloads:
   which provides for both persistence and the ability to attach to and detach as needed.
 - Each session invokes a **harness integration** that knows how to run a particular workload (e.g. a
   full agentic harness such as Claude Code, Codex, etc. or just a plain login shell). The harness
-  integration owns start/restart semantics (e.g. resuming a Claude Code or Codex conversation right
+  integration owns start/resume semantics (e.g. resuming a Claude Code or Codex conversation right
   where it left off) as well as validating the target environment for its workload. Additionally,
   since each harness integration is built for a specific workload, it is the perfect place to grow
   further harness-specific functionality (user and workspace setup, authentication handling,
@@ -161,7 +161,7 @@ admin) in a workspace on a VM. Every session invokes a **harness integration**: 
 knows how to launch and resume a particular **agentic harness** (e.g. Claude Code or Codex) or a
 plain shell, and that checks whether the target environment can support the workload. A unique name,
 persistent tmux session, and integration-specific resume semantics let the operator run any number
-of concurrent workloads and attach, detach, stop, restart, create, and delete them at will. Tmux
+of concurrent workloads and attach, detach, stop, resume, create, and delete them at will. Tmux
 always owns the pane and its tty; the harness integration only decides what runs inside it.
 
 Session templates make workload configuration reusable and predictable. Because the harness

@@ -1,6 +1,6 @@
 """The ``shell`` harness integration and the shared ``HarnessIntegration`` readiness base.
 
-Covers the config vocabulary (validate/merge), the ops (start/restart
+Covers the config vocabulary (validate/merge), the ops (start/resume
 pane strings), the relocated required-commands probe, the SESSION-level
 identity guard, and the layering rule that the capability package
 imports neither ``sessions`` nor ``orchestration``.
@@ -86,7 +86,7 @@ def test_dependencies_imply_no_reference() -> None:
             "session-template/claude",
             {
                 "command": "claude",
-                "restart_command": "claude --resume",
+                "resume_command": "claude --resume",
                 "required_commands": ["claude", "rg"],
             },
         )
@@ -102,7 +102,7 @@ def test_validate_accepts_the_known_fields_and_empty_config() -> None:
             "session-template/claude",
             {
                 "command": "claude",
-                "restart_command": "claude --resume",
+                "resume_command": "claude --resume",
                 "required_commands": ["claude", "rg"],
             },
         )
@@ -119,6 +119,11 @@ def test_shell_launch_note_is_silent() -> None:
 def test_validate_rejects_unknown_field() -> None:
     with pytest.raises(ConfigError, match="unknown shell harness integration field"):
         ShellIntegration.validate("session-template/claude", {"commnad": "typo"})
+
+
+def test_validate_rejects_deprecated_runtime_field() -> None:
+    with pytest.raises(ConfigError, match="unknown shell harness integration field.*restart_command"):
+        ShellIntegration.validate("session-template/claude", {"restart_command": "old"})
 
 
 def test_validate_rejects_non_string_command() -> None:
@@ -143,11 +148,11 @@ def test_construct_revalidates_config() -> None:
 
 def test_merge_child_wins_the_scalars() -> None:
     merged = ShellIntegration.merge_config(
-        {"command": "parent", "restart_command": "parent-r"},
+        {"command": "parent", "resume_command": "parent-r"},
         {"command": "child"},
     )
     assert merged["command"] == "child"
-    assert merged["restart_command"] == "parent-r"  # untouched by the child
+    assert merged["resume_command"] == "parent-r"  # untouched by the child
 
 
 def test_merge_unions_required_commands_append_dedupe() -> None:
@@ -196,17 +201,17 @@ def test_start_empty_config_is_a_login_shell() -> None:
     assert _harness_integration({}).start(RunContext()) == ""
 
 
-def test_restart_prefers_restart_command() -> None:
-    harness_integration = _harness_integration({"command": "claude", "restart_command": "claude --resume"})
-    assert harness_integration.restart(RunContext()) == "claude --resume"
+def test_resume_prefers_resume_command() -> None:
+    harness_integration = _harness_integration({"command": "claude", "resume_command": "claude --resume"})
+    assert harness_integration.resume(RunContext()) == "claude --resume"
 
 
-def test_restart_falls_back_to_command() -> None:
-    assert _harness_integration({"command": "claude"}).restart(RunContext()) == "claude"
+def test_resume_falls_back_to_command() -> None:
+    assert _harness_integration({"command": "claude"}).resume(RunContext()) == "claude"
 
 
-def test_restart_empty_config_is_a_login_shell() -> None:
-    assert _harness_integration({}).restart(RunContext()) == ""
+def test_resume_empty_config_is_a_login_shell() -> None:
+    assert _harness_integration({}).resume(RunContext()) == ""
 
 
 def test_shell_leaves_the_state_blob_untouched() -> None:
@@ -215,7 +220,7 @@ def test_shell_leaves_the_state_blob_untouched() -> None:
     state: dict[str, object] = {}
     harness_integration = _harness_integration({"command": "claude"}, state=state)
     harness_integration.start(RunContext())
-    harness_integration.restart(RunContext())
+    harness_integration.resume(RunContext())
     assert state == {}
     assert harness_integration.state == {}
 

@@ -208,25 +208,29 @@ spec:
   `harness` / `harness_config` inputs still load in 0.13.0 and contribute to one aggregated
   deprecation warning per command/request; run `agw resource migrate` to rewrite them.
 - The `shell` integration's config vocabulary is `command` (the pane command; empty is a login
-  shell), `restart_command` (used by `session restart`, falling back to `command`), and
+  shell), `resume_command` (used by `session resume`, falling back to `command`), and
   `required_commands` (executables checked on the launch target before any state mutation).
-  `command` / `restart_command` support the `{{session_name}}` and `{{workspace_name}}` variables.
+  `command` / `resume_command` support the `{{session_name}}` and `{{workspace_name}}` variables.
+  `restart_command` is accepted with a suppressible deprecation warning in 0.13.0 only; replace it
+  with `resume_command` before upgrading to 0.14.0.
 - The integration-plus-config pair inherits as a unit: a child restating the same integration merges
   its config keys into the parent's (child wins per key; `shell` unions `required_commands`), while
   a child naming a _different_ integration starts fresh. `env`, `inherits`, and the description
   merge as usual.
 - The legacy flat `command` / `restart_command` / `required_commands` keys keep loading in TOML
   (hoisted onto `harness_integration = "shell"`); YAML manifests spell them inside the
-  `harness_integration` table. `agw resource describe harness-integration/shell` shows the
-  integration row and the templates that reference it.
+  `harness_integration` table. `restart_command` is a deprecated input in either form.
+  `agw resource migrate` rewrites it to `resume_command`;
+  `agw resource describe harness-integration/shell` shows the integration row and the templates that
+  reference it.
 
 The `claude-code` integration runs Claude Code as the session. It ships as the opt-in `claude`
 system plugin (see "System plugins" below), so a `session-template` naming it still lists ready, but
 creating a session on it is refused with an "enable plugin `claude`" hint until you set
 `[plugins] system = ["claude"]`. It selects the launch-and-resume conventions in one table instead
-of restating command strings: `session create` starts a new Claude session, and `session restart`
-resumes the same conversation when its transcript still exists (and launches fresh when Claude never
-wrote one), so a restart continues where the session left off:
+of restating command strings: `session create` starts a new Claude session, and `session resume`
+continues the same conversation when its transcript still exists (and launches fresh when Claude
+never wrote one), so a resume continues where the session left off:
 
 ```yaml
 apiVersion: agentworks/v1
@@ -244,17 +248,17 @@ spec:
 
 - Its config is three optional fields: `permission_mode` and `model` forward verbatim to
   `claude --permission-mode` / `--model` (their choice sets are Claude's, not validated here: an
-  invalid value fails at launch with the tool's own error, which `session create` /
-  `session restart` capture into their error message when the workload exits immediately), and
-  `extra_args` is a list of raw argv tokens appended last, the escape hatch for any flag the
-  integration does not model. Unknown fields are errors. `extra_args` elements support the
-  `{{session_name}}` / `{{workspace_name}}` variables.
+  invalid value fails at launch with the tool's own error, which `session create` / `session resume`
+  capture into their error message when the workload exits immediately), and `extra_args` is a list
+  of raw argv tokens appended last, the escape hatch for any flag the integration does not model.
+  Unknown fields are errors. `extra_args` elements support the `{{session_name}}` /
+  `{{workspace_name}}` variables.
 - The only requirement checked on the launch target is that `claude` is installed. The chosen action
   (resume vs new session) is announced in the pane on start, so it is never silent.
 
 The `codex` integration runs Codex the same way and ships as the opt-in `codex` system plugin. Codex
 mints its own session ids, so instead of assigning one the integration discovers the id from Codex's
-on-disk state after the first launch and stores it; `session restart` then resumes the same
+on-disk state after the first launch and stores it; `session resume` then resumes the same
 conversation whenever its session file still exists (a session archived with `codex archive` is
 deliberately treated as not resumable, and a fresh one is started). Its config is nine optional
 fields: `model`, `sandbox`, `approval_policy`, and `profile` forward verbatim to `codex -m` / `-s` /

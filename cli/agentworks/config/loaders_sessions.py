@@ -53,11 +53,12 @@ _SESSION_TEMPLATE_KEYS = {
     "harness_integration",
     "harness_integration_config",
     "command",
+    "resume_command",
     "restart_command",
     "required_commands",
     "env",
 }
-_SHELL_FLAT_FIELDS = ("command", "restart_command", "required_commands")
+_SHELL_FLAT_FIELDS = ("command", "resume_command", "restart_command", "required_commands")
 
 
 def _load_session_templates(
@@ -65,6 +66,7 @@ def _load_session_templates(
     issues: list[str],
     decls: _SectionLineMap,
     deprecated_harness_selectors: list[str] | None = None,
+    deprecated_restart_commands: list[str] | None = None,
 ) -> dict[str, SessionTemplate]:
     raw = data.get("session_templates", {})
     if not isinstance(raw, dict):
@@ -85,6 +87,22 @@ def _load_session_templates(
         harness_integration, harness_integration_config, used_old_selector = _session_harness_integration_pair(
             name, tdata
         )
+        if (
+            harness_integration == "shell"
+            and harness_integration_config is not None
+            and "resume_command" in harness_integration_config
+            and "restart_command" in harness_integration_config
+        ):
+            raise ConfigError(
+                f"session_templates.{name}: resume_command and restart_command cannot be combined; "
+                "use resume_command only"
+            )
+        uses_restart_command = _uses_restart_command(harness_integration, harness_integration_config)
+        if uses_restart_command:
+            if deprecated_restart_commands is not None:
+                deprecated_restart_commands.append(f"session-template/{name}")
+            assert harness_integration_config is not None
+            harness_integration_config["resume_command"] = harness_integration_config.pop("restart_command")
         if used_old_selector and deprecated_harness_selectors is not None:
             deprecated_harness_selectors.append(f"session-template/{name}")
         templates[name] = SessionTemplate(
@@ -93,6 +111,7 @@ def _load_session_templates(
             description=str(tdata["description"]) if "description" in tdata else None,
             harness_integration=harness_integration,
             harness_integration_config=harness_integration_config,
+            restart_command_compat=uses_restart_command,
             env=env,
             declared_at=decls.lookup("session_templates", name),
         )
@@ -138,6 +157,11 @@ def _session_harness_integration_pair(
         raise ConfigError(f"session_templates.{name}.{selector} must be a string")
 
     if flat_present:
+        if "resume_command" in tdata and "restart_command" in tdata:
+            raise ConfigError(
+                f"session_templates.{name}: resume_command and restart_command cannot be combined; "
+                "use resume_command only"
+            )
         if harness_integration_val is not None and harness_integration_val != "shell":
             raise ConfigError(
                 f"session_templates.{name}: the legacy field(s) "
@@ -155,6 +179,8 @@ def _session_harness_integration_pair(
         blob: dict[str, object] = {}
         if "command" in tdata:
             blob["command"] = str(tdata["command"])
+        if "resume_command" in tdata:
+            blob["resume_command"] = str(tdata["resume_command"])
         if "restart_command" in tdata:
             blob["restart_command"] = str(tdata["restart_command"])
         if "required_commands" in tdata:
@@ -181,3 +207,8 @@ def _session_harness_integration_pair(
     # TOML-shape checks above (flat-vs-nested, blob-needs-integration) stay
     # at load, in the operator's TOML vocabulary.
     return harness_integration, harness_integration_config, old
+
+
+def _uses_restart_command(integration: str | None, config: dict[str, object] | None) -> bool:
+    """Return whether a shell declaration uses the compatibility spelling."""
+    return integration == "shell" and config is not None and "restart_command" in config

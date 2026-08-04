@@ -123,8 +123,8 @@ class ClaudeCodeIntegration(HarnessIntegration):
         session if its transcript exists, else launch fresh."""
         return self._resume_or_launch(ctx)
 
-    def restart(self, ctx: RunContext) -> str:
-        """The pane command for ``session restart``: symmetric with
+    def resume(self, ctx: RunContext) -> str:
+        """The pane command for ``session resume``: symmetric with
         :meth:`start`. The orchestrator kills the old tmux BEFORE calling
         this (R7), so the probe decides resume-vs-launch with the old
         process already dead."""

@@ -221,8 +221,8 @@ class CodexIntegration(HarnessIntegration):
         discovered) session if its rollout exists, else launch fresh."""
         return self._resume_or_launch(ctx)
 
-    def restart(self, ctx: RunContext) -> str:
-        """The pane command for ``session restart``: symmetric with
+    def resume(self, ctx: RunContext) -> str:
+        """The pane command for ``session resume``: symmetric with
         :meth:`start`. The orchestrator kills the old tmux BEFORE calling
         this, so the probes decide with the old process already dead."""
         return self._resume_or_launch(ctx)
