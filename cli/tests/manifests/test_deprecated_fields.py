@@ -110,6 +110,7 @@ def test_session_template_flat_fields_rejected_with_preserved_message(
         [
             "command: htop",
             "restart_command: htop",
+            "resume_command: htop --resume",
             "required_commands: [htop]",
         ],
     )
@@ -120,7 +121,7 @@ def test_session_template_flat_fields_rejected_with_preserved_message(
     # (the canonical shape).
     assert (
         "session-template spec field(s) command, required_commands, "
-        "restart_command configure the 'shell' harness integration; move them "
+        "restart_command, resume_command configure the 'shell' harness integration; move them "
         "into a spec.harness_integration tagged table with name: shell"
     ) in str(exc.value)
 

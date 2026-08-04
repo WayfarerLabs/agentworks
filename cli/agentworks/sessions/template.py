@@ -53,10 +53,12 @@ class SessionTemplate(DeclaredResource):
     so inheritance can tell a restating child from a silent one (FRD
     R5). An undeclared harness_integration resolves to the ``shell`` built-in (a
     plain login shell), preserving the behavior from before harness integrations. The legacy
-    flat ``command`` / ``restart_command`` / ``required_commands``
+    flat ``command`` / ``resume_command`` / ``required_commands``
     fields are gone: they are ``shell``'s config vocabulary and live
     under ``harness_integration_config`` now; the TOML loader hoists them for
-    backward compatibility, manifests reject them (FRD R2/R6).
+    backward compatibility, manifests reject them (FRD R2/R6). The
+    ``restart_command_compat`` bit records old-input provenance long enough
+    to reject mixed-spelling inheritance and never reaches runtime config.
     """
 
     inherits: list[str] = field(default_factory=list)
