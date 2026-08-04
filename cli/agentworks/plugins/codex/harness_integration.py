@@ -4,8 +4,11 @@ rollout when one exists and launching fresh otherwise.
 Config vocabulary (all optional): ``model``, ``sandbox``, ``approval_policy``,
 and ``profile`` map to the ``-m`` / ``-s`` / ``-a`` / ``-p`` flags verbatim;
 ``network`` (bool) forwards to the ``sandbox_workspace_write.network_access``
-config key via ``-c``; ``writable_dirs`` (list) emits one ``--add-dir`` per
-entry (union-merged across template inheritance, like ``shell``'s
+config key via ``-c``; ``approvals_reviewer`` (str) forwards to the
+``approvals_reviewer`` config key via ``-c`` (who adjudicates approval
+escalations: codex documents ``user``, the default, and ``auto_review``, its
+risk-based reviewer subagent); ``writable_dirs`` (list) emits one ``--add-dir``
+per entry (union-merged across template inheritance, like ``shell``'s
 ``required_commands``); ``web_search`` (bool) emits ``--search``;
 ``disable_strict_config`` (bool, default false) suppresses the
 ``--strict-config`` the harness integration otherwise always emits; and ``extra_args`` is
@@ -68,6 +71,7 @@ _CODEX_FIELDS = {
     "approval_policy",
     "profile",
     "network",
+    "approvals_reviewer",
     "writable_dirs",
     "web_search",
     "disable_strict_config",
@@ -92,6 +96,18 @@ _FLAG_FIELDS: tuple[tuple[str, str], ...] = (
 # codex's own unknown-field startup error in the pane instead of a
 # session that silently has no network. Re-verify on codex major bumps.
 _NETWORK_KEY = "sandbox_workspace_write.network_access"
+
+# Every string-typed field: the flag-mapped four plus the -c-forwarded
+# approvals_reviewer (validate type-checks them through one loop).
+_STR_FIELDS: tuple[str, ...] = (*(name for name, _flag in _FLAG_FIELDS), "approvals_reviewer")
+
+# The codex config key ``approvals_reviewer`` forwards to (via ``-c``;
+# codex exposes no dedicated flag for it, so the strict-config default is
+# the drift guard here too). Values are codex-owned and forward
+# unvalidated: 0.146.0 documents `user` (the default: escalations prompt
+# the human) and `auto_review` (codex's risk-based reviewer subagent
+# adjudicates), plus the legacy `guardian_subagent`.
+_APPROVALS_REVIEWER_KEY = "approvals_reviewer"
 
 
 def _as_str_list(value: object) -> list[str] | None:
@@ -203,7 +219,7 @@ class CodexIntegration(HarnessIntegration):
         unknown = sorted(set(config) - _CODEX_FIELDS)
         if unknown:
             raise ConfigError(f"{owner}: unknown codex harness integration field(s): {', '.join(unknown)}")
-        for field_name, _flag in _FLAG_FIELDS:
+        for field_name in _STR_FIELDS:
             value = config.get(field_name)
             if value is not None and not isinstance(value, str):
                 raise ConfigError(f"{owner}.{field_name} must be a string")
@@ -398,6 +414,11 @@ class CodexIntegration(HarnessIntegration):
             # Both directions forward explicitly: `false` overrides a
             # profile or config.toml that enabled network access.
             tokens += ["-c", f"{_NETWORK_KEY}={'true' if network else 'false'}"]
+        approvals_reviewer = self.config.get("approvals_reviewer")
+        if isinstance(approvals_reviewer, str):
+            # The -c value is parsed as TOML, so the string is quoted
+            # explicitly rather than leaning on codex's raw-string fallback.
+            tokens += ["-c", f'{_APPROVALS_REVIEWER_KEY}="{approvals_reviewer}"']
         writable_dirs = self.config.get("writable_dirs")
         if isinstance(writable_dirs, list):
             for item in writable_dirs:
