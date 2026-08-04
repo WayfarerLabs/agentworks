@@ -467,8 +467,10 @@ MIGRATIONS: dict[int, str | Callable[[sqlite3.Connection, MigrationContext], Non
     # Recreate sessions table with a CHECK constraint. The INSERT will fail
     # if any agent sessions have NULL socket_path (legacy default-server
     # mode). If this happens, revert to the previous version and run
-    # 'session resume --force' or 'session delete' for each legacy agent
-    # session before upgrading.
+    # 'session restart --force' or 'session delete' for each legacy agent
+    # session before upgrading. This recovery targets the PREVIOUS release's
+    # CLI, where the command is 'session restart' (renamed to 'session resume'
+    # in 0.13.0), so it deliberately keeps the old spelling.
     19: """
         CREATE TABLE sessions_new (
             name              TEXT PRIMARY KEY,
