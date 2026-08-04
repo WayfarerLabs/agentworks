@@ -83,7 +83,7 @@ resource input. Existing source-level deprecation warnings remain independent of
 The field warning is suppressible with `--no-deprecations` and states:
 
 ```text
-restart_command is deprecated; use resume_command instead. It will be removed in 0.14.0. Silence this warning with --no-deprecations.
+restart_command is deprecated; use resume_command instead. It will be removed in 0.14.0. Silence this warning with --no-deprecations. Affected resources: <session-template/name>[, ...]
 ```
 
 When several loaded resources use the old field, the loader SHOULD aggregate them into one warning
