@@ -1,6 +1,6 @@
 # codex harness: pinned decisions and CLI research
 
-**Status:** Pinned **Repo:** `agentworks` **Path:** `cli/agentworks/plugins/codex/`
+**Status:** Locked **Repo:** `agentworks` **Path:** `cli/agentworks/plugins/codex/`
 
 This effort adds a `codex` session harness in a new opt-in `codex` system plugin, mirroring the
 `claude` plugin end to end. It deliberately runs without a full SDD: the pattern it follows is
@@ -228,9 +228,11 @@ keys, `*.launch` files) is ignored and opportunistically cleaned; a pre-redesign
 
 Unchanged in shape: the `find "${CODEX_HOME:-$HOME/.codex}/sessions" -name '*-<sid>.jsonl'` probe
 with the 0/1/raise exit-code fork. `archived_sessions/` is deliberately NOT probed: an archived
-session reports not-resumable and the integration starts fresh (operator-decided 2026-08-01;
-auto-unarchive would silently reverse an explicit operator action), with the archived history
-recoverable manually.
+session reports not-resumable (operator-decided 2026-08-01; auto-unarchive would silently reverse an
+explicit operator action), with the archived history recoverable manually. Not-resumable DROPS the
+bound id and falls through to layers 2/3, so they decide what happens next: adopt a different
+conversation in this workspace, open the picker, or start fresh only when nothing is found. The
+dropped binding is reported alongside whatever replaced it.
 
 ### Invocation forms (redesigned 2026-08-04)
 
@@ -249,11 +251,12 @@ dead id on the next op, and on the `create` path that deletion is the second hal
 recreated-namesake guarantee. `session create` always emits the fresh form; the resume and picker
 forms are reachable only from `session resume`.
 
-Every decision leaf (resumed-bound, resumed-adopted, picker, fresh, archived-or-gone fresh) carries
-its own `launch_note` in the `agw session resume` console output AND a matching pane echo
-(operator-decided 2026-08-04: the console must say what is happening), in resume vocabulary.
-`-c tui.resume_cwd=current` pins the cross-cwd prompt off (the pane has already `cd`-ed to the
-workspace dir). All generated tokens are `shlex.quote`d; no generated piece emits `{{word}}`.
+Every decision leaf (resumed-bound, resumed-adopted, picker, fresh, and a dropped archived-or-gone
+binding composed with whichever of those followed it) carries its own `launch_note` in the
+`agw session resume` console output AND a matching pane echo (operator-decided 2026-08-04: the
+console must say what is happening), in resume vocabulary. `-c tui.resume_cwd=current` pins the
+cross-cwd prompt off (the pane has already `cd`-ed to the workspace dir). All generated tokens are
+`shlex.quote`d; no generated piece emits `{{word}}`.
 
 ### Config vocabulary (all optional; shape-checked here, codex-owned values forwarded unvalidated)
 
