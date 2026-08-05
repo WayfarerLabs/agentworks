@@ -204,6 +204,31 @@ toward preservation when the SDD still meaningfully informs current work. When i
 _not_ finding this SDD via a present-day file or grep search would be a loss; if the answer is no,
 delete.
 
+## Roadmap SDDs
+
+Most SDDs cover one development effort. A roadmap SDD is the meta case: an SDD that coordinates a
+family of related efforts, generating and tracking ordinary child SDDs rather than shipping an
+implementation of its own. Use one when several efforts overlap enough that their ordering and
+shared contracts need a single owner.
+
+The settled rules for the species:
+
+- Its artifacts are not the standard set. A roadmap SDD carries perspectives (its inputs), a
+  synthesis and sequencing document, cross-cutting contract decisions, and a ledger of its child
+  SDDs. It has no frd.md, hla.md, or plan.md of its own; those belong to the children. The exact
+  artifact forms are still stabilizing with the first roadmap SDD and will be recorded here as they
+  prove out.
+- It stays open until every child SDD is closed, then locks like any other SDD. Its ledger plays
+  the role plan checkboxes play in an ordinary SDD, one level up.
+- Roadmap state lives on `main`: every change (a new child SDD, a status change, a design revision)
+  is a PR, and child SDDs reference their roadmap SDD so the coordination is discoverable from any
+  effort.
+- The roadmap lead seeds each child SDD with its FRD plus any constraints the roadmap has already
+  settled, and reviews the child's PRs. A separately launched effort lead owns the child's HLA,
+  plan, and implementation per the ordinary process. Seeding PRs are ready, not draft: their
+  content is limited by design, but they are intended to merge as-is (see PR Review).
+- Terminology: roadmap SDD, roadmap lead, child SDD, effort lead. Not "program".
+
 ## Branching Model
 
 Work driven via SDD should be done in one or more feature branches. The general pattern is:
