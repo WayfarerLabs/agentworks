@@ -33,10 +33,15 @@ One frozen, typed, core-owned record per kind, registered in a single table that
 capability-kind enumeration in the codebase (`KIND_REGISTRY` and manifest decode's declarable-kind
 tables legitimately enumerate all resource kinds and stay). Shape (illustrative, not final code):
 
+The descriptor is minimal by rule: a field exists only when it has a wave 2 consumer. Because the
+descriptor is a frozen record registered in one place, adding a field later is purely additive (no
+registration-site migration), so deferral costs nothing and speculation buys nothing.
+
+Day-one fields:
+
 ```text
 CapabilityKindDescriptor
     kind                     "vm-platform" | "harness-integration" | ...
-    contract_version         integer the implementation declares compatibility with
     implementation_contract  required base class or protocol
     registry_policy          classes or factories, registered by name; constructed instances only
                              as a descriptor-carried interim exception (secret-backend, until
@@ -49,14 +54,28 @@ CapabilityKindDescriptor
     readiness                uniform classmethod contract over config; instance-scoped readiness
                              belongs to constructed, bounded-lifetime clients
     publisher                derived; the skip-plugin-seated idiom implemented once
-    consumer_gating          which consuming surfaces gate on enablement, declared not hand-wired
     manifest_section         how the kind appears in manifest decode: today the kind-sections
                              entry plus, for capability-hosting surfaces, the tagged-table field
                              mapping (the legacy sibling-field pairs die with tagged-shape
                              hardening)
-    migration_participation  whether `agw resource migrate` handles the kind (contingent on
-                             wave 2's call on the migrator's fate)
-    snapshot_participation   derived; plugin-registry snapshot/restore iterates descriptors
+```
+
+Snapshot/restore needs no field at all: it iterates the descriptor table, so participation is
+membership, and a flag would only add a way to be wrong.
+
+Deferred fields, recorded here (and as comments in the implementation) with the trigger that creates
+each, so wave 2 neither builds them early nor reinvents them later:
+
+```text
+    contract_version         when the first incompatible contract change or the wave 8 external
+                             plugin API needs version negotiation; until then every first-party
+                             implementation tracks HEAD and the field would hold one value forever
+    consumer_gating          when gating derivation actually consolidates (the first new consuming
+                             surface, waves 3 and 4); wave 2 changes no gating behavior
+    migration_participation  only if wave 2 rules that `agw resource migrate` survives AND should
+                             derive from the live descriptor; note the counterargument that the
+                             migrator is deliberately an independent frozen oracle and may never
+                             derive from live wiring
 ```
 
 ### Schema slots
@@ -79,9 +98,10 @@ The switchboard collapses: every site that today independently enumerates the fo
 from the descriptor table instead. From `starting-state.md`, that is the adapter table (one generic
 adapter parameterized by descriptor replaces the four hand-written five-method classes), the graph's
 kind set and readiness dispatch, the per-kind registry loaders, bootstrap publication, the
-plugin-registry snapshot/restore tuple, and manifest decode's kind sections, plus the migrator's
-kind participation flags. The existing guard test flips its job from "detect an omitted site" to
-"assert every site derives."
+plugin-registry snapshot/restore tuple, and manifest decode's kind sections. The migrator's kind
+participation flags stay hand-maintained unless the deferred `migration_participation` field is ever
+created (see the deferred list above). The existing guard test flips its job from "detect an omitted
+site" to "assert every site derives."
 
 ## What stays domain-owned
 
@@ -95,11 +115,12 @@ the framework; it does not absorb what makes each kind itself.
 
 The descriptor makes "trust but verify" enforceable at registration, replacing the current
 `type`-and-cast seam: conformance to `implementation_contract`, required metadata present, a
-side-effect-free constructibility check, required operations implemented, every provided slot model
-conforming to the slot's model contract (presence is the support claim, so there is no
-claimed-but-empty slot to check), and `contract_version` compatibility. Atomic seating (prepare
-everything, then mutate registries) is preserved. This strengthens the internal extension framework;
-it does not create a public plugin promise, which stays gated on wave 8's distribution-trust model.
+side-effect-free constructibility check, required operations implemented, and every provided slot
+model conforming to the slot's model contract (presence is the support claim, so there is no
+claimed-but-empty slot to check). Version negotiation joins this list when the deferred
+`contract_version` field is created. Atomic seating (prepare everything, then mutate registries) is
+preserved. This strengthens the internal extension framework; it does not create a public plugin
+promise, which stays gated on wave 8's distribution-trust model.
 
 ## Secret backends under the descriptor
 
