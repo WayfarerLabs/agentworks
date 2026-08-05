@@ -364,6 +364,100 @@ These consumers should not contain harness-specific knowledge.
 
 Best effort does not remove the need for precise security language.
 
+### Layered trust and realistic attackers
+
+The strongest isolation analysis remains binary: code running under the same user identity is not a
+hard security boundary. A sufficiently informed same-UID attacker may be able to inspect, signal,
+replace, bypass, or impersonate an integration-owned observer. Root can replace the entire local
+story.
+
+That boundary analysis should not collapse every user-space component into one practical trust
+level. The components have materially different provenance, scope, exposure, and likely compromise
+paths:
+
+- Agentworks core and the trusted ingest or persistence components designed later.
+- The integration-owned observer or scribe.
+- The harness.
+- Harness dependencies and subprocesses.
+- Model-directed activity.
+
+This list describes distinct trust and exposure considerations, not strict containment.
+Dependencies, subprocesses, model actions, and observers may interact in ways that do not form one
+process tree or linear trust ordering.
+
+An integration-owned scribe is expected to be small, narrowly scoped, purpose-built for Agentworks,
+and developed by contributors who understand the observation contract. It need not accept arbitrary
+model-directed behavior or contact the outside world. The harness is broader, externally developed,
+networked, and built without necessarily sharing Agentworks' security philosophy. Model-directed
+activity and compromised dependencies introduce still different attack paths.
+
+These differences do not make the scribe cryptographically trusted. If the implementation preserves
+its narrow scope and limited exposure, however, they can make it operationally more trustworthy and
+less likely to be the initial compromise target. A prompt-injected model, a compromised package
+scraping credentials, an accidental cleanup command, and an adaptive Agentworks-aware attacker
+should not be treated as the same adversary.
+
+The threat model should distinguish at least three properties:
+
+1. **Observation fidelity:** how accurately the integration reconstructs activity from available
+   sources.
+2. **Collector survivability:** how difficult it is for ordinary failures or opportunistic
+   compromise to silence observation without detection.
+3. **Adversarial assurance:** what remains trustworthy against an informed attacker at a stated
+   privilege level.
+
+Controls can provide substantial value to collector survivability without proving observation
+completeness or defeating an adaptive same-UID attacker.
+
+### Heartbeats and attacker cost
+
+A heartbeat attests only to the component or path segment it exercises. A process heartbeat can
+detect a crashed scribe or process kill. Source-health signals can detect a failed parser input or
+socket. Explicit buffer and resource telemetry can detect exhaustion. A later design may add
+end-to-end synthetic checks that cover more of the observation path. One undifferentiated heartbeat
+must not be credited with all of those properties.
+
+Heartbeats and related health signals can detect accidental failure, generic malicious cleanup, or
+an opportunistic compromise that does not understand Agentworks' observation topology. An informed
+attacker may instead route activity around observed sources, exploit an unknown blind spot, or leave
+the scribe untouched while selectively suppressing events. Protocol imitation is one possible
+evasion path, not a prerequisite for evasion.
+
+Even with those limits, making simple suppression visible and forcing some attackers to understand
+or bypass the observation system raises attacker cost. That is meaningful security without being an
+absolute guarantee.
+
+The precise claim should be:
+
+> A heartbeat attests to continued operation of the specific component or path segment it exercises.
+> It can detect corresponding failures and unsophisticated suppression, but does not prove
+> end-to-end observation health or that the workload reported every activity.
+
+Heartbeat expectations and timeout events should be owned outside the harness behavior being
+observed, with the exact process, UID, and supervision boundary decided explicitly later. Sequence
+and heartbeat signals should be described as detection and investigation aids, not proof of semantic
+completeness.
+
+### Preserving the scribe's practical trust advantage
+
+Where the observation mechanism permits it, the design should keep the integration-owned scribe:
+
+- Small and fixed-purpose.
+- Minimally dependent on third-party packages.
+- Free of model-controlled plugins and arbitrary configuration.
+- Free of harness secrets and outbound network access unless collection strictly requires them.
+- Started and supervised by Agentworks rather than by the harness.
+- Separately identifiable, versioned, resource-bounded, and directly connected to the ingest path.
+- Responsible for its own heartbeats and counters for losses it can detect rather than accepting
+  them from the harness. These counters cannot account for bypassed sources or a compromised scribe.
+
+The later design should consider incremental hardening, such as read-only root-owned executables and
+configuration, separate process groups, resource controls, restricted process visibility or signals,
+a separate UID where observation access allows it, or an external watchdog. These are options to
+evaluate per integration mechanism, not assumptions that every observer can satisfy.
+
+### Limits that remain
+
 - A producer sequence or heartbeat can indicate collector-channel loss; it cannot prove that a
   compromised producer reported every activity.
 - Peer credentials can identify a connecting local process, not automatically the remote human or
@@ -432,6 +526,8 @@ anchoring where the threat model requires it.
 10. A transcript belongs to one session; aggregators never own or merge transcript streams.
 11. Core supplies reusable primitives without learning harness-specific behavior.
 12. Security, fidelity, loss, and provenance claims must match what the mechanisms can prove.
+13. Security analysis distinguishes practical trust layers and attacker cost from hard isolation
+    boundaries.
 
 ## Questions for the Remaining SDD Artifacts
 
@@ -445,5 +541,7 @@ anchoring where the threat model requires it.
 - How should semantic and raw transcript views relate while avoiding duplication?
 - What session/run identity and persistence semantics survive resume, reinit, and deletion?
 - What minimum data-governance requirements must land with the first durable transcript sink?
+- Which realistic attacker classes does each observation control detect, impede, or fail against?
+- Which scribe-hardening measures preserve required harness visibility without weakening usability?
 - Which native structured integrations are sufficiently stable and commercially safe to support as
   optional Phase 3 modes?
