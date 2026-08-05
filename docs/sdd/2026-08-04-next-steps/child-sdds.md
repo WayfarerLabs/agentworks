@@ -55,9 +55,9 @@ wins. They proceed standalone.
 
 ## Issue intake (2026-08-05)
 
-A sweep of the open issue tracker pulled the following issues into the roadmap. Each gets a comment
-pointing back here so it is not worked out-of-band (comments pending a PAT with issue-write access);
-issues not listed stay standalone.
+A sweep of the open issue tracker pulled the following issues into the roadmap. Each rolled-in issue
+received a comment pointing back here so it is not worked out-of-band (posted 2026-08-05); issues
+not listed stay standalone.
 
 | Issue      | Lands in                                                                           |
 | ---------- | ---------------------------------------------------------------------------------- |
@@ -83,8 +83,10 @@ open-ended research placeholder.
 ## Immediate next actions
 
 1. Done (2026-08-05): PR #316 merged; wave 0 complete.
-2. Merge the roadmap PR (#400) and the wave 1 seed FRD (#401); then delete the harvested
-   `feat/harness-transcripts-sdd` branch.
-3. Post the held issue-intake comments once the PAT gains issue-write access.
-4. Finish the design track's first artifact: the capability-kind descriptor contract.
-5. Launch an effort lead to pick up the wave 1 SDD from `main`.
+2. Done (2026-08-05): roadmap PR #400 and wave 1 seed #401 merged; harvested
+   `feat/harness-transcripts-sdd` branch deleted.
+3. Done (2026-08-05): issue-intake comments posted.
+4. Merge the descriptor contract (PR #405, review findings applied), then seed wave 2.
+5. Wave 1 in flight with its effort lead; roadmap lead reviews its PRs.
+6. Design track continues: facet-model boundary with session/run identity, the instance-state store,
+   and the event vocabulary's first slice.
