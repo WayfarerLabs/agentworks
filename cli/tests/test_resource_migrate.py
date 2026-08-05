@@ -473,9 +473,7 @@ def test_singletons_emit_default_documents(tmp_path: Path) -> None:
         ("mise_install_before", '"yesterday"', "mise_install_before"),
     ],
 )
-def test_admin_mise_inputs_fail_during_migration_planning(
-    tmp_path: Path, setting: str, value: str, match: str
-) -> None:
+def test_admin_mise_inputs_fail_during_migration_planning(tmp_path: Path, setting: str, value: str, match: str) -> None:
     cfg = _write_config(tmp_path, resources=f"[admin.config]\n{setting} = {value}\n")
 
     with pytest.raises(ConfigError, match=match):
