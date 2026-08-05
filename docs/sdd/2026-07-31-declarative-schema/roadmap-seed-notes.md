@@ -1,16 +1,16 @@
-# Wave 2 Seed Notes
+# Roadmap Seed Notes (Wave 2)
 
 - Status: Published for the wave 2 effort lead
 - Date: 2026-08-05
-- Audience: the effort lead picking up `docs/sdd/2026-07-31-declarative-schema/` phase 2
-- Authority: `target-state.md` and `capability-descriptor-contract.md` in this directory
+- From: the next-steps roadmap SDD (`docs/sdd/2026-08-04-next-steps/`)
+- Authority: that directory's `target-state.md` and `capability-descriptor-contract.md`
 
-This is the roadmap's seed for an adopted child. The declarative-schema SDD predates the roadmap and
-is not the roadmap lead's to edit, so the changes phase 2 needs are recorded here for you to
-integrate into your own artifacts (which you own, per the sdd skill's ownership rule). Update your
-plan and HLA as living documents; completed checkboxes stay immutable, so integrate by adding and
-annotating, not rewriting history. Flag anything here that contradicts what you find to the
-operator.
+This file is a message from the roadmap, delivered as a new file in your feature directory (the sdd
+skill's new-file message passing; the roadmap does not modify your existing artifacts). It records
+the changes phase 2 needs before it starts. Integrate it into your own artifacts, then keep or
+delete this file as you see fit; it is yours once read. Update your plan and HLA as living
+documents; completed checkboxes stay immutable, so integrate by adding and annotating, not rewriting
+history. Flag anything here that contradicts what you find to the operator.
 
 ## 1. Release the hold
 
@@ -58,12 +58,12 @@ section, which replace the current type-and-cast seam.
   uniform validation; the strict unknown-key direction resolves its open tradeoff), #311 (structural
   secret-name reference extraction), and #170 (`metadata.expires` as an envelope-metadata rider, so
   it is modeled once).
-- Honor the four open doors in `target-state.md` (source-agnostic extraction, layer-stack merge,
-  graph immutability as a registry/fold property, one instance-state store).
+- Honor the four open doors in the roadmap's `target-state.md` (source-agnostic extraction,
+  layer-stack merge, graph immutability as a registry/fold property, one instance-state store).
 
 ## 6. Coordination handles
 
 - The `agw resource schema` and describe surface names are yours to settle, coordinated with the
   onboarding-and-discovery child (seeding now) since those surfaces are its raw material.
-- The roadmap ledger (`child-sdds.md`) tracks your status from merged PRs; you do not update it. The
-  roadmap lead reviews your PRs before merge.
+- The roadmap ledger (`docs/sdd/2026-08-04-next-steps/child-sdds.md`) tracks your status from merged
+  PRs; you do not update it. The roadmap lead reviews your PRs before merge.
