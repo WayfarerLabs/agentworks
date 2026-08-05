@@ -30,8 +30,13 @@ is locked.
 ### Design track: capability-kind descriptor contract
 
 - [x] Contract artifact drafted (`capability-descriptor-contract.md`, 2026-08-05)
+- [x] Reviewed and merged to `main` (PR #405, 2026-08-05)
+- [ ] Consumed by wave 2 seeding (wave 2 releases from its hold once wave 1's removals land)
+
+### Design track: facet-model boundary
+
+- [ ] Contract artifact drafted (roadmap lead, in progress; gates the wave 4 and wave 5 seeds)
 - [ ] Reviewed and merged to `main`
-- [ ] Consumed by wave 2 seeding
 
 ### Not yet spawned
 
