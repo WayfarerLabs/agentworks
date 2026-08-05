@@ -79,6 +79,15 @@ is no longer relevant, it should be left as-is and new checkboxes should be adde
 plan. This preserves the historical record of what was actually done, even if the implemented
 solution evolves.
 
+Mutability also follows ownership. An agent working an effort edits that effort's SDD artifacts and
+no other's: do not update another SDD's content (a roadmap SDD's ledger, a sibling effort's plan)
+unless specifically instructed to, and treat such an instruction as the exception, not standard
+process. When work surfaces an inconsistency in another SDD (a stale claim, a checkbox that no
+longer matches reality, a statement your change invalidates), flag it to the operator rather than
+editing it yourself. If you also have a working communication channel to that SDD's owner (for a
+child SDD, the roadmap lead), flag it there too; until such channels exist, the operator is the
+reliable route.
+
 ## Lockfile
 
 When work on the SDD is done, a `locked.md` file should be created in the feature directory. This
@@ -238,6 +247,10 @@ The settled rules for the species:
   settled, and reviews the child's PRs. A separately launched effort lead owns the child's HLA,
   plan, and implementation per the ordinary process. Seeding PRs are ready, not draft: their content
   is limited by design, but they are intended to merge as-is (see PR Review).
+- The roadmap's artifacts, ledger included, are the roadmap lead's to maintain. Child effort leads
+  do not update the roadmap SDD to mark their own progress; the roadmap lead tracks child status
+  from merged PRs. Child leads flag inconsistencies they notice to the operator instead (see
+  Artifact Mutability's ownership rule).
 - Terminology: roadmap SDD, roadmap lead, child SDD, effort lead. Not "program".
 
 ## Branching Model
