@@ -115,8 +115,8 @@ the framework; it does not absorb what makes each kind itself.
 
 The descriptor makes "trust but verify" enforceable at registration, replacing the current
 `type`-and-cast seam: conformance to `implementation_contract`, required metadata present, a
-side-effect-free constructibility check, required operations implemented, and every provided slot
-model conforming to the slot's model contract (presence is the support claim, so there is no
+side-effect-free constructibility check, required operations implemented, every provided slot model
+conforming to the slot's model contract (presence is the support claim, so there is no
 claimed-but-empty slot to check), and `contract_version` compatibility (declared from day one, so
 the check is initially trivial and the discipline is established before it matters). Atomic seating
 (prepare everything, then mutate registries) is preserved. This strengthens the internal extension
