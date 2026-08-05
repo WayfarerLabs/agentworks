@@ -581,13 +581,18 @@ def _decode_git_credential(doc: Document, spec: dict[str, Any], issues: list[str
         raise ConfigError(
             'git-credential manifests use "provider", not "type"',
         )
+    # By this point ``_normalize_capability_field`` has already folded the
+    # tagged ``spec.provider: {name: ..., ...}`` table into the internal pair
+    # (a ``provider`` string plus a ``provider_config`` mapping), so this
+    # decoder always sees the normalized string form here.
     provider = spec.pop("provider", None)
     if not isinstance(provider, str) or not provider:
         raise ConfigError(
             "git-credential requires spec.provider (github or azdo)",
         )
-    # Provider-owned configuration (azdo's org, the token secret name) rides
-    # the provider table (or the deprecated sibling provider_config).
+    # Provider-owned configuration (azdo's org, the token secret name) rides the
+    # provider table operators write (or the deprecated sibling provider_config);
+    # both land in this normalized ``provider_config`` mapping.
     raw_config = spec.pop("provider_config", {})
     if not isinstance(raw_config, dict):
         raise ConfigError("spec.provider_config must be a mapping")

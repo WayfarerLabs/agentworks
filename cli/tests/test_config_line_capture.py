@@ -87,14 +87,20 @@ def test_manifest_resource_declared_at_points_at_source(
     config_file = _write_config(tmp_path, "", ssh_keys)
     # ``secret`` requires a description; it is optional for the other kinds.
     description = "declared for the declared_at test" if kind == "secret" else None
-    write_manifests(tmp_path, ManifestDoc(kind, name, spec, description=description))
+    resources_dir = write_manifests(tmp_path, ManifestDoc(kind, name, spec, description=description))
+    manifest = resources_dir / "resources.yaml"
+    # Push the document off line 1 with a leading comment block (comments before
+    # the first document are legal YAML and do not open a document), so the
+    # assertion below discriminates a real ``doc.location`` stamp from a decoder
+    # that hardcoded line 1. Four comment lines put ``apiVersion`` on line 5,
+    # mirroring the section offset the former TOML line-capture test pinned.
+    lead = "# leading comment\n# pushes the document\n# off the first line\n# of the file\n"
+    manifest.write_text(lead + manifest.read_text(encoding="utf-8"), encoding="utf-8")
 
     registry = build_registry(load_config(config_file, warn_issues=False))
     decl = registry.lookup(kind, name)
-    # A single-document manifest: the document opens on line 1 of the file the
-    # framework auto-loads operator manifests from.
     assert decl.declared_at.file.name == "resources.yaml"
-    assert decl.declared_at.line == 1
+    assert decl.declared_at.line == 5
 
 
 # The former ``test_vm_template_declared_at_uses_subsection_when_only_env_present``
