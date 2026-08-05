@@ -165,10 +165,10 @@ Two things this graph deliberately does not serialize:
 
 ## Recommended Sequence
 
-### Wave 0: merge phase 1 (done, awaiting merge)
+### Wave 0: merge phase 1 (complete: PR #316 merged 2026-08-05)
 
-Phase 1 is complete and approved; merge the retargeted PR #316 to `main`. Every other wave assumes a
-single declaration frontend.
+Phase 1 merged to `main` via PR #316. The single declaration frontend every other wave assumes is
+now in place.
 
 ### Wave 1: the 0.14 cleanup release
 
@@ -337,6 +337,10 @@ we live with it:
   reviews each child SDD's PRs before merge.
 - Terminology (operator ruling, 2026-08-05): this is a roadmap and its child SDDs, led by a roadmap
   lead and effort leads. The word "program" is deliberately avoided.
+- Seed PRs are ready, not draft (operator ruling, 2026-08-05). A seeding PR's content is limited by
+  design, but it is intended to merge as-is, and ready versus draft is purely a merge-intent signal.
+  Draft stays reserved for the ordinary SDD pre-implementation review, where there is no intent to
+  merge yet.
 - Once the model has survived its first few child-SDD cycles, promote the roadmap-SDD concept into
   the `sdd` skill as its permanent home, so future roadmap efforts follow it without reading this
   SDD. Until then, this section is the working definition.
@@ -403,7 +407,7 @@ massage the base to make that true (see wave 3).
 
 ## Immediate Next Actions
 
-1. Merge the retargeted PR #316 (phase 1 is complete and approved; operator is handling the merge).
+1. Done (2026-08-05): PR #316 merged; wave 0 complete.
 2. Draft the deprecation-removal FRD from its perspective plus the corrections recorded here, and
    start wave 1.
 3. In parallel, begin the design track's first artifact: the capability-kind descriptor contract.
