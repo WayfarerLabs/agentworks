@@ -22,6 +22,7 @@ from agentworks.db import VMStatus
 from agentworks.errors import AuthorizationError, ValidationError
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.vms import manager as vm_manager
+from tests.conftest import ManifestDoc
 
 if TYPE_CHECKING:
     from agentworks.capabilities.base import OperationScope, RunContext
@@ -31,10 +32,11 @@ if TYPE_CHECKING:
 # input for these commands, joining the boundary through the
 # env-target registration (one prompt session with the site secret),
 # never through the walk union.
-AGENT_ENV_SECTION = """
-[agent_templates.default.env]
-AGENT_TOKEN = { secret = "agent-env-secret" }
-"""
+AGENT_ENV_TEMPLATE = ManifestDoc(
+    "agent-template",
+    "default",
+    {"env": {"AGENT_TOKEN": {"secret": "agent-env-secret"}}},
+)
 
 
 @pytest.fixture(autouse=True)
@@ -119,7 +121,7 @@ def test_graph_derives_from_row_and_env_joins_via_targets(
     from agentworks.secrets.resolver import Resolver
     from agentworks.vms.nodes import live_vm_node
 
-    config = make_config(AGENT_ENV_SECTION)
+    config = make_config(manifests=[AGENT_ENV_TEMPLATE])
     _seed(db)
     vm = db.get_vm("box")
     agent = db.get_agent("a1")
@@ -151,7 +153,7 @@ def test_shell_reachable_vm_is_one_boundary_burst(
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
 ) -> None:
-    config = make_config(AGENT_ENV_SECTION)
+    config = make_config(manifests=[AGENT_ENV_TEMPLATE])
     _seed(db)
     _reachable(monkeypatch, True)
 
@@ -173,7 +175,7 @@ def test_shell_stopped_vm_gate_burst_then_boundary_burst(
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
 ) -> None:
-    config = make_config(AGENT_ENV_SECTION)
+    config = make_config(manifests=[AGENT_ENV_TEMPLATE])
     _seed(db)
     events: list[str] = []
     _stop_the_vm(monkeypatch, events)
@@ -193,7 +195,7 @@ def test_exec_stopped_vm_gate_burst_then_boundary_burst(
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
 ) -> None:
-    config = make_config(AGENT_ENV_SECTION)
+    config = make_config(manifests=[AGENT_ENV_TEMPLATE])
     _seed(db)
     events: list[str] = []
     _stop_the_vm(monkeypatch, events)
@@ -253,7 +255,7 @@ def test_exec_double_dash_separator_runs_dash_led_command(
     """`agent exec a1 -- --version` consumes the leading `--` separator
     and runs the dash-led remote command verbatim inside the login
     shell; the leading-dash guard steps aside."""
-    config = make_config(AGENT_ENV_SECTION)
+    config = make_config(manifests=[AGENT_ENV_TEMPLATE])
     _seed(db)
     _reachable(monkeypatch, True)
 
@@ -274,7 +276,7 @@ def test_exec_double_dash_separator_strips_only_the_first(
 ) -> None:
     """Only ONE leading `--` is consumed; a later `--` is part of the
     remote command and is preserved verbatim inside the login shell."""
-    config = make_config(AGENT_ENV_SECTION)
+    config = make_config(manifests=[AGENT_ENV_TEMPLATE])
     _seed(db)
     _reachable(monkeypatch, True)
 
@@ -296,7 +298,7 @@ def test_exec_double_dash_separator_preserves_an_adjacent_second(
     """Back-to-back separators: only the FIRST `--` is consumed, so an
     immediately-adjacent second `--` survives as the remote command's
     own first token (mirror of the vm exec sibling case)."""
-    config = make_config(AGENT_ENV_SECTION)
+    config = make_config(manifests=[AGENT_ENV_TEMPLATE])
     _seed(db)
     _reachable(monkeypatch, True)
 
@@ -317,7 +319,7 @@ def test_exec_bare_flag_after_command_word_still_works(
 ) -> None:
     """A flag that follows a command word (no separator needed) runs as
     before: `agent exec a1 free -m` is unaffected by the `--` handling."""
-    config = make_config(AGENT_ENV_SECTION)
+    config = make_config(manifests=[AGENT_ENV_TEMPLATE])
     _seed(db)
     _reachable(monkeypatch, True)
 

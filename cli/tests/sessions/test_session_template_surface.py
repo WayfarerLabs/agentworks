@@ -80,11 +80,58 @@ def _templates(config) -> dict[str, SessionTemplate]:  # type: ignore[no-untyped
     return kind_dict(build_registry(config), "session-template")
 
 
+# The legacy flat-TOML session-template hoist and its conflict errors are no
+# longer reachable on the normal load path: config.toml is settings-only (ADR
+# 0022), so a ``[session_templates.*]`` section hard-errors as a resource
+# section. That reader (``_session_harness_integration_pair`` and the
+# ``_load_session_templates`` normalization around it) relocated verbatim to
+# the migrator's pre-side oracle, so the hoist / conflict pins re-point there,
+# testing the same code that used to run at load. The restart_command
+# deprecation those tests also asserted now surfaces on the manifest channel
+# (``test_yaml_restart_command_warns_and_normalizes``) and the migrator
+# rewrite (``test_resource_migrate.py``); the row's ``restart_command_compat``
+# flag preserves the "this used the deprecated spelling" pin here.
+
+
+def _oracle_row(tmp_path: Path, body: str, name: str) -> SessionTemplate:
+    """The flat-TOML session template ``name``, read through the migrator's
+    oracle."""
+    from typing import cast
+
+    from agentworks.migrate.toml_resources import toml_resource_rows
+
+    cfg = tmp_path / "legacy.toml"
+    cfg.write_text(dedent(body))
+    return cast("SessionTemplate", toml_resource_rows(cfg)[("session-template", name)])
+
+
+def _oracle_rows(tmp_path: Path, body: str) -> object:
+    """Run the migrator oracle over ``body`` (the raising path for the
+    conflict pins)."""
+    from agentworks.migrate.toml_resources import toml_resource_rows
+
+    cfg = tmp_path / "legacy.toml"
+    cfg.write_text(dedent(body))
+    return toml_resource_rows(cfg)
+
+
+def _pair(body: str, name: str) -> tuple[str | None, dict[str, object] | None, bool]:
+    """The raw ``(harness_integration, harness_integration_config,
+    used_old_selector)`` triple for one flat-TOML template, before the
+    ``_load_session_templates`` restart_command normalization."""
+    import tomllib
+
+    from agentworks.migrate.toml_resources import _session_harness_integration_pair
+
+    data = tomllib.loads(dedent(body))
+    return _session_harness_integration_pair(name, data["session_templates"][name])  # type: ignore[index]
+
+
 # -- TOML hoist + the two conflict errors (FRD R6) ---------------------------
 
 
 def test_flat_toml_hoists_to_the_shell_pair(tmp_path: Path) -> None:
-    config = _config(
+    tmpl = _oracle_row(
         tmp_path,
         """
         [session_templates.claude]
@@ -92,38 +139,39 @@ def test_flat_toml_hoists_to_the_shell_pair(tmp_path: Path) -> None:
         restart_command = "claude --resume"
         required_commands = ["claude"]
         """,
+        "claude",
     )
-    tmpl = _templates(config)["claude"]
     assert tmpl.harness_integration == "shell"
     assert tmpl.harness_integration_config == {
         "command": "claude",
         "resume_command": "claude --resume",
         "required_commands": ["claude"],
     }
-    assert len(config.deprecation_issues) == 2
-    assert "restart_command is deprecated; use resume_command instead" in "\n".join(config.deprecation_issues)
+    # The deprecated restart_command spelling was hoisted and normalized to
+    # resume_command; the compat flag records that it was used.
+    assert tmpl.restart_command_compat is True
 
 
 def test_flat_toml_resume_command_is_canonical(tmp_path: Path) -> None:
-    config = _config(
+    tmpl = _oracle_row(
         tmp_path,
         """
         [session_templates.claude]
         command = "claude"
         resume_command = "claude --resume"
         """,
+        "claude",
     )
-    tmpl = _templates(config)["claude"]
     assert tmpl.harness_integration_config == {
         "command": "claude",
         "resume_command": "claude --resume",
     }
-    assert not any("restart_command" in issue for issue in config.deprecation_issues)
+    assert tmpl.restart_command_compat is False
 
 
 def test_local_resume_and_restart_command_conflict(tmp_path: Path) -> None:
     with pytest.raises(ConfigError, match="resume_command and restart_command cannot be combined"):
-        _config(
+        _oracle_rows(
             tmp_path,
             """
             [session_templates.bad]
@@ -135,7 +183,7 @@ def test_local_resume_and_restart_command_conflict(tmp_path: Path) -> None:
 
 def test_nested_toml_resume_and_restart_command_conflict(tmp_path: Path) -> None:
     with pytest.raises(ConfigError, match="resume_command and restart_command cannot be combined"):
-        _config(
+        _oracle_rows(
             tmp_path,
             """
             [session_templates.bad]
@@ -148,7 +196,7 @@ def test_nested_toml_resume_and_restart_command_conflict(tmp_path: Path) -> None
 
 
 def test_nested_toml_harness_config_passes_through(tmp_path: Path) -> None:
-    config = _config(
+    tmpl = _oracle_row(
         tmp_path,
         """
         [session_templates.htop]
@@ -157,15 +205,14 @@ def test_nested_toml_harness_config_passes_through(tmp_path: Path) -> None:
         command = "htop"
         required_commands = ["htop"]
         """,
+        "htop",
     )
-    tmpl = _templates(config)["htop"]
     assert tmpl.harness_integration == "shell"
     assert tmpl.harness_integration_config == {"command": "htop", "required_commands": ["htop"]}
 
 
 def test_canonical_toml_harness_integration_pair_normalizes_to_internal_pair(tmp_path: Path) -> None:
-    config = _config(
-        tmp_path,
+    integration, config, used_old_selector = _pair(
         """
         [session_templates.htop]
         harness_integration = "shell"
@@ -173,16 +220,17 @@ def test_canonical_toml_harness_integration_pair_normalizes_to_internal_pair(tmp
         command = "htop"
         required_commands = ["htop"]
         """,
+        "htop",
     )
-    tmpl = _templates(config)["htop"]
-    assert tmpl.harness_integration == "shell"
-    assert tmpl.harness_integration_config == {"command": "htop", "required_commands": ["htop"]}
-    assert not config.deprecated_harness_selectors
+    assert integration == "shell"
+    assert config == {"command": "htop", "required_commands": ["htop"]}
+    # The canonical spelling is not flagged as a deprecated selector.
+    assert used_old_selector is False
 
 
 def test_toml_harness_old_and_canonical_pairs_cannot_mix(tmp_path: Path) -> None:
     with pytest.raises(ConfigError, match="old and new harness integration selector/config fields cannot be mixed"):
-        _config(
+        _oracle_rows(
             tmp_path,
             """
             [session_templates.bad]
@@ -193,21 +241,21 @@ def test_toml_harness_old_and_canonical_pairs_cannot_mix(tmp_path: Path) -> None
 
 
 def test_undeclared_template_leaves_the_pair_none(tmp_path: Path) -> None:
-    config = _config(
+    tmpl = _oracle_row(
         tmp_path,
         """
         [session_templates.plain]
         description = "just a login shell"
         """,
+        "plain",
     )
-    tmpl = _templates(config)["plain"]
     assert tmpl.harness_integration is None
     assert tmpl.harness_integration_config is None
 
 
 def test_flat_fields_with_non_shell_harness_is_an_error(tmp_path: Path) -> None:
     with pytest.raises(ConfigError, match="cannot combine with harness"):
-        _config(
+        _oracle_rows(
             tmp_path,
             """
             [session_templates.bad]
@@ -221,7 +269,7 @@ def test_flat_fields_with_explicit_harness_config_is_an_error(
     tmp_path: Path,
 ) -> None:
     with pytest.raises(ConfigError, match="cannot combine with an explicit"):
-        _config(
+        _oracle_rows(
             tmp_path,
             """
             [session_templates.bad]
@@ -234,7 +282,7 @@ def test_flat_fields_with_explicit_harness_config_is_an_error(
 
 def test_harness_config_without_harness_is_an_error(tmp_path: Path) -> None:
     with pytest.raises(ConfigError, match="harness_config needs a selector"):
-        _config(
+        _oracle_rows(
             tmp_path,
             """
             [session_templates.bad]
@@ -248,19 +296,24 @@ def test_unknown_shell_field_errors_at_build(tmp_path: Path) -> None:
     """The declared blob is shape-validated by the finalize ``validate``
     pass (R3), so a malformed shell block fails at build_registry, not at
     load. The error keeps the harness-integration vocabulary and gains the source
-    location (re-attached from the resource origin)."""
-    config = _config(
+    location (re-attached from the resource origin, the manifest file now)."""
+    root = _manifest(
         tmp_path,
         """
-        [session_templates.bad]
-        harness_integration = "shell"
-        [session_templates.bad.harness_integration_config]
-        nope = "x"
+        apiVersion: agentworks/v1
+        kind: session-template
+        metadata:
+          name: bad
+        spec:
+          harness_integration:
+            name: shell
+            nope: x
         """,
     )
+    config = _config(tmp_path, "")
     with pytest.raises(ConfigError, match="unknown shell harness integration field") as exc:
-        build_registry(config)
-    assert "config.toml" in str(exc.value)
+        build_registry(config, load_manifests(root))
+    assert "res.yaml" in str(exc.value)
 
 
 # -- manifest flat-field rejection + unknown-name miss policy (FRD R2) -------
@@ -436,43 +489,12 @@ def test_tagged_yaml_resume_and_restart_command_conflict(tmp_path: Path) -> None
         load_manifests(root)
 
 
-@pytest.mark.parametrize(
-    ("parent_field", "child_body", "errors"),
-    [
-        ("restart_command", 'resume_command = "child"', True),
-        ("resume_command", 'restart_command = "child"', True),
-        ("restart_command", 'command = "child"', False),
-    ],
-)
-def test_deprecated_toml_inheritance_through_loader_and_registry(
-    tmp_path: Path,
-    parent_field: str,
-    child_body: str,
-    errors: bool,
-) -> None:
-    config = _config(
-        tmp_path,
-        f"""
-        [session_templates.parent]
-        {parent_field} = "parent"
-
-        [session_templates.child]
-        inherits = ["parent"]
-        {child_body}
-        """,
-    )
-    registry = build_registry(config)
-    from agentworks.sessions.templates import resolve_template
-
-    if errors:
-        with pytest.raises(ConfigError, match="inheritance cannot combine"):
-            resolve_template(registry, "child")
-    else:
-        resolved = resolve_template(registry, "child")
-        assert resolved.harness_integration_config == {
-            "command": "child",
-            "resume_command": "parent",
-        }
+# The flat-TOML twin of ``test_yaml_inheritance_through_loader_and_registry``
+# is gone: config.toml no longer loads ``[session_templates.*]`` (ADR 0022), so
+# a TOML-declared template can never reach build_registry / resolve_template.
+# The manifest sibling below covers the identical restart/resume/command
+# inheritance matrix, and the deprecated-spelling inheritance conflict itself is
+# pinned by ``test_inheritance_rejects_mixed_resume_spellings``.
 
 
 @pytest.mark.parametrize(
@@ -551,23 +573,38 @@ def test_multi_parent_silent_parent_does_not_wipe(tmp_path: Path) -> None:
     R5): a later harness-integration-silent parent no longer wipes an earlier
     parent's command. Under the old flat-scalar merge, ``env-only``
     would have reset the command to empty."""
-    config = _config(
+    root = _manifest(
         tmp_path,
         """
-        [session_templates.has-command]
-        command = "run-me"
-
-        [session_templates.env-only]
-        [session_templates.env-only.env]
-        FOO = "bar"
-
-        [session_templates.child]
-        inherits = ["has-command", "env-only"]
+        apiVersion: agentworks/v1
+        kind: session-template
+        metadata:
+          name: has-command
+        spec:
+          harness_integration:
+            name: shell
+            command: run-me
+        ---
+        apiVersion: agentworks/v1
+        kind: session-template
+        metadata:
+          name: env-only
+        spec:
+          env:
+            FOO: bar
+        ---
+        apiVersion: agentworks/v1
+        kind: session-template
+        metadata:
+          name: child
+        spec:
+          inherits: [has-command, env-only]
         """,
     )
+    config = _config(tmp_path, "")
     from agentworks.sessions.templates import resolve_template
 
-    resolved = resolve_template(build_registry(config), "child")
+    resolved = resolve_template(build_registry(config, load_manifests(root)), "child")
     assert resolved.harness_integration == "shell"
     assert resolved.harness_integration_config == {"command": "run-me"}
     assert resolved.env["FOO"].value == "bar"
@@ -598,16 +635,21 @@ def test_undeclared_harness_integration_emits_no_reference() -> None:
 
 
 def test_harness_integration_row_lists_its_declaring_template(tmp_path: Path) -> None:
-    config = _config(
+    root = _manifest(
         tmp_path,
         """
-        [session_templates.htop]
-        harness_integration = "shell"
-        [session_templates.htop.harness_integration_config]
-        command = "htop"
+        apiVersion: agentworks/v1
+        kind: session-template
+        metadata:
+          name: htop
+        spec:
+          harness_integration:
+            name: shell
+            command: htop
         """,
     )
-    registry = build_registry(config)
+    config = _config(tmp_path, "")
+    registry = build_registry(config, load_manifests(root))
     desc = describe_resource(registry, "harness-integration", "shell")
     sources = {entry.source for entry in desc.references}
     assert ("session-template", "htop") in sources

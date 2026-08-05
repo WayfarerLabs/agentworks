@@ -8,10 +8,11 @@ of the whole model. It drives ``build_registry`` on real config (no fixture
 plugin injected via ``SYSTEM_PLUGINS``) and pins every contribution:
 
 - the ``azure-vm`` vm-platform ROW: present-but-disabled with a ``system-plugin``
-  origin; a ``vm-site`` on it is not-ready with the "enable plugin `azure`"
-  hint, ``resolve_site`` refuses it, and the deprecated legacy ``[azure]``
-  flat-section site gets the SAME hint (a feature: legacy configs are guided,
-  not broken with an unknown-name error);
+  origin; a ``vm-site`` on it (a ``resources/`` manifest now, ADR 0022) is
+  not-ready with the "enable plugin `azure`" hint and ``resolve_site`` refuses
+  it. The legacy ``[azure]`` flat section is a hard error at load now (pinned in
+  ``tests/vms/test_legacy_site_sections.py``), so its former "guided, not
+  broken" degrade-to-hint behavior no longer applies;
 - the ``azdo`` git-credential-provider ROW: present-but-disabled; a
   ``git-credential`` naming ``provider = "azdo"`` is not-ready via its R14
   propagate hook and refused at use;
@@ -37,41 +38,48 @@ from agentworks.errors import StateError
 from agentworks.resources.access import ensure_recipe_enabled
 from agentworks.resources.graph import Enablement
 from agentworks.resources.inspect import describe_resource, list_resources
+from tests.conftest import ManifestDoc, write_manifests
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from pathlib import Path
 
     from agentworks.config import Config
 
-# A well-formed legacy ``[azure]`` flat section: it auto-declares a vm-site named
-# ``azure`` on the ``azure-vm`` platform. Used both as the ordinary site fixture
-# and as the legacy-section breaking-change pin.
-_AZURE_SECTION = """
-[azure]
-subscription_id = "sub-123"
-resource_group = "rg-agw"
-region = "westus2"
-"""
+# A ``vm-site`` manifest named ``azure`` on the ``azure-vm`` platform, the
+# declarative replacement for the legacy ``[azure]`` flat section (a hard error
+# now, ADR 0022; pinned in ``tests/vms/test_legacy_site_sections.py``). The
+# ordinary site fixture.
+_AZURE_SITE = ManifestDoc(
+    "vm-site",
+    "azure",
+    {
+        "platform": {
+            "name": "azure-vm",
+            "subscription_id": "sub-123",
+            "resource_group": "rg-agw",
+            "region": "westus2",
+        }
+    },
+)
 
-# An azdo git-credential plus an agent template that uses it (the R14
-# propagate hook makes the credential not-ready when azdo is disabled).
-_AZDO_SECTION = """
-[git_credentials.azdo]
-provider = "azdo"
-org = "my-org"
-"""
+# An azdo git-credential (the R14 propagate hook makes the credential not-ready
+# when azdo is disabled).
+_AZDO_CRED = ManifestDoc("git-credential", "azdo", {"provider": "azdo", "provider_config": {"org": "my-org"}})
 
 # A vm-template whose system_install_commands draws on the az-cli row (the
 # Phase 7 recipe gate refuses the template while azure is disabled).
-_AZ_CLI_TEMPLATE = """
-[vm_templates.azcli]
-system_install_commands = ["az-cli"]
-"""
+_AZ_CLI_TEMPLATE = ManifestDoc("vm-template", "azcli", {"system_install_commands": ["az-cli"]})
 
 
-def _config(tmp_path: Path, body: str = "", *, enabled: bool = False) -> Config:
+def _config(
+    tmp_path: Path,
+    *,
+    enabled: bool = False,
+    manifests: Sequence[ManifestDoc | str] = (),
+) -> Config:
     """A real operator config; ``enabled`` toggles ``[plugins] system =
-    ["azure"]`` and ``body`` appends resource declarations."""
+    ["azure"]`` and ``manifests`` seeds resource declarations beside it."""
     pub = tmp_path / "id.pub"
     priv = tmp_path / "id"
     pub.write_text("ssh-ed25519 AAAA...")
@@ -86,8 +94,9 @@ def _config(tmp_path: Path, body: str = "", *, enabled: bool = False) -> Config:
 
         """)
         + plugins
-        + dedent(body)
     )
+    if manifests:
+        write_manifests(tmp_path, *manifests)
     return load_config(cfg, warn_issues=False, warn_deprecations=False)
 
 
@@ -180,7 +189,7 @@ def test_site_on_disabled_azure_is_not_ready_with_hint(tmp_path: Path) -> None:
     """A ``vm-site`` on the ``azure-vm`` platform is not-ready while the plugin
     is disabled, and the readiness reason names the plugin to enable (the fold
     propagates the platform's disabled mark to the site)."""
-    registry = build_registry(_config(tmp_path, _AZURE_SECTION))
+    registry = build_registry(_config(tmp_path, manifests=[_AZURE_SITE]))
     assert not registry.graph.is_ready("vm-site", "azure")
     reason = registry.graph.readiness_of("vm-site", "azure").reason
     assert reason is not None
@@ -192,20 +201,18 @@ def test_resolve_site_refuses_disabled_azure_with_hint(tmp_path: Path) -> None:
     refuses an azure site while the plugin is disabled, before any work."""
     from agentworks.vms.sites import resolve_site
 
-    registry = build_registry(_config(tmp_path, _AZURE_SECTION))
+    registry = build_registry(_config(tmp_path, manifests=[_AZURE_SITE]))
     with pytest.raises(StateError) as exc:
         resolve_site("azure", registry)
     assert "enable plugin `azure`" in str(exc.value)
 
 
-def test_legacy_azure_section_is_guided_not_broken(tmp_path: Path) -> None:
-    """The guided breaking change (R11.1): a deprecated legacy ``[azure]``
-    flat-section site lands on the present-but-disabled row, so it degrades to
-    the enable hint rather than an unknown-name hard error."""
-    registry = build_registry(_config(tmp_path, _AZURE_SECTION))
-    assert registry.lookup("vm-site", "azure") is not None
-    reason = registry.graph.readiness_of("vm-site", "azure").reason
-    assert reason is not None and "enable plugin `azure`" in reason
+# The R11.1 "guided, not broken" pin for the LEGACY ``[azure]`` flat section is
+# retired: under ADR 0022 that section is a hard error at load, not a
+# silently-disabled site, so the "lands on the disabled row" premise is
+# structurally gone. The hard error (carrying the vm-site migration guidance) is
+# pinned by ``tests/vms/test_legacy_site_sections.py``; the disabled-site enable
+# hint stays covered by ``test_site_on_disabled_azure_is_not_ready_with_hint``.
 
 
 # -- the git-credential use-gate (R14, provider propagate) -------------------
@@ -215,7 +222,7 @@ def test_credential_on_disabled_azdo_is_not_ready_with_hint(tmp_path: Path) -> N
     """A ``git-credential`` naming ``provider = "azdo"`` is not-ready while the
     plugin is disabled: the provider's disabled mark propagates to the
     credential via its R14 ``not_ready`` hook, with the enable hint."""
-    registry = build_registry(_config(tmp_path, _AZDO_SECTION))
+    registry = build_registry(_config(tmp_path, manifests=[_AZDO_CRED]))
     assert not registry.graph.is_ready("git-credential", "azdo")
     reason = registry.graph.readiness_of("git-credential", "azdo").reason
     assert reason is not None
@@ -227,7 +234,7 @@ def test_resolve_git_credential_refuses_disabled_azdo(tmp_path: Path) -> None:
     plugin is disabled, before any credential materials are built."""
     from agentworks.vms.initializer import resolve_git_credential_providers
 
-    registry = build_registry(_config(tmp_path, _AZDO_SECTION))
+    registry = build_registry(_config(tmp_path, manifests=[_AZDO_CRED]))
     with pytest.raises(StateError) as exc:
         resolve_git_credential_providers(registry, ["azdo"])
     assert "not ready" in str(exc.value)
@@ -241,7 +248,7 @@ def test_template_referencing_az_cli_finalizes_when_disabled(tmp_path: Path) -> 
     finalizes cleanly while azure is not enabled. Before the migration an
     unknown name here was a hard ``references unknown system-install-command``
     error; now the row is present-but-disabled, so the reference is valid."""
-    registry = build_registry(_config(tmp_path, _AZ_CLI_TEMPLATE))
+    registry = build_registry(_config(tmp_path, manifests=[_AZ_CLI_TEMPLATE]))
     assert registry.graph.enablement_of("system-install-command", "az-cli") is Enablement.disabled
 
 
@@ -249,7 +256,7 @@ def test_recipe_gate_refuses_disabled_az_cli_with_hint(tmp_path: Path) -> None:
     """The recipe gate refuses a vm-template whose closure draws on the disabled
     ``az-cli`` install-command, naming the plugin to enable, before any
     transport work."""
-    registry = build_registry(_config(tmp_path, _AZ_CLI_TEMPLATE))
+    registry = build_registry(_config(tmp_path, manifests=[_AZ_CLI_TEMPLATE]))
     with pytest.raises(StateError) as exc:
         ensure_recipe_enabled(registry, "vm-template", "azcli")
     message = str(exc.value)
@@ -261,12 +268,19 @@ def test_operator_override_of_az_cli_wins(tmp_path: Path) -> None:
     """An operator who declares their own ``az-cli`` system-install-command
     overrides the disabled plugin row with no collision error (the plugin row
     publishes weak while disabled)."""
-    body = """
-    [system_install_commands.az-cli]
-    description = "operator az installer"
-    command = "echo operator-az"
-    """
-    registry = build_registry(_config(tmp_path, body))
+    registry = build_registry(
+        _config(
+            tmp_path,
+            manifests=[
+                ManifestDoc(
+                    "system-install-command",
+                    "az-cli",
+                    {"command": "echo operator-az"},
+                    description="operator az installer",
+                )
+            ],
+        )
+    )
     row = registry.lookup("system-install-command", "az-cli")
     assert row.origin.variant == "operator-declared"
     assert row.command == "echo operator-az"
@@ -284,8 +298,7 @@ def test_enabling_azure_makes_all_three_work(tmp_path: Path) -> None:
     from agentworks.vms.initializer import resolve_git_credential_providers
     from agentworks.vms.sites import resolve_site
 
-    body = _AZURE_SECTION + _AZDO_SECTION + _AZ_CLI_TEMPLATE
-    registry = build_registry(_config(tmp_path, body, enabled=True))
+    registry = build_registry(_config(tmp_path, enabled=True, manifests=[_AZURE_SITE, _AZDO_CRED, _AZ_CLI_TEMPLATE]))
 
     for kind, name in (
         ("vm-platform", "azure-vm"),

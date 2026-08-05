@@ -20,6 +20,7 @@ from agentworks.db import VMStatus
 from agentworks.errors import ValidationError
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.vms import manager as vm_manager
+from tests.conftest import ManifestDoc
 
 if TYPE_CHECKING:
     from agentworks.capabilities.base import OperationScope, RunContext
@@ -29,10 +30,11 @@ if TYPE_CHECKING:
 # for these commands, so it joins the boundary through the env-target
 # registration (one prompt session with the site secret), never
 # through the walk union.
-VM_ENV_SECTION = """
-[vm_templates.default.env]
-API_KEY = { secret = "vm-env-secret" }
-"""
+VM_ENV_TEMPLATE = ManifestDoc(
+    "vm-template",
+    "default",
+    {"env": {"API_KEY": {"secret": "vm-env-secret"}}},
+)
 
 
 @pytest.fixture(autouse=True)
@@ -112,7 +114,7 @@ def test_graph_derives_from_row_and_env_joins_via_targets(
     from agentworks.secrets.resolver import Resolver
     from agentworks.vms.nodes import live_vm_node
 
-    config = make_config(VM_ENV_SECTION)
+    config = make_config(manifests=[VM_ENV_TEMPLATE])
     _seed_vm(db)
     vm = db.get_vm("box")
     assert vm is not None
@@ -135,10 +137,11 @@ def test_graph_derives_from_row_and_env_joins_via_targets(
 # A real, resolvable workspace template whose env must flow into the
 # workspace scope of vm-level ``--workspace`` commands: the positive
 # control against the ``copied``-marker case, which resolves to nothing.
-WORKSPACE_ENV_SECTION = """
-[workspace_templates.proj.env]
-WS_VAR = "ws-val"
-"""
+WORKSPACE_ENV_TEMPLATE = ManifestDoc(
+    "workspace-template",
+    "proj",
+    {"env": {"WS_VAR": "ws-val"}},
+)
 
 
 def test_copied_workspace_pin_resolves_env_scopes_without_a_template(
@@ -154,7 +157,7 @@ def test_copied_workspace_pin_resolves_env_scopes_without_a_template(
     contributes its env, proving the tolerance is scoped to the failure."""
     from agentworks.bootstrap import build_registry
 
-    config = make_config(VM_ENV_SECTION + WORKSPACE_ENV_SECTION)
+    config = make_config(manifests=[VM_ENV_TEMPLATE, WORKSPACE_ENV_TEMPLATE])
     _seed_vm(db)
     _seed_workspace(db, name="copied-ws", template="copied")
     _seed_workspace(db, name="proj-ws", template="proj")
@@ -190,7 +193,7 @@ def test_exec_copied_workspace_pin_no_longer_crashes(
     """End to end: ``vm exec --workspace <copied-ws>`` ran the command in
     the workspace dir but crashed on the synthetic template before this
     fix (issue #285). It now runs, contributing no workspace-template env."""
-    config = make_config(VM_ENV_SECTION)
+    config = make_config(manifests=[VM_ENV_TEMPLATE])
     _seed_vm(db)
     _seed_workspace(db, name="copied-ws", template="copied")
     _reachable(monkeypatch, True)
@@ -219,7 +222,7 @@ def test_shell_reachable_vm_is_one_boundary_burst(
     """vm shell on a reachable VM: the gate's fast path costs nothing,
     so site + env secrets ride ONE boundary burst, and the composed
     env (with the resolved secret) reaches the interactive shell."""
-    config = make_config(VM_ENV_SECTION)
+    config = make_config(manifests=[VM_ENV_TEMPLATE])
     _seed_vm(db)
     _reachable(monkeypatch, True)
 
@@ -244,7 +247,7 @@ def test_shell_stopped_vm_gate_burst_then_boundary_burst(
     """vm shell on a stopped VM: the gate's just-in-time token resolve
     (seeding the boundary), then ONE boundary burst for the env
     secrets; nothing resolves twice, nothing after."""
-    config = make_config(VM_ENV_SECTION)
+    config = make_config(manifests=[VM_ENV_TEMPLATE])
     _seed_vm(db)
     events: list[str] = []
     _stop_the_vm(monkeypatch, events)
@@ -264,7 +267,7 @@ def test_exec_reachable_vm_is_one_boundary_burst(
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
 ) -> None:
-    config = make_config(VM_ENV_SECTION)
+    config = make_config(manifests=[VM_ENV_TEMPLATE])
     _seed_vm(db)
     _reachable(monkeypatch, True)
 
@@ -286,7 +289,7 @@ def test_exec_stopped_vm_gate_burst_then_boundary_burst(
     monkeypatch: pytest.MonkeyPatch,
     captured_output,  # noqa: ANN001
 ) -> None:
-    config = make_config(VM_ENV_SECTION)
+    config = make_config(manifests=[VM_ENV_TEMPLATE])
     _seed_vm(db)
     events: list[str] = []
     _stop_the_vm(monkeypatch, events)
@@ -343,7 +346,7 @@ def test_exec_double_dash_separator_runs_dash_led_command(
     """`vm exec box -- --version` consumes the leading `--` separator and
     runs the dash-led remote command verbatim; the leading-dash guard
     steps aside because the operator marked where the command begins."""
-    config = make_config(VM_ENV_SECTION)
+    config = make_config(manifests=[VM_ENV_TEMPLATE])
     _seed_vm(db)
     _reachable(monkeypatch, True)
 
@@ -364,7 +367,7 @@ def test_exec_double_dash_separator_strips_only_the_first(
 ) -> None:
     """Only ONE leading `--` is consumed; a later `--` is part of the
     remote command and is preserved verbatim."""
-    config = make_config(VM_ENV_SECTION)
+    config = make_config(manifests=[VM_ENV_TEMPLATE])
     _seed_vm(db)
     _reachable(monkeypatch, True)
 
@@ -386,7 +389,7 @@ def test_exec_double_dash_separator_preserves_an_adjacent_second(
     """Back-to-back separators: only the FIRST `--` is consumed, so an
     immediately-adjacent second `--` survives as the remote command's
     own first token."""
-    config = make_config(VM_ENV_SECTION)
+    config = make_config(manifests=[VM_ENV_TEMPLATE])
     _seed_vm(db)
     _reachable(monkeypatch, True)
 
@@ -427,7 +430,7 @@ def test_exec_bare_flag_after_command_word_still_works(
 ) -> None:
     """A flag that follows a command word (no separator needed) runs as
     before: `vm exec box free -m` is unaffected by the `--` handling."""
-    config = make_config(VM_ENV_SECTION)
+    config = make_config(manifests=[VM_ENV_TEMPLATE])
     _seed_vm(db)
     _reachable(monkeypatch, True)
 

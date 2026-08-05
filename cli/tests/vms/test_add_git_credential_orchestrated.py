@@ -29,7 +29,8 @@ from agentworks.db import VMStatus
 from agentworks.errors import StateError, TokenRejectedError, ValidationError
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.vms import manager as vm_manager
-from tests.orchestrated_fixtures import PLUGINS_ENABLED, PROXMOX_SECTION, write_operator_config
+from tests.conftest import ManifestDoc
+from tests.orchestrated_fixtures import PLUGINS_ENABLED, proxmox_site, write_operator_config
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -37,22 +38,23 @@ if TYPE_CHECKING:
     from agentworks.capabilities.base import OperationScope, RunContext
     from agentworks.db import Database, VMRow
 
-GIT_CRED_SECTION = """
-[git_credentials.gh]
-provider = "github"
-"""
+GIT_CRED_GH = ManifestDoc("git-credential", "gh", {"provider": "github"})
 
 
 @pytest.fixture
 def make_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """This suite's ``make_config`` delta from the shared fixture: the
-    git token in the env, and the default body REPLACED per test (the
-    proxmox section is part of the default, not baked in)."""
+    git token in the env, plus the proxmox site and the ``gh`` credential
+    declared as manifests by default. ``git_cred=False`` drops the
+    credential for the test that declares its own scoped credential."""
     monkeypatch.setenv("AW_SECRET_PROXMOX_TOKEN", "pve-token")
     monkeypatch.setenv("AW_SECRET_GIT_TOKEN_GH", "ghtok")
 
-    def _make(extra: str = PROXMOX_SECTION + GIT_CRED_SECTION):
-        return write_operator_config(tmp_path, PLUGINS_ENABLED + extra)
+    def _make(*, git_cred: bool = True):
+        manifests: list[ManifestDoc | str] = [proxmox_site()]
+        if git_cred:
+            manifests.append(GIT_CRED_GH)
+        return write_operator_config(tmp_path, PLUGINS_ENABLED, manifests=manifests)
 
     return _make
 
@@ -162,7 +164,7 @@ def test_scoped_credential_refused_before_any_resolve_or_gate(
         "  provider_config:\n"
         "    repos: [acme/widgets]\n"
     )
-    config = make_config(PROXMOX_SECTION)
+    config = make_config(git_cred=False)
     db.insert_vm("box", site="ghost-site", hostname="box")
     db.update_vm_tailscale("box", "100.64.0.9")
 

@@ -19,6 +19,7 @@ from agentworks.errors import ExternalError
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.vms import manager as vm_manager
 from agentworks.workspaces import manager as workspace_manager
+from tests.conftest import ManifestDoc
 
 if TYPE_CHECKING:
     from agentworks.capabilities.base import OperationScope, RunContext
@@ -27,10 +28,11 @@ if TYPE_CHECKING:
 # A workspace template with an env-block secret reference: a RUNTIME
 # input (delivered where sessions run), which must never join the
 # provisioning union (the hermeticity pin).
-WORKSPACE_ENV_SECTION = """
-[workspace_templates.default.env]
-WS_TOKEN = { secret = "ws-env-secret" }
-"""
+WORKSPACE_ENV_TEMPLATE = ManifestDoc(
+    "workspace-template",
+    "default",
+    {"env": {"WS_TOKEN": {"secret": "ws-env-secret"}}},
+)
 
 
 @pytest.fixture
@@ -97,7 +99,7 @@ def test_create_graph_derives_from_row_and_pending_name(
     from agentworks.vms.nodes import live_vm_node
     from agentworks.workspaces.nodes import pending_workspace_node
 
-    config = make_config(WORKSPACE_ENV_SECTION)
+    config = make_config(manifests=[WORKSPACE_ENV_TEMPLATE])
     _seed_vm(db)
     vm = db.get_vm("box")
     assert vm is not None
@@ -207,7 +209,7 @@ def test_create_never_resolves_the_template_env_secret(
     env-bearing workspace template never resolves the env secret (a
     runtime input, delivered where sessions run), on top of the
     union-level pin above."""
-    config = make_config(WORKSPACE_ENV_SECTION)
+    config = make_config(manifests=[WORKSPACE_ENV_TEMPLATE])
     _seed_vm(db)
     _reachable(monkeypatch, True)
 

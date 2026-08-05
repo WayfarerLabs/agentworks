@@ -22,7 +22,8 @@ from agentworks.errors import ExternalError, NotFoundError
 from agentworks.output import Role
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.vms import manager as vm_manager
-from tests.orchestrated_fixtures import PLUGINS_ENABLED, PROXMOX_SECTION, write_operator_config
+from tests.conftest import ManifestDoc
+from tests.orchestrated_fixtures import PLUGINS_ENABLED, proxmox_site, write_operator_config
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -30,27 +31,22 @@ if TYPE_CHECKING:
     from agentworks.capabilities.base import OperationScope, RunContext
     from agentworks.db import Database
 
-AGENT_SECTION = """
-[git_credentials.gh]
-provider = "github"
-
-[agent_templates.default]
-git_credentials = ["gh"]
-
-[agent_templates.other]
-git_credentials = ["gh"]
-"""
+AGENT_MANIFESTS = [
+    ManifestDoc("git-credential", "gh", {"provider": "github"}),
+    ManifestDoc("agent-template", "default", {"git_credentials": ["gh"]}),
+    ManifestDoc("agent-template", "other", {"git_credentials": ["gh"]}),
+]
 
 
 @pytest.fixture
 def make_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # noqa: ANN201
     """This suite's ``make_config`` delta from the shared fixture: the
-    git token in the env and the agent section baked in."""
+    git token in the env and the agent resources declared as manifests."""
     monkeypatch.setenv("AW_SECRET_PROXMOX_TOKEN", "pve-token")
     monkeypatch.setenv("AW_SECRET_GIT_TOKEN_GH", "ghtok")
 
     def _make():  # noqa: ANN202
-        return write_operator_config(tmp_path, PLUGINS_ENABLED + PROXMOX_SECTION + AGENT_SECTION)
+        return write_operator_config(tmp_path, PLUGINS_ENABLED, manifests=[proxmox_site(), *AGENT_MANIFESTS])
 
     return _make
 

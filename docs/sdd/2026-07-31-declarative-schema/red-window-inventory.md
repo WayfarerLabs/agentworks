@@ -141,6 +141,79 @@ outcomes directly). Files: `test_access.py`, `test_git_credential_provider_kind.
   `test_loader_and_envelope.py` (`test_duplicate_across_files_cites_both_locations`,
   `test_duplicate_within_one_file_errors`).
 
+## Slice 3 of 1.2f (close) -- sessions / vms / agents / workspaces / plugins, done
+
+Date: 2026-08-05. This is the FINAL slice; it takes the suite fully green and CLOSES the window.
+
+- Suite now `3424 passed, 0 failed, 0 errors` (`uv run pytest -q` from `cli/`). The new-failure set
+  vs the clean-tree baseline is EMPTY (there are no failures at all), and every one of the 171
+  baseline non-passing nodes is resolved: 166 now pass (`3258 -> 3424`) and 5 were deleted as
+  structurally gone (see the calls below; `171 = 166 + 5`).
+- `uv run ruff check` / `ruff format --check` clean on all changed files. `uv run mypy .` fully
+  clean (`Success: no issues found in 506 source files`). `./scripts/lint-files.sh` clean (prettier
+  / markdownlint / cspell all ok).
+
+### The shared lever (finished)
+
+- `tests/orchestrated_fixtures.py`: the shared `make_config` grew a `manifests=` param (appended to
+  the proxmox site), the declarative replacement for the resource TOML that used to ride in `extra`.
+  `PROXMOX_SECTION` (the legacy `[proxmox]` TOML string) is RETIRED: its last slice-3 callers
+  converted, and nothing else references it (the identically-named constant in
+  `tests/vms/test_legacy_site_sections.py` is that file's own local copy for the hard-error pin).
+
+### Conversion (convert-to-YAML)
+
+Every remaining TOML resource section in a fixture moved to `resources/*.yaml` manifests via
+`write_manifests` / `ManifestDoc` (proxmox/azure sites via `proxmox_site()` / a local `vm-site`
+manifest; git credentials, agent/vm/workspace/session templates, secrets, admin templates, and
+install-commands via `ManifestDoc`). Orchestrated suites re-point their local `make_config` to the
+`manifests=` param; the bespoke fixtures (`test_create_reinit_orchestrated.py`,
+`test_create_vm_dispatch.py`, and the plugin `_config` helpers) grew the same `manifests=` seam.
+Files: `tests/agents/` (`test_agent_home_permissions.py`, `test_create_reinit_orchestrated.py`,
+`test_shell_exec_orchestrated.py`); `tests/vms/` (`test_add_git_credential_orchestrated.py`,
+`test_create_reinit_orchestrated.py`, `test_create_vm_dispatch.py`, `test_delete_vm_gating.py`,
+`test_live_vm_boundary.py`, `test_shell_exec_orchestrated.py`); `tests/sessions/`
+(`test_create_resume_orchestrated.py`, `test_session_list_harness_integration.py`,
+`test_session_nodes.py`); `tests/workspaces/` (`test_create_orchestrated.py`,
+`test_lifecycle_orchestrated.py`); `tests/plugins/` (`test_azure.py`, `test_claude.py`,
+`test_codex.py`, `test_onepassword.py`, `test_proxmox.py`).
+
+### Redesign calls (intent preserved, re-pointed off the dead TOML surface)
+
+- `test_session_template_surface.py`: the flat-TOML hoist / conflict pins declared
+  `[session_templates.*]` in config.toml (a hard error now). The hoist reader
+  (`_session_harness_integration_pair` and the `_load_session_templates` normalization) relocated
+  verbatim to the migrator's pre-side oracle, so the positive-hoist and conflict-raise tests
+  re-point to `toml_resource_rows` / `_session_harness_integration_pair` (same code, same match
+  strings); the two flat-hoist tests trade the gone `config.deprecation_issues` assertion for the
+  row's `restart_command_compat` flag (the restart_command deprecation content stays covered by the
+  manifest channel and the migrator golden). The build-time pins
+  (`test_unknown_shell_field_errors_at_build`, `test_multi_parent_silent_parent_does_not_wipe`,
+  `test_harness_integration_row_lists_its_declaring_template`) re-point to `session-template`
+  manifests (the source location assertion moves from `config.toml` to the manifest file).
+
+### Deletion calls (behavior structurally gone under ADR 0022, coverage retained elsewhere)
+
+- `test_session_template_surface.py`: removed
+  `test_deprecated_toml_inheritance_through_loader_and_registry` (3 params): a TOML-declared session
+  template can never reach `build_registry` / `resolve_template` now. The identical
+  restart/resume/command inheritance matrix is covered by
+  `test_yaml_inheritance_through_loader_and_registry`, and the mixed-spelling inheritance conflict
+  by `test_inheritance_rejects_mixed_resume_spellings`.
+- `test_proxmox.py`: removed `test_legacy_proxmox_section_is_guided_not_broken`; `test_azure.py`:
+  removed `test_legacy_azure_section_is_guided_not_broken`. Both pinned that a legacy `[proxmox]` /
+  `[azure]` flat section lands on the present-but-disabled row and degrades to the enable hint. That
+  premise is contradicted by ADR 0022: the flat section is a hard error at load now. The hard error
+  (carrying the vm-site migration guidance) is pinned by `tests/vms/test_legacy_site_sections.py`;
+  the disabled-site enable hint stays covered by each file's
+  `test_site_on_disabled_{proxmox,azure}_is_not_ready_with_hint`.
+
+## Window CLOSED
+
+Date: 2026-08-05. All three slices of 1.2f are done; the operator-approved bounded red window is
+CLOSED. The full suite is fully green (`3424 passed, 0 failed, 0 errors`), with no remaining red
+anywhere and an empty new-failure set vs the clean-tree baseline. This feeds the step 1.2 checkoff.
+
 ## Root-cause buckets (every failure is one of these; no surprise regressions)
 
 Bucketing the whole failure output by exception signature:
@@ -242,7 +315,10 @@ deletion calls. The per-file notes below are retained as the record of what each
   (the migrator's `test_verification_is_independent_of_emission` now carries the independence
   claim).
 
-### `tests/sessions/`
+### `tests/sessions/` -- DONE (slice 3 of 1.2f)
+
+Every file in this section is green as of slice 3; see the slice-3 section above for the redesign /
+deletion calls. The per-file notes below are retained as the record of what each conversion faced.
 
 - `test_session_template_surface.py` -- convert-to-YAML: exercises the relocated
   `_session_harness_integration_pair` TOML hoist; move to the migrator oracle or manifest decode.
@@ -250,7 +326,10 @@ deletion calls. The per-file notes below are retained as the record of what each
 - `test_console_attach_orchestrated.py`, `test_create_resume_orchestrated.py`,
   `test_singular_batch_orchestrated.py` -- convert-to-YAML (shared orchestrated fixture).
 
-### `tests/vms/`
+### `tests/vms/` -- DONE (slice 3 of 1.2f)
+
+Every file in this section is green as of slice 3; see the slice-3 section above for the redesign /
+deletion calls. The per-file notes below are retained as the record of what each conversion faced.
 
 - `test_add_git_credential_orchestrated.py`, `test_create_reinit_orchestrated.py`,
   `test_create_vm_dispatch.py`, `test_delete_vm_gating.py`, `test_ensure_tailscale_wording.py`,
@@ -258,12 +337,18 @@ deletion calls. The per-file notes below are retained as the record of what each
   `test_remaining_commands_orchestrated.py`, `test_shell_exec_orchestrated.py` -- convert-to-YAML
   (shared orchestrated fixture writes `[proxmox]` / templates).
 
-### `tests/agents/`
+### `tests/agents/` -- DONE (slice 3 of 1.2f)
+
+Every file in this section is green as of slice 3; see the slice-3 section above for the redesign /
+deletion calls. The per-file notes below are retained as the record of what each conversion faced.
 
 - `test_agent_home_permissions.py`, `test_create_reinit_orchestrated.py`,
   `test_delete_grant_revoke_orchestrated.py`, `test_shell_exec_orchestrated.py` -- convert-to-YAML.
 
-### `tests/workspaces/`
+### `tests/workspaces/` -- DONE (slice 3 of 1.2f)
+
+Every file in this section is green as of slice 3; see the slice-3 section above for the redesign /
+deletion calls. The per-file notes below are retained as the record of what each conversion faced.
 
 - `test_create_orchestrated.py`, `test_lifecycle_orchestrated.py` -- convert-to-YAML.
 
@@ -274,7 +359,10 @@ site through the shared `proxmox_site()` manifest instead of `PROXMOX_SECTION`).
 
 - `test_readiness.py`, `test_secrets.py` -- convert-to-YAML (shared fixture declares resources).
 
-### `tests/plugins/`
+### `tests/plugins/` -- DONE (slice 3 of 1.2f)
+
+Every file in this section is green as of slice 3; see the slice-3 section above for the redesign /
+deletion calls. The per-file notes below are retained as the record of what each conversion faced.
 
 - `test_azure.py`, `test_claude.py`, `test_codex.py`, `test_onepassword.py`, `test_proxmox.py` --
   convert-to-YAML (each declares its capability's resource in TOML).

@@ -18,23 +18,26 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.vms import manager as vm_manager
-from tests.orchestrated_fixtures import PLUGINS_ENABLED, PROXMOX_SECTION, write_operator_config
+from tests.conftest import ManifestDoc
+from tests.orchestrated_fixtures import PLUGINS_ENABLED, proxmox_site, write_operator_config
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from agentworks.db import Database, VMRow
 
 
 @pytest.fixture
 def make_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """This suite's ``make_config`` delta from the shared fixture:
-    nothing baked in (each test names its sites), and deterministic
-    platform preflights (lima checks for limactl locally; pretend the
-    tool exists regardless of the host)."""
+    nothing baked in (each test names its sites via ``manifests``), and
+    deterministic platform preflights (lima checks for limactl locally;
+    pretend the tool exists regardless of the host)."""
     monkeypatch.setenv("AW_SECRET_PROXMOX_TOKEN", "pve-token")
     monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
 
-    def _make(extra: str = ""):
-        return write_operator_config(tmp_path, extra)
+    def _make(extra: str = "", *, manifests: Sequence[ManifestDoc | str] = ()):
+        return write_operator_config(tmp_path, extra, manifests=list(manifests))
 
     return _make
 
@@ -70,7 +73,7 @@ def test_secret_bearing_site_resolves_exactly_once(
     context (scoped delivery over the boundary cache)."""
     from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 
-    config = make_config(PLUGINS_ENABLED + PROXMOX_SECTION)
+    config = make_config(PLUGINS_ENABLED, manifests=[proxmox_site()])
     vm_node, ops_ctx = vm_manager._live_vm_boundary(db, config, _seed_vm(db, "proxmox"))
     assert isinstance(vm_node.site.platform, ProxmoxPlatform)
     assert ops_ctx.secret("proxmox-token") == "pve-token"
@@ -92,7 +95,7 @@ def test_preflight_failure_prevents_the_resolve_pass(
         raise ConnectivityError("world broken")
 
     monkeypatch.setattr(ProxmoxPlatform, "preflight", _boom)
-    config = make_config(PLUGINS_ENABLED + PROXMOX_SECTION)
+    config = make_config(PLUGINS_ENABLED, manifests=[proxmox_site()])
     with pytest.raises(ConnectivityError):
         vm_manager._live_vm_boundary(db, config, _seed_vm(db, "proxmox"))
     assert resolve_counter == []
@@ -113,7 +116,10 @@ def test_env_targets_join_the_site_secret_pass(
 
     monkeypatch.setenv("AW_SECRET_API_KEY", "k")
     monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: True)
-    config = make_config(PLUGINS_ENABLED + PROXMOX_SECTION + '\n[secrets.api-key]\ndescription = "workload key"\n')
+    config = make_config(
+        PLUGINS_ENABLED,
+        manifests=[proxmox_site(), ManifestDoc("secret", "api-key", description="workload key")],
+    )
     registry = build_registry(config)
     target = SecretTarget(
         vm={"API_KEY": EnvEntry(key="API_KEY", secret="api-key")},

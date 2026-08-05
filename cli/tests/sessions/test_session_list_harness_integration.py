@@ -19,15 +19,17 @@ from typing import TYPE_CHECKING
 
 from agentworks.db import SessionMode
 from agentworks.sessions import manager as session_manager
+from tests.conftest import ManifestDoc
 
 if TYPE_CHECKING:
     from agentworks.db import Database
 
-CLAUDE_TEMPLATE = """
-[session_templates.claude]
-harness = "claude-code"
-description = "Claude Code session"
-"""
+CLAUDE_TEMPLATE = ManifestDoc(
+    "session-template",
+    "claude",
+    {"harness": "claude-code"},
+    description="Claude Code session",
+)
 
 
 def _seed_vm(db: Database, name: str, ws: str) -> None:
@@ -64,7 +66,7 @@ def test_list_shows_harness_integration_column_between_template_and_mode(
     make_config,  # noqa: ANN001
     captured_output,  # noqa: ANN001
 ) -> None:
-    config = make_config(CLAUDE_TEMPLATE)
+    config = make_config(manifests=[CLAUDE_TEMPLATE])
     _seed_vm(db, "box", "ws-box")
     _seed_session(db, "s-shell", "ws-box", "default")
     _seed_session(db, "s-claude", "ws-box", "claude")

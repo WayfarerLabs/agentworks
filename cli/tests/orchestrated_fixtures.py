@@ -24,19 +24,6 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from tests.conftest import ManifestDoc
 
-# The legacy ``[proxmox]`` TOML site section. config.toml no longer accepts
-# resource sections (ADR 0022), so this string only survives for the
-# reserved-area callers (vms / sessions / agents / orchestration) that pass
-# it as a hard-error case until their own slice converts them; ``make_config``
-# itself now declares the site through ``PROXMOX_SITE`` below.
-PROXMOX_SECTION = """
-[proxmox]
-api_url = "https://pve:8006"
-node = "pve1"
-token_id = "agw@pam!agw"
-template_vmid = 9000
-"""
-
 # The orchestrated suites use proxmox as their platform fixture: it is the
 # only VM platform that carries a config secret (``proxmox-token``), so it is
 # the natural stand-in for exercising the secret-resolution boundary (the
@@ -52,8 +39,10 @@ system = ["proxmox"]
 
 
 def proxmox_site() -> ManifestDoc:
-    """The ``[proxmox]`` site as a resources/ manifest: the declarative
-    replacement for :data:`PROXMOX_SECTION`.
+    """The proxmox ``vm-site`` as a resources/ manifest: the declarative
+    replacement for the retired legacy ``[proxmox]`` TOML section (a hard error
+    now under ADR 0022; the breaking change is pinned in
+    ``tests/vms/test_legacy_site_sections.py``).
 
     A function (not a module constant) so each caller gets a fresh spec
     dict, since ``ManifestDoc`` is shared and its ``spec`` is mutable.
@@ -102,11 +91,15 @@ def write_operator_config(
 def make_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # noqa: ANN201
     """The dominant ``make_config`` shape: the proxmox token in the env,
     the proxmox plugin enabled (a settings section), and the proxmox site
-    declared as a manifest, with extra TOML settings appended per test."""
+    declared as a manifest, with extra TOML settings appended per test.
+
+    ``manifests`` seeds additional ``resources/*.yaml`` declarations beside
+    the proxmox site (templates, git credentials, secrets), the declarative
+    replacement for the resource TOML that used to ride in ``extra``."""
     monkeypatch.setenv("AW_SECRET_PROXMOX_TOKEN", "pve-token")
 
-    def _make(extra: str = ""):  # noqa: ANN202
-        return write_operator_config(tmp_path, PLUGINS_ENABLED + extra, manifests=[proxmox_site()])
+    def _make(extra: str = "", *, manifests: Sequence[ManifestDoc | str] = ()):  # noqa: ANN202
+        return write_operator_config(tmp_path, PLUGINS_ENABLED + extra, manifests=[proxmox_site(), *manifests])
 
     return _make
 

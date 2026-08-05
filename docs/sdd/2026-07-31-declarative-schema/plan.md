@@ -73,33 +73,33 @@ Lands the whole production change in one reviewable body; the suite goes RED on 
 enumerated by 1.2f (operator-approved bounded window, see the preamble). The step's own new tests
 (below) land green; the red set is only pre-existing fixtures that declare TOML resources.
 
-- [ ] TOML resource loaders relocated into `migrate/` per the LLD; decode layer stops routing
+- [x] TOML resource loaders relocated into `migrate/` per the LLD; decode layer stops routing
       through loader shims, each decoder owning its per-kind logic (interim fork; phase 2 replaces
       it). The two vestigial `publish_to` functions are deleted, not emptied, and the dead
       `restart_command` config-channel block is removed (LLD discrepancies 1 and 2, folded in).
-- [ ] Config load hard-errors (aggregated, actionable, naming sections, pointing at
+- [x] Config load hard-errors (aggregated, actionable, naming sections, pointing at
       `agw resource migrate` and `agw resource sample`) when any resource-declaring TOML section is
       present; settings sections load exactly as before. `Config`'s now-empty resource fields, the
       publish resource loop, and the `resources_loaded` guard are removed together (LLD section 3).
-- [ ] `agw resource migrate` works end to end on a fixture config (proxmox or azure section, git
+- [x] `agw resource migrate` works end to end on a fixture config (proxmox or azure section, git
       credentials, secrets, session template with a legacy harness selector) with the reworked
       verification: `pre_rows` scoped to selected units, emitted-key-set guard, rollback on
       mismatch. `test_full_migration_golden` and the new verification-independence test green.
-- [ ] Deprecation-warning tests for TOML sections replaced by hard-error tests (fires with sections
+- [x] Deprecation-warning tests for TOML sections replaced by hard-error tests (fires with sections
       present, not without; exempted commands still run); doctor renders a fail row and continues
       via the `resources=False` retry (not a truncated report).
-- [ ] The now-red fixture set is enumerated (file list grouped by area) and recorded in 1.2f, so the
+- [x] The now-red fixture set is enumerated (file list grouped by area) and recorded in 1.2f, so the
       window is explicitly bounded, not open.
 
 ### 1.2f Close the red window (fixture conversion to green)
 
-- [ ] The ~58 TOML-resource fixtures are converted to YAML manifests (or hand-built registry rows
+- [x] The ~58 TOML-resource fixtures are converted to YAML manifests (or hand-built registry rows
       where a test asserts registry/graph outcomes), by area: config, resources, sessions,
       git-credentials, vms, plugins, orchestrated. A shared resources-dir fixture helper is added
       first (none exists today; 28 files already author manifests inline as the pattern). Tests that
       assert on removed `Config` fields or pin TOML-only behavior (`declared_at` line capture,
       decode-through-loader parity) are redesigned, not just relocated.
-- [ ] Suite fully green (`pytest -q`, `mypy .` strict, ruff, lint-files) with the window closed;
+- [x] Suite fully green (`pytest -q`, `mypy .` strict, ruff, lint-files) with the window closed;
       only then is step 1.2 checked off.
 
 ### 1.3 Phase 1 records
