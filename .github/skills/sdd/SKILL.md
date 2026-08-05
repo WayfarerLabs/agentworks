@@ -228,6 +228,13 @@ Significant changes to SDD artifacts -- whether net-new specs or material revisi
 -- should go through a draft PR for review before the work is merged. The aim is to surface concerns
 about requirements, architecture, or plan early, while changes are still cheap.
 
+Ready versus draft is purely a merge-intent signal, and it should be set accordingly. The
+pre-implementation review above uses a draft PR because there is genuinely no intent to merge at
+that point: the PR exists as a pure review vehicle while the artifacts churn. By contrast, a PR
+whose content is complete and intended to merge as-is should be ready no matter how small it is;
+limited content is not draftness. A PR that seeds a new effort with only its FRD, for example, is
+ready to merge, not a draft.
+
 Consider phasing the review across multiple PRs rather than landing all the artifacts in one. A
 common pattern is FRD first (to confirm we agree on what we're building), then HLA (to confirm the
 design holds up), then plan and any LLDs. Each phased review is cheaper to consume than a single
