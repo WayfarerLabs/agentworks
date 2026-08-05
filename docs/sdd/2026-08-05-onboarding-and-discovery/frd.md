@@ -38,7 +38,8 @@ surfaces, dynamic content) adopts wave 2's surfaces as they land rather than blo
   discoverable progressively from there rather than front-loaded.
 - **R3 (idempotent and rerunnable).** Onboarding MUST be rerunnable at any time: already-done steps
   are recognized and reported rather than redone, so operators revisit it to confirm they are
-  getting the most out of the platform as it evolves.
+  getting the most out of the platform as it evolves. Together with R2 and R5 this delivers the
+  assisted onboarding flow of issue #391.
 - **R4 (consent-first probing).** Probing the operator's machine MUST happen with consent and
   explanation, never silently: ask before looking for existing material (SSH keys are the canonical
   example), state what will be looked for and what will never be read, and honor refusals with a
@@ -51,12 +52,17 @@ surfaces, dynamic content) adopts wave 2's surfaces as they land rather than blo
   from derived fact. Content unavailable before wave 2's surfaces exist MUST be staged to adopt
   them, not reimplemented against them.
 - **R7 (machine-readable output).** The CLI MUST offer a machine-readable output contract covering
-  at least the list, describe, and doctor surfaces, so agents consume the same facts humans see.
-  Whether this is per-command flags or a global output mode is the HLA's call; the contract MUST be
-  documented and stable once shipped.
+  at least the existing entity list and describe commands and doctor, so agents consume the same
+  facts humans see. Whether this is per-command flags or a global output mode is the HLA's call; the
+  contract MUST be documented and stable once shipped. Wave 2's schema and describe surfaces adopt
+  the same contract when they land under the names wave 2 chooses; this effort does not define
+  contracts over surfaces wave 2 has not yet named.
 - **R8 (capability discovery).** `agw` MUST be able to answer "what can you do and how do I use it"
-  from its own inventory: capability kinds, registered implementations, and their configuration
-  surfaces, coherent with `agw doctor`'s view of what is configured, ready, and wrong.
+  from its own inventory. Before wave 2's surfaces exist, that answer covers the registry inventory
+  (capability kinds and registered implementations, per the merged descriptor contract);
+  configuration-surface answers adopt wave 2's emitted schemas, samples, and describe surfaces as
+  they land, under R6's staging rule. Discovery MUST stay coherent with `agw doctor`'s view of what
+  is configured, ready, and wrong.
 - **R9 (discovery conventions).** New CLI surfaces MUST follow the platform's list/describe
   conventions, participate in shell completions, and update docs in the same commits as behavior.
 
@@ -82,8 +88,9 @@ surfaces, dynamic content) adopts wave 2's surfaces as they land rather than blo
   runs in.
 - Building schema emission, live samples, or describe surfaces themselves; those are wave 2's, and
   their CLI naming is wave 2's call (coordinated with this effort).
-- Editor integration for manifest authoring (follows wave 2's emission; may land here later if
-  timing allows, but it is not required scope).
+- Editor integration for manifest authoring. It follows wave 2's emission as schema-derived depth
+  per the roadmap's phasing; pulling it into this effort later is a plan change for the effort lead
+  to record, not baseline scope.
 - A documentation-site overhaul. This effort's docs work is bounded to onboarding and discovery
   surfaces.
 
@@ -91,8 +98,8 @@ surfaces, dynamic content) adopts wave 2's surfaces as they land rather than blo
 
 1. A fresh operator with a vanilla Claude Code and no prior Agentworks knowledge reaches a working
    session using only the published plugin and its skills, with every probe consented.
-2. Rerunning onboarding on a configured system reports state and changes rather than redoing work,
-   and exits cleanly with nothing to do.
+2. Rerunning onboarding on an unchanged, fully-adopted system is a clean no-op; rerunning after an
+   upgrade reports the delta (new and not-yet-adopted capability) without redoing completed work.
 3. The non-interactive path reproduces the guided path's result on a clean machine.
 4. List, describe, and doctor surfaces offer documented machine-readable output consumed by the
    plugin's skills themselves (dogfooding the contract).
@@ -109,6 +116,10 @@ surfaces, dynamic content) adopts wave 2's surfaces as they land rather than blo
   must not block on them nor duplicate them.
 - **D3 (Claude Code first).** First-party onboarding ships for Claude Code first (the operator's
   primary harness), Codex second, both before lock (R1, AC7).
+- **D4 (issue #390 disposition).** The "examples system plugin" ask is subsumed rather than built:
+  wave 2's live-rendered samples (adopted here per R6) provide example content that cannot drift,
+  and this effort's discovery surfaces present it. No separate examples plugin ships; #390 closes
+  against that combination.
 
 ## Open questions
 
