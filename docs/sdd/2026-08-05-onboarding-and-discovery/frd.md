@@ -1,4 +1,4 @@
-# FRD: Onboarding and Discovery
+# FRD: Onboarding, Discovery, and Management
 
 - Status: Draft
 - Start date: 2026-08-05
@@ -15,24 +15,30 @@ discovery experience that scales with the surface because it is derived from the
 registries, schemas, and samples, and that serves humans and agents alike.
 
 The delivery model is plan A from the roadmap's user perspective: an operator already has a vanilla
-harness (Claude Code, Codex) on their workstation and uses it to set Agentworks up and manage it.
-Agentworks publishes harness-specific onboarding plugins or marketplace entries in its own
-repository; the operator adds one straight from GitHub, asks their agent to set up Agentworks, and
-the agent executes the onboarding process described in the skill, installing, configuring, and using
-the CLI as needed. The onboarding agent deliberately sits outside Agentworks: a managed agent must
-not modify the system it runs in, so the agentic-artifacts layer is not the delivery path for
-onboarding skills.
+harness (Claude Code or Codex) on their workstation and uses it to set Agentworks up and manage it.
+Agentworks publishes a marketplace and plugin (or whatever packaging the harness requires; both
+Claude Code and Codex support the marketplace-plus-plugin model) in its own repository; the operator
+adds it straight from GitHub, asks their agent to set up Agentworks, and the agent executes the
+process described in the skill, installing, configuring, and using the CLI as needed. The onboarding
+agent deliberately sits outside Agentworks: a managed agent must not modify the system it runs in,
+so the agentic-artifacts layer is not the delivery path for these skills.
+
+The skill is positioned as onboarding, discovery, and management, one lifecycle: discovery is
+onboarding on an ongoing basis (a section of the same skill, not a separate thing), and management
+is the day-two work the same agent keeps doing with the same CLI surfaces.
 
 The first slice needs nothing from wave 2. The schema-derived depth (generated samples, describe
 surfaces, dynamic content) adopts wave 2's surfaces as they land rather than blocking on them.
 
 ## Functional requirements
 
-- **R1 (harness plugin delivery).** Agentworks MUST publish a harness-specific onboarding plugin or
-  marketplace entry in its own repository, installable directly from GitHub, for Claude Code first
-  and Codex before this effort closes. The plugin's skills MUST teach an agent to onboard and manage
-  Agentworks using the CLI, and MUST track CLI releases in a defined way (the versioning scheme is
-  the HLA's call).
+- **R1 (marketplace and plugin delivery).** Agentworks MUST publish a marketplace and plugin (or the
+  harness's equivalent packaging) in its own repository, installable directly from GitHub, for both
+  Claude Code and Codex. The plugin's skills MUST teach an agent to onboard, discover, and manage
+  Agentworks using the CLI, structured as one skill whose sections cover onboarding, discovery
+  (ongoing onboarding), and management; when that content is too much for a single `SKILL.md`, it
+  splits into sub-documents referenced from `SKILL.md`. Plugins MUST track CLI releases in a defined
+  way (the versioning scheme is the HLA's call).
 - **R2 (progressive golden path).** Onboarding MUST reach a first working session in minutes, with
   the major capability areas (config, resources, plugins, secrets, VMs, workspaces, sessions)
   discoverable progressively from there rather than front-loaded.
@@ -40,10 +46,14 @@ surfaces, dynamic content) adopts wave 2's surfaces as they land rather than blo
   are recognized and reported rather than redone, so operators revisit it to confirm they are
   getting the most out of the platform as it evolves. Together with R2 and R5 this delivers the
   assisted onboarding flow of issue #391.
-- **R4 (consent-first probing).** Probing the operator's machine MUST happen with consent and
+- **R4 (consent-first, probe-forward).** Probing the operator's machine MUST happen with consent and
   explanation, never silently: ask before looking for existing material (SSH keys are the canonical
   example), state what will be looked for and what will never be read, and honor refusals with a
-  manual alternative. Onboarding is where trust is established.
+  manual alternative. Within that consent frame, onboarding SHOULD probe and verify wherever
+  possible rather than trusting declarations: ask for a secret reference (a 1Password item, for
+  example) and confirm it resolves without reading its value, test SSH connections, confirm
+  installed tools respond. The result is verified setup, not blind configuration. Onboarding is
+  where trust is established, in both directions.
 - **R5 (interactive and non-interactive).** Both a guided path and a scriptable, replayable
   non-interactive path MUST exist, producing equivalent results.
 - **R6 (derived content).** Onboarding and discovery content MUST derive from the platform's
@@ -65,12 +75,28 @@ surfaces, dynamic content) adopts wave 2's surfaces as they land rather than blo
   is configured, ready, and wrong.
 - **R9 (discovery conventions).** New CLI surfaces MUST follow the platform's list/describe
   conventions, participate in shell completions, and update docs in the same commits as behavior.
+- **R10 (ongoing management).** The skill MUST cover management, not only first-run onboarding:
+  day-two operations (creating and changing resources, adopting new capability, resolving
+  deprecations across upgrades, troubleshooting with doctor) through the same CLI surfaces, so the
+  agent that onboarded the operator remains useful for the life of the installation.
+- **R11 (cross-harness content parity).** Skill content MUST NOT fork silently between the harness
+  plugins. Share or generate it from one source where the harness formats allow (the repo's own
+  Rulesync pipeline is prior art); where duplication is unavoidable, a CI guard MUST verify
+  equivalence.
+- **R12 (security disclosure).** Before setup proceeds, onboarding MUST state plainly that an agent
+  managing Agentworks gains access to everything Agentworks can reach: every managed resource and
+  secret reference, and anything accessible over SSH from the operator's machine. It MUST recommend
+  a strict harness security posture, especially once Agentworks is in real use, and point at the
+  relevant settings rather than leaving the recommendation abstract.
 
 ## Personas and stories
 
-- As a new operator with Claude Code on my workstation, I add the Agentworks plugin from GitHub, ask
-  my agent to set Agentworks up, and reach my first working session in minutes, being asked before
-  anything on my machine is examined.
+- As a new operator with Claude Code or Codex on my workstation, I add the Agentworks marketplace
+  and plugin from GitHub, ask my agent to set Agentworks up, and reach my first working session in
+  minutes, told up front what access I am granting and asked before anything on my machine is
+  examined.
+- As an operator six months in, I ask the same agent to add a VM site or rotate a secret, and the
+  skill's management section teaches it the current surfaces rather than leaving it to guess.
 - As a returning operator, I rerun onboarding after an upgrade and see what is new and what I have
   not adopted, without redoing what is already configured.
 - As an operator who scripts environments, I run the non-interactive path in provisioning and get
@@ -106,7 +132,12 @@ surfaces, dynamic content) adopts wave 2's surfaces as they land rather than blo
 5. Discovery answers are generated from the live registry inventory; adding an implementation
    changes the answers without touching onboarding content.
 6. Completions and docs are current for every surface this effort adds (repo rule).
-7. The Codex plugin exists with parity for the onboarding path before the effort locks.
+7. Both harness plugins exist with equivalent skill content, proven by shared sourcing or the R11 CI
+   guard, and both pass criterion 1's fresh-operator test.
+8. The security disclosure (R12) appears before any setup action in both the guided and
+   non-interactive paths.
+9. Consented probes verify configured secrets and connections during onboarding (resolution checked
+   without reading values); a declined probe leaves an explicit manual-verification note.
 
 ## Decisions
 
@@ -114,8 +145,9 @@ surfaces, dynamic content) adopts wave 2's surfaces as they land rather than blo
   roadmap's user perspective and target-state); this FRD does not reopen it.
 - **D2 (parallel to wave 2).** This effort seeds now, consumes wave 2's surfaces as they land, and
   must not block on them nor duplicate them.
-- **D3 (Claude Code first).** First-party onboarding ships for Claude Code first (the operator's
-  primary harness), Codex second, both before lock (R1, AC7).
+- **D3 (both harnesses, no ordering).** Claude Code and Codex plugins are both required deliverables
+  with equivalent content (R1, R11, AC7). Build order is the effort lead's call; neither is an
+  afterthought.
 - **D4 (issue #390 disposition).** The "examples system plugin" ask is subsumed rather than built:
   wave 2's live-rendered samples (adopted here per R6) provide example content that cannot drift,
   and this effort's discovery surfaces present it. No separate examples plugin ships; #390 closes
@@ -129,5 +161,8 @@ surfaces, dynamic content) adopts wave 2's surfaces as they land rather than blo
   and its versioning story (HLA's call, informed by issue #257).
 - Plugin release engineering: how marketplace entries version against CLI releases and how
   compatibility is checked at onboarding time (HLA's call).
+- The R11 sharing mechanism: single-source generation across both harness plugin formats (the repo's
+  Rulesync pipeline as prior art) versus guarded duplication, and what the CI guard checks (HLA's
+  call).
 - What feedback loop tells us onboarding is working for new operators (recorded from the user
   perspective; may resolve to a simple ask-the-operator step rather than telemetry).
