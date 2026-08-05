@@ -42,6 +42,9 @@ Day-one fields (illustrative, not final code):
 ```text
 CapabilityKindDescriptor
     kind                     "vm-platform" | "harness-integration" | ...
+    contract_version         integer the implementation declares compatibility with; day-one by
+                             operator ruling (2026-08-05) so versioning discipline exists before
+                             the first incompatible change rather than being retrofitted
     implementation_contract  required base class or protocol
     registry_policy          classes or factories, registered by name; constructed instances only
                              as a descriptor-carried interim exception (secret-backend, until
@@ -67,9 +70,6 @@ Deferred fields, recorded here (and as comments in the implementation) with the 
 each, so wave 2 neither builds them early nor reinvents them later:
 
 ```text
-    contract_version         when the first incompatible contract change or the wave 8 external
-                             plugin API needs version negotiation; until then every first-party
-                             implementation tracks HEAD and the field would hold one value forever
     consumer_gating          when gating derivation actually consolidates (the first new consuming
                              surface, waves 3 and 4); wave 2 changes no gating behavior
     migration_participation  only if wave 2 rules that `agw resource migrate` survives AND should
@@ -117,10 +117,11 @@ The descriptor makes "trust but verify" enforceable at registration, replacing t
 `type`-and-cast seam: conformance to `implementation_contract`, required metadata present, a
 side-effect-free constructibility check, required operations implemented, and every provided slot
 model conforming to the slot's model contract (presence is the support claim, so there is no
-claimed-but-empty slot to check). Version negotiation joins this list when the deferred
-`contract_version` field is created. Atomic seating (prepare everything, then mutate registries) is
-preserved. This strengthens the internal extension framework; it does not create a public plugin
-promise, which stays gated on wave 8's distribution-trust model.
+claimed-but-empty slot to check), and `contract_version` compatibility (declared from day one, so
+the check is initially trivial and the discipline is established before it matters). Atomic seating
+(prepare everything, then mutate registries) is preserved. This strengthens the internal extension
+framework; it does not create a public plugin promise, which stays gated on wave 8's
+distribution-trust model.
 
 ## Secret backends under the descriptor
 
