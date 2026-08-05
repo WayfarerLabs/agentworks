@@ -35,6 +35,15 @@ treat it as fixed input:
   sequencing question; it is groundwork that is nearly finished (only the bounded fixture burndown
   remains) and should land green rather than sit paused. Next-steps design can assume the TOML
   resource path is gone.
+- **Phase 1 merges to main on its own**, rather than waiting on the same branch as a held phase 2.
+  Concretely: the declarative-schema effort's PR #316 is retargeted to a phase-1-only deliverable
+  (the SDD artifacts plus the TOML sunset) and merged once the red window is closed and phase 1's
+  records land (the superseding ADR, the lockfile entries, the breaking-change marker and operator
+  upgrade note). This gets the precondition onto main and into a release instead of drifting on a
+  long-lived branch, and it is the SDD skill's multi-branch model: the SDD lands unlocked (no
+  `locked.md`), and phase 2 resumes on a later branch tracking the same plan. Its breaking change
+  (config.toml no longer loads resource declarations) reaches operators through the normal release,
+  behind the deprecation runway already shipped in 0.13.0.
 - **Phase 2 should be HELD at the phase gate until this next-steps SDD settles.** Per-kind Pydantic
   modeling is exactly where the open ownership boundaries bite: modeling the legacy harness selector
   and then unwinding it in 0.14 is wasted work, and modeling each kind before the capability-kind
