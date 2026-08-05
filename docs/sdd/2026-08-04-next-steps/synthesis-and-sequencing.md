@@ -213,6 +213,24 @@ Introduce the two-level `secret-backend` / `secret-source` model on top of phase
 the active chain and mappings, normalize the backend registry away from constructed singletons, and
 take the resolution-API evolution (typed outcomes, failure categories, cleanup) in the same effort.
 
+Operator mandate (2026-08-05): secret backends are ordinary capabilities, full stop. They live in
+the `capabilities/` tree on the shared capability contract, and the descriptor work is free to
+massage the base abstraction to make that true; the backend/source split is the mechanism for the
+mandate, not an exemption from it (backend parallels `vm-platform`, source parallels `vm-site`). The
+one piece the descriptor design must address deliberately is lifecycle layering: secret resolution
+runs upstream of every other capability's runup, so a source's own lifecycle sits one stage earlier,
+and a source's config must not depend on secrets served by another source unless the active chain's
+ordering is explicitly promoted to a resolution order.
+
+Operator design input for the wave 3 FRD (2026-08-05): a source exposes KV secrets and maps to one
+backend with that source's config; per-source mapping to multiple backends is not required. On
+reference shape, the operator's suggestion is that a per-secret reference may name either a backend
+directly (today's simple case) or a source. The wave 3 design should weigh that against the
+alternative already in the capability perspective: synthesize zero-config sources under the current
+backend names (`env-var`, `prompt`) so every reference names a source and the simple case keeps its
+current spelling with only one concept in the model. Either way, the simple case must not get more
+verbose.
+
 ### Wave 4: harness facet framework, one vertical slice
 
 Implement the facet model designed earlier: attachments at VM/admin/agent/workspace/session
@@ -378,7 +396,9 @@ Settled by operator ruling (2026-08-05): the artifact shape follows the roadmap-
 bundles phase 1's TOML hard error with the expired-compat removals as one breaking-cleanup release;
 and the harness-transcripts FRD is harvested and then deleted, branch included, once its useful
 content (distillation, record-store, and any other still-relevant requirements) is verifiably
-extracted, so a superseded draft is not left around to confuse.
+extracted, so a superseded draft is not left around to confuse. A further ruling the same day:
+secret backends are ordinary capabilities on the shared contract, with the descriptor free to
+massage the base to make that true (see wave 3).
 
 ## Immediate Next Actions
 
