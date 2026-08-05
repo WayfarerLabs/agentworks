@@ -99,15 +99,15 @@ settings and platform shell behavior are unchanged; no dead Python compatibility
 
 ## Phase 3: Legacy VM console deletion
 
-- [ ] Delete `agw vm console`, its dynamic completion mapping, and its dedicated
+- [x] Delete `agw vm console`, its dynamic completion mapping, and its dedicated
       `sessions/console.py` implementation.
-- [ ] Delete session create's best-effort legacy-console window hook and its tests while preserving
+- [x] Delete session create's best-effort legacy-console window hook and its tests while preserving
       tmuxinator regeneration and all other roll-forward behavior.
-- [ ] Remove legacy VM-console-only tests and imports without weakening canonical named-console
+- [x] Remove legacy VM-console-only tests and imports without weakening canonical named-console
       creation, attachment, mutation, layout, or recovery coverage.
-- [ ] Update `cli/README.md`, the named-console sample, current code comments, help, and completion
+- [x] Update `cli/README.md`, the named-console sample, current code comments, help, and completion
       assertions to describe only the canonical top-level `console` family.
-- [ ] Review the slice, resolve every valid finding, and run session create/resume, canonical
+- [x] Review the slice, resolve every valid finding, and run session create/resume, canonical
       console, orchestrated attach, sample, completion, docs, and full-gate verification.
 
 Definition of done: R5 is complete; the old VM-wide console command and implementation have no

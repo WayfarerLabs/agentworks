@@ -189,7 +189,6 @@ just a vm-site.
 | `agw vm rekey <name>`                               | Assign a new Tailscale auth key to a VM (logout + rejoin)     |
 | `agw vm port-forward <name> <ports...>`             | Forward local port(s) to a VM (like kubectl port-forward)     |
 | `agw vm logs <name>`                                | Show SSH logs for a VM                                        |
-| `agw vm console <name>`                             | _Deprecated_: use `agw console`                               |
 | `agw vm add-git-credential <name> <cred>`           | Add or update a git credential                                |
 
 **Power-state semantics:** a VM that stopped on its own (idle timeout, host reboot) is started
@@ -440,8 +439,7 @@ panes you want preloaded into a session's window.
 - `--all-running` -- like `--all` but restricted to sessions whose live tmux state on the VM is OK
   (one SSH round-trip; same probe `agw session list` uses). Mutually exclusive with `--all`.
   Requires the VM to be reachable.
-- `--add-admin-shell` -- include a top-level admin-shell window as window 0, matching the legacy
-  `vm console` behavior.
+- `--add-admin-shell` -- include a top-level admin-shell window as window 0.
 
 `console list` accepts `--vm`, `--workspace`, and `--agent` to narrow the result set. Each filter
 takes a single value or a comma-separated list (`--workspace ws1,ws2`); commas within a filter are
@@ -500,11 +498,10 @@ removed sessions themselves are untouched; only their membership in the console 
 Each session runs in its own locked-down tmux session on the VM. There are several ways to interact
 with sessions, at different scopes:
 
-| Method                    | Scope                            | tmux session name   | Entry point        |
-| ------------------------- | -------------------------------- | ------------------- | ------------------ |
-| `session attach`          | One session                      | `<session-name>`    | Operator's machine |
-| `console`                 | Curated subset across workspaces | `aw-console-<name>` | Operator's machine |
-| `vm console` (deprecated) | All sessions on the VM           | `vm-console`        | Operator's machine |
+| Method           | Scope                            | tmux session name   | Entry point        |
+| ---------------- | -------------------------------- | ------------------- | ------------------ |
+| `session attach` | One session                      | `<session-name>`    | Operator's machine |
+| `console`        | Curated subset across workspaces | `aw-console-<name>` | Operator's machine |
 
 #### Session tmux Sessions
 
@@ -523,9 +520,9 @@ pane PTY, and each socket path is persisted in the database.
 #### Named Console
 
 `console attach <name>` creates or attaches to the `aw-console-<name>` tmux session. Each member
-session becomes a window running the same wrapper used by the VM console, plus a configurable number
-of extra shell panes (default user = session's agent user, default cwd = workspace root; override
-per pane with `--cwd` / `--admin` on `console add-shell`).
+session becomes a window running an attachment wrapper, plus a configurable number of extra shell
+panes (default user = session's agent user, default cwd = workspace root; override per pane with
+`--cwd` / `--admin` on `console add-shell`).
 
 ```text
 aw-console-backend
@@ -549,13 +546,6 @@ regenerated whenever sessions change. The `agw workspace console` command that a
 removed (superseded by named consoles); the config remains usable directly on the VM via
 `tmuxinator start ws-<name>-console` (e.g. inside VS Code's integrated terminal).
 
-#### VM Console (Deprecated)
-
-`vm console` creates or attaches to the `vm-console` session, which spans all sessions on the VM.
-Built dynamically (not via tmuxinator). Superseded by named consoles, which let you curate which
-sessions are in scope at any moment instead of seeing every session on the VM. Will be removed in a
-future release.
-
 #### Shells
 
 `vm shell` and `agent shell` open plain login shells with no tmux (optionally rooted in a workspace
@@ -565,10 +555,9 @@ via `--workspace <ws>`). Use these when you just need a terminal without the con
 
 - **Direct attach** (`session attach`): the user's prefix key, detach, copy mode, and scroll all
   work normally. Status bar is hidden since there is only one pane.
-- **Consoles** (`console`, `vm console`): the console's prefix key eclipses the inner session's
-  prefix, so window switching, detach, etc. all operate at the console level. Session windows use a
-  wrapper that re-attaches if the inner session disconnects and shows a message when the session
-  ends.
+- **Consoles** (`console`): the console's prefix key eclipses the inner session's prefix, so window
+  switching, detach, etc. all operate at the console level. Session windows use a wrapper that
+  re-attaches if the inner session disconnects and shows a message when the session ends.
 - **Nesting protection**: the console commands refuse to run inside an existing tmux session to
   avoid prefix key conflicts. Pass `--allow-nesting` to override.
 - **Console lifecycle**: consoles are independent of sessions. Killing or detaching a console does

@@ -523,7 +523,7 @@ MIGRATIONS: dict[int, str | Callable[[sqlite3.Connection, MigrationContext], Non
         );
         CREATE INDEX idx_console_sessions_order ON console_sessions(console_name, position);
     """,
-    # -- Optional admin-shell window (legacy vm-console behavior) ----------
+    # -- Optional admin-shell window ---------------------------------------
     24: """
         ALTER TABLE consoles ADD COLUMN admin_shell INTEGER NOT NULL DEFAULT 0;
     """,

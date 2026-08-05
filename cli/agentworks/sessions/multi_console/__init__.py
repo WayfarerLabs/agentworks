@@ -2,9 +2,8 @@
 
 A console is a named tmux session on a VM that aggregates a curated subset of
 the VM's sessions as windows, with optional extra shell panes per session
-window. Unlike the legacy vm-console (one per VM, holds all sessions), a
-console is created explicitly with a chosen set of sessions and can be
-attached, modified, or deleted independently.
+window. A console is created explicitly with a chosen set of sessions and can
+be attached, modified, or deleted independently.
 
 This is a package rather than a single module because the implementation
 outgrew a single 500-line file. The submodules are organized by concern:

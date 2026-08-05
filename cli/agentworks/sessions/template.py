@@ -29,8 +29,7 @@ if TYPE_CHECKING:
 class NamedConsoleConfig(DeclaredResource):
     """Settings for the `console` subcommand group (named multi-session
     consoles). Section is `[named_console]` in the TOML to disambiguate from
-    the legacy `vm console` and the workspace console template. Only named
-    consoles read these values today.
+    the workspace console template. Only named consoles read these values.
 
     Inheriting ``DeclaredResource`` gives this the uniform metadata every
     declared resource carries, including ``name``. The console surface is a
