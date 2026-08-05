@@ -587,29 +587,13 @@ def test_add_git_credential_line_key_preserves_scoped_lines() -> None:
     assert _credential_line_key(fallback_old) == _credential_line_key(fallback_new)
 
 
-# -- TOML path: ignored scope keys warn ----------------------------------------
-
-
-def test_toml_github_scope_keys_warn_and_unscope(tmp_path: Path) -> None:
-    pub = tmp_path / "k.pub"
-    priv = tmp_path / "k"
-    pub.write_text("ssh-ed25519 AAAA test")
-    priv.write_text("key")
-    cfg = tmp_path / "config.toml"
-    cfg.write_text(
-        dedent(f"""\
-        [operator]
-        ssh_public_key = "{pub.as_posix()}"
-        ssh_private_key = "{priv.as_posix()}"
-
-        [git_credentials.gh]
-        provider = "github"
-        repos = ["acme/widgets"]
-        """)
-    )
-    config = load_config(cfg, warn_issues=False)
-    assert any("manifest-only" in issue and "IGNORED" in issue for issue in config.config_issues)
-    assert config.git_credentials["gh"].provider_config == {}
+# The former ``test_toml_github_scope_keys_warn_and_unscope`` was removed here:
+# it pinned the flat-TOML ``[git_credentials.*]`` behavior of warning that
+# github scope keys (``repos``) are manifest-only and dropping them to an empty
+# ``provider_config``. config.toml now hard-errors on any resource section
+# (ADR 0022), so a ``[git_credentials.*]`` block never loads to warn-and-unscope;
+# the manifest scope path is covered by ``test_resolve_threads_scope_from_manifest``
+# and ``test_manifest_scope_validation_has_file_line`` above.
 
 
 # -- review_remote (provider-owned repo URL advice) ----------------------------

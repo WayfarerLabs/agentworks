@@ -9,12 +9,17 @@ the value as a keyword argument; no ``env=`` injection.
 
 from __future__ import annotations
 
-from pathlib import Path
 from textwrap import dedent
+from typing import TYPE_CHECKING
 
 import pytest
 
 from agentworks.config import load_config
+from tests.conftest import ManifestDoc, write_manifests
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+    from pathlib import Path
 
 
 def _resolve_tailscale_key(config, registry, vm_tmpl) -> str:  # type: ignore[no-untyped-def]
@@ -46,7 +51,16 @@ def ssh_keys(tmp_path: Path) -> tuple[Path, Path]:
     return pub, priv
 
 
-def _write_cfg(tmp_path: Path, body: str, ssh_keys: tuple[Path, Path]) -> Path:
+def _write_cfg(
+    tmp_path: Path,
+    ssh_keys: tuple[Path, Path],
+    *,
+    settings: str = "",
+    manifests: Sequence[ManifestDoc | str] = (),
+) -> Path:
+    """Write a settings-only config.toml plus its resources/ manifests and
+    return the config path. ``settings`` carries settings-only TOML
+    ([secret_config]); resources go in ``manifests``."""
     pub, priv = ssh_keys
     p = tmp_path / "c.toml"
     p.write_text(
@@ -58,8 +72,10 @@ def _write_cfg(tmp_path: Path, body: str, ssh_keys: tuple[Path, Path]) -> Path:
 
             """
         )
-        + dedent(body)
+        + dedent(settings)
     )
+    if manifests:
+        write_manifests(tmp_path, *manifests)
     return p
 
 
@@ -75,11 +91,11 @@ def test_boundary_resolves_tailscale_from_env_var(
     """
     cfg = _write_cfg(
         tmp_path,
-        """\
+        ssh_keys,
+        settings="""
         [secret_config]
         backends = ["env-var"]
         """,
-        ssh_keys,
     )
     config = load_config(cfg, warn_issues=False)
 
@@ -106,14 +122,12 @@ def test_boundary_uses_custom_tailscale_secret_name(
     """
     cfg = _write_cfg(
         tmp_path,
-        """\
-        [vm_templates.azure-prod]
-        tailscale_auth_key = "custom-ts"
-
+        ssh_keys,
+        settings="""
         [secret_config]
         backends = ["env-var"]
         """,
-        ssh_keys,
+        manifests=[ManifestDoc("vm-template", "azure-prod", {"tailscale_auth_key": "custom-ts"})],
     )
     config = load_config(cfg, warn_issues=False)
 
@@ -138,11 +152,11 @@ def test_template_preflight_fails_on_unresolvable_key(
     """
     cfg = _write_cfg(
         tmp_path,
-        """\
+        ssh_keys,
+        settings="""
         [secret_config]
         backends = ["env-var"]
         """,
-        ssh_keys,
     )
     config = load_config(cfg, warn_issues=False)
     monkeypatch.delenv("AW_SECRET_TAILSCALE_AUTH_KEY", raising=False)

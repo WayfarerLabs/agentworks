@@ -10,8 +10,8 @@ $EDITOR launch.
 
 from __future__ import annotations
 
-from pathlib import Path
 from textwrap import dedent
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -19,9 +19,14 @@ from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
 from agentworks.errors import NotFoundError, ValidationError
 from agentworks.resources.inspect import edit_location
+from tests.conftest import ManifestDoc, write_manifests
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+    from pathlib import Path
 
 
-def _write_base(cfg_path: Path, extras: str = "") -> None:
+def _write_base(cfg_path: Path) -> None:
     tmp = cfg_path.parent
     (tmp / "id.pub").write_text("ssh-ed25519 AAAA...")
     (tmp / "id").write_text("-----BEGIN OPENSSH PRIVATE KEY-----")
@@ -31,17 +36,16 @@ def _write_base(cfg_path: Path, extras: str = "") -> None:
         ssh_public_key = "{(tmp / "id.pub").as_posix()}"
         ssh_private_key = "{(tmp / "id").as_posix()}"
         """)
-        + dedent(extras)
     )
 
 
-def _registry(tmp_path: Path, *, toml_extras: str = "", manifest: str = ""):
+def _registry(tmp_path: Path, *, manifests: Sequence[ManifestDoc | str] = ()):
     cfg = tmp_path / "config.toml"
-    _write_base(cfg, toml_extras)
-    if manifest:
-        resources = tmp_path / "resources"
-        resources.mkdir(exist_ok=True)
-        (resources / "res.yaml").write_text(dedent(manifest))
+    _write_base(cfg)
+    # These tests assert on the declaring file's name, so the manifests land
+    # in a single ``res.yaml``.
+    if manifests:
+        write_manifests(tmp_path, *manifests, filename="res.yaml")
     config = load_config(cfg, warn_issues=False)
     return build_registry(config)
 
@@ -49,34 +53,28 @@ def _registry(tmp_path: Path, *, toml_extras: str = "", manifest: str = ""):
 def test_yaml_declared_resource_resolves_to_file_and_line(tmp_path: Path) -> None:
     registry = _registry(
         tmp_path,
-        manifest="""\
+        manifests=[
+            """\
         apiVersion: agentworks/v1
         kind: secret
         metadata:
           name: npm-token
           description: npm token
         spec: {}
-        """,
+        """
+        ],
     )
     path, line = edit_location(registry, "secret", "npm-token")
     assert path == tmp_path / "resources" / "res.yaml"
     assert line == 1
 
 
-def test_toml_declared_resource_points_at_migrate_or_config_edit(
-    tmp_path: Path,
-) -> None:
-    registry = _registry(
-        tmp_path,
-        toml_extras="""
-        [secrets.npm-token]
-        description = "npm token"
-        """,
-    )
-    with pytest.raises(ValidationError, match="declared in TOML") as exc:
-        edit_location(registry, "secret", "npm-token")
-    assert "agw resource migrate secret/npm-token" in (exc.value.hint or "")
-    assert "agw config edit" in (exc.value.hint or "")
+# The former ``test_toml_declared_resource_points_at_migrate_or_config_edit``
+# was removed here: it pinned ``edit_location``'s "declared in TOML" branch,
+# which the TOML resource sunset (ADR 0022) made unreachable, since a
+# TOML-declared resource can no longer enter the registry (config.toml
+# hard-errors on [secrets.*]). Only YAML resources are editable now, and that
+# path is covered by test_yaml_declared_resource_resolves_to_file_and_line.
 
 
 def test_builtin_capability_has_no_file_to_edit(tmp_path: Path) -> None:
@@ -100,13 +98,8 @@ def test_builtin_declarable_resource_points_at_sample(tmp_path: Path) -> None:
 
 
 def test_auto_declared_resource_has_no_file_to_edit(tmp_path: Path) -> None:
-    """A bare [vm_templates.default] auto-declares tailscale-auth-key."""
-    registry = _registry(
-        tmp_path,
-        toml_extras="""
-        [vm_templates.default]
-        """,
-    )
+    """A bare vm-template/default auto-declares tailscale-auth-key."""
+    registry = _registry(tmp_path, manifests=[ManifestDoc("vm-template", "default")])
     with pytest.raises(ValidationError, match="auto-declared"):
         edit_location(registry, "secret", "tailscale-auth-key")
 
@@ -252,14 +245,10 @@ def test_fallback_miss_names_unreadable_files(tmp_path: Path, monkeypatch) -> No
     from agentworks.cli import app
 
     cfg = tmp_path / "config.toml"
-    _write_base(
-        cfg,
-        """
-        [secrets.bad]
-        description = "d"
-        backend_mappings.prompt = "nope"
-        """,
-    )
+    _write_base(cfg)
+    # An unparseable manifest is itself what makes the config fail validation
+    # here (the strict registry build raises), so the CLI falls back to the
+    # tolerant scan; that scan cannot read broken.yaml and must name it.
     resources = tmp_path / "resources"
     resources.mkdir()
     (resources / "broken.yaml").write_text("kind: [unclosed\n")

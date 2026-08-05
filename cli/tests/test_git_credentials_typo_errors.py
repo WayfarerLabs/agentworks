@@ -7,14 +7,19 @@ named.
 
 from __future__ import annotations
 
-from pathlib import Path
 from textwrap import dedent
+from typing import TYPE_CHECKING
 
 import pytest
 
 from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
 from agentworks.errors import ConfigError
+from tests.conftest import ManifestDoc, write_manifests
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+    from pathlib import Path
 
 
 @pytest.fixture()
@@ -26,7 +31,14 @@ def ssh_keys(tmp_path: Path) -> tuple[Path, Path]:
     return pub, priv
 
 
-def _write_cfg(tmp_path: Path, body: str, ssh_keys: tuple[Path, Path]) -> Path:
+def _write_cfg(
+    tmp_path: Path,
+    ssh_keys: tuple[Path, Path],
+    *,
+    manifests: Sequence[ManifestDoc | str] = (),
+) -> Path:
+    """Write a bare operator config.toml plus its resources/ manifests and
+    return the config path."""
     pub, priv = ssh_keys
     p = tmp_path / "c.toml"
     p.write_text(
@@ -38,8 +50,9 @@ def _write_cfg(tmp_path: Path, body: str, ssh_keys: tuple[Path, Path]) -> Path:
 
             """
         )
-        + dedent(body)
     )
+    if manifests:
+        write_manifests(tmp_path, *manifests)
     return p
 
 
@@ -48,13 +61,14 @@ def test_admin_referencing_undeclared_git_credential_errors_at_finalize(
 ) -> None:
     cfg = _write_cfg(
         tmp_path,
-        """\
-        [admin.config]
-        git_credentials = ["githb-prod"]
-        claude_marketplaces = []
-        claude_plugins = []
-        """,
         ssh_keys,
+        manifests=[
+            ManifestDoc(
+                "admin-template",
+                "default",
+                {"git_credentials": ["githb-prod"], "claude_marketplaces": [], "claude_plugins": []},
+            )
+        ],
     )
     config = load_config(cfg, warn_issues=False)
     with pytest.raises(ConfigError) as exc:
@@ -71,11 +85,8 @@ def test_agent_template_referencing_undeclared_git_credential_errors(
 ) -> None:
     cfg = _write_cfg(
         tmp_path,
-        """\
-        [agent_templates.claude]
-        git_credentials = ["github-typo"]
-        """,
         ssh_keys,
+        manifests=[ManifestDoc("agent-template", "claude", {"git_credentials": ["github-typo"]})],
     )
     config = load_config(cfg, warn_issues=False)
     with pytest.raises(ConfigError) as exc:
@@ -90,16 +101,15 @@ def test_declared_git_credential_does_not_error(tmp_path: Path, ssh_keys: tuple[
     """
     cfg = _write_cfg(
         tmp_path,
-        """\
-        [git_credentials.github]
-        type = "github"
-
-        [admin.config]
-        git_credentials = ["github"]
-        claude_marketplaces = []
-        claude_plugins = []
-        """,
         ssh_keys,
+        manifests=[
+            ManifestDoc("git-credential", "github", {"provider": {"name": "github"}}),
+            ManifestDoc(
+                "admin-template",
+                "default",
+                {"git_credentials": ["github"], "claude_marketplaces": [], "claude_plugins": []},
+            ),
+        ],
     )
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)

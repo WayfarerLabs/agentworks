@@ -10,20 +10,25 @@ existing agent or admin mode).
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from agentworks.db import Database
+from tests.conftest import ManifestDoc, write_manifests
 
 from ._session_ephemeral_support import _non_interactive, _stub_build_registry
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 __all__ = ["_non_interactive", "_stub_build_registry"]
 
 
 def _write_parity_config(tmp_path: Path) -> Path:
-    """Config with secrets referenced at every env scope so the parity
-    test exercises vm / workspace / admin / agent / session scopes."""
+    """Settings-only config.toml plus resource manifests with secrets
+    referenced at every env scope, so the parity test exercises the vm /
+    workspace / admin / agent / session scopes."""
     from textwrap import dedent
 
     pub = tmp_path / "id.pub"
@@ -37,36 +42,20 @@ def _write_parity_config(tmp_path: Path) -> Path:
         [operator]
         ssh_public_key = "{pub.as_posix()}"
         ssh_private_key = "{priv.as_posix()}"
-
-        [vm_templates.default]
-        env = {{ VM_TOKEN = {{ secret = "vm-secret" }} }}
-
-        [workspace_templates.default]
-        env = {{ WS_TOKEN = {{ secret = "ws-secret" }} }}
-
-        [agent_templates.default]
-        env = {{ AGENT_TOKEN = {{ secret = "agent-secret" }} }}
-
-        [admin.config]
-        shell = "zsh"
-
-        [admin.env]
-        ADMIN_TOKEN = {{ secret = "admin-secret" }}
-
-        [session_templates.default]
-        env = {{ SESSION_TOKEN = {{ secret = "session-secret" }} }}
-
-        [secrets.vm-secret]
-        description = "vm-scope secret"
-        [secrets.ws-secret]
-        description = "workspace-scope secret"
-        [secrets.agent-secret]
-        description = "agent-scope secret"
-        [secrets.admin-secret]
-        description = "admin-scope secret"
-        [secrets.session-secret]
-        description = "session-scope secret"
         """)
+    )
+    write_manifests(
+        tmp_path,
+        ManifestDoc("vm-template", "default", {"env": {"VM_TOKEN": {"secret": "vm-secret"}}}),
+        ManifestDoc("workspace-template", "default", {"env": {"WS_TOKEN": {"secret": "ws-secret"}}}),
+        ManifestDoc("agent-template", "default", {"env": {"AGENT_TOKEN": {"secret": "agent-secret"}}}),
+        ManifestDoc("admin-template", "default", {"shell": "zsh", "env": {"ADMIN_TOKEN": {"secret": "admin-secret"}}}),
+        ManifestDoc("session-template", "default", {"env": {"SESSION_TOKEN": {"secret": "session-secret"}}}),
+        ManifestDoc("secret", "vm-secret", description="vm-scope secret"),
+        ManifestDoc("secret", "ws-secret", description="workspace-scope secret"),
+        ManifestDoc("secret", "agent-secret", description="agent-scope secret"),
+        ManifestDoc("secret", "admin-secret", description="admin-scope secret"),
+        ManifestDoc("secret", "session-secret", description="session-scope secret"),
     )
     return cfg
 

@@ -7,9 +7,9 @@ entries (the migrated built-ins under ``manifests/builtin/`` and
 operator-declared ``resources/*.yaml`` entries) carry a real source
 location instead of the synthesized sentinel.
 
-The operator-TOML surface stays on the loaders' default synthesized shim (the
-real section-line map is local to ``load_config`` and not carried on ``Config``);
-that is the deprecated surface and an acceptable gap, asserted here for clarity.
+The operator-TOML apt surface is gone entirely now (config.toml hard-errors on
+resource sections, ADR 0022), so every operator apt-source is a YAML manifest
+with a real ``declared_at``.
 """
 
 from __future__ import annotations
@@ -18,15 +18,15 @@ from textwrap import dedent
 from typing import TYPE_CHECKING
 
 from agentworks.source_location import synthesized
+from tests.conftest import write_manifests
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from agentworks.apt import AptSourceEntry
 
-# A well-formed operator apt-source, expressed once as YAML manifest spec and
-# once as a TOML section, so the two operator paths assert against the same
-# resource shape.
+# A well-formed operator apt-source manifest, authored as raw YAML (rather than
+# a ManifestDoc) so these tests can assert on the declaring file's own name.
 _CUSTOM_APT_SOURCE_MANIFEST = dedent(
     """
     apiVersion: agentworks/v1
@@ -42,45 +42,30 @@ _CUSTOM_APT_SOURCE_MANIFEST = dedent(
     """
 )
 
-_CUSTOM_APT_SOURCE_TOML = dedent(
-    """
-    [apt_sources.custom-repo]
-    description = "Custom operator apt repository"
-    key_url = "https://example.com/key.gpg"
-    key_path = "/etc/apt/keyrings/custom.gpg"
-    source = "deb [signed-by=/etc/apt/keyrings/custom.gpg] https://example.com stable main"
-    source_file = "custom.list"
-    """
-)
-
 
 def _write_operator_config(
     tmp_path: Path,
     *,
-    toml_body: str = "",
     manifests: dict[str, str] | None = None,
 ) -> Path:
-    """Write a minimal operator config (plus optional TOML apt-source entries
-    and ``resources/*.yaml`` manifests) and return the config path.
+    """Write a minimal operator config plus optional ``resources/*.yaml``
+    manifests (keyed by filename, since these tests assert on the declaring
+    file's name) and return the config path.
     """
     pub = tmp_path / "id.pub"
     priv = tmp_path / "id"
     pub.write_text("ssh-ed25519 X")
     priv.write_text("-----BEGIN-----")
     cfg = tmp_path / "config.toml"
-    cfg.write_text(f'[operator]\nssh_public_key = "{pub}"\nssh_private_key = "{priv}"\n' + toml_body)
-    if manifests:
-        resources = tmp_path / "resources"
-        resources.mkdir()
-        for filename, content in manifests.items():
-            (resources / filename).write_text(content)
+    cfg.write_text(f'[operator]\nssh_public_key = "{pub}"\nssh_private_key = "{priv}"\n')
+    for filename, content in (manifests or {}).items():
+        write_manifests(tmp_path, content, filename=filename)
     return cfg
 
 
 def _apt_sources(
     tmp_path: Path,
     *,
-    toml_body: str = "",
     manifests: dict[str, str] | None = None,
 ) -> dict[str, AptSourceEntry]:
     from agentworks.bootstrap import build_registry
@@ -88,7 +73,7 @@ def _apt_sources(
     from agentworks.resources.access import kind_dict
 
     cfg = load_config(
-        _write_operator_config(tmp_path, toml_body=toml_body, manifests=manifests),
+        _write_operator_config(tmp_path, manifests=manifests),
         warn_issues=False,
     )
     registry = build_registry(cfg)
@@ -120,15 +105,10 @@ def test_operator_yaml_entry_declared_at_points_at_operator_file(
     assert src.declared_at.line >= 1
 
 
-def test_operator_toml_entry_declared_at_stays_synthesized(tmp_path: Path) -> None:
-    """Sanity: an operator-TOML apt-source entry still loads; its
-    ``declared_at`` stays synthesized (the deprecated TOML surface does
-    not carry the section-line map), which is acceptable.
-    """
-    src = _apt_sources(tmp_path, toml_body=_CUSTOM_APT_SOURCE_TOML)["custom-repo"]
-
-    assert src.source_file == "custom.list"
-    assert src.declared_at == synthesized()
+# The former ``test_operator_toml_entry_declared_at_stays_synthesized`` was
+# removed here: it pinned the deprecated TOML apt-source surface (loads with a
+# synthesized ``declared_at``), which the TOML resource sunset (ADR 0022) made
+# structurally impossible, since config.toml now hard-errors on [apt_sources.*].
 
 
 def test_describe_surfaces_location_for_manifest_entry(tmp_path: Path) -> None:

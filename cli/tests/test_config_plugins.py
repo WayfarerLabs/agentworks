@@ -182,8 +182,6 @@ def test_plugins_system_reaches_config_on_both_load_paths(tmp_path: Path) -> Non
     )
     with_resources = load_config(cfg, warn_issues=False, resources=True)
     assert with_resources.enabled_system_plugins == ("a", "b")
-    assert with_resources.resources_loaded is True
 
     settings_only = load_config(cfg, warn_issues=False, resources=False)
     assert settings_only.enabled_system_plugins == ("a", "b")
-    assert settings_only.resources_loaded is False

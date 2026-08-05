@@ -8,17 +8,91 @@ from collections.abc import Generator
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from pathlib import Path
+from textwrap import dedent
 from typing import Protocol
 
 import pytest
+import yaml
 
 from agentworks.db import Database
+from agentworks.manifests.envelope import API_VERSION
+from agentworks.manifests.loader import RESOURCES_DIRNAME
 from agentworks.output import Role, StatusStyle, _render_header
 
 # The orchestrated-command suites' shared fixture trio (proxmox
 # section, make_config, resolve_counter) lives in its own module so it
 # reads as the suites' vocabulary rather than universal machinery.
 pytest_plugins = ["tests.orchestrated_fixtures"]
+
+
+# ---------------------------------------------------------------------------
+# Resource manifest authoring
+#
+# config.toml is settings-only now (ADR 0022); resources are declared in
+# ``resources/*.yaml`` manifests beside it. Roughly 28 test files already
+# author those manifests inline (mkdir a ``resources/`` dir, write an
+# enveloped YAML document); this is the shared form of that pattern, so a
+# fixture only varies the kind, name, and spec.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ManifestDoc:
+    """One resource-manifest document, in structured form.
+
+    The envelope boilerplate (``apiVersion`` / ``kind`` / ``metadata``) is
+    identical for every document, so a test only varies the resource
+    ``kind``, its ``name``, the ``spec`` mapping, and an optional
+    ``description`` (which belongs in ``metadata``, never in ``spec``).
+    :func:`write_manifests` renders these into the ``resources/`` dir the
+    framework auto-loads operator manifests from (``RESOURCES_DIRNAME``).
+    """
+
+    kind: str
+    name: str
+    spec: dict[str, object] = field(default_factory=dict)
+    description: str | None = None
+
+
+def render_manifest(doc: ManifestDoc | str) -> str:
+    """Render one manifest document to YAML text.
+
+    A :class:`ManifestDoc` is wrapped in the standard envelope; a raw
+    string is dedented and returned unchanged, the escape hatch for tests
+    that must author malformed or otherwise hand-shaped YAML.
+    """
+    if isinstance(doc, str):
+        return dedent(doc)
+    metadata: dict[str, object] = {"name": doc.name}
+    if doc.description is not None:
+        metadata["description"] = doc.description
+    envelope = {
+        "apiVersion": API_VERSION,
+        "kind": doc.kind,
+        "metadata": metadata,
+        "spec": doc.spec,
+    }
+    return yaml.safe_dump(envelope, sort_keys=False)
+
+
+def write_manifests(
+    config_dir: Path,
+    *docs: ManifestDoc | str,
+    filename: str = "resources.yaml",
+) -> Path:
+    """Write resource manifests into ``<config_dir>/resources/`` and return
+    that directory.
+
+    Multiple ``docs`` are written as one multi-document YAML stream in
+    ``filename``; call again with a distinct ``filename`` to spread
+    declarations across files (e.g. to exercise load ordering, or to sit an
+    unreadable file beside a good one).
+    """
+    resources_dir = config_dir / RESOURCES_DIRNAME
+    resources_dir.mkdir(parents=True, exist_ok=True)
+    stream = "---\n".join(render_manifest(doc) for doc in docs)
+    (resources_dir / filename).write_text(stream)
+    return resources_dir
 
 
 @pytest.fixture(autouse=True)

@@ -13,6 +13,66 @@ down (fixture conversion to green).
 - The 22 errors are fixture-setup hard errors (a shared fixture builds a config with a resource
   section), not a distinct failure class.
 
+## Slice 1 of 1.2f (close) -- shared lever + `tests/` root, done
+
+Date: 2026-08-05.
+
+- Suite now `233 failed, 3189 passed, 11 errors` (`uv run pytest -q` from `cli/`). No NEW failures
+  vs the 1.2 baseline (verified by diffing the failing node-id set); every remaining failure is a
+  still-inventoried, not-yet-converted file in a reserved area.
+- `uv run ruff check` / `ruff format --check` clean on all changed files. `uv run mypy .` is clean
+  except 6 `[attr-defined]` errors in `tests/resources/test_admin_template_plurified.py` (a reserved
+  file that reads the retired `Config.admin`; converts in a later slice).
+- `./scripts/lint-files.sh` is clean for this slice's files; its only failures are pre-existing
+  markdownlint/prettier issues in `plan.md`, untouched by this slice.
+
+### The shared lever (built)
+
+- `cli/tests/conftest.py` gained `ManifestDoc` (a frozen `kind`/`name`/`spec`/`description` record)
+  and `write_manifests(config_dir, *docs, filename=...)`, which writes a `resources/` manifest dir
+  beside a config.toml (matching `RESOURCES_DIRNAME`). Docs are `ManifestDoc`s (enveloped for you)
+  or raw YAML strings (the escape hatch for declaring-file-name / malformed-YAML assertions).
+- `cli/tests/orchestrated_fixtures.py`: `make_config` now declares the proxmox site through a
+  `vm-site` manifest (`proxmox_site()`) instead of baking `[proxmox]` into TOML;
+  `write_operator_config` grew a `manifests=` param. `PROXMOX_SECTION` (the TOML string) is retained
+  for the reserved-area callers that still pass it as a hard-error case until their own slice.
+
+### Cascade (green for free)
+
+Converting the shared orchestrated fixture turned 6 reserved-area files green with no per-file
+edits: `tests/agents/test_delete_grant_revoke_orchestrated.py`,
+`tests/sessions/test_console_attach_orchestrated.py`,
+`tests/sessions/test_singular_batch_orchestrated.py`, `tests/vms/test_ensure_tailscale_wording.py`,
+`tests/vms/test_lifecycle_orchestrated.py`, `tests/vms/test_remaining_commands_orchestrated.py`.
+
+### Redesign / deletion calls (behavior structurally gone under ADR 0022)
+
+- `test_apt_declared_at.py`: removed `test_operator_toml_entry_declared_at_stays_synthesized` (TOML
+  apt-source surface is gone).
+- `test_resource_edit.py`: removed `test_toml_declared_resource_points_at_migrate_or_config_edit` (a
+  TOML-declared resource can no longer enter the registry).
+- `test_config.py`: removed `test_git_credential_type_still_accepted` and
+  `test_git_credential_provider_wins_over_type` (manifests reject the legacy `type` key outright).
+- `test_config_line_capture.py`: collapsed the 8 per-kind TOML-header line tests into one
+  parametrized manifest `declared_at` test; removed the TOML implicit-parent subsection test and the
+  two omitted-singleton `Config.admin`/`Config.named_console` sentinel tests.
+- `test_git_credential_scoping.py`: removed `test_toml_github_scope_keys_warn_and_unscope` (the flat
+  TOML manifest-only-key warn/strip has no manifest analogue; manifest scope path is covered).
+- `test_capability_config_contract.py`: removed `test_github_toml_stray_org_keeps_loading`
+  (collapses into its yaml sibling; stray blob fields are rejected, not silently ignored).
+- `test_builtin_entries_parity.py`: removed `test_operator_toml_override_wins_over_builtin`
+  (identical to its manifest sibling once TOML is gone).
+- `test_doctor_env_and_secrets.py`: removed the #310 pair
+  (`test_config_load_validation_error_yields_fail_row_not_abort` and its `run_checks` sibling): the
+  `[secrets.*]`-name `ValidationError`-at-load scenario is structurally impossible (the section
+  hard-errors as a resource-section `ConfigError` first, and no settings-side load path raises
+  `ValidationError`). The guard's explicit `ValidationError` branch stays as defensive coverage.
+
+All other converted tests preserved intent: reads of retired `Config` fields re-point to
+`registry.lookup` / `iter_kind_items`, `config_issues` warnings that moved to the manifest channel
+re-point to `load_manifests(...).issues`, and a `ValidationError` at load became a `ConfigError` at
+build where manifest decode wraps the spec-level error (message substrings kept).
+
 ## Root-cause buckets (every failure is one of these; no surprise regressions)
 
 Bucketing the whole failure output by exception signature:
@@ -60,7 +120,10 @@ behavior** (loader-parity / `declared_at` line capture) and cannot be mechanical
 
 ## Red files by area
 
-### `tests/` (config, secrets, git-credentials, resource CLI)
+### `tests/` (config, secrets, git-credentials, resource CLI) -- DONE (slice 1 of 1.2f)
+
+Every file in this section is green as of slice 1; see the slice-1 section above for the redesign /
+deletion calls. The per-file notes below are retained as the record of what each conversion faced.
 
 - `test_config.py` -- redesign: asserts on removed `Config` resource fields; keep only settings
   load.

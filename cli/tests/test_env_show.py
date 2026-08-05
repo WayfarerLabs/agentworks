@@ -10,7 +10,8 @@ Pins:
 
 from __future__ import annotations
 
-from pathlib import Path
+from textwrap import dedent
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -18,14 +19,35 @@ from agentworks.config import load_config
 from agentworks.db import Database
 from agentworks.env.show import ResolvedEnvRow, show_env
 from agentworks.errors import ValidationError
+from tests.conftest import ManifestDoc, write_manifests
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+    from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # Test config fixture
 # ---------------------------------------------------------------------------
 
 
-def _write_config(tmp_path: Path, *, extras: str = "") -> Path:
-    """Write a minimal config.toml + return its path."""
+def _write_config(
+    tmp_path: Path,
+    *,
+    settings: str = "",
+    vm_template: ManifestDoc | None = None,
+    admin: ManifestDoc | None = None,
+    manifests: Sequence[ManifestDoc | str] = (),
+) -> Path:
+    """Write a settings-only config.toml plus its resources/ manifests and
+    return the config path.
+
+    The base always declares an empty ``default`` vm-template and the
+    ``default`` admin-template (shell=zsh), the two singletons env-show
+    resolves against; pass ``vm_template`` / ``admin`` to extend either
+    (e.g. with an ``env`` block), and ``manifests`` for the additional
+    resources a test needs (session / workspace templates, secrets).
+    ``settings`` carries any settings-only TOML ([secret_config], ...).
+    """
     pub = tmp_path / "id.pub"
     priv = tmp_path / "id"
     pub.write_text("ssh-ed25519 AAAA...")
@@ -33,19 +55,18 @@ def _write_config(tmp_path: Path, *, extras: str = "") -> Path:
 
     cfg = tmp_path / "config.toml"
     cfg.write_text(
-        f"""\
-[operator]
-ssh_public_key = "{pub.as_posix()}"
-ssh_private_key = "{priv.as_posix()}"
-
-[vm_templates.default]
-
-[admin.config]
-shell = "zsh"
-
-[defaults]
-{extras}
-"""
+        dedent(f"""\
+        [operator]
+        ssh_public_key = "{pub.as_posix()}"
+        ssh_private_key = "{priv.as_posix()}"
+        """)
+        + dedent(settings)
+    )
+    write_manifests(
+        tmp_path,
+        vm_template or ManifestDoc("vm-template", "default"),
+        admin or ManifestDoc("admin-template", "default", {"shell": "zsh"}),
+        *manifests,
     )
     return cfg
 
@@ -154,10 +175,7 @@ def test_copied_workspace_template_shows_no_workspace_env_and_does_not_crash(
     the failure."""
     cfg = _write_config(
         tmp_path,
-        extras="""
-[workspace_templates.proj.env]
-WS_VAR = "ws-val"
-""",
+        manifests=[ManifestDoc("workspace-template", "proj", {"env": {"WS_VAR": "ws-val"}})],
     )
     config = load_config(cfg, warn_issues=False)
     _seed_db(db, with_workspace=False)
@@ -209,13 +227,8 @@ def test_session_scope_wins_over_vm_for_same_key(
     value wins AND the row's scope label is 'session'."""
     cfg = _write_config(
         tmp_path,
-        extras="""
-[vm_templates.default.env]
-EDITOR = "vim"
-
-[session_templates.shell.env]
-EDITOR = "nvim"
-""",
+        vm_template=ManifestDoc("vm-template", "default", {"env": {"EDITOR": "vim"}}),
+        manifests=[ManifestDoc("session-template", "shell", {"env": {"EDITOR": "nvim"}})],
     )
     config = load_config(cfg, warn_issues=False)
     _seed_db(db, with_workspace=True, with_agent=True, with_session=True)
@@ -235,10 +248,7 @@ def test_admin_env_appears_only_when_no_agent_context(
 ) -> None:
     cfg = _write_config(
         tmp_path,
-        extras="""
-[admin.env]
-HTTP_PROXY = "http://proxy:3128"
-""",
+        admin=ManifestDoc("admin-template", "default", {"shell": "zsh", "env": {"HTTP_PROXY": "http://proxy:3128"}}),
     )
     config = load_config(cfg, warn_issues=False)
     _seed_db(db, with_agent=True)
@@ -260,16 +270,14 @@ HTTP_PROXY = "http://proxy:3128"
 def test_secret_redacted_by_default(db: Database, tmp_path: Path) -> None:
     cfg = _write_config(
         tmp_path,
-        extras="""
-[admin.env]
-API_KEY = { secret = "shared-token" }
-
-[secrets.shared-token]
-description = "shared API token"
-
-[secret_config]
-backends = ["env-var", "prompt"]
-""",
+        settings="""
+        [secret_config]
+        backends = ["env-var", "prompt"]
+        """,
+        admin=ManifestDoc(
+            "admin-template", "default", {"shell": "zsh", "env": {"API_KEY": {"secret": "shared-token"}}}
+        ),
+        manifests=[ManifestDoc("secret", "shared-token", description="shared API token")],
     )
     config = load_config(cfg, warn_issues=False)
     _seed_db(db)
@@ -289,16 +297,14 @@ def test_secret_revealed_with_flag(
     monkeypatch.setenv("AW_SECRET_SHARED_TOKEN", "from-operator-env")
     cfg = _write_config(
         tmp_path,
-        extras="""
-[admin.env]
-API_KEY = { secret = "shared-token" }
-
-[secrets.shared-token]
-description = "shared API token"
-
-[secret_config]
-backends = ["env-var", "prompt"]
-""",
+        settings="""
+        [secret_config]
+        backends = ["env-var", "prompt"]
+        """,
+        admin=ManifestDoc(
+            "admin-template", "default", {"shell": "zsh", "env": {"API_KEY": {"secret": "shared-token"}}}
+        ),
+        manifests=[ManifestDoc("secret", "shared-token", description="shared API token")],
     )
     config = load_config(cfg, warn_issues=False)
     _seed_db(db)
@@ -322,10 +328,7 @@ def test_identity_var_overlays_user_env(
     at render time (per FRD R1; the operator's value is replaced)."""
     cfg = _write_config(
         tmp_path,
-        extras="""
-[session_templates.shell.env]
-AGENTWORKS_SESSION = "operator-override"
-""",
+        manifests=[ManifestDoc("session-template", "shell", {"env": {"AGENTWORKS_SESSION": "operator-override"}})],
     )
     config = load_config(cfg, warn_issues=False)
     _seed_db(db, with_workspace=True, with_agent=True, with_session=True)

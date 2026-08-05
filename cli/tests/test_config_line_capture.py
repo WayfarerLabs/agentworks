@@ -1,12 +1,16 @@
-"""Tests for ``declared_at: SourceLocation`` attachment in ``load_config``.
+"""Tests for ``declared_at: SourceLocation`` capture on declared Resources.
 
-Every operator-declared Resource carries a ``declared_at`` pointing at the
-opening line of its TOML section header. For Resources composed from multiple
-sub-sections (e.g., ``[vm_templates.x]`` plus ``[vm_templates.x.env]``),
-``declared_at`` points at the earliest contributing header. Singletons that
-the operator omits entirely (no ``[admin.*]``, no ``[named_console]``) still
-appear in ``Config`` with a sentinel ``SourceLocation(file=<config_path>,
-line=0)`` so downstream framework code never has to face a missing field.
+config.toml is settings only now (ADR 0022): every operator-declared Resource
+lives in a ``resources/*.yaml`` manifest, and its ``declared_at`` points at the
+opening line of its YAML document (``file:line``), captured at manifest decode.
+The former per-kind TOML-section line pinning is gone with the TOML resource
+surface; the manifest ``declared_at`` is uniform across kinds (each decoder
+stamps ``doc.location``), which the parametrized test below pins per kind.
+
+The settings-side ``[secret_config]`` table stays in config.toml, so its
+``declared_at`` is still captured from the TOML section header, and a config
+that omits it still carries the ``line=0`` sentinel so downstream framework
+code never faces a missing field.
 """
 
 from __future__ import annotations
@@ -16,7 +20,9 @@ from textwrap import dedent
 
 import pytest
 
+from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
+from tests.conftest import ManifestDoc, write_manifests
 
 
 @pytest.fixture()
@@ -29,6 +35,8 @@ def ssh_keys(tmp_path: Path) -> tuple[Path, Path]:
 
 
 def _write_config(tmp_path: Path, body: str, ssh_keys: tuple[Path, Path]) -> Path:
+    """Write a settings-only config.toml (``[operator]`` plus optional
+    settings ``body``) and return its path. Resources go in manifests."""
     pub, priv = ssh_keys
     config_file = tmp_path / "config.toml"
     config_file.write_text(
@@ -45,130 +53,60 @@ def _write_config(tmp_path: Path, body: str, ssh_keys: tuple[Path, Path]) -> Pat
     return config_file
 
 
-def test_vm_template_declared_at_points_at_root_header(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
-    config_file = _write_config(
-        tmp_path,
-        """\
-        [vm_templates.azure-prod]
-        cpus = 4
-
-        [vm_templates.azure-prod.env]
-        FOO = "bar"
-        """,
-        ssh_keys,
-    )
-
-    cfg = load_config(config_file, warn_issues=False)
-    tmpl = cfg.vm_templates["azure-prod"]
-    assert tmpl.declared_at.file == config_file
-    assert tmpl.declared_at.line == 5  # [vm_templates.azure-prod]
+# ---------------------------------------------------------------------------
+# Manifest-declared Resources carry a real declared_at (file:line)
+# ---------------------------------------------------------------------------
 
 
-def test_vm_template_declared_at_uses_subsection_when_only_env_present(
-    tmp_path: Path, ssh_keys: tuple[Path, Path]
+@pytest.mark.parametrize(
+    ("kind", "name", "spec"),
+    [
+        ("vm-template", "azure-prod", {"cpus": 4, "env": {"FOO": "bar"}}),
+        ("admin-template", "default", {"shell": "zsh", "env": {"FOO": "bar"}}),
+        ("named-console-template", "default", {"tmux_layout": "tiled"}),
+        ("git-credential", "github-prod", {"provider": {"name": "github"}}),
+        ("secret", "anthropic-api-key", {}),
+        ("session-template", "dev", {"harness_integration": {"name": "shell", "command": "claude"}}),
+        ("workspace-template", "gruntweave", {"repo": "https://example.com/org/repo.git"}),
+        ("agent-template", "claude", {"shell": "zsh"}),
+    ],
+)
+def test_manifest_resource_declared_at_points_at_source(
+    tmp_path: Path,
+    ssh_keys: tuple[Path, Path],
+    kind: str,
+    name: str,
+    spec: dict[str, object],
 ) -> None:
-    """The implicit-parent case per the revised FRD R2: writing only
-    ``[vm_templates.x.env]`` produces a valid ``vm_templates.x`` Resource
-    whose ``declared_at`` points at the env header line.
+    """Every declarable kind's manifest Resource carries a ``declared_at``
+    pointing at its declaring YAML document (the ``resources/*.yaml`` file, at
+    the document's opening line), not a synthesized sentinel. This is the
+    manifest equivalent of the former per-kind TOML-section line capture, and
+    it pins that each decoder stamps ``doc.location`` onto the Resource.
     """
-    config_file = _write_config(
-        tmp_path,
-        """\
-        [vm_templates.only-env.env]
-        FOO = "bar"
-        """,
-        ssh_keys,
-    )
-
-    cfg = load_config(config_file, warn_issues=False)
-    tmpl = cfg.vm_templates["only-env"]
-    assert tmpl.declared_at.file == config_file
-    assert tmpl.declared_at.line == 5
-
-
-def test_admin_config_declared_at_points_at_admin_subtree(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
-    config_file = _write_config(
-        tmp_path,
-        """\
-        [admin.config]
-        shell = "zsh"
-
-        [admin.env]
-        FOO = "bar"
-        """,
-        ssh_keys,
-    )
-
-    cfg = load_config(config_file, warn_issues=False)
-    assert cfg.admin is not None
-    assert cfg.admin.declared_at.file == config_file
-    assert cfg.admin.declared_at.line == 5  # earliest under [admin.*]
-
-
-def test_admin_config_synthesized_when_section_omitted(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
-    """A config with no ``[admin.*]`` sections loads with
-    ``Config.admin = None``: the loader publishes nothing and the
-    framework auto-declares the default at finalize (no synthesized
-    placeholder rows)."""
     config_file = _write_config(tmp_path, "", ssh_keys)
+    # ``secret`` requires a description; it is optional for the other kinds.
+    description = "declared for the declared_at test" if kind == "secret" else None
+    write_manifests(tmp_path, ManifestDoc(kind, name, spec, description=description))
 
-    cfg = load_config(config_file, warn_issues=False)
-    assert cfg.admin is None
-
-
-def test_named_console_declared_at(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
-    config_file = _write_config(
-        tmp_path,
-        """\
-        [named_console]
-        tmux_layout = "tiled"
-        """,
-        ssh_keys,
-    )
-
-    cfg = load_config(config_file, warn_issues=False)
-    assert cfg.named_console is not None
-    assert cfg.named_console.declared_at.file == config_file
-    assert cfg.named_console.declared_at.line == 5
+    registry = build_registry(load_config(config_file, warn_issues=False))
+    decl = registry.lookup(kind, name)
+    # A single-document manifest: the document opens on line 1 of the file the
+    # framework auto-loads operator manifests from.
+    assert decl.declared_at.file.name == "resources.yaml"
+    assert decl.declared_at.line == 1
 
 
-def test_named_console_synthesized_when_omitted(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
-    config_file = _write_config(tmp_path, "", ssh_keys)
-
-    cfg = load_config(config_file, warn_issues=False)
-    assert cfg.named_console is None
-
-
-def test_git_credential_declared_at(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
-    config_file = _write_config(
-        tmp_path,
-        """\
-        [git_credentials.github-prod]
-        type = "github"
-        """,
-        ssh_keys,
-    )
-
-    cfg = load_config(config_file, warn_issues=False)
-    cred = cfg.git_credentials["github-prod"]
-    assert cred.declared_at.file == config_file
-    assert cred.declared_at.line == 5
+# The former ``test_vm_template_declared_at_uses_subsection_when_only_env_present``
+# was removed here: it pinned the TOML loader's implicit-parent behavior (writing
+# only ``[vm_templates.x.env]`` produces ``vm_templates.x`` whose declared_at
+# points at the env subsection header). A YAML manifest has no sub-section shape,
+# so that TOML-loader-internal detail has no manifest equivalent (ADR 0022).
 
 
-def test_secret_decl_declared_at(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
-    config_file = _write_config(
-        tmp_path,
-        """\
-        [secrets.anthropic-api-key]
-        description = "Anthropic API key"
-        """,
-        ssh_keys,
-    )
-
-    cfg = load_config(config_file, warn_issues=False)
-    decl = cfg.secrets["anthropic-api-key"]
-    assert decl.declared_at.file == config_file
-    assert decl.declared_at.line == 5
+# ---------------------------------------------------------------------------
+# [secret_config] stays a settings-side table: TOML header capture + sentinel
+# ---------------------------------------------------------------------------
 
 
 def test_secret_config_declared_at(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
@@ -194,49 +132,10 @@ def test_secret_config_synthesized_when_omitted(tmp_path: Path, ssh_keys: tuple[
     assert cfg.secret_config_data.declared_at.line == 0
 
 
-def test_session_template_declared_at(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
-    config_file = _write_config(
-        tmp_path,
-        """\
-        [session_templates.dev]
-        command = "claude"
-        """,
-        ssh_keys,
-    )
-
-    cfg = load_config(config_file, warn_issues=False)
-    tmpl = cfg.session_templates["dev"]
-    assert tmpl.declared_at.file == config_file
-    assert tmpl.declared_at.line == 5
-
-
-def test_workspace_template_declared_at(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
-    config_file = _write_config(
-        tmp_path,
-        """\
-        [workspace_templates.gruntweave]
-        repo = "https://example.com/org/repo.git"
-        """,
-        ssh_keys,
-    )
-
-    cfg = load_config(config_file, warn_issues=False)
-    tmpl = cfg.workspace_templates["gruntweave"]
-    assert tmpl.declared_at.file == config_file
-    assert tmpl.declared_at.line == 5
-
-
-def test_agent_template_declared_at(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
-    config_file = _write_config(
-        tmp_path,
-        """\
-        [agent_templates.claude]
-        shell = "zsh"
-        """,
-        ssh_keys,
-    )
-
-    cfg = load_config(config_file, warn_issues=False)
-    tmpl = cfg.agent_templates["claude"]
-    assert tmpl.declared_at.file == config_file
-    assert tmpl.declared_at.line == 5
+# The former ``test_admin_config_synthesized_when_section_omitted`` and
+# ``test_named_console_synthesized_when_omitted`` were removed here: both read
+# the retired ``Config.admin`` / ``Config.named_console`` fields to assert the
+# TOML loader published no synthesized placeholder for an omitted singleton.
+# config.toml no longer carries any resource surface (ADR 0022), so those fields
+# are gone; the omitted-singleton-auto-declares behavior is covered on the
+# registry side by ``test_config.py::test_named_console_tmux_layout_default_when_section_missing``.

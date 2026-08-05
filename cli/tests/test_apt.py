@@ -9,15 +9,16 @@ payload parity lives in ``test_builtin_entries_parity.py``.
 
 from __future__ import annotations
 
-from textwrap import dedent
 from typing import TYPE_CHECKING
 
 import pytest
 
 from agentworks.apt import _load_apt_packages, _load_apt_sources
 from agentworks.errors import ConfigError
+from tests.conftest import ManifestDoc, write_manifests
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from pathlib import Path
 
 
@@ -75,13 +76,15 @@ def test_apt_package_apt_must_be_list() -> None:
 # -- Framework integration: unknown apt-source reference -----------------------
 
 
-def _write_operator_config(tmp_path: Path, *, toml_body: str = "") -> Path:
+def _write_operator_config(tmp_path: Path, *, manifests: Sequence[ManifestDoc | str] = ()) -> Path:
     pub = tmp_path / "id.pub"
     priv = tmp_path / "id"
     pub.write_text("ssh-ed25519 X")
     priv.write_text("-----BEGIN-----")
     cfg = tmp_path / "config.toml"
-    cfg.write_text(f'[operator]\nssh_public_key = "{pub}"\nssh_private_key = "{priv}"\n' + toml_body)
+    cfg.write_text(f'[operator]\nssh_public_key = "{pub}"\nssh_private_key = "{priv}"\n')
+    if manifests:
+        write_manifests(tmp_path, *manifests)
     return cfg
 
 
@@ -95,15 +98,20 @@ def test_bad_apt_source_reference_errors_at_build_registry(tmp_path: Path) -> No
     from agentworks.bootstrap import build_registry
     from agentworks.config import load_config
 
-    toml_body = dedent(
-        """
-        [apt_packages.bad-pkg]
-        description = "Bad"
-        apt = ["bad"]
-        apt_sources = ["nonexistent"]
-        """
+    cfg = load_config(
+        _write_operator_config(
+            tmp_path,
+            manifests=[
+                ManifestDoc(
+                    "apt-package",
+                    "bad-pkg",
+                    {"apt": ["bad"], "apt_sources": ["nonexistent"]},
+                    description="Bad",
+                )
+            ],
+        ),
+        warn_issues=False,
     )
-    cfg = load_config(_write_operator_config(tmp_path, toml_body=toml_body), warn_issues=False)
 
     with pytest.raises(ConfigError, match="nonexistent"):
         build_registry(cfg)

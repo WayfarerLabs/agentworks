@@ -8,7 +8,17 @@ from typing import Any
 
 import pytest
 
+from agentworks.bootstrap import build_registry
 from agentworks.config import ConfigError, load_config
+from agentworks.manifests import RESOURCES_DIRNAME, load_manifests
+from tests.conftest import ManifestDoc, write_manifests
+
+
+def _manifest_issues(config_file: Path) -> tuple[str, ...]:
+    """The spec-level warnings the resources/ manifests raise (nonconforming
+    secret names, unknown keys). config.toml is settings only now (ADR 0022),
+    so these ride the ManifestSet, not cfg.config_issues."""
+    return load_manifests(config_file.parent / RESOURCES_DIRNAME).issues
 
 
 @pytest.fixture()
@@ -20,62 +30,49 @@ def config_dir(tmp_path: Path) -> Path:
     pub.write_text("ssh-ed25519 AAAA...")
     priv.write_text("-----BEGIN OPENSSH PRIVATE KEY-----")
 
+    # config.toml is settings only now (ADR 0022): the templates, credentials,
+    # and install-command that used to live here are resources/ manifests.
     config_file.write_text(
         dedent(f"""\
         [operator]
         ssh_public_key = "{pub.as_posix()}"
         ssh_private_key = "{priv.as_posix()}"
 
-        [vm_templates.default]
-        apt = ["zsh", "tmux"]
-
-        [admin.config]
-        shell = "zsh"
-        git_credentials = ["github"]
-        user_install_commands = ["hello"]
-
-        [user_install_commands.hello]
-        command = "echo hello"
-        path = ["~/.local/bin"]
-
-        [workspace_templates.default]
-
-        [workspace_templates.gruntweave]
-        repo = "https://example.com/org/repo.git"
-
-        [workspace_templates.child]
-        inherits = ["gruntweave"]
-        tmuxinator = false
-
-        [git_credentials.github]
-        type = "github"
-
-        [git_credentials.azdo]
-        type = "azdo"
-        org = "my-org"
-
         [defaults]
     """)
+    )
+    write_manifests(
+        tmp_path,
+        ManifestDoc("vm-template", "default", {"apt": ["zsh", "tmux"]}),
+        ManifestDoc(
+            "admin-template",
+            "default",
+            {"shell": "zsh", "git_credentials": ["github"], "user_install_commands": ["hello"]},
+        ),
+        ManifestDoc("user-install-command", "hello", {"command": "echo hello", "path": ["~/.local/bin"]}),
+        ManifestDoc("workspace-template", "default"),
+        ManifestDoc("workspace-template", "gruntweave", {"repo": "https://example.com/org/repo.git"}),
+        ManifestDoc("workspace-template", "child", {"inherits": ["gruntweave"], "tmuxinator": False}),
+        ManifestDoc("git-credential", "github", {"provider": {"name": "github"}}),
+        ManifestDoc("git-credential", "azdo", {"provider": {"name": "azdo", "org": "my-org"}}),
     )
     return config_file
 
 
 def test_load_valid_config(config_dir: Path) -> None:
-    cfg = load_config(config_dir)
-    assert cfg.admin is not None
-    assert cfg.admin.shell == "zsh"
-    from agentworks.vms.templates import resolve_from_dict as _resolve_vm
-
-    assert _resolve_vm(cfg.vm_templates).apt == ["zsh", "tmux"]
-    assert cfg.admin.user_install_commands == ["hello"]
-    assert "hello" in cfg.user_install_commands
-    assert "default" in cfg.workspace_templates
-    assert "gruntweave" in cfg.workspace_templates
-    assert cfg.workspace_templates["child"].inherits == ["gruntweave"]
-    assert cfg.workspace_templates["child"].tmuxinator is False
-    assert cfg.git_credentials["github"].provider == "github"
-    assert cfg.git_credentials["azdo"].provider_config == {"org": "my-org"}
-    assert cfg.admin.git_credentials == ["github"]
+    registry = build_registry(load_config(config_dir))
+    admin = registry.lookup("admin-template", "default")
+    assert admin.shell == "zsh"
+    assert registry.lookup("vm-template", "default").apt == ["zsh", "tmux"]
+    assert admin.user_install_commands == ["hello"]
+    assert registry.lookup("user-install-command", "hello").command == "echo hello"
+    assert registry.lookup("workspace-template", "default").name == "default"
+    assert registry.lookup("workspace-template", "gruntweave").repo == "https://example.com/org/repo.git"
+    assert registry.lookup("workspace-template", "child").inherits == ["gruntweave"]
+    assert registry.lookup("workspace-template", "child").tmuxinator is False
+    assert registry.lookup("git-credential", "github").provider == "github"
+    assert registry.lookup("git-credential", "azdo").provider_config == {"org": "my-org"}
+    assert admin.git_credentials == ["github"]
 
 
 def test_missing_config_file(tmp_path: Path) -> None:
@@ -89,8 +86,6 @@ def test_cycle_detection(tmp_path: Path) -> None:
     The bespoke load-time pass is gone; load_config no longer does
     inherits validation for any template kind.
     """
-    from agentworks.bootstrap import build_registry
-
     pub = tmp_path / "id.pub"
     priv = tmp_path / "id"
     pub.write_text("key")
@@ -102,13 +97,12 @@ def test_cycle_detection(tmp_path: Path) -> None:
         [operator]
         ssh_public_key = "{pub.as_posix()}"
         ssh_private_key = "{priv.as_posix()}"
-
-        [workspace_templates.a]
-        inherits = ["b"]
-
-        [workspace_templates.b]
-        inherits = ["a"]
     """)
+    )
+    write_manifests(
+        tmp_path,
+        ManifestDoc("workspace-template", "a", {"inherits": ["b"]}),
+        ManifestDoc("workspace-template", "b", {"inherits": ["a"]}),
     )
     cfg = load_config(config_file)
     with pytest.raises(ConfigError, match="cycle"):
@@ -120,8 +114,6 @@ def test_invalid_git_credential_type(tmp_path: Path) -> None:
     unknown provider type errors at ``build_registry`` time via
     GitCredentialProviderKind's error miss policy.
     """
-    from agentworks.bootstrap import build_registry
-
     pub = tmp_path / "id.pub"
     priv = tmp_path / "id"
     pub.write_text("key")
@@ -133,17 +125,28 @@ def test_invalid_git_credential_type(tmp_path: Path) -> None:
         [operator]
         ssh_public_key = "{pub.as_posix()}"
         ssh_private_key = "{priv.as_posix()}"
-
-        [git_credentials.bad]
-        type = "gitlab"
     """)
     )
+    # An UNKNOWN provider (not a legacy ``type`` key, which manifests reject
+    # outright): the provider-kind miss policy still fires at build_registry.
+    write_manifests(tmp_path, ManifestDoc("git-credential", "bad", {"provider": {"name": "gitlab"}}))
     cfg = load_config(config_file)
     with pytest.raises(ConfigError, match="git-credential-provider 'gitlab'"):
         build_registry(cfg)
 
 
-def _git_credential_config(tmp_path: Path, section: str) -> Path:
+# The former ``test_git_credential_type_still_accepted`` and
+# ``test_git_credential_provider_wins_over_type`` were removed here: both pinned
+# the flat-TOML loader's handling of the legacy ``type`` key (accepted as an
+# alias; ``provider`` wins on disagreement). git-credential manifests reject a
+# ``type`` key outright ('git-credential manifests use "provider", not "type"'),
+# and config.toml no longer declares credentials at all (ADR 0022), so both
+# behaviors are structurally gone.
+
+
+def _git_credential_config(tmp_path: Path, *docs: ManifestDoc | str) -> Path:
+    """Write a settings-only config.toml plus the given git-credential
+    manifests and return the config path."""
     pub = tmp_path / "id.pub"
     priv = tmp_path / "id"
     pub.write_text("key")
@@ -155,10 +158,10 @@ def _git_credential_config(tmp_path: Path, section: str) -> Path:
         [operator]
         ssh_public_key = "{pub.as_posix()}"
         ssh_private_key = "{priv.as_posix()}"
-
-        {section}
     """)
     )
+    if docs:
+        write_manifests(tmp_path, *docs)
     return config_file
 
 
@@ -167,59 +170,35 @@ def test_git_credential_provider_key(tmp_path: Path) -> None:
     provider, matching secret-backend manifests."""
     config_file = _git_credential_config(
         tmp_path,
-        '[git_credentials.gh]\nprovider = "github"',
+        ManifestDoc("git-credential", "gh", {"provider": {"name": "github"}}),
     )
-    cfg = load_config(config_file)
-    assert cfg.git_credentials["gh"].provider == "github"
-
-
-def test_git_credential_type_still_accepted(tmp_path: Path) -> None:
-    """Legacy ``type`` keeps working until the TOML cutover deletes it."""
-    config_file = _git_credential_config(
-        tmp_path,
-        '[git_credentials.gh]\ntype = "github"',
-    )
-    cfg = load_config(config_file, warn_issues=False)
-    assert cfg.git_credentials["gh"].provider == "github"
-    # Deprecation nudges travel on deprecation_issues, so this pin stays
-    # sharp: the legacy key must not produce any real issue.
-    assert not cfg.config_issues
-
-
-def test_git_credential_provider_wins_over_type(tmp_path: Path) -> None:
-    """When both keys are present, ``provider`` wins; a disagreement is
-    surfaced as a config issue rather than silently swallowed."""
-    config_file = _git_credential_config(
-        tmp_path,
-        '[git_credentials.ado]\nprovider = "azdo"\ntype = "github"\norg = "my-org"',
-    )
-    cfg = load_config(config_file, warn_issues=False)
-    assert cfg.git_credentials["ado"].provider == "azdo"
-    assert any("git_credentials.ado" in issue and "provider wins" in issue for issue in cfg.config_issues)
+    registry = build_registry(load_config(config_file))
+    assert registry.lookup("git-credential", "gh").provider == "github"
 
 
 def test_git_credential_nonconforming_name_warns_and_loads(tmp_path: Path) -> None:
     """A non-conforming credential name (uppercase) with no explicit token
     still loads and stays usable, but warns: its default token secret
-    ``git-token-<name>`` inherits the non-conformance (issue #308)."""
+    ``git-token-<name>`` inherits the non-conformance (issue #308). The
+    derived-secret warning now rides the manifest issues channel."""
     config_file = _git_credential_config(
         tmp_path,
-        '[git_credentials.GITHUB]\nprovider = "github"',
+        ManifestDoc("git-credential", "GITHUB", {"provider": {"name": "github"}}),
     )
-    cfg = load_config(config_file, warn_issues=False)
     # Warn-only, non-breaking: the credential is present and unchanged.
-    assert cfg.git_credentials["GITHUB"].provider == "github"
-    assert any("git_credentials.GITHUB" in issue and "git-token-GITHUB" in issue for issue in cfg.config_issues)
+    registry = build_registry(load_config(config_file, warn_issues=False))
+    assert registry.lookup("git-credential", "GITHUB").provider == "github"
+    issues = _manifest_issues(config_file)
+    assert any("git_credentials.GITHUB" in issue and "git-token-GITHUB" in issue for issue in issues), issues
 
 
 def test_git_credential_conforming_name_no_warning(tmp_path: Path) -> None:
     """A conforming credential name emits no derived-secret warning."""
     config_file = _git_credential_config(
         tmp_path,
-        '[git_credentials.github]\nprovider = "github"',
+        ManifestDoc("git-credential", "github", {"provider": {"name": "github"}}),
     )
-    cfg = load_config(config_file, warn_issues=False)
-    assert not any("does not follow the naming rules" in issue for issue in cfg.config_issues)
+    assert not any("does not follow the naming rules" in issue for issue in _manifest_issues(config_file))
 
 
 def test_git_credential_nonconforming_name_with_explicit_token_no_derived_warning(
@@ -230,12 +209,13 @@ def test_git_credential_nonconforming_name_with_explicit_token_no_derived_warnin
     token value's own conformance is issue #279's concern, not this one)."""
     config_file = _git_credential_config(
         tmp_path,
-        '[git_credentials.GITHUB]\nprovider = "github"\ntoken = "git-token-github"',
+        ManifestDoc("git-credential", "GITHUB", {"provider": {"name": "github", "token": "git-token-github"}}),
     )
-    cfg = load_config(config_file, warn_issues=False)
-    assert cfg.git_credentials["GITHUB"].provider == "github"
-    assert cfg.git_credentials["GITHUB"].provider_config["token"] == "git-token-github"
-    assert not any("does not follow the naming rules" in issue for issue in cfg.config_issues)
+    registry = build_registry(load_config(config_file, warn_issues=False))
+    cred = registry.lookup("git-credential", "GITHUB")
+    assert cred.provider == "github"
+    assert cred.provider_config["token"] == "git-token-github"
+    assert not any("does not follow the naming rules" in issue for issue in _manifest_issues(config_file))
 
 
 def test_git_credential_name_deriving_secret_at_length_cap_no_warning(tmp_path: Path) -> None:
@@ -248,10 +228,9 @@ def test_git_credential_name_deriving_secret_at_length_cap_no_warning(tmp_path: 
     name = "a" * (MAX_SECRET_NAME_LENGTH - len("git-token-"))
     config_file = _git_credential_config(
         tmp_path,
-        f'[git_credentials.{name}]\nprovider = "github"',
+        ManifestDoc("git-credential", name, {"provider": {"name": "github"}}),
     )
-    cfg = load_config(config_file, warn_issues=False)
-    assert not any("does not follow the naming rules" in issue for issue in cfg.config_issues)
+    assert not any("does not follow the naming rules" in issue for issue in _manifest_issues(config_file))
 
 
 def test_git_credential_name_conforming_but_derived_over_cap_warns(tmp_path: Path) -> None:
@@ -269,13 +248,12 @@ def test_git_credential_name_conforming_but_derived_over_cap_warns(tmp_path: Pat
     validate_name(name, max_length=MAX_SECRET_NAME_LENGTH)
     config_file = _git_credential_config(
         tmp_path,
-        f'[git_credentials.{name}]\nprovider = "github"',
+        ManifestDoc("git-credential", name, {"provider": {"name": "github"}}),
     )
-    cfg = load_config(config_file, warn_issues=False)
+    issues = _manifest_issues(config_file)
     assert any(
-        f"git_credentials.{name}" in issue and "does not follow the naming rules" in issue
-        for issue in cfg.config_issues
-    )
+        f"git_credentials.{name}" in issue and "does not follow the naming rules" in issue for issue in issues
+    ), issues
 
 
 def test_unexpected_top_level_keys_warns(tmp_path: Path) -> None:
@@ -441,29 +419,27 @@ def test_ssh_allow_cidrs_defaults_empty(config_dir: Path) -> None:
     assert cfg.operator.ssh_allow_cidrs == []
 
 
-# -- Legacy [proxmox] vm-site tests (table-driven) ----------------------------
-# The section loads as the vm-site/proxmox resource (dual-path, vm-sites
-# semantics); the flat keys nest into platform_config at the boundary, and
-# the proxmox platform capability validates the assembled blob at
-# build_registry (the finalize ``validate`` pass, R3).
+# -- proxmox vm-site tests (table-driven) -------------------------------------
+# The proxmox site is a vm-site/proxmox manifest whose platform_config carries
+# the connection fields; the proxmox platform capability validates the assembled
+# blob at build_registry (the finalize ``validate`` pass, R3).
 
 _PROXMOX_TEST_CASES: list[dict[str, Any]] = [
     {
         "id": "valid_all_fields",
-        "toml": """\
-            [proxmox]
-            api_url = "https://pve.example.com:8006"
-            node = "pve"
-            token_id = "agentworks@pam!agentworks"
-            template_vmid = 9000
-            storage = "zfs-pool"
-            bridge = "vmbr1"
-            verify_ssl = false
-        """,
+        "platform_config": {
+            "api_url": "https://pve.example.com:8006",
+            "node": "pve",
+            "token_id": "agentworks@pam!agentworks",
+            "template_vmid": 9000,
+            "storage": "zfs-pool",
+            "bridge": "vmbr1",
+            "verify_ssl": False,
+        },
         "expect_error": None,
-        "check": lambda cfg: (
-            cfg.vm_sites["proxmox"].platform == "proxmox"
-            and cfg.vm_sites["proxmox"].platform_config
+        "check": lambda registry: (
+            registry.lookup("vm-site", "proxmox").platform == "proxmox"
+            and registry.lookup("vm-site", "proxmox").platform_config
             == {
                 "api_url": "https://pve.example.com:8006",
                 "node": "pve",
@@ -477,68 +453,43 @@ _PROXMOX_TEST_CASES: list[dict[str, Any]] = [
     },
     {
         "id": "valid_defaults",
-        "toml": """\
-            [proxmox]
-            api_url = "https://pve.local:8006"
-            node = "node1"
-            token_id = "root@pam!test"
-            template_vmid = 100
-        """,
+        "platform_config": {
+            "api_url": "https://pve.local:8006",
+            "node": "node1",
+            "token_id": "root@pam!test",
+            "template_vmid": 100,
+        },
         "expect_error": None,
         # Optional keys are absent from the blob when omitted; the
         # platform applies its own defaults (storage local-lvm, bridge
         # vmbr0, verify_ssl True) at use.
-        "check": lambda cfg: (
-            "storage" not in cfg.vm_sites["proxmox"].platform_config
-            and "bridge" not in cfg.vm_sites["proxmox"].platform_config
-            and "verify_ssl" not in cfg.vm_sites["proxmox"].platform_config
+        "check": lambda registry: (
+            "storage" not in registry.lookup("vm-site", "proxmox").platform_config
+            and "bridge" not in registry.lookup("vm-site", "proxmox").platform_config
+            and "verify_ssl" not in registry.lookup("vm-site", "proxmox").platform_config
         ),
     },
     {
         "id": "missing_api_url",
-        "toml": """\
-            [proxmox]
-            node = "pve"
-            token_id = "u@p!t"
-            template_vmid = 9000
-
-        """,
+        "platform_config": {"node": "pve", "token_id": "u@p!t", "template_vmid": 9000},
         "expect_error": r"vm-site/proxmox\.api_url is required",
         "check": None,
     },
     {
         "id": "missing_node",
-        "toml": """\
-            [proxmox]
-            api_url = "https://pve:8006"
-            token_id = "u@p!t"
-            template_vmid = 9000
-
-        """,
+        "platform_config": {"api_url": "https://pve:8006", "token_id": "u@p!t", "template_vmid": 9000},
         "expect_error": r"vm-site/proxmox\.node is required",
         "check": None,
     },
     {
         "id": "missing_token_id",
-        "toml": """\
-            [proxmox]
-            api_url = "https://pve:8006"
-            node = "pve"
-            template_vmid = 9000
-
-        """,
+        "platform_config": {"api_url": "https://pve:8006", "node": "pve", "template_vmid": 9000},
         "expect_error": r"vm-site/proxmox\.token_id is required",
         "check": None,
     },
     {
         "id": "missing_template_vmid",
-        "toml": """\
-            [proxmox]
-            api_url = "https://pve:8006"
-            node = "pve"
-            token_id = "u@p!t"
-
-        """,
+        "platform_config": {"api_url": "https://pve:8006", "node": "pve", "token_id": "u@p!t"},
         "expect_error": r"vm-site/proxmox\.template_vmid is required",
         "check": None,
     },
@@ -557,9 +508,9 @@ def test_proxmox_config(tmp_path: Path, case: dict) -> None:
     priv.write_text("key")
 
     # Proxmox ships in the opt-in ``proxmox`` system plugin (Phase 10, R11);
-    # enable it so the legacy [proxmox] section's platform_config validation
-    # runs (a disabled platform's site is not-ready and skips field validation,
-    # so the missing-field ConfigError would never fire).
+    # enable it so the proxmox site's platform_config validation runs (a
+    # disabled platform's site is not-ready and skips field validation, so
+    # the missing-field ConfigError would never fire).
     config_file = tmp_path / "config.toml"
     config_file.write_text(
         dedent(f"""\
@@ -569,30 +520,30 @@ def test_proxmox_config(tmp_path: Path, case: dict) -> None:
 
         [plugins]
         system = ["proxmox"]
-
-        {dedent(case["toml"])}
     """)
     )
+    write_manifests(
+        tmp_path,
+        ManifestDoc("vm-site", "proxmox", {"platform": {"name": "proxmox", **case["platform_config"]}}),
+    )
+    config = load_config(config_file)
 
     if case["expect_error"]:
-        # The platform_config blob's shape check moved out of the TOML
-        # loader into the finalize ``validate`` pass (R3): a malformed
-        # legacy [proxmox] section loads fine and fails at build_registry,
-        # framed by the vm-site name with the source location re-attached.
-        from agentworks.bootstrap import build_registry
-        from agentworks.manifests import ManifestSet
-
-        config = load_config(config_file)
+        # The platform_config blob's shape check runs in the finalize
+        # ``validate`` pass (R3): a malformed manifest decodes fine and
+        # fails at build_registry, framed by the vm-site name with the
+        # source location re-attached.
         with pytest.raises(ConfigError, match=case["expect_error"]):
-            build_registry(config, ManifestSet.empty())
+            build_registry(config)
     else:
-        cfg = load_config(config_file)
-        assert case["check"](cfg), f"Check failed for {case['id']}"
+        registry = build_registry(config)
+        assert case["check"](registry), f"Check failed for {case['id']}"
 
 
 def test_proxmox_section_absent(config_dir: Path) -> None:
-    cfg = load_config(config_dir)
-    assert "proxmox" not in cfg.vm_sites
+    registry = build_registry(load_config(config_dir))
+    with pytest.raises(KeyError):
+        registry.lookup("vm-site", "proxmox")
 
 
 def test_user_section_deprecated_alias(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -622,8 +573,8 @@ def test_user_section_deprecated_alias(tmp_path: Path, capsys: pytest.CaptureFix
 # -- Claude plugin config validation ----------------------------------------
 
 
-def _minimal_config(tmp_path: Path, extra: str = "") -> Path:
-    """Write a minimal valid config with optional extra sections."""
+def _minimal_config(tmp_path: Path) -> Path:
+    """Write a minimal, settings-only config.toml (resources go in manifests)."""
     pub = tmp_path / "id.pub"
     priv = tmp_path / "id"
     pub.write_text("key")
@@ -634,86 +585,80 @@ def _minimal_config(tmp_path: Path, extra: str = "") -> Path:
         [operator]
         ssh_public_key = "{pub.as_posix()}"
         ssh_private_key = "{priv.as_posix()}"
-
-        {dedent(extra)}
     """)
     )
     return config_file
 
 
 def test_claude_marketplaces_loads_cleanly(tmp_path: Path) -> None:
-    config_file = _minimal_config(
+    config_file = _minimal_config(tmp_path)
+    write_manifests(
         tmp_path,
-        """
-        [admin.config]
-        claude_marketplaces = ["https://github.com/example/tools#v1"]
-        claude_plugins = ["my-plugin@my-marketplace"]
-    """,
+        ManifestDoc(
+            "admin-template",
+            "default",
+            {
+                "claude_marketplaces": ["https://github.com/example/tools#v1"],
+                "claude_plugins": ["my-plugin@my-marketplace"],
+            },
+        ),
     )
-    cfg = load_config(config_file, warn_issues=False)
-    assert cfg.admin is not None
-    assert cfg.admin.claude_marketplaces == ["https://github.com/example/tools#v1"]
-    assert cfg.admin.claude_plugins == ["my-plugin@my-marketplace"]
+    registry = build_registry(load_config(config_file, warn_issues=False))
+    admin = registry.lookup("admin-template", "default")
+    assert admin.claude_marketplaces == ["https://github.com/example/tools#v1"]
+    assert admin.claude_plugins == ["my-plugin@my-marketplace"]
 
 
 def test_claude_marketplaces_agent_template(tmp_path: Path) -> None:
-    config_file = _minimal_config(
+    config_file = _minimal_config(tmp_path)
+    write_manifests(
         tmp_path,
-        """
-        [agent_templates.claude]
-        claude_marketplaces = ["https://github.com/example/tools#v1"]
-        claude_plugins = ["my-plugin@my-marketplace"]
-    """,
+        ManifestDoc(
+            "agent-template",
+            "claude",
+            {
+                "claude_marketplaces": ["https://github.com/example/tools#v1"],
+                "claude_plugins": ["my-plugin@my-marketplace"],
+            },
+        ),
     )
-    cfg = load_config(config_file, warn_issues=False)
-    assert cfg.agent_templates["claude"].claude_marketplaces == ["https://github.com/example/tools#v1"]
-    assert cfg.agent_templates["claude"].claude_plugins == ["my-plugin@my-marketplace"]
-    assert not cfg.config_issues
+    registry = build_registry(load_config(config_file, warn_issues=False))
+    agent = registry.lookup("agent-template", "claude")
+    assert agent.claude_marketplaces == ["https://github.com/example/tools#v1"]
+    assert agent.claude_plugins == ["my-plugin@my-marketplace"]
+    assert not _manifest_issues(config_file)
 
 
 def test_claude_marketplaces_rejects_string(tmp_path: Path) -> None:
-    config_file = _minimal_config(
+    config_file = _minimal_config(tmp_path)
+    write_manifests(
         tmp_path,
-        """
-        [admin.config]
-        claude_marketplaces = "https://github.com/example/tools"
-    """,
+        ManifestDoc("admin-template", "default", {"claude_marketplaces": "https://github.com/example/tools"}),
     )
     with pytest.raises(ConfigError, match="must be a list of strings"):
-        load_config(config_file)
+        build_registry(load_config(config_file, warn_issues=False))
 
 
-def test_toml_description_stored_for_template_kinds(tmp_path: Path) -> None:
-    """description is framework-uniform: every declarable kind's TOML
-    surface stores it onto the loaded dataclass, with no warnings."""
-    config_file = _minimal_config(
+def test_description_stored_for_template_kinds(tmp_path: Path) -> None:
+    """description is framework-uniform: every declarable kind's manifest
+    stores it onto the loaded dataclass (from metadata.description), with no
+    warnings."""
+    config_file = _minimal_config(tmp_path)
+    write_manifests(
         tmp_path,
-        """
-        [vm_templates.dev]
-        description = "the dev box"
-
-        [agent_templates.dev]
-        description = "the dev agent"
-
-        [workspace_templates.proj]
-        description = "the proj workspace"
-
-        [admin.config]
-        description = "the admin user"
-
-        [named_console]
-        description = "the default console"
-    """,
+        ManifestDoc("vm-template", "dev", description="the dev box"),
+        ManifestDoc("agent-template", "dev", description="the dev agent"),
+        ManifestDoc("workspace-template", "proj", description="the proj workspace"),
+        ManifestDoc("admin-template", "default", description="the admin user"),
+        ManifestDoc("named-console-template", "default", description="the default console"),
     )
-    cfg = load_config(config_file, warn_issues=False)
-    assert not cfg.config_issues
-    assert cfg.vm_templates["dev"].description == "the dev box"
-    assert cfg.agent_templates["dev"].description == "the dev agent"
-    assert cfg.workspace_templates["proj"].description == "the proj workspace"
-    assert cfg.admin is not None
-    assert cfg.admin.description == "the admin user"
-    assert cfg.named_console is not None
-    assert cfg.named_console.description == "the default console"
+    registry = build_registry(load_config(config_file, warn_issues=False))
+    assert not _manifest_issues(config_file)
+    assert registry.lookup("vm-template", "dev").description == "the dev box"
+    assert registry.lookup("agent-template", "dev").description == "the dev agent"
+    assert registry.lookup("workspace-template", "proj").description == "the proj workspace"
+    assert registry.lookup("admin-template", "default").description == "the admin user"
+    assert registry.lookup("named-console-template", "default").description == "the default console"
 
 
 # -- [named_console] section ------------------------------------------------
@@ -724,12 +669,10 @@ def test_named_console_tmux_layout_default_when_section_missing(tmp_path: Path) 
     framework auto-declares the default, whose tmux_layout is the
     aw-session-vertical default the Named Console feature was designed
     around (one privileged session pane on top, helper shells under)."""
-    from agentworks.bootstrap import build_registry
-
     config_file = _minimal_config(tmp_path)
-    cfg = load_config(config_file)
-    assert cfg.named_console is None
-    nc = build_registry(cfg).lookup("named-console-template", "default")
+    # No named-console-template manifest: the framework auto-declares the
+    # default at finalize.
+    nc = build_registry(load_config(config_file)).lookup("named-console-template", "default")
     assert nc.tmux_layout == "aw-session-vertical"
 
 
@@ -747,41 +690,27 @@ def test_named_console_tmux_layout_default_when_section_missing(tmp_path: Path) 
 def test_named_console_tmux_layout_accepts_valid_presets(tmp_path: Path, layout: str) -> None:
     """All five tmux preset layout names plus the agentworks-specific
     `aw-session-vertical` are accepted verbatim."""
-    config_file = _minimal_config(
-        tmp_path,
-        f"""
-        [named_console]
-        tmux_layout = "{layout}"
-    """,
-    )
-    cfg = load_config(config_file)
-    assert cfg.named_console is not None
-    assert cfg.named_console.tmux_layout == layout
+    config_file = _minimal_config(tmp_path)
+    write_manifests(tmp_path, ManifestDoc("named-console-template", "default", {"tmux_layout": layout}))
+    registry = build_registry(load_config(config_file))
+    assert registry.lookup("named-console-template", "default").tmux_layout == layout
 
 
 def test_named_console_tmux_layout_rejects_unknown(tmp_path: Path) -> None:
-    """Unknown layout names fail at load with a list of valid alternatives."""
-    config_file = _minimal_config(
-        tmp_path,
-        """
-        [named_console]
-        tmux_layout = "tabbed"
-    """,
-    )
+    """Unknown layout names fail at build with a list of valid alternatives
+    (the decoder's spec-level error surfaces as ConfigError at build_registry)."""
+    config_file = _minimal_config(tmp_path)
+    write_manifests(tmp_path, ManifestDoc("named-console-template", "default", {"tmux_layout": "tabbed"}))
     with pytest.raises(ConfigError, match="named_console.tmux_layout must be one of"):
-        load_config(config_file)
+        build_registry(load_config(config_file))
 
 
-def test_named_console_section_unexpected_keys_warn(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    """Unknown keys in [named_console] surface as warnings, not silent ignores."""
-    config_file = _minimal_config(
+def test_named_console_section_unexpected_keys_warn(tmp_path: Path) -> None:
+    """Unknown keys on the named-console-template manifest surface as
+    warnings on the manifest issues channel, not silent ignores."""
+    config_file = _minimal_config(tmp_path)
+    write_manifests(
         tmp_path,
-        """
-        [named_console]
-        tmux_layout = "tiled"
-        unknown_key = "x"
-    """,
+        ManifestDoc("named-console-template", "default", {"tmux_layout": "tiled", "unknown_key": "x"}),
     )
-    load_config(config_file)
-    captured = capsys.readouterr()
-    assert "unknown_key" in captured.err or "unknown_key" in captured.out
+    assert any("unknown_key" in issue for issue in _manifest_issues(config_file))
