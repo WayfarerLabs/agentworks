@@ -10,13 +10,13 @@
 
 ## Purpose
 
-This document synthesizes the six perspectives into one program-level ordering. It records what the
+This document synthesizes the six perspectives into one roadmap-level ordering. It records what the
 perspectives already fix, what code reconnaissance verified or corrected, the dependency structure
 between the workstreams, and a recommended wave sequence with explicit operator decision points. It
 is the bridge between the perspective-gathering stage of this SDD and whatever requirements
 artifacts follow.
 
-## Program Through-Lines
+## Roadmap Through-Lines
 
 Every sequencing choice below is tested against these seven destinations. They are the "where we
 ultimately want to go" that individual efforts must not paint over.
@@ -60,7 +60,7 @@ merges to `main` alone via the retargeted PR #316; the SDD stays unlocked while 
 phase gate until this SDD settles the descriptor and the 0.14 removal ordering. `main` is a strict
 ancestor of the branch, so the merge is clean.
 
-The updated perspective also records forward pressure this program must not wall off: per-instance
+The updated perspective also records forward pressure this roadmap must not wall off: per-instance
 configuration (an optional instance `spec` merged as one more layer atop the template rollup) and
 the "living graph" it implies (the dependency graph becoming a function of config plus live instance
 state, a future SDD of its own). Phase 2 and the descriptor work keep four doors open:
@@ -276,7 +276,7 @@ operator's machine; trust is established in the first minutes or not at all.
 
 ### Recorded but unscheduled
 
-Future SDDs this program acknowledges without slotting: the living graph (per-instance specs
+Future SDDs this roadmap acknowledges without slotting: the living graph (per-instance specs
 introducing post-finalize graph updates; the four open doors keep it unblocked) and the herdr
 rendering backend (gated on its spike). Both have their triggers recorded rather than dates.
 
@@ -300,16 +300,21 @@ we live with it:
 - Each wave executes as its own ordinary SDD (or an already-open one, like declarative-schema),
   authored against the settled contracts and closed out normally.
 - The roadmap SDD stays open until every child SDD is closed, then locks. Its ledger is the
-  program's source of truth for what is spawned, in flight, blocked, and done, the same role plan
+  roadmap's source of truth for what is spawned, in flight, blocked, and done, the same role plan
   checkboxes play in an ordinary SDD, one level up.
-- All program state lives on `main` so it is visible across the individual SDD tracks: every change
+- All roadmap state lives on `main` so it is visible across the individual SDD tracks: every change
   (a new child SDD, a status change, a design revision) is a PR merged to `main`, and child SDDs
-  point back to this roadmap SDD so the program is discoverable from any effort.
+  point back to this roadmap SDD so the roadmap is discoverable from any effort.
 - Division of labor (operator ruling, 2026-08-05): the roadmap lead seeds each child SDD with its
-  FRD, plus critical architectural constraints the program has already settled, but not the full HLA
+  FRD, plus critical architectural constraints the roadmap has already settled, but not the full HLA
   and not the plan. A separately launched effort lead picks the SDD up from `main` on a new branch
   and owns its HLA, plan, and implementation per the standard development process. The roadmap lead
   reviews each child SDD's PRs before merge.
+- Terminology (operator ruling, 2026-08-05): this is a roadmap and its child SDDs, led by a roadmap
+  lead and effort leads. The word "program" is deliberately avoided.
+- Once the model has survived its first few child-SDD cycles, promote the roadmap-SDD concept into
+  the `sdd` skill as its permanent home, so future roadmap efforts follow it without reading this
+  SDD. Until then, this section is the working definition.
 
 ## Release Mapping
 
@@ -336,8 +341,8 @@ the system of record; Rulesync informs but is not a runtime dependency.
 2. **Herdr.** Stays gated on its spike per the 2026-07-30 ruling. The ephemeral-agents direction and
    wave 5's authoritative state reporting are the two signals that would justify revisiting.
 
-Settled by operator ruling (2026-08-05): the program-artifact shape follows the roadmap-SDD model
-above (per-wave child SDDs under this open roadmap SDD, artifact forms discovered as we go); 0.14.0
+Settled by operator ruling (2026-08-05): the artifact shape follows the roadmap-SDD model above
+(per-wave child SDDs under this open roadmap SDD, artifact forms discovered as we go); 0.14.0
 bundles phase 1's TOML hard error with the expired-compat removals as one breaking-cleanup release;
 and the harness-transcripts FRD is harvested and then deleted, branch included, once its useful
 content (distillation, record-store, and any other still-relevant requirements) is verifiably
