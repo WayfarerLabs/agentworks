@@ -25,6 +25,7 @@ is locked.
 - [x] Seed notes published for the effort lead (delivered as
       `docs/sdd/2026-07-31-declarative-schema/roadmap-seed-notes.md` via new-file message passing;
       the adopted-child analog of a seed FRD)
+- [x] Effort lead launched (2026-08-05, seed notes merged via PR #411)
 - [ ] Phase 2 released from its hold (prerequisites landed via PRs #405 and #406; the effort lead's
       first commit records the release in that SDD's plan)
 - [ ] Phase 2 implementation complete (absorbs generic-discriminator removal and the migrator's
@@ -35,7 +36,7 @@ is locked.
 
 - [x] Contract artifact drafted (`capability-descriptor-contract.md`, 2026-08-05)
 - [x] Reviewed and merged to `main` (PR #405, 2026-08-05)
-- [ ] Consumed by wave 2 seeding (wave 2 releases from its hold once wave 1's removals land)
+- [x] Consumed by wave 2 seeding (seed notes delivered via PR #411; effort lead launched 2026-08-05)
 
 ### Design track: facet-model boundary
 
@@ -43,15 +44,19 @@ is locked.
       5 seeds)
 - [ ] Reviewed and merged to `main`
 
+### Onboarding and discovery (destination 1): 2026-08-05-onboarding-and-discovery
+
+- [x] Seeded (FRD, PR #413, 2026-08-05; runs parallel to wave 2 per `phasing.md`)
+- [ ] FRD merged to `main`
+- [ ] Picked up by an effort lead (HLA, plan)
+- [ ] First-slice implementation (plugin, skills, output contract); schema-derived depth adopts wave
+      2 surfaces as they land
+- [ ] Locked
+
 ### Not yet spawned
 
 Planned children, seeded when their prerequisites land (see `phasing.md`):
 
-- Onboarding and discovery (destination 1): seeds at wave 1 completion and runs parallel to wave 2.
-  First slice needs no schema emission (onboarding harness plugin and skills, consent-first probing,
-  the machine-readable output contract); the schema-derived depth follows wave 2's emission as it
-  lands. Slotted this early deliberately: it teaches the post-cleanup 0.14 surface, so nothing it
-  ships gets reworked by wave 1, and waiting longer just delays destination 1.
 - Wave 3: secret-source instances
 - Wave 4: harness facet framework
 - Wave 5: session observability phase 1
