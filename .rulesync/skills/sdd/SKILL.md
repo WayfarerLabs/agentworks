@@ -216,14 +216,19 @@ shared contracts need a single owner.
 The settled rules for the species:
 
 - Its artifacts are not the standard set. The working set, established by the first roadmap SDD: an
-  `inputs/` folder holding perspectives and other source material; `current-state.md`, a dated
-  snapshot of where the system is, updated in place at wave boundaries (git history is the
-  append-only record); `target-state.md`, the north star and the home of every settled design
-  ruling; `phasing.md`, ordering only (dependency structure, waves, release mapping); and
-  `child-sdds.md`, the inventory and checkbox tracker that plays plan.md's role, whose completed
-  checkboxes are immutable per the standard rule. A roadmap SDD has no frd.md, hla.md, or plan.md of
-  its own; those belong to the children. The roadmap locks when current state and target state agree
-  and every child is locked. These forms are still young; refine them here as they prove out.
+  `inputs/` folder holding perspectives and other source material; `starting-state.md`, an immutable
+  snapshot of where the system stood at roadmap start, frozen once underway so the full journey
+  stays visible; `current-state.md`, a dated snapshot of where the system is, updated in place at
+  wave boundaries (git history is the append-only record); `target-state.md`, where the system is
+  going across this roadmap (not a forever vision) and the home of every settled design ruling;
+  `phasing.md`, ordering only (dependency structure, waves, release mapping); and `child-sdds.md`,
+  the inventory and checkbox tracker that plays plan.md's role, whose completed checkboxes are
+  immutable per the standard rule. A roadmap SDD has no frd.md, hla.md, or plan.md of its own; those
+  belong to the children. The roadmap locks when current state and target state agree and every
+  child is locked. These forms are still young; refine them here as they prove out.
+- A roadmap constrains only its own scope. Work outside the roadmap is not paused by it and can be
+  picked off whenever bandwidth allows; the roadmap's target-state should say explicitly what is out
+  of scope so that boundary stays crisp.
 - It stays open until every child SDD is closed, then locks like any other SDD. Its ledger plays the
   role plan checkboxes play in an ordinary SDD, one level up.
 - Roadmap state lives on `main`: every change (a new child SDD, a status change, a design revision)
