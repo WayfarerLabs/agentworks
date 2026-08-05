@@ -31,13 +31,13 @@ not an implementation plan: the wave 2 effort owns the plan and the code. Where 
 
 One frozen, typed, core-owned record per kind, registered in a single table that becomes the only
 capability-kind enumeration in the codebase (`KIND_REGISTRY` and manifest decode's declarable-kind
-tables legitimately enumerate all resource kinds and stay). Shape (illustrative, not final code):
+tables legitimately enumerate all resource kinds and stay).
 
 The descriptor is minimal by rule: a field exists only when it has a wave 2 consumer. Because the
 descriptor is a frozen record registered in one place, adding a field later is purely additive (no
 registration-site migration), so deferral costs nothing and speculation buys nothing.
 
-Day-one fields:
+Day-one fields (illustrative, not final code):
 
 ```text
 CapabilityKindDescriptor
