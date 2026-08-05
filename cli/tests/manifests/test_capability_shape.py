@@ -448,6 +448,7 @@ def test_cli_warns_ambiently_and_no_deprecations_silences(tmp_path: Path, monkey
     with_warning = CliRunner().invoke(app, ["resource", "list", "--names-only"])
     assert with_warning.exit_code == 0, with_warning.output
     assert "deprecated capability config shape in: vm-site/gpu-box" in with_warning.output
+    assert "harness/harness_config" not in with_warning.output
 
     silenced = CliRunner().invoke(app, ["--no-deprecations", "resource", "list", "--names-only"])
     assert silenced.exit_code == 0, silenced.output

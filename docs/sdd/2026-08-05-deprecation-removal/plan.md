@@ -161,24 +161,52 @@ no roadmap artifact has been modified.
 
 ## Phase 6: Release record, residual sweep, and final verification
 
-- [ ] Ensure the removal commit consumed by Release Please uses a breaking conventional-commit
+- [x] Ensure the removal commit consumed by Release Please uses a breaking conventional-commit
       marker and a `BREAKING CHANGE:` footer containing the coherent 0.14.0 story: phase 1 TOML
       sunset plus all removals, explicit `code_workspaces` and `--provisioner` callouts, canonical
       replacements, and the instruction to resolve warnings and migrate on 0.13.0 before upgrading.
       Verify Release Please interprets the metadata as the intended generated release-note content.
-- [ ] Run classified residual searches for every retired token across production code, tests,
+- [x] Run classified residual searches for every retired token across production code, tests,
       completions, samples, permanent docs, and SDDs. Record each remaining hit as an explicit
       rejection, historical record, database migration, active closeout record, or unrelated
       canonical technical use.
-- [ ] Build the wheel and exercise it through an isolated tool environment. Verify retired commands
+- [x] Build the wheel and exercise it through an isolated tool environment. Verify retired commands
       and options fail, canonical commands remain, help teaches only canonical surfaces, and bash,
       zsh, and PowerShell completions contain no retired command entry.
-- [ ] Run ruff check and format verification, strict mypy, the complete non-integration pytest
+- [x] Run ruff check and format verification, strict mypy, the complete non-integration pytest
       suite, `./scripts/lint-files.sh`, Rulesync drift checking, and locked-SDD enforcement.
-- [ ] Run final `agentworks-reviewer` and fresh-eyes reviews over the complete diff, resolve every
+- [x] Run final `agentworks-reviewer` and fresh-eyes reviews over the complete diff, resolve every
       valid finding, and repeat affected gates.
-- [ ] Update this plan with the residual-sweep record, final gate evidence, and any deviations; add
+- [x] Update this plan with the residual-sweep record, final gate evidence, and any deviations; add
       this effort's dated `locked.md` only after every requirement and acceptance criterion is met.
+
+### Final evidence (2026-08-05)
+
+- The classified source sweep and installed-artifact results are recorded in
+  `residual-inventory.md`. No retired input remains accepted, completed, or taught. Remaining hits
+  are rejection tests, historical changelog/database/SDD records, or unrelated canonical technical
+  vocabulary. Generic config and manifest deprecation producers still have live warning and doctor
+  consumers.
+- A wheel built from this branch was installed into a fresh uv tool directory under Python 3.12.
+  Retired commands and the retired option exited 2 through ordinary Typer errors; canonical help
+  exited 0; bash, zsh, and PowerShell completions contained canonical `resume` and `--platform`
+  entries and no retired entry.
+- Final gates passed: Ruff check; Ruff format verification (503 files); strict mypy (503 source
+  files); pytest excluding integration (3,388 passed, 3 deselected); file lint (Prettier,
+  markdownlint-cli2, cspell); Rulesync 7.14.0 drift; and locked-SDD enforcement. Pytest ran outside
+  the filesystem sandbox because its ordinary user log directory is read-only inside that sandbox.
+- The project-values and cold complete-diff reviews independently found one stale generic warning
+  that still named `harness/harness_config`. The warning now names only surviving generic shapes, a
+  regression pins the retired pair absent, both reviewers approved the fix, and the full affected
+  gates passed again.
+- The final `feat(cli)!` closeout commit carries one `BREAKING CHANGE:` footer with the complete
+  phase-1 TOML and compatibility-removal upgrade story. Against the repository's Release Please
+  configuration, the breaking marker/footer on 0.13.0 with `bump-minor-pre-major` produces the
+  intended 0.14.0 bump and breaking-note content. Release Please, not this branch, updates the
+  version and historical changelog.
+
+No implementation deviation remains at closeout. The roadmap SDD and historical changelog were not
+modified.
 
 Definition of done: R8, R9, and R11 are complete; all FRD acceptance criteria have objective
 evidence; the built 0.14 CLI accepts, completes, and teaches only canonical in-scope surfaces; every

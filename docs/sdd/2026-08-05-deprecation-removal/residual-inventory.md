@@ -136,3 +136,55 @@ Remaining hits are allowed only when classified as one of:
 
 Current production code, help, completion output, permanent instructional docs, and shipped samples
 must not accept, complete, or teach an in-scope retired input.
+
+## Final classified sweep
+
+- Snapshot: 2026-08-05
+- Source baseline: `1d167e80` plus the Phase 6 closeout record
+- Search scope: production code, tests, shipped samples, permanent docs, historical changelog and
+  database migrations, and all SDDs
+
+Every remaining hit is classified below. Generic words were inspected in context rather than deleted
+mechanically: `harness` remains a canonical resource-kind slug and implementation term, and
+`console`, `restart`, `platform`, `user`, and `provisioner` all have unrelated current technical
+uses.
+
+| Retired surface                                               | Remaining-hit classification                                                                                                                                                                                                                                                                 |
+| ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `agw session restart`                                         | Historical `cli/CHANGELOG.md` entries; the deliberately preserved database-migration recovery string and explanation; active or locked SDD history. No production command, help, or completion entry remains.                                                                                |
+| `restart_command`                                             | Explicit ordinary-rejection tests; ADR 0020's historical transition note; historical changelog and active or locked SDD records. No loader normalization, warning producer, sample, or current instructional use remains.                                                                    |
+| Session-template `harness` / `harness_config`                 | Explicit ordinary-rejection tests for the retired selector shape; historical ADR and SDD records. Other `harness` hits name the canonical resource kind, harness integrations, or general harness concepts. No retired selector normalization, sample, or current instructional use remains. |
+| `[defaults].platform`                                         | Explicit ordinary-rejection tests and historical SDD records. Other `platform` hits are canonical site/platform concepts, including `vm shell --platform`.                                                                                                                                   |
+| Top-level `[user]`                                            | Explicit ordinary-rejection tests and historical SDD records. Other `user` hits describe operating-system users or current operator data, not the retired config section.                                                                                                                    |
+| `[paths].code_workspaces`                                     | The safety regression that proves rejection precedes file creation; historical and active SDD records. Production hits are the distinct canonical `vscode_workspaces` identifier.                                                                                                            |
+| `agw vm shell --provisioner`                                  | Explicit Typer rejection/help tests; historical changelog and SDD records. Other `provisioner` hits are internal provider abstractions, not the retired CLI option.                                                                                                                          |
+| `agw vm console`                                              | Historical changelog and SDD records. Other console hits belong to the canonical top-level named-console family. No production command, legacy module, help, or completion entry remains.                                                                                                    |
+| `UserConfig`, `output.phase()`, `env_compat.py`               | Historical changelog or SDD records only. No production definition, export, import, or test-only module remains.                                                                                                                                                                             |
+| `deprecated_harness_selectors`, `deprecated_restart_commands` | Active or locked SDD records only. No production fact field or consumer remains.                                                                                                                                                                                                             |
+
+The surviving generic deprecation channel is live rather than residue:
+
+- `Config.deprecation_issues` is produced for no-op `[secret_backends.*]` declarations and consumed
+  by config loading/bootstrap warning output.
+- `ManifestSet.deprecation_issues` and `deprecated_shape_resources` are produced for generic
+  capability sibling shapes and consumed by bootstrap, package validation, and doctor reporting.
+- `--no-deprecations` still controls ambient warning suppression, while doctor reports health
+  independently. Focused config-warning, registry-boundary, bootstrap, and doctor tests cover these
+  paths.
+
+## Installed-wheel verification
+
+`uv build --wheel` produced `agentworks_cli-0.13.0-py3-none-any.whl`. The wheel was installed into a
+fresh uv tool directory with Python 3.12, independent of the checkout environment. Against that
+installed executable:
+
+- `agw session restart`, `agw vm console`, and `agw vm shell placeholder --provisioner` each exited
+  2 with Typer's ordinary unknown-command or unknown-option error.
+- `agw session resume --help`, `agw vm shell --help`, and `agw console --help` each exited 0 and
+  exposed the canonical resume, `--platform`, and named-console surfaces.
+- Generated bash, zsh, and PowerShell completion scripts contained canonical `resume` and
+  `--platform` entries and contained no `session restart`, `vm console`, or `--provisioner` entry.
+
+The distribution still reports version 0.13.0 because Release Please owns the version bump. The
+verification target is the built branch artifact that will become 0.14.0, not a locally edited
+version string.

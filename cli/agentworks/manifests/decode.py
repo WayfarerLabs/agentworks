@@ -155,7 +155,7 @@ def capability_shape_deprecation(resources: list[str]) -> str:
         f"deprecated capability config shape in: {', '.join(resources)}. "
         f"Naming a capability as a string with its config in a sibling table "
         f"(platform: lima plus platform_config:, and likewise "
-        f"provider/provider_config and harness/harness_config) is deprecated "
+        f"provider/provider_config) is deprecated "
         f"and will be removed in a future release. Fold the pair into one "
         f"tagged table on the naming field, e.g. "
         f"platform: {{name: <capability>, <config keys...>}} replacing "
