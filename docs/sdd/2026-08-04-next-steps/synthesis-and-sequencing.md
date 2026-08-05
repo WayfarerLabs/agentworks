@@ -246,6 +246,12 @@ with composition, provenance, and drift detection. Revive the distillation desig
 harness-transcripts FRD against the real event stream: distiller reads transcripts, curates across
 sessions, proposes reviewed PRs. This closes the memory-learning loop.
 
+A live example of the need, from this roadmap's own development: this workspace authenticates GitHub
+through a custom git credential helper that serves fine-grained PATs by full HTTP path, which is
+environment knowledge an agent currently has to be told in conversation. A feature that provisions
+such a helper should emit exactly that fact as a skill so future agents in the environment use it
+unprompted (operator observation, 2026-08-05).
+
 ### Wave 7: structured control and console rendering
 
 Observability phase 2 (validated intents, ACP projection, stale-decision rejection). Revisit herdr
