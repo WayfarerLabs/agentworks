@@ -84,7 +84,9 @@ Two things this graph deliberately does not serialize:
 
 Adjacent standalone work, explicitly out of roadmap scope (see `target-state.md`): the
 named-console-template selector SDD, the companion-shell command and resilient session attach
-unbundled from the herdr FRD, and opportunistic doc/config hygiene. They schedule independently.
+unbundled from the herdr FRD, herdr itself (behind its own spike gate), and opportunistic doc/config
+hygiene. An active roadmap does not pause other development: anything outside its scope can be
+picked off whenever bandwidth allows, on its own merits and its own schedule.
 
 ## Release mapping
 
