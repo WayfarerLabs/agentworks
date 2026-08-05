@@ -131,7 +131,7 @@ def test_disabled_rows_hidden_from_list_shown_by_describe(tmp_path: Path) -> Non
 _CC_TEMPLATE = ManifestDoc(
     "session-template",
     "cc",
-    {"harness": "claude-code"},
+    {"harness_integration": {"name": "claude-code"}},
     description="Claude Code session",
 )
 

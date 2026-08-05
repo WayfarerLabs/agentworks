@@ -4,9 +4,7 @@
 ## owns start/restart and the launch-target readiness check.
 ## `spec.harness_integration` is one tagged table: its `name` key selects the
 ## integration capability and the remaining keys are the config that
-## integration validates. The old `harness` / `harness_config` inputs still
-## load with a deprecation warning through 0.13.0. An undeclared integration
-## resolves to `shell` (a plain login shell), so a
+## integration validates. An undeclared integration resolves to `shell` (a plain login shell), so a
 ## field-less template is still a login shell.
 ##
 ## `shell`'s config vocabulary is the legacy command fields, now nested:

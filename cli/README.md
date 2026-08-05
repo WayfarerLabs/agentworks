@@ -370,7 +370,6 @@ Manage sessions (persistent tmux sessions running in workspaces). Session names 
 | `agw session attach <name>`   | Attach to a running session    |
 | `agw session stop <name>`     | Stop a running session         |
 | `agw session resume <name>`   | Resume a session               |
-| `agw session restart <name>`  | Deprecated alias for `resume`  |
 | `agw session delete <name>`   | Stop and delete a session      |
 | `agw session logs <name>`     | Dump session scrollback buffer |
 | `agw console attach <name>`   | Attach to a named console      |
@@ -389,10 +388,6 @@ accept a single value or a comma-separated list (`--vm vm1,vm2`); commas within 
 together, and an unknown name in a filter is an error, not an empty result. `--agent` matches
 agent-mode sessions only; `--admin` matches admin-mode sessions only (the two are mutually
 exclusive). Pass `--force` to stop/resume broken sessions via PID kill.
-
-`agw session restart` remains a deprecated compatibility alias in 0.13.0. It has the same arguments
-and behavior as `resume`, but warns once per invocation unless you pass `--no-deprecations`. Update
-scripts to `session resume` before 0.14.0, when the alias is removed.
 
 `session create <name>` takes the session name as a required positional. Optional flags:
 `--workspace`, `--template`, `--admin`, and `--agent`. If `--workspace` / `--new-workspace` is
@@ -605,11 +600,10 @@ A session template selects the **harness integration** that runs the session's w
 integration is a [capability](../docs/guides/resources.md#harness-integrations) that owns
 starting/resuming the harness or shell and checking its required executables; the template's
 `spec.harness_integration` is one tagged table whose `name` key selects the integration and whose
-remaining keys are the config block that integration validates. The old `harness` / `harness_config`
-inputs still load with one aggregated deprecation warning per command/request in 0.13.0 and can be
-rewritten with `agw resource migrate`. A template that names no integration runs the built-in
-`shell` integration (a login shell, `$SHELL --login`, or an operator-supplied command), which is the
-built-in `default` template's behavior. Define custom templates as `session-template` resources:
+remaining keys are the config block that integration validates. A template that names no integration
+runs the built-in `shell` integration (a login shell, `$SHELL --login`, or an operator-supplied
+command), which is the built-in `default` template's behavior. Define custom templates as
+`session-template` resources:
 
 ```yaml
 apiVersion: agentworks/v1
@@ -630,9 +624,8 @@ level:
 - `command`: the pane command (empty/omitted is a plain login shell). Supports `{{session_name}}`
   and `{{workspace_name}}` variable substitution (double-brace syntax).
 - `resume_command`: used by `session resume`, for a tool that needs a different invocation on
-  resume. If omitted, `command` is used. `restart_command` remains an old, warning-producing input
-  through 0.13.0 only. (To run Claude Code, prefer the dedicated `claude-code` integration below,
-  which resumes the previous conversation on its own.)
+  resume. If omitted, `command` is used. (To run Claude Code, prefer the dedicated `claude-code`
+  integration below, which resumes the previous conversation on its own.)
 - `required_commands`: executables the command needs, checked on the session's launch target (the
   agent, or the VM admin for admin sessions) before any state mutation, so launching a session whose
   tool is not installed fails fast with a clear error instead of a cryptic downstream tmux failure.
@@ -640,10 +633,8 @@ level:
 
 In a YAML manifest these three keys live only inside the `harness_integration` table; spelling any
 of them at the `spec` top level is a load error that points you at the nested shape. That check is
-one instance of a general deprecated-field notice: any resource kind can flag retired or relocated
-spec fields with an actionable message (a hard load error when ignoring the field would change
-behavior, otherwise a warning that `agw doctor` also surfaces). It is separate from the TOML
-flat-field handling below, which is a permanent supported spelling, not a deprecation.
+an explicit session-template validation boundary. It is separate from the TOML flat-field handling
+below, which is a permanent supported spelling, not a deprecation.
 
 The `claude-code` integration runs Claude Code as the session: `session create` starts a new Claude
 session and `session resume` resumes the same conversation when its transcript still exists on disk
@@ -727,12 +718,9 @@ fresh config (the parent's block was addressed to a different tool). `env`, `inh
 description merge as usual.
 
 **TOML session-template sections are removed.** `config.toml` is settings only, so
-`[session_templates.<name>]` (and the legacy flat `command` / `restart_command` /
-`required_commands` keys it used to accept) no longer load: any resource-declaring section is now a
-hard error at config load. Declare session templates as YAML manifests
-(`agw resource sample session-template`), and run `agw resource migrate session-template` to move
-any that still live in `config.toml`. The `restart_command` deprecation described above applies to
-the YAML input as well; `agw resource migrate` rewrites it to `resume_command`.
+`[session_templates.<name>]` no longer loads: any resource-declaring section is now a hard error at
+config load. Declare session templates as YAML manifests (`agw resource sample session-template`),
+and run `agw resource migrate session-template` to move any that still live in `config.toml`.
 
 ### Config
 
@@ -760,7 +748,7 @@ mappings, template inheritance chains, resolution previews), reach for the per-k
 | `agw resource kinds`                 | List every kind: category (declarable/capability), counts, purpose   |
 | `agw resource describe KIND/NAME`    | Show the per-resource detail view (header + Referenced by + Used by) |
 | `agw resource edit KIND/NAME`        | Open the declaring YAML manifest in $EDITOR                          |
-| `agw resource migrate [SELECTOR]...` | Move TOML resources and canonicalize legacy session-template YAML    |
+| `agw resource migrate [SELECTOR]...` | Move TOML resources to YAML manifests                                |
 | `agw resource sample KIND [--write]` | Print (or save) a kind's commented sample manifest (--all for all)   |
 
 `resource list` accepts `--kind <csv>` (e.g. `--kind secret,vm-template`) and `--origin <variant>`
@@ -772,21 +760,18 @@ split is unambiguous). The `kind/name` token is the one grammar across the resou
 `resource describe secret/npm-token` and `resource migrate vm-template/dev` take the same shape.
 
 `resource migrate` is a recurring, incremental migration command. It moves resources (or a subset)
-from TOML to YAML manifests and rewrites selected existing `session-template` YAML documents that
-still use the legacy `harness` selector to canonical `harness_integration`. Selectors scope both
-paths: `KIND` selects one kind, `KIND/NAME` one resource (overlaps union), and `--all` selects
-everything migratable; a bare invocation errors rather than migrating the whole config by accident.
-`--layout per-kind|single|per-resource` picks the file mapping for TOML-derived documents (default
-one multi-document file per kind, e.g. `resources/vm-templates.yaml`).
+from TOML to YAML manifests. Selectors scope the TOML path: `KIND` selects one kind, `KIND/NAME` one
+resource (overlaps union), and `--all` selects everything migratable; a bare invocation errors
+rather than migrating the whole config by accident. `--layout per-kind|single|per-resource` picks
+the file mapping for TOML-derived documents (default one multi-document file per kind, e.g.
+`resources/vm-templates.yaml`).
 
 TOML-derived documents append after a `---` separator without rewriting the existing YAML content.
-The legacy session-template exception is a guarded, in-place YAML rewrite: it preserves the document
-stream and YAML comments while folding `harness` plus an optional `harness_config` into the
-canonical tagged table. Before any write, the command backs up `config.toml` and stores recovery
-copies of existing YAML files it will append to or rewrite under `paths.backups`. Digest checks
-refuse to replace a TOML or YAML file changed since planning. Writes are atomic, and rollback
-restores only files that still match this run's output digest, so a concurrent operator edit is
-never overwritten; an incomplete rollback reports the recovery copy for manual repair.
+Before any write, the command backs up `config.toml` and stores recovery copies of existing YAML
+files it will append to under `paths.backups`. Digest checks refuse to replace a TOML or YAML file
+changed since planning. Writes are atomic, and rollback restores only files that still match this
+run's output digest, so a concurrent operator edit is never overwritten; an incomplete rollback
+reports the recovery copy for manual repair.
 
 Migrated TOML sections are commented out in place with a `# migrated to resources/<file>` marker
 (default) or removed with `--toml delete`. Deprecated `[secret_backends.*]` sections are dropped

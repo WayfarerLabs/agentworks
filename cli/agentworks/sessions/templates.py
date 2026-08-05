@@ -82,7 +82,7 @@ def _resolve(
     harness integration's completeness validation once on the merged blob, the value
     no single declaration saw.
     """
-    result, harness_integration, harness_integration_config, _ = _resolve_walk(templates, name, _visiting)
+    result, harness_integration, harness_integration_config = _resolve_walk(templates, name, _visiting)
     result.harness_integration = harness_integration or "shell"
     result.harness_integration_config = harness_integration_config
     _validate_merged(result)
@@ -93,7 +93,7 @@ def _resolve_walk(
     templates: dict[str, SessionTemplate],
     name: str,
     _visiting: tuple[str, ...] = (),
-) -> tuple[ResolvedSessionTemplate, str | None, dict[str, object], bool]:
+) -> tuple[ResolvedSessionTemplate, str | None, dict[str, object]]:
     """Depth-first, left-to-right resolution, threading the raw harness_integration
     pair alongside the accumulating ``ResolvedSessionTemplate``.
 
@@ -115,50 +115,41 @@ def _resolve_walk(
         raise ConfigError(f"session_templates inheritance cycle detected: {path}")
 
     if name not in templates:
-        return ResolvedSessionTemplate(name=name), None, {}, False
+        return ResolvedSessionTemplate(name=name), None, {}
 
     tmpl = templates[name]
     result = ResolvedSessionTemplate(name=name)
     harness_integration: str | None = None
     harness_integration_config: dict[str, object] = {}
-    restart_command_compat = False
     next_visiting = (*_visiting, name)
 
     for parent_name in tmpl.inherits:
-        parent, parent_harness_integration, parent_config, parent_restart_compat = _resolve_walk(
-            templates, parent_name, next_visiting
-        )
+        parent, parent_harness_integration, parent_config = _resolve_walk(templates, parent_name, next_visiting)
         _merge(result, parent)
-        harness_integration, harness_integration_config, restart_command_compat = _merge_pair(
+        harness_integration, harness_integration_config = _merge_pair(
             harness_integration,
             harness_integration_config,
-            restart_command_compat,
             parent_harness_integration,
             parent_config,
-            parent_restart_compat,
         )
 
     _merge_template(result, tmpl)
-    harness_integration, harness_integration_config, restart_command_compat = _merge_pair(
+    harness_integration, harness_integration_config = _merge_pair(
         harness_integration,
         harness_integration_config,
-        restart_command_compat,
         tmpl.harness_integration,
         tmpl.harness_integration_config,
-        tmpl.restart_command_compat,
     )
     result.name = name
-    return result, harness_integration, harness_integration_config, restart_command_compat
+    return result, harness_integration, harness_integration_config
 
 
 def _merge_pair(
     acc_harness_integration: str | None,
     acc_config: dict[str, object],
-    acc_restart_compat: bool,
     child_harness_integration: str | None,
     child_config: dict[str, object] | None,
-    child_restart_compat: bool,
-) -> tuple[str | None, dict[str, object], bool]:
+) -> tuple[str | None, dict[str, object]]:
     """Fold one declared (or resolved) ``(harness_integration, config)`` into the
     accumulator:
 
@@ -172,24 +163,12 @@ def _merge_pair(
       ``required_commands``).
     """
     if child_harness_integration is None:
-        return acc_harness_integration, acc_config, acc_restart_compat
+        return acc_harness_integration, acc_config
     from agentworks.capabilities.harness_integration import harness_integration_for
 
     base = acc_config if child_harness_integration == acc_harness_integration else {}
-    base_restart_compat = acc_restart_compat if base else False
-    if (
-        child_harness_integration == "shell"
-        and "resume_command" in base
-        and child_config is not None
-        and "resume_command" in child_config
-        and base_restart_compat != child_restart_compat
-    ):
-        raise ConfigError(
-            "shell harness integration inheritance cannot combine resume_command and restart_command; "
-            "use resume_command throughout the inheritance chain"
-        )
     merged = harness_integration_for(child_harness_integration).merge_config(base, child_config or {})
-    return child_harness_integration, merged, child_restart_compat or base_restart_compat
+    return child_harness_integration, merged
 
 
 def _validate_merged(resolved: ResolvedSessionTemplate) -> None:

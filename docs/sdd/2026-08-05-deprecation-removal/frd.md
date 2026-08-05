@@ -50,9 +50,9 @@ gate exists to avoid.
   `[operator]`), `[paths].code_workspaces` (canonical: `vscode_workspaces`), and
   `agw vm shell --provisioner` (canonical: `--platform`). Retired settings MUST fail clearly rather
   than silently falling back to defaults; in particular, an old `code_workspaces` key MUST NOT be
-  ignored in a way that writes VS Code workspace files to the default directory. Where the loader
-  can do so cheaply, the failure SHOULD name the canonical replacement. Canonical settings MUST keep
-  their current behavior and defaults.
+  ignored in a way that writes VS Code workspace files to the default directory. The failure MAY be
+  the loader's ordinary unknown-key or required-section error; no retired-name hint or compatibility
+  table is required. Canonical settings MUST keep their current behavior and defaults.
 - **R5 (vm console).** `agw vm console` MUST be removed together with its dedicated legacy
   implementation and its completion-tree entries. It shares no code with the canonical `agw console`
   family: it is a standalone VM-wide console module. One canonical caller feeds it today: session
@@ -147,15 +147,18 @@ gate exists to avoid.
 - **D3 (no warn-first for old aliases).** The never-warned aliases (`code_workspaces`,
   `--provisioner`) are removed directly rather than given a warning release first. They predate the
   0.13 transition by long enough that a further compatibility release buys little; the mitigation is
-  clear failure messages and explicit release notes (R4, R9).
+  ordinary validation failures and explicit release notes (R4, R9).
 - **D4 (rejection over migration).** 0.14.0 rejects retired inputs rather than auto-migrating them.
   The supported jump path for stale configurations is through 0.13.0's warnings and tooling.
 - **D5 (fixture budget).** The plan MUST budget fixture conversion as first-class work rather than
   discovering it, and SHOULD prefer shared fixture helpers over per-file edits. This is phase 1's
   chief lesson.
-- **D6 (retired-setting errors).** The config loader uses a small retired-key table for the three
-  removed TOML settings and names each canonical replacement. Generic unknown-key handling is not
-  sufficient because settings sections currently warn or default rather than uniformly failing.
+- **D6 (ordinary validation, no tombstones).** Retired commands, options, selectors, and settings
+  fail through ordinary command or schema validation. This effort does not add or retain hint tables
+  or bespoke compatibility errors for its in-scope retired names. Unrelated existing targeted
+  validation, such as `_LEGACY_SINGLETON_HINTS` for old VM and agent top-level shapes, is out of
+  scope and remains intact. Where current warn-mode or defaulting behavior would silently accept a
+  removed input, the owning validation boundary becomes strict for unknown keys instead.
 - **D7 (harness vocabulary boundary).** The `harness` resource-kind slug is canonical and was never
   an alias. No broad vocabulary cleanup applies to it; only text that teaches the retired
   session-template selector is removed or updated.

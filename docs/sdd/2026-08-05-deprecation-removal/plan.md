@@ -12,8 +12,8 @@ completions, samples, and permanent documentation move together. Completed check
 records and must not be edited, moved, removed, or unchecked.
 
 This is a bounded deletion effort with validation changes at existing boundaries. No separate LLD is
-required before implementation: the exact guard placement, retained consumers, removal slices, and
-verification contracts are specified in `hla.md`. If implementation reveals a new subsystem or a
+required before implementation: the exact validation placement, retained consumers, removal slices,
+and verification contracts are specified in `hla.md`. If implementation reveals a new subsystem or a
 boundary change broader than the HLA, stop and add an LLD or revise the upstream artifacts before
 continuing.
 
@@ -36,33 +36,40 @@ this plan, cross-slice invariants, SDD reconciliation, and escalation decisions.
 Definition of done: the artifacts are approved through the SDD pre-implementation review process,
 the baseline is recorded, and no implementation work has begun against an unsettled contract.
 
+### Material error-policy revision (2026-08-05)
+
+- [x] Review the operator-directed shift from bespoke retired-name hints to ordinary validation,
+      including call-site-local strictness and preservation of unrelated existing targeted errors.
+- [x] Re-approve `frd.md`, `hla.md`, and this plan after resolving review findings; implementation
+      must not be committed or Phase 1 marked complete before this item is checked.
+
 ## Phase 1: Session and harness compatibility removal
 
-- [ ] Remove `agw session restart`, its warning, duplicate option signature, dynamic completion
+- [x] Remove `agw session restart`, its warning, duplicate option signature, dynamic completion
       mappings, and alias-only parity/suppression tests. Assert ordinary unknown-command behavior
       and preserve all `session resume` behavior.
-- [ ] Add narrow session-template retired-field guards for top-level `harness`, `harness_config`,
-      and `restart_command`, plus `restart_command` in the normalized shell-integration config. Pin
-      canonical tagged YAML rejection with file/location context and canonical replacement guidance;
-      do not expose the decoder's internal sibling representation as a public shape.
-- [ ] Add explicit `restart_command` rejection to the migrator's independent legacy TOML reader and
-      pin the failure before deleting its compatibility rewrite.
-- [ ] Remove `restart_command` normalization, template provenance, inheritance conflicts, warning
+- [x] Make the session-template decoder's ordinary unknown-key validation strict before removing
+      `harness`, `harness_config`, and top-level `restart_command` from its accepted shape. Pin
+      generic rejection with file/location context; do not add retired-name hints or expose the
+      decoder's internal sibling representation as a public shape.
+- [x] Make the migrator's independent legacy TOML session-template reader reject ordinary unknown
+      keys before deleting its compatibility rewrites. Pin generic `restart_command` rejection.
+- [x] Remove `restart_command` normalization, template provenance, inheritance conflicts, warning
       aggregation, migrator rewrites, compatibility fixtures, and alias-only tests.
-- [ ] Remove old `harness`/`harness_config` selector normalization, mixed-form conflicts,
+- [x] Remove old `harness`/`harness_config` selector normalization, mixed-form conflicts,
       selector-specific facts, bootstrap/doctor reporting, migrator rewrites, compatibility
       fixtures, and alias-only tests.
-- [ ] Remove the expiring deprecated-field scanner after its hard-rejection responsibility is fully
-      covered by the new session-template guard.
-- [ ] Convert shared fixture families to canonical spellings without weakening explicit rejection
-      tests.
-- [ ] Update `cli/README.md`, `docs/guides/resources.md`, the harness-integration capability README,
+- [x] Remove the expiring deprecated-field scanner after strict session-template validation covers
+      its correctness responsibility; do not replace it with a retired-field table.
+- [x] Convert shared fixture families to canonical spellings without weakening ordinary
+      unknown-input rejection tests.
+- [x] Update `cli/README.md`, `docs/guides/resources.md`, the harness-integration capability README,
       ADR 0020 current-state language, session-template samples, CLI help, and completion assertions
       in the same slice.
-- [ ] Verify the generic capability sibling-shape warning remains aggregated, suppressible, and
+- [x] Verify the generic capability sibling-shape warning remains aggregated, suppressible, and
       reported by doctor; verify every remaining `Config` and `ManifestSet` deprecation field has a
       live consumer.
-- [ ] Review the slice, resolve every valid finding, and run session lifecycle, manifest decode,
+- [x] Review the slice, resolve every valid finding, and run session lifecycle, manifest decode,
       migration, registry warning, doctor, docs/sample, and completion tests plus the full gate.
 
 Definition of done: R1-R3 and the rename-specific portion of R7 are implemented; retired tokens are
@@ -71,9 +78,10 @@ generic deprecation framework remains live and tested.
 
 ## Phase 2: Older settings, option, and dead Python surfaces
 
-- [ ] Add an early retired-settings guard for `[defaults].platform`, `[user]`, and
-      `[paths].code_workspaces`, then delete their alias consumption from settings loaders in the
-      same behavior-and-documentation slice. Every error names the canonical replacement.
+- [ ] Make unknown config top-level sections, `[defaults]` keys, and `[paths]` keys fail through
+      ordinary validation, then delete alias consumption for `[defaults].platform`, `[user]`, and
+      `[paths].code_workspaces` in the same behavior-and-documentation slice. Do not add a
+      retired-key hint table.
 - [ ] Pin the `code_workspaces` safety contract with a regression proving configuration fails before
       any VS Code workspace file can be written to the default directory.
 - [ ] Remove `agw vm shell --provisioner` while preserving `--platform`, native transport routing,

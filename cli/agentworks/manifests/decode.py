@@ -82,60 +82,15 @@ CAPABILITY_FIELDS: dict[str, tuple[str, str]] = {
 }
 
 
-def _normalize_session_harness_selector(spec: dict[str, object]) -> bool:
-    """Normalize the 0.13 harness selector compatibility boundary.
-
-    This function is deliberately the only place where old YAML selector
-    input is accepted. Both spellings leave this boundary as the canonical
-    internal pair.
-    """
-    old_fields = {"harness", "harness_config"} & set(spec)
+def _normalize_session_harness_selector(spec: dict[str, object]) -> None:
+    """Normalize the canonical tagged harness-integration table."""
     new_fields = {"harness_integration", "harness_integration_config"} & set(spec)
-    if old_fields and new_fields:
-        names = ", ".join(sorted(old_fields | new_fields))
-        raise ConfigError(
-            f"old and new harness selector/config fields cannot be mixed: {names}; "
-            "use harness_integration: {name: ..., <config keys...>} only"
-        )
-    if old_fields:
-        if "harness_config" in spec and "harness" not in spec:
-            raise ConfigError(
-                "deprecated spec.harness_config needs a spec.harness selector; "
-                "use a spec.harness_integration tagged table with name: shell"
-            )
-        value = spec.pop("harness", None)
-        if isinstance(value, dict):
-            if "harness_config" in spec:
-                raise ConfigError(
-                    "spec.harness is a tagged table, so a sibling spec.harness_config is ambiguous; "
-                    "fold those keys into a spec.harness_integration tagged table"
-                )
-            name = value.get("name")
-            if not isinstance(name, str) or not name:
-                raise ConfigError(
-                    "deprecated spec.harness table requires a 'name' key; "
-                    "use a spec.harness_integration tagged table with name: shell"
-                )
-            config = {key: item for key, item in value.items() if key != "name"}
-            spec["harness_integration"] = name
-            if config:
-                spec["harness_integration_config"] = config
-        else:
-            if not isinstance(value, str) or not value:
-                raise ConfigError(
-                    "deprecated spec.harness must be a non-empty string or tagged table; "
-                    "use a spec.harness_integration tagged table with name: shell"
-                )
-            spec["harness_integration"] = value
-            if "harness_config" in spec:
-                spec["harness_integration_config"] = spec.pop("harness_config")
-        return True
     # A template may intentionally declare no workload here: it inherits a
     # selector from a parent, or remains the default login shell. Preserve
     # that established no-selector form rather than treating absence as an
     # invalid canonical selector.
     if not new_fields:
-        return False
+        return
     value = spec.pop("harness_integration", None)
     if "harness_integration_config" in spec:
         raise ConfigError(
@@ -150,7 +105,6 @@ def _normalize_session_harness_selector(spec: dict[str, object]) -> bool:
     spec["harness_integration"] = name
     if config:
         spec["harness_integration_config"] = config
-    return False
 
 
 def _normalize_capability_field(kind: str, spec: dict[str, object]) -> bool:
@@ -234,8 +188,6 @@ def decode_document(
     doc: Document,
     issues: list[str],
     deprecated_shapes: list[str] | None = None,
-    deprecated_harness_selectors: list[str] | None = None,
-    deprecated_restart_commands: list[str] | None = None,
 ) -> Any:
     """Decode one validated envelope into the kind's Resource instance.
 
@@ -264,36 +216,12 @@ def decode_document(
 
     local_issues: list[str] = []
     try:
-        # General deprecated-field notices (FRD R11), run before per-kind
-        # delegation and kept decoupled from schema validation so the
-        # whole shim is removable (delete deprecated_fields.py and this
-        # call). Error-level fields raise here, never reaching the loader;
-        # warn-level fields add a notice and fall through, ignored.
-        from agentworks.manifests.deprecated_fields import check_deprecated_fields
-
-        local_issues.extend(check_deprecated_fields(doc.kind, spec))
         # Capability-shape normalization (tagged table -> internal
         # sibling pair) runs next, so every decoder and the shared TOML
         # loaders underneath see exactly one shape. Old-shape usage is
         # collected for the caller's aggregated deprecation warning.
         if doc.kind == "session-template":
-            if _normalize_session_harness_selector(spec) and deprecated_harness_selectors is not None:
-                deprecated_harness_selectors.append(f"{doc.kind}/{doc.name}")
-            config = spec.get("harness_integration_config")
-            if (
-                spec.get("harness_integration") == "shell"
-                and isinstance(config, dict)
-                and "resume_command" in config
-                and "restart_command" in config
-            ):
-                raise ConfigError("resume_command and restart_command cannot be combined; use resume_command only")
-            if (
-                spec.get("harness_integration") == "shell"
-                and isinstance(config, dict)
-                and "restart_command" in config
-                and deprecated_restart_commands is not None
-            ):
-                deprecated_restart_commands.append(f"{doc.kind}/{doc.name}")
+            _normalize_session_harness_selector(spec)
         elif _normalize_capability_field(doc.kind, spec) and deprecated_shapes is not None:
             deprecated_shapes.append(f"{doc.kind}/{doc.name}")
         resource = decoder(doc, spec, local_issues)
@@ -521,19 +449,20 @@ _SESSION_TEMPLATE_KEYS = {
 
 
 def _decode_session_template(doc: Document, spec: dict[str, Any], issues: list[str]) -> Any:
-    from agentworks.config.loaders_core import _parse_env_table, _warn_unexpected_keys
+    from agentworks.config.loaders_core import _parse_env_table
     from agentworks.sessions.template import SessionTemplate
 
     # The selector normalization (tagged harness_integration table -> the
     # internal ``harness_integration`` name plus ``harness_integration_config``
-    # blob, and the legacy ``harness`` fold) already ran in
+    # blob) already ran in
     # ``decode_document`` before this decoder, so the spec here carries the
-    # canonical internal pair. The legacy flat command fields
-    # (``command`` / ``resume_command`` / ...) are ``shell``'s config
-    # vocabulary and live only under harness_integration_config; a manifest
-    # that spells them top-level is rejected by the deprecated-field table.
+    # canonical internal pair. Shell configuration lives only under
+    # harness_integration_config. This kind is strict at its own boundary so
+    # misspelled or removed fields do not degrade into warn-mode handling.
     name = doc.name
-    _warn_unexpected_keys(spec, _SESSION_TEMPLATE_KEYS, f"session_templates.{name}", issues)
+    unexpected = sorted(set(spec) - _SESSION_TEMPLATE_KEYS)
+    if unexpected:
+        raise ConfigError(f"unexpected keys in [session_templates.{name}]: {unexpected}")
     harness_integration = spec.get("harness_integration")
     if harness_integration is not None and not isinstance(harness_integration, str):
         raise ConfigError(f"session_templates.{name}.harness_integration must be a string")
@@ -545,18 +474,7 @@ def _decode_session_template(doc: Document, spec: dict[str, Any], issues: list[s
             f"session_templates.{name}: harness_integration_config needs a selector "
             f'(a blob with no owner); add harness_integration = "..."'
         )
-    # The deprecated ``restart_command`` shell spelling is renamed to
-    # ``resume_command`` in the blob and remembered via
-    # ``restart_command_compat`` (the compat marker the request boundary and
-    # ``strip_source_fields`` read), mirroring the relocated loader. The
-    # resume+restart conflict already raised in ``decode_document``.
     config_blob = dict(raw_config) if isinstance(raw_config, dict) else None
-    uses_restart_command = (
-        harness_integration == "shell" and config_blob is not None and "restart_command" in config_blob
-    )
-    if uses_restart_command:
-        assert config_blob is not None
-        config_blob["resume_command"] = config_blob.pop("restart_command")
     env: dict[str, EnvEntry] | None = None
     if "env" in spec:
         env = _parse_env_table(spec["env"], context=f"session_templates.{name}", issues=issues)
@@ -566,7 +484,6 @@ def _decode_session_template(doc: Document, spec: dict[str, Any], issues: list[s
         description=str(spec["description"]) if "description" in spec else None,
         harness_integration=harness_integration,
         harness_integration_config=config_blob,
-        restart_command_compat=uses_restart_command,
         env=env,
         declared_at=doc.location,
     )

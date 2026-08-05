@@ -354,13 +354,11 @@ def resource_migrate(
     ] = False,
     yes: Annotated[bool, typer.Option("--yes", help="Skip the confirmation prompt.")] = False,
 ) -> None:
-    """Move resources from config.toml to YAML manifests.
+    """Migrate TOML-declared resources to YAML manifests.
 
     A recurring, incremental mover: run it any time you want to move
-    resources (or a subset) from TOML to YAML, canonicalize old YAML
-    session-template selectors, or rewrite deprecated YAML fields. New
-    TOML-derived documents append without rewriting existing files; YAML
-    rewrites preserve comments. The
+    resources (or a subset) from TOML to YAML. New
+    TOML-derived documents append without rewriting existing files. The
     original config.toml is backed up first, and every real run verifies the
     resulting registry is identical before it counts as done.
     """
@@ -391,10 +389,7 @@ def resource_migrate(
     )
 
     if plan.nothing_to_do:
-        output.info(
-            "Nothing to migrate: no migratable TOML-declared resources, legacy YAML "
-            "session-template selectors, or deprecated YAML fields remain."
-        )
+        output.info("Nothing to migrate: no migratable TOML-declared resources remain.")
         return
 
     if dry_run:
@@ -415,8 +410,6 @@ def resource_migrate(
         output.detail(f"Created {path}")
     for path in result.appended:
         output.detail(f"Appended to {path}")
-    for path in result.replaced:
-        output.detail(f"Rewrote {path}")
     if result.config_rewritten:
         output.detail(f"Rewrote {plan.config_path} (backup: {result.backup_path})")
     else:

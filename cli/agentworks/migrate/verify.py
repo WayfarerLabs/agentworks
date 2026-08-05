@@ -63,9 +63,9 @@ def strip_source_fields(resource: Any) -> Any:
     if not dataclasses.is_dataclass(resource) or isinstance(resource, type):
         return resource
     kwargs: dict[str, Any] = {}
-    for field in ("origin", "declared_at", "restart_command_compat"):
+    for field in ("origin", "declared_at"):
         if hasattr(resource, field):
-            kwargs[field] = False if field == "restart_command_compat" else None
+            kwargs[field] = None
     if hasattr(resource, "references"):
         kwargs["references"] = ()
     if not kwargs:

@@ -520,26 +520,11 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
         # renders, rather than aborting the whole run.
         g.fail("Manifest", str(e), hint=e.hint)
 
-    # Deprecated-field usage (FRD R11) is surfaced as its own proactive
-    # finding: warn-level fields load with a notice and are ignored, so
-    # without this they only emit an easily-missed ambient log line.
-    # These notices match the strings the loader puts in
-    # ``manifests.issues`` verbatim, so they are pulled out of the generic
-    # Manifest rows below rather than reported twice.
-    from agentworks.manifests.deprecated_fields import manifest_deprecation_notices
-
-    deprecated_field_notices = manifest_deprecation_notices(resources_dir)
-
     for issue in config.config_issues:
         g.warn("Config", issue)
     if manifests is not None:
-        deprecated_set = set(deprecated_field_notices)
         for issue in manifests.issues:
-            if issue in deprecated_set:
-                continue
             g.warn("Manifest", issue)
-    for notice in deprecated_field_notices:
-        g.warn("Deprecated manifest field", notice)
     if not config_load_failed and not config.config_issues and manifests is not None and not manifests.issues:
         g.ok("Config is valid")
     # Deprecation nudges ride their own channel (so --no-deprecations
@@ -555,11 +540,6 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
             f"{', '.join(manifests.deprecated_shape_resources)}: fold the "
             "sibling pair into one tagged table, e.g. platform: {name: lima, ...}",
         )
-    if manifests is not None:
-        from agentworks.bootstrap import harness_selector_deprecation
-
-        if message := harness_selector_deprecation(config, manifests):
-            g.warn("Session templates use the deprecated harness selector", message)
     for section in config.noop_secret_backend_sections:
         g.warn(
             f"Config has a no-op {section} section",
