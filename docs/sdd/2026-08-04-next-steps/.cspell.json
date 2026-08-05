@@ -1,5 +1,5 @@
 {
   "version": "0.2",
   "import": ["../../../.cspell.json"],
-  "words": ["fanout", "Pydantic", "Rulesync", "timestamping", "unkeyed"]
+  "words": ["diffable", "fanout", "Pydantic", "Rulesync", "SIEM", "tamperable", "timestamping", "unkeyed"]
 }
