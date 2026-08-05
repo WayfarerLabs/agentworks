@@ -18,10 +18,12 @@ The declarative-schema effort is a two-phase, single-branch effort. Phase 1 remo
 resource-declaration path so phase 2 replaces one decode surface instead of two kept in lockstep.
 Phase 2 moves every capability and resource kind onto registration-time Pydantic models from which
 validation, reference extraction, JSON Schema emission, live-rendered samples, and a describe
-surface are all derived. As of this baseline, phase 1's core has landed on the effort branch (the
-TOML resource path hard-errors, the loaders are relocated into the migrator as an independent
-verification oracle, and the fixture suite is mid-conversion under a deliberately bounded window);
-phase 2 is fully specified but not yet implemented.
+surface are all derived. As of this baseline, **phase 1 is complete and ready to merge** on the
+effort branch (the TOML resource path hard-errors, the loaders are relocated into the migrator as an
+independent verification oracle, the full fixture suite is converted and green, the records are
+written, and the final review approved it): it lands via the retargeted PR #316 as the standalone,
+precondition-clearing phase 1. Phase 2 is fully specified but deliberately not implemented, held at
+the phase gate per the disposition below.
 
 ## Recommended Disposition: Complete Phase 1, Hold Phase 2
 
@@ -210,6 +212,64 @@ the boundaries so they are not assumed complete:
   shape would otherwise be modeled and then immediately unwound (the legacy harness selector is the
   clear case).
 
+## Forward Pressure: Instance-Level Configuration and the Living Graph
+
+Two related future needs were raised in review, both explicitly out of scope for the declarative-
+schema effort but worth recording so that effort and the descriptor work do not wall them off. The
+first: today the only way to vary a provisioned X (VM, workspace, agent, session) is a different
+X-template, which is excellent for fleet repeatability but awkward for genuinely one-off
+configuration. The second: harness integration wants to persist its latest applied state (initially
+"which files did we create", but generally useful). The proposed shape for both is one mechanism:
+the existing template rollup plus an optional per-instance `spec` merged on top with the same
+semantics, with the full result (template ref, the spec, and the final rolled-up shape) persisted
+per instance for visibility and reinit.
+
+This is well-aligned with the declarative model, and the model is precisely what makes it cheap
+later. A per-instance spec is just one more layer on the same effective-config merge phase 2
+formalizes: the per-kind model, the merge policy, the total reference extractor, and model-layer
+defaulting all transfer to it unchanged. FR17 already establishes that a resource's runtime
+dependencies derive from its effective (merged) config rather than its declared blob, so a
+spec-contributed reference fits that frame rather than fighting it. The declarative-schema effort
+should proceed as designed; its job here is only to avoid closing doors.
+
+The load-bearing tension is NOT in the schema layer. It is that the dependency graph today is a pure
+function of declared data (config plus manifests), computed once at finalize and retained immutably
+(the registry-readiness-refactor's hard-won property). A per-instance spec, authored at provision
+time and persisted in the DB, can introduce a new reference that needs auto-declaration AFTER
+finalize, so the graph becomes a function of config plus live instance state. Making the graph a
+living, incrementally-updated thing is a real redesign of the registry/fold layer, largely
+orthogonal to phase 2's per-kind modeling, and belongs in its own future SDD.
+
+Doors the declarative-schema effort and the descriptor work should keep open, since two of them are
+otherwise decided implicitly:
+
+- **Source-agnostic reference extraction.** `extract_references(model, blob, owner)` is already a
+  pure function of its inputs and does not care whether the blob came from declared config or a
+  persisted instance spec. Keep it that way; do not special-case "declared".
+- **A general layer-stack merge, not a template-only chain.** An instance spec is just the top
+  layer. The effort's current "validate effective config at finalize" framing is declared-data-
+  specific; an instance layer resolves and validates at provision time, not finalize. The merge
+  primitive should not assume the full stack is known at finalize.
+- **Graph mutability stays a registry/fold concern.** Do not bake "the graph is immutable after
+  finalize" into the model-layer contracts, so a future living-graph effort can relax it without
+  touching the models.
+- **One instance-state store.** The per-instance spec persistence and the harness applied-state are
+  the same need, and the capability perspective already wants a dedicated state store for facet
+  state rather than an opaque JSON column per resource table. Model them as one instance-state
+  store, not two.
+
+Sharp edges for the future SDD that owns this, recorded so they are not surprises: ownership and GC
+of instance-contributed auto-declared resources (a destroyed instance whose spec auto-declared a
+secret); reinit authority (re-roll the template to pick up template changes, versus replay the
+persisted final shape for reproducibility, which persisting all three artifacts lets you defer but
+not avoid); and repeatability erosion (per-instance specs are a footgun if they become the default
+rather than the audited exception, so surface the spec as drift in `describe` to keep one-offs
+visible). A precision on "instances as resources": the docs' current phrasing concerns capability
+instances versus consuming resources and deliberately keeps capability instances off the graph; the
+move here is the larger one of elevating provisioned instances (the VM/workspace/agent/session DB
+rows, today outside the registry) into the graph as first-class nodes, which is exactly what ties
+the graph's lifetime to provisioned state.
+
 ## Questions for the Remaining SDD Artifacts
 
 - Should the JSON Schema this effort emits become the interchange the descriptor work and the plugin
@@ -222,3 +282,10 @@ the boundaries so they are not assumed complete:
   descriptor work absorb versus leave to each kind's model?
 - When the secret-source and harness-facet layers add their own config surfaces, do they reuse this
   effort's error-framing bridge directly, or does the bridge need to become a shared service first?
+- Does the effort's merge primitive stay general enough to accept a runtime instance-spec layer, or
+  does it assume the full inheritance stack is known at finalize?
+- What is the smallest change that keeps the graph's post-finalize immutability a registry/fold
+  property rather than a model-layer assumption, so a later living-graph effort is not blocked?
+- Should the instance-state store (per-instance spec plus harness applied-state) be designed once,
+  now, as a shared model, given that both this perspective and the capability perspective converge
+  on it?
