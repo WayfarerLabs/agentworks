@@ -204,6 +204,40 @@ toward preservation when the SDD still meaningfully informs current work. When i
 _not_ finding this SDD via a present-day file or grep search would be a loss; if the answer is no,
 delete.
 
+## Roadmap SDDs
+
+Most SDDs cover one development effort. A roadmap SDD is the meta case: an SDD that coordinates a
+family of related efforts, generating and tracking ordinary child SDDs rather than shipping an
+implementation of its own. Use one when several efforts overlap enough that their ordering and
+shared contracts need a single owner.
+
+The settled rules for the species:
+
+- Its artifacts are not the standard set. The working set, established by the first roadmap SDD: an
+  `inputs/` folder holding perspectives and other source material; `starting-state.md`, an immutable
+  snapshot of where the system stood at roadmap start, frozen once underway so the full journey
+  stays visible; `current-state.md`, a dated snapshot of where the system is, updated in place at
+  wave boundaries (git history is the append-only record); `target-state.md`, where the system is
+  going across this roadmap (not a forever vision) and the home of every settled design ruling;
+  `phasing.md`, ordering only (dependency structure, waves, release mapping); and `child-sdds.md`,
+  the inventory and checkbox tracker that plays plan.md's role, whose completed checkboxes are
+  immutable per the standard rule. A roadmap SDD has no frd.md, hla.md, or plan.md of its own; those
+  belong to the children. The roadmap locks when current state and target state agree and every
+  child is locked. These forms are still young; refine them here as they prove out.
+- A roadmap constrains only its own scope. Work outside the roadmap is not paused by it and can be
+  picked off whenever bandwidth allows; the roadmap's target-state should say explicitly what is out
+  of scope so that boundary stays crisp.
+- It stays open until every child SDD is closed, then locks like any other SDD. Its ledger plays the
+  role plan checkboxes play in an ordinary SDD, one level up.
+- Roadmap state lives on `main`: every change (a new child SDD, a status change, a design revision)
+  is a PR, and child SDDs reference their roadmap SDD so the coordination is discoverable from any
+  effort.
+- The roadmap lead seeds each child SDD with its FRD plus any constraints the roadmap has already
+  settled, and reviews the child's PRs. A separately launched effort lead owns the child's HLA,
+  plan, and implementation per the ordinary process. Seeding PRs are ready, not draft: their content
+  is limited by design, but they are intended to merge as-is (see PR Review).
+- Terminology: roadmap SDD, roadmap lead, child SDD, effort lead. Not "program".
+
 ## Branching Model
 
 Work driven via SDD should be done in one or more feature branches. The general pattern is:
@@ -227,6 +261,13 @@ Work driven via SDD should be done in one or more feature branches. The general 
 Significant changes to SDD artifacts -- whether net-new specs or material revisions to existing ones
 -- should go through a draft PR for review before the work is merged. The aim is to surface concerns
 about requirements, architecture, or plan early, while changes are still cheap.
+
+Ready versus draft is purely a merge-intent signal, and it should be set accordingly. The
+pre-implementation review above uses a draft PR because there is genuinely no intent to merge at
+that point: the PR exists as a pure review vehicle while the artifacts churn. By contrast, a PR
+whose content is complete and intended to merge as-is should be ready no matter how small it is;
+limited content is not draftness. A PR that seeds a new effort with only its FRD, for example, is
+ready to merge, not a draft.
 
 Consider phasing the review across multiple PRs rather than landing all the artifacts in one. A
 common pattern is FRD first (to confirm we agree on what we're building), then HLA (to confirm the
