@@ -1,7 +1,8 @@
 # Current State
 
-- Snapshot date: 2026-08-05 (update at wave boundaries)
-- Baseline: Agentworks 0.13.0 plus the phase 1 TOML sunset (PR #316, merged 2026-08-05)
+- Snapshot date: 2026-08-05, post-wave-1 (update at wave boundaries)
+- Baseline: Agentworks 0.13.0 plus the phase 1 TOML sunset (PR #316) and the 0.14 expired-compat
+  removals (PR #406); the 0.14.0 release itself is pending
 
 This document records where the system actually is, verified by code reconnaissance rather than
 assumed from the perspectives. It is the ground truth the phasing rests on; when a wave lands,
@@ -20,19 +21,11 @@ contracts are recorded in `target-state.md`.
 
 ## Deprecation removal targets
 
-Every surface in the removal perspective exists as described, with corrections the wave 1 FRD
-carries:
-
-- `agw vm console` is not a thin alias. It is a separate legacy implementation
-  (`cli/agentworks/sessions/console.py`, ~218 lines) unrelated to the canonical `agw console`
-  family's `multi_console` code, and one canonical caller feeds it: session create's roll-forward
-  best-effort hook that adds new sessions to a live legacy console.
-- Two aliases are silently accepted today with no warning at all: `[paths].code_workspaces` and
-  `agw vm shell --provisioner`. Their removal is a hard behavior change with zero prior notice.
-- The `[user]` section warning bypasses the aggregated deprecation channel (raw stderr print), an
-  inconsistency that dissolves once the alias is removed.
-- `output.phase()` and `env_compat.py` are fully dead (zero production callers); `UserConfig` is a
-  one-line alias. These are trivial deletions.
+Cleared by wave 1 (PR #406, 2026-08-05): every in-scope expired surface is removed, including the
+session restart vocabulary, the legacy harness selectors, the older configuration aliases, the
+legacy VM console module, and the dead Python surfaces. The generic deprecation framework survives
+with only live registrations; the remaining deprecated shape is the generic capability discriminator
+compatibility, which wave 2 removes with its tagged-union hardening.
 
 ## Capability framework
 
@@ -70,19 +63,13 @@ carries:
 
 ## Open SDD ledger (pre-roadmap efforts)
 
-- Release-spanning, unblocked now that 0.13.0 shipped: `2026-08-03-harness-integration` (0.14
-  removal phase plus closeout) and `2026-08-04-session-resume` (0.14 removal phase plus closeout).
-  Both are discharged by wave 1.
-- Operationally complete, needing verification and `locked.md` only: `2026-03-29-proxmox-provider`
-  (20/20 checked) and `2026-05-03-session-enhancements` (69/69 checked).
-- `2026-03-26-mise-integration` shows 0/30 checked but the implementation demonstrably landed
-  (`vms/initializer/mise.py`, `sources.py`, config fields). Its checkboxes need evidence-based
-  reconciliation before locking.
-- Unmerged drafts on remote branches: `2026-07-29-herdr-integration` (explicitly not scheduled,
-  gated on a spike, but unbundling two standalone wins) and
-  `2026-07-19-named-console-template-selector` (small, mechanical, ready). The
-  `2026-07-29-harness-transcripts` draft is harvested into `inputs/harness-transcripts-harvest.md`
-  and its branch is deleted once the harvest lands on `main` (operator ruling, 2026-08-05).
+Cleared by wave 1 (PR #406): all five pre-roadmap SDDs are locked (`2026-08-03-harness-integration`,
+`2026-08-04-session-resume`, `2026-03-29-proxmox-provider`, `2026-05-03-session-enhancements`, and
+`2026-03-26-mise-integration` with its plan reconciled against evidence). The
+`2026-07-29-harness-transcripts` draft is harvested into `inputs/harness-transcripts-harvest.md` and
+its branch is deleted. Remaining unmerged drafts on remote branches, both out of roadmap scope:
+`2026-07-29-herdr-integration` (spike-gated) and `2026-07-19-named-console-template-selector`
+(ready, standalone).
 
 ## Environment notes
 

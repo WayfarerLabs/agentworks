@@ -13,10 +13,11 @@ is locked.
 
 - [x] Seeded (FRD, PR #401, reviewed with findings applied)
 - [x] FRD merged to `main` (2026-08-05)
-- [ ] Picked up by an effort lead (HLA, plan; effort lead launched 2026-08-05)
-- [ ] Implementation complete, pre-roadmap SDD closeouts done (see `current-state.md` ledger)
-- [ ] Ships in 0.14.0 with phase 1
-- [ ] Locked
+- [x] Picked up by an effort lead (HLA, plan, residual inventory; PR #406)
+- [x] Implementation complete, pre-roadmap SDD closeouts done (PR #406, 2026-08-05: all five
+      pre-roadmap SDDs locked, plan 46/46, docs promoted including ADR 0020)
+- [ ] Ships in 0.14.0 with phase 1 (release pending)
+- [x] Locked (`locked.md` on `main` via PR #406)
 
 ### Wave 2 (adopted child): 2026-07-31-declarative-schema
 
@@ -92,8 +93,13 @@ open-ended research placeholder.
 2. Done (2026-08-05): roadmap PR #400 and wave 1 seed #401 merged; harvested
    `feat/harness-transcripts-sdd` branch deleted.
 3. Done (2026-08-05): issue-intake comments posted.
-4. Done (2026-08-05): descriptor contract merged (PR #405). Wave 2 seeds once wave 1's removals
-   land.
-5. Wave 1 in flight with its effort lead; roadmap lead reviews its PRs.
-6. Design track: facet boundary contract in review; then the instance-state store schema and the
+4. Done (2026-08-05): descriptor contract merged (PR #405).
+5. Done (2026-08-05): wave 1 implementation, closeouts, and lock merged (PR #406). The 0.14.0
+   release ships when cut.
+6. Wave 2 is unblocked (descriptor merged plus removals landed): launch an effort lead to pick up
+   `2026-07-31-declarative-schema` phase 2 from `main`; its first act records the hold release in
+   that SDD's plan, citing `capability-descriptor-contract.md`.
+7. Onboarding-and-discovery child is now ready to seed (wave 1 complete): roadmap lead drafts its
+   seed FRD next.
+8. Design track: facet boundary contract in review; then the instance-state store schema and the
    event vocabulary's first slice.
