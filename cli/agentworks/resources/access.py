@@ -7,9 +7,9 @@ here keeps kind-string literals in one place and call sites readable.
 
 These accessors centralize resource reads: every read that used to
 be a ``Config`` resource attribute goes through here (or through a
-template resolver that does). ``Config.publish_to`` and the ``apt`` /
-``install_commands`` operator publishers remain the only direct readers of
-Config resource attributes.
+template resolver that does). The ``Config`` resource fields and the
+operator publishers that once read them are gone (ADR 0022); resources
+live only in the Registry now.
 """
 
 from __future__ import annotations

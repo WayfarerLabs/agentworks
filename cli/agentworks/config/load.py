@@ -56,16 +56,39 @@ EXPECTED_TOP_LEVEL_KEYS = {
 }
 
 
+# Doubly-legacy singleton spellings: these were renamed to the
+# ``[vm_templates.default]`` / ``[agent_templates.default]`` resource shape
+# before this effort, and those shapes are themselves now resources (ADR 0022).
+# The pointed rename error used to live in the vm/agent template loaders, which
+# relocated into the migrator; on a normal load they now fall through to the
+# generic unexpected-key path, so give them a targeted hint at the modern
+# destination (a YAML manifest) rather than the stale rename target.
+_LEGACY_SINGLETON_HINTS = {
+    "vm": "[vm.config] is a legacy spelling of the vm-template resource; declare it as a YAML "
+    "manifest (`agw resource sample vm-template`).",
+    "agent": "[agent.config] is a legacy spelling of the agent-template resource; declare it as a "
+    "YAML manifest (`agw resource sample agent-template`).",
+}
+
+
 def _warn_unexpected_top_level_keys(data: dict[str, object], issues: list[str]) -> None:
     """Record unexpected top-level keys.
 
     This catches a common TOML pitfall: uncommenting a key without its section
-    header causes the key to land in the wrong (or top-level) section.
+    header causes the key to land in the wrong (or top-level) section. Known
+    legacy singleton spellings get a targeted migration hint instead of the
+    generic message.
     """
-    unexpected = set(data.keys()) - EXPECTED_TOP_LEVEL_KEYS
-    if unexpected:
-        keys = ", ".join(sorted(unexpected))
-        issues.append(f"unexpected top-level keys in config: {keys}")
+    unexpected = sorted(set(data.keys()) - EXPECTED_TOP_LEVEL_KEYS)
+    if not unexpected:
+        return
+    for key in unexpected:
+        hint = _LEGACY_SINGLETON_HINTS.get(key)
+        if hint is not None:
+            issues.append(hint)
+    generic = [key for key in unexpected if key not in _LEGACY_SINGLETON_HINTS]
+    if generic:
+        issues.append(f"unexpected top-level keys in config: {', '.join(generic)}")
 
 
 def _raise_for_resource_sections(data: dict[str, object]) -> None:

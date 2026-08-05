@@ -6,10 +6,9 @@ via the kind's ``synthesize`` for auto-declared ones); never mutated.
 
 Four variants today:
 
-- ``operator-declared``: from operator config (Config publisher today;
-  the YAML manifest publisher). Carries ``file: Path`` + ``line:
-  int`` for traceability. Built from the Config-layer ``SourceLocation``
-  during ``Config.publish_to``.
+- ``operator-declared``: from the operator's YAML manifests (the manifest
+  publisher). Carries ``file: Path`` + ``line: int`` for traceability, built
+  from the manifest document's ``SourceLocation`` at decode.
 - ``built-in``: shipped with the app itself, inseparable from it (the
   bundled-manifest publisher and other app-bundled publishers). Carries
   ``source: str``, a code-source identifier like

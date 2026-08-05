@@ -2,16 +2,15 @@
 
 The consumer repoint moved every resource read from ``Config``
 attributes to Registry queries so the operator source can swap from
-TOML to YAML manifests without touching consumers. The only sanctioned
-readers of Config resource attributes are the publishers
-(``Config.publish_to`` in config/models.py and the ``publish_to``
-operator publishers in apt.py / install_commands.py).
+TOML to YAML manifests without touching consumers. The declarative-schema
+sunset (ADR 0022) then removed the ``Config`` resource fields outright and
+deleted the operator publishers, so there are now NO sanctioned readers:
+the allowlist is empty.
 
 This is a source-level scan (same spirit as the Phase 0 vocabulary
 guard): any ``config.<resource-attr>`` / ``cfg.<resource-attr>`` read
-outside the allowlisted publisher modules fails the build. Comments and
-docstrings count on purpose; prose that references the retired idiom is
-stale prose.
+fails the build. Comments and docstrings count on purpose; prose that
+references the retired idiom is stale prose.
 """
 
 from __future__ import annotations
@@ -23,11 +22,9 @@ import agentworks
 
 _AGENTWORKS_ROOT = Path(agentworks.__file__).parent
 
-_PUBLISHER_ALLOWLIST = {
-    Path("config/models.py"),
-    Path("apt.py"),
-    Path("install_commands.py"),
-}
+# Empty: ADR 0022 removed the Config resource fields and the operator
+# publishers, so no module reads a config resource attribute anymore.
+_PUBLISHER_ALLOWLIST: set[Path] = set()
 
 _RESOURCE_ATTRS = (
     "secrets",
