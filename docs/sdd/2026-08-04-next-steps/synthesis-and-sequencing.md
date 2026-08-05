@@ -224,12 +224,13 @@ ordering is explicitly promoted to a resolution order.
 
 Operator design input for the wave 3 FRD (2026-08-05): a source exposes KV secrets and maps to one
 backend with that source's config; per-source mapping to multiple backends is not required. On
-reference shape, the operator's suggestion is that a per-secret reference may name either a backend
-directly (today's simple case) or a source. The wave 3 design should weigh that against the
-alternative already in the capability perspective: synthesize zero-config sources under the current
-backend names (`env-var`, `prompt`) so every reference names a source and the simple case keeps its
-current spelling with only one concept in the model. Either way, the simple case must not get more
-verbose.
+reference shape, the settled direction (operator, 2026-08-05) is the synthesized-source model: every
+per-secret reference names a source, and zero-config backends get synthesized sources under their
+current names (`env-var`, `prompt`) so the simple case keeps its current spelling with only one
+concept in the model. Direct backend references become a deprecated compatibility path rather than a
+permanent second branch. Breaking changes are acceptable across this work provided each one ships
+with a deprecation runway and migration helpers (the 0.13 to 0.14 pattern: warn and migrate in one
+release, reject in the next). The simple case must not get more verbose.
 
 ### Wave 4: harness facet framework, one vertical slice
 
