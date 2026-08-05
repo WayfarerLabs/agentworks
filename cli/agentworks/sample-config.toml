@@ -8,10 +8,11 @@
 # git credentials, vm-sites, and apt / install-command entries live in the
 # resources/ directory next to this file (`agw resource sample <kind>`
 # prints a commented starter; --all for every kind). Legacy TOML resource
-# sections are deprecated: they keep loading with a deprecation warning,
-# and `agw resource migrate` moves them to YAML. This file is the
-# permanent home for SETTINGS: operator identity, paths, defaults,
-# enabled plugins, and the secret backend chain.
+# sections are no longer supported: a config.toml that still declares
+# resources is a hard error at load now (they were previously deprecated
+# with a warning). Run `agw resource migrate` to move them to YAML. This
+# file is the permanent home for SETTINGS: operator identity, paths,
+# defaults, enabled plugins, and the secret backend chain.
 #
 # Comment convention: examples are written as `#key = "value"` (no space
 # after `#`), so you can uncomment a line in place by deleting one `#`.

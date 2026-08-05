@@ -153,6 +153,12 @@ a config resource or a live instance.
 > deprecated for removal in "a future release" (deliberately no longer gated on a major release),
 > and the load-time warning and operator docs say so. A superseding ADR will come out of the
 > upcoming TOML-resource sunset SDD effort.
+>
+> Superseded by [ADR 0022](0022-single-resource-declaration-frontend.md) (2026-08-05): the dual-path
+> stance in this section is retired. YAML manifests are now the single resource-declaration
+> frontend; config.toml is settings only and hard-errors on any resource-declaring section. ADR 0022
+> supersedes ONLY this section; the rest of this ADR still stands. `agw resource migrate` remains
+> the escape hatch that moves legacy TOML declarations to YAML.
 
 TOML resource sections remain fully supported publishers into the same registry, with deprecation
 warnings at load. As originally accepted, removal was deferred to a future major release and the
@@ -167,8 +173,11 @@ teaching surface, while `agw config init/edit/sample` continue to own the perman
 ## Consequences
 
 - Operators declare resources as small reviewable files, grouping resources into any number of YAML
-  manifests, with the same validation as TOML (the manifest decoders call the TOML loaders, so the
-  two sources cannot drift).
+  manifests. (Amended 2026-08-05 per [ADR 0022](0022-single-resource-declaration-frontend.md): this
+  bullet originally said the manifest decoders call the TOML loaders "so the two sources cannot
+  drift". That is no longer true. config.toml no longer declares resources, and the manifest
+  decoders now own their per-kind validation directly; the relocated TOML reader survives only as
+  the migrator's private oracle. There is no second load-path source left to drift from.)
 - The registry is the single source of truth for the runtime; `Config` carries settings only.
   Consumer code reads resources through registry accessors, never `Config` attributes.
 - Plugins get a paved road: resources arrive as bundled manifests with their own origin variant;

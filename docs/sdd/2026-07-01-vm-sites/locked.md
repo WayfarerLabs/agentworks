@@ -264,3 +264,13 @@ yet) as `aws-ec2`: renamed from `ec2` for provider-service naming symmetry, so t
 pairing reads uniformly (`azure` -> `azure-vm`, `aws` -> `aws-ec2`), matching the
 one-specific-service rationale `azure-vm` follows. Only the platform NAME changed; the class
 (`EC2Platform`), the plugin (`aws`), and the config surface are unchanged.
+
+## Addendum: 2026-08-05 (legacy `[azure]` / `[proxmox]` sections no longer load, PR #316)
+
+This SDD's stance that "the legacy `[azure]` / `[proxmox]` config sections became deprecated
+`vm-site` declarations" (recorded in the 2026-07-16 entry above and in ADR 0016's implementation
+note) is revised by the declarative-schema effort's phase 1 (the TOML resource sunset). config.toml
+is now settings only: `[azure]` and `[proxmox]` no longer load as deprecated vm-site declarations,
+they hard-error at config load. Migrate them to `vm-site` manifests with
+`agw resource migrate vm-site` (they still migrate as vm-site). ADR 0016's dual-path stance is
+superseded by [ADR 0022](../../adrs/0022-single-resource-declaration-frontend.md).

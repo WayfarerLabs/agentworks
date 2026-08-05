@@ -178,3 +178,16 @@ Existing VMs need `agw vm reinit` to deploy the new fragment. Until then the pan
 rather than failing: without the fragment sudo refuses the whole `--preserve-env` command instead of
 dropping the vars, so the service layer probes the capability first, omits the flag, keeps the
 `env_keep`-only behavior, and warns naming the missing directive and the reinit command.
+
+## 2026-08-05: `[secrets.*]` (and the resource `*.env` subsections) no longer load in TOML (PR #316)
+
+This SDD's "TOML loader extensions" entry records `[secrets.<name>]` and the per-resource
+`[vm_templates.*.env]` / `[workspace_templates.*.env]` / `[agent_templates.*.env]` /
+`[session_templates.*.env]` / `[admin.env]` env subsections as parsed and validated at config load.
+The declarative-schema effort's phase 1 (the TOML resource sunset) revises that: config.toml is now
+settings only, so `[secrets.*]` and every resource-declaring section (env subsections included,
+since they ride their owning resource) hard-error at load rather than parse. Declare secrets and
+resource env maps in YAML manifests; `agw resource migrate` moves existing TOML declarations. The
+`[secret_config]` chain and `[secret_backends.*]` no-op sections are settings/no-ops, not resource
+declarations, and are unaffected. ADR 0016's dual-path stance is superseded by
+[ADR 0022](../../adrs/0022-single-resource-declaration-frontend.md).

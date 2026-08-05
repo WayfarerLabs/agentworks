@@ -726,31 +726,13 @@ and `codex` unions `writable_dirs`), while a child naming a _different_ integrat
 fresh config (the parent's block was addressed to a different tool). `env`, `inherits`, and the
 description merge as usual.
 
-**TOML** (`[session_templates.<name>]` in `config.toml`, deprecated but supported): use the same
-canonical pair, `harness_integration` plus a nested `harness_integration_config` table:
-
-```toml
-[session_templates.htop]
-harness_integration = "shell"
-[session_templates.htop.harness_integration_config]
-command = "htop"
-required_commands = ["htop"]
-```
-
-For `shell`, the legacy flat keys `command` / `restart_command` / `required_commands` keep working
-at the section top level and are hoisted into `harness_integration = "shell"` plus the equivalent
-`harness_integration_config`. The flat form is the documented default TOML shape; use
-`resume_command` for new declarations. `restart_command` warns in 0.13.0 and is removed in 0.14.0.
-YAML manifests are the primary authoring surface (run `agw resource sample session-template`). The
-flat fields cannot be combined with a non-`shell` `harness_integration` or with an explicit
-`harness_integration_config` table (one spelling per declaration), and both conflicts are load
-errors. One inheritance interaction worth noting: a legacy flat-field child under a
-`harness_integration: claude-code` parent hoists to `harness_integration = "shell"`, which (per the
-different-integration rule) switches the lineage back to `shell` with a fresh config.
-
-The old TOML `harness` / `harness_config` pair remains accepted through 0.13.0 and contributes to
-that once-per-command/request aggregated warning. It cannot be mixed with the canonical pair; run
-`agw resource migrate` to rewrite it.
+**TOML session-template sections are removed.** `config.toml` is settings only, so
+`[session_templates.<name>]` (and the legacy flat `command` / `restart_command` /
+`required_commands` keys it used to accept) no longer load: any resource-declaring section is now a
+hard error at config load. Declare session templates as YAML manifests
+(`agw resource sample session-template`), and run `agw resource migrate session-template` to move
+any that still live in `config.toml`. The `restart_command` deprecation described above applies to
+the YAML input as well; `agw resource migrate` rewrites it to `resume_command`.
 
 ### Config
 
@@ -809,7 +791,7 @@ never overwritten; an incomplete rollback reports the recovery copy for manual r
 Migrated TOML sections are commented out in place with a `# migrated to resources/<file>` marker
 (default) or removed with `--toml delete`. Deprecated `[secret_backends.*]` sections are dropped
 (with a note) by any run, including a bare run with nothing else to migrate. Every real run finishes
-by rebuilding the registry and verifying it is row-for-row identical to the pre-migration one; on
+by verifying that each migrated resource still decodes to exactly what it declared in TOML; on
 mismatch the run rolls back and reports. `--dry-run` prints a summary of what would migrate or be
 rewritten and writes nothing; add `--full` for complete YAML documents, YAML diffs, and the
 `config.toml` diff.
@@ -830,9 +812,9 @@ Configuration splits into two surfaces:
 - **Resources** (secrets, templates, git credentials, vm-sites, apt / install-command entries) are
   declared as YAML manifests under `~/.config/agentworks/resources/`, auto-loaded whenever a command
   needs them. `agw resource sample <kind>` prints a commented starter (`--all` for every kind). The
-  classic TOML resource sections keep working (deprecated, with one aggregated load warning per
-  command/request naming the sections present; silence it with the global `--no-deprecations` flag);
-  `agw resource migrate` moves them to YAML whenever you like. See
+  classic TOML resource sections are no longer supported: a `config.toml` that still declares
+  resources is a hard error at load (they were previously deprecated with a warning). Run
+  `agw resource migrate` to move any legacy TOML declarations to YAML. See
   [docs/guides/resources.md](../docs/guides/resources.md).
 
 Settings sections (`config.toml`, permanent):
@@ -846,7 +828,9 @@ Settings sections (`config.toml`, permanent):
 - `[plugins]`: the plugin-subsystem namespace; its `system` key is the opt-in list of enabled system
   plugins (see [System Plugins](#system-plugins) below)
 
-Resource kinds (YAML manifests; the deprecated TOML section is noted for each):
+Resource kinds (declared as YAML manifests). Each parenthetical names the removed legacy TOML
+section that used to declare the kind: it no longer loads, and is listed only as a reference for
+`agw resource migrate`:
 
 - `vm-site` (`[azure]` / `[proxmox]`, flat legacy shape): a configured place to create VMs.
   `spec.platform` is one tagged table: its `name` key selects the backing platform and the remaining
@@ -870,12 +854,12 @@ Resource kinds (YAML manifests; the deprecated TOML section is noted for each):
 - `named-console-template` (`[named_console]`) -- named-console layout (tmux preset names +
   `aw-session-vertical`)
 - `git-credential` (`[git_credentials.*]`) -- git credentials; `spec.provider` selects github or
-  azdo (TOML also accepts the legacy `type`)
+  azdo
 - `secret` (`[secrets.*]`) -- secret declarations referenced by `{secret: name}` env entries
 - `apt-source` / `apt-package` / `system-install-command` / `user-install-command`
   (`[apt_sources.*]` etc.): apt / install-command extensions
-- Env vars ride their owning resource: an `env` map in the template's `spec` (TOML: `[<scope>.env]`
-  subsections) at vm / workspace / admin / agent / session scope
+- Env vars ride their owning resource: an `env` map in the template's `spec` (the removed TOML shape
+  used `[<scope>.env]` subsections) at vm / workspace / admin / agent / session scope
 
 ### Environment Variables and Secrets
 
@@ -900,8 +884,6 @@ spec:
     HTTP_PROXY: http://proxy:3128
     NPM_TOKEN: { secret: npm-token }
 ```
-
-(TOML equivalent: `[vm_templates.default.env]` with `NPM_TOKEN = { secret = "npm-token" }`.)
 
 Every secret reference points to a `secret` resource declaration (auto-declared with a
 framework-synthesized description if you skip it). Active backends (and their precedence order) are
@@ -1084,8 +1066,6 @@ spec:
   claude_marketplaces: ["https://github.com/WayfarerLabs/nerftools#4.1.0"]
   claude_plugins: [nerftools-default@nerftools]
 ```
-
-(TOML equivalent: `[admin.config]` in `config.toml`, deprecated but supported.)
 
 ### Built-in Apt / Install-Command Entries
 

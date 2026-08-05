@@ -104,16 +104,16 @@ enumerated by 1.2f (operator-approved bounded window, see the preamble). The ste
 
 ### 1.3 Phase 1 records
 
-- [ ] Superseding ADR replaces ADR 0016's dual-path stance (the ADR the status note promised); ADR
+- [x] Superseding ADR replaces ADR 0016's dual-path stance (the ADR the status note promised); ADR
       0016 gains its superseded-by pointer.
-- [ ] Guides, cli README, root README, and sample-config.toml describe only the manifest path
+- [x] Guides, cli README, root README, and sample-config.toml describe only the manifest path
       (sample-config's pointer comments already do; sweep for stragglers).
-- [ ] Dated lockfile entries: resource-manifests (TOML path removed; which shipped machinery from
+- [x] Dated lockfile entries: resource-manifests (TOML path removed; which shipped machinery from
       that SDD is retired) and any other locked SDD whose stance this revises.
-- [ ] The removal commit carries the breaking-change marker (`!` / BREAKING CHANGE footer) so
+- [x] The removal commit carries the breaking-change marker (`!` / BREAKING CHANGE footer) so
       release-please surfaces it, and an operator upgrade note (run `agw resource migrate` before
       upgrading, or after via the escape hatch) is written for the release notes.
-- [ ] Reviewer pass on the whole phase; findings fixed.
+- [x] Reviewer pass on the whole phase; findings fixed.
 
 ## Phase 2: the declarative schema model
 
