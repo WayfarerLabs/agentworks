@@ -35,7 +35,8 @@ is locked.
 
 ### Design track: facet-model boundary
 
-- [ ] Contract artifact drafted (roadmap lead, in progress; gates the wave 4 and wave 5 seeds)
+- [x] Contract artifact drafted (`facet-boundary-contract.md`, 2026-08-05; gates the wave 4 and wave
+      5 seeds)
 - [ ] Reviewed and merged to `main`
 
 ### Not yet spawned
@@ -91,7 +92,8 @@ open-ended research placeholder.
 2. Done (2026-08-05): roadmap PR #400 and wave 1 seed #401 merged; harvested
    `feat/harness-transcripts-sdd` branch deleted.
 3. Done (2026-08-05): issue-intake comments posted.
-4. Merge the descriptor contract (PR #405, review findings applied), then seed wave 2.
+4. Done (2026-08-05): descriptor contract merged (PR #405). Wave 2 seeds once wave 1's removals
+   land.
 5. Wave 1 in flight with its effort lead; roadmap lead reviews its PRs.
-6. Design track continues: facet-model boundary with session/run identity, the instance-state store,
-   and the event vocabulary's first slice.
+6. Design track: facet boundary contract in review; then the instance-state store schema and the
+   event vocabulary's first slice.

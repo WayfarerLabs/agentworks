@@ -45,8 +45,9 @@ Facet
     grants          the least-privilege set the facet receives: execution identity, target,
                     filesystem roots, secret access; nothing outside the declaration
     operations      readiness plus the facet's lifecycle operations (apply/reconcile for setup
-                    facets; start/resume for the workload facet; collect/emit for observation;
-                    validated intents for control)
+                    facets; start/resume for the workload facet; collect, emit, current-state
+                    exposure, and degradation reporting for observation; validated intents for
+                    control)
     state           applied-state schema and version, persisted in the instance-state store
     requirements    prerequisites this facet satisfies for later session use, by stable key
 ```
@@ -57,13 +58,19 @@ Two families share this declaration but differ in lifecycle:
 
 - **Setup facets** (vm, admin, agent, workspace): mutate their owning resource during its owning
   lifecycle operation, with idempotent apply where the lifecycle supports reapplication (vm and
-  agent reinit) and create-time materialization where it does not (workspace, session). Their
-  effects are recorded as applied state.
-- **Runtime facets** (session workload, observation, control): bound to one session run. The
-  workload facet is today's session object, unchanged in ownership. Observation collects and fuses
-  sources into the universal event stream; control validates intents against observed live state.
-  Control MUST NOT be declared without observation; the framework rejects that registration
-  (conformance, not convention).
+  agent reinit) and create-time materialization where it does not (workspace). Their effects are
+  recorded as applied state. Session-scope create-time materialization is not a fifth setup case: it
+  belongs to the workload facet, whose config resolves and materializes once at session create per
+  the fixed-at-create lifecycle.
+- **Runtime facets** (session workload, observation, control): their operations run within one
+  session run, though their state need not be run-scoped (see below). The workload facet is today's
+  session object, unchanged in ownership. Observation collects and fuses sources into the universal
+  event stream, exposes interpreted current state, and reports degradation and loss; control
+  validates intents against that observed live state. Control MUST NOT be declared without
+  observation, and the framework rejects that registration (conformance, not convention). The
+  enforcement mechanism is a wave 4 descriptor addition per the descriptor's deferred-field
+  discipline: slot-dependency metadata (a slot declares that it requires another slot), created when
+  the control facet first exists.
 
 Setup facets never run from session operations. Runtime facets never mutate upstream resources.
 These are the same boundary stated from both sides, and they inherit the existing session-local
@@ -78,22 +85,28 @@ The identity model both waves build on, resolving the sharpest gap in `starting-
   delete-and-recreate under the same name can never splice histories.
 - **`run_id`**: minted at each workload incarnation (create and every resume), unique within the
   session. The existing `boot_id` stays what it is today: VM reboot detection, not identity.
-- Events, facet state for runtime facets, and transcripts key on `(session_uuid, run_id)`. Setup
-  facet state keys on the owning resource's identity, integration, facet, attachment, and schema
-  version, in the instance-state store.
+- Events and transcripts key on `(session_uuid, run_id)`. Runtime-facet state declares its scope
+  explicitly: session-scoped state keys on `session_uuid` alone and deliberately survives resume
+  (the workload facet's state is the load-bearing case: a harness's minted conversation identity is
+  exactly what a later run needs to decide resume versus launch), while run-scoped state keys on
+  `(session_uuid, run_id)` (observation's working state is the expected case). Setup facet state
+  keys on the owning resource's identity, integration, facet, and attachment (the attachment key
+  component is provisional pending wave 4's attachment shape); the state's schema version is an
+  attribute of the record, not a key component, so upgrades migrate state rather than orphaning it.
 - Run boundaries are explicit events: a resume ends the previous run (closing unfinished interaction
   pairs as expired-by-run-end, never silently) and starts a new one. Liveness signals attach to a
   run; activity signals attach to observed events within a run. VM auto-suspend consumes activity,
   never liveness.
-- The schema change (two columns plus mint points at create and resume) is small and self-contained;
-  wave 5 owns it unless wave 1 finds it convenient earlier, per `phasing.md`.
+- The schema change (two columns plus mint points at create and resume) is small and self-contained
+  and may land early if convenient, per `phasing.md`; wave 5 owns it otherwise.
 
 ## State ownership
 
 - Facet applied-state and runtime-facet state live in the single instance-state store, keyed as
-  above, with schema versions per facet. The existing per-session `harness_integration_state` blob
-  keeps its current contract until wave 4 migrates the workload facet's state into the store; the
-  store's key shape is designed now precisely so that migration is mechanical.
+  above, each record carrying its facet schema version. The existing per-session
+  `harness_integration_state` blob keeps its current contract until wave 4 migrates the workload
+  facet's state into the store as session-scoped state; the session-scoped key is what makes that
+  migration mechanical (the blob already survives resume by design).
 - Stable external-artifact identifiers that are canonical entity state stay explicit on the owning
   entity; the store holds facet state, not entity identity (harness-scope perspective, preserved).
 - Secrets never enter persisted facet state or resolved-config snapshots; store references and
