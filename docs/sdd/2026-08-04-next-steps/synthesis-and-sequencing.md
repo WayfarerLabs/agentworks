@@ -200,11 +200,11 @@ order:
 
 ### Wave 2: declarative schema phase 2, through the descriptor
 
-Unhold phase 2 and execute it as the first consumer of the descriptor design: per-kind models
-registered via the descriptor's config-schema contract, tagged-union hardening (old sibling shape to
-a hard error, in-place manifest upgrade), schema emission, and live samples. Absorb here the
-deferred removals that belong to it: the generic discriminator compatibility and the fate of
-`agw resource migrate` and its frozen TOML oracle. Honor the four open doors recorded under
+Release phase 2 from its hold and execute it as the first consumer of the descriptor design:
+per-kind models registered via the descriptor's config-schema contract, tagged-union hardening (old
+sibling shape to a hard error, in-place manifest upgrade), schema emission, and live samples. Absorb
+here the deferred removals that belong to it: the generic discriminator compatibility and the fate
+of `agw resource migrate` and its frozen TOML oracle. Honor the four open doors recorded under
 "Declarative schema" above so the later instance-spec and living-graph work is not blocked.
 
 ### Wave 3: secret-source instances
