@@ -67,3 +67,18 @@ now locked.
   orphaned once `DeclaredResource` unified `description` and the display path moved to generic
   `getattr`). Surfaced incidentally during the vocabulary sweep and pulled into this PR as a
   leave-it-better cleanup.
+
+## 2026-08-05: the apt / install-command TOML surface is removed (PR #316)
+
+The "Deliberately out of scope" note above recorded that the operator TOML surface for these kinds
+(`[apt_sources.*]`, `[apt_packages.*]`, `[system_install_commands.*]`, `[user_install_commands.*]`)
+"stays until the broader TOML-resource deprecation (ADR 0016), served by the per-module operator
+publishers." That broader deprecation is now complete: the declarative-schema effort's phase 1 (the
+TOML resource sunset) makes config.toml settings only, so these sections hard-error at load rather
+than being served. The per-module operator publishers `apt.publish_to` and
+`install_commands.publish_to` were deleted (their only job was the operator TOML half); the built-in
+apt / install-command entries still publish through `builtin_manifests.publish_to`, and the
+`_load_apt_*` / `_load_*_commands` domain helpers survive for the manifest decoders. Declare these
+kinds in YAML manifests; `agw resource migrate` moves existing TOML declarations. ADR 0016's
+dual-path stance is superseded by
+[ADR 0022](../../adrs/0022-single-resource-declaration-frontend.md).

@@ -24,12 +24,18 @@ from agentworks.capabilities.git_credential.base import GitCredentialProvider
 from agentworks.config import load_config
 from agentworks.errors import ConfigError
 from agentworks.resources.reference import ConfigReference
+from tests.conftest import ManifestDoc, write_manifests
 
 
-def _config(tmp_path: Path, body: str = "", *, enabled: bool = False) -> Any:
-    # ``azdo`` ships in the opt-in ``azure`` system plugin, whose capability
-    # validation is deferred while disabled; a test exercising the azdo
-    # ``validate`` pass must enable the plugin so validation fires.
+def _config(tmp_path: Path, settings: str = "", *, enabled: bool = False) -> Any:
+    """Write a settings-only config.toml and return the loaded Config.
+
+    ``azdo`` ships in the opt-in ``azure`` system plugin, whose capability
+    validation is deferred while disabled; a test exercising the azdo
+    ``validate`` pass must enable the plugin (``enabled=True``) so validation
+    fires. The resources under test are declared through :func:`_manifest`;
+    config.toml is settings only now (ADR 0022).
+    """
     pub = tmp_path / "k.pub"
     priv = tmp_path / "k"
     pub.write_text("ssh-ed25519 AAAA test")
@@ -43,37 +49,34 @@ def _config(tmp_path: Path, body: str = "", *, enabled: bool = False) -> Any:
         ssh_private_key = "{priv.as_posix()}"
         """)
         + plugins
-        + dedent(body)
+        + dedent(settings)
     )
     return load_config(cfg, warn_issues=False)
 
 
-def _manifest(tmp_path: Path, text: str) -> None:
-    resources = tmp_path / "resources"
-    resources.mkdir(exist_ok=True)
-    (resources / "res.yaml").write_text(dedent(text))
+def _manifest(tmp_path: Path, *docs: ManifestDoc | str) -> None:
+    """Write the resource manifests under test into ``resources/res.yaml``.
+
+    Accepts structured :class:`ManifestDoc` documents or raw YAML strings (the
+    file's yaml-sibling tests hand-author the envelope). The fixed ``res.yaml``
+    filename is what the file:line assertions match on.
+    """
+    write_manifests(tmp_path, *docs, filename="res.yaml")
 
 
 # -- Blob validation through the capability ---------------------------------
 
 
-def test_azdo_org_required_toml(tmp_path: Path) -> None:
-    """A malformed provider_config fails at build_registry now, not at
-    load: capability validation moved out of the TOML loader into the
-    finalize ``validate`` pass (R3). The source location is re-attached
-    from the resource origin, so the TOML path gains a file:line it never
-    framed before."""
-    config = _config(
-        tmp_path,
-        """
-        [git_credentials.ado]
-        provider = "azdo"
-        """,
-        enabled=True,
-    )
+def test_azdo_org_required(tmp_path: Path) -> None:
+    """A malformed provider_config (azdo with no ``org``) fails at
+    build_registry: capability validation runs in the finalize ``validate``
+    pass (R3). The manifest file:line is re-attached from the resource
+    origin, so the error frames the declaring document."""
+    _manifest(tmp_path, ManifestDoc("git-credential", "ado", {"provider": {"name": "azdo"}}))
+    config = _config(tmp_path, enabled=True)
     with pytest.raises(ConfigError, match="org is required for the azdo provider") as exc:
         build_registry(config)
-    assert "config.toml" in str(exc.value)
+    assert "res.yaml" in str(exc.value)
 
 
 def test_azdo_rejects_unknown_blob_fields_yaml(tmp_path: Path) -> None:
@@ -140,13 +143,8 @@ def test_github_rejects_unknown_blob_fields(tmp_path: Path) -> None:
 def test_unknown_provider_defers_to_miss_policy(tmp_path: Path) -> None:
     """An unregistered provider name skips capability validation; the
     framework's miss policy reports it uniformly at build_registry."""
-    config = _config(
-        tmp_path,
-        """
-        [git_credentials.mystery]
-        provider = "sourcehut"
-        """,
-    )
+    _manifest(tmp_path, ManifestDoc("git-credential", "mystery", {"provider": {"name": "sourcehut"}}))
+    config = _config(tmp_path)
     with pytest.raises(ConfigError, match="sourcehut"):
         build_registry(config)
 
@@ -160,19 +158,16 @@ def test_cycle_reported_before_malformed_block(tmp_path: Path) -> None:
     a config carrying BOTH a malformed block and a cycle now reports the
     cycle first, where the malformed block used to fail earlier at
     decode/load, before finalize ever ran."""
-    config = _config(
+    _manifest(
         tmp_path,
-        """
-        [session_templates.a]
-        inherits = ["b"]
-        harness = "shell"
-        [session_templates.a.harness_config]
-        nope = "x"
-
-        [session_templates.b]
-        inherits = ["a"]
-        """,
+        ManifestDoc(
+            "session-template",
+            "a",
+            {"inherits": ["b"], "harness_integration": {"name": "shell", "nope": "x"}},
+        ),
+        ManifestDoc("session-template", "b", {"inherits": ["a"]}),
     )
+    config = _config(tmp_path)
     with pytest.raises(ConfigError, match="cycle detected") as exc:
         build_registry(config)
     # The malformed shell block is deferred behind the cycle, not raised.
@@ -234,13 +229,8 @@ def test_capability_refs_attributed_to_consuming_resource(tmp_path: Path, signin
     """The full contract: the capability returns the reference its blob
     implies; the consuming resource emits it as source; the framework
     auto-declares the secret with a per-consumer description."""
-    config = _config(
-        tmp_path,
-        """
-        [git_credentials.signer]
-        provider = "test-signing"
-        """,
-    )
+    _manifest(tmp_path, ManifestDoc("git-credential", "signer", {"provider": {"name": "test-signing"}}))
+    config = _config(tmp_path)
     registry = build_registry(config)
     # Defaulted secret name: auto-declared, attributed to THIS credential.
     decl = registry.lookup("secret", "code-signing-key")
@@ -252,32 +242,20 @@ def test_capability_refs_attributed_to_consuming_resource(tmp_path: Path, signin
 
 def test_capability_ref_default_is_operator_overridable(tmp_path: Path, signing_provider: None) -> None:
     """The defaulted-and-overridable flavor: pointing the blob field at
-    another secret moves the reference (TOML hosts blob fields flat)."""
-    config = _config(
-        tmp_path,
-        """
-        [git_credentials.signer]
-        provider = "test-signing"
-
-        [secrets.corp-signing-key]
-        description = "Corporate signing key"
-        """,
-    )
-    # TOML flat domain has no blob columns beyond org today; drive the
-    # override through a manifest instead.
+    another secret moves the reference. ``signer`` takes the default
+    (``code-signing-key``); ``signer2`` overrides ``signing_key`` in its
+    provider table onto ``corp-signing-key``."""
     _manifest(
         tmp_path,
-        """
-        apiVersion: agentworks/v1
-        kind: git-credential
-        metadata:
-          name: signer2
-        spec:
-          provider: test-signing
-          provider_config:
-            signing_key: corp-signing-key
-        """,
+        ManifestDoc("git-credential", "signer", {"provider": {"name": "test-signing"}}),
+        ManifestDoc("secret", "corp-signing-key", description="Corporate signing key"),
+        ManifestDoc(
+            "git-credential",
+            "signer2",
+            {"provider": {"name": "test-signing", "signing_key": "corp-signing-key"}},
+        ),
     )
+    config = _config(tmp_path)
     registry = build_registry(config)
     registry.lookup("secret", "corp-signing-key")
     sources = {entry.source for entry in registry.graph.dependents_of("secret", "corp-signing-key")}
@@ -292,14 +270,13 @@ def test_env_var_mapping_validated_at_build_registry(tmp_path: Path) -> None:
     describe/resolve time; validate_chain now invokes the backend's
     validate_mapping so it fails at build_registry with config
     vocabulary."""
-    config = _config(
+    _manifest(
         tmp_path,
-        """
-        [secrets.npm-token]
-        description = "npm token"
-        backend_mappings.env-var = { vault = "Work" }
-        """,
+        ManifestDoc(
+            "secret", "npm-token", {"backend_mappings": {"env-var": {"vault": "Work"}}}, description="npm token"
+        ),
     )
+    config = _config(tmp_path)
     with pytest.raises(ConfigError, match="env-var backend must be a non-empty string"):
         build_registry(config)
 
@@ -309,28 +286,26 @@ def test_prompt_rejects_any_mapping(tmp_path: Path) -> None:
     config (a typo for another backend) and errors at build_registry.
     The generic false opt-out is loop-owned and never reaches the
     capability."""
-    config = _config(
+    _manifest(
         tmp_path,
-        """
-        [secrets.npm-token]
-        description = "npm token"
-        backend_mappings.prompt = "ignored"
-        """,
+        ManifestDoc("secret", "npm-token", {"backend_mappings": {"prompt": "ignored"}}, description="npm token"),
     )
+    config = _config(tmp_path)
     with pytest.raises(ConfigError, match="prompt backend has no meaning"):
         build_registry(config)
 
 
 def test_prompt_false_opt_out_still_loads(tmp_path: Path) -> None:
-    config = _config(
+    _manifest(
         tmp_path,
-        """
-        [secrets.npm-token]
-        description = "npm token"
-        backend_mappings.env-var = "NPM_TOKEN"
-        backend_mappings.prompt = false
-        """,
+        ManifestDoc(
+            "secret",
+            "npm-token",
+            {"backend_mappings": {"env-var": "NPM_TOKEN", "prompt": False}},
+            description="npm token",
+        ),
     )
+    config = _config(tmp_path)
     build_registry(config)  # no error
 
 
@@ -341,15 +316,17 @@ def test_declared_mapping_for_non_opted_in_backend_is_validated_at_build(tmp_pat
     mapping, not just the opted-in ones). Here env-var is not opted in (chain
     is prompt-only) but its structured mapping is malformed for env-var, so the
     build now fails, where the old ``validate_chain`` left it dormant."""
+    _manifest(
+        tmp_path,
+        ManifestDoc(
+            "secret", "npm-token", {"backend_mappings": {"env-var": {"vault": "Work"}}}, description="npm token"
+        ),
+    )
     config = _config(
         tmp_path,
         """
         [secret_config]
         backends = ["prompt"]
-
-        [secrets.npm-token]
-        description = "npm token"
-        backend_mappings.env-var = { vault = "Work" }
         """,
     )
     with pytest.raises(ConfigError, match="env-var backend must be a non-empty string"):
@@ -357,33 +334,23 @@ def test_declared_mapping_for_non_opted_in_backend_is_validated_at_build(tmp_pat
 
 
 def test_prompt_rejects_structured_mapping_too(tmp_path: Path) -> None:
-    config = _config(
+    _manifest(
         tmp_path,
-        """
-        [secrets.npm-token]
-        description = "npm token"
-        backend_mappings.prompt = { vault = "Work" }
-        """,
+        ManifestDoc(
+            "secret", "npm-token", {"backend_mappings": {"prompt": {"vault": "Work"}}}, description="npm token"
+        ),
     )
+    config = _config(tmp_path)
     with pytest.raises(ConfigError, match="prompt backend has no meaning"):
         build_registry(config)
 
 
-def test_github_toml_stray_org_keeps_loading(tmp_path: Path) -> None:
-    """Loads-today: the flat TOML shape only ever read `org` for azdo,
-    so a released github credential carrying a stray `org` key loaded
-    with the key silently ignored. The capability validates the blob
-    the loader assembles, and the loader must therefore hoist `org`
-    into the blob only for azdo -- a stray key must not be promoted
-    into a validation error on released surface."""
-    config = _config(
-        tmp_path,
-        """
-        [git_credentials.hub]
-        provider = "github"
-        org = "accidental"
-        """,
-    )
-    registry = build_registry(config)
-    cred = registry.lookup("git-credential", "hub")
-    assert cred.provider_config == {}  # stray key stays ignored, as released
+# The former ``test_github_toml_stray_org_keeps_loading`` was removed here: it
+# pinned the flat-TOML loader's behavior of hoisting ``org`` into the blob only
+# for azdo, so a released github credential carrying a stray ``org`` loaded with
+# the key silently ignored (``provider_config == {}``). config.toml no longer
+# declares git-credentials (ADR 0022), and a manifest provider table has no flat
+# hoisting: an ``org`` key on a github provider table is an explicit unknown
+# field the capability rejects (``unknown github provider field``, pinned by
+# ``test_github_rejects_unknown_blob_fields``). The silently-ignored-stray-key
+# behavior is structurally gone with the flat TOML surface.

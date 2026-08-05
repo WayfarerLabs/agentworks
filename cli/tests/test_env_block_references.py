@@ -12,8 +12,8 @@ surfaces "no active backend resolved" if no backend yields a value.
 
 from __future__ import annotations
 
-from pathlib import Path
 from textwrap import dedent
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -26,6 +26,11 @@ from agentworks.sessions.template import SessionTemplate
 from agentworks.vms.admin import AdminConfig
 from agentworks.vms.template import VMTemplate
 from agentworks.workspaces.template import WorkspaceTemplate
+from tests.conftest import ManifestDoc, write_manifests
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+    from pathlib import Path
 
 
 @pytest.fixture()
@@ -37,7 +42,16 @@ def ssh_keys(tmp_path: Path) -> tuple[Path, Path]:
     return pub, priv
 
 
-def _write_cfg(tmp_path: Path, body: str, ssh_keys: tuple[Path, Path]) -> Path:
+def _write_cfg(
+    tmp_path: Path,
+    ssh_keys: tuple[Path, Path],
+    *,
+    settings: str = "",
+    manifests: Sequence[ManifestDoc | str] = (),
+) -> Path:
+    """Write a settings-only config.toml plus its resources/ manifests and
+    return the config path. ``settings`` carries settings-only TOML; the
+    env-block resources under test go in ``manifests``."""
     pub, priv = ssh_keys
     p = tmp_path / "c.toml"
     p.write_text(
@@ -49,8 +63,10 @@ def _write_cfg(tmp_path: Path, body: str, ssh_keys: tuple[Path, Path]) -> Path:
 
             """
         )
-        + dedent(body)
+        + dedent(settings)
     )
+    if manifests:
+        write_manifests(tmp_path, *manifests)
     return p
 
 
@@ -160,11 +176,8 @@ def test_undeclared_env_secret_auto_declares_through_build_registry(
     """
     cfg = _write_cfg(
         tmp_path,
-        """\
-        [admin.env]
-        API_KEY = { secret = "anthropic-api-ky" }
-        """,
         ssh_keys,
+        manifests=[ManifestDoc("admin-template", "default", {"env": {"API_KEY": {"secret": "anthropic-api-ky"}}})],
     )
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
@@ -189,20 +202,12 @@ def test_operator_declared_secret_referenced_from_env_gets_usage_populated(
     """
     cfg = _write_cfg(
         tmp_path,
-        """\
-        [secrets.shared-key]
-        description = "Used by both admin and a template"
-
-        [admin.env]
-        ADMIN_KEY = { secret = "shared-key" }
-
-        [vm_templates.azure-prod]
-        cpus = 2
-
-        [vm_templates.azure-prod.env]
-        TEMPLATE_KEY = { secret = "shared-key" }
-        """,
         ssh_keys,
+        manifests=[
+            ManifestDoc("secret", "shared-key", description="Used by both admin and a template"),
+            ManifestDoc("admin-template", "default", {"env": {"ADMIN_KEY": {"secret": "shared-key"}}}),
+            ManifestDoc("vm-template", "azure-prod", {"cpus": 2, "env": {"TEMPLATE_KEY": {"secret": "shared-key"}}}),
+        ],
     )
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
@@ -223,12 +228,14 @@ def test_operator_declared_secret_referenced_from_env_gets_usage_populated(
 def test_multiple_env_refs_from_one_resource_each_contribute_usage(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
     cfg = _write_cfg(
         tmp_path,
-        """\
-        [admin.env]
-        KEY_A = { secret = "shared" }
-        KEY_B = { secret = "shared" }
-        """,
         ssh_keys,
+        manifests=[
+            ManifestDoc(
+                "admin-template",
+                "default",
+                {"env": {"KEY_A": {"secret": "shared"}, "KEY_B": {"secret": "shared"}}},
+            )
+        ],
     )
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)

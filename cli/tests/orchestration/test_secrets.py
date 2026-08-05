@@ -359,10 +359,12 @@ def _px_site_setup(tmp_path: Path, chain: str = '"env-var"') -> tuple[Config, Re
     prediction helpers above do not need this (they are handed a
     reference directly); intactness does, because it asks the registry."""
     from agentworks.bootstrap import build_registry
-    from tests.orchestrated_fixtures import PLUGINS_ENABLED, PROXMOX_SECTION, write_operator_config
+    from tests.orchestrated_fixtures import PLUGINS_ENABLED, proxmox_site, write_operator_config
 
     config = write_operator_config(
-        tmp_path, PLUGINS_ENABLED + PROXMOX_SECTION + f"[secret_config]\nbackends = [{chain}]\n"
+        tmp_path,
+        PLUGINS_ENABLED + f"[secret_config]\nbackends = [{chain}]\n",
+        manifests=[proxmox_site()],
     )
     return config, build_registry(config)
 

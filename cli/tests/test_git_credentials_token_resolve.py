@@ -9,12 +9,17 @@ fallback.
 
 from __future__ import annotations
 
-from pathlib import Path
 from textwrap import dedent
+from typing import TYPE_CHECKING
 
 import pytest
 
 from agentworks.config import load_config
+from tests.conftest import ManifestDoc, write_manifests
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+    from pathlib import Path
 
 
 def _resolve_tokens(config: object, registry: object, names: list[str]) -> dict[str, str]:
@@ -47,7 +52,16 @@ def ssh_keys(tmp_path: Path) -> tuple[Path, Path]:
     return pub, priv
 
 
-def _write_cfg(tmp_path: Path, body: str, ssh_keys: tuple[Path, Path]) -> Path:
+def _write_cfg(
+    tmp_path: Path,
+    ssh_keys: tuple[Path, Path],
+    *,
+    settings: str = "",
+    manifests: Sequence[ManifestDoc | str] = (),
+) -> Path:
+    """Write a settings-only config.toml plus its resources/ manifests and
+    return the config path. ``settings`` carries settings-only TOML
+    ([secret_config], [plugins]); resources go in ``manifests``."""
     pub, priv = ssh_keys
     p = tmp_path / "c.toml"
     p.write_text(
@@ -59,8 +73,10 @@ def _write_cfg(tmp_path: Path, body: str, ssh_keys: tuple[Path, Path]) -> Path:
 
             """
         )
-        + dedent(body)
+        + dedent(settings)
     )
+    if manifests:
+        write_manifests(tmp_path, *manifests)
     return p
 
 
@@ -74,14 +90,12 @@ def test_collect_git_tokens_resolves_default_secret_name(
     """
     cfg = _write_cfg(
         tmp_path,
-        """\
-        [git_credentials.github]
-        type = "github"
-
+        ssh_keys,
+        settings="""
         [secret_config]
         backends = ["env-var"]
         """,
-        ssh_keys,
+        manifests=[ManifestDoc("git-credential", "github", {"provider": {"name": "github"}})],
     )
     config = load_config(cfg, warn_issues=False)
     monkeypatch.setenv("AW_SECRET_GIT_TOKEN_GITHUB", "ghp_abc")
@@ -103,15 +117,12 @@ def test_collect_git_tokens_resolves_custom_secret_name(
     """
     cfg = _write_cfg(
         tmp_path,
-        """\
-        [git_credentials.github]
-        type = "github"
-        token = "custom-tok"
-
+        ssh_keys,
+        settings="""
         [secret_config]
         backends = ["env-var"]
         """,
-        ssh_keys,
+        manifests=[ManifestDoc("git-credential", "github", {"provider": {"name": "github", "token": "custom-tok"}})],
     )
     config = load_config(cfg, warn_issues=False)
     monkeypatch.setenv("AW_SECRET_CUSTOM_TOK", "ghp_custom")
@@ -133,23 +144,20 @@ def test_collect_git_tokens_batches_multiple_credentials(
     """
     cfg = _write_cfg(
         tmp_path,
+        ssh_keys,
         # ``azdo`` ships in the opt-in ``azure`` system plugin; enable it so the
         # azdo credential is ready and its token resolves.
-        """\
+        settings="""
         [plugins]
         system = ["azure"]
-
-        [git_credentials.github]
-        type = "github"
-
-        [git_credentials.azdo]
-        type = "azdo"
-        org = "my-org"
 
         [secret_config]
         backends = ["env-var"]
         """,
-        ssh_keys,
+        manifests=[
+            ManifestDoc("git-credential", "github", {"provider": {"name": "github"}}),
+            ManifestDoc("git-credential", "azdo", {"provider": {"name": "azdo", "org": "my-org"}}),
+        ],
     )
     config = load_config(cfg, warn_issues=False)
     monkeypatch.setenv("AW_SECRET_GIT_TOKEN_GITHUB", "ghp_aaa")
@@ -163,7 +171,7 @@ def test_collect_git_tokens_batches_multiple_credentials(
 
 
 def test_collect_git_tokens_empty_list_returns_empty_dict(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
-    cfg = _write_cfg(tmp_path, "", ssh_keys)
+    cfg = _write_cfg(tmp_path, ssh_keys)
     config = load_config(cfg, warn_issues=False)
 
     from agentworks.bootstrap import build_registry
@@ -182,27 +190,14 @@ def test_manifest_declared_credential_resolves_through_the_fold(
     both declaration surfaces feed the graph identically."""
     cfg = _write_cfg(
         tmp_path,
-        """\
+        ssh_keys,
+        settings="""
         [secret_config]
         backends = ["env-var"]
         """,
-        ssh_keys,
-    )
-    resources = tmp_path / "resources"
-    resources.mkdir()
-    (resources / "creds.yaml").write_text(
-        dedent(
-            """\
-            apiVersion: agentworks/v1
-            kind: git-credential
-            metadata:
-              name: widgets-bot
-            spec:
-              provider: github
-              provider_config:
-                repos: [acme/widgets]
-            """
-        )
+        manifests=[
+            ManifestDoc("git-credential", "widgets-bot", {"provider": {"name": "github", "repos": ["acme/widgets"]}})
+        ],
     )
     config = load_config(cfg, warn_issues=False)
     monkeypatch.setenv("AW_SECRET_GIT_TOKEN_WIDGETS_BOT", "tok123")
@@ -224,14 +219,12 @@ def test_collect_git_tokens_credential_lines_use_resolved_value(
     """
     cfg = _write_cfg(
         tmp_path,
-        """\
-        [git_credentials.github]
-        type = "github"
-
+        ssh_keys,
+        settings="""
         [secret_config]
         backends = ["env-var"]
         """,
-        ssh_keys,
+        manifests=[ManifestDoc("git-credential", "github", {"provider": {"name": "github"}})],
     )
     config = load_config(cfg, warn_issues=False)
     monkeypatch.setenv("AW_SECRET_GIT_TOKEN_GITHUB", "ghp_xyz")
@@ -259,15 +252,12 @@ def test_secret_name_equals_graph_secret_edge_single_derivation(
     needed."""
     cfg = _write_cfg(
         tmp_path,
-        """\
-        [git_credentials.github]
-        type = "github"
-        token = "custom-tok"
-
+        ssh_keys,
+        settings="""
         [secret_config]
         backends = ["env-var"]
         """,
-        ssh_keys,
+        manifests=[ManifestDoc("git-credential", "github", {"provider": {"name": "github", "token": "custom-tok"}})],
     )
     config = load_config(cfg, warn_issues=False)
 

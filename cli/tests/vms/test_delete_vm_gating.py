@@ -28,6 +28,7 @@ from agentworks.errors import AuthorizationError, UserAbort
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.vms import manager as vm_manager
 from tests._azure_platform_support import _RESOURCE_ID, _authorization_denied, _install_fakes
+from tests.conftest import ManifestDoc
 from tests.orchestrated_fixtures import write_operator_config
 
 if TYPE_CHECKING:
@@ -296,11 +297,21 @@ def test_azure_rbac_delete_failure_keeps_the_row_end_to_end(
     the one pin proving the two halves meet."""
     config = write_operator_config(
         tmp_path,
-        '[plugins]\nsystem = ["azure"]\n\n'
-        "[azure]\n"
-        'subscription_id = "sub-A"\n'
-        'resource_group = "rg1"\n'
-        'region = "eastus"\n',
+        '[plugins]\nsystem = ["azure"]\n',
+        manifests=[
+            ManifestDoc(
+                "vm-site",
+                "azure",
+                {
+                    "platform": {
+                        "name": "azure-vm",
+                        "subscription_id": "sub-A",
+                        "resource_group": "rg1",
+                        "region": "eastus",
+                    }
+                },
+            )
+        ],
     )
     # No tailscale host: the best-effort logout span never opens, so
     # nothing here needs the transport stubs.

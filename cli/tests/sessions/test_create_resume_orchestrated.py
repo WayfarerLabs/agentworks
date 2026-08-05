@@ -34,8 +34,8 @@ from agentworks.secrets.orchestration import (
     resolve_for_command as _real_resolve_for_command,
 )
 
-from ..conftest import stub_build_registry, stub_session_resolvers, stub_vm_gates
-from ..orchestrated_fixtures import PLUGINS_ENABLED, PROXMOX_SECTION, write_operator_config
+from ..conftest import ManifestDoc, stub_build_registry, stub_session_resolvers, stub_vm_gates
+from ..orchestrated_fixtures import PLUGINS_ENABLED, proxmox_site, write_operator_config
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -576,13 +576,10 @@ def test_resume_pane_command_uses_resume_command_and_session_workspace(
 # backend ops, the reachability probe, and the transports are the
 # fakes.
 
-SESSION_ENV_SECTION = """
-[session_templates.default.env]
-API_KEY = { secret = "api-key" }
-
-[secrets.api-key]
-description = "session runtime input"
-"""
+SESSION_ENV_MANIFESTS = [
+    ManifestDoc("session-template", "default", {"env": {"API_KEY": {"secret": "api-key"}}}),
+    ManifestDoc("secret", "api-key", description="session runtime input"),
+]
 
 
 @pytest.fixture
@@ -605,7 +602,7 @@ def make_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # noqa: ANN20
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", _real_resolve_for_command)
 
     def _make():  # noqa: ANN202
-        return write_operator_config(tmp_path, PLUGINS_ENABLED + PROXMOX_SECTION + SESSION_ENV_SECTION)
+        return write_operator_config(tmp_path, PLUGINS_ENABLED, manifests=[proxmox_site(), *SESSION_ENV_MANIFESTS])
 
     return _make
 

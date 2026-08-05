@@ -492,28 +492,39 @@ def test_cli_warns_ambiently_and_no_deprecations_silences(tmp_path: Path, monkey
     assert "deprecated session-template selector" not in silenced.output
 
 
-def test_cli_aggregates_toml_and_yaml_old_selectors_into_one_warning(
+def test_cli_aggregates_multiple_manifest_old_selectors_into_one_warning(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The warning is a request fact, not one emission per input source."""
+    """The warning is a request fact, not one emission per input source:
+    old selectors spread across two manifest files still aggregate into
+    one warning naming both. (config.toml can no longer declare session
+    templates, ADR 0022, so every declaration source is a manifest now.)"""
     from typer.testing import CliRunner
 
     from agentworks import output
     from agentworks.cli import app
 
     cfg = _write_config(tmp_path)
-    with cfg.open("a", encoding="utf-8") as handle:
-        handle.write('\n[session_templates.toml-old]\nharness = "shell"\n')
     resources = tmp_path / "resources"
     resources.mkdir()
     (resources / "res.yaml").write_text(dedent(_OLD_SHAPE_MANIFEST))
+    (resources / "res2.yaml").write_text(
+        dedent("""
+        apiVersion: agentworks/v1
+        kind: session-template
+        metadata:
+          name: other
+        spec:
+          harness: shell
+        """)
+    )
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
     monkeypatch.setattr(output, "_suppress_deprecations", False)
 
     result = CliRunner().invoke(app, ["resource", "list", "--names-only"])
     assert result.exit_code == 0, result.output
     assert result.output.count("deprecated session-template selector in:") == 1
-    assert "session-template/toml-old" in result.output
+    assert "session-template/other" in result.output
     assert "session-template/htop" in result.output
 
 

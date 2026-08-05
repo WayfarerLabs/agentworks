@@ -5,14 +5,18 @@ resolve secret values; it reports state").
 
 from __future__ import annotations
 
-from pathlib import Path
 from textwrap import dedent
+from typing import TYPE_CHECKING
 
 import pytest
 
 from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
 from agentworks.secrets.inspect import describe_secret
+from tests.conftest import ManifestDoc, write_manifests
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 @pytest.fixture()
@@ -24,7 +28,9 @@ def ssh_keys(tmp_path: Path) -> tuple[Path, Path]:
     return pub, priv
 
 
-def _write_cfg(tmp_path: Path, body: str, ssh_keys: tuple[Path, Path]) -> Path:
+def _write_api_key_cfg(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> Path:
+    """Write a config with one operator secret (``api-key``) declared as a
+    YAML manifest and the env-var/prompt backend chain."""
     pub, priv = ssh_keys
     p = tmp_path / "c.toml"
     p.write_text(
@@ -34,10 +40,12 @@ def _write_cfg(tmp_path: Path, body: str, ssh_keys: tuple[Path, Path]) -> Path:
             ssh_public_key = "{pub}"
             ssh_private_key = "{priv}"
 
+            [secret_config]
+            backends = ["env-var", "prompt"]
             """
         )
-        + dedent(body)
     )
+    write_manifests(tmp_path, ManifestDoc("secret", "api-key", description="API key"))
     return p
 
 
@@ -52,17 +60,7 @@ def test_describe_secret_never_resolves_through_interactive_backends(
     reported on ``would_attempt`` alone -- probing it would BE the
     prompt.
     """
-    cfg = _write_cfg(
-        tmp_path,
-        """\
-        [secrets.api-key]
-        description = "API key"
-
-        [secret_config]
-        backends = ["env-var", "prompt"]
-        """,
-        ssh_keys,
-    )
+    cfg = _write_api_key_cfg(tmp_path, ssh_keys)
     config = load_config(cfg, warn_issues=False)
 
     def _fail_batch_get(*args: object, **kwargs: object) -> None:
@@ -89,17 +87,7 @@ def test_describe_secret_does_not_run_the_resolve_loop(
     never route through it (its per-backend probe calls the backend's
     ``resolve`` directly, one non-interactive backend at a time).
     """
-    cfg = _write_cfg(
-        tmp_path,
-        """\
-        [secrets.api-key]
-        description = "API key"
-
-        [secret_config]
-        backends = ["env-var", "prompt"]
-        """,
-        ssh_keys,
-    )
+    cfg = _write_api_key_cfg(tmp_path, ssh_keys)
     config = load_config(cfg, warn_issues=False)
 
     def _fail_resolve_secrets(*args: object, **kwargs: object) -> None:
@@ -120,17 +108,7 @@ def test_describe_secret_does_not_invoke_prompt_backend(
     surface; ``describe`` must never reach it (belt to the provider
     batch_get guard's suspenders).
     """
-    cfg = _write_cfg(
-        tmp_path,
-        """\
-        [secrets.api-key]
-        description = "API key"
-
-        [secret_config]
-        backends = ["env-var", "prompt"]
-        """,
-        ssh_keys,
-    )
+    cfg = _write_api_key_cfg(tmp_path, ssh_keys)
     config = load_config(cfg, warn_issues=False)
 
     def _fail(*args: object, **kwargs: object) -> None:

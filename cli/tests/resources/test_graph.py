@@ -27,6 +27,7 @@ from agentworks.resources import (
     collect_secrets_for,
 )
 from agentworks.resources.reference import ReferenceEntry
+from tests.conftest import ManifestDoc, write_manifests
 
 
 @dataclass(frozen=True)
@@ -174,7 +175,11 @@ def test_every_node_is_ready_and_enabled_this_phase() -> None:
 # -- golden: dependents_of reproduces exactly the old references field -------
 
 
-def _write_cfg(tmp_path: Path, body: str) -> Path:
+def _write_cfg(tmp_path: Path, settings: str = "", *manifests: ManifestDoc | str) -> Path:
+    """Write a settings-only config.toml plus its resources/ manifests and
+    return the config path. ``settings`` carries settings-only TOML (operator
+    block plus any ``[secret_config]`` / ``[plugins]``); the resources under
+    test are authored as ``manifests`` beside it (ADR 0022)."""
     pub = tmp_path / "id.pub"
     priv = tmp_path / "id"
     pub.write_text("ssh-ed25519 X")
@@ -189,8 +194,10 @@ def _write_cfg(tmp_path: Path, body: str) -> Path:
 
             """
         )
-        + dedent(body)
+        + dedent(settings)
     )
+    if manifests:
+        write_manifests(tmp_path, *manifests)
     return p
 
 
@@ -220,20 +227,18 @@ def test_dependents_of_reproduces_old_references_field(tmp_path: Path) -> None:
     field held (same set of (source, usage) pairs)."""
     cfg = _write_cfg(
         tmp_path,
-        """
-        [secrets.shared-key]
-        description = "Shared"
-
-        [admin.env]
-        ADMIN_KEY = { secret = "shared-key" }
-        API_KEY = { secret = "auto-key" }
-
-        [vm_templates.azure-prod]
-        cpus = 2
-
-        [vm_templates.azure-prod.env]
-        TEMPLATE_KEY = { secret = "shared-key" }
-        """,
+        "",
+        ManifestDoc("secret", "shared-key", description="Shared"),
+        ManifestDoc(
+            "admin-template",
+            "default",
+            {"env": {"ADMIN_KEY": {"secret": "shared-key"}, "API_KEY": {"secret": "auto-key"}}},
+        ),
+        ManifestDoc(
+            "vm-template",
+            "azure-prod",
+            {"cpus": 2, "env": {"TEMPLATE_KEY": {"secret": "shared-key"}}},
+        ),
     )
     registry = build_registry(load_config(cfg, warn_issues=False))
     graph = registry.graph
@@ -290,13 +295,9 @@ def test_reachable_from_matches_collect_secrets_for(tmp_path: Path) -> None:
     VM template whose bootstrap reaches the tailscale auth key."""
     cfg = _write_cfg(
         tmp_path,
-        """
-        [admin.env]
-        ADMIN_KEY = { secret = "admin-secret" }
-
-        [vm_templates.default.env]
-        VM_KEY = { secret = "vm-secret" }
-        """,
+        "",
+        ManifestDoc("admin-template", "default", {"env": {"ADMIN_KEY": {"secret": "admin-secret"}}}),
+        ManifestDoc("vm-template", "default", {"env": {"VM_KEY": {"secret": "vm-secret"}}}),
     )
     registry = build_registry(load_config(cfg, warn_issues=False))
     graph = registry.graph
@@ -326,7 +327,7 @@ def test_auto_declared_secret_has_resolving_backend_edges(tmp_path: Path) -> Non
     the no-loop regression: a materialized secret walks its backend edges, and
     those point only back into the already-present backend nodes, so the
     fixpoint terminates."""
-    cfg = _write_cfg(tmp_path, "[vm_templates.default]\n")
+    cfg = _write_cfg(tmp_path, "", ManifestDoc("vm-template", "default"))
     registry = build_registry(load_config(cfg, warn_issues=False))
     graph = registry.graph
 
@@ -344,10 +345,8 @@ def test_backend_rows_gain_inbound_secret_refs(tmp_path: Path) -> None:
     referenced by nothing before the ``secret -> secret-backend`` edges)."""
     cfg = _write_cfg(
         tmp_path,
-        """
-        [secrets.api-key]
-        description = "an API key"
-        """,
+        "",
+        ManifestDoc("secret", "api-key", description="an API key"),
     )
     registry = build_registry(load_config(cfg, warn_issues=False))
     graph = registry.graph
@@ -363,11 +362,13 @@ def test_onepassword_mapped_secret_gets_onepassword_edge(tmp_path: Path) -> None
     the default env-var / prompt edges."""
     cfg = _write_cfg(
         tmp_path,
-        """
-        [secrets.vault-key]
-        description = "a vaulted key"
-        backend_mappings.onepassword = "op://vault/item/field"
-        """,
+        "",
+        ManifestDoc(
+            "secret",
+            "vault-key",
+            {"backend_mappings": {"onepassword": "op://vault/item/field"}},
+            description="a vaulted key",
+        ),
     )
     registry = build_registry(load_config(cfg, warn_issues=False))
     targets = {(ref.kind, ref.name) for ref in registry.graph.edges_of("secret", "vault-key")}

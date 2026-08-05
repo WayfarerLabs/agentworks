@@ -41,8 +41,10 @@ from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.transports import SSHTransport
 from agentworks.vms import manager as vm_manager
 from agentworks.workspaces import manager as workspace_manager
+from tests.conftest import ManifestDoc
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from pathlib import Path
 
     from agentworks.capabilities.base import OperationScope, RunContext
@@ -55,13 +57,15 @@ def make_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # noqa: ANN20
     """The shared ``make_config`` shape, plus a tmp ``[paths]`` section
     so delete's ``.code-workspace`` unlink and copy's VS Code stub
     never touch the operator's real directories."""
-    from tests.orchestrated_fixtures import PLUGINS_ENABLED, PROXMOX_SECTION, write_operator_config
+    from tests.orchestrated_fixtures import PLUGINS_ENABLED, proxmox_site, write_operator_config
 
     monkeypatch.setenv("AW_SECRET_PROXMOX_TOKEN", "pve-token")
     paths_section = f'[paths]\nvscode_workspaces = "{tmp_path / "vscode"}"\n'
 
-    def _make(extra: str = ""):  # noqa: ANN202
-        return write_operator_config(tmp_path, PLUGINS_ENABLED + PROXMOX_SECTION + paths_section + extra)
+    def _make(extra: str = "", *, manifests: Sequence[ManifestDoc | str] = ()):  # noqa: ANN202
+        return write_operator_config(
+            tmp_path, PLUGINS_ENABLED + paths_section + extra, manifests=[proxmox_site(), *manifests]
+        )
 
     return _make
 
@@ -272,7 +276,13 @@ def test_repair_converges_git_identity_on_the_checkout(
     checkout's repo-local config on repair (the fake answers the rev-parse
     repo probe ok, and the config --get probe empty, so both fields apply)."""
     config = make_config(
-        '[workspace_templates.default]\ngit_user_name = "Ada Lovelace"\ngit_user_email = "ada@example.com"\n'
+        manifests=[
+            ManifestDoc(
+                "workspace-template",
+                "default",
+                {"git_user_name": "Ada Lovelace", "git_user_email": "ada@example.com"},
+            )
+        ]
     )
     _seed(db)
     _reachable(monkeypatch, True)
@@ -320,7 +330,7 @@ def test_repair_skips_git_identity_when_not_a_repo(
     )
     _wire_target(monkeypatch, fake)
 
-    config = make_config('[workspace_templates.default]\ngit_user_name = "Ada Lovelace"\n')
+    config = make_config(manifests=[ManifestDoc("workspace-template", "default", {"git_user_name": "Ada Lovelace"})])
     _seed(db)
     _reachable(monkeypatch, True)
 
@@ -342,7 +352,7 @@ def test_repair_git_identity_warns_on_unexpected_probe_failure(
     fake = _RevParseFailingTarget(rev_parse_stderr="git: command not found")
     _wire_target(monkeypatch, fake)
 
-    config = make_config('[workspace_templates.default]\ngit_user_name = "Ada Lovelace"\n')
+    config = make_config(manifests=[ManifestDoc("workspace-template", "default", {"git_user_name": "Ada Lovelace"})])
     _seed(db)
     _reachable(monkeypatch, True)
 
@@ -1162,7 +1172,9 @@ def test_create_rollback_on_clone_failure_leaves_no_residue(
     fake = _CheckAwareTarget(failing=("test -d", "git clone"))
     _wire_target(monkeypatch, fake)
 
-    config = make_config('[workspace_templates.default]\nrepo = "https://example.com/repo.git"\n')
+    config = make_config(
+        manifests=[ManifestDoc("workspace-template", "default", {"repo": "https://example.com/repo.git"})]
+    )
     _seed_vm_only(db)
     _reachable(monkeypatch, True)
 

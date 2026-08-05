@@ -1,12 +1,10 @@
 """Tests for Phase 2a.3's plurification of ``admin-template``.
 
 The kind moves from singleton-conceptual to named-multi-instance,
-matching the shape of the other template kinds. The operator surface is
-unchanged in Phase 2a -- ``Config`` still parses only ``[admin]`` and
-publishes one ``admin-template:default`` row. These tests verify the
-*framework* is plurified: a hypothetical future operator surface
-(e.g., ``[admin_templates.work]`` parsing landing in a follow-up SDD)
-would Just Work without re-touching the framework.
+matching the shape of the other template kinds. These tests verify the
+*framework* is plurified: named admin-template declarations (as manifests
+now that config.toml is settings only, ADR 0022) publish as independent
+rows without re-touching the framework.
 
 What we pin:
 
@@ -41,6 +39,7 @@ from agentworks.resources import (
 )
 from agentworks.resources.graph import BuildContext
 from agentworks.vms.admin import AdminConfig
+from tests.conftest import ManifestDoc, write_manifests
 
 
 def _write_cfg(path: Path, body: str = "") -> Path:
@@ -181,7 +180,7 @@ def test_admin_template_kind_errors_on_unreserved_name_reference(
         registry.finalize()
 
 
-# -- Backwards-compatibility: today's operator surface still works ---------
+# -- Operator surface: admin-template defaults -----------------------------
 
 
 def test_loader_produces_admin_template_default_unchanged(tmp_path: Path) -> None:
@@ -199,46 +198,15 @@ def test_loader_produces_admin_template_default_unchanged(tmp_path: Path) -> Non
     assert admin.origin.variant == "auto-declared"
 
 
-def test_loader_admin_config_section_still_parses(tmp_path: Path) -> None:
-    """``[admin.config]`` still produces a single named-default
-    AdminConfig. Operator-surface unchanged in Phase 2a.
+def test_admin_config_manifest_still_produces_named_default(tmp_path: Path) -> None:
+    """An admin-template manifest declaring ``shell = "fish"`` still
+    produces a single named-default ``AdminConfig`` with that shell:
+    the admin-template default surface, now declared as a manifest
+    (config.toml is settings only, ADR 0022).
     """
-    cfg_file = _write_cfg(
-        tmp_path / "config.toml",
-        """
-        [admin.config]
-        shell = "fish"
-        """,
-    )
+    cfg_file = _write_cfg(tmp_path / "config.toml")
+    write_manifests(cfg_file.parent, ManifestDoc("admin-template", "default", {"shell": "fish"}))
     cfg = load_config(cfg_file, warn_issues=False)
-    assert cfg.admin is not None
-    assert cfg.admin.name == "default"
-    assert cfg.admin.shell == "fish"
-
-
-def test_plurified_operator_surface_not_yet_parsed(tmp_path: Path) -> None:
-    """Today's loader doesn't recognize ``[admin_templates.<name>]``;
-    the section silently passes through (no top-level recognized-keys
-    sweep) and ``cfg.admin`` is unchanged. Pinning this so a future
-    SDD that wires the plurified parsing has a known starting state.
-    """
-    cfg_file = _write_cfg(
-        tmp_path / "config.toml",
-        """
-        [admin.config]
-        shell = "zsh"
-
-        [admin_templates.work]
-        shell = "bash"
-        """,
-    )
-    cfg = load_config(cfg_file, warn_issues=False)
-    # The singleton admin still parses normally.
-    assert cfg.admin is not None
-    assert cfg.admin.name == "default"
-    assert cfg.admin.shell == "zsh"
-    # The unrecognized [admin_templates.*] block doesn't produce
-    # additional admin-template Resources today.
-    registry = build_registry(cfg)
-    names = sorted(r.name for r in registry.iter_kind("admin-template"))
-    assert names == ["default"]
+    admin = build_registry(cfg).lookup("admin-template", "default")
+    assert admin.name == "default"
+    assert admin.shell == "fish"

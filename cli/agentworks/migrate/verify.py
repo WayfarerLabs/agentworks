@@ -32,15 +32,23 @@ def normalized_rows(registry: Registry) -> dict[tuple[str, str], Any]:
 
 
 def first_difference(pre: dict[tuple[str, str], Any], post: dict[tuple[str, str], Any]) -> str | None:
-    """Human-readable description of the first divergence, or None."""
+    """First divergence of ``pre`` against ``post``, pre-keys-scoped, or None.
+
+    ``pre`` is the migrated units only (the oracle over the original TOML
+    plus the decoded original YAML, scoped to ``plan.units``); ``post`` is
+    the full registry rebuilt from the rewritten config plus manifests. Each
+    pre ``(kind, name)`` must be present and equal in post. The symmetric
+    "added" branch is deliberately dropped: once ``pre`` is scoped to the
+    selected units, ``post`` legitimately carries rows ``pre`` does not
+    (built-ins, auto-declared, other manifests), so an "added" check would
+    false-fail on every run. The narrow fabrication gap this opens (an
+    emission inventing an extra row for a selected unit) is closed by the
+    emitted-key-set guard in ``execute._verify``.
+    """
     missing = sorted(set(pre) - set(post))
     if missing:
         kind, name = missing[0]
         return f"{kind}/{name}: present before migration, missing after"
-    added = sorted(set(post) - set(pre))
-    if added:
-        kind, name = added[0]
-        return f"{kind}/{name}: absent before migration, present after"
     for key in sorted(pre):
         if pre[key] != post[key]:
             kind, name = key

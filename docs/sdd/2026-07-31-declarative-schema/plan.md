@@ -1,0 +1,342 @@
+# Plan: TOML Resource Sunset and the Declarative Schema Model
+
+Date: 2026-08-01
+
+Status: DRAFT (authored alongside the FRD and HLA; implementation gated, see prerequisites)
+
+## How to work this plan
+
+- **Split delivery (revised 2026-08-04).** Originally one branch and PR
+  (`feat/declarative-schema-sdd`, PR #316) for both phases. Phase 2 is now HELD at the phase gate
+  pending the next-steps SDD (`docs/sdd/2026-08-04-next-steps/`), which owns the capability-kind
+  descriptor and the 0.14 compatibility removals that per-kind modeling should follow rather than
+  precede (see that SDD's declarative-schema perspective). Because phase 1 (the TOML sunset) is a
+  precondition under every next-steps sequencing and carries independent standalone value, it MERGES
+  TO MAIN ON ITS OWN via PR #316 (SDD artifacts included), once the red window is closed and phase
+  1's records land. Phase 2 becomes a later feature branch tracking this same plan when next-steps
+  unblocks it; the SDD is not locked (no `locked.md`) until phase 2 completes. This is the SDD
+  skill's multi-branch model.
+- The suite stays green at every step, with ONE deliberate, operator-approved exception: step 1.2's
+  config-load hard error breaks ~58 test fixtures that declare resources in TOML, and the operator
+  chose (2026-08-04) a bounded red window over the additive-first alternative. So the core 1.2
+  production change lands first (suite red on a tracked, enumerated set of fixture files), and step
+  1.2f converts those fixtures back to green by area. The window is CLOSED (suite fully green)
+  before step 1.2 is checked off; phase 1 does not merge red.
+- Each numbered step is delegated to an `agentworks-dev` subagent (LLD first where one is called
+  for, then implementation), then reviewed by `agentworks-reviewer` before its boxes are checked.
+- Every step's definition of done includes the standing gates: `ruff check`, `ruff format --check`,
+  `mypy .` (strict), `pytest -q` all green, `./scripts/lint-files.sh` clean, plus the step's own
+  criteria. Steps that touch the CLI surface include the completions check; steps that change
+  operator-visible behavior update docs in the same commit.
+- Checked boxes are immutable history; plan changes add new boxes rather than editing old ones.
+
+## Prerequisites (hard gates, in order)
+
+- [x] The codex harness effort has landed on `main` (operator direction, 2026-08-01: wait for it,
+      then start; landed via PR #360 on 2026-08-02, alongside the EC2 vm-platform, PR #359). Its
+      capability joins the phase 2 model inventory like any other.
+- [x] PR #315 (TOML deprecation warning) and PR #349 (tagged-shape pre-support) are both in a
+      shipped release (v0.13.0, cut 2026-08-04). Phase 1's hard error and phase 2's shape hardening
+      each require one released warning version of runway (FRD dependencies).
+- [x] Branch rebased onto `main` after the above (2026-08-04); capability inventory re-enumerated:
+      the harness kind is now `harness-integration` (PR #383 rename; canonical field
+      `spec.harness_integration: {name: ...}`, legacy selector warned until that SDD's 0.14.0
+      removal phase), integrations are shell / claude-code / codex, and shell's config vocabulary is
+      `command` / `resume_command` / `required_commands` (`restart_command` deprecated by the
+      concurrent session-resume SDD, riding the same migrator rewrite pass). Steps 2.3, 2.4, and 2.5
+      updated below.
+
+## Phase 1: remove TOML resource declarations
+
+### 1.1 Phase 1 LLD (the migrator verification rework is the core)
+
+- [x] LLD `toml-sunset-lld.md` written and reviewed (2026-08-04; reviewer approve-with-changes, all
+      nine findings folded in). It must settle:
+  - The independent pre-side derivation for migrate verification (FRD FR2, HLA phase 1). Candidate
+    to evaluate first: RELOCATE the TOML resource loaders into `migrate/` as the migrator's private
+    TOML reader instead of deleting them outright. That satisfies "reads the TOML file directly",
+    keeps the pre-side independent of the emission mapping (old loader semantics vs section-to-spec
+    sweep), and still removes the loaders from the app's config-load path. If the LLD rejects this,
+    it must name the alternative independent derivation.
+  - The hard-error mechanics: where the `KIND_SECTIONS` check raises, the aggregated error text, and
+    which commands keep the settings-only escape hatch (`resource migrate` moves to it;
+    `resource sample --write` and `resource edit` fallback already use it).
+  - What happens to the `--no-deprecations` channel contents (the TOML nudge becomes an error and
+    leaves the channel; the #349 tagged-shape warning remains on it).
+  - The fate of every consumer of the deleted loaders (decode shims, `resource edit`'s TOML pointer
+    text, DB-migration snippet printers, doctor rows naming TOML sections, and the
+    `tests/resources/test_graph_guard.py` allowlist that hardcodes `config/loaders_secrets.py`).
+
+### 1.2 Hard error and loader removal (core production change)
+
+Lands the whole production change in one reviewable body; the suite goes RED on the fixture files
+enumerated by 1.2f (operator-approved bounded window, see the preamble). The step's own new tests
+(below) land green; the red set is only pre-existing fixtures that declare TOML resources.
+
+- [x] TOML resource loaders relocated into `migrate/` per the LLD; decode layer stops routing
+      through loader shims, each decoder owning its per-kind logic (interim fork; phase 2 replaces
+      it). The two vestigial `publish_to` functions are deleted, not emptied, and the dead
+      `restart_command` config-channel block is removed (LLD discrepancies 1 and 2, folded in).
+- [x] Config load hard-errors (aggregated, actionable, naming sections, pointing at
+      `agw resource migrate` and `agw resource sample`) when any resource-declaring TOML section is
+      present; settings sections load exactly as before. `Config`'s now-empty resource fields, the
+      publish resource loop, and the `resources_loaded` guard are removed together (LLD section 3).
+- [x] `agw resource migrate` works end to end on a fixture config (proxmox or azure section, git
+      credentials, secrets, session template with a legacy harness selector) with the reworked
+      verification: `pre_rows` scoped to selected units, emitted-key-set guard, rollback on
+      mismatch. `test_full_migration_golden` and the new verification-independence test green.
+- [x] Deprecation-warning tests for TOML sections replaced by hard-error tests (fires with sections
+      present, not without; exempted commands still run); doctor renders a fail row and continues
+      via the `resources=False` retry (not a truncated report).
+- [x] The now-red fixture set is enumerated (file list grouped by area) and recorded in 1.2f, so the
+      window is explicitly bounded, not open.
+
+### 1.2f Close the red window (fixture conversion to green)
+
+- [x] The ~58 TOML-resource fixtures are converted to YAML manifests (or hand-built registry rows
+      where a test asserts registry/graph outcomes), by area: config, resources, sessions,
+      git-credentials, vms, plugins, orchestrated. A shared resources-dir fixture helper is added
+      first (none exists today; 28 files already author manifests inline as the pattern). Tests that
+      assert on removed `Config` fields or pin TOML-only behavior (`declared_at` line capture,
+      decode-through-loader parity) are redesigned, not just relocated.
+- [x] Suite fully green (`pytest -q`, `mypy .` strict, ruff, lint-files) with the window closed;
+      only then is step 1.2 checked off.
+
+### 1.3 Phase 1 records
+
+- [x] Superseding ADR replaces ADR 0016's dual-path stance (the ADR the status note promised); ADR
+      0016 gains its superseded-by pointer.
+- [x] Guides, cli README, root README, and sample-config.toml describe only the manifest path
+      (sample-config's pointer comments already do; sweep for stragglers).
+- [x] Dated lockfile entries: resource-manifests (TOML path removed; which shipped machinery from
+      that SDD is retired) and any other locked SDD whose stance this revises.
+- [x] The removal commit carries the breaking-change marker (`!` / BREAKING CHANGE footer) so
+      release-please surfaces it, and an operator upgrade note (run `agw resource migrate` before
+      upgrading, or after via the escape hatch) is written for the release notes.
+- [x] Reviewer pass on the whole phase; findings fixed.
+
+## Phase 2: the declarative schema model
+
+> **HELD at the phase gate (2026-08-04).** Phase 1 merges to main on its own; phase 2 does not start
+> until the next-steps SDD (`docs/sdd/2026-08-04-next-steps/`) settles the capability-kind
+> descriptor and the 0.14 compatibility-removal ordering. Phase 2's decisions below are proven and
+> stand, but they should be executed THROUGH that SDD's descriptor and after the 0.14 removals, not
+> ahead of them (modeling the legacy harness selector only to unwind it, or baking in the per-kind
+> switchboard before the descriptor exists, is the waste this gate avoids). Resume on a fresh
+> feature branch tracking this plan when next-steps unblocks it.
+
+### 2.1 Schema foundation
+
+- [ ] `schema-foundation-lld.md` written and reviewed: base model config (strict, frozen,
+      `extra="forbid"`), the `SecretRef` / `ResourceRef` `Annotated` markers and their
+      `json_schema_extra` (`x-agw-*`) encoding, `extract_references` (total, never raising, reads
+      raw blobs, applies owner templates) and `iter_field_docs` signatures, and the pydantic pin
+      policy (latest stable v2 at implementation time, checked then, not from memory).
+- [ ] `resources/schema/` package implemented with unit tests, including totality tests for
+      `extract_references` over malformed blobs (property-style: no input raises) and marker
+      round-trip into emitted JSON Schema.
+- [ ] pydantic dependency added; mypy plugin enabled; strict mypy green across the repo.
+- [ ] `pydantic` and related vocabulary promoted from the SDD cspell dictionary to the root
+      dictionary (it now appears in permanent code).
+
+### 2.2 Error bridge
+
+- [ ] `error-bridge-lld.md` (may fold into 2.1's LLD if small): `ValidationError.loc` to
+      owner-framed message mapping, message normalization rules, `SourceLocation` framing, and the
+      severity plumbing for fold-gated validation (FR12: the bridge raises for READY+ENABLED
+      resources; the same rendering is reusable as diagnostic text elsewhere).
+- [ ] Bridge implemented with the FRD's representative-mistakes corpus as a pinned test: unknown
+      key, wrong type, missing required field, bad capability name, each asserting owner framing and
+      file/position context at least as good as today's. (The old-sibling-shape corpus entry lands
+      in 2.4, where its bespoke error exists to pin.)
+
+### 2.3 Capability config models (the contract flip)
+
+- [ ] `capability-contract-lld.md` written and reviewed: the registration surface, the interim
+      tagged-table synthesis while decode still routes through the phase-1 decoders, the typed-ops
+      migration per capability (the hidden bulk), retirement of the stale tolerate-and-self-disable
+      comment in `manifests/decode.py` (~298-301), which misstates the shipped R9.2 hard-error
+      behavior, and effective-config validation (operator decision 2026-08-02): validation runs on
+      the MERGED blob only, resolved along the graph's `inherits` chain at finalize (chain length
+      one everywhere but session templates), never on a partial declared blob. The LLD settles the
+      per-key provenance the merge tracks for error attribution, the two-stage reference extraction
+      (structural refs per declared blob feed the graph; secret refs read the effective blob), the
+      inheritance edge as a typed, non-dependency edge (FR17: excluded from the secret union,
+      resolvability prediction, and dependency listings; readiness/enablement propagation across it
+      is this LLD's policy call), and the retirement of the session resolver's use-time completeness
+      call (`sessions/templates.py::_validate_merged`) in favor of the finalize pass.
+- [ ] Per-capability models declared and registered via `config_model` (empty-config shared model
+      where applicable). Inventory re-enumerated 2026-08-02, still re-check at implementation:
+      vm-platform lima, wsl2, azure-vm (including the nested `service_principal` model), proxmox,
+      aws-ec2 (new, renamed from ec2 by PR #363; nested `credentials` model with `access_key_secret`
+      as a `SecretRef` defaulting to the well-known name, plus the `instance_types` catalog);
+      git-credential-provider github (scope union: repos/owner mutual exclusion as a model
+      validator; `token` as `SecretRef` with the `git-token-{owner}` template), azdo;
+      harness-integration (the kind renamed by PR #383) shell (config: command, resume_command,
+      required_commands; the deprecated restart_command alias is the session-resume SDD's to
+      remove), claude-code, codex (`extra_args` list plus flag fields); secret backends env-var,
+      prompt (no mapping), onepassword (mapping is itself a union: `op://` string or
+      account/reference table).
+- [ ] Core-driven validation and extraction wired: registry name-to-model maps per capability kind;
+      `Capability.validate` / `Capability.dependencies` classmethods and
+      `SecretBackend.validate_mapping` retired; per-capability hand-rolled validate code deleted;
+      `capabilities/git_credential/base.py`'s token helpers absorbed into the model layer.
+- [ ] Construction binds the validated model instance; ops read typed fields (this is a real
+      per-capability migration: azure and proxmox ops currently read `self.platform_config[...]`
+      dict keys; each capability's op code moves to model attributes with mypy enforcing it).
+- [ ] Fold-gated severity proven by tests: broken blob on a disabled plugin's resource loads with
+      the row marked, errors on enable/use; broken blob on an enabled resource is a load error; an
+      unregistered capability name remains a hard finalize error (R9.2/R9.11 preserved, operator
+      decision 2026-08-01; the cross-host story rides the enablement axis, not name tolerance).
+- [ ] FR17 pinned by a regression test over a fixture inheriting surface: a child overriding the
+      parent's default secret name declares only the override in its refs, the parent keeps its own
+      default-secret edge, and no runtime-need traversal (secret union, resolvability prediction,
+      dependency listing) attributes the parent's default secret to the child.
+- [ ] `test_capability_config_contract.py` and `test_capability_base.py` reworked to pin the new
+      contract (declare-and-receive: models in, typed instances out).
+
+### 2.4 Tagged-shape hardening
+
+- [ ] `tagged-hardening-lld.md` written and reviewed: the old-shape detection and error text, how
+      the old-shape error survives 2.5's decoder-to-model swap, and the manifest-upgrade mode as a
+      GENERALIZATION of the migrator's shipped YAML-rewrite machinery (PR #383's `YamlRewrite`:
+      ruamel round-trip with document-marker text patching, digest/CAS guards, backup-first
+      rollback, YAML-native units), extended from the bespoke session-template selector fold to the
+      platform/provider sibling fold. Coordination is part of this LLD: the legacy
+      `harness`/`harness_config` selector's hard cut belongs to the harness-integration SDD's 0.14.0
+      phase and the `restart_command` removal to the session-resume SDD; this step must neither
+      remove nor break their still-supported warning paths if it lands first.
+- [ ] Old sibling shape (`platform` + `platform_config`, `provider` + `provider_config`) becomes a
+      hard error naming the exact rewrite; #349's dual-shape normalization, its aggregated warning
+      channel (`ManifestSet.deprecation_issues` for shape), and the bundle-gate special case are
+      removed (the hard error makes the gate redundant).
+- [ ] The old-sibling-shape entry joins the representative-mistakes corpus here, pinned end to end
+      so 2.5's swap cannot degrade it to a generic unknown-key error (in the model regime the old
+      shape would otherwise surface as exactly that on `platform` plus `platform_config`).
+- [ ] `agw resource migrate` gains the manifest-upgrade mode (backup-first discipline reused;
+      completions updated for any new flag/subcommand).
+- [ ] Upgrade mode proven on a fixture resources dir authored in the old shape (comments preserved
+      per the LLD's decided policy; result loads clean; idempotent re-run is a no-op).
+- [ ] The hardening commit carries the breaking-change marker and an operator upgrade note (run the
+      manifest-upgrade mode) for release-please.
+
+### 2.5 Kind spec models replace the decoders
+
+- [ ] `kind-spec-models-lld.md` written and reviewed: the per-kind model-vs-thin-wrapper calls,
+      semantic-validator placement (name/length caps, cross-field rules), and the decode entry point
+      contract the swap preserves. The session-template model must absorb or sequence around the
+      bespoke `_normalize_session_harness_selector` decode shim (the legacy `harness` selector's
+      warning path, owned by the harness-integration SDD until its 0.14.0 removal) and the
+      `restart_command` alias (session-resume SDD); if those removals land first, the shims are
+      simply gone, else the model keeps their behavior byte-compatible.
+- [ ] Kind-by-kind migration behind the stable decode entry points, smallest first to bed in the
+      pattern: apt-package, apt-source, system/user-install-command, workspace-template,
+      named-console-template, admin-template, agent-template, vm-template, secret, git-credential,
+      vm-site, session-template. Each kind's box covers: model (with semantic validators for
+      name/length caps and cross-field rules), decode swap, error parity via the bridge, tests
+      updated.
+- [ ] Unknown-key handling flips from warn to hard error for kind specs (FR12): the
+      `_warn_unexpected_keys` machinery retires with the last kind; tests updated accordingly.
+- [ ] `migrate/verify.py` normalization taught the model shape (the dataclass-only
+      `strip_source_fields` stops silently no-oping when decl classes become models).
+- [ ] Decl classes are frozen models (or thin wrappers where behavior-rich; per-kind LLD calls),
+      with `DeclaredResource`'s hooks preserved for the registry.
+
+### 2.6 Model-layer defaulting (FR15)
+
+- [ ] Sweep and enumerate every consumer-side fallback for modeled fields (the
+      is-not-None-else-literal and or-literal idioms on request/config reads). Known at authoring
+      time: azure cpus=4 / memory=8 / disk=50 / swap=0, lima cpus=4 / memory=8 / disk=50 / swap=0
+      (`capabilities/vm_platform/lima.py` ~220), wsl2 swap=0 (`wsl2.py` ~545), proxmox swap=0; the
+      sweep is the authority and the in-tree platforms carry the same literals as the plugins.
+- [ ] Defaults declared on the models; post-decode types non-optional where defaulted; every
+      enumerated fallback deleted; consumers observing an unexpectedly-unset modeled field raise
+      (DB-sourced legacy rows included: raise, never locally default).
+- [ ] The end-to-end fixture-capability test (FRD success criterion): add a field with a default and
+      description to a fixture capability model and prove validation, extraction, sample, describe,
+      and emitted schema all reflect it with no other edits.
+
+### 2.7 Schema emission and editor association
+
+- [ ] JSON Schema (2020-12) emitted per kind plus the envelope schema, unions expressed as `oneOf` +
+      discriminator over `name`; CLI surface (working name `agw resource schema`) prints/writes the
+      set; completions tree updated for the new command.
+- [ ] `agw resource sample --write` and migrator-emitted YAML stamp the yaml-language-server
+      modeline referencing written schema files; end-to-end check that a schema-aware editor setup
+      validates a sample manifest (documented manual check plus an automated schema-validates-the-
+      sample test using a JSON Schema validator in tests only, if the LLD approves the dev-only
+      dependency).
+
+### 2.8 Live-rendered samples and describe
+
+- [ ] `emission-and-renderer-lld.md` (shared with 2.7 if the seams overlap) written and reviewed:
+      renderer output contract, blurb registration surface, and the describe surface's naming.
+- [ ] Renderer over `iter_field_docs`: commented-YAML skeleton per kind and capability arm (one
+      union arm rendered, alternatives listed), merged with registered prose blurbs (kind-level and
+      capability-level; blurbs carry no field lists). Disabled capabilities render too (rendering
+      reads the model, not the operator's blob), pinned by a test.
+- [ ] `agw resource sample` (and `--write`) rendering live from the registry, plugins included;
+      bundled sample YAML files deleted; `samples.py`'s bundled-file machinery retired;
+      sample-pinning tests replaced by renderer tests (every kind renders, loads through the
+      manifest path, and builds a registry; fixture-schema renderer unit tests).
+- [ ] `agw resource describe` (or the sibling surface the LLD names) renders the field reference for
+      kinds and capabilities from the same stream; completions updated for any new command or
+      argument surface.
+- [ ] Prose blurbs authored for every bundled kind and capability (content lifted from today's
+      samples' narrative lines, field lists dropped).
+
+### 2.9 Pointer sweep and docs promotion (FR16, FR4 tail)
+
+- [ ] One-time sweep: guides, command help, and remediation text discussing a config shape point at
+      the rendered sample / describe surfaces; redundant hand-stated field lists deleted
+      (narrative-necessary ones may stay).
+- [ ] Permanent-doc promotion: `capabilities/README.md` rewritten for the declare-schema contract
+      (the invoked-validation sections and their standing deprecation notes retire);
+      `capabilities/harness_integration/README.md` (the harness developer guide, added 2026-08-02
+      and renamed with the kind, whose `validate`/`dependencies` sections document the retired
+      contract) updated the same way; `cli/agentworks/plugins/README.md` documents `config_model`
+      for plugin capability authors; `docs/guides/resources.md` updated; the superseding ADR
+      extended or a sibling ADR added for the schema model if the phase 1 ADR did not already cover
+      it.
+- [ ] Dated lockfile entries: resource-manifests (Phase 5.7 invoked-validation contract retired;
+      sample machinery replaced) and vm-sites (its "schema-registration is future work" deferral
+      resolved).
+- [ ] SDD cspell words promoted to root wherever they now appear in permanent code or docs.
+
+### 2.10 Stretch: settings schema (FR14; descope without renegotiating)
+
+- [ ] Settings sections (`[operator]`, `[paths]`, `[plugins]`, `[defaults]`, `[secret_config]`,
+      `[session.config]`) declared as models under the same regime, validated through the bridge
+      with TOML line framing.
+- [ ] config.toml JSON Schema emitted; taplo association documented (draft-4 subset decision made
+      here, not before).
+
+## Closeout
+
+- [ ] Full-suite gates green; end-to-end live verification (fresh config init, sample-driven
+      resource authoring with editor schema association, vm-site declare, migrate fixture, doctor).
+- [ ] Final `agentworks-reviewer` pass over the whole branch; findings fixed.
+- [ ] `locked.md` written summarizing final state, decisions, and deviations; PR #316 to non-draft;
+      Copilot review triaged.
+
+## Pressure-test notes (what writing this plan surfaced)
+
+- The migrator pre-side "relocate the loaders into migrate/" candidate resolves FR2, verification
+  independence, and loader removal with one move; the phase 1 LLD must confirm it or beat it.
+- The ops-read-typed-fields migration (2.3) is the hidden bulk of the capability flip: azure and
+  proxmox op code reads config dicts today, and the HLA's one line about it is a multi-file change
+  with real review surface.
+- #349's dual-shape normalization, warning channel, and bundle gate are deliberately temporary; 2.4
+  removes them. Building then removing is the cost of the runway, accepted.
+- The onepassword mapping model is itself a union (string or table), a good early test of union
+  ergonomics inside a backend mapping model.
+- The github scope rules (repos/owner mutually exclusive, list shapes) exercise model validators
+  beyond field types on day one of 2.3.
+- Deleting bundled samples (2.8) also retires the strip-one-`#` sample test convention; the renderer
+  tests replace that coverage. `agw resource sample`'s CLI contract (kind selection, `--all`,
+  `--write` append-only behavior) is already pinned by `tests/manifests/test_samples.py`; the 2.8
+  work is carrying those pins through the renderer swap intact, not writing them.
+- The unregistered-capability-name question was re-decided with the operator (2026-08-01) after
+  review showed the shipped behavior is R9.2's hard finalize error, not the stale
+  tolerate-and-self-disable a decode.py comment described: the hard error stays, and cross-host
+  sharing rides the enablement axis.

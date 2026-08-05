@@ -27,6 +27,7 @@ from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
 from agentworks.errors import ConfigError
 from agentworks.resources import KIND_REGISTRY, NoUnreferencedDefaultError
+from tests.conftest import ManifestDoc, write_manifests
 
 APT_AND_INSTALL_KINDS = (
     "apt-source",
@@ -36,7 +37,11 @@ APT_AND_INSTALL_KINDS = (
 )
 
 
-def _write_cfg(path: Path, body: str = "") -> Path:
+def _write_cfg(path: Path, settings: str = "", *manifests: ManifestDoc | str) -> Path:
+    """Write a settings-only config.toml plus its resources/ manifests and
+    return the config path. ``settings`` carries settings-only TOML; the apt /
+    install-command resources under test are authored as ``manifests`` beside
+    it (ADR 0022)."""
     pub = path.parent / "id.pub"
     priv = path.parent / "id"
     pub.write_text("ssh-ed25519 AAAA...")
@@ -48,8 +53,10 @@ def _write_cfg(path: Path, body: str = "") -> Path:
         ssh_private_key = "{priv.as_posix()}"
 
         """)
-        + dedent(body),
+        + dedent(settings),
     )
+    if manifests:
+        write_manifests(path.parent, *manifests)
     return path
 
 
@@ -86,10 +93,8 @@ def test_apt_package_typo_errors_with_source(tmp_path: Path) -> None:
     cfg = load_config(
         _write_cfg(
             tmp_path / "config.toml",
-            """
-            [vm_templates.default]
-            apt_packages = ["nonexistent-pkg"]
-            """,
+            "",
+            ManifestDoc("vm-template", "default", {"apt_packages": ["nonexistent-pkg"]}),
         ),
         warn_issues=False,
     )
@@ -101,10 +106,8 @@ def test_system_install_command_typo_errors_with_source(tmp_path: Path) -> None:
     cfg = load_config(
         _write_cfg(
             tmp_path / "config.toml",
-            """
-            [vm_templates.default]
-            system_install_commands = ["totally-fake-cmd"]
-            """,
+            "",
+            ManifestDoc("vm-template", "default", {"system_install_commands": ["totally-fake-cmd"]}),
         ),
         warn_issues=False,
     )
@@ -116,10 +119,8 @@ def test_user_install_command_typo_in_admin_errors(tmp_path: Path) -> None:
     cfg = load_config(
         _write_cfg(
             tmp_path / "config.toml",
-            """
-            [admin.config]
-            user_install_commands = ["bogus-installer"]
-            """,
+            "",
+            ManifestDoc("admin-template", "default", {"user_install_commands": ["bogus-installer"]}),
         ),
         warn_issues=False,
     )
@@ -131,10 +132,8 @@ def test_user_install_command_typo_in_agent_errors(tmp_path: Path) -> None:
     cfg = load_config(
         _write_cfg(
             tmp_path / "config.toml",
-            """
-            [agent_templates.default]
-            user_install_commands = ["bogus-installer"]
-            """,
+            "",
+            ManifestDoc("agent-template", "default", {"user_install_commands": ["bogus-installer"]}),
         ),
         warn_issues=False,
     )
@@ -152,10 +151,8 @@ def test_known_apt_package_reference_resolves(tmp_path: Path) -> None:
     cfg = load_config(
         _write_cfg(
             tmp_path / "config.toml",
-            """
-            [vm_templates.default]
-            apt_packages = ["gh"]
-            """,
+            "",
+            ManifestDoc("vm-template", "default", {"apt_packages": ["gh"]}),
         ),
         warn_issues=False,
     )
@@ -205,10 +202,8 @@ def test_apt_package_references_flow_to_apt_source(tmp_path: Path) -> None:
     cfg = load_config(
         _write_cfg(
             tmp_path / "config.toml",
-            """
-            [vm_templates.default]
-            apt_packages = ["gh"]
-            """,
+            "",
+            ManifestDoc("vm-template", "default", {"apt_packages": ["gh"]}),
         ),
         warn_issues=False,
     )
@@ -239,12 +234,13 @@ def test_unknown_apt_source_reference_errors_via_framework(
     cfg = load_config(
         _write_cfg(
             tmp_path / "config.toml",
-            """
-            [apt_packages.bad-pkg]
-            description = "Package with an unknown source"
-            apt = ["bad"]
-            apt_sources = ["nonexistent-source"]
-            """,
+            "",
+            ManifestDoc(
+                "apt-package",
+                "bad-pkg",
+                {"apt": ["bad"], "apt_sources": ["nonexistent-source"]},
+                description="Package with an unknown source",
+            ),
         ),
         warn_issues=False,
     )
@@ -266,19 +262,24 @@ def test_operator_declared_apt_source_layers_over_builtin(
     cfg = load_config(
         _write_cfg(
             tmp_path / "config.toml",
-            """
-            [apt_sources.custom-src]
-            description = "Operator-defined source"
-            key_url = "https://example.com/key.gpg"
-            key_path = "/etc/apt/keyrings/custom-src.gpg"
-            source = "deb [signed-by=/etc/apt/keyrings/custom-src.gpg] https://example.com/apt stable main"
-            source_file = "custom-src.list"
-
-            [apt_packages.custom-pkg]
-            description = "Package using the operator source"
-            apt = ["custom-pkg"]
-            apt_sources = ["custom-src"]
-            """,
+            "",
+            ManifestDoc(
+                "apt-source",
+                "custom-src",
+                {
+                    "key_url": "https://example.com/key.gpg",
+                    "key_path": "/etc/apt/keyrings/custom-src.gpg",
+                    "source": "deb [signed-by=/etc/apt/keyrings/custom-src.gpg] https://example.com/apt stable main",
+                    "source_file": "custom-src.list",
+                },
+                description="Operator-defined source",
+            ),
+            ManifestDoc(
+                "apt-package",
+                "custom-pkg",
+                {"apt": ["custom-pkg"], "apt_sources": ["custom-src"]},
+                description="Package using the operator source",
+            ),
         ),
         warn_issues=False,
     )

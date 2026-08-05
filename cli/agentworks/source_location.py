@@ -36,8 +36,7 @@ class SourceLocation:
     by a specific section header." Two situations produce it:
 
     - **No-declaration-site fallback** (``file=<real path>``, ``line=0``):
-      the Resource carries a real file but no single declaration line -- the
-      apt / install-commands operator publisher's rows, and
+      the Resource carries a real file but no single declaration line, from
       ``_SectionLineMap.lookup``'s no-match fallback. The path lets
       downstream Origin rendering still name the source file.
     - **Code/test-synthesized Resource** (``file=Path("<synthesized>")``,

@@ -1,6 +1,12 @@
-"""Dual-path legacy TOML: [azure] / [proxmox] load as vm-site resources
-with the aggregated deprecation warning, and the defaults.site /
-defaults.platform alias behavior.
+"""Legacy TOML [azure] / [proxmox] sections are a hard error now (ADR 0022:
+config.toml is settings only), plus the defaults.site / defaults.platform
+alias behavior (settings, unaffected) and the YAML vm-site manifest path.
+
+The old dual-path (flat TOML sections loading as vm-site resources) is gone:
+those sections migrate to YAML manifests via `agw resource migrate`, whose
+oracle keeps reading the flat shape. The token_secret nonconforming-name
+warning that the flat TOML loader emitted is now surfaced only on the YAML
+manifest path (tested here) and inside the migrator oracle.
 """
 
 from __future__ import annotations
@@ -48,69 +54,22 @@ def write_config(tmp_path: Path):
     return _write
 
 
-def test_legacy_sections_load_as_vm_sites(write_config) -> None:
-    config = load_config(
-        write_config(AZURE_SECTION + PROXMOX_SECTION),
-        warn_issues=False,
-        warn_deprecations=False,
-    )
-    assert set(config.vm_sites) == {"azure", "proxmox"}
-    azure = config.vm_sites["azure"]
-    # The SITE keeps its legacy section name; the platform underneath
-    # is the renamed azure-vm capability.
-    assert azure.platform == "azure-vm"
-    assert azure.platform_config["resource_group"] == "agw"
-    proxmox = config.vm_sites["proxmox"]
-    assert proxmox.platform == "proxmox"
-    assert proxmox.platform_config["node"] == "pve1"
-    # The flat sections warn as deprecated resource sections.
-    joined = "\n".join(config.deprecation_issues)
-    assert "[azure]" in joined
-    assert "[proxmox]" in joined
-    assert "[azure]" in config.deprecated_sections
-    assert "[proxmox]" in config.deprecated_sections
+def test_legacy_sections_are_a_hard_error(write_config) -> None:
+    """[azure] / [proxmox] are resource-declaring sections now, so a normal
+    load hard-errors, naming the sections and the vm-site migration clause."""
+    with pytest.raises(ConfigError) as excinfo:
+        load_config(write_config(AZURE_SECTION + PROXMOX_SECTION), warn_issues=False)
+    message = str(excinfo.value)
+    assert "[azure]" in message
+    assert "[proxmox]" in message
+    assert "migrate as vm-site" in message
 
 
-def test_legacy_sections_publish_and_finalize(write_config) -> None:
-    from agentworks.bootstrap import build_registry
-    from agentworks.manifests import ManifestSet
-
-    config = load_config(
-        write_config(AZURE_SECTION),
-        warn_issues=False,
-        warn_deprecations=False,
-    )
-    registry = build_registry(config, ManifestSet.empty())
-    row = registry.lookup("vm-site", "azure")
-    assert row.platform == "azure-vm"
-    assert row.origin is not None
-    assert row.origin.variant == "operator-declared"
-
-
-def test_legacy_section_blob_validates(write_config) -> None:
-    """The assembled platform_config blob is shape-validated by the
-    finalize ``validate`` pass (R3), so a malformed legacy section fails
-    at build_registry, not at load. The site name (``azure``) frames the
-    error, with the source location re-attached from the origin. ``azure-vm``
-    ships in the opt-in ``azure`` system plugin, whose validation is deferred
-    while disabled, so the plugin is enabled here for the blob check to fire."""
-    from agentworks.bootstrap import build_registry
-    from agentworks.manifests import ManifestSet
-
-    broken = '[plugins]\nsystem = ["azure"]\n' + AZURE_SECTION.replace('subscription_id = "0000"\n', "")
-    config = load_config(write_config(broken), warn_issues=False, warn_deprecations=False)
-    with pytest.raises(ConfigError, match="subscription_id"):
-        build_registry(config, ManifestSet.empty())
-
-
-def test_settings_only_load_skips_legacy_sites(write_config) -> None:
-    config = load_config(
-        write_config(AZURE_SECTION),
-        warn_issues=False,
-        warn_deprecations=False,
-        resources=False,
-    )
-    assert config.vm_sites == {}
+def test_settings_only_load_reads_a_config_with_legacy_sections(write_config) -> None:
+    """The escape hatch loads a config carrying [azure] without error (the
+    migrator uses it); settings load identically."""
+    config = load_config(write_config(AZURE_SECTION), warn_issues=False, resources=False)
+    assert config.operator is not None
 
 
 def test_defaults_site_parses(write_config) -> None:
@@ -161,36 +120,6 @@ def test_defaults_vm_host_is_a_hard_error(write_config) -> None:
         )
 
 
-def test_proxmox_token_secret_nonconforming_warns_but_loads(write_config) -> None:
-    """Issue #279 (coverage extension): a proxmox vm-site whose
-    ``token_secret`` names a non-conforming (uppercase) secret loads via the
-    legacy TOML path, keeps the site and the token_secret value, and warns
-    naming the secret and its ``proxmox.token_secret`` location."""
-    section = PROXMOX_SECTION + 'token_secret = "GITHUB_TOKEN"\n'
-    config = load_config(
-        write_config(section),
-        warn_issues=False,
-        warn_deprecations=False,
-    )
-    # The site and the raw secret name are preserved unchanged.
-    assert config.vm_sites["proxmox"].platform_config["token_secret"] == "GITHUB_TOKEN"
-    assert any("GITHUB_TOKEN" in issue and "proxmox.token_secret" in issue for issue in config.config_issues), (
-        config.config_issues
-    )
-
-
-def test_proxmox_token_secret_conforming_emits_no_warning(write_config) -> None:
-    """A conforming ``token_secret`` name emits no secret-naming warning."""
-    section = PROXMOX_SECTION + 'token_secret = "proxmox-token"\n'
-    config = load_config(
-        write_config(section),
-        warn_issues=False,
-        warn_deprecations=False,
-    )
-    assert config.vm_sites["proxmox"].platform_config["token_secret"] == "proxmox-token"
-    assert not any("secret naming rules" in issue for issue in config.config_issues), config.config_issues
-
-
 def _write_site_manifest(manifest_dir: Path, token_secret: str) -> None:
     manifest_dir.mkdir(exist_ok=True)
     (manifest_dir / "site.yaml").write_text(
@@ -208,9 +137,9 @@ def _write_site_manifest(manifest_dir: Path, token_secret: str) -> None:
 
 
 def test_manifest_token_secret_nonconforming_warns(tmp_path: Path) -> None:
-    """The YAML manifest path emits the same warning: a non-conforming
-    ``token_secret`` decodes with an issue whose shape-neutral location
-    names the key and the bad secret."""
+    """The YAML manifest path emits the token_secret warning: a non-conforming
+    ``token_secret`` decodes with an issue whose shape-neutral location names
+    the key and the bad secret."""
     from agentworks.manifests.loader import load_manifests
 
     manifest_dir = tmp_path / "resources"
@@ -219,7 +148,6 @@ def test_manifest_token_secret_nonconforming_warns(tmp_path: Path) -> None:
     assert any("GITHUB_TOKEN" in issue and "token_secret (platform config)" in issue for issue in manifests.issues), (
         manifests.issues
     )
-    # The site still decoded, with the secret name preserved.
     (entry,) = manifests.entries
     assert entry.resource.platform_config["token_secret"] == "GITHUB_TOKEN"
 
@@ -233,45 +161,3 @@ def test_manifest_token_secret_conforming_emits_no_warning(tmp_path: Path) -> No
     _write_site_manifest(manifest_dir, "proxmox-token")
     manifests = load_manifests(manifest_dir)
     assert not any("secret naming rules" in issue for issue in manifests.issues), manifests.issues
-
-
-def test_legacy_toml_and_manifest_decode_agree(write_config, tmp_path: Path) -> None:
-    """Decode parity: a flat [proxmox] section and the equivalent
-    vm-site manifest produce the same resource fields. The Phase 5
-    migrator's flat-to-nested emission leans on this equivalence.
-    """
-    from agentworks.manifests.loader import load_manifests
-    from agentworks.vms.sites import VMSiteDecl
-
-    config = load_config(
-        write_config(PROXMOX_SECTION),
-        warn_issues=False,
-        warn_deprecations=False,
-    )
-    toml_site = config.vm_sites["proxmox"]
-
-    manifest_dir = tmp_path / "resources"
-    manifest_dir.mkdir()
-    (manifest_dir / "site.yaml").write_text(
-        "apiVersion: agentworks/v1\n"
-        "kind: vm-site\n"
-        "metadata:\n"
-        "  name: proxmox\n"
-        "spec:\n"
-        "  platform: proxmox\n"
-        "  platform_config:\n"
-        '    api_url: "https://pve:8006"\n'
-        "    node: pve1\n"
-        '    token_id: "agw@pam!agw"\n'
-        "    template_vmid: 9000\n"
-    )
-    manifests = load_manifests(manifest_dir)
-    assert not manifests.issues, manifests.issues
-    (entry,) = manifests.entries
-    yaml_site = entry.resource
-    assert isinstance(yaml_site, VMSiteDecl)
-
-    assert toml_site.name == yaml_site.name
-    assert toml_site.platform == yaml_site.platform
-    assert toml_site.platform_config == yaml_site.platform_config
-    assert toml_site.description == yaml_site.description

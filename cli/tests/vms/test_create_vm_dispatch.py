@@ -17,22 +17,21 @@ from agentworks.capabilities.vm_platform import ProvisionResult
 from agentworks.config import load_config
 from agentworks.errors import NotFoundError, ProvisioningError
 from agentworks.vms import manager as vm_manager
+from tests.conftest import ManifestDoc, write_manifests
+from tests.orchestrated_fixtures import proxmox_site
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from agentworks.db import Database
 
 # Proxmox ships in the opt-in ``proxmox`` system plugin since Phase 10 (R11),
 # so a config that uses the proxmox site enables the plugin, exactly as a real
-# proxmox operator would.
-PROXMOX_SECTION = """
+# proxmox operator would. The plugin opt-in is a settings section; the site
+# itself is declared as a ``vm-site`` manifest (ADR 0022).
+PLUGINS_ENABLED = """
 [plugins]
 system = ["proxmox"]
-
-[proxmox]
-api_url = "https://pve:8006"
-node = "pve1"
-token_id = "agw@pam!agw"
-template_vmid = 9000
 """
 
 
@@ -46,9 +45,11 @@ def make_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     # locally; pretend the tool exists regardless of the host.
     monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
 
-    def _make(extra: str = ""):
+    def _make(extra: str = "", *, manifests: Sequence[ManifestDoc | str] = ()):
         path = tmp_path / "config.toml"
         path.write_text(f'[operator]\nssh_public_key = "{key}.pub"\nssh_private_key = "{key}"\n' + extra)
+        if manifests:
+            write_manifests(tmp_path, *manifests)
         return load_config(path, warn_issues=False, warn_deprecations=False)
 
     return _make
@@ -72,7 +73,7 @@ def test_create_vm_request_shape_and_row(
     from agentworks.capabilities.vm_platform import ProvisionRequest
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
 
-    config = make_config("[vm_templates.default]\ncpus = 2\n")
+    config = make_config(manifests=[ManifestDoc("vm-template", "default", {"cpus": 2})])
     captured_request: list[ProvisionRequest] = []
     captured_platform: list[LimaPlatform] = []
 
@@ -346,7 +347,7 @@ def test_proxmox_token_resolves_end_to_end(
     PROXMOX_TOKEN_SECRET env fallback."""
     from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 
-    config = make_config(PROXMOX_SECTION)
+    config = make_config(PLUGINS_ENABLED, manifests=[proxmox_site()])
     monkeypatch.setenv("AW_SECRET_PROXMOX_TOKEN", "pve-token-value")
     # The deleted legacy shadow path: setting the OLD raw variable to a
     # different value proves nothing reads it.

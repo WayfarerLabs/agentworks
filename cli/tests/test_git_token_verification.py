@@ -26,6 +26,7 @@ from agentworks.capabilities.git_credential.github import GitHubCredentialProvid
 from agentworks.config import load_config
 from agentworks.errors import TokenRejectedError
 from agentworks.plugins.azure.azdo import AzDOCredentialProvider
+from tests.conftest import ManifestDoc, write_manifests
 
 _EXPIRY_HEADER = "github-authentication-token-expiration"
 
@@ -154,7 +155,7 @@ def test_azdo_200_verifies(monkeypatch: pytest.MonkeyPatch, capsys: pytest.Captu
 # -- collector wiring (agent-create token pass) -----------------------------
 
 
-def _config_with_github_cred(tmp_path: Path, *, extra: str = ""):  # noqa: ANN202
+def _config_with_github_cred(tmp_path: Path):  # noqa: ANN202
     pub = tmp_path / "k.pub"
     priv = tmp_path / "k"
     pub.write_text("ssh-ed25519 AAAA test")
@@ -165,11 +166,9 @@ def _config_with_github_cred(tmp_path: Path, *, extra: str = ""):  # noqa: ANN20
         [operator]
         ssh_public_key = "{pub.as_posix()}"
         ssh_private_key = "{priv.as_posix()}"
-        {extra}
-        [git_credentials.gh]
-        provider = "github"
         """)
     )
+    write_manifests(tmp_path, ManifestDoc("git-credential", "gh", {"provider": {"name": "github"}}))
     return load_config(cfg, warn_issues=False)
 
 

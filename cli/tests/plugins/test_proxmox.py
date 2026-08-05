@@ -8,11 +8,12 @@ A capability-only migration (no bundled manifests), so this drives
 
 - the ``proxmox`` vm-platform ROW: present-but-disabled with a ``system-plugin``
   origin until the operator opts in (the core built-in platforms are untouched);
-- a ``vm-site`` on the ``proxmox`` platform: not-ready with the
-  "enable plugin `proxmox`" hint, and ``resolve_site`` refuses it at use, until
-  ``[plugins] system = ["proxmox"]``. The deprecated legacy ``[proxmox]``
-  flat-section site gets the SAME hint, not an unknown-name hard error (a
-  feature: legacy configs are guided, not broken).
+- a ``vm-site`` on the ``proxmox`` platform (a ``resources/`` manifest now, ADR
+  0022): not-ready with the "enable plugin `proxmox`" hint, and ``resolve_site``
+  refuses it at use, until ``[plugins] system = ["proxmox"]``. The legacy
+  ``[proxmox]`` flat section is a hard error at load now (pinned in
+  ``tests/vms/test_legacy_site_sections.py``), so its former "guided, not
+  broken" degrade-to-hint behavior no longer applies.
 
 Enabling ``[plugins] system = ["proxmox"]`` makes the site ready and
 resolvable.
@@ -30,27 +31,43 @@ from agentworks.config import load_config
 from agentworks.errors import StateError
 from agentworks.resources.graph import Enablement
 from agentworks.resources.inspect import describe_resource, list_resources
+from tests.conftest import ManifestDoc, write_manifests
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from pathlib import Path
 
     from agentworks.config import Config
 
-# A well-formed legacy ``[proxmox]`` flat section: it auto-declares a vm-site
-# named ``proxmox`` on the ``proxmox`` platform. Used both as the ordinary
-# site fixture and as the legacy-section breaking-change pin.
-_PROXMOX_SECTION = """
-[proxmox]
-api_url = "https://pve:8006"
-node = "pve1"
-token_id = "agw@pam!agw"
-template_vmid = 9000
-"""
+
+# A ``vm-site`` manifest named ``proxmox`` on the ``proxmox`` platform, the
+# declarative replacement for the legacy ``[proxmox]`` flat section (which is a
+# hard error now, ADR 0022; that breaking change is pinned in
+# ``tests/vms/test_legacy_site_sections.py``). Used as the ordinary site fixture.
+def _proxmox_site() -> ManifestDoc:
+    return ManifestDoc(
+        "vm-site",
+        "proxmox",
+        {
+            "platform": {
+                "name": "proxmox",
+                "api_url": "https://pve:8006",
+                "node": "pve1",
+                "token_id": "agw@pam!agw",
+                "template_vmid": 9000,
+            }
+        },
+    )
 
 
-def _config(tmp_path: Path, body: str = "", *, enabled: bool = False) -> Config:
+def _config(
+    tmp_path: Path,
+    *,
+    enabled: bool = False,
+    manifests: Sequence[ManifestDoc | str] = (),
+) -> Config:
     """A real operator config; ``enabled`` toggles ``[plugins] system =
-    ["proxmox"]`` and ``body`` appends resource declarations."""
+    ["proxmox"]`` and ``manifests`` seeds resource declarations beside it."""
     pub = tmp_path / "id.pub"
     priv = tmp_path / "id"
     pub.write_text("ssh-ed25519 AAAA...")
@@ -65,8 +82,9 @@ def _config(tmp_path: Path, body: str = "", *, enabled: bool = False) -> Config:
 
         """)
         + plugins
-        + dedent(body)
     )
+    if manifests:
+        write_manifests(tmp_path, *manifests)
     return load_config(cfg, warn_issues=False, warn_deprecations=False)
 
 
@@ -123,7 +141,7 @@ def test_site_on_disabled_proxmox_is_not_ready_with_hint(tmp_path: Path) -> None
     """A ``vm-site`` on the ``proxmox`` platform is not-ready while the plugin
     is disabled, and the readiness reason names the plugin to enable (the fold
     propagates the platform's disabled mark to the site)."""
-    registry = build_registry(_config(tmp_path, _PROXMOX_SECTION))
+    registry = build_registry(_config(tmp_path, manifests=[_proxmox_site()]))
     assert not registry.graph.is_ready("vm-site", "proxmox")
     reason = registry.graph.readiness_of("vm-site", "proxmox").reason
     assert reason is not None
@@ -135,21 +153,19 @@ def test_resolve_site_refuses_disabled_proxmox_with_hint(tmp_path: Path) -> None
     refuses a proxmox site while the plugin is disabled, before any work."""
     from agentworks.vms.sites import resolve_site
 
-    registry = build_registry(_config(tmp_path, _PROXMOX_SECTION))
+    registry = build_registry(_config(tmp_path, manifests=[_proxmox_site()]))
     with pytest.raises(StateError) as exc:
         resolve_site("proxmox", registry)
     assert "enable plugin `proxmox`" in str(exc.value)
 
 
-def test_legacy_proxmox_section_is_guided_not_broken(tmp_path: Path) -> None:
-    """The guided breaking change (R11.1): a deprecated legacy ``[proxmox]``
-    flat-section site lands on the present-but-disabled row, so it degrades to
-    the enable hint rather than an unknown-name hard error."""
-    registry = build_registry(_config(tmp_path, _PROXMOX_SECTION))
-    # The site is present (published from the legacy section), just not ready.
-    assert registry.lookup("vm-site", "proxmox") is not None
-    reason = registry.graph.readiness_of("vm-site", "proxmox").reason
-    assert reason is not None and "enable plugin `proxmox`" in reason
+# The R11.1 "guided, not broken" pin for the LEGACY ``[proxmox]`` flat section
+# is retired: under ADR 0022 that section is a hard error at load, not a
+# silently-disabled site, so the "lands on the disabled row" premise is
+# structurally gone. The hard error (carrying the vm-site migration guidance)
+# is pinned by ``tests/vms/test_legacy_site_sections.py``; the disabled-site
+# enable hint stays covered by
+# ``test_site_on_disabled_proxmox_is_not_ready_with_hint`` above.
 
 
 def test_enabling_proxmox_makes_the_site_ready_and_resolvable(tmp_path: Path) -> None:
@@ -158,7 +174,7 @@ def test_enabling_proxmox_makes_the_site_ready_and_resolvable(tmp_path: Path) ->
     from agentworks.capabilities.vm_platform.base import VMPlatform
     from agentworks.vms.sites import resolve_site
 
-    registry = build_registry(_config(tmp_path, _PROXMOX_SECTION, enabled=True))
+    registry = build_registry(_config(tmp_path, enabled=True, manifests=[_proxmox_site()]))
     assert registry.graph.enablement_of("vm-platform", "proxmox") is Enablement.enabled
     assert registry.graph.is_ready("vm-site", "proxmox")
     platform = resolve_site("proxmox", registry)  # no raise

@@ -1,13 +1,13 @@
-"""Deprecation warnings for TOML resource sections.
+"""config.toml is settings only (ADR 0022): a resource-declaring section is
+a hard error at load, not a deprecation nudge.
 
-The TOML resource-declaration path is being sunset: the sections keep
-loading with today's semantics for now, but their presence emits ONE
-aggregated deprecation issue (aggregated at maintainer direction; a
-warning per section was obnoxious on real configs) naming every present
-section, the removal, the YAML surface, the mover, and the silencer.
-Deprecations travel on ``Config.deprecation_issues``, a separate channel
-from ``config_issues``, so real issues stay sharp and
-``--no-deprecations`` can silence only these.
+These tests pin the flip from the old aggregated warning to
+``_raise_for_resource_sections`` (fires with resource sections present at
+``resources=True``; no error at ``resources=False`` or for a settings-only
+config), the remaining deprecation-channel content (the ``[secret_backends]``
+no-op and the ``defaults.platform`` alias), and the exempted commands that
+load ``resources=False`` so they can still read a config carrying resource
+sections.
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ from textwrap import dedent
 import pytest
 
 from agentworks.config import load_config
+from agentworks.errors import ConfigError
 
 
 def _config(tmp_path: Path, extras: str = "") -> Path:
@@ -37,19 +38,12 @@ def _config(tmp_path: Path, extras: str = "") -> Path:
     return cfg
 
 
-def _deprecations(cfg_path: Path) -> tuple[str, ...]:
-    return load_config(cfg_path, warn_issues=False).deprecation_issues
-
-
-def test_present_sections_aggregate_into_one_warning(tmp_path: Path) -> None:
+def test_resource_sections_hard_error_naming_sections(tmp_path: Path) -> None:
     cfg = _config(
         tmp_path,
         """
         [secrets.npm-token]
         description = "npm token"
-
-        [secrets.other]
-        description = "other"
 
         [vm_templates.default]
         cpus = 4
@@ -61,22 +55,33 @@ def test_present_sections_aggregate_into_one_warning(tmp_path: Path) -> None:
         shell = "zsh"
         """,
     )
-    (issue,) = _deprecations(cfg)
-    # Every present section is named once (grep-able header shapes),
-    # in one message, not one warning per section.
-    assert "[secrets.*]" in issue
-    assert "[vm_templates.*]" in issue
-    assert "[named_console]" in issue
-    assert "[admin.config]" in issue
-    # And the three pointers: the YAML surface, the mover, the silencer.
-    assert "agw resource sample" in issue
-    assert "agw resource migrate" in issue
-    assert "--no-deprecations" in issue
-    # The message states the sunset plainly: deprecated AND removed.
-    assert "deprecated and will be removed" in issue
+    with pytest.raises(ConfigError) as excinfo:
+        load_config(cfg, warn_issues=False)
+    message = str(excinfo.value)
+    # Every present section is named (grep-able header shapes).
+    assert "[secrets.*]" in message
+    assert "[vm_templates.*]" in message
+    assert "[named_console]" in message
+    assert "[admin.config]" in message
+    # And it points at the two remediation commands and says settings-only.
+    assert "agw resource migrate" in message
+    assert "agw resource sample" in message
+    assert "settings only" in message
 
 
-def test_deprecations_do_not_pollute_config_issues(tmp_path: Path) -> None:
+def test_legacy_site_sections_get_the_vm_site_clause(tmp_path: Path) -> None:
+    cfg = _config(
+        tmp_path,
+        """
+        [azure]
+        subscription_id = "0000"
+        """,
+    )
+    with pytest.raises(ConfigError, match="migrate as vm-site"):
+        load_config(cfg, warn_issues=False)
+
+
+def test_no_vm_site_clause_without_a_legacy_site(tmp_path: Path) -> None:
     cfg = _config(
         tmp_path,
         """
@@ -84,15 +89,30 @@ def test_deprecations_do_not_pollute_config_issues(tmp_path: Path) -> None:
         description = "npm token"
         """,
     )
-    config = load_config(cfg, warn_issues=False)
-    assert config.deprecation_issues
-    assert not config.config_issues
+    with pytest.raises(ConfigError) as excinfo:
+        load_config(cfg, warn_issues=False)
+    assert "vm-site" not in str(excinfo.value)
 
 
-def test_config_only_toml_warns_nothing(tmp_path: Path) -> None:
-    """Settings sections ([operator], [secret_config], ...) are config,
-    not resources: a fully-migrated config loads without a single
-    deprecation issue."""
+def test_resources_false_skips_the_check(tmp_path: Path) -> None:
+    """The escape hatch: ``resources=False`` loads a config carrying
+    resource sections (settings load identically), and collects no
+    resource-section deprecation."""
+    cfg = _config(
+        tmp_path,
+        """
+        [secrets.npm-token]
+        description = "npm token"
+        """,
+    )
+    config = load_config(cfg, warn_issues=False, resources=False)
+    assert config.operator is not None
+    assert config.deprecation_issues == ()
+
+
+def test_settings_only_config_loads_without_error(tmp_path: Path) -> None:
+    """A fully-migrated config (only settings sections) loads normally with
+    no error and no deprecation."""
     cfg = _config(
         tmp_path,
         """
@@ -102,28 +122,13 @@ def test_config_only_toml_warns_nothing(tmp_path: Path) -> None:
         [defaults]
         """,
     )
-    assert _deprecations(cfg) == ()
+    config = load_config(cfg, warn_issues=False)
+    assert config.deprecation_issues == ()
 
 
-def test_secret_backends_keeps_its_own_no_op_warning(tmp_path: Path) -> None:
-    """[secret_backends.*] is not folded into the aggregate: it has the
-    dedicated no-op message (pointing at `agw resource migrate --all`),
-    on the same suppressible deprecation channel."""
-    cfg = _config(
-        tmp_path,
-        """
-        [secret_backends.env-var]
-        """,
-    )
-    issues = _deprecations(cfg)
-    assert len(issues) == 1
-    assert issues[0].startswith("[secret_backends.env-var]")
-    assert "agw resource migrate --all" in issues[0]
-
-
-def test_shipped_sample_config_warns_nothing(tmp_path: Path) -> None:
+def test_shipped_sample_config_loads_clean(tmp_path: Path) -> None:
     """The shipped sample is YAML-first: as-shipped (resource examples
-    commented out) it produces zero deprecation issues."""
+    commented out) it loads with no error and no deprecation."""
     sample = Path(__file__).resolve().parent.parent / "agentworks" / "sample-config.toml"
     pub = tmp_path / "id.pub"
     priv = tmp_path / "id"
@@ -134,112 +139,122 @@ def test_shipped_sample_config_warns_nothing(tmp_path: Path) -> None:
     text = text.replace('ssh_private_key = "~/.ssh/id_ed25519"', f'ssh_private_key = "{priv.as_posix()}"')
     cfg = tmp_path / "config.toml"
     cfg.write_text(text)
-    assert _deprecations(cfg) == ()
+    config = load_config(cfg, warn_issues=False)
+    assert config.deprecation_issues == ()
 
 
-def test_cli_no_deprecations_flag_silences_the_warning(tmp_path: Path, monkeypatch) -> None:
-    """`agw --no-deprecations <cmd>` suppresses the deprecation warning;
-    without the flag it prints. Only deprecations are silenced; the
-    flag does not touch config_issues."""
-    from typer.testing import CliRunner
-
-    from agentworks import output
-    from agentworks.cli import app
-
+def test_secret_backends_keeps_its_no_op_deprecation(tmp_path: Path) -> None:
+    """[secret_backends.*] is NOT a resource section (it is a capability-kind
+    no-op), so it stays a deprecation on the channel rather than a hard
+    error, pointing at `agw resource migrate --all`."""
     cfg = _config(
         tmp_path,
         """
-        [secrets.npm-token]
-        description = "npm token"
-        """,
-    )
-    monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
-    # The callback seeds module state per invocation; reset afterwards so
-    # test order cannot leak a suppressed state.
-    monkeypatch.setattr(output, "_suppress_deprecations", False)
-
-    with_warning = CliRunner().invoke(app, ["resource", "list", "--names-only"])
-    assert with_warning.exit_code == 0, with_warning.output
-    assert "deprecated TOML resource" in with_warning.output
-
-    silenced = CliRunner().invoke(app, ["--no-deprecations", "resource", "list", "--names-only"])
-    assert silenced.exit_code == 0, silenced.output
-    assert "deprecated" not in silenced.output
-
-
-def test_remediation_commands_do_not_nag(tmp_path: Path, monkeypatch) -> None:
-    """The commands the nudge points at are exempt from it: migrate
-    loads with warn_deprecations=False (it still needs the resource
-    sections for the equivalence-verification registry), and sample
-    --write loads settings-only (resources=False), which never collects
-    deprecations at all."""
-    from typer.testing import CliRunner
-
-    from agentworks.cli import app
-
-    cfg = _config(
-        tmp_path,
-        """
-        [secrets.npm-token]
-        description = "npm token"
-        """,
-    )
-    monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
-
-    dry = CliRunner().invoke(app, ["resource", "migrate", "secret", "--dry-run"])
-    assert dry.exit_code == 0, dry.output
-    assert "deprecated TOML resource" not in dry.output
-    assert "secret/npm-token" in dry.output  # it still planned the move
-
-    written = CliRunner().invoke(app, ["resource", "sample", "secret", "--write", "samples.yaml"])
-    assert written.exit_code == 0, written.output
-    assert "deprecated TOML resource" not in written.output
-    assert (tmp_path / "resources" / "samples.yaml").exists()
-
-
-def test_settings_only_config_refuses_registry_build(tmp_path: Path) -> None:
-    """load_config(resources=False) skips the resource sections, so
-    build_registry must refuse the resulting Config: publishing it
-    would silently drop every TOML-declared resource."""
-    from agentworks.bootstrap import build_registry
-    from agentworks.errors import StateError
-
-    cfg = _config(
-        tmp_path,
-        """
-        [secrets.npm-token]
-        description = "npm token"
-        """,
-    )
-    config = load_config(cfg, warn_issues=False, resources=False)
-    assert config.resources_loaded is False
-    assert config.deprecation_issues == ()  # sections never loaded
-    assert not config.secrets  # resource fields empty
-    with pytest.raises(StateError, match="settings-only"):
-        build_registry(config)
-
-
-def test_fact_fields_mirror_the_messages(tmp_path: Path) -> None:
-    """The structured facts (for doctor's tidy rendering) track the
-    ambient messages: deprecated_sections lists the display shapes the
-    aggregate names, and noop_secret_backend_sections the no-op ones."""
-    cfg = _config(
-        tmp_path,
-        """
-        [secrets.npm-token]
-        description = "npm token"
-
-        [vm_templates.default]
-
         [secret_backends.env-var]
         """,
     )
     config = load_config(cfg, warn_issues=False)
-    assert config.deprecated_sections == ("[secrets.*]", "[vm_templates.*]")
+    assert len(config.deprecation_issues) == 1
+    assert config.deprecation_issues[0].startswith("[secret_backends.env-var]")
+    assert "agw resource migrate --all" in config.deprecation_issues[0]
     assert config.noop_secret_backend_sections == ("[secret_backends.env-var]",)
-    # And a clean config carries empty facts.
-    clean_dir = tmp_path / "clean"
-    clean_dir.mkdir()
-    clean = load_config(_config(clean_dir), warn_issues=False)
-    assert clean.deprecated_sections == ()
-    assert clean.noop_secret_backend_sections == ()
+
+
+def test_defaults_platform_alias_stays_a_deprecation(tmp_path: Path) -> None:
+    cfg = _config(
+        tmp_path,
+        """
+        [defaults]
+        platform = "azure"
+        """,
+    )
+    config = load_config(cfg, warn_issues=False)
+    assert any("defaults.platform is deprecated" in issue for issue in config.deprecation_issues)
+
+
+# ---------------------------------------------------------------------------
+# Exempted commands: they load resources=False and so still run against a
+# config that carries resource sections; a normal command errors.
+# ---------------------------------------------------------------------------
+
+
+def test_normal_command_errors_against_a_resource_declaring_config(tmp_path: Path, monkeypatch) -> None:
+    from typer.testing import CliRunner
+
+    from agentworks.cli import app
+
+    cfg = _config(
+        tmp_path,
+        """
+        [secrets.npm-token]
+        description = "npm token"
+        """,
+    )
+    monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
+    result = CliRunner().invoke(app, ["resource", "list", "--names-only"])
+    assert result.exit_code != 0
+    # CliRunner invokes the Typer app directly (not the ``main()`` wrapper that
+    # renders AgentworksError to stderr), so the hard error surfaces as the
+    # captured exception.
+    assert isinstance(result.exception, ConfigError)
+    assert "settings only" in str(result.exception)
+
+
+def test_resource_migrate_runs_against_a_resource_declaring_config(tmp_path: Path, monkeypatch) -> None:
+    from typer.testing import CliRunner
+
+    from agentworks.cli import app
+
+    cfg = _config(
+        tmp_path,
+        """
+        [secrets.npm-token]
+        description = "npm token"
+        """,
+    )
+    monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
+    dry = CliRunner().invoke(app, ["resource", "migrate", "secret", "--dry-run"])
+    assert dry.exit_code == 0, dry.output
+    assert "secret/npm-token" in dry.output
+
+
+def test_resource_sample_write_runs_against_a_resource_declaring_config(tmp_path: Path, monkeypatch) -> None:
+    from typer.testing import CliRunner
+
+    from agentworks.cli import app
+
+    cfg = _config(
+        tmp_path,
+        """
+        [secrets.npm-token]
+        description = "npm token"
+        """,
+    )
+    monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
+    written = CliRunner().invoke(app, ["resource", "sample", "secret", "--write", "samples.yaml"])
+    assert written.exit_code == 0, written.output
+    assert (tmp_path / "resources" / "samples.yaml").exists()
+
+
+def test_resource_edit_fallback_runs_against_a_resource_declaring_config(tmp_path: Path, monkeypatch) -> None:
+    """`resource edit` falls back to a settings-only manifest scan when the
+    registry build is unavailable; it must not hit the hard error. With no
+    matching manifest it reports not-found, NOT the settings-only
+    ConfigError."""
+    from typer.testing import CliRunner
+
+    from agentworks.cli import app
+
+    cfg = _config(
+        tmp_path,
+        """
+        [secrets.npm-token]
+        description = "npm token"
+        """,
+    )
+    monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
+    monkeypatch.setenv("EDITOR", "true")
+    result = CliRunner().invoke(app, ["resource", "edit", "secret/does-not-exist"])
+    # It reached the manifest scan (settings-only), not the resource-section
+    # hard error: the output must not carry the settings-only message.
+    assert "settings only" not in result.output

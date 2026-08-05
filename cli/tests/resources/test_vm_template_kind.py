@@ -35,9 +35,10 @@ from agentworks.resources import (
 )
 from agentworks.resources.graph import BuildContext
 from agentworks.vms.template import VMTemplate
+from tests.conftest import ManifestDoc, write_manifests
 
 
-def _write_cfg(path: Path, body: str) -> Path:
+def _write_cfg(path: Path, *manifests: ManifestDoc) -> Path:
     pub = path.parent / "id.pub"
     priv = path.parent / "id"
     pub.write_text("ssh-ed25519 AAAA...")
@@ -47,10 +48,10 @@ def _write_cfg(path: Path, body: str) -> Path:
         [operator]
         ssh_public_key = "{pub.as_posix()}"
         ssh_private_key = "{priv.as_posix()}"
-
-        """)
-        + dedent(body),
+        """),
     )
+    if manifests:
+        write_manifests(path.parent, *manifests)
     return path
 
 
@@ -137,10 +138,7 @@ def test_inherits_typo_fires_framework_miss_policy_error(tmp_path: Path) -> None
     """
     cfg_file = _write_cfg(
         tmp_path / "config.toml",
-        """
-        [vm_templates.child]
-        inherits = ["defualt"]  # typo
-        """,
+        ManifestDoc("vm-template", "child", {"inherits": ["defualt"]}),  # typo
     )
     cfg = load_config(cfg_file, warn_issues=False)
     with pytest.raises(ConfigError, match="vm-template kind only auto-declares"):
@@ -155,11 +153,7 @@ def test_inherits_default_works_without_operator_declaration(tmp_path: Path) -> 
     """
     cfg_file = _write_cfg(
         tmp_path / "config.toml",
-        """
-        [vm_templates.child]
-        inherits = ["default"]
-        cpus = 4
-        """,
+        ManifestDoc("vm-template", "child", {"inherits": ["default"], "cpus": 4}),
     )
     cfg = load_config(cfg_file, warn_issues=False)
     registry = build_registry(cfg)
@@ -186,13 +180,8 @@ def test_non_default_inherits_cycle_caught_by_framework(tmp_path: Path) -> None:
     """
     cfg_file = _write_cfg(
         tmp_path / "config.toml",
-        """
-        [vm_templates.a]
-        inherits = ["b"]
-
-        [vm_templates.b]
-        inherits = ["a"]
-        """,
+        ManifestDoc("vm-template", "a", {"inherits": ["b"]}),
+        ManifestDoc("vm-template", "b", {"inherits": ["a"]}),
     )
     cfg = load_config(cfg_file, warn_issues=False)
     with pytest.raises(ConfigError, match="cycle detected"):
@@ -208,10 +197,7 @@ def test_non_default_self_reference_caught_by_framework(tmp_path: Path) -> None:
     """
     cfg_file = _write_cfg(
         tmp_path / "config.toml",
-        """
-        [vm_templates.a]
-        inherits = ["a"]
-        """,
+        ManifestDoc("vm-template", "a", {"inherits": ["a"]}),
     )
     cfg = load_config(cfg_file, warn_issues=False)
     with pytest.raises(ConfigError, match="cycle detected"):
@@ -254,13 +240,8 @@ def test_inherits_cycle_through_default_caught_at_build_registry(tmp_path: Path)
     """
     cfg_file = _write_cfg(
         tmp_path / "config.toml",
-        """
-        [vm_templates.default]
-        inherits = ["a"]
-
-        [vm_templates.a]
-        inherits = ["default"]
-        """,
+        ManifestDoc("vm-template", "default", {"inherits": ["a"]}),
+        ManifestDoc("vm-template", "a", {"inherits": ["default"]}),
     )
     cfg = load_config(cfg_file, warn_issues=False)
     with pytest.raises(ConfigError, match="cycle"):
@@ -277,7 +258,7 @@ def test_unreferenced_vm_template_default_lands_with_framework_source(
     admin-template test in ``test_always_materialize.py`` for the
     Phase 2a.1 kind.
     """
-    cfg_file = _write_cfg(tmp_path / "config.toml", "")
+    cfg_file = _write_cfg(tmp_path / "config.toml")
     cfg = load_config(cfg_file, warn_issues=False)
     registry = build_registry(cfg)
 

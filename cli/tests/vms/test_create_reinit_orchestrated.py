@@ -21,30 +21,25 @@ from agentworks.db import VMStatus
 from agentworks.errors import StateError
 from agentworks.output import Role
 from agentworks.vms import manager as vm_manager
+from tests.conftest import ManifestDoc, write_manifests
+from tests.orchestrated_fixtures import proxmox_site
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from pathlib import Path
 
     from agentworks.db import Database
 
 # Proxmox ships in the opt-in ``proxmox`` system plugin since Phase 10 (R11),
 # so a config that uses the proxmox site enables the plugin, exactly as a real
-# proxmox operator would.
-PROXMOX_SECTION = """
+# proxmox operator would. The plugin opt-in is a settings section; the site
+# itself is declared as a ``vm-site`` manifest (ADR 0022).
+PLUGINS_ENABLED = """
 [plugins]
 system = ["proxmox"]
-
-[proxmox]
-api_url = "https://pve:8006"
-node = "pve1"
-token_id = "agw@pam!agw"
-template_vmid = 9000
 """
 
-GIT_CRED_SECTION = """
-[git_credentials.gh]
-provider = "github"
-"""
+GIT_CRED_GH = ManifestDoc("git-credential", "gh", {"provider": "github"})
 
 
 @pytest.fixture
@@ -57,9 +52,11 @@ def make_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("AW_SECRET_PROXMOX_TOKEN", "pve-token")
     monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
 
-    def _make(extra: str = ""):
+    def _make(extra: str = "", *, manifests: Sequence[ManifestDoc | str] = ()):
         path = tmp_path / "config.toml"
         path.write_text(f'[operator]\nssh_public_key = "{key}.pub"\nssh_private_key = "{key}"\n' + extra)
+        if manifests:
+            write_manifests(tmp_path, *manifests)
         return load_config(path, warn_issues=False, warn_deprecations=False)
 
     return _make
@@ -94,11 +91,14 @@ def test_create_graph_derives_from_declared_resources(make_config, db: Database)
     from agentworks.vms.templates import resolve_template
 
     config = make_config(
-        PROXMOX_SECTION
-        + GIT_CRED_SECTION
-        + '[admin.config]\ngit_credentials = ["gh"]\n'
-        + '[vm_templates.default.env]\nAPI_KEY = { secret = "api-key" }\n'
-        + '[secrets.api-key]\ndescription = "runtime only"\n'
+        PLUGINS_ENABLED,
+        manifests=[
+            proxmox_site(),
+            GIT_CRED_GH,
+            ManifestDoc("admin-template", "default", {"git_credentials": ["gh"]}),
+            ManifestDoc("vm-template", "default", {"env": {"API_KEY": {"secret": "api-key"}}}),
+            ManifestDoc("secret", "api-key", description="runtime only"),
+        ],
     )
     registry = build_registry(config)
     admin = admin_template(registry)
@@ -438,7 +438,7 @@ def test_reinit_runs_initialization_through_the_gate(
     the activation span."""
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
 
-    config = make_config(GIT_CRED_SECTION + '[admin.config]\ngit_credentials = ["gh"]\n')
+    config = make_config(manifests=[GIT_CRED_GH, ManifestDoc("admin-template", "default", {"git_credentials": ["gh"]})])
     _seed_provisioned_vm(db)
     monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: True)
     holds: list[str] = []
@@ -511,7 +511,7 @@ def test_reinit_resolves_the_stored_admin_template(
           git_credentials: ["gh"]
         """)
     )
-    config = make_config(GIT_CRED_SECTION)
+    config = make_config(manifests=[GIT_CRED_GH])
     db.insert_vm("rvm", site="lima-local", hostname="rvm", admin_template="work")
     db.update_vm_tailscale("rvm", "100.64.0.9")
     db.update_vm_provisioning_status("rvm", ProvisioningStatus.COMPLETE)

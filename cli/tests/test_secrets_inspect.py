@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from textwrap import dedent
 from typing import TYPE_CHECKING
 
@@ -18,8 +17,12 @@ from agentworks.secrets.inspect import (
     build_secret_table,
     render_secret_table,
 )
+from tests.conftest import ManifestDoc, write_manifests
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+    from pathlib import Path
+
     from tests.conftest import CapturedOutput
 
 
@@ -29,7 +32,22 @@ def _build_table(cfg_file: Path):
     return build_secret_table(cfg, registry)
 
 
-def _write_base(config_path: Path, *, extras: str = "") -> None:
+def _write_base(
+    config_path: Path,
+    *,
+    settings: str = "",
+    admin_env: dict[str, object] | None = None,
+    manifests: Sequence[ManifestDoc | str] = (),
+) -> None:
+    """Write a settings-only config.toml plus resources/ manifests.
+
+    The base always declares the ``default`` vm-template (whose
+    ``tailscale_auth_key`` requirement is what auto-declares the
+    ``tailscale-auth-key`` secret these tests assert on). ``admin_env``
+    seeds the ``default`` admin-template's env block (the operator's
+    secret-referencing env), ``manifests`` carries the operator secrets,
+    and ``settings`` any settings-only TOML ([secret_config], [plugins]).
+    """
     pub = config_path.parent / "id.pub"
     priv = config_path.parent / "id"
     pub.write_text("ssh-ed25519 AAAA...")
@@ -39,12 +57,14 @@ def _write_base(config_path: Path, *, extras: str = "") -> None:
         [operator]
         ssh_public_key = "{pub.as_posix()}"
         ssh_private_key = "{priv.as_posix()}"
-
-        [vm_templates.default]
-        apt = ["zsh"]
         """)
-        + dedent(extras),
+        + dedent(settings),
     )
+    docs: list[ManifestDoc | str] = [ManifestDoc("vm-template", "default", {"apt": ["zsh"]})]
+    if admin_env is not None:
+        docs.append(ManifestDoc("admin-template", "default", {"env": admin_env}))
+    docs.extend(manifests)
+    write_manifests(config_path.parent, *docs)
 
 
 def test_no_operator_secrets_still_shows_auto_declared(tmp_path: Path) -> None:
@@ -76,21 +96,12 @@ def test_rows_sorted_alphabetically_by_secret_name(tmp_path: Path) -> None:
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
-        extras="""
-        [admin.env]
-        Z = { secret = "z-token" }
-        A = { secret = "a-token" }
-        M = { secret = "m-token" }
-
-        [secrets.z-token]
-        description = "Z"
-
-        [secrets.a-token]
-        description = "A"
-
-        [secrets.m-token]
-        description = "M"
-        """,
+        admin_env={"Z": {"secret": "z-token"}, "A": {"secret": "a-token"}, "M": {"secret": "m-token"}},
+        manifests=[
+            ManifestDoc("secret", "z-token", description="Z"),
+            ManifestDoc("secret", "a-token", description="A"),
+            ManifestDoc("secret", "m-token", description="M"),
+        ],
     )
     table = _build_table(cfg_file)
     # Operator-declared secrets are sorted alphabetically; the
@@ -107,13 +118,8 @@ def test_env_var_cell_shows_default_convention_identifier(tmp_path: Path) -> Non
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
-        extras="""
-        [admin.env]
-        TOKEN = { secret = "github-token" }
-
-        [secrets.github-token]
-        description = "GitHub PAT"
-        """,
+        admin_env={"TOKEN": {"secret": "github-token"}},
+        manifests=[ManifestDoc("secret", "github-token", description="GitHub PAT")],
     )
     table = _build_table(cfg_file)
     row = table.rows[0]
@@ -128,14 +134,15 @@ def test_env_var_cell_shows_mapping_override(tmp_path: Path) -> None:
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
-        extras="""
-        [admin.env]
-        TOKEN = { secret = "github-token" }
-
-        [secrets.github-token]
-        description = "GitHub PAT"
-        backend_mappings.env-var = "GITHUB_TOKEN"
-        """,
+        admin_env={"TOKEN": {"secret": "github-token"}},
+        manifests=[
+            ManifestDoc(
+                "secret",
+                "github-token",
+                {"backend_mappings": {"env-var": "GITHUB_TOKEN"}},
+                description="GitHub PAT",
+            )
+        ],
     )
     table = _build_table(cfg_file)
     env_var_cell = next(c for c in table.rows[0].cells if c.backend == "env-var")
@@ -148,14 +155,15 @@ def test_env_var_cell_when_opted_out_reports_wont_attempt(tmp_path: Path) -> Non
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
-        extras="""
-        [admin.env]
-        TOKEN = { secret = "force-prompt" }
-
-        [secrets.force-prompt]
-        description = "Always prompt"
-        backend_mappings.env-var = false
-        """,
+        admin_env={"TOKEN": {"secret": "force-prompt"}},
+        manifests=[
+            ManifestDoc(
+                "secret",
+                "force-prompt",
+                {"backend_mappings": {"env-var": False}},
+                description="Always prompt",
+            )
+        ],
     )
     table = _build_table(cfg_file)
     env_var_cell = next(c for c in table.rows[0].cells if c.backend == "env-var")
@@ -169,13 +177,8 @@ def test_prompt_cell_has_no_static_identifier(tmp_path: Path) -> None:
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
-        extras="""
-        [admin.env]
-        TOKEN = { secret = "any" }
-
-        [secrets.any]
-        description = "any"
-        """,
+        admin_env={"TOKEN": {"secret": "any"}},
+        manifests=[ManifestDoc("secret", "any", description="any")],
     )
     table = _build_table(cfg_file)
     prompt_cell = next(c for c in table.rows[0].cells if c.backend == "prompt")
@@ -189,16 +192,12 @@ def test_column_order_matches_backend_chain_precedence(tmp_path: Path) -> None:
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
-        extras="""
-        [admin.env]
-        TOKEN = { secret = "x" }
-
-        [secrets.x]
-        description = "x"
-
+        settings="""
         [secret_config]
         backends = ["prompt", "env-var"]
         """,
+        admin_env={"TOKEN": {"secret": "x"}},
+        manifests=[ManifestDoc("secret", "x", description="x")],
     )
     table = _build_table(cfg_file)
     assert table.backends == ("prompt", "env-var")
@@ -217,17 +216,11 @@ def test_names_only_lists_every_registry_secret(tmp_path: Path, monkeypatch) -> 
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
-        extras="""
-        [admin.env]
-        TOKEN = { secret = "z-token" }
-        OTHER = { secret = "a-token" }
-
-        [secrets.z-token]
-        description = "Z"
-
-        [secrets.a-token]
-        description = "A"
-        """,
+        admin_env={"TOKEN": {"secret": "z-token"}, "OTHER": {"secret": "a-token"}},
+        manifests=[
+            ManifestDoc("secret", "z-token", description="Z"),
+            ManifestDoc("secret", "a-token", description="A"),
+        ],
     )
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg_file)
 
@@ -253,7 +246,7 @@ def test_empty_backend_chain_yields_no_columns(tmp_path: Path) -> None:
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
-        extras="""
+        settings="""
         [secret_config]
         backends = []
         """,
@@ -349,32 +342,38 @@ def _readiness_grid_config(tmp_path: Path) -> Path:
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
-        extras="""
+        settings="""
         [plugins]
         system = ["onepassword"]
-
-        [admin.env]
-        A = { secret = "mapped-op" }
-        B = { secret = "prompt-only" }
-        C = { secret = "unmapped-op" }
-
-        [secrets.mapped-op]
-        description = "op ref, env-var opted out"
-        backend_mappings.env-var = false
-        backend_mappings.onepassword = "op://Vault/item/field"
-
-        [secrets.prompt-only]
-        description = "no static key anywhere"
-        backend_mappings.env-var = false
-        backend_mappings.onepassword = false
-
-        [secrets.unmapped-op]
-        description = "onepassword mapping-required, no mapping"
-        backend_mappings.env-var = false
 
         [secret_config]
         backends = ["env-var", "onepassword", "prompt"]
         """,
+        admin_env={
+            "A": {"secret": "mapped-op"},
+            "B": {"secret": "prompt-only"},
+            "C": {"secret": "unmapped-op"},
+        },
+        manifests=[
+            ManifestDoc(
+                "secret",
+                "mapped-op",
+                {"backend_mappings": {"env-var": False, "onepassword": "op://Vault/item/field"}},
+                description="op ref, env-var opted out",
+            ),
+            ManifestDoc(
+                "secret",
+                "prompt-only",
+                {"backend_mappings": {"env-var": False, "onepassword": False}},
+                description="no static key anywhere",
+            ),
+            ManifestDoc(
+                "secret",
+                "unmapped-op",
+                {"backend_mappings": {"env-var": False}},
+                description="onepassword mapping-required, no mapping",
+            ),
+        ],
     )
     return cfg_file
 

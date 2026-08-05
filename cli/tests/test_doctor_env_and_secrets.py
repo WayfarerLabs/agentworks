@@ -2,36 +2,60 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from textwrap import dedent
+from typing import TYPE_CHECKING
 
 import pytest
 
 from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
-from agentworks.doctor import Status, _check_config, _check_secrets, run_checks
-from agentworks.errors import ConfigError, ValidationError
+from agentworks.doctor import Status, _check_config, _check_secrets
+from agentworks.errors import ConfigError
+from tests.conftest import ManifestDoc, write_manifests
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+    from pathlib import Path
 
 
-def _write_config(tmp_path: Path, *, extras: str = "") -> Path:
+def _write_config(
+    tmp_path: Path,
+    *,
+    settings: str = "",
+    admin_env: dict[str, object] | None = None,
+    manifests: Sequence[ManifestDoc | str] = (),
+) -> Path:
+    """Write a settings-only config.toml plus its resources/ manifests and
+    return the config path.
+
+    The base always declares an empty ``default`` vm-template (whose
+    tailscale requirement auto-declares ``tailscale-auth-key``, the secret
+    the doctor tests assert on) and the ``default`` admin-template
+    (shell=zsh). ``admin_env`` seeds that admin-template's env block,
+    ``manifests`` adds further resources (secrets, sites), and ``settings``
+    carries settings-only TOML ([plugins], [secret_config], the no-op
+    [secret_backends.*] sections)."""
     pub = tmp_path / "id.pub"
     priv = tmp_path / "id"
     pub.write_text("ssh-ed25519 AAAA...")
     priv.write_text("-----BEGIN OPENSSH PRIVATE KEY-----")
     cfg = tmp_path / "config.toml"
     cfg.write_text(
-        f"""\
-[operator]
-ssh_public_key = "{pub.as_posix()}"
-ssh_private_key = "{priv.as_posix()}"
-
-[vm_templates.default]
-
-[admin.config]
-shell = "zsh"
-
-[defaults]
-{extras}
-"""
+        dedent(f"""\
+        [operator]
+        ssh_public_key = "{pub.as_posix()}"
+        ssh_private_key = "{priv.as_posix()}"
+        """)
+        + dedent(settings)
+    )
+    admin_spec: dict[str, object] = {"shell": "zsh"}
+    if admin_env is not None:
+        admin_spec["env"] = admin_env
+    write_manifests(
+        tmp_path,
+        ManifestDoc("vm-template", "default"),
+        ManifestDoc("admin-template", "default", admin_spec),
+        *manifests,
     )
     return cfg
 
@@ -70,16 +94,12 @@ def test_secret_resolves_via_env_var_when_set(
     monkeypatch.setenv("AW_SECRET_SHARED", "from-operator-env")
     cfg = _write_config(
         tmp_path,
-        extras="""
-[admin.env]
-TOKEN = { secret = "shared" }
-
-[secrets.shared]
-description = "Shared API token"
-
-[secret_config]
-backends = ["env-var", "prompt"]
-""",
+        settings="""
+        [secret_config]
+        backends = ["env-var", "prompt"]
+        """,
+        admin_env={"TOKEN": {"secret": "shared"}},
+        manifests=[ManifestDoc("secret", "shared", description="Shared API token")],
     )
     config = load_config(cfg, warn_issues=False)
     g = _check_secrets(config, build_registry(config))
@@ -99,16 +119,12 @@ def test_secret_resolves_via_prompt_when_env_var_unset(
     monkeypatch.delenv("AW_SECRET_SHARED", raising=False)
     cfg = _write_config(
         tmp_path,
-        extras="""
-[admin.env]
-TOKEN = { secret = "shared" }
-
-[secrets.shared]
-description = "Shared API token"
-
-[secret_config]
-backends = ["env-var", "prompt"]
-""",
+        settings="""
+        [secret_config]
+        backends = ["env-var", "prompt"]
+        """,
+        admin_env={"TOKEN": {"secret": "shared"}},
+        manifests=[ManifestDoc("secret", "shared", description="Shared API token")],
     )
     config = load_config(cfg, warn_issues=False)
     g = _check_secrets(config, build_registry(config))
@@ -128,17 +144,19 @@ def test_secret_not_available_when_env_var_unset_and_prompt_opted_out(
     monkeypatch.delenv("AW_SECRET_OPTED_OUT", raising=False)
     cfg = _write_config(
         tmp_path,
-        extras="""
-[admin.env]
-TOKEN = { secret = "opted-out" }
-
-[secrets.opted-out]
-description = "Must come from env-var"
-backend_mappings.prompt = false
-
-[secret_config]
-backends = ["env-var", "prompt"]
-""",
+        settings="""
+        [secret_config]
+        backends = ["env-var", "prompt"]
+        """,
+        admin_env={"TOKEN": {"secret": "opted-out"}},
+        manifests=[
+            ManifestDoc(
+                "secret",
+                "opted-out",
+                {"backend_mappings": {"prompt": False}},
+                description="Must come from env-var",
+            )
+        ],
     )
     config = load_config(cfg, warn_issues=False)
     g = _check_secrets(config, build_registry(config))
@@ -162,7 +180,7 @@ def test_secret_backends_group_reports_readiness(tmp_path: Path, monkeypatch: py
 
     monkeypatch.setattr("shutil.which", lambda name: None)  # op absent
     config = load_config(
-        _write_config(tmp_path, extras='[plugins]\nsystem = ["onepassword"]\n'),
+        _write_config(tmp_path, settings='[plugins]\nsystem = ["onepassword"]\n'),
         warn_issues=False,
     )
     g = _check_secret_backends(build_registry(config))
@@ -211,21 +229,22 @@ def test_check_secrets_flags_a_not_ready_only_backend(tmp_path: Path, monkeypatc
     monkeypatch.setattr("shutil.which", lambda name: None)  # op absent
     cfg = _write_config(
         tmp_path,
-        extras="""
-[plugins]
-system = ["onepassword"]
+        settings="""
+        [plugins]
+        system = ["onepassword"]
 
-[admin.env]
-TOKEN = { secret = "op-only" }
-
-[secrets.op-only]
-description = "resolves only via onepassword"
-backend_mappings.onepassword = "op://Vault/item/field"
-backend_mappings.env-var = false
-
-[secret_config]
-backends = ["onepassword"]
-""",
+        [secret_config]
+        backends = ["onepassword"]
+        """,
+        admin_env={"TOKEN": {"secret": "op-only"}},
+        manifests=[
+            ManifestDoc(
+                "secret",
+                "op-only",
+                {"backend_mappings": {"onepassword": "op://Vault/item/field", "env-var": False}},
+                description="resolves only via onepassword",
+            )
+        ],
     )
     config = load_config(cfg, warn_issues=False)
     g = _check_secrets(config, build_registry(config))
@@ -246,19 +265,11 @@ def test_r9_3_manifest_malformed_block_surfaces_under_resource_registry(
     azdo git-credential; azdo ships in the opt-in ``azure`` system plugin, whose
     validation is deferred while disabled, so the plugin is enabled here for the
     block to validate (host-independent, so it always validates once enabled)."""
-    cfg = _write_config(tmp_path, extras='[plugins]\nsystem = ["azure"]')
-    resources_dir = tmp_path / "resources"
-    resources_dir.mkdir()
-    (resources_dir / "res.yaml").write_text(
-        "apiVersion: agentworks/v1\n"
-        "kind: git-credential\n"
-        "metadata:\n"
-        "  name: ado\n"
-        "spec:\n"
-        "  provider: azdo\n"
-        "  provider_config:\n"
-        "    org: my-org\n"
-        "    bogus: 1\n"
+    cfg = _write_config(tmp_path, settings='[plugins]\nsystem = ["azure"]')
+    write_manifests(
+        tmp_path,
+        ManifestDoc("git-credential", "ado", {"provider": {"name": "azdo", "org": "my-org", "bogus": 1}}),
+        filename="res.yaml",
     )
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
     g, _, registry = _check_config()
@@ -283,17 +294,14 @@ def test_mapping_to_undeclared_kind_hard_errors_at_build(tmp_path: Path) -> None
     """
     cfg = _write_config(
         tmp_path,
-        extras="""
-[admin.env]
-TOKEN = { secret = "shared" }
-
-[secrets.shared]
-description = "shared token"
-backend_mappings.bogusvault = "x"
-
-[secret_config]
-backends = ["env-var", "prompt"]
-""",
+        settings="""
+        [secret_config]
+        backends = ["env-var", "prompt"]
+        """,
+        admin_env={"TOKEN": {"secret": "shared"}},
+        manifests=[
+            ManifestDoc("secret", "shared", {"backend_mappings": {"bogusvault": "x"}}, description="shared token")
+        ],
     )
     config = load_config(cfg, warn_issues=False)
     with pytest.raises(ConfigError, match="unknown secret-backend 'bogusvault'"):
@@ -307,18 +315,19 @@ def test_mapping_to_multiple_undeclared_kinds_hard_errors_at_build(tmp_path: Pat
     old tolerant per-secret doctor row that listed them sorted."""
     cfg = _write_config(
         tmp_path,
-        extras="""
-[admin.env]
-TOKEN = { secret = "shared" }
-
-[secrets.shared]
-description = "shared token"
-backend_mappings.zeta-vault = "z"
-backend_mappings.alpha-vault = "a"
-
-[secret_config]
-backends = ["env-var", "prompt"]
-""",
+        settings="""
+        [secret_config]
+        backends = ["env-var", "prompt"]
+        """,
+        admin_env={"TOKEN": {"secret": "shared"}},
+        manifests=[
+            ManifestDoc(
+                "secret",
+                "shared",
+                {"backend_mappings": {"zeta-vault": "z", "alpha-vault": "a"}},
+                description="shared token",
+            )
+        ],
     )
     config = load_config(cfg, warn_issues=False)
     with pytest.raises(ConfigError, match="unknown secret-backend '(alpha-vault|zeta-vault)'"):
@@ -339,51 +348,55 @@ def test_agentworks_identity_override_surfaces_in_configuration(
     group (there used to be a separate Env group; it was removed as
     redundant since ``agw env show`` is the authoritative inspection
     surface)."""
-    cfg = _write_config(
-        tmp_path,
-        extras="""
-[admin.env]
-AGENTWORKS_SESSION = "operator-override"
-""",
-    )
+    cfg = _write_config(tmp_path, admin_env={"AGENTWORKS_SESSION": "operator-override"})
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
     g, _, _ = _check_config()
     warns = [c for c in g.checks if c.status == Status.WARN]
     assert any("AGENTWORKS_SESSION" in (c.message or "") for c in warns), [(c.name, c.message) for c in warns]
 
 
-def test_doctor_surfaces_deprecation_nudges(tmp_path: Path, monkeypatch) -> None:
-    """Deprecations moved off config_issues onto their own channel (so
-    --no-deprecations can silence the ambient per-command warning);
-    doctor is the explicit full-health surface and must still show them
-    -- the channel split silently dropped them from doctor once.
+def test_doctor_resource_sections_fail_row_and_continues(tmp_path: Path, monkeypatch) -> None:
+    """config.toml declaring resources is a hard error now (ADR 0022). Doctor
+    must NOT truncate the report to one fail row for the mid-migration
+    operator it helps most: it renders the Config fail row, then retries
+    settings-only (``resources=False``) and continues with the rest of the
+    report (SSH rows, registry)."""
+    # This test needs a config that genuinely still declares resources in TOML
+    # (the mid-migration state), so it writes those sections directly rather
+    # than through the manifest-based helper.
+    pub = tmp_path / "id.pub"
+    priv = tmp_path / "id"
+    pub.write_text("ssh-ed25519 AAAA...")
+    priv.write_text("-----BEGIN OPENSSH PRIVATE KEY-----")
+    cfg = tmp_path / "config.toml"
+    cfg.write_text(
+        dedent(f"""\
+        [operator]
+        ssh_public_key = "{pub.as_posix()}"
+        ssh_private_key = "{priv.as_posix()}"
 
-    Doctor renders the FACT as a tidy one-liner (maintainer ruling,
-    2026-07-06): one next step (`agw resource migrate`), no section
-    list, no teaching text -- that stays on the ambient warning."""
-    cfg = _write_config(tmp_path)  # has [vm_templates.default] + [admin.config]
+        [vm_templates.default]
+
+        [admin.config]
+        shell = "zsh"
+        """)
+    )
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
-    g, _, _ = _check_config()
-    warns = [(c.name, c.message or "") for c in g.checks if c.status == Status.WARN]
-    ((name, message),) = [w for w in warns if "deprecated TOML resource" in w[0]]
-    # Maintainer-specified row shape: the check NAME carries the fact,
-    # the parenthetical carries the one next step.
-    assert name == "Config has deprecated TOML resource declarations"
-    assert message == "migrate to YAML with `agw resource migrate`"
-    # The tidy pin: none of the ambient teaching text leaks into doctor.
-    line = f"{name} {message}"
-    assert "--no-deprecations" not in line
-    assert "resource sample" not in line
-    assert "[vm_templates.*]" not in line
+    g, config, registry = _check_config()
+    fails = [(c.name, c.message or "") for c in g.checks if c.status == Status.FAIL]
+    assert any(name == "Config" and "settings only" in message for name, message in fails), fails
+    # The report continued past the fail row rather than aborting: the
+    # settings-only retry produced a config, the SSH checks rendered, and the
+    # registry still built.
+    assert config is not None
+    assert any(c.name.startswith("SSH") for c in g.checks), [c.name for c in g.checks]
+    assert registry is not None
 
 
 def test_doctor_shows_noop_secret_backend_sections(tmp_path: Path, monkeypatch) -> None:
-    cfg = _write_config(
-        tmp_path,
-        extras="""
-[secret_backends.env-var]
-""",
-    )
+    # [secret_backends.*] is a settings-side no-op section (it does not
+    # hard-error like the resource sections); it stays in config.toml.
+    cfg = _write_config(tmp_path, settings="[secret_backends.env-var]\n")
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
     g, _, _ = _check_config()
     warns = [(c.name, c.message or "") for c in g.checks if c.status == Status.WARN]
@@ -397,12 +410,9 @@ def test_manifest_issues_surface_as_doctor_rows(tmp_path: Path, monkeypatch, cap
     ok. Doctor now renders manifest issues as warn rows, and passing
     the pre-loaded set into build_registry keeps the ambient print out
     of doctor's output entirely."""
-    from textwrap import dedent
-
     cfg = _write_config(tmp_path)
-    resources = tmp_path / "resources"
-    resources.mkdir()
-    (resources / "agent.yaml").write_text(
+    write_manifests(
+        tmp_path,
         dedent("""\
         apiVersion: agentworks/v1
         kind: agent-template
@@ -410,7 +420,8 @@ def test_manifest_issues_surface_as_doctor_rows(tmp_path: Path, monkeypatch, cap
           name: other
         spec:
           github_credentials: ["github"]
-        """)
+        """),
+        filename="agent.yaml",
     )
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
     g, _, registry = _check_config()
@@ -445,16 +456,25 @@ def test_manifest_load_failure_keeps_other_rows(tmp_path: Path, monkeypatch) -> 
     """A broken manifest FILE (parse error) gets a fail row without
     short-circuiting the rest of the report: TOML issue rows still
     render, and only the registry-dependent tail is skipped."""
-    cfg = _write_config(
-        tmp_path,
-        extras="""\
-[named_console]
-bogus_key = 1
-""",
+    # A settings-side warning (an unexpected top-level key, which must precede
+    # [operator]) stands in for the TOML issue row: the old [named_console]
+    # unknown-key warn is impossible now, since [named_console] is a resource
+    # section that hard-errors rather than soft-warning.
+    pub = tmp_path / "id.pub"
+    priv = tmp_path / "id"
+    pub.write_text("ssh-ed25519 AAAA...")
+    priv.write_text("-----BEGIN OPENSSH PRIVATE KEY-----")
+    cfg = tmp_path / "config.toml"
+    cfg.write_text(
+        dedent(f"""\
+        oops = true
+
+        [operator]
+        ssh_public_key = "{pub.as_posix()}"
+        ssh_private_key = "{priv.as_posix()}"
+        """)
     )
-    resources = tmp_path / "resources"
-    resources.mkdir()
-    (resources / "broken.yaml").write_text("kind: [unclosed\n")
+    write_manifests(tmp_path, "kind: [unclosed\n", filename="broken.yaml")
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
     g, config, registry = _check_config()
 
@@ -463,7 +483,7 @@ bogus_key = 1
     fails = [c for c in g.checks if c.name == "Manifest" and c.status == Status.FAIL]
     assert fails and "broken.yaml" in (fails[0].message or "")
     # The TOML unknown-key warn row still rendered after the fail.
-    assert any(c.name == "Config" and c.status == Status.WARN and "bogus_key" in (c.message or "") for c in g.checks)
+    assert any(c.name == "Config" and c.status == Status.WARN and "oops" in (c.message or "") for c in g.checks)
     assert not any(c.name == "Config is valid" for c in g.checks)
 
 
@@ -497,17 +517,15 @@ def _sp_site_config(tmp_path: Path) -> Path:
     supply."""
     cfg = _write_config(
         tmp_path,
-        extras="""
-[plugins]
-system = ["azure"]
+        settings="""
+        [plugins]
+        system = ["azure"]
 
-[secret_config]
-backends = ["env-var", "prompt"]
-""",
+        [secret_config]
+        backends = ["env-var", "prompt"]
+        """,
     )
-    resources = tmp_path / "resources"
-    resources.mkdir()
-    (resources / "site.yaml").write_text(_AZURE_SP_SITE)
+    write_manifests(tmp_path, _AZURE_SP_SITE, filename="site.yaml")
     return cfg
 
 
@@ -553,58 +571,15 @@ def test_prompt_only_site_secret_still_renders_on_its_own_secret_row(
     assert "would resolve via prompt" in (row.message or "")
 
 
-def test_config_load_validation_error_yields_fail_row_not_abort(tmp_path: Path, monkeypatch) -> None:
-    """Regression for #310: a non-conforming explicit [secrets.*] name makes
-    _load_secrets raise ValidationError at config load. ValidationError is a
-    SIBLING of ConfigError under AgentworksError (not a subclass), so the
-    config-load guard must name it explicitly; otherwise it escapes _check_config
-    and aborts the whole doctor run. Here it must instead produce a Config FAIL
-    row (carrying the ValidationError's hint) and return cleanly."""
-    cfg = _write_config(
-        tmp_path,
-        extras="""
-[secrets.Bad-Name]
-description = "uppercase name is non-conforming"
-""",
-    )
-    # Precondition: this config really does raise ValidationError at load.
-    with pytest.raises(ValidationError):
-        load_config(cfg, warn_issues=False)
-
-    monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
-    g, config, registry = _check_config()  # must not raise / abort
-
-    assert config is None
-    assert registry is None
-    fails = [c for c in g.checks if c.name == "Config" and c.status == Status.FAIL]
-    assert fails and "Bad-Name" in (fails[0].message or "")
-
-
-@pytest.mark.integration
-def test_run_checks_renders_full_report_on_config_validation_error(tmp_path: Path, monkeypatch) -> None:
-    """Regression for #310, at the run_checks level: a load-time ValidationError
-    must not abort the run. Doctor's contract is maximal visibility in one run,
-    so the full report still renders (config-free groups present) with a
-    Configuration FAIL row, and report.has_failures stays True (the signal the
-    CLI uses to exit nonzero). Integration for the same reason as the other
-    run_checks tests: the config-free groups probe the real environment."""
-    cfg = _write_config(
-        tmp_path,
-        extras="""
-[secrets.Bad-Name]
-description = "uppercase name is non-conforming"
-""",
-    )
-    monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
-
-    report = run_checks()  # must not raise / abort
-
-    group_names = [g.name for g in report.groups]
-    # The rest of the report still rendered: config-free groups are present.
-    for name in ("System", "Python", "Required tools"):
-        assert name in group_names
-    # The Configuration group carries the load failure as a FAIL row.
-    config_group = next(g for g in report.groups if g.name == "Configuration")
-    assert any(c.name == "Config" and c.status == Status.FAIL for c in config_group.checks)
-    # The fail row is what drives a nonzero exit at the CLI surface.
-    assert report.has_failures is True
+# The #310 regression pair (``test_config_load_validation_error_yields_fail_row_not_abort``
+# and its ``run_checks``-level sibling ``test_run_checks_renders_full_report_on_config_validation_error``)
+# was removed here. Both drove a load-time ValidationError from a non-conforming
+# explicit [secrets.*] name so that _check_config's guard (which catches
+# ValidationError, a SIBLING of ConfigError, not just ConfigError) could be
+# proven not to abort the run. The TOML resource sunset (ADR 0022) makes that
+# scenario structurally impossible: a [secrets.*] section now hard-errors as a
+# resource-section ConfigError before any name validation, and a non-conforming
+# name in a YAML manifest surfaces as ConfigError too (decode wraps every
+# spec-level AgentworksError). No settings-side load path raises ValidationError,
+# so the sibling-catch behavior can no longer be exercised through config load.
+# The guard's explicit ValidationError branch is retained as defensive coverage.

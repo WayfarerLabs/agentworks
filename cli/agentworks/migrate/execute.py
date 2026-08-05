@@ -294,7 +294,14 @@ def _verify(plan: MigrationPlan) -> int:
     from agentworks.bootstrap import build_registry
     from agentworks.config import load_config
 
-    post_config = load_config(plan.config_path, warn_issues=False)
+    # ``resources=False`` is load-bearing: after a partial migration the
+    # rewritten config may still carry un-migrated resource sections, which a
+    # normal load would reject with the phase-1 hard error. The settings-only
+    # load skips that check (and never loaded TOML resources anyway), while
+    # manifests, including the just-emitted YAML, still load, so the
+    # post-registry is the operator's real post-upgrade world minus the
+    # not-yet-migrated TOML rows.
+    post_config = load_config(plan.config_path, warn_issues=False, resources=False)
     post_rows = normalized_rows(build_registry(post_config))
     difference = first_difference(plan.pre_rows, post_rows)
     if difference is not None:
@@ -305,7 +312,55 @@ def _verify(plan: MigrationPlan) -> int:
                 "is being attempted; inspect its outcome and report this error."
             ),
         )
-    return len(post_rows)
+    # Bounded fabrication guard (LLD section 1): the migrated units' emitted
+    # documents must decode to EXACTLY the pre key set. ``first_difference``
+    # dropped its symmetric "added" branch (the post-registry legitimately
+    # carries built-in / auto-declared / other-manifest rows the scoped pre
+    # does not), so this key-set equality is what still catches an emission
+    # inventing an extra row for a selected unit, without reintroducing
+    # whole-registry false positives.
+    emitted = _emitted_unit_keys(plan)
+    expected = set(plan.pre_rows)
+    if emitted != expected:
+        extra = sorted(emitted - expected)
+        dropped = sorted(expected - emitted)
+        detail = f"emitted {sorted(emitted)} but expected {sorted(expected)}"
+        if extra:
+            detail = f"emitted an unexpected row {extra[0]}"
+        elif dropped:
+            detail = f"did not emit {dropped[0]}"
+        raise StateError(
+            f"migration verification failed: {detail}",
+            hint=(
+                "This is a migrate-tool bug, not a config problem. Rollback "
+                "is being attempted; inspect its outcome and report this error."
+            ),
+        )
+    return len(plan.pre_rows)
+
+
+def _emitted_unit_keys(plan: MigrationPlan) -> set[tuple[str, str]]:
+    """The ``(kind, name)`` set the migrated units' output decodes to.
+
+    The TOML units contribute one emitted YAML document each
+    (``plan.emitted_documents``, captured before coalescing); the
+    YAML-rewrite units contribute their own ``(kind, name)`` (the rewrite is
+    in place, so no new envelope is emitted for them).
+    """
+    import yaml
+
+    from agentworks.manifests.envelope import validate_envelope
+    from agentworks.source_location import SourceLocation
+
+    keys: set[tuple[str, str]] = set()
+    location = SourceLocation(file=plan.config_path, line=0)
+    for text in plan.emitted_documents:
+        document = validate_envelope(yaml.safe_load(text), location)
+        keys.add((document.kind, document.name))
+    for unit in plan.units:
+        if unit.source == "yaml":
+            keys.add((unit.kind, unit.name))
+    return keys
 
 
 def _rollback(

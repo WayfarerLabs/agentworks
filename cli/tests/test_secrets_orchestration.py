@@ -14,7 +14,8 @@ Pins:
 
 from __future__ import annotations
 
-from pathlib import Path
+from textwrap import dedent
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -27,13 +28,30 @@ from agentworks.secrets import (
     compute_needed_secrets,
     resolve_for_command,
 )
+from tests.conftest import ManifestDoc, write_manifests
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+    from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # Config fixture
 # ---------------------------------------------------------------------------
 
 
-def _write_config(tmp_path: Path, *, extras: str = "") -> Path:
+def _write_config(
+    tmp_path: Path,
+    *,
+    settings: str = "",
+    manifests: Sequence[ManifestDoc | str] = (),
+) -> Path:
+    """Write a settings-only config.toml plus its resources/ manifests and
+    return the config path.
+
+    config.toml is settings only now (ADR 0022): the ``[secrets.*]`` these
+    tests used to declare are ``secret`` manifests under ``resources/``, and
+    ``[secret_config]`` stays a settings-side table carried in ``settings``.
+    """
     pub = tmp_path / "id.pub"
     priv = tmp_path / "id"
     pub.write_text("ssh-ed25519 AAAA...")
@@ -41,20 +59,15 @@ def _write_config(tmp_path: Path, *, extras: str = "") -> Path:
 
     cfg = tmp_path / "config.toml"
     cfg.write_text(
-        f"""\
-[operator]
-ssh_public_key = "{pub.as_posix()}"
-ssh_private_key = "{priv.as_posix()}"
-
-[vm_templates.default]
-
-[admin.config]
-shell = "zsh"
-
-[defaults]
-{extras}
-"""
+        dedent(f"""\
+        [operator]
+        ssh_public_key = "{pub.as_posix()}"
+        ssh_private_key = "{priv.as_posix()}"
+        """)
+        + dedent(settings)
     )
+    if manifests:
+        write_manifests(tmp_path, *manifests)
     return cfg
 
 
@@ -76,13 +89,11 @@ def test_unions_single_target_env_chain(
     monkeypatch.setenv("AW_SECRET_API_KEY", "x")  # silence prompt fallback
     cfg = _write_config(
         tmp_path,
-        extras="""
-[secrets.api-key]
-description = "shared API key"
-
-[secret_config]
-backends = ["env-var"]
-""",
+        settings="""
+        [secret_config]
+        backends = ["env-var"]
+        """,
+        manifests=[ManifestDoc("secret", "api-key", description="shared API key")],
     )
     config = load_config(cfg, warn_issues=False)
     vm_env = {"API_KEY": EnvEntry(key="API_KEY", secret="api-key")}
@@ -114,16 +125,14 @@ def test_unknown_reference_raises_instead_of_dropping(tmp_path: Path) -> None:
 def test_unions_across_multiple_targets_dedup_by_name(tmp_path: Path) -> None:
     cfg = _write_config(
         tmp_path,
-        extras="""
-[secrets.shared]
-description = "shared"
-
-[secrets.unique-a]
-description = "unique to target a"
-
-[secret_config]
-backends = ["env-var", "prompt"]
-""",
+        settings="""
+        [secret_config]
+        backends = ["env-var", "prompt"]
+        """,
+        manifests=[
+            ManifestDoc("secret", "shared", description="shared"),
+            ManifestDoc("secret", "unique-a", description="unique to target a"),
+        ],
     )
     config = load_config(cfg, warn_issues=False)
 
@@ -153,19 +162,16 @@ def test_walks_all_scopes_in_target(tmp_path: Path) -> None:
     """All five scope dicts in a SecretTarget feed into the union."""
     cfg = _write_config(
         tmp_path,
-        extras="""
-[secrets.vm-secret]
-description = "vm"
-[secrets.ws-secret]
-description = "ws"
-[secrets.admin-secret]
-description = "admin"
-[secrets.session-secret]
-description = "session"
-
-[secret_config]
-backends = ["env-var", "prompt"]
-""",
+        settings="""
+        [secret_config]
+        backends = ["env-var", "prompt"]
+        """,
+        manifests=[
+            ManifestDoc("secret", "vm-secret", description="vm"),
+            ManifestDoc("secret", "ws-secret", description="ws"),
+            ManifestDoc("secret", "admin-secret", description="admin"),
+            ManifestDoc("secret", "session-secret", description="session"),
+        ],
     )
     config = load_config(cfg, warn_issues=False)
 
@@ -189,21 +195,21 @@ def test_extra_decls_extend_union(tmp_path: Path) -> None:
     -- the hook for legacy tailscale / git-cred migration."""
     cfg = _write_config(
         tmp_path,
-        extras="""
-[secrets.from-env]
-description = "in env table"
-[secrets.external]
-description = "not in any env table"
-
-[secret_config]
-backends = ["env-var", "prompt"]
-""",
+        settings="""
+        [secret_config]
+        backends = ["env-var", "prompt"]
+        """,
+        manifests=[
+            ManifestDoc("secret", "from-env", description="in env table"),
+            ManifestDoc("secret", "external", description="not in any env table"),
+        ],
     )
     config = load_config(cfg, warn_issues=False)
+    registry = build_registry(config)
 
     target = SecretTarget(vm={"K": EnvEntry(key="K", secret="from-env")})
-    external_decl = config.secrets["external"]
-    decls = compute_needed_secrets([target], build_registry(config), extra_decls=[external_decl])
+    external_decl = registry.lookup("secret", "external")
+    decls = compute_needed_secrets([target], registry, extra_decls=[external_decl])
     assert sorted(d.name for d in decls) == ["external", "from-env"]
 
 
@@ -218,13 +224,11 @@ def test_secret_references_invariant_under_value_substitution(
     un-substituted template env dicts."""
     cfg = _write_config(
         tmp_path,
-        extras="""
-[secrets.api]
-description = "api"
-
-[secret_config]
-backends = ["env-var", "prompt"]
-""",
+        settings="""
+        [secret_config]
+        backends = ["env-var", "prompt"]
+        """,
+        manifests=[ManifestDoc("secret", "api", description="api")],
     )
     config = load_config(cfg, warn_issues=False)
 
@@ -266,15 +270,14 @@ def test_cross_target_first_encounter_ordering(tmp_path: Path) -> None:
     missing-secrets list in prompt-order."""
     cfg = _write_config(
         tmp_path,
-        extras="""
-[secrets.b-secret]
-description = "b"
-[secrets.a-secret]
-description = "a"
-
-[secret_config]
-backends = ["env-var", "prompt"]
-""",
+        settings="""
+        [secret_config]
+        backends = ["env-var", "prompt"]
+        """,
+        manifests=[
+            ManifestDoc("secret", "b-secret", description="b"),
+            ManifestDoc("secret", "a-secret", description="a"),
+        ],
     )
     config = load_config(cfg, warn_issues=False)
 
@@ -292,19 +295,18 @@ def test_extra_decls_dedupe_against_target_decls(tmp_path: Path) -> None:
     appears once, not twice."""
     cfg = _write_config(
         tmp_path,
-        extras="""
-[secrets.shared]
-description = "shared"
-
-[secret_config]
-backends = ["env-var", "prompt"]
-""",
+        settings="""
+        [secret_config]
+        backends = ["env-var", "prompt"]
+        """,
+        manifests=[ManifestDoc("secret", "shared", description="shared")],
     )
     config = load_config(cfg, warn_issues=False)
+    registry = build_registry(config)
 
     target = SecretTarget(vm={"K": EnvEntry(key="K", secret="shared")})
-    shared = config.secrets["shared"]
-    decls = compute_needed_secrets([target], build_registry(config), extra_decls=[shared])
+    shared = registry.lookup("secret", "shared")
+    decls = compute_needed_secrets([target], registry, extra_decls=[shared])
     assert [d.name for d in decls] == ["shared"]
 
 
@@ -322,13 +324,11 @@ def test_resolve_for_command_returns_resolved_values(
     monkeypatch.setenv("AW_SECRET_API_KEY", "from-env")
     cfg = _write_config(
         tmp_path,
-        extras="""
-[secrets.api-key]
-description = "api"
-
-[secret_config]
-backends = ["env-var"]
-""",
+        settings="""
+        [secret_config]
+        backends = ["env-var"]
+        """,
+        manifests=[ManifestDoc("secret", "api-key", description="api")],
     )
     config = load_config(cfg, warn_issues=False)
     target = SecretTarget(vm={"K": EnvEntry(key="K", secret="api-key")})
@@ -346,13 +346,11 @@ def test_resolved_values_are_plain_data(
     monkeypatch.setenv("AW_SECRET_API_KEY", "first")
     cfg = _write_config(
         tmp_path,
-        extras="""
-[secrets.api-key]
-description = "api"
-
-[secret_config]
-backends = ["env-var"]
-""",
+        settings="""
+        [secret_config]
+        backends = ["env-var"]
+        """,
+        manifests=[ManifestDoc("secret", "api-key", description="api")],
     )
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
@@ -408,13 +406,11 @@ def test_resolve_for_command_passes_extra_decls_through(
     monkeypatch.setenv("AW_SECRET_EXTERNAL", "x")
     cfg = _write_config(
         tmp_path,
-        extras="""
-[secrets.external]
-description = "external"
-
-[secret_config]
-backends = ["env-var"]
-""",
+        settings="""
+        [secret_config]
+        backends = ["env-var"]
+        """,
+        manifests=[ManifestDoc("secret", "external", description="external")],
     )
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
@@ -429,7 +425,7 @@ backends = ["env-var"]
 
     monkeypatch.setattr("agentworks.secrets.resolve.resolve_secrets", _spy)
 
-    resolve_for_command([], config, registry, extra_decls=[config.secrets["external"]])
+    resolve_for_command([], config, registry, extra_decls=[registry.lookup("secret", "external")])
     assert calls == [["external"]]
 
 

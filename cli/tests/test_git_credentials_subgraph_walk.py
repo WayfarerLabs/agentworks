@@ -6,13 +6,18 @@ each token secret is auto-declared with the right ``Origin.source``.
 
 from __future__ import annotations
 
-from pathlib import Path
 from textwrap import dedent
+from typing import TYPE_CHECKING
 
 import pytest
 
 from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
+from tests.conftest import ManifestDoc, write_manifests
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+    from pathlib import Path
 
 
 @pytest.fixture()
@@ -24,7 +29,16 @@ def ssh_keys(tmp_path: Path) -> tuple[Path, Path]:
     return pub, priv
 
 
-def _write_cfg(tmp_path: Path, body: str, ssh_keys: tuple[Path, Path]) -> Path:
+def _write_cfg(
+    tmp_path: Path,
+    ssh_keys: tuple[Path, Path],
+    *,
+    settings: str = "",
+    manifests: Sequence[ManifestDoc | str] = (),
+) -> Path:
+    """Write a settings-only config.toml plus its resources/ manifests and
+    return the config path. ``settings`` carries settings-only TOML
+    ([plugins], ...); resources go in ``manifests``."""
     pub, priv = ssh_keys
     p = tmp_path / "c.toml"
     p.write_text(
@@ -36,8 +50,10 @@ def _write_cfg(tmp_path: Path, body: str, ssh_keys: tuple[Path, Path]) -> Path:
 
             """
         )
-        + dedent(body)
+        + dedent(settings)
     )
+    if manifests:
+        write_manifests(tmp_path, *manifests)
     return p
 
 
@@ -50,16 +66,15 @@ def test_admin_to_git_credentials_to_secret_walk(tmp_path: Path, ssh_keys: tuple
     """
     cfg = _write_cfg(
         tmp_path,
-        """\
-        [git_credentials.github]
-        type = "github"
-
-        [admin.config]
-        git_credentials = ["github"]
-        claude_marketplaces = []
-        claude_plugins = []
-        """,
         ssh_keys,
+        manifests=[
+            ManifestDoc("git-credential", "github", {"provider": {"name": "github"}}),
+            ManifestDoc(
+                "admin-template",
+                "default",
+                {"git_credentials": ["github"], "claude_marketplaces": [], "claude_plugins": []},
+            ),
+        ],
     )
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
@@ -81,20 +96,17 @@ def test_admin_to_git_credentials_to_secret_walk(tmp_path: Path, ssh_keys: tuple
 def test_agent_template_to_git_credentials_to_secret_walk(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
     cfg = _write_cfg(
         tmp_path,
+        ssh_keys,
         # ``azdo`` ships in the opt-in ``azure`` system plugin; enable it so the
         # azdo credential is ready and the subgraph walk reaches its secret.
-        """\
+        settings="""
         [plugins]
         system = ["azure"]
-
-        [git_credentials.azdo]
-        type = "azdo"
-        org = "my-org"
-
-        [agent_templates.claude]
-        git_credentials = ["azdo"]
         """,
-        ssh_keys,
+        manifests=[
+            ManifestDoc("git-credential", "azdo", {"provider": {"name": "azdo", "org": "my-org"}}),
+            ManifestDoc("agent-template", "claude", {"git_credentials": ["azdo"]}),
+        ],
     )
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
@@ -117,25 +129,22 @@ def test_collect_secrets_for_walks_admin_subgraph(tmp_path: Path, ssh_keys: tupl
 
     cfg = _write_cfg(
         tmp_path,
+        ssh_keys,
         # ``azdo`` ships in the opt-in ``azure`` system plugin; enable it so the
         # azdo credential is ready and the admin subgraph walk reaches its secret.
-        """\
+        settings="""
         [plugins]
         system = ["azure"]
-
-        [git_credentials.github]
-        type = "github"
-
-        [git_credentials.azdo]
-        type = "azdo"
-        org = "my-org"
-
-        [admin.config]
-        git_credentials = ["github", "azdo"]
-        claude_marketplaces = []
-        claude_plugins = []
         """,
-        ssh_keys,
+        manifests=[
+            ManifestDoc("git-credential", "github", {"provider": {"name": "github"}}),
+            ManifestDoc("git-credential", "azdo", {"provider": {"name": "azdo", "org": "my-org"}}),
+            ManifestDoc(
+                "admin-template",
+                "default",
+                {"git_credentials": ["github", "azdo"], "claude_marketplaces": [], "claude_plugins": []},
+            ),
+        ],
     )
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)

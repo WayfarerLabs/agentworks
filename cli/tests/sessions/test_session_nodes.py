@@ -16,6 +16,7 @@ from agentworks.errors import ConfigError, StateError
 from agentworks.sessions.nodes import pending_session_node
 from agentworks.sessions.templates import ResolvedSessionTemplate
 from agentworks.vms.nodes import LiveVMNode, VMSiteNode
+from tests.conftest import ManifestDoc, write_manifests
 
 if TYPE_CHECKING:
     from agentworks.capabilities.vm_platform import VMPlatform
@@ -431,8 +432,8 @@ def test_sweep_predicts_a_harness_integration_config_secret_with_owner_usage_fra
     # finalize reaches through HARNESS_INTEGRATION_REGISTRY to walk the template's
     # harness_integration_config dependencies (the auto-declaration input).
     monkeypatch.setitem(HARNESS_INTEGRATION_REGISTRY, "scanner", _SecretHarnessIntegration)
-    template_section = '[session_templates.scan]\nharness = "scanner"\n' if declared else ""
-    config = write_operator_config(tmp_path, template_section + '[secret_config]\nbackends = ["env-var"]\n')
+    template = [ManifestDoc("session-template", "scan", {"harness": "scanner"})] if declared else []
+    config = write_operator_config(tmp_path, '[secret_config]\nbackends = ["env-var"]\n', manifests=template)
     registry = build_registry(config)
     # Prove the parametrization actually forks the declaration path: a
     # real auto-declared row versus the synthesize fallback's KeyError.
@@ -834,12 +835,12 @@ def test_agent_template_node_derives_credential_edges(tmp_path, monkeypatch: pyt
     key.write_text("private")
     (tmp_path / "id_ed25519.pub").write_text("public")
     cfg = tmp_path / "config.toml"
-    cfg.write_text(
-        f'[operator]\nssh_public_key = "{key}.pub"\nssh_private_key = "{key}"\n'
-        '[git_credentials.gh]\nprovider = "github"\n'
-        '[git_credentials.gh2]\nprovider = "github"\n'
-        "[agent_templates.default]\n"
-        'git_credentials = ["gh", "gh2"]\n'
+    cfg.write_text(f'[operator]\nssh_public_key = "{key}.pub"\nssh_private_key = "{key}"\n')
+    write_manifests(
+        tmp_path,
+        ManifestDoc("git-credential", "gh", {"provider": "github"}),
+        ManifestDoc("git-credential", "gh2", {"provider": "github"}),
+        ManifestDoc("agent-template", "default", {"git_credentials": ["gh", "gh2"]}),
     )
     config = load_config(cfg, warn_issues=False, warn_deprecations=False)
     registry = build_registry(config)

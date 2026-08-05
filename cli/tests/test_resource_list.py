@@ -9,8 +9,8 @@ the summary counts reflect the post-filter view.
 
 from __future__ import annotations
 
-from pathlib import Path
 from textwrap import dedent
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -19,9 +19,31 @@ from agentworks.config import load_config
 from agentworks.errors import NotFoundError
 from agentworks.resources.inspect import list_resources
 from agentworks.resources.render import format_origin_line
+from tests.conftest import ManifestDoc, write_manifests
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+    from pathlib import Path
+
+# The operator vm-template these tests seed, so vm-template/default is
+# operator-declared and its tailscale requirement auto-declares a secret.
+_VM_DEFAULT = ManifestDoc("vm-template", "default", {"apt": ["zsh"]})
+# The env-var secret backend, the settings block most of these tests carry.
+_ENV_VAR_BACKEND = """
+[secret_config]
+backends = ["env-var"]
+"""
 
 
-def _write_base(config_path: Path, *, extras: str = "") -> None:
+def _write_base(
+    config_path: Path,
+    *,
+    settings: str = "",
+    manifests: Sequence[ManifestDoc | str] = (),
+) -> None:
+    """Write a settings-only config.toml plus its resources/ manifests.
+    ``settings`` carries settings-only TOML ([secret_config]); resources
+    go in ``manifests``."""
     pub = config_path.parent / "id.pub"
     priv = config_path.parent / "id"
     pub.write_text("ssh-ed25519 AAAA...")
@@ -32,8 +54,10 @@ def _write_base(config_path: Path, *, extras: str = "") -> None:
         ssh_public_key = "{pub.as_posix()}"
         ssh_private_key = "{priv.as_posix()}"
         """)
-        + dedent(extras),
+        + dedent(settings),
     )
+    if manifests:
+        write_manifests(config_path.parent, *manifests)
 
 
 def _load(cfg_file: Path):
@@ -51,16 +75,8 @@ def test_lists_every_kind_present_when_no_kind_filter(tmp_path: Path) -> None:
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
-        extras="""
-        [vm_templates.default]
-        apt = ["zsh"]
-
-        [secrets.my-key]
-        description = "k"
-
-        [secret_config]
-        backends = ["env-var"]
-        """,
+        settings=_ENV_VAR_BACKEND,
+        manifests=[_VM_DEFAULT, ManifestDoc("secret", "my-key", description="k")],
     )
     registry = _load(cfg_file)
     listing = list_resources(registry)
@@ -82,16 +98,8 @@ def test_kind_filter_narrows_rows_and_summary(tmp_path: Path) -> None:
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
-        extras="""
-        [vm_templates.default]
-        apt = ["zsh"]
-
-        [secrets.my-key]
-        description = "k"
-
-        [secret_config]
-        backends = ["env-var"]
-        """,
+        settings=_ENV_VAR_BACKEND,
+        manifests=[_VM_DEFAULT, ManifestDoc("secret", "my-key", description="k")],
     )
     registry = _load(cfg_file)
     listing = list_resources(registry, kinds=("secret",))
@@ -104,16 +112,7 @@ def test_kind_filter_narrows_rows_and_summary(tmp_path: Path) -> None:
 
 def test_kind_filter_accepts_multiple_kinds(tmp_path: Path) -> None:
     cfg_file = tmp_path / "config.toml"
-    _write_base(
-        cfg_file,
-        extras="""
-        [vm_templates.default]
-        apt = ["zsh"]
-
-        [secret_config]
-        backends = ["env-var"]
-        """,
-    )
+    _write_base(cfg_file, settings=_ENV_VAR_BACKEND, manifests=[_VM_DEFAULT])
     registry = _load(cfg_file)
     listing = list_resources(registry, kinds=("vm-template", "secret-backend"))
 
@@ -136,16 +135,8 @@ def test_origin_filter_operator_only_shows_operator_declared(tmp_path: Path) -> 
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
-        extras="""
-        [vm_templates.default]
-        apt = ["zsh"]
-
-        [secrets.my-key]
-        description = "k"
-
-        [secret_config]
-        backends = ["env-var"]
-        """,
+        settings=_ENV_VAR_BACKEND,
+        manifests=[_VM_DEFAULT, ManifestDoc("secret", "my-key", description="k")],
     )
     registry = _load(cfg_file)
     listing = list_resources(registry, origin_filter="operator")
@@ -158,16 +149,7 @@ def test_origin_filter_operator_only_shows_operator_declared(tmp_path: Path) -> 
 
 def test_origin_filter_auto_only_shows_auto_declared(tmp_path: Path) -> None:
     cfg_file = tmp_path / "config.toml"
-    _write_base(
-        cfg_file,
-        extras="""
-        [vm_templates.default]
-        apt = ["zsh"]
-
-        [secret_config]
-        backends = ["env-var"]
-        """,
-    )
+    _write_base(cfg_file, settings=_ENV_VAR_BACKEND, manifests=[_VM_DEFAULT])
     registry = _load(cfg_file)
     listing = list_resources(registry, origin_filter="auto")
 
@@ -200,13 +182,8 @@ def test_format_origin_line_renders_each_variant(tmp_path: Path) -> None:
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
-        extras="""
-        [secrets.my-key]
-        description = "k"
-
-        [secret_config]
-        backends = ["env-var"]
-        """,
+        settings=_ENV_VAR_BACKEND,
+        manifests=[ManifestDoc("secret", "my-key", description="k")],
     )
     registry = _load(cfg_file)
     listing = list_resources(registry)
@@ -226,16 +203,8 @@ def test_description_populated_for_operator_and_auto_resources(tmp_path: Path) -
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
-        extras="""
-        [vm_templates.default]
-        apt = ["zsh"]
-
-        [secrets.my-key]
-        description = "operator note"
-
-        [secret_config]
-        backends = ["env-var"]
-        """,
+        settings=_ENV_VAR_BACKEND,
+        manifests=[_VM_DEFAULT, ManifestDoc("secret", "my-key", description="operator note")],
     )
     registry = _load(cfg_file)
     listing = list_resources(registry)
@@ -265,13 +234,7 @@ def test_cli_names_only_emits_kind_slash_name_per_line(tmp_path: Path, monkeypat
     from agentworks.cli import app
 
     cfg_file = tmp_path / "config.toml"
-    _write_base(
-        cfg_file,
-        extras="""
-        [vm_templates.default]
-        apt = ["zsh"]
-        """,
-    )
+    _write_base(cfg_file, manifests=[_VM_DEFAULT])
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg_file)
 
     result = CliRunner().invoke(app, ["resource", "list", "--names-only"])
@@ -292,13 +255,7 @@ def test_cli_kind_csv_filter(tmp_path: Path, monkeypatch) -> None:
     from agentworks.cli import app
 
     cfg_file = tmp_path / "config.toml"
-    _write_base(
-        cfg_file,
-        extras="""
-        [vm_templates.default]
-        apt = ["zsh"]
-        """,
-    )
+    _write_base(cfg_file, manifests=[_VM_DEFAULT])
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg_file)
 
     result = CliRunner().invoke(
@@ -321,13 +278,7 @@ def test_cli_kind_csv_filter_tolerates_whitespace(tmp_path: Path, monkeypatch) -
     from agentworks.cli import app
 
     cfg_file = tmp_path / "config.toml"
-    _write_base(
-        cfg_file,
-        extras="""
-        [vm_templates.default]
-        apt = ["zsh"]
-        """,
-    )
+    _write_base(cfg_file, manifests=[_VM_DEFAULT])
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg_file)
 
     result = CliRunner().invoke(

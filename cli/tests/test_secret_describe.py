@@ -8,14 +8,28 @@ backend mappings (per-active-backend disposition), resolution preview
 
 from __future__ import annotations
 
-from pathlib import Path
 from textwrap import dedent
+from typing import TYPE_CHECKING
 
 import pytest
 
 from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
 from agentworks.secrets.inspect import describe_secret
+from tests.conftest import ManifestDoc, write_manifests
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+    from pathlib import Path
+
+_ENV_PROMPT = """
+[secret_config]
+backends = ["env-var", "prompt"]
+"""
+_ENV_ONLY = """
+[secret_config]
+backends = ["env-var"]
+"""
 
 
 @pytest.fixture()
@@ -27,7 +41,19 @@ def ssh_keys(tmp_path: Path) -> tuple[Path, Path]:
     return pub, priv
 
 
-def _write_cfg(tmp_path: Path, body: str, ssh_keys: tuple[Path, Path]) -> Path:
+def _write_cfg(
+    tmp_path: Path,
+    ssh_keys: tuple[Path, Path],
+    *,
+    settings: str = "",
+    admin_env: dict[str, object] | None = None,
+    manifests: Sequence[ManifestDoc | str] = (),
+) -> Path:
+    """Write a settings-only config.toml plus its resources/ manifests and
+    return the config path. ``settings`` carries settings-only TOML
+    ([secret_config], [plugins]); ``admin_env`` seeds the ``default``
+    admin-template's env block (the operator's secret-referencing env);
+    ``manifests`` carries the remaining resources (secrets, vm-templates)."""
     pub, priv = ssh_keys
     p = tmp_path / "c.toml"
     p.write_text(
@@ -39,8 +65,13 @@ def _write_cfg(tmp_path: Path, body: str, ssh_keys: tuple[Path, Path]) -> Path:
 
             """
         )
-        + dedent(body)
+        + dedent(settings)
     )
+    docs: list[ManifestDoc | str] = list(manifests)
+    if admin_env is not None:
+        docs.append(ManifestDoc("admin-template", "default", {"env": admin_env}))
+    if docs:
+        write_manifests(tmp_path, *docs)
     return p
 
 
@@ -50,14 +81,9 @@ def _write_cfg(tmp_path: Path, body: str, ssh_keys: tuple[Path, Path]) -> Path:
 def test_operator_declared_secret_shows_file_and_line(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
     cfg = _write_cfg(
         tmp_path,
-        """\
-        [secrets.api-key]
-        description = "API key for the operator's service"
-
-        [secret_config]
-        backends = ["env-var", "prompt"]
-        """,
         ssh_keys,
+        settings=_ENV_PROMPT,
+        manifests=[ManifestDoc("secret", "api-key", description="API key for the operator's service")],
     )
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
@@ -68,11 +94,12 @@ def test_operator_declared_secret_shows_file_and_line(tmp_path: Path, ssh_keys: 
     assert desc.description == "API key for the operator's service"
     # operator-declared origin carries structured file + line fields;
     # the renderer formats them as separate sub-lines. The describe
-    # service returns the raw Origin.
+    # service returns the raw Origin. The declaring file is the YAML
+    # manifest in the resources/ dir now, not config.toml.
     assert desc.origin is not None
     assert desc.origin.variant == "operator-declared"
     assert desc.origin.file is not None
-    assert str(desc.origin.file).endswith(cfg.name)
+    assert desc.origin.file.parent.name == "resources"
     assert desc.origin.line is not None
     assert desc.origin.line > 0
 
@@ -85,14 +112,9 @@ def test_auto_declared_secret_shows_first_requirement_source(tmp_path: Path, ssh
     """
     cfg = _write_cfg(
         tmp_path,
-        """\
-        [admin.env]
-        API_KEY = { secret = "auto-key" }
-
-        [secret_config]
-        backends = ["env-var", "prompt"]
-        """,
         ssh_keys,
+        settings=_ENV_PROMPT,
+        admin_env={"API_KEY": {"secret": "auto-key"}},
     )
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
@@ -118,21 +140,16 @@ def test_auto_declared_description_suffix_counts_other_sources(tmp_path: Path, s
     """
     cfg = _write_cfg(
         tmp_path,
-        """\
-        [admin.env]
-        SHARED_KEY = { secret = "shared" }
-
-        [vm_templates.azure-prod]
-        cpus = 2
-
-        [vm_templates.azure-prod.env]
-        TEMPLATE_KEY = { secret = "shared" }
-        OTHER_KEY = { secret = "shared" }
-
-        [secret_config]
-        backends = ["env-var", "prompt"]
-        """,
         ssh_keys,
+        settings=_ENV_PROMPT,
+        admin_env={"SHARED_KEY": {"secret": "shared"}},
+        manifests=[
+            ManifestDoc(
+                "vm-template",
+                "azure-prod",
+                {"cpus": 2, "env": {"TEMPLATE_KEY": {"secret": "shared"}, "OTHER_KEY": {"secret": "shared"}}},
+            )
+        ],
     )
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
@@ -161,20 +178,12 @@ def test_multiple_usages_render_one_row_each(tmp_path: Path, ssh_keys: tuple[Pat
     """
     cfg = _write_cfg(
         tmp_path,
-        """\
-        [secrets.shared-key]
-        description = "Used by admin and a template"
-
-        [admin.env]
-        ADMIN_KEY = { secret = "shared-key" }
-
-        [vm_templates.azure-prod]
-        cpus = 2
-
-        [vm_templates.azure-prod.env]
-        TEMPLATE_KEY = { secret = "shared-key" }
-        """,
         ssh_keys,
+        admin_env={"ADMIN_KEY": {"secret": "shared-key"}},
+        manifests=[
+            ManifestDoc("secret", "shared-key", description="Used by admin and a template"),
+            ManifestDoc("vm-template", "azure-prod", {"cpus": 2, "env": {"TEMPLATE_KEY": {"secret": "shared-key"}}}),
+        ],
     )
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
@@ -197,11 +206,8 @@ def test_no_usages_for_unreferenced_operator_declared_secret(tmp_path: Path, ssh
     """
     cfg = _write_cfg(
         tmp_path,
-        """\
-        [secrets.lonely-key]
-        description = "Declared but not used"
-        """,
         ssh_keys,
+        manifests=[ManifestDoc("secret", "lonely-key", description="Declared but not used")],
     )
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
@@ -219,14 +225,9 @@ def test_backend_mappings_show_each_active_backend(tmp_path: Path, ssh_keys: tup
     """
     cfg = _write_cfg(
         tmp_path,
-        """\
-        [secrets.api-key]
-        description = "API key"
-
-        [secret_config]
-        backends = ["env-var", "prompt"]
-        """,
         ssh_keys,
+        settings=_ENV_PROMPT,
+        manifests=[ManifestDoc("secret", "api-key", description="API key")],
     )
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
@@ -250,15 +251,11 @@ def test_backend_mapping_respects_operator_override(tmp_path: Path, ssh_keys: tu
     """
     cfg = _write_cfg(
         tmp_path,
-        """\
-        [secrets.api-key]
-        description = "API key"
-        backend_mappings.env-var = "CUSTOM_API_KEY"
-
-        [secret_config]
-        backends = ["env-var"]
-        """,
         ssh_keys,
+        settings=_ENV_ONLY,
+        manifests=[
+            ManifestDoc("secret", "api-key", {"backend_mappings": {"env-var": "CUSTOM_API_KEY"}}, description="API key")
+        ],
     )
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
@@ -274,15 +271,9 @@ def test_backend_mapping_respects_opt_out(tmp_path: Path, ssh_keys: tuple[Path, 
     """
     cfg = _write_cfg(
         tmp_path,
-        """\
-        [secrets.api-key]
-        description = "API key"
-        backend_mappings.env-var = false
-
-        [secret_config]
-        backends = ["env-var", "prompt"]
-        """,
         ssh_keys,
+        settings=_ENV_PROMPT,
+        manifests=[ManifestDoc("secret", "api-key", {"backend_mappings": {"env-var": False}}, description="API key")],
     )
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
@@ -307,14 +298,9 @@ def test_resolution_preview_picks_env_var_when_var_is_set(
     """
     cfg = _write_cfg(
         tmp_path,
-        """\
-        [secrets.api-key]
-        description = "API key"
-
-        [secret_config]
-        backends = ["env-var", "prompt"]
-        """,
         ssh_keys,
+        settings=_ENV_PROMPT,
+        manifests=[ManifestDoc("secret", "api-key", description="API key")],
     )
     monkeypatch.setenv("AW_SECRET_API_KEY", "from-shell")
     config = load_config(cfg, warn_issues=False)
@@ -338,14 +324,9 @@ def test_resolution_preview_falls_through_when_env_var_is_unset(
     """
     cfg = _write_cfg(
         tmp_path,
-        """\
-        [secrets.api-key]
-        description = "API key"
-
-        [secret_config]
-        backends = ["env-var", "prompt"]
-        """,
         ssh_keys,
+        settings=_ENV_PROMPT,
+        manifests=[ManifestDoc("secret", "api-key", description="API key")],
     )
     monkeypatch.delenv("AW_SECRET_API_KEY", raising=False)
     config = load_config(cfg, warn_issues=False)
@@ -359,15 +340,9 @@ def test_resolution_preview_falls_through_when_env_var_is_unset(
 def test_resolution_preview_falls_through_to_prompt(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
     cfg = _write_cfg(
         tmp_path,
-        """\
-        [secrets.api-key]
-        description = "API key"
-        backend_mappings.env-var = false
-
-        [secret_config]
-        backends = ["env-var", "prompt"]
-        """,
         ssh_keys,
+        settings=_ENV_PROMPT,
+        manifests=[ManifestDoc("secret", "api-key", {"backend_mappings": {"env-var": False}}, description="API key")],
     )
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
@@ -391,18 +366,22 @@ def test_not_ready_backend_annotated_and_skipped_in_preview(
     monkeypatch.setattr("shutil.which", lambda name: None)  # op absent -> not ready
     cfg = _write_cfg(
         tmp_path,
-        """\
+        ssh_keys,
+        settings="""
         [plugins]
         system = ["onepassword"]
-
-        [secrets.api-key]
-        description = "API key"
-        backend_mappings.onepassword = "op://Vault/api/field"
 
         [secret_config]
         backends = ["onepassword", "prompt"]
         """,
-        ssh_keys,
+        manifests=[
+            ManifestDoc(
+                "secret",
+                "api-key",
+                {"backend_mappings": {"onepassword": "op://Vault/api/field"}},
+                description="API key",
+            )
+        ],
     )
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
@@ -426,18 +405,22 @@ def test_render_shows_not_ready_annotation_and_skip(
     monkeypatch.setattr("shutil.which", lambda name: None)
     cfg = _write_cfg(
         tmp_path,
-        """\
+        ssh_keys,
+        settings="""
         [plugins]
         system = ["onepassword"]
-
-        [secrets.api-key]
-        description = "API key"
-        backend_mappings.onepassword = "op://Vault/api/field"
 
         [secret_config]
         backends = ["onepassword", "prompt"]
         """,
-        ssh_keys,
+        manifests=[
+            ManifestDoc(
+                "secret",
+                "api-key",
+                {"backend_mappings": {"onepassword": "op://Vault/api/field"}},
+                description="API key",
+            )
+        ],
     )
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
@@ -461,18 +444,22 @@ def test_interactive_optimism_preview_unchanged_under_readiness(
     monkeypatch.setattr("shutil.which", lambda name: None)
     cfg = _write_cfg(
         tmp_path,
-        """\
+        ssh_keys,
+        settings="""
         [plugins]
         system = ["onepassword"]
-
-        [secrets.api-key]
-        description = "API key"
-        backend_mappings.onepassword = "op://Vault/api/field"
 
         [secret_config]
         backends = ["onepassword", "prompt"]
         """,
-        ssh_keys,
+        manifests=[
+            ManifestDoc(
+                "secret",
+                "api-key",
+                {"backend_mappings": {"onepassword": "op://Vault/api/field"}},
+                description="API key",
+            )
+        ],
     )
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
@@ -499,14 +486,7 @@ def test_resolution_preview_not_available_when_no_backend_attempts(tmp_path: Pat
     from agentworks.secrets.backends import publish_to as publish_backends
     from agentworks.secrets.base import SecretDecl
 
-    cfg = _write_cfg(
-        tmp_path,
-        """\
-        [secret_config]
-        backends = ["env-var"]
-        """,
-        ssh_keys,
-    )
+    cfg = _write_cfg(tmp_path, ssh_keys, settings=_ENV_ONLY)
     config = load_config(cfg, warn_issues=False)
 
     from agentworks.manifests import builtin as builtin_manifests
@@ -552,17 +532,10 @@ def test_render_emits_header_usages_mappings_preview(
 
     cfg = _write_cfg(
         tmp_path,
-        """\
-        [secrets.api-key]
-        description = "API key for the operator's service"
-
-        [admin.env]
-        ADMIN_KEY = { secret = "api-key" }
-
-        [secret_config]
-        backends = ["env-var", "prompt"]
-        """,
         ssh_keys,
+        settings=_ENV_PROMPT,
+        admin_env={"ADMIN_KEY": {"secret": "api-key"}},
+        manifests=[ManifestDoc("secret", "api-key", description="API key for the operator's service")],
     )
     # Resolution preview now reflects runtime presence -- set the var so
     # the assertion ``would resolve via env-var`` is meaningful.
@@ -605,14 +578,9 @@ def test_describe_secret_used_by_is_none_without_db(tmp_path: Path, ssh_keys: tu
     """
     cfg = _write_cfg(
         tmp_path,
-        """\
-        [secrets.api-key]
-        description = "k"
-
-        [secret_config]
-        backends = ["env-var"]
-        """,
         ssh_keys,
+        settings=_ENV_ONLY,
+        manifests=[ManifestDoc("secret", "api-key", description="k")],
     )
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
@@ -627,14 +595,7 @@ def test_describe_secret_used_by_populated_with_db(tmp_path: Path, ssh_keys: tup
     """
     from agentworks.db import Database, SessionMode
 
-    cfg = _write_cfg(
-        tmp_path,
-        """\
-        [admin.env]
-        API_KEY = { secret = "shared-key" }
-        """,
-        ssh_keys,
-    )
+    cfg = _write_cfg(tmp_path, ssh_keys, admin_env={"API_KEY": {"secret": "shared-key"}})
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
 
@@ -667,14 +628,7 @@ def test_render_emits_used_by_section_when_populated(
     from agentworks.db import Database, SessionMode
     from agentworks.secrets.inspect import render_secret_description
 
-    cfg = _write_cfg(
-        tmp_path,
-        """\
-        [admin.env]
-        API_KEY = { secret = "shared-key" }
-        """,
-        ssh_keys,
-    )
+    cfg = _write_cfg(tmp_path, ssh_keys, admin_env={"API_KEY": {"secret": "shared-key"}})
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
 
@@ -715,14 +669,9 @@ def test_render_used_by_empty_shows_friendly_message(
 
     cfg = _write_cfg(
         tmp_path,
-        """\
-        [secrets.dead-key]
-        description = "Declared but no live session reaches it"
-
-        [secret_config]
-        backends = ["env-var"]
-        """,
         ssh_keys,
+        settings=_ENV_ONLY,
+        manifests=[ManifestDoc("secret", "dead-key", description="Declared but no live session reaches it")],
     )
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
@@ -751,14 +700,9 @@ def test_render_omits_used_by_section_when_none(
 
     cfg = _write_cfg(
         tmp_path,
-        """\
-        [secrets.api-key]
-        description = "k"
-
-        [secret_config]
-        backends = ["env-var"]
-        """,
         ssh_keys,
+        settings=_ENV_ONLY,
+        manifests=[ManifestDoc("secret", "api-key", description="k")],
     )
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
@@ -783,7 +727,7 @@ def test_describe_secret_raises_not_found_for_unknown_name(tmp_path: Path, ssh_k
     """
     from agentworks.errors import NotFoundError
 
-    cfg = _write_cfg(tmp_path, "", ssh_keys)
+    cfg = _write_cfg(tmp_path, ssh_keys)
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
     with pytest.raises(NotFoundError) as exc:

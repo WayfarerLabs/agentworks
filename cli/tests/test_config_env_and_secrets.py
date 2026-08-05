@@ -1,38 +1,63 @@
-"""Config loader tests for the env / secrets surface added in Phase 2 of the
-env-and-secrets effort.
+"""Registry-boundary tests for the env / secrets surface added in Phase 2 of
+the env-and-secrets effort.
 
-These cover:
+config.toml is settings only now (ADR 0022): the env-carrying resources
+(admin-template, vm/agent/workspace/session templates) and the
+``[secrets.*]`` declarations are YAML manifests under ``resources/``, and
+the decode + validation that used to run at ``load_config`` now runs at
+``build_registry`` (envelope decode) and ``registry.finalize`` (chain /
+capability validation). These tests exercise the same guarantees through
+that boundary:
 
-- env tables on AdminConfig / VMTemplate / WorkspaceTemplate / AgentTemplate /
-  SessionTemplate parse into ``dict[str, EnvEntry]`` (plaintext + secret-ref shapes).
+- env tables on admin-template / vm / workspace / agent / session templates
+  parse into ``dict[str, EnvEntry]`` (plaintext + secret-ref shapes), read
+  back off the finalized registry.
 - env key validation (regex; rejects invalid names).
-- AGENTWORKS_* override emits a load-time warning.
-- [secrets.*] parses into SecretDecls including all backend_mappings value forms
-  (string, dict, false). ``true`` is rejected.
-- [secret_config].backends drives the active backend chain; precedence preserved.
+- AGENTWORKS_* override emits a warning (now on the ManifestSet, not
+  cfg.config_issues).
+- secret manifests parse into SecretDecls including all backend_mappings
+  value forms (string, dict, false). ``true`` is rejected.
+- [secret_config].backends drives the active backend chain; precedence
+  preserved (still a config setting).
 - Unknown backend kinds in [secret_config].backends raise ConfigError.
-- Unreachable secrets raise ConfigError at load time.
-- Env entries referencing undeclared secrets load cleanly (Phase 1b of the
-  Resource Registry SDD removed the strict-error path; auto-decl coverage
-  lives in tests/test_env_block_requirements.py, runtime-failure coverage
-  in tests/test_secrets_resolve.py).
-- Mid-config without any [secrets] / [secret_config] still loads cleanly;
-  the default chain applies with nothing to resolve.
+- Unreachable secrets raise ConfigError at build_registry.
+- Env entries referencing undeclared secrets load cleanly (the Registry's
+  auto-declare miss policy; auto-decl coverage lives in
+  tests/test_env_block_references.py, runtime-failure coverage in
+  tests/test_secrets_resolve.py).
+- Settings-only config (no secret manifests, no [secret_config]) still
+  builds; the default chain applies with nothing to resolve.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
 from textwrap import dedent
+from typing import TYPE_CHECKING
 
 import pytest
 
 from agentworks.bootstrap import build_registry
 from agentworks.config import ConfigError, load_config
+from agentworks.manifests import RESOURCES_DIRNAME, load_manifests
 from agentworks.secrets import active_backends, resolve_secrets
+from tests.conftest import ManifestDoc, write_manifests
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+    from pathlib import Path
 
 
-def _write_base(config_path: Path, *, extras: str = "") -> None:
+def _write_base(
+    config_path: Path,
+    *,
+    settings: str = "",
+    manifests: Sequence[ManifestDoc | str] = (),
+) -> None:
+    """Write a settings-only config.toml plus its resources/ manifests.
+
+    ``settings`` carries settings-only TOML ([secret_config], [plugins],
+    [secret_backends]); every resource under test goes in ``manifests``.
+    """
     pub = config_path.parent / "id.pub"
     priv = config_path.parent / "id"
     pub.write_text("ssh-ed25519 AAAA...")
@@ -44,16 +69,24 @@ def _write_base(config_path: Path, *, extras: str = "") -> None:
         ssh_public_key = "{pub.as_posix()}"
         ssh_private_key = "{priv.as_posix()}"
 
-        [vm_templates.default]
-        apt = ["zsh"]
-
-        [admin.config]
-        shell = "zsh"
-
-        [defaults]
         """)
-        + dedent(extras),
+        + dedent(settings),
     )
+    if manifests:
+        write_manifests(config_path.parent, *manifests)
+
+
+def _load(cfg_file: Path):  # type: ignore[no-untyped-def]
+    """Load the settings config and build the finalized registry: the
+    boundary where manifest decode and chain/site validation now surface."""
+    return build_registry(load_config(cfg_file, warn_issues=False))
+
+
+def _manifest_issues(cfg_file: Path) -> tuple[str, ...]:
+    """The spec-level warnings the resources/ manifests raise (env hygiene,
+    nonconforming secret names, unknown keys). config.toml is settings only
+    now, so these ride the ManifestSet, not cfg.config_issues."""
+    return load_manifests(cfg_file.parent / RESOURCES_DIRNAME).issues
 
 
 def test_no_secrets_section_loads_with_default_chain(tmp_path: Path) -> None:
@@ -65,10 +98,13 @@ def test_no_secrets_section_loads_with_default_chain(tmp_path: Path) -> None:
     cfg_file = tmp_path / "config.toml"
     _write_base(cfg_file)
     cfg = load_config(cfg_file, warn_issues=False)
-    assert cfg.secrets == {}
     # Absence of [secret_config] defaults to the standard chain.
     assert cfg.secret_config_data.backends == ("env-var", "prompt")
     registry = build_registry(cfg)
+    # No operator-declared secrets: config carries none, and no manifest
+    # declares one (only the ever-present auto-declared tailscale-auth-key
+    # remains).
+    assert all(decl.origin.variant != "operator-declared" for _name, decl in registry.iter_kind_items("secret"))
     backends = active_backends(cfg, registry)
     assert [b.name for b in backends] == ["env-var", "prompt"]
     # No declared secrets => nothing to resolve; the loop is a no-op.
@@ -82,13 +118,10 @@ def test_secret_config_absent_uses_default_chain(tmp_path: Path) -> None:
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
-        extras="""
-        [admin.env]
-        API_KEY = { secret = "api-key" }
-
-        [secrets.api-key]
-        description = "API token"
-        """,
+        manifests=[
+            ManifestDoc("admin-template", "default", {"env": {"API_KEY": {"secret": "api-key"}}}),
+            ManifestDoc("secret", "api-key", description="API token"),
+        ],
     )
     cfg = load_config(cfg_file, warn_issues=False)
     assert cfg.secret_config_data.backends == ("env-var", "prompt")
@@ -101,7 +134,7 @@ def test_secret_config_table_without_backends_uses_default_chain(tmp_path: Path)
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
-        extras="""
+        settings="""
         [secret_config]
         """,
     )
@@ -115,7 +148,7 @@ def test_secret_config_explicit_empty_list_disables_resolution(tmp_path: Path) -
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
-        extras="""
+        settings="""
         [secret_config]
         backends = []
         """,
@@ -128,59 +161,58 @@ def test_admin_env_plaintext_and_secret(tmp_path: Path) -> None:
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
-        extras="""
-        [admin.env]
-        HTTP_PROXY = "http://proxy:3128"
-        TOKEN = { secret = "shared-token" }
-
-        [secrets.shared-token]
-        description = "Shared token"
-
+        settings="""
         [secret_config]
         backends = ["env-var", "prompt"]
         """,
+        manifests=[
+            ManifestDoc(
+                "admin-template",
+                "default",
+                {"env": {"HTTP_PROXY": "http://proxy:3128", "TOKEN": {"secret": "shared-token"}}},
+            ),
+            ManifestDoc("secret", "shared-token", description="Shared token"),
+        ],
     )
-    cfg = load_config(cfg_file, warn_issues=False)
-    assert cfg.admin is not None
-    assert cfg.admin.env["HTTP_PROXY"].value == "http://proxy:3128"
-    assert cfg.admin.env["TOKEN"].secret == "shared-token"
+    registry = _load(cfg_file)
+    admin = registry.lookup("admin-template", "default")
+    assert admin.env["HTTP_PROXY"].value == "http://proxy:3128"
+    assert admin.env["TOKEN"].secret == "shared-token"
 
 
 def test_vm_template_env(tmp_path: Path) -> None:
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
-        extras="""
-        [vm_templates.default.env]
-        EDITOR = "nvim"
-        """,
+        manifests=[ManifestDoc("vm-template", "default", {"env": {"EDITOR": "nvim"}})],
     )
-    cfg = load_config(cfg_file, warn_issues=False)
-    assert cfg.vm_templates["default"].env["EDITOR"].value == "nvim"
+    registry = _load(cfg_file)
+    assert registry.lookup("vm-template", "default").env["EDITOR"].value == "nvim"
     # Resolved VM also carries the env.
-    from agentworks.vms.templates import resolve_from_dict as _resolve_vm
+    from agentworks.vms.templates import resolve_template
 
-    assert _resolve_vm(cfg.vm_templates).env["EDITOR"].value == "nvim"
+    assert resolve_template(registry, "default").env["EDITOR"].value == "nvim"
 
 
 def test_agent_template_env(tmp_path: Path) -> None:
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
-        extras="""
-        [agent_templates.claude.env]
-        LOG_LEVEL = "info"
-        ANTHROPIC_API_KEY = { secret = "anthropic-api-key" }
-
-        [secrets.anthropic-api-key]
-        description = "Anthropic API key"
-
+        settings="""
         [secret_config]
         backends = ["env-var", "prompt"]
         """,
+        manifests=[
+            ManifestDoc(
+                "agent-template",
+                "claude",
+                {"env": {"LOG_LEVEL": "info", "ANTHROPIC_API_KEY": {"secret": "anthropic-api-key"}}},
+            ),
+            ManifestDoc("secret", "anthropic-api-key", description="Anthropic API key"),
+        ],
     )
-    cfg = load_config(cfg_file, warn_issues=False)
-    agent = cfg.agent_templates["claude"]
+    registry = _load(cfg_file)
+    agent = registry.lookup("agent-template", "claude")
     assert agent.env["LOG_LEVEL"].value == "info"
     assert agent.env["ANTHROPIC_API_KEY"].secret == "anthropic-api-key"
 
@@ -189,36 +221,37 @@ def test_workspace_template_env(tmp_path: Path) -> None:
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
-        extras="""
-        [workspace_templates.gruntweave]
-        repo = "https://example.com/org/repo.git"
-
-        [workspace_templates.gruntweave.env]
-        EXTRA = "value"
-        """,
+        manifests=[
+            ManifestDoc(
+                "workspace-template",
+                "gruntweave",
+                {"repo": "https://example.com/org/repo.git", "env": {"EXTRA": "value"}},
+            )
+        ],
     )
-    cfg = load_config(cfg_file, warn_issues=False)
-    assert cfg.workspace_templates["gruntweave"].env["EXTRA"].value == "value"
+    registry = _load(cfg_file)
+    assert registry.lookup("workspace-template", "gruntweave").env["EXTRA"].value == "value"
 
 
 def test_session_template_env_plaintext_and_secret(tmp_path: Path) -> None:
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
-        extras="""
-        [session_templates.shell.env]
-        EDITOR = "nvim"
-        API_KEY = { secret = "anthropic-api-key" }
-
-        [secrets.anthropic-api-key]
-        description = "Anthropic API key"
-
+        settings="""
         [secret_config]
         backends = ["env-var", "prompt"]
         """,
+        manifests=[
+            ManifestDoc(
+                "session-template",
+                "shell",
+                {"env": {"EDITOR": "nvim", "API_KEY": {"secret": "anthropic-api-key"}}},
+            ),
+            ManifestDoc("secret", "anthropic-api-key", description="Anthropic API key"),
+        ],
     )
-    cfg = load_config(cfg_file, warn_issues=False)
-    tmpl = cfg.session_templates["shell"]
+    registry = _load(cfg_file)
+    tmpl = registry.lookup("session-template", "shell")
     assert tmpl.env is not None
     assert tmpl.env["EDITOR"].value == "nvim"
     assert tmpl.env["API_KEY"].secret == "anthropic-api-key"
@@ -228,81 +261,63 @@ def test_invalid_env_key_raises(tmp_path: Path) -> None:
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
-        extras="""
-        [admin.env]
-        "1BAD" = "value"
-        """,
+        manifests=[ManifestDoc("admin-template", "default", {"env": {"1BAD": "value"}})],
     )
     with pytest.raises(ConfigError, match="invalid env var name"):
-        load_config(cfg_file, warn_issues=False)
+        _load(cfg_file)
 
 
 def test_agentworks_prefix_env_emits_warning(tmp_path: Path) -> None:
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
-        extras="""
-        [admin.env]
-        AGENTWORKS_VM = "override-bad"
-        """,
+        manifests=[ManifestDoc("admin-template", "default", {"env": {"AGENTWORKS_VM": "override-bad"}})],
     )
-    cfg = load_config(cfg_file, warn_issues=False)
-    assert any("AGENTWORKS_VM" in issue and "identity variable" in issue for issue in cfg.config_issues), (
-        cfg.config_issues
-    )
+    issues = _manifest_issues(cfg_file)
+    assert any("AGENTWORKS_VM" in issue and "identity variable" in issue for issue in issues), issues
 
 
 def test_env_inline_table_unknown_key_rejected(tmp_path: Path) -> None:
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
-        extras="""
-        [admin.env]
-        BAD = { value = "x" }
-        """,
+        manifests=[ManifestDoc("admin-template", "default", {"env": {"BAD": {"value": "x"}}})],
     )
     with pytest.raises(ConfigError, match="unexpected keys"):
-        load_config(cfg_file, warn_issues=False)
+        _load(cfg_file)
 
 
 def test_env_secret_must_be_string(tmp_path: Path) -> None:
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
-        extras="""
-        [admin.env]
-        BAD = { secret = 42 }
-        """,
+        manifests=[ManifestDoc("admin-template", "default", {"env": {"BAD": {"secret": 42}}})],
     )
     with pytest.raises(ConfigError, match="secret"):
-        load_config(cfg_file, warn_issues=False)
+        _load(cfg_file)
 
 
-def test_env_referencing_undeclared_secret_does_not_error_at_load(
+def test_env_referencing_undeclared_secret_does_not_error(
     tmp_path: Path,
 ) -> None:
-    """Phase 1b of the Resource Registry SDD removed the strict
-    config-load error for env-block secret refs that have no
-    ``[secrets.<name>]`` block; the Registry's auto-declare miss policy
-    handles the missing name at finalize. Verifying the load no longer
-    errors; the auto-declare path is covered by
-    ``tests/test_env_block_requirements.py``.
+    """The Registry's auto-declare miss policy handles an env-block secret
+    ref that has no ``secret`` manifest: the build no longer errors (the
+    strict config-load error is gone). This verifies the build succeeds and
+    the entry is preserved; the auto-declare path itself is covered by
+    ``tests/test_env_block_references.py``.
     """
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
-        extras="""
-        [admin.env]
-        API_KEY = { secret = "missing" }
-
+        settings="""
         [secret_config]
         backends = ["env-var"]
         """,
+        manifests=[ManifestDoc("admin-template", "default", {"env": {"API_KEY": {"secret": "missing"}}})],
     )
-    # No longer raises -- the secret auto-declares through the framework.
-    cfg = load_config(cfg_file, warn_issues=False)
-    assert cfg.admin is not None
-    assert cfg.admin.env["API_KEY"].secret == "missing"
+    # No raise: the secret auto-declares through the framework.
+    registry = _load(cfg_file)
+    assert registry.lookup("admin-template", "default").env["API_KEY"].secret == "missing"
 
 
 def test_secret_declared_with_all_mapping_forms(tmp_path: Path) -> None:
@@ -313,65 +328,59 @@ def test_secret_declared_with_all_mapping_forms(tmp_path: Path) -> None:
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
-        extras="""
-        [secrets.token-a]
-        description = "string mapping"
-        backend_mappings.env-var = "OVERRIDE_NAME"
-
-        [secrets.token-b]
-        description = "structured mapping (for future backend)"
-        backend_mappings.onepassword = { vault = "Shared", item = "Tok", field = "key" }
-
-        [secrets.token-c]
-        description = "opt-out mapping"
-        backend_mappings.env-var = false
-
+        settings="""
         [secret_config]
         backends = ["prompt"]
         """,
+        manifests=[
+            ManifestDoc(
+                "secret", "token-a", {"backend_mappings": {"env-var": "OVERRIDE_NAME"}}, description="string mapping"
+            ),
+            ManifestDoc(
+                "secret",
+                "token-b",
+                {"backend_mappings": {"onepassword": {"vault": "Shared", "item": "Tok", "field": "key"}}},
+                description="structured mapping (for future backend)",
+            ),
+            ManifestDoc("secret", "token-c", {"backend_mappings": {"env-var": False}}, description="opt-out mapping"),
+        ],
     )
-    cfg = load_config(cfg_file, warn_issues=False)
-    assert cfg.secrets["token-a"].backend_mappings == {"env-var": "OVERRIDE_NAME"}
-    assert cfg.secrets["token-b"].backend_mappings == {
+    registry = _load(cfg_file)
+    assert registry.lookup("secret", "token-a").backend_mappings == {"env-var": "OVERRIDE_NAME"}
+    assert registry.lookup("secret", "token-b").backend_mappings == {
         "onepassword": {"vault": "Shared", "item": "Tok", "field": "key"}
     }
-    assert cfg.secrets["token-c"].backend_mappings == {"env-var": False}
+    assert registry.lookup("secret", "token-c").backend_mappings == {"env-var": False}
 
 
-def test_secret_name_over_username_cap_loads_from_toml(tmp_path: Path) -> None:
-    """Issue #275: the TOML [secrets.*] loader validates secret names against
-    the larger secret cap. The git-token-<credential> default (33 chars) loads
+def test_secret_name_over_username_cap_loads_from_manifest(tmp_path: Path) -> None:
+    """Issue #275: the secret decoder validates secret names against the
+    larger secret cap. The git-token-<credential> default (33 chars) loads
     even though it exceeds the 30-char username cap."""
     cfg_file = tmp_path / "config.toml"
     long_name = "git-token-github-fg-wf-agw-tester"  # 33 chars
     assert len(long_name) > 30
     _write_base(
         cfg_file,
-        extras=f"""
-        [secrets.{long_name}]
-        description = "PAT for the tester credential"
-        """,
+        manifests=[ManifestDoc("secret", long_name, description="PAT for the tester credential")],
     )
-    cfg = load_config(cfg_file, warn_issues=False)
-    assert cfg.secrets[long_name].name == long_name
+    registry = _load(cfg_file)
+    assert registry.lookup("secret", long_name).name == long_name
 
 
-def test_secret_name_over_secret_cap_rejected_from_toml(tmp_path: Path) -> None:
+def test_secret_name_over_secret_cap_rejected_from_manifest(tmp_path: Path) -> None:
     """A secret name beyond the secret cap (253) is rejected, and the error
-    reports the correct (secret) max, not 30."""
+    reports the correct (secret) max, not 30. The name-validation error is a
+    spec-level failure, so the decoder surfaces it as ConfigError."""
     from agentworks.config import MAX_SECRET_NAME_LENGTH
-    from agentworks.errors import ValidationError
 
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
-        extras=f"""
-        [secrets.{"s" * (MAX_SECRET_NAME_LENGTH + 1)}]
-        description = "too long"
-        """,
+        manifests=[ManifestDoc("secret", "s" * (MAX_SECRET_NAME_LENGTH + 1), description="too long")],
     )
-    with pytest.raises(ValidationError) as exc:
-        load_config(cfg_file, warn_issues=False)
+    with pytest.raises(ConfigError) as exc:
+        _load(cfg_file)
     message = str(exc.value)
     assert "is too long" in message
     assert f"max {MAX_SECRET_NAME_LENGTH}" in message
@@ -381,24 +390,21 @@ def test_secret_true_in_backend_mappings_rejected(tmp_path: Path) -> None:
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
-        extras="""
-        [secrets.token]
-        description = "bad"
-        backend_mappings.env-var = true
-
+        settings="""
         [secret_config]
         backends = ["env-var"]
         """,
+        manifests=[ManifestDoc("secret", "token", {"backend_mappings": {"env-var": True}}, description="bad")],
     )
     with pytest.raises(ConfigError, match="true"):
-        load_config(cfg_file, warn_issues=False)
+        _load(cfg_file)
 
 
 def test_secret_config_backends_preserves_precedence(tmp_path: Path) -> None:
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
-        extras="""
+        settings="""
         [secret_config]
         backends = ["env-var", "prompt"]
         """,
@@ -411,19 +417,18 @@ def test_active_backends_stand_up_when_configured(tmp_path: Path) -> None:
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
-        extras="""
-        [secrets.shared]
-        description = "Shared token"
-
+        settings="""
         [secret_config]
         backends = ["env-var", "prompt"]
         """,
+        manifests=[ManifestDoc("secret", "shared", description="Shared token")],
     )
     cfg = load_config(cfg_file, warn_issues=False)
     registry = build_registry(cfg)
     backends = active_backends(cfg, registry)
     # Smoke-check the chain: the first attempting backend is env-var.
-    first = next((b for b in backends if b.would_attempt(cfg.secrets["shared"])), None)
+    decl = registry.lookup("secret", "shared")
+    first = next((b for b in backends if b.would_attempt(decl)), None)
     assert first is not None
     assert first.name == "env-var"
 
@@ -432,7 +437,7 @@ def test_unknown_backend_kind_raises(tmp_path: Path) -> None:
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
-        extras="""
+        settings="""
         [secret_config]
         backends = ["env-var", "totally-fake-backend"]
         """,
@@ -452,14 +457,15 @@ def test_unreachable_secret_raises(tmp_path: Path) -> None:
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
-        extras="""
-        [secrets.stranded]
-        description = "no path to resolution"
-        backend_mappings.env-var = false
-
+        settings="""
         [secret_config]
         backends = ["env-var"]
         """,
+        manifests=[
+            ManifestDoc(
+                "secret", "stranded", {"backend_mappings": {"env-var": False}}, description="no path to resolution"
+            )
+        ],
     )
     cfg = load_config(cfg_file, warn_issues=False)
     with pytest.raises(ConfigError, match="unreachable"):
@@ -476,7 +482,7 @@ def test_reachability_scope_is_operator_declared_only(tmp_path: Path) -> None:
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
-        extras="""
+        settings="""
         [secret_config]
         backends = []
         """,
@@ -498,17 +504,21 @@ def test_reachability_keying_is_would_attempt_readiness_blind(tmp_path: Path, mo
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
-        extras="""
+        settings="""
         [plugins]
         system = ["onepassword"]
-
-        [secrets.vaulted]
-        description = "only resolvable via onepassword"
-        backend_mappings.onepassword = "op://Work/item/field"
 
         [secret_config]
         backends = ["onepassword"]
         """,
+        manifests=[
+            ManifestDoc(
+                "secret",
+                "vaulted",
+                {"backend_mappings": {"onepassword": "op://Work/item/field"}},
+                description="only resolvable via onepassword",
+            )
+        ],
     )
     cfg = load_config(cfg_file, warn_issues=False)
     registry = build_registry(cfg)  # no raise: not-ready does not make it unreachable
@@ -524,14 +534,15 @@ def test_unreachable_secret_error_message_and_hint(tmp_path: Path) -> None:
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
-        extras="""
-        [secrets.stranded]
-        description = "no path to resolution"
-        backend_mappings.env-var = false
-
+        settings="""
         [secret_config]
         backends = ["env-var"]
         """,
+        manifests=[
+            ManifestDoc(
+                "secret", "stranded", {"backend_mappings": {"env-var": False}}, description="no path to resolution"
+            )
+        ],
     )
     cfg = load_config(cfg_file, warn_issues=False)
     with pytest.raises(ConfigError) as exc:
@@ -556,12 +567,15 @@ def test_unknown_backend_kind_in_secret_backends_errors(
     """A typo in [secret_backends.<kind>] (e.g. 'env_var' or 'envvar'
     for 'env-var') errors at config-load time. Phase 2b.2 elevated this
     from a soft warning to a hard error so it matches the framework's
-    treatment of [git_credentials.<name>].type typos.
+    treatment of the git-credential provider typos.
+
+    ``[secret_backends.*]`` stays a config.toml section (a no-op capability
+    hint, not a declarable resource), so this check remains at load_config.
     """
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
-        extras="""
+        settings="""
         [secret_backends.env_var]
         # typo: kind is 'env-var' (kebab), not 'env_var' (snake)
         """,
@@ -571,42 +585,49 @@ def test_unknown_backend_kind_in_secret_backends_errors(
 
 
 @pytest.mark.parametrize(
-    ("scope_extras", "context_label"),
+    ("manifest", "context_label"),
     [
-        ('[vm_templates.default.env]\nAGENTWORKS_VM = "override"', "vm_templates.default.env"),
-        ('[admin.env]\nAGENTWORKS_PLATFORM = "override"', "admin.env"),
-        ('[agent_templates.claude.env]\nAGENTWORKS_AGENT = "override"', "agent_templates.claude.env"),
-        ('[workspace_templates.ws.env]\nAGENTWORKS_WORKSPACE = "override"', "workspace_templates.ws.env"),
-        ('[session_templates.shell.env]\nAGENTWORKS_SESSION = "override"', "session_templates.shell.env"),
+        (ManifestDoc("vm-template", "default", {"env": {"AGENTWORKS_VM": "override"}}), "vm_templates.default.env"),
+        (ManifestDoc("admin-template", "default", {"env": {"AGENTWORKS_PLATFORM": "override"}}), "admin.env"),
+        (
+            ManifestDoc("agent-template", "claude", {"env": {"AGENTWORKS_AGENT": "override"}}),
+            "agent_templates.claude.env",
+        ),
+        (
+            ManifestDoc("workspace-template", "ws", {"env": {"AGENTWORKS_WORKSPACE": "override"}}),
+            "workspace_templates.ws.env",
+        ),
+        (
+            ManifestDoc("session-template", "shell", {"env": {"AGENTWORKS_SESSION": "override"}}),
+            "session_templates.shell.env",
+        ),
     ],
 )
 def test_agentworks_prefix_warning_fires_for_every_scope(
     tmp_path: Path,
-    scope_extras: str,
+    manifest: ManifestDoc,
     context_label: str,
 ) -> None:
     """The AGENTWORKS_* override warning fires for every scope's env table,
     not just admin.env. Pin this so a future refactor that moves the check
     into a per-scope code path doesn't silently miss some scopes."""
     cfg_file = tmp_path / "config.toml"
-    _write_base(cfg_file, extras="\n" + scope_extras + "\n")
-    cfg = load_config(cfg_file, warn_issues=False)
-    assert any(context_label in issue and "identity variable" in issue for issue in cfg.config_issues), (
-        cfg.config_issues
-    )
+    _write_base(cfg_file, manifests=[manifest])
+    issues = _manifest_issues(cfg_file)
+    assert any(context_label in issue and "identity variable" in issue for issue in issues), issues
 
 
-def test_plaintext_env_with_newline_warns_at_load(tmp_path: Path) -> None:
+def test_plaintext_env_with_newline_warns(tmp_path: Path) -> None:
     """Per ADR 0014: a newline in a plaintext env value would corrupt
-    the SSH SetEnv argument shape. Catch it at load time so the operator
+    the SSH SetEnv argument shape. Catch it at decode so the operator
     sees a clear message instead of an opaque SSH-side rejection."""
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
-        extras='\n[admin.env]\nMULTILINE = "line1\\nline2"\n',
+        manifests=[ManifestDoc("admin-template", "default", {"env": {"MULTILINE": "line1\nline2"}})],
     )
-    cfg = load_config(cfg_file, warn_issues=False)
-    assert any("MULTILINE" in issue and "newline" in issue for issue in cfg.config_issues), cfg.config_issues
+    issues = _manifest_issues(cfg_file)
+    assert any("MULTILINE" in issue and "newline" in issue for issue in issues), issues
 
 
 def test_session_template_inherits_parent_env(tmp_path: Path) -> None:
@@ -615,37 +636,42 @@ def test_session_template_inherits_parent_env(tmp_path: Path) -> None:
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
-        extras="""
-        [session_templates.parent.env]
-        EDITOR = "nvim"
-
-        [session_templates.child]
-        inherits = ["parent"]
-        """,
+        manifests=[
+            ManifestDoc("session-template", "parent", {"env": {"EDITOR": "nvim"}}),
+            ManifestDoc("session-template", "child", {"inherits": ["parent"]}),
+        ],
     )
-    cfg = load_config(cfg_file, warn_issues=False)
+    registry = _load(cfg_file)
     # Resolve the child template through the inheritance chain.
-    from agentworks.sessions.templates import resolve_from_dict
+    from agentworks.sessions.templates import resolve_template
 
-    resolved = resolve_from_dict(cfg.session_templates, "child")
+    resolved = resolve_template(registry, "child")
     assert resolved.env["EDITOR"].value == "nvim"
 
 
 def test_session_template_required_commands_parsed(tmp_path: Path) -> None:
-    """The flat ``required_commands`` hoists into the ``shell`` harness
+    """The ``required_commands`` config rides the ``shell`` harness
     integration's config blob (the integration surface owns the command
     vocabulary now)."""
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
-        extras="""
-        [session_templates.claude]
-        command = "claude --name {{session_name}}"
-        required_commands = ["claude"]
-        """,
+        manifests=[
+            ManifestDoc(
+                "session-template",
+                "claude",
+                {
+                    "harness_integration": {
+                        "name": "shell",
+                        "command": "claude --name {{session_name}}",
+                        "required_commands": ["claude"],
+                    }
+                },
+            )
+        ],
     )
-    cfg = load_config(cfg_file, warn_issues=False)
-    tmpl = cfg.session_templates["claude"]
+    registry = _load(cfg_file)
+    tmpl = registry.lookup("session-template", "claude")
     assert tmpl.harness_integration == "shell"
     assert tmpl.harness_integration_config == {
         "command": "claude --name {{session_name}}",
@@ -654,40 +680,40 @@ def test_session_template_required_commands_parsed(tmp_path: Path) -> None:
 
 
 def test_session_template_required_commands_must_be_list(tmp_path: Path) -> None:
-    """A non-list ``required_commands`` is rejected at load time."""
-    from agentworks.errors import ConfigError
-
+    """A non-list ``required_commands`` is rejected. The shell harness
+    integration's validate pass fires at finalize (build_registry)."""
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
-        extras="""
-        [session_templates.claude]
-        command = "claude"
-        required_commands = "claude"
-        """,
+        manifests=[
+            ManifestDoc(
+                "session-template",
+                "claude",
+                {"harness_integration": {"name": "shell", "command": "claude", "required_commands": "claude"}},
+            )
+        ],
     )
     with pytest.raises(ConfigError, match="required_commands must be a list"):
-        load_config(cfg_file, warn_issues=False)
+        _load(cfg_file)
 
 
 def test_session_template_required_commands_must_be_strings(tmp_path: Path) -> None:
-    """Non-string elements (e.g. ints) are rejected at load time -- not
-    silently coerced via ``str()``. Pinning the type-strict behavior so a
-    future refactor that drops the ``_require_string_list`` helper would
-    surface here."""
-    from agentworks.errors import ConfigError
-
+    """Non-string elements (e.g. ints) are rejected, not silently coerced
+    via ``str()``. Pinning the type-strict behavior so a future refactor
+    that drops the list-of-strings check would surface here."""
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
-        extras="""
-        [session_templates.claude]
-        command = "claude"
-        required_commands = [123]
-        """,
+        manifests=[
+            ManifestDoc(
+                "session-template",
+                "claude",
+                {"harness_integration": {"name": "shell", "command": "claude", "required_commands": [123]}},
+            )
+        ],
     )
     with pytest.raises(ConfigError, match="required_commands must be a list of strings"):
-        load_config(cfg_file, warn_issues=False)
+        _load(cfg_file)
 
 
 def test_session_template_required_commands_union_on_inherit(tmp_path: Path) -> None:
@@ -696,64 +722,66 @@ def test_session_template_required_commands_union_on_inherit(tmp_path: Path) -> 
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
-        extras="""
-        [session_templates.parent]
-        required_commands = ["tmux", "claude"]
-
-        [session_templates.child]
-        inherits = ["parent"]
-        required_commands = ["claude", "jq"]
-        """,
+        manifests=[
+            ManifestDoc(
+                "session-template",
+                "parent",
+                {"harness_integration": {"name": "shell", "required_commands": ["tmux", "claude"]}},
+            ),
+            ManifestDoc(
+                "session-template",
+                "child",
+                {
+                    "inherits": ["parent"],
+                    "harness_integration": {"name": "shell", "required_commands": ["claude", "jq"]},
+                },
+            ),
+        ],
     )
-    cfg = load_config(cfg_file, warn_issues=False)
-    from agentworks.sessions.templates import resolve_from_dict
+    registry = _load(cfg_file)
+    from agentworks.sessions.templates import resolve_template
 
-    resolved = resolve_from_dict(cfg.session_templates, "child")
+    resolved = resolve_template(registry, "child")
     assert resolved.harness_integration == "shell"
     assert resolved.harness_integration_config["required_commands"] == ["tmux", "claude", "jq"]
 
 
-def test_undeclared_secret_in_parent_no_longer_errors_at_load(
+def test_undeclared_secret_in_parent_no_longer_errors(
     tmp_path: Path,
 ) -> None:
-    """Phase 1b: a parent template's env secret-ref to an undeclared name
-    no longer errors at config load. The Registry's auto-declare miss
-    policy handles it at finalize regardless of whether a child template
-    overrides the key with plaintext. The override semantics still apply
-    at resolution time -- if the child overrides with a literal, the
-    parent's secret-ref doesn't actually need resolution -- but that's a
-    runtime concern, not a config-load concern.
+    """A parent template's env secret-ref to an undeclared name no longer
+    errors: the Registry's auto-declare miss policy handles it at finalize
+    regardless of whether a child template overrides the key with plaintext.
+    The override semantics still apply at resolution time (if the child
+    overrides with a literal, the parent's secret-ref doesn't actually need
+    resolution), but that's a runtime concern, not a build concern.
     """
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
-        extras="""
-        [agent_templates.parent.env]
-        TOKEN = { secret = "missing-secret" }
-
-        [agent_templates.child]
-        inherits = ["parent"]
-
-        [agent_templates.child.env]
-        TOKEN = "literal-value"
-
+        settings="""
         [secret_config]
         backends = ["env-var", "prompt"]
         """,
+        manifests=[
+            ManifestDoc("agent-template", "parent", {"env": {"TOKEN": {"secret": "missing-secret"}}}),
+            ManifestDoc("agent-template", "child", {"inherits": ["parent"], "env": {"TOKEN": "literal-value"}}),
+        ],
     )
     # No longer raises.
-    cfg = load_config(cfg_file, warn_issues=False)
-    assert cfg.agent_templates["parent"].env["TOKEN"].secret == "missing-secret"
-    assert cfg.agent_templates["child"].env["TOKEN"].value == "literal-value"
+    registry = _load(cfg_file)
+    assert registry.lookup("agent-template", "parent").env["TOKEN"].secret == "missing-secret"
+    assert registry.lookup("agent-template", "child").env["TOKEN"].value == "literal-value"
 
 
 # --- Issue #279: warn-only validation of operator-supplied secret NAMES ------
 #
-# Names declared explicitly in [secrets.*] are validated with a hard error.
-# Names that enter through a REFERENCE (a VM template's tailscale_auth_key, an
-# env entry's `secret = "..."`, a git credential's token) historically bypassed
-# that check. They now emit a non-fatal load-time warning yet STILL load and
-# resolve unchanged, so no config that loads today newly fails.
+# Names declared explicitly in a ``secret`` manifest are validated with a hard
+# error. Names that enter through a REFERENCE (a VM template's
+# tailscale_auth_key, an env entry's `secret = "..."`, a git credential's
+# token) historically bypassed that check. They now emit a non-fatal warning
+# yet STILL load and resolve unchanged, so no config that loads today newly
+# fails.
 
 
 def test_vm_template_tailscale_auth_key_nonconforming_warns_but_loads(
@@ -765,17 +793,15 @@ def test_vm_template_tailscale_auth_key_nonconforming_warns_but_loads(
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
-        extras="""
-        [vm_templates.tester]
-        tailscale_auth_key = "GITHUB_TOKEN"
-        """,
+        manifests=[ManifestDoc("vm-template", "tester", {"tailscale_auth_key": "GITHUB_TOKEN"})],
     )
-    cfg = load_config(cfg_file, warn_issues=False)
+    registry = _load(cfg_file)
     # The secret name is preserved exactly, still declared and usable.
-    assert cfg.vm_templates["tester"].tailscale_auth_key == "GITHUB_TOKEN"
-    assert any(
-        "GITHUB_TOKEN" in issue and "vm_templates.tester.tailscale_auth_key" in issue for issue in cfg.config_issues
-    ), cfg.config_issues
+    assert registry.lookup("vm-template", "tester").tailscale_auth_key == "GITHUB_TOKEN"
+    issues = _manifest_issues(cfg_file)
+    assert any("GITHUB_TOKEN" in issue and "vm_templates.tester.tailscale_auth_key" in issue for issue in issues), (
+        issues
+    )
 
 
 def test_env_secret_ref_nonconforming_warns_but_loads(tmp_path: Path) -> None:
@@ -784,15 +810,12 @@ def test_env_secret_ref_nonconforming_warns_but_loads(tmp_path: Path) -> None:
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
-        extras="""
-        [admin.env]
-        FOO = { secret = "Bad_Name" }
-        """,
+        manifests=[ManifestDoc("admin-template", "default", {"env": {"FOO": {"secret": "Bad_Name"}}})],
     )
-    cfg = load_config(cfg_file, warn_issues=False)
-    assert cfg.admin is not None
-    assert cfg.admin.env["FOO"].secret == "Bad_Name"
-    assert any("Bad_Name" in issue and "admin.env.FOO" in issue for issue in cfg.config_issues), cfg.config_issues
+    registry = _load(cfg_file)
+    assert registry.lookup("admin-template", "default").env["FOO"].secret == "Bad_Name"
+    issues = _manifest_issues(cfg_file)
+    assert any("Bad_Name" in issue and "admin.env.FOO" in issue for issue in issues), issues
 
 
 def test_git_credential_token_nonconforming_warns_but_loads(tmp_path: Path) -> None:
@@ -801,17 +824,12 @@ def test_git_credential_token_nonconforming_warns_but_loads(tmp_path: Path) -> N
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
-        extras="""
-        [git_credentials.gh]
-        provider = "github"
-        token = "GITHUB_TOKEN"
-        """,
+        manifests=[ManifestDoc("git-credential", "gh", {"provider": {"name": "github", "token": "GITHUB_TOKEN"}})],
     )
-    cfg = load_config(cfg_file, warn_issues=False)
-    assert cfg.git_credentials["gh"].provider_config["token"] == "GITHUB_TOKEN"
-    assert any("GITHUB_TOKEN" in issue and "git_credentials.gh.token" in issue for issue in cfg.config_issues), (
-        cfg.config_issues
-    )
+    registry = _load(cfg_file)
+    assert registry.lookup("git-credential", "gh").provider_config["token"] == "GITHUB_TOKEN"
+    issues = _manifest_issues(cfg_file)
+    assert any("GITHUB_TOKEN" in issue and "git_credentials.gh.token" in issue for issue in issues), issues
 
 
 def test_conforming_secret_ref_names_emit_no_warning(tmp_path: Path) -> None:
@@ -820,38 +838,28 @@ def test_conforming_secret_ref_names_emit_no_warning(tmp_path: Path) -> None:
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
-        extras="""
-        [vm_templates.tester]
-        tailscale_auth_key = "tailscale-auth-key"
-
-        [admin.env]
-        FOO = { secret = "github-token" }
-
-        [git_credentials.gh]
-        provider = "github"
-        token = "git-token-github"
-        """,
+        manifests=[
+            ManifestDoc("vm-template", "tester", {"tailscale_auth_key": "tailscale-auth-key"}),
+            ManifestDoc("admin-template", "default", {"env": {"FOO": {"secret": "github-token"}}}),
+            ManifestDoc("git-credential", "gh", {"provider": {"name": "github", "token": "git-token-github"}}),
+        ],
     )
-    cfg = load_config(cfg_file, warn_issues=False)
-    assert not any("secret naming rules" in issue for issue in cfg.config_issues), cfg.config_issues
+    issues = _manifest_issues(cfg_file)
+    assert not any("secret naming rules" in issue for issue in issues), issues
 
 
 def test_explicit_secret_declaration_invalid_still_raises(tmp_path: Path) -> None:
-    """Status quo: an explicit [secrets.*] declaration with a non-conforming
-    name still raises ValidationError at load (warn-only applies to REFERENCES,
-    not explicit declarations; the pre-existing hard error is unchanged)."""
-    from agentworks.errors import ValidationError
-
+    """Status quo: an explicit ``secret`` manifest with a non-conforming
+    name still raises at build (warn-only applies to REFERENCES, not explicit
+    declarations). The name-validation error is a spec-level failure, so the
+    decoder surfaces it as ConfigError."""
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
-        extras="""
-        [secrets.GITHUB_TOKEN]
-        description = "non-conforming explicit declaration"
-        """,
+        manifests=[ManifestDoc("secret", "GITHUB_TOKEN", description="non-conforming explicit declaration")],
     )
-    with pytest.raises(ValidationError, match="invalid name"):
-        load_config(cfg_file, warn_issues=False)
+    with pytest.raises(ConfigError, match="invalid name"):
+        _load(cfg_file)
 
 
 def test_secretdecl_construction_tolerates_nonconforming_operator_name() -> None:

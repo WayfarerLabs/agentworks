@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from agentworks.agents import initializer as agent_initializer
-from tests.orchestrated_fixtures import PROXMOX_SECTION, write_operator_config
+from tests.orchestrated_fixtures import proxmox_site, write_operator_config
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -153,7 +153,7 @@ def _first_run_index(admin: _RecordingTransport, predicate) -> int:  # noqa: ANN
 @pytest.fixture
 def config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # noqa: ANN201
     monkeypatch.setenv("AW_SECRET_PROXMOX_TOKEN", "pve-token")
-    return write_operator_config(tmp_path, PROXMOX_SECTION)
+    return write_operator_config(tmp_path, manifests=[proxmox_site()])
 
 
 def test_create_useradd_forces_private_group(db: Database, config: Any, monkeypatch: pytest.MonkeyPatch) -> None:

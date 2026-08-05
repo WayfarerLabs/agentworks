@@ -1,10 +1,9 @@
 """``agentworks.resources``: the Resource Registry framework.
 
 The Registry is the framework's typed, queryable Resource store. Publishers
-(``agentworks.config``'s ``Config.publish_to``, the ``agentworks.apt`` /
-``agentworks.install_commands`` operator publishers, the bundled built-in
-manifests, future plugins / YAML manifest publishers) push composed
-Resources into it; ``Registry.finalize()`` runs the framework pass that walks
+(the operator's YAML manifests, the bundled built-in manifests, the
+capability-row publishers, future plugins) push composed Resources into it;
+``Registry.finalize()`` runs the framework pass that walks
 the reference graph, dispatches miss policies (potentially synthesizing
 auto-declared Resources), attaches ``usage`` lists, detects cycles, and
 freezes the Registry.

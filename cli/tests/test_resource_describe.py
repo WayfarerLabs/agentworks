@@ -8,8 +8,8 @@ usage. Kind-specific detail belongs to the per-kind describe commands.
 
 from __future__ import annotations
 
-from pathlib import Path
 from textwrap import dedent
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -17,9 +17,26 @@ from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
 from agentworks.errors import NotFoundError
 from agentworks.resources.inspect import describe_resource
+from tests.conftest import ManifestDoc, write_manifests
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+    from pathlib import Path
+
+# The operator vm-template these tests seed, so vm-template/default is
+# operator-declared and its tailscale requirement auto-declares a secret.
+_VM_DEFAULT = ManifestDoc("vm-template", "default", {"apt": ["zsh"]})
 
 
-def _write_base(config_path: Path, *, extras: str = "") -> None:
+def _write_base(
+    config_path: Path,
+    *,
+    settings: str = "",
+    manifests: Sequence[ManifestDoc | str] = (),
+) -> None:
+    """Write a settings-only config.toml plus its resources/ manifests.
+    ``settings`` carries settings-only TOML ([secret_config]); resources
+    go in ``manifests``."""
     pub = config_path.parent / "id.pub"
     priv = config_path.parent / "id"
     pub.write_text("ssh-ed25519 AAAA...")
@@ -30,8 +47,10 @@ def _write_base(config_path: Path, *, extras: str = "") -> None:
         ssh_public_key = "{pub.as_posix()}"
         ssh_private_key = "{priv.as_posix()}"
         """)
-        + dedent(extras),
+        + dedent(settings),
     )
+    if manifests:
+        write_manifests(config_path.parent, *manifests)
 
 
 def _load(cfg_file: Path):
@@ -46,13 +65,11 @@ def test_describes_operator_declared_resource(tmp_path: Path) -> None:
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
-        extras="""
-        [secrets.my-key]
-        description = "operator-typed note"
-
+        settings="""
         [secret_config]
         backends = ["env-var"]
         """,
+        manifests=[ManifestDoc("secret", "my-key", description="operator-typed note")],
     )
     registry = _load(cfg_file)
 
@@ -71,11 +88,7 @@ def test_describes_template_kind_description(tmp_path: Path) -> None:
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
-        extras="""
-        [vm_templates.dev]
-        description = "the dev box"
-        cpus = 4
-        """,
+        manifests=[ManifestDoc("vm-template", "dev", {"cpus": 4}, description="the dev box")],
     )
     registry = _load(cfg_file)
 
@@ -88,13 +101,7 @@ def test_describes_auto_declared_resource_carries_synth_description(
     tmp_path: Path,
 ) -> None:
     cfg_file = tmp_path / "config.toml"
-    _write_base(
-        cfg_file,
-        extras="""
-        [vm_templates.default]
-        apt = ["zsh"]
-        """,
-    )
+    _write_base(cfg_file, manifests=[_VM_DEFAULT])
     registry = _load(cfg_file)
 
     desc = describe_resource(registry, "secret", "tailscale-auth-key")
@@ -135,13 +142,7 @@ def test_newly_uniform_kinds_auto_declared_default_gets_synth_description(tmp_pa
 
 def test_describe_returns_usage_entries(tmp_path: Path) -> None:
     cfg_file = tmp_path / "config.toml"
-    _write_base(
-        cfg_file,
-        extras="""
-        [vm_templates.default]
-        apt = ["zsh"]
-        """,
-    )
+    _write_base(cfg_file, manifests=[_VM_DEFAULT])
     registry = _load(cfg_file)
 
     desc = describe_resource(registry, "secret", "tailscale-auth-key")
@@ -202,13 +203,7 @@ def test_cli_describe_renders_header_and_usage_sections(tmp_path: Path, monkeypa
     from agentworks.cli import app
 
     cfg_file = tmp_path / "config.toml"
-    _write_base(
-        cfg_file,
-        extras="""
-        [vm_templates.default]
-        apt = ["zsh"]
-        """,
-    )
+    _write_base(cfg_file, manifests=[_VM_DEFAULT])
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg_file)
 
     result = CliRunner().invoke(app, ["resource", "describe", "secret/tailscale-auth-key"])

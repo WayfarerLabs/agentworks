@@ -11,9 +11,12 @@ from __future__ import annotations
 
 from pathlib import Path
 from textwrap import dedent
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
@@ -29,6 +32,7 @@ from agentworks.resources.graph import Readiness
 from agentworks.secrets import active_backends, resolve_secrets
 from agentworks.secrets.base import SecretDecl
 from agentworks.secrets.resolve import ActiveBackend, preview_resolution
+from tests.conftest import ManifestDoc, write_manifests
 
 
 def _decl(name: str, **kw: Any) -> SecretDecl:
@@ -224,7 +228,7 @@ def test_validate_mapping_rejects_vault_item_field_table() -> None:
         assert word not in message.lower()
 
 
-def _config(tmp_path: Path, body: str = "") -> Any:
+def _config(tmp_path: Path, body: str = "", *, manifests: Sequence[ManifestDoc | str] = ()) -> Any:
     pub = tmp_path / "k.pub"
     priv = tmp_path / "k"
     pub.write_text("ssh-ed25519 AAAA test")
@@ -238,6 +242,8 @@ def _config(tmp_path: Path, body: str = "") -> Any:
         """)
         + dedent(body)
     )
+    if manifests:
+        write_manifests(tmp_path, *manifests)
     return load_config(cfg, warn_issues=False)
 
 
@@ -254,11 +260,15 @@ def test_validate_chain_surfaces_malformed_mapping_at_build_registry(
 
         [secret_config]
         backends = ["onepassword", "prompt"]
-
-        [secrets.npm-token]
-        description = "npm token"
-        backend_mappings.onepassword = "not-a-valid-ref"
         """,
+        manifests=[
+            ManifestDoc(
+                "secret",
+                "npm-token",
+                {"backend_mappings": {"onepassword": "not-a-valid-ref"}},
+                description="npm token",
+            )
+        ],
     )
     with pytest.raises(ConfigError, match="onepassword"):
         build_registry(config)
@@ -273,11 +283,15 @@ def test_valid_mapping_passes_build_registry(tmp_path: Path) -> None:
 
         [secret_config]
         backends = ["onepassword", "prompt"]
-
-        [secrets.npm-token]
-        description = "npm token"
-        backend_mappings.onepassword = "op://Work/npm/token"
         """,
+        manifests=[
+            ManifestDoc(
+                "secret",
+                "npm-token",
+                {"backend_mappings": {"onepassword": "op://Work/npm/token"}},
+                description="npm token",
+            )
+        ],
     )
     registry = build_registry(config)
     names = [b.name for b in active_backends(config, registry)]
@@ -500,21 +514,26 @@ def test_onepassword_descriptor_row_is_disabled_system_plugin_by_default(
 # -- Phase 8 migration: the opt-in breaking change (R11.1) --------------------
 
 
-def _op_only_body(*, enabled: bool) -> str:
-    """A config whose only path to ``op-only`` is the onepassword backend
-    (env-var opted out), with onepassword in the chain; ``enabled`` toggles the
-    [plugins] opt-in."""
+# A secret whose only path is the onepassword backend (env-var opted out),
+# declared as a manifest (config.toml is settings-only now, ADR 0022).
+_OP_ONLY_SECRET = ManifestDoc(
+    "secret",
+    "op-only",
+    {"backend_mappings": {"env-var": False, "onepassword": "op://Vault/item/field"}},
+    description="resolvable only via onepassword",
+)
+
+
+def _op_only_settings(*, enabled: bool) -> str:
+    """The settings half of the ``op-only`` fixture: onepassword in the chain,
+    and ``enabled`` toggling the [plugins] opt-in. Pair with
+    ``manifests=[_OP_ONLY_SECRET]``."""
     plugins = '[plugins]\nsystem = ["onepassword"]\n\n' if enabled else ""
     return (
         plugins
         + """
         [secret_config]
         backends = ["env-var", "onepassword"]
-
-        [secrets.op-only]
-        description = "resolvable only via onepassword"
-        backend_mappings.env-var = false
-        backend_mappings.onepassword = "op://Vault/item/field"
         """
     )
 
@@ -525,10 +544,10 @@ def test_disabled_plugin_backends_maps_onepassword_only_when_disabled(tmp_path: 
     once it is enabled (so the failure message is verbatim today's)."""
     from agentworks.secrets.resolve import disabled_plugin_backends
 
-    disabled = build_registry(_config(tmp_path, _op_only_body(enabled=False)))
+    disabled = build_registry(_config(tmp_path, _op_only_settings(enabled=False), manifests=[_OP_ONLY_SECRET]))
     assert disabled_plugin_backends(disabled) == {"onepassword": "onepassword"}
 
-    enabled = build_registry(_config(tmp_path, _op_only_body(enabled=True)))
+    enabled = build_registry(_config(tmp_path, _op_only_settings(enabled=True), manifests=[_OP_ONLY_SECRET]))
     assert disabled_plugin_backends(enabled) == {}
 
 
@@ -541,7 +560,7 @@ def test_secret_mapped_only_to_disabled_onepassword_fails_with_enable_hint(tmp_p
     from agentworks.errors import SecretUnavailableError
     from agentworks.secrets import SecretTarget, resolve_for_command
 
-    config = _config(tmp_path, _op_only_body(enabled=False))
+    config = _config(tmp_path, _op_only_settings(enabled=False), manifests=[_OP_ONLY_SECRET])
     registry = build_registry(config)
     target = SecretTarget(vm={"TOKEN": EnvEntry(key="TOKEN", secret="op-only")})
     with pytest.raises(SecretUnavailableError) as exc:
@@ -557,7 +576,7 @@ def test_enabling_the_plugin_resolves_the_onepassword_secret(tmp_path: Path, mon
     from agentworks.secrets import SecretTarget, resolve_for_command
 
     monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/op" if name == "op" else None)
-    config = _config(tmp_path, _op_only_body(enabled=True))
+    config = _config(tmp_path, _op_only_settings(enabled=True), manifests=[_OP_ONLY_SECRET])
     registry = build_registry(config)
     _install_runner(monkeypatch, _fake_op(values={"op://Vault/item/field": "the-token"}))
     target = SecretTarget(vm={"TOKEN": EnvEntry(key="TOKEN", secret="op-only")})
@@ -579,10 +598,8 @@ def test_non_plugin_secret_failure_message_is_unchanged(tmp_path: Path, monkeypa
         """
         [secret_config]
         backends = ["env-var"]
-
-        [secrets.plain]
-        description = "reachable via env-var's default convention, but unset"
         """,
+        manifests=[ManifestDoc("secret", "plain", description="reachable via env-var's default convention, but unset")],
     )
     registry = build_registry(config)
     target = SecretTarget(vm={"TOKEN": EnvEntry(key="TOKEN", secret="plain")})
@@ -600,7 +617,7 @@ def test_hint_reaches_the_dominant_resolver_path(tmp_path: Path) -> None:
     from agentworks.errors import SecretUnavailableError
     from agentworks.secrets.resolver import Resolver
 
-    config = _config(tmp_path, _op_only_body(enabled=False))
+    config = _config(tmp_path, _op_only_settings(enabled=False), manifests=[_OP_ONLY_SECRET])
     registry = build_registry(config)
     resolver = Resolver(config, registry)
     resolver.register_name("op-only")
@@ -626,11 +643,15 @@ def test_explicit_false_opt_out_of_onepassword_gets_no_enable_hint(
         """
         [secret_config]
         backends = ["env-var", "onepassword"]
-
-        [secrets.opted-out]
-        description = "opts out of onepassword; reachable via env-var default, but unset"
-        backend_mappings.onepassword = false
         """,
+        manifests=[
+            ManifestDoc(
+                "secret",
+                "opted-out",
+                {"backend_mappings": {"onepassword": False}},
+                description="opts out of onepassword; reachable via env-var default, but unset",
+            )
+        ],
     )
     registry = build_registry(config)
     target = SecretTarget(vm={"TOKEN": EnvEntry(key="TOKEN", secret="opted-out")})

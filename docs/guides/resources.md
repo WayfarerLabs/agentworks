@@ -20,7 +20,7 @@ agw resource describe vm-template/dev   # one resource, with references and usag
 agw resource kinds                      # every kind: category, counts, purpose
 ```
 
-Resources come from four origins: **operator-declared** (you wrote them, in YAML or TOML),
+Resources come from four origins: **operator-declared** (you wrote them, as YAML manifests),
 **built-in** (shipped with agentworks, e.g. the `env-var` and `prompt` secret backends and the
 built-in apt / install-command entries), **auto-declared** (the framework filled in a
 referenced-but-undeclared resource, e.g. the `tailscale-auth-key` secret or `git-token-<name>`
@@ -55,15 +55,13 @@ spec:
   `name: default` for now: `named-console-template` is an ordinary multi-instance kind in the
   framework, but no command can select a named instance yet, so a named declaration would be dead
   config (issue #165 adds the selector).
-- `spec` carries the kind-specific fields: the same fields, with the same validation, as the TOML
-  sections (both sources decode through the same loaders, so they cannot drift).
+- `spec` carries the kind-specific fields, validated by the manifest decoder for that kind.
 - Multiple documents per file are separated with `---`.
 
 `agw resource sample vm-template` prints a commented starter for one kind (`--all` for every kind);
 `--write <file>` saves it under the resources directory instead. Samples are fully commented out --
 delete one leading `#` per line to activate. `agw resource edit KIND/NAME` opens the manifest
-declaring a resource in `$EDITOR` (YAML-declared resources only: TOML-declared ones point at
-`agw resource migrate` or `agw config edit`).
+declaring a resource in `$EDITOR`.
 
 ## Scoped GitHub credentials (fine-grained PATs)
 
@@ -75,7 +73,8 @@ github credential may carry a scope there: `repos: ["owner/name", ...]` pins the
 specific repositories (always a list, even for one, matching a fine-grained PAT's selected repos),
 while `owner: "org"` covers every repository under that user or org, including repos an agent clones
 ad hoc that no workspace ever declared. The two are mutually exclusive; a credential with neither is
-the unscoped fallback. Scopes are manifest-only (the legacy flat TOML shape has no GitHub fields).
+the unscoped fallback. Scopes are a manifest feature (the removed flat TOML shape never had GitHub
+fields).
 
 Selection lives in the agentworks credential helper: initialization sets `credential.useHttpPath`
 (via the managed include `~/.agentworks-git-scopes.gitconfig`), so git hands the helper the remote's
@@ -97,23 +96,31 @@ if git stops sending repository paths (a local git config overriding `useHttpPat
 warns and serves the host default. The credential's resource name appears as the username on scoped
 store lines and in provider-side logs; remotes are never rewritten.
 
-## TOML resource sections: deprecated but supported
+## TOML resource sections: removed
 
-The classic TOML resource sections (`[secrets.*]`, `[vm_templates.*]`, `[git_credentials.*]`, ...)
-keep working with exactly their historical semantics for now, but declaring resources in
-`config.toml` is deprecated and will be removed in a future release. Their presence emits one
-aggregated deprecation warning per command/request naming the sections found (silence it with the
-global `--no-deprecations` flag). You may mix sources freely (some resources in YAML, some in TOML),
-but declaring the SAME resource in both is an error citing both locations.
+Declaring resources in `config.toml` is no longer supported. `config.toml` is settings only. The
+classic TOML resource sections (`[secrets.*]`, `[vm_templates.*]`, `[git_credentials.*]`, the legacy
+flat `[azure]` / `[proxmox]` vm-site sections, `[apt_sources.*]`, and the rest) no longer load: a
+`config.toml` that still carries any of them is a hard error at load, naming the offending sections
+and pointing you at `agw resource migrate`. This was deprecated with a load-time warning in an
+earlier release and is now removed. Resources are declared as YAML manifests (see "Declaring
+resources" above); settings sections load exactly as before.
 
-Move resources over whenever you like:
+**Upgrading.** This is a breaking change. If your `config.toml` still declares resources, migrate
+them to YAML manifests before (or right after) upgrading, so no command hits the hard error:
 
 ```bash
-agw resource migrate secret            # one kind
-agw resource migrate vm-template/dev   # one resource
-agw resource migrate --all             # everything (explicit opt-in)
+agw resource migrate --all             # move every TOML resource declaration to YAML
+agw resource migrate secret            # or one kind at a time
+agw resource migrate vm-template/dev   # or one resource
 agw resource migrate --all --dry-run   # see the plan first (--full for the diff)
 ```
+
+`agw resource migrate` still reads the legacy TOML directly and can run even against a `config.toml`
+the app would otherwise refuse to load (it loads with resources skipped, the settings-only escape
+hatch), so you can migrate on either side of the upgrade. Once every resource section is moved, the
+hard error is gone. Any section you have not moved stays a hard error until you migrate or delete
+it.
 
 The migrator handles two paths. TOML-declared resources become new YAML documents, appended without
 rewriting existing YAML content; migrated TOML sections are commented out in place with a
@@ -125,10 +132,10 @@ and YAML comments. The same kind or `kind/name` selectors scope both paths.
 Every real run backs up `config.toml`; a run that modifies an existing YAML file also stores its
 original as a recovery copy under `paths.backups`. Digest guards refuse to replace files changed
 after planning, writes are atomic, and rollback restores only outputs that still match the run's
-digest, so concurrent edits are not overwritten. Finally, the command rebuilds the registry and
-verifies it is identical to the pre-migration registry, rolling back on a mismatch and reporting any
-recovery copy needed for manual repair. Use `--dry-run --full` to inspect generated documents,
-in-place YAML diffs, and the TOML diff before writing.
+digest, so concurrent edits are not overwritten. Finally, the command verifies that the migrated
+resources still decode to exactly what they declared in TOML, rolling back on a mismatch and
+reporting any recovery copy needed for manual repair. Use `--dry-run --full` to inspect generated
+documents, in-place YAML diffs, and the TOML diff before writing.
 
 ## VM sites and platforms
 
@@ -178,8 +185,9 @@ spec:
   system plugin (which also provides the `azdo` git-credential provider and the `az-cli`
   install-command), so the `azure-dev` example above is not-ready with an "enable plugin `azure`"
   hint until you set `[plugins] system = ["azure"]`.
-- The legacy flat `[azure]` / `[proxmox]` TOML sections keep loading as deprecated vm-site
-  declarations; `agw resource migrate vm-site` moves them to manifests.
+- The legacy flat `[azure]` / `[proxmox]` TOML sections no longer load: like every resource section,
+  they are a hard error in `config.toml` now. Run `agw resource migrate vm-site` to move them to
+  vm-site manifests (they migrate as vm-site, unchanged).
 
 ## Harness integrations
 
@@ -217,10 +225,9 @@ spec:
   its config keys into the parent's (child wins per key; `shell` unions `required_commands`), while
   a child naming a _different_ integration starts fresh. `env`, `inherits`, and the description
   merge as usual.
-- The legacy flat `command` / `restart_command` / `required_commands` keys keep loading in TOML
-  (hoisted onto `harness_integration = "shell"`); YAML manifests spell them inside the
-  `harness_integration` table. `restart_command` is a deprecated input in either form.
-  `agw resource migrate` rewrites it to `resume_command`;
+- YAML manifests spell `command` / `resume_command` / `required_commands` inside the
+  `harness_integration` table. `restart_command` is a deprecated input, replaced by
+  `resume_command`; `agw resource migrate` rewrites it.
   `agw resource describe harness-integration/shell` shows the integration row and the templates that
   reference it.
 
@@ -397,11 +404,11 @@ opted in. Authoring a system plugin is documented in the plugins package README
 
 **Config errors in a not-enabled plugin's resources surface only once you enable it.** Validation
 runs over enabled, reachable resources, so a mistake in a disabled plugin's config (for example a
-typo in a legacy `[proxmox]` section's platform config while the `proxmox` plugin is not enabled) is
-not reported until you add the plugin to `[plugins].system`. The first thing you see is the
-actionable "enable plugin `<name>`" hint; the config error surfaces on the next build once enabled,
-still before any real work runs. This is the same rule that defers validation for any not-ready
-resource, applied to the opt-in axis.
+typo in the platform config of a proxmox `vm-site` manifest while the `proxmox` plugin is not
+enabled) is not reported until you add the plugin to `[plugins].system`. The first thing you see is
+the actionable "enable plugin `<name>`" hint; the config error surfaces on the next build once
+enabled, still before any real work runs. This is the same rule that defers validation for any
+not-ready resource, applied to the opt-in axis.
 
 **Upgrading: Azure, Proxmox, 1Password, and Claude Code are now opt-in.** These vendor- and
 tool-specific capabilities used to be built in and always available; they now ship as the `azure`,
@@ -414,14 +421,14 @@ system = ["azure", "proxmox", "onepassword", "claude"]  # only the ones you use
 ```
 
 Concretely, enable `onepassword` if a secret maps the `onepassword` backend; `proxmox` if a
-`vm-site` (or a legacy `[proxmox]` section) uses the `proxmox` platform; `azure` if you use the
-`azure-vm` platform, the `azdo` (Azure DevOps) git-credential provider, or the `az-cli`
-install-command; and `claude` if a `session-template` uses the `claude-code` integration or a
-template installs the `claude` CLI. Until you do, a resource that references one is not-ready (or
-refused at use) with an "enable plugin `<name>`" hint, never a silent failure. The default local
-path (the `lima` / `wsl2` platforms, the `shell` harness integration, the `env-var` / `prompt`
-secret backends, and the `github` git-credential provider) is unchanged and needs no `[plugins]`
-entry. `agw doctor` lists every installed plugin and whether it is enabled.
+`vm-site` uses the `proxmox` platform; `azure` if you use the `azure-vm` platform, the `azdo` (Azure
+DevOps) git-credential provider, or the `az-cli` install-command; and `claude` if a
+`session-template` uses the `claude-code` integration or a template installs the `claude` CLI. Until
+you do, a resource that references one is not-ready (or refused at use) with an "enable plugin
+`<name>`" hint, never a silent failure. The default local path (the `lima` / `wsl2` platforms, the
+`shell` harness integration, the `env-var` / `prompt` secret backends, and the `github`
+git-credential provider) is unchanged and needs no `[plugins]` entry. `agw doctor` lists every
+installed plugin and whether it is enabled.
 
 ## Secrets: backends and the chain
 
@@ -498,5 +505,5 @@ agw doctor                              # health: would every secret resolve?
 
 The design rationale (the config/resource split, capability kinds, the vocabulary rules, and the
 vm-site / vm-platform pair) is recorded in ADR 0016. Its dual-path section records the original
-keep-both-paths stance; a status note there marks the revision to today's deprecate-for-removal
-policy, pending a superseding ADR from the sunset SDD effort.
+keep-both-paths stance, since superseded by ADR 0022: YAML manifests are the single
+resource-declaration frontend, and `config.toml` is settings only.

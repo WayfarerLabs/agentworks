@@ -2,15 +2,15 @@
 
 Config lives at ~/.config/agentworks/config.toml. It is read-only at runtime.
 
-This package holds the settings dataclasses plus the legacy TOML
-resource loaders/publisher (``Config.publish_to`` and the ``_load_*``
-helpers) slated for removal; nothing else. The declarable-resource
-dataclasses (VMTemplate,
+This package holds the settings dataclasses and the settings-section
+loaders; nothing else. config.toml is settings only now (ADR 0022): the
+TOML resource loaders relocated to ``agentworks.migrate.toml_resources``
+(the migrator's private oracle), so a resource-declaring section is a hard
+error at load. The declarable-resource dataclasses (VMTemplate,
 AgentTemplate, AdminConfig, WorkspaceTemplate, SessionTemplate,
-NamedConsoleConfig, GitCredentialConfig) and the console/tmux layout
-constants now live in their domain packages; the loaders import them from
-there. Kind definitions live in the domain packages too (see
-``agentworks.resources.kinds`` for the registration index).
+NamedConsoleConfig, GitCredentialConfig) live in their domain packages;
+kind definitions live there too (see ``agentworks.resources.kinds`` for the
+registration index).
 
 It was split out of a single ~1600-line ``config.py`` module into this
 package, one submodule per cohesive concern, while keeping the public
@@ -19,24 +19,21 @@ import path ``agentworks.config`` unchanged:
 - ``validation``: ``CONFIG_DIR`` / ``CONFIG_PATH`` and the name/username
   validators. Has no dependency on any sibling submodule.
 - ``models``: the settings dataclasses, the ``Config`` object (and its
-  ``publish_to``), and ``_SectionLineMap``.
-- ``loaders_core``: generic TOML-loading helpers plus the
-  ``[operator]`` / ``[paths]`` / ``[defaults]`` settings loaders and the
-  ``[git_credentials]`` resource loader.
-- ``loaders_resources``: the remaining TOML resource-section loaders
-  (named console, VM/agent/workspace templates, admin config, apt/install
-  sections, legacy vm-site sections).
-- ``loaders_sessions``: ``[session.config]`` and ``[session_templates.*]``,
-  including legacy flat fields hoisted into the shell harness integration's config.
-- ``loaders_secrets``: ``[secrets.*]``, ``[secret_backends.*]``, the
-  aggregated deprecated-TOML-section warning, ``[secret_config]``, and
-  ``[plugins]``.
-- ``load``: the ``load_config`` entry point that drives the above.
+  now-empty ``publish_to``), and ``_SectionLineMap``.
+- ``loaders_core``: generic TOML-loading helpers, the ``[operator]`` /
+  ``[paths]`` / ``[defaults]`` settings loaders, and the two shared
+  nonconforming-secret-name helpers (used by both the migrator oracle and
+  the manifest decoders).
+- ``loaders_sessions``: the ``[session.config]`` settings loader.
+- ``loaders_secrets``: ``[secret_backends.*]`` (deprecated no-op warning),
+  ``[secret_config]``, and ``[plugins]``.
+- ``load``: the ``load_config`` entry point (drives the settings loaders and
+  the resource-section hard error).
 
 This ``__init__.py`` re-exports the public surface (and the handful of
-private ``_load_*`` helpers that the manifest decoder and tests reach into
-directly) so every existing ``from agentworks.config import ...`` call site
-keeps working unchanged.
+private helpers that the manifest decoder and tests reach into directly) so
+every existing ``from agentworks.config import ...`` call site keeps working
+unchanged.
 
 CRITICAL cycle note: the ``agentworks.db`` package imports ``agentworks.config.CONFIG_DIR``
 at module load time, while the domain packages this package imports
@@ -54,7 +51,6 @@ from agentworks.config.load import (
 )
 from agentworks.config.loaders_core import (
     _load_defaults,
-    _load_git_credentials,
     _load_operator,
     _load_paths,
     _parse_env_table,
@@ -62,27 +58,13 @@ from agentworks.config.loaders_core import (
     _require_string_list,
     _warn_unexpected_keys,
 )
-from agentworks.config.loaders_resources import (
-    _LEGACY_SITE_SECTIONS,
-    _load_admin_config,
-    _load_agent_templates,
-    _load_apt_and_install_sections,
-    _load_named_console,
-    _load_vm_sites_legacy,
-    _load_vm_templates,
-    _load_workspace_templates,
-)
 from agentworks.config.loaders_secrets import (
     _load_plugins,
     _load_secret_backends,
     _load_secret_config,
-    _load_secrets,
-    _warn_deprecated_resource_sections,
 )
 from agentworks.config.loaders_sessions import (
     _load_session_config,
-    _load_session_templates,
-    _session_harness_integration_pair,
 )
 from agentworks.config.models import (
     Config,
@@ -139,30 +121,17 @@ __all__ = [
     "PathsConfig",
     "SessionConfig",
     "UserConfig",
-    "_LEGACY_SITE_SECTIONS",
     "_SectionLineMap",
-    "_load_admin_config",
-    "_load_agent_templates",
-    "_load_apt_and_install_sections",
     "_load_defaults",
-    "_load_git_credentials",
-    "_load_named_console",
     "_load_operator",
     "_load_paths",
     "_load_plugins",
     "_load_secret_backends",
     "_load_secret_config",
-    "_load_secrets",
     "_load_session_config",
-    "_load_session_templates",
-    "_load_vm_sites_legacy",
-    "_load_vm_templates",
-    "_load_workspace_templates",
     "_parse_env_table",
     "_require",
     "_require_string_list",
-    "_session_harness_integration_pair",
-    "_warn_deprecated_resource_sections",
     "_warn_unexpected_keys",
     "_warn_unexpected_top_level_keys",
     "load_config",

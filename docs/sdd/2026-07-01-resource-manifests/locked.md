@@ -230,3 +230,33 @@ old shape and an in-place manifest upgrade mode for `agw resource migrate` are d
 this change; they land with the follow-on declarative-schema SDD effort (in progress, PR #316) after
 a released warning window. The locked LLD is not edited in place (a point-in-time record); this
 entry is the authoritative note.
+
+## 2026-08-05: TOML resource path removed (declarative-schema phase 1, PR #316)
+
+The declarative-schema effort's phase 1 (the TOML resource sunset) landed and retires machinery this
+SDD shipped. config.toml is now settings only: any resource-declaring section is a hard
+`ConfigError` at load, and the aggregated load-time deprecation warning is gone (it became the
+error). ADR 0016's dual-path stance is superseded by
+[ADR 0022](../../adrs/0022-single-resource-declaration-frontend.md); see that ADR for the permanent
+record.
+
+What this SDD shipped that phase 1 now retires:
+
+- **The TOML resource loaders.** Phase 2's "decode-through-TOML-loaders parity" (the manifest
+  decoders routing through the flat TOML loaders so the two sources could not drift) is dissolved:
+  the decoders now own their per-kind validation directly, and the loaders were relocated out of the
+  config-load path into a private migrate module. ADR 0016's matching Consequences bullet is
+  corrected in place.
+- **Phase 5 per-section TOML deprecation warnings.** Retired with the sections they warned about;
+  the `[secret_backends.*]` no-op warning is NOT a resource declaration and stays.
+- **`agw resource migrate`'s verification pre-side (Phase 4).** It no longer builds the
+  pre-migration registry and diffs it against the post-migration registry. The pre-side is now the
+  relocated TOML loaders read as an independent oracle (flat TOML to decl), scoped to the selected
+  migration units, compared against a settings-only post-load, plus an emitted-key-set equality
+  guard.
+
+What SURVIVES unchanged: the migrator itself and its whole operator-facing contract. Its recurring,
+incremental, selector-scoped moves; its backup-first ordering (config.toml backed up, recovery
+copies of rewritten YAML under `paths.backups`); its digest/CAS guards; and its rollback on a
+verification mismatch all stand. Only the internal source of the verification pre-side changed; the
+operator sees the same behavior.

@@ -15,6 +15,7 @@ from agentworks.config import load_config
 from agentworks.errors import ConfigError
 from agentworks.resources import Origin, Registry
 from agentworks.secrets.base import SecretDecl
+from tests.conftest import ManifestDoc, write_manifests
 
 
 @pytest.fixture()
@@ -30,12 +31,12 @@ def example_config(tmp_path: Path) -> Path:
             [operator]
             ssh_public_key = "{pub}"
             ssh_private_key = "{priv}"
-
-            [secrets.api-key]
-            description = "API key"
             """
         )
     )
+    # The one operator-declared secret is a resources/ manifest now
+    # (config.toml is settings only, ADR 0022).
+    write_manifests(tmp_path, ManifestDoc("secret", "api-key", description="API key"))
     return p
 
 
@@ -48,7 +49,9 @@ def test_add_rejects_names_containing_slash(tmp_path: Path) -> None:
     """'/' is banned in resource names at the single publisher choke
     point (maintainer ruling, 2026-07-05): it is reserved for kind/name
     selectors and per-resource manifest filenames. Uniform across
-    sources -- TOML, YAML, and direct adds all hit the same check."""
+    sources: manifest (YAML) and direct adds hit the same check.
+    (config.toml can no longer declare resources, ADR 0022, so there is
+    no TOML source leg to exercise.)"""
     r = Registry.empty()
     decl = SecretDecl(name="we/ird", description="d")
     with pytest.raises(ConfigError, match="contains '/'"):
@@ -59,31 +62,13 @@ def test_add_rejects_names_containing_slash(tmp_path: Path) -> None:
             Origin.operator_declared(file=tmp_path / "c.toml", line=1),
         )
 
-    # TOML source: a quoted section name with a slash loads as data but
-    # is refused at publish.
+    # Manifest source: same rule, error cites the manifest origin.
     pub = tmp_path / "id.pub"
     priv = tmp_path / "id"
     pub.write_text("ssh-ed25519 X")
     priv.write_text("-----BEGIN-----")
-    cfg = tmp_path / "c.toml"
-    cfg.write_text(
-        dedent(
-            f"""
-            [operator]
-            ssh_public_key = "{pub}"
-            ssh_private_key = "{priv}"
-
-            [vm_templates."we/ird"]
-            cpus = 2
-            """
-        )
-    )
     from agentworks.bootstrap import build_registry
 
-    with pytest.raises(ConfigError, match="contains '/'"):
-        build_registry(load_config(cfg, warn_issues=False))
-
-    # Manifest source: same rule, error cites the manifest origin.
     cfg2 = tmp_path / "c2.toml"
     cfg2.write_text(
         dedent(
@@ -253,6 +238,7 @@ def test_build_registry_equivalent_to_manual_steps(example_config: Path, monkeyp
     from agentworks import secrets
     from agentworks.bootstrap import build_registry
     from agentworks.capabilities import vm_platform as vm_platforms
+    from agentworks.manifests import RESOURCES_DIRNAME, load_manifests
     from agentworks.manifests import builtin as builtin_manifests
     from tests.conftest import stub_platform_support
 
@@ -269,6 +255,10 @@ def test_build_registry_equivalent_to_manual_steps(example_config: Path, monkeyp
     # publisher for the same graph-completeness reason as the backends.
     vm_platforms.publish_to(manual)
     cfg.publish_to(manual)
+    # The operator's api-key secret is a YAML manifest now (config.toml is
+    # settings only, ADR 0022), so the operator ManifestSet publishes it,
+    # exactly as build_registry auto-loads it on the auto side.
+    load_manifests(example_config.parent / RESOURCES_DIRNAME).publish_to(manual)
     manual.finalize()
 
     assert auto.is_finalized

@@ -18,17 +18,11 @@ from typing import TYPE_CHECKING
 import pytest
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from pathlib import Path
 
     from agentworks.config import Config
-
-PROXMOX_SECTION = """
-[proxmox]
-api_url = "https://pve:8006"
-node = "pve1"
-token_id = "agw@pam!agw"
-template_vmid = 9000
-"""
+    from tests.conftest import ManifestDoc
 
 # The orchestrated suites use proxmox as their platform fixture: it is the
 # only VM platform that carries a config secret (``proxmox-token``), so it is
@@ -44,29 +38,68 @@ system = ["proxmox"]
 """
 
 
-def write_operator_config(tmp_path: Path, body: str = "") -> Config:
+def proxmox_site() -> ManifestDoc:
+    """The proxmox ``vm-site`` as a resources/ manifest: the declarative
+    replacement for the retired legacy ``[proxmox]`` TOML section (a hard error
+    now under ADR 0022; the breaking change is pinned in
+    ``tests/vms/test_legacy_site_sections.py``).
+
+    A function (not a module constant) so each caller gets a fresh spec
+    dict, since ``ManifestDoc`` is shared and its ``spec`` is mutable.
+    """
+    from tests.conftest import ManifestDoc
+
+    return ManifestDoc(
+        kind="vm-site",
+        name="proxmox",
+        spec={
+            "platform": {
+                "name": "proxmox",
+                "api_url": "https://pve:8006",
+                "node": "pve1",
+                "token_id": "agw@pam!agw",
+                "template_vmid": 9000,
+            }
+        },
+    )
+
+
+def write_operator_config(
+    tmp_path: Path,
+    body: str = "",
+    *,
+    manifests: Sequence[ManifestDoc | str] = (),
+) -> Config:
     """Write an operator config (with a throwaway SSH keypair) plus
-    ``body``, and load it: the shared bottom half of every orchestrated
-    suite's ``make_config``."""
+    ``body``, optionally seed ``resources/*.yaml`` manifests beside it, and
+    load it: the shared bottom half of every orchestrated suite's
+    ``make_config``."""
     from agentworks.config import load_config
+    from tests.conftest import write_manifests
 
     key = tmp_path / "id_ed25519"
     key.write_text("private")
     (tmp_path / "id_ed25519.pub").write_text("public")
     path = tmp_path / "config.toml"
     path.write_text(f'[operator]\nssh_public_key = "{key}.pub"\nssh_private_key = "{key}"\n' + body)
+    if manifests:
+        write_manifests(tmp_path, *manifests)
     return load_config(path, warn_issues=False, warn_deprecations=False)
 
 
 @pytest.fixture
 def make_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # noqa: ANN201
-    """The dominant ``make_config`` shape: the proxmox token in the
-    env, the proxmox plugin enabled and its section baked in, extra
-    sections appended per test."""
+    """The dominant ``make_config`` shape: the proxmox token in the env,
+    the proxmox plugin enabled (a settings section), and the proxmox site
+    declared as a manifest, with extra TOML settings appended per test.
+
+    ``manifests`` seeds additional ``resources/*.yaml`` declarations beside
+    the proxmox site (templates, git credentials, secrets), the declarative
+    replacement for the resource TOML that used to ride in ``extra``."""
     monkeypatch.setenv("AW_SECRET_PROXMOX_TOKEN", "pve-token")
 
-    def _make(extra: str = ""):  # noqa: ANN202
-        return write_operator_config(tmp_path, PLUGINS_ENABLED + PROXMOX_SECTION + extra)
+    def _make(extra: str = "", *, manifests: Sequence[ManifestDoc | str] = ()):  # noqa: ANN202
+        return write_operator_config(tmp_path, PLUGINS_ENABLED + extra, manifests=[proxmox_site(), *manifests])
 
     return _make
 

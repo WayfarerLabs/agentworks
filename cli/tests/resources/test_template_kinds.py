@@ -29,6 +29,7 @@ from agentworks.resources import (
 from agentworks.resources.graph import BuildContext
 from agentworks.sessions.template import SessionTemplate
 from agentworks.workspaces.template import WorkspaceTemplate
+from tests.conftest import ManifestDoc, write_manifests
 
 
 @dataclass(frozen=True)
@@ -36,18 +37,17 @@ class _KindSpec:
     """One parametrization entry per template kind."""
 
     kind: str
-    section: str  # TOML section name (e.g. "agent_templates")
     expected_type: type
 
 
 SPECS: tuple[_KindSpec, ...] = (
-    _KindSpec("agent-template", "agent_templates", AgentTemplate),
-    _KindSpec("workspace-template", "workspace_templates", WorkspaceTemplate),
-    _KindSpec("session-template", "session_templates", SessionTemplate),
+    _KindSpec("agent-template", AgentTemplate),
+    _KindSpec("workspace-template", WorkspaceTemplate),
+    _KindSpec("session-template", SessionTemplate),
 )
 
 
-def _write_cfg(path: Path, body: str) -> Path:
+def _write_cfg(path: Path, *manifests: ManifestDoc) -> Path:
     pub = path.parent / "id.pub"
     priv = path.parent / "id"
     pub.write_text("ssh-ed25519 AAAA...")
@@ -57,10 +57,10 @@ def _write_cfg(path: Path, body: str) -> Path:
         [operator]
         ssh_public_key = "{pub.as_posix()}"
         ssh_private_key = "{priv.as_posix()}"
-
-        """)
-        + dedent(body),
+        """),
     )
+    if manifests:
+        write_manifests(path.parent, *manifests)
     return path
 
 
@@ -152,10 +152,7 @@ def test_inherits_typo_fires_framework_miss_policy(spec: _KindSpec, tmp_path: Pa
     """
     cfg_file = _write_cfg(
         tmp_path / "config.toml",
-        f"""
-        [{spec.section}.child]
-        inherits = ["defualt"]
-        """,
+        ManifestDoc(spec.kind, "child", {"inherits": ["defualt"]}),
     )
     cfg = load_config(cfg_file, warn_issues=False)
     with pytest.raises(ConfigError, match=f"{spec.kind} kind only auto-declares"):
@@ -171,10 +168,7 @@ def test_inherits_default_works_without_operator_declaration(spec: _KindSpec, tm
     """
     cfg_file = _write_cfg(
         tmp_path / "config.toml",
-        f"""
-        [{spec.section}.child]
-        inherits = ["default"]
-        """,
+        ManifestDoc(spec.kind, "child", {"inherits": ["default"]}),
     )
     cfg = load_config(cfg_file, warn_issues=False)
     registry = build_registry(cfg)
@@ -194,13 +188,8 @@ def test_inherits_cycle_caught_by_framework(spec: _KindSpec, tmp_path: Path) -> 
     """
     cfg_file = _write_cfg(
         tmp_path / "config.toml",
-        f"""
-        [{spec.section}.a]
-        inherits = ["b"]
-
-        [{spec.section}.b]
-        inherits = ["a"]
-        """,
+        ManifestDoc(spec.kind, "a", {"inherits": ["b"]}),
+        ManifestDoc(spec.kind, "b", {"inherits": ["a"]}),
     )
     cfg = load_config(cfg_file, warn_issues=False)
     with pytest.raises(ConfigError, match="cycle detected"):
@@ -217,13 +206,8 @@ def test_agent_template_default_cycle_caught_at_build_registry(tmp_path: Path) -
     """
     cfg_file = _write_cfg(
         tmp_path / "config.toml",
-        """
-        [agent_templates.default]
-        inherits = ["a"]
-
-        [agent_templates.a]
-        inherits = ["default"]
-        """,
+        ManifestDoc("agent-template", "default", {"inherits": ["a"]}),
+        ManifestDoc("agent-template", "a", {"inherits": ["default"]}),
     )
     cfg = load_config(cfg_file, warn_issues=False)
     with pytest.raises(ConfigError, match="cycle"):

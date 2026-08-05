@@ -12,8 +12,9 @@ reference (an unknown apt-source named by a package, or an unknown
 apt-package named by a vm-template) surfaces as a framework
 ``ConfigError`` at ``build_registry`` time citing the reference's source.
 Built-in entries ship as bundled manifests under ``manifests/builtin/``;
-operators may add or override entries via YAML manifests (or the
-deprecated TOML surface, published by ``publish_to`` below).
+operators may add or override entries via YAML manifests. The
+``_load_apt_sources`` / ``_load_apt_packages`` helpers below survive the
+TOML sunset (ADR 0022) because the manifest apt decoders delegate to them.
 
 ``agentworks.resources.kinds.__init__`` imports this module so the two
 kinds self-register into ``KIND_REGISTRY`` at load.
@@ -37,8 +38,7 @@ from agentworks.resources.kind import KIND_REGISTRY, synthesize_no_default
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from agentworks.config import Config, _SectionLineMap
-    from agentworks.resources import Registry
+    from agentworks.config import _SectionLineMap
     from agentworks.resources.graph import BuildContext
     from agentworks.resources.reference import ResourceReference
 
@@ -153,45 +153,12 @@ def _load_apt_packages(
     return entries
 
 
-def publish_to(registry: Registry, config: Config | None = None) -> None:
-    """Publish operator-declared TOML apt entries into the registry.
-
-    Built-in apt entries no longer publish here: they ship as bundled YAML
-    manifests under ``manifests/builtin/`` and land via
-    ``builtin_manifests.publish_to`` (which runs first in
-    ``build_registry``), with ``Origin.built_in`` and a shipped-file
-    source, exactly like every other bundled resource. This function now
-    carries only the operator's deprecated TOML surface for these two
-    kinds (retired separately under ADR 0016).
-
-    When ``config`` is provided, operator-declared entries
-    (``[apt_sources.<name>]``, ``[apt_packages.<name>]`` in the operator's
-    TOML) publish with ``Origin.operator_declared(...)``. Publish order +
-    the kinds' ``builtin_override = "allow"`` policy is what lets the
-    operator row replace the built-in at ``Registry.add``: the built-in
-    manifests publish first, then this operator publisher, so an
-    operator's override lands on top of the built-in base. Config-side
-    publishing lives here (rather than in ``Config.publish_to``) because
-    parsing operator apt entries is this module's expertise; Config just
-    stashes the raw TOML dicts.
-
-    ``declared_at`` falls through to the loaders' default synthesized shim
-    here: the real section-line map is local to ``load_config`` and not
-    carried on ``Config`` (which stashes only the raw section dicts), so
-    the deprecated TOML surface keeps the ``line=0`` sentinel. Manifest
-    entries carry a real location via the decoders.
-    """
-    if config is None:
-        return
-
-    from agentworks.config import CONFIG_PATH
-    from agentworks.resources import Origin
-
-    op_origin = Origin.operator_declared(file=CONFIG_PATH, line=0)
-    for src_name, src in _load_apt_sources(config.apt_sources).items():
-        registry.add("apt-source", src_name, src, op_origin)
-    for pkg_name, pkg in _load_apt_packages(config.apt_packages).items():
-        registry.add("apt-package", pkg_name, pkg, op_origin)
+# The operator apt publisher was deleted with the TOML resource surface
+# (ADR 0022): built-in apt entries ship as bundled YAML manifests
+# (``manifests/builtin/*.yaml``, via ``builtin_manifests.publish_to``), and
+# operator apt entries are YAML manifests too. ``_load_apt_sources`` /
+# ``_load_apt_packages`` above survive because the manifest apt decoders
+# still delegate to them.
 
 
 # -- Framework kind strategies -------------------------------------------------

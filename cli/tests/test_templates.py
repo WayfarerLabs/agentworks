@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from textwrap import dedent
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -14,6 +14,10 @@ from agentworks.workspaces.templates import (
     resolve_template,
     resolve_ws_template_env_or_empty,
 )
+from tests.conftest import ManifestDoc, write_manifests
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 @pytest.fixture()
@@ -29,20 +33,18 @@ def config(tmp_path: Path):  # type: ignore[no-untyped-def]
         [operator]
         ssh_public_key = "{pub.as_posix()}"
         ssh_private_key = "{priv.as_posix()}"
-
-        [workspace_templates.default]
-
-        [workspace_templates.base]
-        repo = "https://example.com/org/base.git"
-
-        [workspace_templates.child]
-        inherits = ["base"]
-        tmuxinator = false
-
-        [workspace_templates.grandchild]
-        inherits = ["child"]
-        repo = "https://example.com/org/override.git"
     """)
+    )
+    write_manifests(
+        tmp_path,
+        ManifestDoc("workspace-template", "default"),
+        ManifestDoc("workspace-template", "base", {"repo": "https://example.com/org/base.git"}),
+        ManifestDoc("workspace-template", "child", {"inherits": ["base"], "tmuxinator": False}),
+        ManifestDoc(
+            "workspace-template",
+            "grandchild",
+            {"inherits": ["child"], "repo": "https://example.com/org/override.git"},
+        ),
     )
     return load_config(config_file)
 
@@ -136,10 +138,11 @@ def test_resolve_ws_template_env_or_empty_real_template_returns_its_env(tmp_path
         [operator]
         ssh_public_key = "{pub.as_posix()}"
         ssh_private_key = "{priv.as_posix()}"
-
-        [workspace_templates.proj.env]
-        WS_VAR = "ws-val"
     """)
+    )
+    write_manifests(
+        tmp_path,
+        ManifestDoc("workspace-template", "proj", {"env": {"WS_VAR": "ws-val"}}),
     )
     cfg = load_config(config_file)
     env = resolve_ws_template_env_or_empty(build_registry(cfg), "proj")
@@ -158,7 +161,7 @@ def test_unknown_template_hint_when_none_declared() -> None:
     assert exc.value.hint == "no workspace templates are declared"
 
 
-def _identity_config(tmp_path: Path, body: str):  # type: ignore[no-untyped-def]
+def _identity_config(tmp_path: Path, *manifests: ManifestDoc | str):  # type: ignore[no-untyped-def]
     pub = tmp_path / "id.pub"
     priv = tmp_path / "id"
     pub.write_text("key")
@@ -169,10 +172,10 @@ def _identity_config(tmp_path: Path, body: str):  # type: ignore[no-untyped-def]
         [operator]
         ssh_public_key = "{pub.as_posix()}"
         ssh_private_key = "{priv.as_posix()}"
-
         """)
-        + dedent(body)
     )
+    if manifests:
+        write_manifests(tmp_path, *manifests)
     return config_file
 
 
@@ -180,11 +183,11 @@ def test_git_identity_resolves(tmp_path: Path) -> None:
     cfg = load_config(
         _identity_config(
             tmp_path,
-            """
-            [workspace_templates.default]
-            git_user_name = "Ada Lovelace"
-            git_user_email = "ada@example.com"
-            """,
+            ManifestDoc(
+                "workspace-template",
+                "default",
+                {"git_user_name": "Ada Lovelace", "git_user_email": "ada@example.com"},
+            ),
         )
     )
     result = resolve_template(build_registry(cfg))
@@ -202,15 +205,16 @@ def test_git_identity_inherits_and_overrides(tmp_path: Path) -> None:
     cfg = load_config(
         _identity_config(
             tmp_path,
-            """
-            [workspace_templates.base]
-            git_user_name = "Base Bot"
-            git_user_email = "base@example.com"
-
-            [workspace_templates.child]
-            inherits = ["base"]
-            git_user_email = "child@example.com"
-            """,
+            ManifestDoc(
+                "workspace-template",
+                "base",
+                {"git_user_name": "Base Bot", "git_user_email": "base@example.com"},
+            ),
+            ManifestDoc(
+                "workspace-template",
+                "child",
+                {"inherits": ["base"], "git_user_email": "child@example.com"},
+            ),
         )
     )
     registry = build_registry(cfg)
@@ -220,14 +224,14 @@ def test_git_identity_inherits_and_overrides(tmp_path: Path) -> None:
 
 
 def test_unknown_workspace_template_key_warns(tmp_path: Path) -> None:
-    cfg = load_config(
-        _identity_config(
-            tmp_path,
-            """
-            [workspace_templates.default]
-            git_user_emial = "typo@example.com"
-            """,
-        ),
-        warn_issues=False,
+    # The unknown-key warning now rides the manifest issue channel
+    # (config.toml is settings only, ADR 0022): the workspace-template
+    # decoder emits it into the ManifestSet, not cfg.config_issues.
+    from agentworks.manifests import RESOURCES_DIRNAME, load_manifests
+
+    cfg_file = _identity_config(
+        tmp_path,
+        ManifestDoc("workspace-template", "default", {"git_user_emial": "typo@example.com"}),
     )
-    assert any("workspace_templates.default" in issue and "git_user_emial" in issue for issue in cfg.config_issues)
+    manifests = load_manifests(cfg_file.parent / RESOURCES_DIRNAME)
+    assert any("workspace_templates.default" in issue and "git_user_emial" in issue for issue in manifests.issues)

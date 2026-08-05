@@ -1,6 +1,14 @@
-"""Generic TOML-loading helpers, plus the settings-section loaders
-(``[operator]`` / ``[paths]`` / ``[defaults]``) and the ``[git_credentials]``
-resource loader.
+"""Generic TOML-loading helpers plus the settings-section loaders
+(``[operator]`` / ``[paths]`` / ``[defaults]``).
+
+The ``[git_credentials]`` resource loader relocated to
+``agentworks.migrate.toml_resources`` when config.toml stopped declaring
+resources (ADR 0022), but the two shared nonconforming-secret-name helpers
+it used (``_warn_nonconforming_secret_name`` and
+``_warn_nonconforming_derived_secret``) stay here: both the migrator's
+oracle and the manifest decoders (which own their per-kind validation now)
+call them, so keeping them in one leaf module keeps the two sides sharing
+one measuring stick.
 
 Split out of the former monolithic ``agentworks/config.py`` (see
 ``agentworks/config/__init__.py`` for the package overview).
@@ -13,7 +21,7 @@ import re
 import sys
 from pathlib import Path
 
-from agentworks.config.models import DefaultsConfig, OperatorConfig, PathsConfig, _SectionLineMap
+from agentworks.config.models import DefaultsConfig, OperatorConfig, PathsConfig
 from agentworks.config.validation import (
     MAX_SECRET_NAME_LENGTH,
     SSH_HOST_PREFIX_RE,
@@ -22,7 +30,6 @@ from agentworks.config.validation import (
 )
 from agentworks.env import EnvEntry
 from agentworks.errors import ConfigError, ValidationError
-from agentworks.git_credentials.credential import GitCredentialConfig
 
 
 def _expand(path_str: str) -> Path:
@@ -390,109 +397,3 @@ def _load_defaults(
         site=str(site) if site is not None else None,
         runup_git_credentials=bool(raw.get("runup_git_credentials", True)),
     )
-
-
-def _load_git_credentials(
-    data: dict[str, object],
-    issues: list[str],
-    decls: _SectionLineMap,
-    *,
-    warn_ignored_scope_keys: bool = True,
-) -> dict[str, GitCredentialConfig]:
-    raw = data.get("git_credentials", {})
-    if not isinstance(raw, dict):
-        raise ConfigError("[git_credentials] must be a table")
-
-    creds: dict[str, GitCredentialConfig] = {}
-    for name, cdata in raw.items():
-        if not isinstance(cdata, dict):
-            raise ConfigError(f"git_credentials.{name} must be a table")
-        # The ``type`` field's reference-existence check
-        # lives in the framework via
-        # ``GitCredentialConfig.dependencies`` emitting a
-        # ``ResourceReference(kind="git-credential-provider", ...)``;
-        # ``_GitCredentialProviderKind``'s error miss policy fires at
-        # build_registry time with the framework's consistent error
-        # shape if the type isn't a known provider.
-        # ``provider`` is the vocabulary going forward (matching
-        # secret-backend manifests); ``type`` remains accepted until the
-        # TOML resource surface is deleted at the cutover. ``provider``
-        # wins when both are present.
-        if "provider" in cdata:
-            cred_type = str(cdata["provider"])
-            if "type" in cdata and str(cdata["type"]) != cred_type:
-                issues.append(
-                    f"git_credentials.{name}: both provider ({cred_type!r}) "
-                    f"and type ({cdata['type']!r}) are set and disagree; "
-                    "provider wins"
-                )
-        elif "type" in cdata:
-            cred_type = str(cdata["type"])
-        else:
-            raise ConfigError(f"git_credentials.{name}.provider is required")
-        # (TOML keeps org at the section top level -- the only flat
-        # domain; it nests into provider_config below, and the provider
-        # capability validates the assembled blob at build_registry (the
-        # finalize ``validate`` pass, R3). Unknown provider names defer to
-        # the framework's miss policy at finalize.)
-
-        provider_config: dict[str, object] = {}
-        # ``token`` is a bare secret name the provider sources its PAT
-        # from. Flat in TOML, hoisted into provider_config so the
-        # internal rep matches the YAML manifest shape (the provider's
-        # dependencies owns the ``git-token-<name>`` default when it
-        # is omitted). Empty-string is rejected so an operator who types
-        # ``token = ""`` doesn't silently get the default behind their
-        # back.
-        if "token" in cdata:
-            if not isinstance(cdata["token"], str):
-                raise ConfigError(
-                    f"git_credentials.{name}.token must be a bare secret "
-                    f"name (string), got {type(cdata['token']).__name__}"
-                )
-            if not cdata["token"]:
-                raise ConfigError(
-                    f"git_credentials.{name}.token must not be empty; "
-                    f"omit the key to inherit the default secret name "
-                    f'"git-token-{name}"'
-                )
-            _warn_nonconforming_secret_name(cdata["token"], location=f"git_credentials.{name}.token", issues=issues)
-            provider_config["token"] = cdata["token"]
-        else:
-            # Only the token-absent case derives ``git-token-<name>`` from the
-            # credential name; when ``token`` is set explicitly the name feeds
-            # no secret, so warning about it here would be noise (and the
-            # explicit value's own conformance is a separate reference-site
-            # concern, issue #279). Scoping the warning to the default-
-            # derivation case is exactly #308's gap and avoids double-warning.
-            _warn_nonconforming_derived_secret(name, issues)
-        # The flat TOML shape only ever read ``org``, and only for azdo;
-        # hoisting it into the blob for other providers would promote a
-        # historically-ignored stray key into a validation error and
-        # break released configs (loads-today). The flat domain's
-        # stray-key silence stays until the flat shape is retired, EXCEPT
-        # github scope keys, where silence would ship a credential with
-        # BROADER authority than the operator declared; those warn.
-        if warn_ignored_scope_keys and cred_type == "github":
-            ignored_scopes = sorted({"repo", "repos", "owner"} & set(cdata))
-            if ignored_scopes:
-                issues.append(
-                    f"git_credentials.{name}: github scope field(s) "
-                    f"{', '.join(ignored_scopes)} are manifest-only and "
-                    f"IGNORED here: the credential is provisioned "
-                    f"unscoped; migrate it to YAML "
-                    f"(agw resource migrate git-credential)"
-                )
-        if cred_type == "azdo" and "org" in cdata:
-            provider_config["org"] = str(cdata["org"])
-        # The assembled provider_config blob's shape is validated by the
-        # finalize ``validate`` pass (GitCredentialConfig.validate), not
-        # here: capability validation is decoupled from load (R3).
-        creds[name] = GitCredentialConfig(
-            name=name,
-            provider=cred_type,
-            provider_config=provider_config,
-            description=str(cdata["description"]) if "description" in cdata else None,
-            declared_at=decls.lookup("git_credentials", name),
-        )
-    return creds

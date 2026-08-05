@@ -256,19 +256,20 @@ _BUNDLED_SOURCE = {
 def _write_operator_config(
     tmp_path: Path,
     *,
-    toml_body: str = "",
     manifests: dict[str, str] | None = None,
 ) -> Path:
-    """Write a minimal operator config (plus optional TOML apt /
-    install-command entries and resources/*.yaml manifests) and return
-    the config path.
+    """Write a minimal operator config (plus optional resources/*.yaml
+    manifests) and return the config path.
+
+    config.toml is settings only now (ADR 0022): operator apt /
+    install-command entries are declared as ``resources/*.yaml`` manifests.
     """
     pub = tmp_path / "id.pub"
     priv = tmp_path / "id"
     pub.write_text("ssh-ed25519 X")
     priv.write_text("-----BEGIN-----")
     cfg = tmp_path / "config.toml"
-    cfg.write_text(f'[operator]\nssh_public_key = "{pub}"\nssh_private_key = "{priv}"\n' + toml_body)
+    cfg.write_text(f'[operator]\nssh_public_key = "{pub}"\nssh_private_key = "{priv}"\n')
     if manifests:
         resources = tmp_path / "resources"
         resources.mkdir()
@@ -339,31 +340,12 @@ def test_bundled_builtin_rows_match_oracle(tmp_path: Path) -> None:
             assert entry.origin.source == _BUNDLED_SOURCE[kind]
 
 
-def test_operator_toml_override_wins_over_builtin(tmp_path: Path) -> None:
-    """An operator's TOML apt-package with a built-in's name replaces the
-    built-in row (publish order + builtin_override='allow'), carrying the
-    operator payload and an operator-declared origin.
-    """
-    from agentworks.bootstrap import build_registry
-    from agentworks.config import load_config
-    from agentworks.resources.access import kind_dict
-
-    toml_body = dedent(
-        """
-        [apt_packages.gh]
-        description = "Operator gh override"
-        apt = ["gh", "gh-extra"]
-        apt_sources = ["github-cli"]
-        """
-    )
-    cfg = load_config(_write_operator_config(tmp_path, toml_body=toml_body), warn_issues=False)
-    registry = build_registry(cfg)
-
-    gh = kind_dict(registry, "apt-package")["gh"]
-    assert gh.apt == ["gh", "gh-extra"]
-    assert gh.description == "Operator gh override"
-    assert gh.origin is not None
-    assert gh.origin.variant == "operator-declared"
+# The former ``test_operator_toml_override_wins_over_builtin`` was removed here:
+# it declared an operator ``[apt_packages.gh]`` override in config.toml, which
+# now hard-errors as a resource section (ADR 0022). With the TOML declaration
+# surface gone, that test collapses onto its manifest sibling
+# ``test_operator_manifest_override_wins_over_builtin`` below (same override
+# semantics, same operator-declared origin), which is the sole remaining path.
 
 
 def test_operator_manifest_override_wins_over_builtin(tmp_path: Path) -> None:

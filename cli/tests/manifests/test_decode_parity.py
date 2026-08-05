@@ -1,10 +1,14 @@
-"""Decode parity: the same resource declared via TOML and via a manifest
-must produce the same Resource.
+"""Decode parity: the same resource declared as flat TOML and as a tagged
+manifest must produce the same Resource.
 
-Parity is structural because the decoders literally call the TOML
-loaders; these tests pin that wiring (and the metadata.description
-mapping, the git-credential provider vocabulary, and the admin
-flattening) end to end through ``build_registry``.
+config.toml no longer loads resources on the normal path (ADR 0022), so
+the two sides fork: the flat TOML is read by the migrator's pre-side
+oracle (``agentworks.migrate.toml_resources``, where those loaders now
+live), the tagged YAML by the manifest decoders. Comparing the two is a
+real test of the emission mapping rather than a tautology, and pins the
+metadata.description mapping, the git-credential provider vocabulary, and
+the admin flattening. Source-dependent fields are normalized with the
+migrator's own ``strip_source_fields`` so the two cannot drift.
 """
 
 from __future__ import annotations
@@ -19,6 +23,7 @@ from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
 from agentworks.errors import ConfigError
 from agentworks.manifests import ManifestSet, load_manifests
+from agentworks.migrate.toml_resources import toml_resource_rows
 
 _BASE_TOML = """
 [operator]
@@ -248,27 +253,27 @@ def _strip(resource: Any) -> Any:
     ],
 )
 def test_round_trip_parity(tmp_path: Path, kind: str, name: str, toml_body: str, manifest_doc: str) -> None:
-    toml_dir = tmp_path / "toml"
-    toml_dir.mkdir()
+    # Pre-side oracle: the flat TOML declaration, read by the migrator's
+    # TOML reader (config.toml no longer loads resources on the normal
+    # path, ADR 0022; that reader now lives in the oracle).
+    toml_cfg = tmp_path / "source.toml"
+    toml_cfg.write_text(dedent(toml_body))
+    oracle_row = toml_resource_rows(toml_cfg)[(kind, name)]
+
+    # Post-side: the tagged YAML manifest, decoded through build_registry.
     manifest_dir = tmp_path / "manifest"
     manifest_dir.mkdir()
-
-    toml_registry = build_registry(_config(toml_dir, toml_body), ManifestSet.empty())
     _manifest(manifest_dir, manifest_doc)
-    manifest_registry = build_registry(_config(manifest_dir))
+    manifest_row = build_registry(_config(manifest_dir)).lookup(kind, name)
 
-    assert _strip(toml_registry.lookup(kind, name)) == _strip(manifest_registry.lookup(kind, name))
+    assert _strip(oracle_row) == _strip(manifest_row)
 
 
 def test_admin_template_flat_spec(tmp_path: Path) -> None:
-    toml_dir = tmp_path / "toml"
-    toml_dir.mkdir()
-    manifest_dir = tmp_path / "manifest"
-    manifest_dir.mkdir()
-
-    toml_registry = build_registry(
-        _config(
-            toml_dir,
+    # Pre-side oracle: the flat [admin.config] + [admin.env] TOML.
+    toml_cfg = tmp_path / "source.toml"
+    toml_cfg.write_text(
+        dedent(
             """
             [admin.config]
             description = "the admin user"
@@ -278,13 +283,15 @@ def test_admin_template_flat_spec(tmp_path: Path) -> None:
 
             [admin.env]
             EDITOR = "nvim"
-
-            [git_credentials.github]
-            type = "github"
-            """,
-        ),
-        ManifestSet.empty(),
+            """
+        )
     )
+    oracle_admin = toml_resource_rows(toml_cfg)[("admin-template", "default")]
+
+    # Post-side: the flattened admin manifest (plus the git-credential its
+    # git_credentials list references, so the finalize walk resolves).
+    manifest_dir = tmp_path / "manifest"
+    manifest_dir.mkdir()
     _manifest(
         manifest_dir,
         """
@@ -308,11 +315,9 @@ def test_admin_template_flat_spec(tmp_path: Path) -> None:
           provider: github
         """,
     )
-    manifest_registry = build_registry(_config(manifest_dir))
+    manifest_admin = build_registry(_config(manifest_dir)).lookup("admin-template", "default")
 
-    assert _strip(toml_registry.lookup("admin-template", "default")) == _strip(
-        manifest_registry.lookup("admin-template", "default")
-    )
+    assert _strip(oracle_admin) == _strip(manifest_admin)
 
 
 def test_git_credential_type_key_rejected(tmp_path: Path) -> None:
@@ -611,80 +616,13 @@ def test_manifest_named_admin_template_carries_its_name(tmp_path: Path) -> None:
     assert registry.lookup("admin-template", "default").name == "default"
 
 
-def test_manifest_admin_collides_with_declared_toml_admin(tmp_path: Path) -> None:
-    """Dual-window semantics: a real [admin.config] in TOML plus an
-    admin manifest is a duplicate."""
-    _manifest(
-        tmp_path,
-        """
-        apiVersion: agentworks/v1
-        kind: admin-template
-        metadata:
-          name: default
-        spec:
-          username: ops
-        """,
-    )
-    config = _config(
-        tmp_path,
-        """
-        [admin.config]
-        username = "other"
-        """,
-    )
-    with pytest.raises(ConfigError, match="duplicate admin-template"):
-        build_registry(config)
-
-
-def test_toml_apt_extension_vs_manifest_is_duplicate(tmp_path: Path) -> None:
-    """The line-0 exemption is singleton-only: a TOML apt-package
-    extension colliding with a manifest errors like any operator
-    duplicate."""
-    _manifest(
-        tmp_path,
-        """
-        apiVersion: agentworks/v1
-        kind: apt-package
-        metadata:
-          name: my-tool
-          description: from manifest
-        spec:
-          apt: [my-tool]
-        """,
-    )
-    config = _config(
-        tmp_path,
-        """
-        [apt_packages.my-tool]
-        description = "from TOML"
-        apt = ["my-tool"]
-        """,
-    )
-    with pytest.raises(ConfigError, match="duplicate apt-package"):
-        build_registry(config)
-
-
-def test_cross_source_duplicate_errors_at_build(tmp_path: Path) -> None:
-    config = _config(
-        tmp_path,
-        """
-        [secrets.npm-token]
-        description = "from TOML"
-        """,
-    )
-    _manifest(
-        tmp_path,
-        """
-        apiVersion: agentworks/v1
-        kind: secret
-        metadata:
-          name: npm-token
-          description: from manifest
-        spec: {}
-        """,
-    )
-    with pytest.raises(ConfigError, match="duplicate secret"):
-        build_registry(config)
+# The dual-window cross-source duplicate tests (a TOML [admin.config] /
+# [apt_packages.*] / [secrets.*] colliding with a manifest of the same
+# kind+name) were removed here: config.toml can no longer declare
+# resources (ADR 0022), so a TOML-vs-manifest collision cannot occur. The
+# surviving manifest-vs-manifest duplicate detection is covered in
+# tests/manifests/test_loader_and_envelope.py (test_duplicate_across_files
+# _cites_both_locations, test_duplicate_within_one_file_errors).
 
 
 def test_manifest_overrides_builtin_apt_entry(tmp_path: Path) -> None:

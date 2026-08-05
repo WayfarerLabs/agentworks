@@ -32,16 +32,23 @@ from agentworks.errors import StateError
 from agentworks.resources.access import ensure_recipe_enabled
 from agentworks.resources.graph import Enablement
 from agentworks.resources.inspect import describe_resource, list_resources
+from tests.conftest import ManifestDoc, write_manifests
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from pathlib import Path
 
     from agentworks.config import Config
 
 
-def _config(tmp_path: Path, body: str = "", *, enabled: bool = False) -> Config:
+def _config(
+    tmp_path: Path,
+    *,
+    enabled: bool = False,
+    manifests: Sequence[ManifestDoc | str] = (),
+) -> Config:
     """A real operator config; ``enabled`` toggles ``[plugins] system =
-    ["claude"]`` and ``body`` appends resource declarations."""
+    ["claude"]`` and ``manifests`` seeds resource declarations beside it."""
     pub = tmp_path / "id.pub"
     priv = tmp_path / "id"
     pub.write_text("ssh-ed25519 AAAA...")
@@ -56,8 +63,9 @@ def _config(tmp_path: Path, body: str = "", *, enabled: bool = False) -> Config:
 
         """)
         + plugins
-        + dedent(body)
     )
+    if manifests:
+        write_manifests(tmp_path, *manifests)
     return load_config(cfg, warn_issues=False)
 
 
@@ -120,11 +128,12 @@ def test_disabled_rows_hidden_from_list_shown_by_describe(tmp_path: Path) -> Non
 
 # -- the harness integration use-gate (R14, the secret model) ----------------
 
-_CC_TEMPLATE = """
-[session_templates.cc]
-harness = "claude-code"
-description = "Claude Code session"
-"""
+_CC_TEMPLATE = ManifestDoc(
+    "session-template",
+    "cc",
+    {"harness": "claude-code"},
+    description="Claude Code session",
+)
 
 
 def test_session_template_naming_disabled_harness_integration_finalizes_and_stays_ready(tmp_path: Path) -> None:
@@ -132,29 +141,26 @@ def test_session_template_naming_disabled_harness_integration_finalizes_and_stay
     reference lands on the present-but-disabled row, never an unknown-name
     error) and stays ready: the harness integration's disablement does not propagate to the
     template (mirroring how a secret stays ready while its backends are gated)."""
-    registry = build_registry(_config(tmp_path, _CC_TEMPLATE))
+    registry = build_registry(_config(tmp_path, manifests=[_CC_TEMPLATE]))
     assert registry.graph.is_ready("session-template", "cc")
 
 
 def test_ensure_harness_integration_enabled_refuses_disabled_claude_code_with_hint(tmp_path: Path) -> None:
-    registry = build_registry(_config(tmp_path, _CC_TEMPLATE))
+    registry = build_registry(_config(tmp_path, manifests=[_CC_TEMPLATE]))
     with pytest.raises(StateError) as exc:
         ensure_harness_integration_enabled(registry, "claude-code")
     assert "enable plugin `claude`" in str(exc.value)
 
 
 def test_enabling_claude_lets_the_harness_integration_be_used(tmp_path: Path) -> None:
-    registry = build_registry(_config(tmp_path, _CC_TEMPLATE, enabled=True))
+    registry = build_registry(_config(tmp_path, enabled=True, manifests=[_CC_TEMPLATE]))
     assert registry.graph.enablement_of("harness-integration", "claude-code") is Enablement.enabled
     ensure_harness_integration_enabled(registry, "claude-code")  # no raise
 
 
 # -- the install-command recipe use-gate (Phase 7 manifest parity) -----------
 
-_CLAUDE_INSTALL_TEMPLATE = """
-[agent_templates.default]
-user_install_commands = ["claude"]
-"""
+_CLAUDE_INSTALL_TEMPLATE = ManifestDoc("agent-template", "default", {"user_install_commands": ["claude"]})
 
 
 def test_template_referencing_claude_install_finalizes_when_disabled(tmp_path: Path) -> None:
@@ -162,7 +168,7 @@ def test_template_referencing_claude_install_finalizes_when_disabled(tmp_path: P
     finalizes cleanly while claude is not enabled. Before the migration an
     unknown name here was a hard ``references unknown user-install-command``
     error; now the row is present-but-disabled, so the reference is valid."""
-    registry = build_registry(_config(tmp_path, _CLAUDE_INSTALL_TEMPLATE))
+    registry = build_registry(_config(tmp_path, manifests=[_CLAUDE_INSTALL_TEMPLATE]))
     assert registry.graph.enablement_of("user-install-command", "claude") is Enablement.disabled
 
 
@@ -170,7 +176,7 @@ def test_recipe_gate_refuses_disabled_claude_install_with_hint(tmp_path: Path) -
     """The recipe gate refuses an (enabled) template whose closure draws on the
     disabled ``claude`` install-command, naming the disabled contribution and
     the plugin to enable, before any transport work."""
-    registry = build_registry(_config(tmp_path, _CLAUDE_INSTALL_TEMPLATE))
+    registry = build_registry(_config(tmp_path, manifests=[_CLAUDE_INSTALL_TEMPLATE]))
     with pytest.raises(StateError) as exc:
         ensure_recipe_enabled(registry, "agent-template", "default")
     message = str(exc.value)
@@ -179,7 +185,7 @@ def test_recipe_gate_refuses_disabled_claude_install_with_hint(tmp_path: Path) -
 
 
 def test_enabling_claude_lets_the_install_command_be_consumed(tmp_path: Path) -> None:
-    registry = build_registry(_config(tmp_path, _CLAUDE_INSTALL_TEMPLATE, enabled=True))
+    registry = build_registry(_config(tmp_path, enabled=True, manifests=[_CLAUDE_INSTALL_TEMPLATE]))
     assert registry.graph.enablement_of("user-install-command", "claude") is Enablement.enabled
     ensure_recipe_enabled(registry, "agent-template", "default")  # no raise
 
@@ -188,12 +194,19 @@ def test_operator_override_of_claude_install_wins(tmp_path: Path) -> None:
     """An operator who declares their own ``claude`` user-install-command
     overrides the disabled plugin row with no collision error (the plugin row
     publishes weak while disabled)."""
-    body = """
-    [user_install_commands.claude]
-    description = "operator claude installer"
-    command = "echo operator-claude"
-    """
-    registry = build_registry(_config(tmp_path, body))
+    registry = build_registry(
+        _config(
+            tmp_path,
+            manifests=[
+                ManifestDoc(
+                    "user-install-command",
+                    "claude",
+                    {"command": "echo operator-claude"},
+                    description="operator claude installer",
+                )
+            ],
+        )
+    )
     row = registry.lookup("user-install-command", "claude")
     assert row.origin.variant == "operator-declared"
     assert row.command == "echo operator-claude"
