@@ -213,11 +213,15 @@ shared contracts need a single owner.
 
 The settled rules for the species:
 
-- Its artifacts are not the standard set. A roadmap SDD carries perspectives (its inputs), a
-  synthesis and sequencing document, cross-cutting contract decisions, and a ledger of its child
-  SDDs. It has no frd.md, hla.md, or plan.md of its own; those belong to the children. The exact
-  artifact forms are still stabilizing with the first roadmap SDD and will be recorded here as they
-  prove out.
+- Its artifacts are not the standard set. The working set, established by the first roadmap SDD: an
+  `inputs/` folder holding perspectives and other source material; `current-state.md`, a dated
+  snapshot of where the system is, updated in place at wave boundaries (git history is the
+  append-only record); `target-state.md`, the north star and the home of every settled design
+  ruling; `phasing.md`, ordering only (dependency structure, waves, release mapping); and
+  `child-sdds.md`, the inventory and checkbox tracker that plays plan.md's role, whose completed
+  checkboxes are immutable per the standard rule. A roadmap SDD has no frd.md, hla.md, or plan.md of
+  its own; those belong to the children. The roadmap locks when current state and target state agree
+  and every child is locked. These forms are still young; refine them here as they prove out.
 - It stays open until every child SDD is closed, then locks like any other SDD. Its ledger plays the
   role plan checkboxes play in an ordinary SDD, one level up.
 - Roadmap state lives on `main`: every change (a new child SDD, a status change, a design revision)
