@@ -73,6 +73,74 @@ All other converted tests preserved intent: reads of retired `Config` fields re-
 re-point to `load_manifests(...).issues`, and a `ValidationError` at load became a `ConfigError` at
 build where manifest decode wraps the spec-level error (message substrings kept).
 
+## Slice 2 of 1.2f (close) -- `tests/resources/`, `tests/manifests/`, `tests/orchestration/`, done
+
+Date: 2026-08-05.
+
+- Suite now `160 failed, 3258 passed, 11 errors` (`uv run pytest -q` from `cli/`). No NEW failures
+  vs the slice-1 baseline (verified by diffing the failing node-id set: the new-failure set is
+  empty, exactly 73 nodes went green, and every one of the 171 remaining non-passing nodes is a
+  still-inventoried slice-3 file under `tests/agents/`, `tests/plugins/`, `tests/sessions/`,
+  `tests/vms/`, `tests/workspaces/`). The passed count rises by 69, not 73, because 4 tests were
+  deleted as structurally gone (see the calls below); 73 fixed = 69 now-passing + 4 removed.
+- `uv run ruff check` / `ruff format --check` clean on all 15 changed files. `uv run mypy .` is now
+  fully clean (`Success: no issues found in 506 source files`): the 6 `[attr-defined]` errors slice
+  1 left in `tests/resources/test_admin_template_plurified.py` are resolved by this slice.
+- `./scripts/lint-files.sh` is clean for this slice's files; its only failures are the pre-existing
+  markdownlint/prettier issues in `plan.md`, untouched by this slice.
+
+### Conversion (convert-to-YAML)
+
+Every TOML resource section in a fixture moved into a `resources/*.yaml` manifest via
+`write_manifests` / `ManifestDoc` (or a hand-built row where the test asserts registry/graph
+outcomes directly). Files: `test_access.py`, `test_git_credential_provider_kind.py`,
+`test_vm_template_kind.py`, `test_template_kinds.py`, `test_always_materialize.py`, `test_graph.py`,
+`test_install_resource_kinds.py`, `test_instances.py` (all `tests/resources/`), and the
+`_site_graph` / `_px_site_setup` helpers in `tests/orchestration/test_readiness.py` /
+`test_secrets.py` (the shared `proxmox_site()` manifest replaces the `PROXMOX_SECTION` TOML).
+`test_template_kinds.py` also dropped the now-dead `_KindSpec.section` (TOML section name) field.
+
+### Redesign calls (intent preserved, re-pointed off the dead TOML surface)
+
+- `test_decode_parity.py`: `test_round_trip_parity` and `test_admin_template_flat_spec` compared a
+  TOML-built registry against a manifest-built one; the TOML side hard-errors now. Re-pointed to
+  oracle-vs-decode: the flat TOML is read by the migrator's pre-side oracle
+  (`agentworks.migrate.toml_resources.toml_resource_rows`, where those loaders relocated), the
+  tagged YAML by the manifest decoders, normalized through the shared `strip_source_fields`. This
+  keeps the per-kind golden mapping AND is the same comparison the migrator's own verification runs.
+- `test_singleton_publishing.py`: the two `origin.line == 5` assertions pinned TOML header
+  resolution (which `[admin.*]` / `[named_console]` header `declared_at` picks); a manifest has one
+  document location, so they re-point to `origin.variant == "operator-declared"` + `origin.file`
+  (the manifest) + the content assertion, equivalent strength in the manifest world.
+- `test_admin_template_plurified.py`: `test_loader_admin_config_section_still_parses` (read
+  `cfg.admin`) redesigned to declare the admin-template default as a manifest and assert via
+  `registry.lookup` (renamed `test_admin_config_manifest_still_produces_named_default`).
+- `test_registry_lifecycle.py`: `test_add_rejects_names_containing_slash` dropped its TOML-source
+  leg (a `[vm_templates."we/ird"]` section hard-errors as a resource section before reaching the '/'
+  check); the direct-add and manifest-source legs preserve the uniform-rule intent.
+  `test_build_registry_equivalent_to_manual_steps` now publishes the operator ManifestSet on the
+  manual side (the api-key secret is a manifest, not `cfg.publish_to`, now).
+- `test_capability_shape.py`: `test_cli_aggregates_toml_and_yaml_old_selectors_into_one_warning`
+  appended a `[session_templates.*]` TOML section; re-pointed to aggregate old selectors across two
+  MANIFEST files instead (renamed
+  `test_cli_aggregates_multiple_manifest_old_selectors_into_one_ warning`), preserving the "one
+  warning per request, not per source" intent.
+
+### Deletion calls (behavior structurally gone under ADR 0022, coverage retained elsewhere)
+
+- `test_admin_template_plurified.py`: removed `test_plurified_operator_surface_not_yet_parsed` (it
+  pinned that `[admin_templates.<name>]` TOML is silently not parsed and `cfg.admin` unchanged; both
+  the TOML resource surface and `Config.admin` are gone). Framework plurification stays covered by
+  `test_registry_can_hold_multiple_admin_template_rows` here and
+  `test_manifest_named_admin_template_carries_its_name` in `test_decode_parity.py`.
+- `test_decode_parity.py`: removed the three dual-window cross-source duplicate tests
+  (`test_cross_source_duplicate_errors_at_build`,
+  `test_manifest_admin_collides_with_declared_toml_ admin`,
+  `test_toml_apt_extension_vs_manifest_is_duplicate`): a TOML-vs-manifest collision cannot occur
+  once config.toml declares no resources. Manifest-vs-manifest duplicate detection stays covered by
+  `test_loader_and_envelope.py` (`test_duplicate_across_files_cites_both_locations`,
+  `test_duplicate_within_one_file_errors`).
+
 ## Root-cause buckets (every failure is one of these; no surprise regressions)
 
 Bucketing the whole failure output by exception signature:
@@ -152,7 +220,10 @@ deletion calls. The per-file notes below are retained as the record of what each
   `[vm_templates.default]` + `[admin.config]`; the `_check_secrets` tests call `load_config`
   directly and hit the hard error. (The doctor fail-row test is already green.)
 
-### `tests/resources/`
+### `tests/resources/` -- DONE (slice 2 of 1.2f)
+
+Every file in this section is green as of slice 2; see the slice-2 section above for the redesign /
+deletion calls. The per-file notes below are retained as the record of what each conversion faced.
 
 - `test_access.py`, `test_admin_template_plurified.py`, `test_always_materialize.py`,
   `test_git_credential_provider_kind.py`, `test_graph.py`, `test_install_resource_kinds.py`,
@@ -160,7 +231,10 @@ deletion calls. The per-file notes below are retained as the record of what each
   `test_template_kinds.py`, `test_vm_template_kind.py` -- convert-to-YAML / hand-built registry rows
   (these assert registry/graph outcomes seeded from TOML resources).
 
-### `tests/manifests/`
+### `tests/manifests/` -- DONE (slice 2 of 1.2f)
+
+Every file in this section is green as of slice 2; see the slice-2 section above for the redesign /
+deletion calls. The per-file notes below are retained as the record of what each conversion faced.
 
 - `test_capability_shape.py` -- convert-to-YAML (a shared config declares resources).
 - `test_decode_parity.py` -- pins TOML-only behavior: it pins "decode routes through the TOML
@@ -193,7 +267,10 @@ deletion calls. The per-file notes below are retained as the record of what each
 
 - `test_create_orchestrated.py`, `test_lifecycle_orchestrated.py` -- convert-to-YAML.
 
-### `tests/orchestration/`
+### `tests/orchestration/` -- DONE (slice 2 of 1.2f)
+
+Both files are green as of slice 2 (the `_site_graph` / `_px_site_setup` helpers declare the proxmox
+site through the shared `proxmox_site()` manifest instead of `PROXMOX_SECTION`).
 
 - `test_readiness.py`, `test_secrets.py` -- convert-to-YAML (shared fixture declares resources).
 

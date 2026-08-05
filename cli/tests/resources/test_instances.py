@@ -18,6 +18,7 @@ column and the ``Used by:`` describe section. This module covers:
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 from textwrap import dedent
 from typing import Any
@@ -26,6 +27,7 @@ from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
 from agentworks.db import Database, SessionMode
 from agentworks.resources import KIND_REGISTRY, InstanceRef, Registry
+from tests.conftest import ManifestDoc, write_manifests
 
 
 def _instances(kind: str, db: Database, registry: Registry, resource: object) -> list[InstanceRef]:
@@ -43,7 +45,18 @@ def _instances(kind: str, db: Database, registry: Registry, resource: object) ->
     return list(handler.instances(db, registry, resource))
 
 
-def _write_base(config_path: Path, *, extras: str = "") -> None:
+def _write_base(
+    config_path: Path,
+    *,
+    extras: str = "",
+    manifests: Sequence[ManifestDoc | str] = (),
+) -> None:
+    """Write a settings-only config.toml plus its resources/ manifests.
+
+    ``extras`` carries settings-only TOML (e.g. ``[secret_config]`` /
+    ``[plugins]``); resource declarations live in ``manifests`` beside the
+    config now (ADR 0022).
+    """
     pub = config_path.parent / "id.pub"
     priv = config_path.parent / "id"
     pub.write_text("ssh-ed25519 AAAA...")
@@ -56,6 +69,8 @@ def _write_base(config_path: Path, *, extras: str = "") -> None:
         """)
         + dedent(extras),
     )
+    if manifests:
+        write_manifests(config_path.parent, *manifests)
 
 
 def _seed_basic(tmp_path: Path) -> tuple[Database, Registry]:
@@ -64,13 +79,7 @@ def _seed_basic(tmp_path: Path) -> tuple[Database, Registry]:
     ``default`` (or NULL on the optional template column).
     """
     cfg = tmp_path / "config.toml"
-    _write_base(
-        cfg,
-        extras="""
-        [vm_templates.custom]
-        cpus = 4
-        """,
-    )
+    _write_base(cfg, manifests=[ManifestDoc("vm-template", "custom", {"cpus": 4})])
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
 
@@ -235,10 +244,7 @@ def test_secret_instances_finds_sessions_via_admin_env(tmp_path: Path) -> None:
     cfg = tmp_path / "config.toml"
     _write_base(
         cfg,
-        extras="""
-        [admin.env]
-        API_KEY = { secret = "shared-key" }
-        """,
+        manifests=[ManifestDoc("admin-template", "default", {"env": {"API_KEY": {"secret": "shared-key"}}})],
     )
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
@@ -328,13 +334,13 @@ def test_secret_instances_finds_sessions_via_vm_template_env(
     cfg = tmp_path / "config.toml"
     _write_base(
         cfg,
-        extras="""
-        [vm_templates.prod]
-        cpus = 8
-
-        [vm_templates.prod.env]
-        DB_TOKEN = { secret = "prod-db-token" }
-        """,
+        manifests=[
+            ManifestDoc(
+                "vm-template",
+                "prod",
+                {"cpus": 8, "env": {"DB_TOKEN": {"secret": "prod-db-token"}}},
+            )
+        ],
     )
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
@@ -410,12 +416,10 @@ def test_secret_instances_empty_when_no_session_reaches_it(
     _write_base(
         cfg,
         extras="""
-        [secrets.dead-key]
-        description = "Declared but nothing references it"
-
         [secret_config]
         backends = ["env-var"]
         """,
+        manifests=[ManifestDoc("secret", "dead-key", description="Declared but nothing references it")],
     )
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
@@ -447,13 +451,13 @@ def test_secret_instances_finds_sessions_via_agent_template_env(
     cfg = tmp_path / "config.toml"
     _write_base(
         cfg,
-        extras="""
-        [agent_templates.claude]
-        shell = "bash"
-
-        [agent_templates.claude.env]
-        AGENT_KEY = { secret = "agent-secret" }
-        """,
+        manifests=[
+            ManifestDoc(
+                "agent-template",
+                "claude",
+                {"shell": "bash", "env": {"AGENT_KEY": {"secret": "agent-secret"}}},
+            )
+        ],
     )
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
@@ -489,10 +493,7 @@ def test_secret_instances_admin_secret_not_attributed_to_agent_session(
     cfg = tmp_path / "config.toml"
     _write_base(
         cfg,
-        extras="""
-        [admin.env]
-        ADMIN_KEY = { secret = "admin-only-secret" }
-        """,
+        manifests=[ManifestDoc("admin-template", "default", {"env": {"ADMIN_KEY": {"secret": "admin-only-secret"}}})],
     )
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
@@ -536,10 +537,7 @@ def test_secret_instances_finds_sessions_via_auto_declared_secret(
     cfg = tmp_path / "config.toml"
     _write_base(
         cfg,
-        extras="""
-        [admin.env]
-        TYPO_KEY = { secret = "anthropic-api-ky" }
-        """,
+        manifests=[ManifestDoc("admin-template", "default", {"env": {"TYPO_KEY": {"secret": "anthropic-api-ky"}}})],
     )
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)

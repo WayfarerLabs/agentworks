@@ -22,9 +22,10 @@ from agentworks.resources.access import (
     named_console_template,
     secret_decls,
 )
+from tests.conftest import ManifestDoc, write_manifests
 
 
-def _registry(tmp_path: Path, body: str = ""):  # noqa: ANN202 - test helper
+def _registry(tmp_path: Path, *manifests: ManifestDoc):  # noqa: ANN202 - test helper
     cfg = tmp_path / "config.toml"
     cfg.write_text(
         dedent(
@@ -34,10 +35,11 @@ def _registry(tmp_path: Path, body: str = ""):  # noqa: ANN202 - test helper
             ssh_private_key = "{priv}"
             """
         ).format(pub=tmp_path / "k.pub", priv=tmp_path / "k")
-        + dedent(body)
     )
     (tmp_path / "k.pub").write_text("ssh-ed25519 AAAA test")
     (tmp_path / "k").write_text("key")
+    if manifests:
+        write_manifests(cfg.parent, *manifests)
     return build_registry(load_config(cfg, warn_issues=False))
 
 
@@ -49,11 +51,7 @@ def test_git_credential_miss_returns_none(tmp_path: Path) -> None:
 def test_git_credential_hit_returns_entry(tmp_path: Path) -> None:
     registry = _registry(
         tmp_path,
-        """
-        [git_credentials.github]
-        type = "github"
-        description = "gh"
-        """,
+        ManifestDoc("git-credential", "github", {"provider": {"name": "github"}}, description="gh"),
     )
     cred = git_credential(registry, "github")
     assert cred is not None

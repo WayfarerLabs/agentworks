@@ -21,6 +21,7 @@ from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
 from agentworks.sessions.template import NamedConsoleConfig
 from agentworks.vms.admin import AdminConfig
+from tests.conftest import ManifestDoc, write_manifests
 
 
 def _write_minimal(path: Path) -> Path:
@@ -206,21 +207,8 @@ def test_operator_declared_admin_is_not_overwritten(tmp_path: Path) -> None:
     overwrite the operator-declared row -- the short-circuit
     ``if name in self._resources.get(kind, {})`` handles it.
     """
-    cfg_file = tmp_path / "config.toml"
-    pub = tmp_path / "id.pub"
-    priv = tmp_path / "id"
-    pub.write_text("ssh-ed25519 AAAA...")
-    priv.write_text("-----BEGIN OPENSSH PRIVATE KEY-----")
-    cfg_file.write_text(
-        dedent(f"""\
-        [operator]
-        ssh_public_key = "{pub.as_posix()}"
-        ssh_private_key = "{priv.as_posix()}"
-
-        [admin.config]
-        shell = "zsh"
-        """),
-    )
+    cfg_file = _write_minimal(tmp_path / "config.toml")
+    write_manifests(cfg_file.parent, ManifestDoc("admin-template", "default", {"shell": "zsh"}))
     cfg = load_config(cfg_file, warn_issues=False)
     registry = build_registry(cfg)
 

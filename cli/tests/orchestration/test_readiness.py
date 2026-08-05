@@ -132,10 +132,12 @@ def _site_graph(tmp_path: Path, chain: str) -> tuple[object, object, list[object
     one of the two node kinds that declares a config secret."""
     from agentworks.bootstrap import build_registry
     from agentworks.vms.nodes import vm_site_node
-    from tests.orchestrated_fixtures import PLUGINS_ENABLED, PROXMOX_SECTION, write_operator_config
+    from tests.orchestrated_fixtures import PLUGINS_ENABLED, proxmox_site, write_operator_config
 
     config = write_operator_config(
-        tmp_path, PLUGINS_ENABLED + PROXMOX_SECTION + f"[secret_config]\nbackends = [{chain}]\n"
+        tmp_path,
+        PLUGINS_ENABLED + f"[secret_config]\nbackends = [{chain}]\n",
+        manifests=[proxmox_site()],
     )
     registry = build_registry(config)
     return config, registry, [vm_site_node(registry, "proxmox")]

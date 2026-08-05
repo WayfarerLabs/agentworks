@@ -12,9 +12,10 @@ from agentworks.capabilities.git_credential import GIT_CREDENTIAL_PROVIDER_REGIS
 from agentworks.config import load_config
 from agentworks.errors import ConfigError
 from agentworks.resources import KIND_REGISTRY, NoUnreferencedDefaultError
+from tests.conftest import ManifestDoc, write_manifests
 
 
-def _write_cfg(path: Path, body: str = "") -> Path:
+def _write_cfg(path: Path, *manifests: ManifestDoc) -> Path:
     pub = path.parent / "id.pub"
     priv = path.parent / "id"
     pub.write_text("ssh-ed25519 AAAA...")
@@ -24,10 +25,10 @@ def _write_cfg(path: Path, body: str = "") -> Path:
         [operator]
         ssh_public_key = "{pub.as_posix()}"
         ssh_private_key = "{priv.as_posix()}"
-
-        """)
-        + dedent(body),
+        """),
     )
+    if manifests:
+        write_manifests(path.parent, *manifests)
     return path
 
 
@@ -52,10 +53,7 @@ def test_known_providers_resolve(tmp_path: Path) -> None:
     cfg = load_config(
         _write_cfg(
             tmp_path / "config.toml",
-            """
-            [git_credentials.gh]
-            type = "github"
-            """,
+            ManifestDoc("git-credential", "gh", {"provider": {"name": "github"}}),
         ),
         warn_issues=False,
     )
@@ -70,10 +68,7 @@ def test_unknown_provider_errors_with_framework_shape(tmp_path: Path) -> None:
     cfg = load_config(
         _write_cfg(
             tmp_path / "config.toml",
-            """
-            [git_credentials.bad]
-            type = "gitlab"
-            """,
+            ManifestDoc("git-credential", "bad", {"provider": {"name": "gitlab"}}),
         ),
         warn_issues=False,
     )
