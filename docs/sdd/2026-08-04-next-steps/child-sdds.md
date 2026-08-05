@@ -104,10 +104,9 @@ open-ended research placeholder.
 4. Done (2026-08-05): descriptor contract merged (PR #405).
 5. Done (2026-08-05): wave 1 implementation, closeouts, and lock merged (PR #406). The 0.14.0
    release ships when cut.
-6. Wave 2 is unblocked (descriptor merged plus removals landed): launch an effort lead to pick up
-   `2026-07-31-declarative-schema` phase 2 from `main`; its first act records the hold release in
-   that SDD's plan, citing `capability-descriptor-contract.md`.
-7. Onboarding-and-discovery child is now ready to seed (wave 1 complete): roadmap lead drafts its
-   seed FRD next.
-8. Design track: facet boundary contract in review; then the instance-state store schema and the
-   event vocabulary's first slice.
+6. Done (2026-08-05): wave 2 seed notes merged (PR #411) and effort lead launched.
+7. Done (2026-08-05): onboarding-and-discovery seeded (FRD, PR #413).
+8. Merge the onboarding seed (PR #413, reviewer pass in flight), then launch its effort lead.
+9. Roadmap lead reviews wave 2 and onboarding PRs as they arrive.
+10. Design track: facet boundary contract in review (PR #407); then the instance-state store schema
+    and the event vocabulary's first slice.
