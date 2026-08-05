@@ -109,6 +109,11 @@ Done when: the shipped declarative resource samples show the new settings clearl
 - [ ] Manual test: dotfiles providing mise config without `mise_packages` (should pick up dotfiles).
 - [x] Verify agent creation respects agent-specific mise config.
 
+Closeout disposition (2026-08-05): the five manual reinit checks above are waived for this effort,
+not completed. The reconciliation added focused automated coverage for each configuration and
+install-flow branch, but it did not provision a live VM. Keeping the boxes unchecked preserves that
+verification limitation while making clear that they are not open implementation work.
+
 ## 2026-08-05 reconciliation record
 
 The unchecked historical implementation items above were audited against the current source, tests,

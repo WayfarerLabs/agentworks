@@ -138,22 +138,22 @@ the SDD is ready to lock.
 
 ## Phase 5: Release-spanning and completed-SDD closeout
 
-- [ ] Complete the still-unchecked 0.14 removal and closeout items in `2026-08-04-session-resume`,
+- [x] Complete the still-unchecked 0.14 removal and closeout items in `2026-08-04-session-resume`,
       using the Phase 1 implementation and canonical permanent docs as evidence; add its dated
       `locked.md`.
-- [ ] Complete the still-unchecked removal, migration-strategy, and closeout items in
+- [x] Complete the still-unchecked removal, migration-strategy, and closeout items in
       `2026-08-03-harness-integration`, using the Phase 1 implementation, residual sweep, and
       permanent docs as evidence; add its dated `locked.md`.
-- [ ] Verify every completed checklist item in `2026-03-29-proxmox-provider` against current code,
+- [x] Verify every completed checklist item in `2026-03-29-proxmox-provider` against current code,
       tests, scripts, samples, and `docs/guides/proxmox.md`; record later evolution without changing
       completed boxes, then add its dated `locked.md`.
-- [ ] Promote a concise permanent maintainer description of the session PID/boot-ID status model,
+- [x] Promote a concise permanent maintainer description of the session PID/boot-ID status model,
       auto-repair, and force semantics; verify `2026-05-03-session-enhancements` against it and the
       current tests, then add its dated `locked.md` without altering completed boxes.
-- [ ] Finish the evidence-based mise reconciliation from Phase 4 and add
+- [x] Finish the evidence-based mise reconciliation from Phase 4 and add
       `2026-03-26-mise-integration/locked.md`, explicitly recording deviations and any unverified
       manual checks.
-- [ ] Review all five lockfiles and plan edits for historical accuracy, permanent-doc sufficiency,
+- [x] Review all five lockfiles and plan edits for historical accuracy, permanent-doc sufficiency,
       and completed-checkbox immutability; run locked-SDD enforcement.
 
 Definition of done: R10 is complete; all five named SDDs are truthful, non-load-bearing, and locked;

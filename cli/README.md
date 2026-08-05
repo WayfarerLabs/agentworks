@@ -387,6 +387,10 @@ together, and an unknown name in a filter is an error, not an empty result. `--a
 agent-mode sessions only; `--admin` matches admin-mode sessions only (the two are mutually
 exclusive). Pass `--force` to stop/resume broken sessions via PID kill.
 
+Maintainers: [Session status internals](../docs/guides/session-status.md) documents the persisted
+PID and boot-ID model, live status derivation, automatic repair, and the safety boundary for
+`--force`.
+
 `session create <name>` takes the session name as a required positional. Optional flags:
 `--workspace`, `--template`, `--admin`, and `--agent`. If `--workspace` / `--new-workspace` is
 omitted, you are prompted to pick from the existing workspaces or `[Create new workspace]` --
