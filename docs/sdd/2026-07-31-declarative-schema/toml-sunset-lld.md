@@ -175,14 +175,19 @@ with no registry build (planning is now pure over text; the post-side builds its
 
 `--no-deprecations` channel afterward: the TOML resource nudge LEAVES (it is now an error). What
 REMAINS: the #349 tagged-shape warning (`decode.py:186` `capability_shape_deprecation`), the
-harness-selector warning (`bootstrap.py:142`), the `restart_command` warning (`config/load.py:181`),
-and the settings-side `defaults.platform` alias deprecation (`_load_defaults`,
-`loaders_core.py:381`, threaded via `config/load.py:199`), which is a settings deprecation and
-unaffected by this phase. The `[secret_backends.*]` no-op warning (`_load_secret_backends`,
-`loaders_secrets.py:85`) also stays on the channel: it is a capability-kind no-op section, never a
-resource declaration, and its removal is owned by `agw resource migrate --all`'s existing drop, not
-by FR1. (Open question, section: whether the operator wants it folded into the hard error too; the
-LLD keeps it a warning as the minimal, separable call.)
+harness-selector warning (`bootstrap.py:142`), and the settings-side `defaults.platform` alias
+deprecation (`_load_defaults`, `loaders_core.py:381`, threaded via `config/load.py:199`), which is a
+settings deprecation and unaffected by this phase. NOTE (LLD discrepancy 1, resolved): the
+`restart_command` warning's config-channel block (`config/load.py:181`) is DEAD after this phase,
+its only producer is `_load_session_templates`, which relocates out of the config-load path, and
+`[session_templates.*]` now hard-errors, so no config.toml input can feed it. Remove the dead block;
+the `restart_command` deprecation continues to fire from the YAML manifest path
+(`ManifestSet.deprecation_issues`), which is unchanged. The `[secret_backends.*]` no-op warning
+(`_load_secret_backends`, `loaders_secrets.py:85`) also stays on the channel: it is a
+capability-kind no-op section, never a resource declaration, and its removal is owned by
+`agw resource migrate --all`'s existing drop, not by FR1. (Open question, section: whether the
+operator wants it folded into the hard error too; the LLD keeps it a warning as the minimal,
+separable call.)
 
 ## 3. Consumer inventory and dispositions
 
@@ -197,14 +202,15 @@ LLD keeps it a warning as the minimal, separable call.)
   fields (`vm_templates`, `secrets`, `session_templates`, `git_credentials`, `vm_sites`,
   `agent_templates`, `workspace_templates`, `admin`, `named_console`, `apt_*`, `*_install_commands`)
   and `Config.publish_to`'s resource loop (`models.py:189-218`) are removed. `apt.publish_to` /
-  `install_commands.publish_to` (`apt.py:156`, `install_commands.py:134`) become vestigial: the
-  bundled apt/install entries publish via `builtin_manifests.publish_to` (`bootstrap.py:113`), and
-  these two functions' ONLY current job is the operator TOML half, so once it is removed they are
-  no-ops. Drop the two calls (`bootstrap.py:114-115`) and the now-unused `config` parameter on both.
-  Consumers read resources from the registry, never Config (ADR 0016), so mypy finds any stragglers.
-  This is a decision the LLD makes explicit beyond the HLA's literal "delete the loaders":
-  always-empty resource fields would be a field that lies (principles 5, 6) and a half-migrated
-  state (principle 10). Reviewer confirmation invited.
+  `install_commands.publish_to` (`apt.py:156`, `install_commands.py:134`) are DELETED, not emptied
+  (LLD discrepancy 2, resolved): the bundled apt/install entries publish via
+  `builtin_manifests.publish_to` (`bootstrap.py:113`), and these two functions' ONLY current job is
+  the operator TOML half, so once it is removed the functions have no body and no caller. Delete
+  them along with their `bootstrap.py:114-115` calls; the `_load_apt_*` / `_load_*_commands` domain
+  helpers they wrapped stay (still used by `decode.py`). Consumers read resources from the registry,
+  never Config (ADR 0016), so mypy finds any stragglers. This is a decision the LLD makes explicit
+  beyond the HLA's literal "delete the loaders": always-empty resource fields would be a field that
+  lies (principles 5, 6) and a half-migrated state (principle 10). Reviewer confirmation invited.
 - **`resources_loaded` + `build_registry` guard** (`models.py:143`, `bootstrap.py:87`): retire. With
   no TOML resource side to publish, the "settings-only Config must not silently publish empty" guard
   has nothing to guard; the escape hatch is now expressed purely by `resources=False` gating the
@@ -234,8 +240,9 @@ LLD keeps it a warning as the minimal, separable call.)
   or manifest decode.
 - **`Config.deprecation_issues` / `deprecated_sections`**: `deprecated_sections` (and its
   `models.py` field, `models.py:135`) retire with the warn row above. `deprecation_issues` STAYS,
-  now carrying the `restart_command`, `[secret_backends]` no-op, and `defaults.platform` alias
-  messages.
+  now carrying the `[secret_backends]` no-op and `defaults.platform` alias messages (the
+  `restart_command` config-channel block is dead and removed, discrepancy 1 above; that deprecation
+  now fires only from the YAML manifest path).
 
 ## 4. Test plan
 

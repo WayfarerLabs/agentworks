@@ -7,7 +7,12 @@ Status: DRAFT (authored alongside the FRD and HLA; implementation gated, see pre
 ## How to work this plan
 
 - One feature branch and PR (`feat/declarative-schema-sdd`, PR #316); phases land as ordered commits
-  on it. The suite stays green at every step; there is no flag-day cutover.
+  on it. The suite stays green at every step, with ONE deliberate, operator-approved exception: step
+  1.2's config-load hard error breaks ~58 test fixtures that declare resources in TOML, and the
+  operator chose (2026-08-04) a bounded red window over the additive-first alternative. So the core
+  1.2 production change lands first (suite red on a tracked, enumerated set of fixture files), and
+  step 1.2f converts those fixtures back to green by area. The window is CLOSED (suite fully green)
+  before step 1.2 is checked off; phase 1 does not complete red.
 - Each numbered step is delegated to an `agentworks-dev` subagent (LLD first where one is called
   for, then implementation), then reviewed by `agentworks-reviewer` before its boxes are checked.
 - Every step's definition of done includes the standing gates: `ruff check`, `ruff format --check`,
@@ -53,20 +58,40 @@ Status: DRAFT (authored alongside the FRD and HLA; implementation gated, see pre
     text, DB-migration snippet printers, doctor rows naming TOML sections, and the
     `tests/resources/test_graph_guard.py` allowlist that hardcodes `config/loaders_secrets.py`).
 
-### 1.2 Hard error and loader removal
+### 1.2 Hard error and loader removal (core production change)
 
+Lands the whole production change in one reviewable body; the suite goes RED on the fixture files
+enumerated by 1.2f (operator-approved bounded window, see the preamble). The step's own new tests
+(below) land green; the red set is only pre-existing fixtures that declare TOML resources.
+
+- [ ] TOML resource loaders relocated into `migrate/` per the LLD; decode layer stops routing
+      through loader shims, each decoder owning its per-kind logic (interim fork; phase 2 replaces
+      it). The two vestigial `publish_to` functions are deleted, not emptied, and the dead
+      `restart_command` config-channel block is removed (LLD discrepancies 1 and 2, folded in).
 - [ ] Config load hard-errors (aggregated, actionable, naming sections, pointing at
       `agw resource migrate` and `agw resource sample`) when any resource-declaring TOML section is
-      present; settings sections load exactly as before.
-- [ ] TOML resource loaders removed from the config-load path per the LLD (relocated or deleted);
-      decode layer stops routing through loader shims, owning surviving logic directly (interim
-      state; phase 2 replaces it).
+      present; settings sections load exactly as before. `Config`'s now-empty resource fields, the
+      publish resource loop, and the `resources_loaded` guard are removed together (LLD section 3).
 - [ ] `agw resource migrate` works end to end on a fixture config (proxmox or azure section, git
-      credentials, secrets, session template) with the reworked verification: emitted YAML decodes
-      and loads, comparison against the independent pre-side passes, rollback still fires on
-      mismatch. `test_full_migration_golden` updated and green.
+      credentials, secrets, session template with a legacy harness selector) with the reworked
+      verification: `pre_rows` scoped to selected units, emitted-key-set guard, rollback on
+      mismatch. `test_full_migration_golden` and the new verification-independence test green.
 - [ ] Deprecation-warning tests for TOML sections replaced by hard-error tests (fires with sections
-      present, not without; exempted commands still run).
+      present, not without; exempted commands still run); doctor renders a fail row and continues
+      via the `resources=False` retry (not a truncated report).
+- [ ] The now-red fixture set is enumerated (file list grouped by area) and recorded in 1.2f, so the
+      window is explicitly bounded, not open.
+
+### 1.2f Close the red window (fixture conversion to green)
+
+- [ ] The ~58 TOML-resource fixtures are converted to YAML manifests (or hand-built registry rows
+      where a test asserts registry/graph outcomes), by area: config, resources, sessions,
+      git-credentials, vms, plugins, orchestrated. A shared resources-dir fixture helper is added
+      first (none exists today; 28 files already author manifests inline as the pattern). Tests that
+      assert on removed `Config` fields or pin TOML-only behavior (`declared_at` line capture,
+      decode-through-loader parity) are redesigned, not just relocated.
+- [ ] Suite fully green (`pytest -q`, `mypy .` strict, ruff, lint-files) with the window closed;
+      only then is step 1.2 checked off.
 
 ### 1.3 Phase 1 records
 
