@@ -1,6 +1,6 @@
 # FRD: 0.14 Deprecation Removal
 
-- Status: Draft
+- Status: Approved
 - Start date: 2026-08-05
 - Target release: 0.14.0
 - Roadmap: `docs/sdd/2026-08-04-next-steps` (this effort is wave 1 of that roadmap; its
@@ -35,9 +35,9 @@ gate exists to avoid.
   only by that normalization, inheritance conflict rules whose only purpose is distinguishing the
   two spellings, migration rewrites, and fixtures that exist only for the alias. A declared
   `restart_command` MUST fail as an unknown or unsupported field at the existing validation
-  boundary, and the failure MUST be loud everywhere the field can appear, including nested inside
-  `harness_integration_config` tables in YAML manifests; it MUST NOT degrade to warn-mode
-  unknown-key handling. `resume_command` behavior MUST be unchanged.
+  boundary, and the failure MUST be loud everywhere the field can appear, including inside a YAML
+  manifest's tagged `harness_integration` table and the migrator's legacy TOML reader; it MUST NOT
+  degrade to warn-mode unknown-key handling. `resume_command` behavior MUST be unchanged.
 - **R3 (harness selectors).** The pre-0.13 session-template selectors `harness` and `harness_config`
   MUST be removed from manifest loading: old-selector normalization, mixed old-and-new conflict
   branches, aggregated old-selector facts and request warnings, doctor reporting specific to the old
@@ -153,13 +153,18 @@ gate exists to avoid.
 - **D5 (fixture budget).** The plan MUST budget fixture conversion as first-class work rather than
   discovering it, and SHOULD prefer shared fixture helpers over per-file edits. This is phase 1's
   chief lesson.
+- **D6 (retired-setting errors).** The config loader uses a small retired-key table for the three
+  removed TOML settings and names each canonical replacement. Generic unknown-key handling is not
+  sufficient because settings sections currently warn or default rather than uniformly failing.
+- **D7 (harness vocabulary boundary).** The `harness` resource-kind slug is canonical and was never
+  an alias. No broad vocabulary cleanup applies to it; only text that teaches the retired
+  session-template selector is removed or updated.
+- **D8 (mise reconciliation).** Small implementation, validation, test, or documentation gaps found
+  while reconciling the mise SDD ride this effort. Substantial feature work is split and escalated.
+  The absent `install_mise` toggle is recorded as a deviation rather than introduced during
+  closeout.
 
 ## Open questions
 
-- Exact error mechanism for retired TOML keys: does the config loader gain a small retired-key table
-  that names replacements (nicer errors), or is generic unknown-key rejection acceptable everywhere
-  the canonical validation boundary already fires? (HLA's call; R4 sets the floor.)
-- Does the harness-integration SDD's residual `harness` resource-kind vocabulary need any doc-only
-  cleanup beyond R8, given the kind slug itself was never an alias?
-- Whether the mise-integration reconciliation (R10) surfaces gaps that convert closeout work into
-  small follow-up fixes, and if so whether they ride this effort or the roadmap ledger.
+None. Implementation discoveries that materially change scope or architecture are escalated through
+the plan rather than silently resolved.
