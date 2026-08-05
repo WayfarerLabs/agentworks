@@ -22,8 +22,9 @@ is locked.
 ### Wave 2 (adopted child): 2026-07-31-declarative-schema
 
 - [x] Phase 1 (TOML sunset) merged to `main` (PR #316, 2026-08-05)
-- [x] Seed notes published for the effort lead (`wave-2-seed-notes.md`; the adopted-child analog of
-      a seed FRD)
+- [x] Seed notes published for the effort lead (delivered as
+      `docs/sdd/2026-07-31-declarative-schema/roadmap-seed-notes.md` via new-file message passing;
+      the adopted-child analog of a seed FRD)
 - [ ] Phase 2 released from its hold (prerequisites landed via PRs #405 and #406; the effort lead's
       first commit records the release in that SDD's plan)
 - [ ] Phase 2 implementation complete (absorbs generic-discriminator removal and the migrator's
