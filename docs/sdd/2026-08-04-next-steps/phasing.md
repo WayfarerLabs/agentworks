@@ -19,7 +19,7 @@ phase 2 models -----------------> secret-source instances    (per-source config 
 descriptor + phase 2 -----------> harness facet framework    (facets declare model + merge policy)
 facet framework ----------------> artifacts materialization  (facets own placement/applied state)
 facet contract design ----------> observability integration contract (observation is a facet)
-observability phase 1 ----------> structured control, distillation, vm auto-suspend, herdr
+observability phase 1 ----------> structured control, distillation, vm auto-suspend
 phase 2 surfaces ---------------> schema-derived onboarding and discovery
 internal contracts proven ------> external plugin API
 ```
@@ -66,22 +66,25 @@ Two things this graph deliberately does not serialize:
 - **Wave 6: artifacts and the learning loop's write-back path.** First-class agentic contributions
   through the facet materialization seam; revive distillation from the harvest against the real
   event stream. This closes the memory-learning loop.
-- **Wave 7: structured control and console rendering.** Observability phase 2 (validated intents,
-  ACP projection, stale-decision rejection). Revisit herdr after its spike.
+- **Wave 7: structured control.** Observability phase 2 (validated intents, ACP projection,
+  stale-decision rejection).
 - **Wave 8: external plugin API.** Registration conformance, discovery, namespacing, versioning, and
   the distribution-trust model, promised publicly only once the internal contracts survive
   first-party use.
 
 ## Tracks
 
-- **Operator-experience track (incremental, accelerates after wave 2).** Skills, CLI discoverability
-  conventions, and machine-readable output can start anytime. The schema-derived parts (generated
-  samples, describe surfaces, editor integration, dynamic onboarding content) deliberately trail
-  wave 2's schema emission. Plan A onboarding does not depend on the wave 6 artifacts layer at all,
-  which decouples it further.
-- **Continuous lane: small standalone wins.** The named-console-template selector SDD (verify PR
-  #200's migration numbering first), the companion-shell command and resilient session attach
-  unbundled from the herdr FRD, and opportunistic doc/config hygiene.
+- **Onboarding-and-discovery child (destination 1): seeds at wave 1 completion, runs parallel to
+  wave 2.** Slotted as early as sensible without rework: it teaches the post-cleanup 0.14 surface,
+  so nothing wave 1 removes gets taught, and its first slice (onboarding harness plugin and skills,
+  consent-first probing, the machine-readable output contract) needs no schema emission. The
+  schema-derived depth (generated samples, describe surfaces, editor integration, dynamic onboarding
+  content) consumes wave 2's emission as it lands. Plan A onboarding does not depend on the wave 6
+  artifacts layer at all.
+
+Adjacent standalone work, explicitly out of roadmap scope (see `target-state.md`): the
+named-console-template selector SDD, the companion-shell command and resilient session attach
+unbundled from the herdr FRD, and opportunistic doc/config hygiene. They schedule independently.
 
 ## Release mapping
 
@@ -95,5 +98,3 @@ Two things this graph deliberately does not serialize:
 
 1. **Observability parallelism.** Whether wave 5 truly runs alongside waves 2 through 4 is a
    bandwidth call, not a dependency call. The design track's contract work keeps the option open.
-2. **Herdr.** Stays gated on its spike per the 2026-07-30 ruling; revisit triggers are recorded in
-   `target-state.md`.

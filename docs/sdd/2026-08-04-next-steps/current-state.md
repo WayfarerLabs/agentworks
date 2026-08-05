@@ -5,7 +5,9 @@
 
 This document records where the system actually is, verified by code reconnaissance rather than
 assumed from the perspectives. It is the ground truth the phasing rests on; when a wave lands,
-update the affected section and the snapshot date.
+update the affected section and the snapshot date, in place (git history is the append-only record).
+The immutable origin snapshot is `starting-state.md`; the journey is the diff from there to here to
+`target-state.md`.
 
 ## Declarative schema
 

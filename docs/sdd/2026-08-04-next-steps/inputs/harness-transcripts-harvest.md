@@ -21,7 +21,7 @@ It exists to feed two efforts on the next-steps roadmap:
 - **Wave 5, observability phase 1**: the event vocabulary, harness contract, and inspection surface
   that the FRD specified for transcripts, now expressed against the newer multi-source model.
 - **Wave 6, artifacts and the learning loop's write-back path**: the FRD's distillation design,
-  which `../target-state.md` explicitly restores as destination 5 (the memory-learning loop) after
+  which `../target-state.md` explicitly restores as destination 6 (the memory-learning loop) after
   noting it was dropped when the observability perspective reframed the collection mechanism.
   Distillation was never superseded; only its substrate was.
 
@@ -312,7 +312,7 @@ without separate tracking.
   repo process (SDD lifecycle rules, always-consider-docs). Recorded in topic 12 for completeness,
   not tracked separately.
 - **The FRD's own "resolved direction (maintainer, 2026-07-29)" framing language and terminology
-  section.** Superseded by `../target-state.md`'s destination 5, which restates the same substance
+  section.** Superseded by `../target-state.md`'s destination 6, which restates the same substance
   (topic 1) in the roadmap's current vocabulary. The underlying decision is preserved; the specific
   wording and standalone terminology list are not reproduced verbatim here.
 - **Migration notes (topic 14) as a tracked decision.** A generic, low-stakes rollout posture rather

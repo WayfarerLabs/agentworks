@@ -37,15 +37,21 @@ is locked.
 
 Planned children, seeded when their prerequisites land (see `phasing.md`):
 
+- Onboarding and discovery (destination 1): seeds at wave 1 completion and runs parallel to wave 2.
+  First slice needs no schema emission (onboarding harness plugin and skills, consent-first probing,
+  the machine-readable output contract); the schema-derived depth follows wave 2's emission as it
+  lands. Slotted this early deliberately: it teaches the post-cleanup 0.14 surface, so nothing it
+  ships gets reworked by wave 1, and waiting longer just delays destination 1.
 - Wave 3: secret-source instances
 - Wave 4: harness facet framework
 - Wave 5: session observability phase 1
 - Wave 6: agentic artifacts and distillation
-- Wave 7: structured control (and the herdr revisit, if its spike passes)
+- Wave 7: structured control
 - Wave 8: external plugin API
-- Operator-experience track efforts (onboarding plugin, discovery surfaces)
-- Continuous lane: 2026-07-19-named-console-template-selector (drafted pre-roadmap, ready to
-  schedule)
+
+Not children of this roadmap (explicitly out of scope, see `target-state.md`): the
+named-console-template selector SDD, the herdr effort, and the companion-shell and resilient-attach
+wins. They proceed standalone.
 
 ## Issue intake (2026-08-05)
 
@@ -56,18 +62,18 @@ issues not listed stay standalone.
 | Issue      | Lands in                                                                           |
 | ---------- | ---------------------------------------------------------------------------------- |
 | #76        | Wave 1 SDD closeouts (stale lockfile half only; the derive audit stays standalone) |
-| #165       | Continuous lane: the named-console-template selector SDD                           |
+| #165       | Not rolled in: its own pre-roadmap SDD proceeds standalone (out of roadmap scope)  |
 | #170       | Wave 2 rider (expires metadata belongs in the envelope/metadata modeling)          |
 | #205, #212 | Design track: instance-state store and per-instance specs; future living-graph SDD |
 | #214       | Wave 2 (live samples, uniform validation; unknown keys go hard-error there)        |
 | #242       | Waves 4 and 5 (harness-owned adoption plus resume re-pointing)                     |
-| #257       | Operator-experience track (machine-readable output contract)                       |
+| #257       | Onboarding-and-discovery child (machine-readable output contract)                  |
 | #311       | Wave 2 (structural reference extraction from annotated models)                     |
 | #370       | Wave 3 (resolution-API evolution owns the batching question)                       |
 | #373       | Wave 4 (environment-appropriate defaults belong to facet config)                   |
 | #374       | Design track descriptor plus wave 3 (capability mandate; see `target-state.md`)    |
 | #387       | Waves 4 and 6 (workspace facets and features own post-clone setup)                 |
-| #390, #391 | Operator-experience track (schema-derived samples and plan A onboarding)           |
+| #390, #391 | Onboarding-and-discovery child (samples and plan A onboarding)                     |
 
 Notes: #242 also picks up the 0.14 rename (it lands as `session resume --update-template`); the
 capability-contract sibling cluster #368 through #374 splits, with #370/#373/#374 rolled in and the
