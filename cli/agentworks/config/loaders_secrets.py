@@ -1,6 +1,11 @@
-"""Secrets-related loaders: ``[secrets.*]`` declarations, the deprecated
-``[secret_backends.*]`` no-op sections, the aggregated deprecated-TOML-
-resource-section warning, and ``[secret_config]``.
+"""Secrets-related settings loaders: the deprecated ``[secret_backends.*]``
+no-op sections, ``[secret_config]``, and ``[plugins]``.
+
+The ``[secrets.*]`` resource loader (``_load_secrets``) and the aggregated
+deprecated-TOML-resource-section warning relocated when config.toml stopped
+declaring resources (ADR 0022): ``_load_secrets`` moved to
+``agentworks.migrate.toml_resources``, and the warning became a raising
+check (``_raise_for_resource_sections``) in ``agentworks.config.load``.
 
 Split out of the former monolithic ``agentworks/config.py`` (see
 ``agentworks/config/__init__.py`` for the package overview).
@@ -8,78 +13,14 @@ Split out of the former monolithic ``agentworks/config.py`` (see
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 from agentworks.config.loaders_core import _warn_unexpected_keys
-from agentworks.config.validation import MAX_SECRET_NAME_LENGTH, validate_name
 from agentworks.errors import ConfigError
-from agentworks.secrets import SecretConfig, SecretDecl
+from agentworks.secrets import SecretConfig
 
 if TYPE_CHECKING:
     from agentworks.config.models import _SectionLineMap
-
-
-def _load_secrets(
-    data: dict[str, object],
-    issues: list[str],
-    decls: _SectionLineMap,
-) -> dict[str, SecretDecl]:
-    """Load [secrets.*] declarations into SecretDecls keyed by name."""
-    raw = data.get("secrets", {})
-    if not isinstance(raw, dict):
-        raise ConfigError("[secrets] must be a table")
-
-    expected = {"description", "hint", "backend_mappings"}
-    secret_decls: dict[str, SecretDecl] = {}
-    for name, sdata in raw.items():
-        name_str = str(name)
-        if not isinstance(sdata, dict):
-            raise ConfigError(f"secrets.{name_str} must be a table")
-        # Secret names are never derived into Linux usernames, so they use the
-        # larger MAX_SECRET_NAME_LENGTH cap rather than a username/group-derived
-        # one. This is the single validation point for the secret kind: the
-        # manifest decoder (_decode_secret) delegates here, so no other kind is
-        # affected.
-        validate_name(name_str, max_length=MAX_SECRET_NAME_LENGTH)
-        _warn_unexpected_keys(sdata, expected, f"secrets.{name_str}", issues)
-
-        description = sdata.get("description")
-        if not isinstance(description, str) or not description:
-            raise ConfigError(f"secrets.{name_str}.description is required and must be a non-empty string")
-        hint = sdata.get("hint")
-        if hint is not None and not isinstance(hint, str):
-            raise ConfigError(f"secrets.{name_str}.hint must be a string")
-
-        raw_mappings = sdata.get("backend_mappings", {})
-        if not isinstance(raw_mappings, dict):
-            raise ConfigError(f"secrets.{name_str}.backend_mappings must be a table")
-        backend_mappings: dict[str, str | dict[str, object] | Literal[False]] = {}
-        for kind, mapping in raw_mappings.items():
-            kind_str = str(kind)
-            if isinstance(mapping, bool):
-                if mapping is True:
-                    raise ConfigError(
-                        f"secrets.{name_str}.backend_mappings.{kind_str}: "
-                        "boolean must be `false` (opt-out); `true` is not a valid value"
-                    )
-                backend_mappings[kind_str] = False
-            elif isinstance(mapping, str):
-                backend_mappings[kind_str] = mapping
-            elif isinstance(mapping, dict):
-                backend_mappings[kind_str] = dict(mapping)
-            else:
-                raise ConfigError(
-                    f"secrets.{name_str}.backend_mappings.{kind_str}: must be a string, inline table, or false"
-                )
-
-        secret_decls[name_str] = SecretDecl(
-            name=name_str,
-            description=description,
-            hint=hint,
-            backend_mappings=backend_mappings,
-            declared_at=decls.lookup("secrets", name_str),
-        )
-    return secret_decls
 
 
 def _load_secret_backends(
@@ -123,65 +64,6 @@ def _load_secret_backends(
             f"`agw resource migrate --all` to drop it."
         )
     return tuple(found)
-
-
-def _warn_deprecated_resource_sections(
-    data: dict[str, object],
-    deprecations: list[str],
-) -> tuple[str, ...]:
-    """ONE aggregated deprecation issue for the TOML resource sections
-    present (aggregated at maintainer direction; a warning
-    per section was obnoxious on real configs).
-
-    The TOML resource-declaration path is being sunset: these sections
-    keep loading with exactly today's semantics for now, but they WILL
-    be removed, and this warning is the nudge toward the YAML manifest
-    surface (the detection set is ``KIND_SECTIONS``, the same shared
-    table the migrator plans from, so the warning and
-    ``agw resource migrate`` cannot disagree about what counts).
-    ``[secret_backends.*]`` is excluded (it has its own no-op message
-    above), and ``[secret_config]`` is config, not a resource section.
-
-    Returns the display shapes of the sections found, so surfaces with
-    their own rendering (doctor's tidy one-line row) can compose from
-    the fact instead of reusing this ambient teaching text.
-    """
-    from agentworks.manifests.decode import KIND_SECTIONS
-
-    present: list[str] = []
-    for _kind, sections in KIND_SECTIONS.items():
-        for section in sections:
-            if section == "secret_backends" or section not in data:
-                continue
-            # Display the header shape operators can actually grep for:
-            # [admin.config], [named_console], and the legacy vm-site
-            # sections ([azure] / [proxmox]) are non-family sections;
-            # everything else nests names ([secrets.<name>]).
-            if section == "admin":
-                present.append("[admin.config]")
-            elif section in ("named_console", "azure", "proxmox"):
-                present.append(f"[{section}]")
-            else:
-                present.append(f"[{section}.*]")
-    if not present:
-        return ()
-    noun = "section" if len(present) == 1 else "sections"
-    # Selectors are KIND names, not section names: [azure]/[proxmox]
-    # migrate as `vm-site`, which nothing on screen would suggest.
-    site_hint = (
-        " (the [azure]/[proxmox] sections migrate as `vm-site`)"
-        if any(s in ("[azure]", "[proxmox]") for s in present)
-        else ""
-    )
-    deprecations.append(
-        f"deprecated TOML resource {noun}: {', '.join(present)}. "
-        f"Declaring resources in config.toml is deprecated and will be "
-        f"removed in a future release. Move these with "
-        f"`agw resource migrate <kind>` or `--all`{site_hint}, declare "
-        f"new resources as YAML manifests (`agw resource sample <kind>`), "
-        f"or silence this warning with --no-deprecations."
-    )
-    return tuple(present)
 
 
 def _load_secret_config(

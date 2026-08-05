@@ -13,19 +13,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from agentworks.config.validation import CONFIG_DIR
-from agentworks.secrets import SecretConfig, SecretDecl
+from agentworks.secrets import SecretConfig
 from agentworks.source_location import SourceLocation
 
 if TYPE_CHECKING:
-    from agentworks.agents.template import AgentTemplate
-    from agentworks.git_credentials.credential import GitCredentialConfig
-    from agentworks.resources.origin import Origin
     from agentworks.resources.registry import Registry
-    from agentworks.sessions.template import NamedConsoleConfig, SessionTemplate
-    from agentworks.vms.admin import AdminConfig
-    from agentworks.vms.sites import VMSiteDecl
-    from agentworks.vms.template import VMTemplate
-    from agentworks.workspaces.template import WorkspaceTemplate
 
 # -- Data classes ----------------------------------------------------------
 
@@ -82,33 +74,15 @@ class Config:
     operator: OperatorConfig
     paths: PathsConfig
     defaults: DefaultsConfig
-    # None = the operator's TOML has no [named_console] section; the
-    # framework's always-materialize pre-step auto-declares the default.
-    named_console: NamedConsoleConfig | None
-    vm_templates: dict[str, VMTemplate]
     # The file this Config was loaded from. The resources directory
     # (YAML manifests) is resolved relative to it, so tests loading
     # from tmp paths never pick up the developer's real manifests.
     source_path: Path
-    # None = the operator's TOML has no [admin.*] sections (see
-    # named_console above).
-    admin: AdminConfig | None
-    agent_templates: dict[str, AgentTemplate]
     session: SessionConfig
-    session_templates: dict[str, SessionTemplate]
-    workspace_templates: dict[str, WorkspaceTemplate]
-    git_credentials: dict[str, GitCredentialConfig]
-    apt_sources: dict[str, object] = field(default_factory=dict)
-    apt_packages: dict[str, object] = field(default_factory=dict)
-    system_install_commands: dict[str, object] = field(default_factory=dict)
-    user_install_commands: dict[str, object] = field(default_factory=dict)
-    # Legacy [azure] / [proxmox] TOML declarations of vm-site resources
-    # (dual-path; deprecated). Keyed by site name (the section name).
-    vm_sites: dict[str, VMSiteDecl] = field(default_factory=dict)
-    # Env-and-secrets ----------------------------------------------------
-    # Declared secrets, keyed by name. Empty when [secrets.*] is absent.
-    secrets: dict[str, SecretDecl] = field(default_factory=dict)
-    # Per-backend connection config keyed by kind ("env-var", "onepassword", ...).
+    # config.toml is settings only now (ADR 0022): every resource is a YAML
+    # manifest, so Config carries no resource dicts. Resources are read from
+    # the registry (built from the bundled + operator manifests), never from
+    # Config.
 
     # Top-level [secret_config] table; carries the enabled-backends precedence list.
     secret_config_data: SecretConfig = field(default_factory=SecretConfig)
@@ -124,98 +98,37 @@ class Config:
     # plugins.publish_plugins / build_registry.
     enabled_system_plugins: tuple[str, ...] = ()
     config_issues: tuple[str, ...] = ()
-    # Deprecation nudges (TOML resource sections, [secret_backends.*]
-    # no-ops): a separate channel so real issues stay sharp for tests
-    # and callers, and so --no-deprecations can silence only these.
+    # Deprecation nudges ([secret_backends.*] no-ops, the defaults.platform
+    # alias): a separate channel so real issues stay sharp for tests and
+    # callers, and so --no-deprecations can silence only these.
     # ``deprecation_issues`` holds the ambient teaching messages;
-    # ``deprecated_sections`` / ``noop_secret_backend_sections`` hold
-    # the bare facts (display shapes of the sections present) for
-    # surfaces that render their own tidy lines (doctor).
+    # ``noop_secret_backend_sections`` holds the bare facts (display shapes
+    # of the sections present) for surfaces that render their own tidy lines
+    # (doctor). The old TOML-resource-section nudge is now a hard error
+    # (``_raise_for_resource_sections``), so it no longer rides this channel.
     deprecation_issues: tuple[str, ...] = ()
-    deprecated_sections: tuple[str, ...] = ()
     noop_secret_backend_sections: tuple[str, ...] = ()
     # Session-template declarations that still spell the pre-0.13 selector.
-    # The request boundary combines these with manifest facts into one warning.
+    # config.toml can no longer declare session templates (hard error), so
+    # this is always empty from the config side now; the request boundary
+    # still combines it with manifest facts into one warning, and the
+    # manifest side carries the live values.
     deprecated_harness_selectors: tuple[str, ...] = ()
-    # False when loaded with ``load_config(resources=False)`` (settings-only
-    # callers); ``build_registry`` refuses such a Config so the TOML side
-    # can never silently publish as empty.
-    resources_loaded: bool = True
 
     def publish_to(self, registry: Registry) -> None:
-        """Publish every operator-declared Resource into ``registry``.
+        """Publish Config's resources into ``registry`` (now a no-op).
 
-        Iterates Config's per-kind dicts and pushes each Resource with an
-        ``Origin.operator_declared(file=..., line=...)`` built from its
-        ``declared_at: SourceLocation``. ``Config.admin`` and
-        ``Config.named_console`` are operator-surface singletons today
-        (one TOML block, one row published as ``admin-template:default``
-        / ``named-console-template:default``), but their kinds are
-        named-multi-instance in the framework. They publish only when
-        the operator actually declared the sections (``None`` = absent);
-        otherwise the framework's always-materialize pre-step
-        auto-declares the default, exactly like vm-template and
-        agent-template.
+        config.toml is settings only (ADR 0022): every resource is a YAML
+        manifest published by ``ManifestSet.publish_to``, so Config has no
+        resources to publish. The method is kept as the (now-empty) Config
+        arm of the publisher protocol ``bootstrap.build_registry`` drives.
 
-        ``secret_config`` is pure config and is NOT published: the
-        chain is a setting that names resources, consumed by the
-        secrets subsystem directly (validated against the finalized
-        registry by ``secrets.validate_chain`` in ``build_registry``,
-        read again at resolve time). Settings don't become
-        pseudo-resources just because they point at resources.
-        ``enabled_system_plugins`` is the same kind of setting (an opt-in
-        list of names, not a resource) and is likewise not published here;
-        it is consumed directly by ``plugins.publish_plugins`` /
-        ``build_registry``.
-
-        Imports ``Registry`` and ``Origin`` from ``agentworks.resources``
-        -- the explicit layer handoff. Config's data structures (parsed
-        Resources, ``SourceLocation``, etc.) remain framework-ignorant
-        otherwise; only this publish handoff crosses the boundary.
+        ``secret_config`` and ``enabled_system_plugins`` are settings, not
+        resources: they are consumed directly (``secrets.validate_chain`` /
+        ``plugins.publish_plugins`` in ``build_registry``), never published
+        as pseudo-resources.
         """
-        # Import locally to keep ``agentworks.config`` import-light at
-        # module load: bootstrap code paths that don't touch Resources
-        # (e.g., `from agentworks.config import CONFIG_PATH`) avoid
-        # pulling in the full framework.
-        from agentworks.resources import Origin
-
-        def op_origin(declared_at: SourceLocation) -> Origin:
-            return Origin.operator_declared(file=declared_at.file, line=declared_at.line)
-
-        # Multi-named kinds: one Resource per (container, name) pair.
-        # secret_backends is deliberately absent: the TOML sections are
-        # deprecated no-ops (built-in backends ship as bundled
-        # manifests; new backends are manifest-declared).
-        for kind, kind_dict in (
-            ("secret", self.secrets),
-            ("vm-template", self.vm_templates),
-            ("agent-template", self.agent_templates),
-            ("workspace-template", self.workspace_templates),
-            ("session-template", self.session_templates),
-            ("git-credential", self.git_credentials),
-            ("vm-site", self.vm_sites),
-        ):
-            for name, resource in kind_dict.items():
-                registry.add(kind, name, resource, op_origin(resource.declared_at))
-
-        # Operator-surface-singleton kinds publish only when declared;
-        # an absent section means the framework auto-declares the
-        # default at finalize (no synthesized placeholder rows, no
-        # collision exemption).
-        if self.admin is not None:
-            registry.add(
-                "admin-template",
-                self.admin.name,
-                self.admin,
-                op_origin(self.admin.declared_at),
-            )
-        if self.named_console is not None:
-            registry.add(
-                "named-console-template",
-                "default",
-                self.named_console,
-                op_origin(self.named_console.declared_at),
-            )
+        return
 
 
 # -- Loading ---------------------------------------------------------------

@@ -223,9 +223,8 @@ def resource_edit(
 ) -> None:
     """Open the YAML manifest declaring a resource in $EDITOR.
 
-    Only operator-declared YAML resources are editable here: TOML-declared
-    resources error with a pointer at `agw resource migrate` / `agw config
-    edit`, and built-in / auto-declared resources have no file to open.
+    Only operator-declared YAML resources are editable here: built-in /
+    auto-declared resources have no file to open.
     """
     import os
     import subprocess
@@ -366,7 +365,6 @@ def resource_migrate(
     resulting registry is identical before it counts as done.
     """
     from agentworks import output
-    from agentworks.bootstrap import build_registry
     from agentworks.config import load_config
     from agentworks.errors import UserAbort, ValidationError
     from agentworks.migrate import execute_plan, plan_migration
@@ -378,14 +376,14 @@ def resource_migrate(
             hint="A real run prints the summary and asks for confirmation.",
         )
 
-    # This command IS the remediation the deprecation nudge points at;
-    # nagging it is noise. (It still needs the resource sections loaded:
-    # the post-run registry-equivalence verification builds a registry.)
-    config = load_config(warn_deprecations=False)
-    registry = build_registry(config)
+    # This command IS the remediation for the resource-section hard error, so
+    # it loads settings-only (resources=False) to read a config that still
+    # carries resource sections. Planning is pure over the config text (no
+    # registry build); the post-run verification builds its own registry from
+    # the rewritten config.
+    config = load_config(resources=False)
     plan = plan_migration(
         config,
-        registry,
         list(selectors or []),
         all_resources=all_resources,
         layout=layout,

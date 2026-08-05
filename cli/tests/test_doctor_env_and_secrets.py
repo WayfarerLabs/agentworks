@@ -352,29 +352,23 @@ AGENTWORKS_SESSION = "operator-override"
     assert any("AGENTWORKS_SESSION" in (c.message or "") for c in warns), [(c.name, c.message) for c in warns]
 
 
-def test_doctor_surfaces_deprecation_nudges(tmp_path: Path, monkeypatch) -> None:
-    """Deprecations moved off config_issues onto their own channel (so
-    --no-deprecations can silence the ambient per-command warning);
-    doctor is the explicit full-health surface and must still show them
-    -- the channel split silently dropped them from doctor once.
-
-    Doctor renders the FACT as a tidy one-liner (maintainer ruling,
-    2026-07-06): one next step (`agw resource migrate`), no section
-    list, no teaching text -- that stays on the ambient warning."""
+def test_doctor_resource_sections_fail_row_and_continues(tmp_path: Path, monkeypatch) -> None:
+    """config.toml declaring resources is a hard error now (ADR 0022). Doctor
+    must NOT truncate the report to one fail row for the mid-migration
+    operator it helps most: it renders the Config fail row, then retries
+    settings-only (``resources=False``) and continues with the rest of the
+    report (SSH rows, registry)."""
     cfg = _write_config(tmp_path)  # has [vm_templates.default] + [admin.config]
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
-    g, _, _ = _check_config()
-    warns = [(c.name, c.message or "") for c in g.checks if c.status == Status.WARN]
-    ((name, message),) = [w for w in warns if "deprecated TOML resource" in w[0]]
-    # Maintainer-specified row shape: the check NAME carries the fact,
-    # the parenthetical carries the one next step.
-    assert name == "Config has deprecated TOML resource declarations"
-    assert message == "migrate to YAML with `agw resource migrate`"
-    # The tidy pin: none of the ambient teaching text leaks into doctor.
-    line = f"{name} {message}"
-    assert "--no-deprecations" not in line
-    assert "resource sample" not in line
-    assert "[vm_templates.*]" not in line
+    g, config, registry = _check_config()
+    fails = [(c.name, c.message or "") for c in g.checks if c.status == Status.FAIL]
+    assert any(name == "Config" and "settings only" in message for name, message in fails), fails
+    # The report continued past the fail row rather than aborting: the
+    # settings-only retry produced a config, the SSH checks rendered, and the
+    # registry still built.
+    assert config is not None
+    assert any(c.name.startswith("SSH") for c in g.checks), [c.name for c in g.checks]
+    assert registry is not None
 
 
 def test_doctor_shows_noop_secret_backend_sections(tmp_path: Path, monkeypatch) -> None:

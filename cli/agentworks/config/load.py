@@ -1,6 +1,11 @@
 """Top-level ``load_config`` entry point: reads the TOML file, pre-scans it
-for section-header line numbers, and drives every section loader to compose
-a validated ``Config``.
+for section-header line numbers, and drives every settings-section loader
+to compose a validated ``Config``.
+
+config.toml is settings only now (ADR 0022): a resource-declaring section
+is a hard error (``_raise_for_resource_sections``), gated on ``resources``
+so the migrator and other remediation commands can still read a config
+that carries them via the ``resources=False`` escape hatch.
 
 Split out of the former monolithic ``agentworks/config.py`` (see
 ``agentworks/config/__init__.py`` for the package overview).
@@ -12,24 +17,13 @@ import sys
 import tomllib
 from typing import TYPE_CHECKING
 
-from agentworks.config.loaders_core import _load_defaults, _load_git_credentials, _load_operator, _load_paths
-from agentworks.config.loaders_resources import (
-    _load_admin_config,
-    _load_agent_templates,
-    _load_apt_and_install_sections,
-    _load_named_console,
-    _load_vm_sites_legacy,
-    _load_vm_templates,
-    _load_workspace_templates,
-)
+from agentworks.config.loaders_core import _load_defaults, _load_operator, _load_paths
 from agentworks.config.loaders_secrets import (
     _load_plugins,
     _load_secret_backends,
     _load_secret_config,
-    _load_secrets,
-    _warn_deprecated_resource_sections,
 )
-from agentworks.config.loaders_sessions import _load_session_config, _load_session_templates
+from agentworks.config.loaders_sessions import _load_session_config
 from agentworks.config.models import Config, _SectionLineMap
 from agentworks.errors import ConfigError
 from agentworks.source_location import scan_section_lines
@@ -74,6 +68,57 @@ def _warn_unexpected_top_level_keys(data: dict[str, object], issues: list[str]) 
         issues.append(f"unexpected top-level keys in config: {keys}")
 
 
+def _raise_for_resource_sections(data: dict[str, object]) -> None:
+    """Hard-error when config.toml declares resources (ADR 0022).
+
+    config.toml is settings only now: the resource-declaration path moved to
+    YAML manifests. This is the replacement for the old deprecation nudge
+    (``_warn_deprecated_resource_sections``); it reuses the same shared
+    ``KIND_SECTIONS`` presence sweep (minus ``secret_backends``, which has
+    its own no-op warning) and the same grep-able display shapes, so the
+    error and ``agw resource migrate`` cannot disagree about what counts.
+
+    The escape hatch is ``load_config(resources=False)``: the commands that
+    ARE the remediation (``agw resource migrate``, ``resource sample
+    --write``, ``resource edit``'s fallback) load that way and so still read
+    a config that carries resource sections.
+    """
+    from agentworks.manifests.decode import KIND_SECTIONS
+
+    present: list[str] = []
+    for _kind, sections in KIND_SECTIONS.items():
+        for section in sections:
+            if section == "secret_backends" or section not in data:
+                continue
+            # The header shape operators can grep for: [admin.config],
+            # [named_console], and the legacy vm-site sections ([azure] /
+            # [proxmox]) are non-family sections; everything else nests
+            # names ([secrets.<name>]).
+            if section == "admin":
+                present.append("[admin.config]")
+            elif section in ("named_console", "azure", "proxmox"):
+                present.append(f"[{section}]")
+            else:
+                present.append(f"[{section}.*]")
+    if not present:
+        return
+    noun = "section" if len(present) == 1 else "sections"
+    # The [azure]/[proxmox] sections migrate as vm-site, a kind name nothing
+    # on screen would suggest; name it only when one is present.
+    site_hint = (
+        " (the [azure]/[proxmox] sections migrate as vm-site)"
+        if any(s in ("[azure]", "[proxmox]") for s in present)
+        else ""
+    )
+    raise ConfigError(
+        f"config.toml declares resources, which config.toml no longer supports "
+        f"(it is settings only now): {', '.join(present)}. Move the {noun} to "
+        f"YAML manifests with `agw resource migrate <kind>` (or "
+        f"`agw resource migrate --all`){site_hint}, or author new manifests "
+        f"from `agw resource sample <kind>`. Then remove the {noun} from config.toml."
+    )
+
+
 def load_config(
     path: Path | None = None,
     *,
@@ -87,26 +132,21 @@ def load_config(
         path: Override config file path (default: ~/.config/agentworks/config.toml).
         warn_issues: Emit config issues as warnings to stderr (default: True).
             Set to False when the caller handles issues itself (e.g. doctor).
-        warn_deprecations: Emit the TOML-resource deprecation nudge (default:
-            True; also silenceable per-invocation via --no-deprecations). Set
-            to False for commands that ARE the remediation the nudge points at
-            (e.g. ``agw resource migrate``) -- nagging them is noise.
-        resources: Load the TOML resource sections into Config (default:
-            True). Settings-only callers (e.g. ``agw resource sample --write``,
-            which only needs ``source_path``) pass False: resource sections are
-            neither validated nor deprecation-warned, and the resulting Config
-            carries ``resources_loaded=False`` -- ``build_registry`` refuses it,
-            so a settings-only Config can never silently publish an empty TOML
-            side into a registry.
+        warn_deprecations: Emit deprecation nudges (default: True; also
+            silenceable per-invocation via --no-deprecations).
+        resources: Enforce the resource-section hard error (default: True).
+            config.toml is settings only now; a resource-declaring section is
+            a hard error. The commands that ARE the remediation (``agw
+            resource migrate``, ``resource sample --write``, ``resource edit``
+            fallback) pass False to read a config that still carries such
+            sections. Settings load identically either way.
 
     Returns:
         Validated Config object.
 
     Raises:
-        ConfigError: If the config is missing or invalid.
-        ValidationError: If a declared resource name is non-conforming (a
-            sibling of ConfigError under AgentworksError, not a subclass, so
-            callers guarding load must catch both).
+        ConfigError: If the config is missing, invalid, or declares resources
+            (with ``resources=True``).
         SystemExit: If the config file does not exist.
     """
     # Re-imported here (rather than bound at module load) so that tests'
@@ -131,8 +171,9 @@ def load_config(
         raise SystemExit(1) from None
 
     # Pre-scan the raw text for section-header line numbers so we can attach
-    # ``declared_at: SourceLocation`` to every composed Resource. tomllib loses
-    # this info on parse; the scanner is a small regex pre-pass.
+    # ``declared_at: SourceLocation`` to the settings singletons that carry
+    # one. tomllib loses this info on parse; the scanner is a small regex
+    # pre-pass.
     decls = _SectionLineMap(
         config_path=config_path,
         section_lines=scan_section_lines(raw_text),
@@ -148,78 +189,30 @@ def load_config(
             "[admin.config] (dotfiles_source, dotfiles_destination, dotfiles_install_cmd)."
         )
 
-    # Settings-only mode: resource loaders see an empty document, so they
-    # produce their framework defaults with zero issues or deprecations.
-    # Settings loaders (operator, paths, defaults, session, secret_config)
-    # always see the real data; they are config. The legacy [azure] /
-    # [proxmox] sections are RESOURCE declarations (vm-site rows) and go
-    # through resource_data like every other resource section.
-    resource_data = data if resources else {}
-
-    git_credentials = _load_git_credentials(resource_data, issues, decls)
-    apt_sources, apt_packages, system_cmds, user_cmds = _load_apt_and_install_sections(resource_data)
+    # config.toml is settings only: reject resource-declaring sections before
+    # the settings loaders run, unless the caller is the remediation itself
+    # (resources=False).
+    if resources:
+        _raise_for_resource_sections(data)
 
     session_config = _load_session_config(data, issues)
-    deprecated_harness_selectors: list[str] = []
-    deprecated_restart_commands: list[str] = []
-    session_templates = _load_session_templates(
-        resource_data,
-        issues,
-        decls,
-        deprecated_harness_selectors,
-        deprecated_restart_commands,
-    )
 
-    loaded_vm_templates = _load_vm_templates(resource_data, issues, decls)
-    loaded_agent_templates = _load_agent_templates(resource_data, issues, decls)
-
-    admin = _load_admin_config(resource_data, issues, decls)
-    workspace_templates = _load_workspace_templates(resource_data, issues, decls)
-
-    secrets = _load_secrets(resource_data, issues, decls)
     deprecations: list[str] = []
-    if deprecated_restart_commands:
-        names = ", ".join(sorted(deprecated_restart_commands))
-        deprecations.append(
-            "restart_command is deprecated; use resume_command instead. It will be removed in 0.14.0. "
-            f"Silence this warning with --no-deprecations. Affected resources: {names}"
-        )
-    noop_backend_sections = _load_secret_backends(resource_data, deprecations)
-    deprecated_sections = _warn_deprecated_resource_sections(resource_data, deprecations)
+    noop_backend_sections = _load_secret_backends(data, deprecations)
     secret_config_data = _load_secret_config(data, issues, decls)
     enabled_system_plugins = _load_plugins(data, issues, decls)
-    # Env-block secret references no longer error at config load
-    # when they don't match a [secrets.<name>] block; the framework
-    # auto-declares them at finalize. Resolution runs through the active
-    # backends (``agentworks.secrets.resolve``).
 
     config = Config(
         operator=_load_operator(data, issues),
         paths=_load_paths(data),
         defaults=_load_defaults(data, issues, deprecations),
-        named_console=_load_named_console(resource_data, issues, decls),
-        vm_templates=loaded_vm_templates,
         source_path=config_path,
-        admin=admin,
-        agent_templates=loaded_agent_templates,
         session=session_config,
-        session_templates=session_templates,
-        workspace_templates=workspace_templates,
-        git_credentials=git_credentials,
-        apt_sources=apt_sources,
-        apt_packages=apt_packages,
-        system_install_commands=system_cmds,
-        user_install_commands=user_cmds,
-        vm_sites=_load_vm_sites_legacy(resource_data, issues, decls),
-        secrets=secrets,
         secret_config_data=secret_config_data,
         enabled_system_plugins=enabled_system_plugins,
         config_issues=tuple(issues),
         deprecation_issues=tuple(deprecations),
-        deprecated_sections=deprecated_sections,
         noop_secret_backend_sections=noop_backend_sections,
-        deprecated_harness_selectors=tuple(deprecated_harness_selectors),
-        resources_loaded=resources,
     )
 
     if warn_issues and config.config_issues:

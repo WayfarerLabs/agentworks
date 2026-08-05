@@ -119,9 +119,11 @@ backups = "{(tmp_path / "backups").as_posix()}"
 
 
 def _plan(cfg: Path, selectors: list[str], **kwargs: object):
-    config = load_config(cfg, warn_issues=False)
-    registry = build_registry(config)
-    return config, plan_migration(config, registry, selectors, **kwargs)  # type: ignore[arg-type]
+    # The migrate command loads settings-only (config.toml declaring resources
+    # is a hard error now); planning is pure over the config text and builds
+    # its own pre-side oracle, so there is no registry to pass.
+    config = load_config(cfg, warn_issues=False, resources=False)
+    return config, plan_migration(config, selectors, **kwargs)  # type: ignore[arg-type]
 
 
 def _loaded_docs(path: Path) -> list[dict]:  # type: ignore[type-arg]
@@ -134,10 +136,33 @@ def _loaded_docs(path: Path) -> list[dict]:  # type: ignore[type-arg]
 
 
 def test_full_migration_golden(tmp_path: Path) -> None:
-    """The maximal config migrates wholesale (--all): every kind lands
-    in YAML, the TOML keeps only config sections (comments preserved),
-    the secret_backends residue is dropped, and verification passes."""
+    """The maximal config migrates wholesale (--all) in one run, exercising
+    every branch together: the flat [azure]/[proxmox] vm-sites, git
+    credentials, secrets with backend mappings, and a pre-existing YAML
+    session-template still spelling the legacy ``harness`` selector plus
+    ``restart_command`` (the YAML-native rewrite path, alongside the TOML
+    path). Every kind lands in YAML, the TOML keeps only config sections
+    (comments preserved), the secret_backends residue is dropped, the
+    legacy YAML selector is canonicalized, and the scoped verification
+    passes."""
     cfg = _write_config(tmp_path)
+    # A pre-existing manifest using the deprecated harness selector +
+    # restart_command drives the YAML-native rewrite in the same --all run.
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    (resources / "legacy-sessions.yaml").write_text(
+        """\
+apiVersion: agentworks/v1
+kind: session-template
+metadata:
+  name: legacy-yaml
+spec:
+  harness: shell
+  harness_config:
+    command: htop
+    restart_command: "htop --resume"
+"""
+    )
     config, plan = _plan(cfg, [], all_resources=True)
 
     kinds = {(u.kind, u.name) for u in plan.units}
@@ -148,6 +173,7 @@ def test_full_migration_golden(tmp_path: Path) -> None:
         ("workspace-template", "proj"),
         ("agent-template", "default"),
         ("session-template", "claude"),
+        ("session-template", "legacy-yaml"),
         ("git-credential", "github"),
         ("vm-site", "azure"),
         ("vm-site", "proxmox"),
@@ -158,10 +184,20 @@ def test_full_migration_golden(tmp_path: Path) -> None:
         ("system-install-command", "my-sys"),
         ("user-install-command", "my-user"),
     }
+    # The legacy YAML session-template is a YAML-rewrite unit, not a TOML write.
+    assert any(u.source == "yaml" and u.name == "legacy-yaml" for u in plan.units)
+    assert len(plan.yaml_rewrites) == 1
 
     result = execute_plan(plan, config)
     assert result.verified_rows > 0
     assert result.dropped_secret_backends
+
+    # The legacy YAML selector and restart_command were canonicalized in place.
+    rewritten_yaml = (resources / "legacy-sessions.yaml").read_text()
+    assert "harness_integration:" in rewritten_yaml
+    assert "harness:" not in rewritten_yaml
+    assert "resume_command:" in rewritten_yaml
+    assert "restart_command:" not in rewritten_yaml
 
     after = cfg.read_text()
     # Surviving config sections and their comments are untouched.
@@ -187,13 +223,44 @@ def test_full_migration_golden(tmp_path: Path) -> None:
     assert not emitted.issues
 
     # Per-kind layout: one file per kind with the plural-s convention.
-    resources = tmp_path / "resources"
-    assert (resources / "secrets.yaml").exists()
-    assert (resources / "vm-templates.yaml").exists()
-    docs = _loaded_docs(resources / "vm-templates.yaml")
+    resources_out = tmp_path / "resources"
+    assert (resources_out / "secrets.yaml").exists()
+    assert (resources_out / "vm-templates.yaml").exists()
+    docs = _loaded_docs(resources_out / "vm-templates.yaml")
     assert [d["metadata"]["name"] for d in docs] == ["default", "dev"]
     # Non-contiguous env section folded into the one document.
     assert docs[1]["spec"]["env"] == {"HTTP_PROXY": "http://proxy:3128"}
+
+
+def test_verification_is_independent_of_emission(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An emission bug (a field dropped in ``_emit_document``) makes the
+    scoped comparison FAIL, proving the pre-side oracle is derived from the
+    TOML directly and NOT through ``_emit_document``: if the oracle flowed
+    through emission, the dropped field would cancel on both sides and the
+    bug would pass silently. The run rolls back (config restored, no
+    manifest written)."""
+    import agentworks.migrate.planning as planning_mod
+
+    real_emit = planning_mod._emit_document
+
+    def buggy_emit(doc: object, unit: object) -> str:
+        text = real_emit(doc, unit)  # type: ignore[arg-type]
+        if getattr(unit, "kind", None) == "vm-template":
+            data = yaml.safe_load(text)
+            data["spec"].pop("cpus", None)  # drop a real field the oracle keeps
+            return yaml.safe_dump(data, sort_keys=False)
+        return text
+
+    monkeypatch.setattr(planning_mod, "_emit_document", buggy_emit)
+
+    cfg = _write_config(tmp_path)
+    before = cfg.read_text()
+    config, plan = _plan(cfg, ["vm-template"])
+    with pytest.raises(StateError, match="vm-template/default: content differs"):
+        execute_plan(plan, config)
+    # Full rollback: the config is byte-for-byte restored and nothing landed.
+    assert cfg.read_text() == before
+    assert not (tmp_path / "resources" / "vm-templates.yaml").exists()
 
 
 def test_vm_site_sections_migrate_flat_to_nested(tmp_path: Path) -> None:
@@ -234,7 +301,7 @@ def test_vm_site_sections_migrate_flat_to_nested(tmp_path: Path) -> None:
     assert "\n[azure]" not in after
 
     # The rewritten config reloads and the sites resolve as manifests.
-    reloaded = load_config(cfg, warn_issues=False, warn_deprecations=False)
+    reloaded = load_config(cfg, warn_issues=False, resources=False)
     registry = build_registry(reloaded)
     assert registry.lookup("vm-site", "azure").platform == "azure-vm"
 
@@ -256,10 +323,9 @@ def test_vm_site_description_refused_before_write(tmp_path: Path) -> None:
     writing. It falls into platform_config and refuses pre-write."""
     resources = MAXIMAL_RESOURCES.replace('region = "eastus"', 'region = "eastus"\ndescription = "our sub"')
     cfg = _write_config(tmp_path, resources)
-    config = load_config(cfg, warn_issues=False)
-    registry = build_registry(config)
+    config = load_config(cfg, warn_issues=False, resources=False)
     with pytest.raises(ConfigError, match="cannot migrate vm-site/azure"):
-        plan_migration(config, registry, ["vm-site/azure"])
+        plan_migration(config, ["vm-site/azure"])
 
 
 def test_vm_site_stray_key_refused_before_write(tmp_path: Path) -> None:
@@ -268,10 +334,9 @@ def test_vm_site_stray_key_refused_before_write(tmp_path: Path) -> None:
     operator's TOML vocabulary instead."""
     resources = MAXIMAL_RESOURCES.replace('region = "eastus"', 'region = "eastus"\nstray_key = "x"')
     cfg = _write_config(tmp_path, resources)
-    config = load_config(cfg, warn_issues=False)
-    registry = build_registry(config)
+    config = load_config(cfg, warn_issues=False, resources=False)
     with pytest.raises(ConfigError, match="cannot migrate vm-site/azure"):
-        plan_migration(config, registry, ["vm-site/azure"])
+        plan_migration(config, ["vm-site/azure"])
 
 
 def test_git_credential_type_becomes_provider(tmp_path: Path) -> None:
@@ -710,10 +775,12 @@ def test_singleton_assignment_shape_refused(tmp_path: Path) -> None:
         _plan(cfg, ["admin-template"])
 
 
-def test_slash_names_are_rejected_at_load(tmp_path: Path) -> None:
-    """'/' is banned in resource names at Registry.add (maintainer
-    ruling, 2026-07-05), so a slash-named resource never reaches the
-    migrate tool -- the KIND/NAME selector grammar is unambiguous."""
+def test_slash_names_are_rejected_by_verification(tmp_path: Path) -> None:
+    """'/' is banned in resource names at Registry.add (maintainer ruling,
+    2026-07-05). Planning is pure over text now (no plan-time registry
+    build), so a slash-named unit is discovered and emitted, but the
+    post-run verification's registry rebuild rejects the '/' and the run
+    rolls back: the config is restored and no manifest survives."""
     cfg = _write_config(
         tmp_path,
         resources="""\
@@ -721,8 +788,12 @@ def test_slash_names_are_rejected_at_load(tmp_path: Path) -> None:
 cpus = 2
 """,
     )
+    before = cfg.read_text()
+    config, plan = _plan(cfg, [], all_resources=True)
     with pytest.raises(ConfigError, match="contains '/'"):
-        _plan(cfg, [], all_resources=True)
+        execute_plan(plan, config)
+    assert cfg.read_text() == before
+    assert not (tmp_path / "resources" / "vm-templates.yaml").exists()
 
 
 def test_per_resource_comment_markers_name_every_file(tmp_path: Path) -> None:
@@ -1028,7 +1099,7 @@ spec:
     assert "# selector comment" in rewritten
     assert "harness_integration:" in rewritten
     assert "harness_config:" not in rewritten
-    registry = build_registry(load_config(cfg, warn_issues=False))
+    registry = build_registry(load_config(cfg, warn_issues=False, resources=False))
     assert registry.lookup("session-template", "htop").harness_integration == "shell"
 
 
@@ -1096,7 +1167,7 @@ spec:
     assert "restart_command" not in manifest.read_text()
     assert "resume_command: tool --resume" in manifest.read_text()
     assert "keep this comment" in manifest.read_text()
-    registry = build_registry(load_config(cfg, warn_issues=False))
+    registry = build_registry(load_config(cfg, warn_issues=False, resources=False))
     template = registry.lookup("session-template", "tool")
     assert template.harness_integration_config == {
         "command": "tool",

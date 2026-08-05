@@ -11,7 +11,6 @@ import pytest
 # use ``load_request_registry`` so the old-selector warning is rendered once
 # at the request boundary instead of leaking from ``build_registry``.
 _PURE_BUILD_REGISTRY_CALLERS = {
-    "cli/commands/resource.py": "resource migrate is the warning remediation",
     "doctor.py": "doctor passes an explicit ManifestSet to render health rows",
     "migrate/execute.py": "post-migration equivalence verification",
 }

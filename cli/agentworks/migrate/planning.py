@@ -3,7 +3,8 @@
 Planning is pure: it reads the config file text and produces a
 ``MigrationPlan`` carrying everything ``execute_plan`` needs (rendered
 YAML documents grouped by target file, the rewritten TOML text, and the
-normalized pre-migration registry rows for verification). ``--dry-run``
+source-normalized pre-migration rows for verification, built from the
+migrator's own TOML/YAML oracle rather than a registry). ``--dry-run``
 is therefore just "plan and print".
 """
 
@@ -24,11 +25,11 @@ from agentworks.errors import ConfigError, ValidationError
 from agentworks.manifests.decode import KIND_SECTIONS
 from agentworks.manifests.loader import RESOURCES_DIRNAME
 from agentworks.migrate.toml_edit import apply_toml_edits, key_name
-from agentworks.migrate.verify import normalized_rows
+from agentworks.migrate.toml_resources import toml_resource_rows
+from agentworks.migrate.verify import strip_source_fields
 
 if TYPE_CHECKING:
     from agentworks.config import Config
-    from agentworks.resources.registry import Registry
 
 
 # Kinds that exist in TOML as one singleton section rather than a named
@@ -112,9 +113,18 @@ class MigrationPlan:
     # "resources/vm-templates.yaml"); feeds the preview and the
     # "migrated to" markers.
     targets: dict[tuple[str, str], str] = field(default_factory=dict)
-    # Normalized pre-migration registry rows, keyed by (kind, name);
-    # ``execute_plan`` compares the post-migration rebuild against this.
+    # Source-normalized pre-migration rows, keyed by (kind, name), scoped to
+    # the SELECTED units (the migrator oracle over the original TOML plus the
+    # decoded original YAML, both stripped of source-dependent fields).
+    # ``execute._verify`` checks each is present-and-equal in the rebuilt
+    # post-registry.
     pre_rows: dict[tuple[str, str], Any] = field(repr=False, default_factory=dict)
+    # The TOML-unit YAML documents ``_emit_document`` produced, in plan order
+    # (before write/rewrite coalescing moves them between files). The
+    # emitted-key-set guard in ``execute._verify`` decodes these (plus the
+    # YAML-rewrite unit keys) and asserts they equal the pre key set, closing
+    # the fabrication gap that dropping the symmetric "added" diff opens.
+    emitted_documents: list[str] = field(repr=False, default_factory=list)
 
     @property
     def nothing_to_do(self) -> bool:
@@ -123,7 +133,6 @@ class MigrationPlan:
 
 def plan_migration(
     config: Config,
-    registry: Registry,
     selectors: list[str],
     *,
     all_resources: bool = False,
@@ -131,6 +140,12 @@ def plan_migration(
     toml_mode: str = "comment",
 ) -> MigrationPlan:
     """Resolve selectors against the config's TOML and build the plan.
+
+    Pure over the config file text: reads the TOML directly (no registry).
+    The pre-side verification rows come from the migrator's own oracle
+    (``toml_resource_rows`` over the original TOML plus the decoded original
+    YAML), so planning does not need a built registry, and the post-side
+    (``execute._verify``) builds its own from the rewritten config.
 
     Migrating everything requires the explicit ``all_resources`` opt-in
     (``--all``); an empty selection without it is an error, so a bare
@@ -179,10 +194,13 @@ def plan_migration(
     selected = _resolve_selectors(selectors, available)
     toml_selected = [unit for unit in selected if unit.source == "toml"]
     yaml_selected = [unit for unit in selected if unit.source == "yaml"]
-    _check_declaration_shapes(doc, toml_selected, registry, old_text, config_path)
+    _check_declaration_shapes(doc, toml_selected, old_text, config_path)
 
     targets = _targets(toml_selected, layout)
     writes = _build_writes(doc, toml_selected, layout, resources_dir)
+    # Capture the per-unit emitted documents before coalescing folds some
+    # write files into YAML rewrites; the emitted-key-set guard needs them.
+    emitted_documents = [text for write in writes for text in write.documents]
     yaml_rewrites = _plan_yaml_rewrites(yaml_selected)
     writes, yaml_rewrites = _coalesce_writes_and_rewrites(writes, yaml_rewrites)
 
@@ -218,8 +236,65 @@ def plan_migration(
         new_toml_digest=sha256(new_text.encode()).hexdigest(),
         drops_secret_backends=drops,
         targets=targets,
-        pre_rows=normalized_rows(registry),
+        pre_rows=_build_pre_rows(config_path, selected),
+        emitted_documents=emitted_documents,
     )
+
+
+def _build_pre_rows(config_path: Path, selected: list[MigrationUnit]) -> dict[tuple[str, str], Any]:
+    """The verification pre-side, scoped to the selected units.
+
+    Two independent sources, keyed by ``(kind, name)`` and source-normalized:
+    the migrator oracle over the ORIGINAL TOML (filtered to the selected TOML
+    units), and the ORIGINAL YAML documents decoded through the manifest
+    decoder (for the YAML-rewrite units). Scoping to ``plan.units`` is
+    load-bearing: the post-side loads ``resources=False`` and so does not
+    carry un-migrated TOML rows, so a full-scope pre would false-fail every
+    partial migration.
+    """
+    pre: dict[tuple[str, str], Any] = {}
+    toml_selected = [u for u in selected if u.source == "toml"]
+    yaml_selected = [u for u in selected if u.source == "yaml"]
+    if toml_selected:
+        oracle = toml_resource_rows(config_path)
+        for unit in toml_selected:
+            key = (unit.kind, unit.name)
+            if key in oracle:
+                pre[key] = strip_source_fields(oracle[key])
+    if yaml_selected:
+        pre.update(_yaml_pre_rows(yaml_selected))
+    return pre
+
+
+def _yaml_pre_rows(yaml_selected: list[MigrationUnit]) -> dict[tuple[str, str], Any]:
+    """Decode the ORIGINAL YAML documents for the YAML-rewrite units.
+
+    The migrator rewrites a legacy ``harness`` selector / ``restart_command``
+    session template in place; this decodes the pre-rewrite document so the
+    post-side (which decodes the rewritten canonical document) must match.
+    ``strip_source_fields`` normalizes ``restart_command_compat`` so a
+    ``restart_command`` -> ``resume_command`` rewrite compares equal.
+    """
+    from agentworks.manifests.decode import decode_document
+    from agentworks.manifests.envelope import validate_envelope
+    from agentworks.manifests.loader import _iter_documents
+
+    wanted: dict[Path, set[str]] = {}
+    for unit in yaml_selected:
+        wanted.setdefault(Path(unit.section), set()).add(unit.name)
+    rows: dict[tuple[str, str], Any] = {}
+    for path, names in wanted.items():
+        for value, location in _iter_documents(path):
+            if not isinstance(value, dict) or value.get("kind") != "session-template":
+                continue
+            metadata = value.get("metadata")
+            doc_name = metadata.get("name") if isinstance(metadata, dict) else None
+            if doc_name not in names:
+                continue
+            document = validate_envelope(value, location)
+            resource = decode_document(document, [], [], [], [])
+            rows[(document.kind, document.name)] = strip_source_fields(resource)
+    return rows
 
 
 def _discover_units(doc: tomlkit.TOMLDocument) -> list[MigrationUnit]:
@@ -579,7 +654,6 @@ def _resolve_selectors(selectors: list[str], available: list[MigrationUnit]) -> 
 def _check_declaration_shapes(
     doc: tomlkit.TOMLDocument,
     selected: list[MigrationUnit],
-    registry: Registry,
     old_text: str,
     config_path: Path,
 ) -> None:
@@ -587,8 +661,9 @@ def _check_declaration_shapes(
 
     "Commented out in place" has no faithful rendering for a key buried
     in a shared table; the operator migrates those by hand. Errors carry
-    the declaration's file:line (from the registry row where one exists,
-    else a text scan for the section).
+    the declaration's file:line from a text scan for the section (planning
+    is pure over text now, so there is no registry row to source a more
+    precise line from; a minor precision loss on this one error, noted).
     """
     wanted: dict[str, set[str]] = {}
     singleton_sections: dict[str, MigrationUnit] = {}
@@ -622,25 +697,13 @@ def _check_declaration_shapes(
                 continue
             if not isinstance(inner, toml_items.Table):
                 child = f"{section}.{key_name(inner_key)}"
-                unit = next(u for u in selected if u.section == section and u.name == key_name(inner_key))
-                where = _declared_at(registry, unit) or _section_location(old_text, config_path, section)
+                where = _section_location(old_text, config_path, section)
                 raise ConfigError(
                     f"{where}: [{child}] is declared as a dotted key or "
                     f"inline table; the migrate tool only rewrites standard "
                     f"[{child}] header tables",
                     hint="Migrate this resource by hand.",
                 )
-
-
-def _declared_at(registry: Registry, unit: MigrationUnit) -> str | None:
-    try:
-        resource = registry.lookup(unit.kind, unit.name)
-    except Exception:  # noqa: BLE001 - location is best-effort decoration
-        return None
-    location = getattr(resource, "declared_at", None)
-    if location is None or not getattr(location, "line", 0):
-        return None
-    return f"{location.file}:{location.line}"
 
 
 def _section_location(old_text: str, config_path: Path, section: str) -> str:
@@ -743,7 +806,7 @@ def _emit_document(doc: tomlkit.TOMLDocument, unit: MigrationUnit) -> str:
         # unvalidated emission would only fail the post-run verification
         # after files were written.
         from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
-        from agentworks.config import _LEGACY_SITE_SECTIONS
+        from agentworks.migrate.toml_resources import _LEGACY_SITE_SECTIONS
 
         platform = _LEGACY_SITE_SECTIONS[unit.section][0]
         platform_config = dict(spec)

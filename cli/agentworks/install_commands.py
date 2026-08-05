@@ -12,8 +12,9 @@ reference (an unknown command named by a vm-template, admin-template, or
 agent-template) surfaces as a framework ``ConfigError`` at
 ``build_registry`` time citing the reference's source. Built-in entries
 ship as bundled manifests under ``manifests/builtin/``; operators may add
-or override entries via YAML manifests (or the deprecated TOML surface,
-published by ``publish_to`` below).
+or override entries via YAML manifests. The ``_load_system_commands`` /
+``_load_user_commands`` helpers below survive the TOML sunset (ADR 0022)
+because the manifest install decoders delegate to them.
 
 ``agentworks.resources.kinds.__init__`` imports this module so the two
 kinds self-register into ``KIND_REGISTRY`` at load.
@@ -36,8 +37,7 @@ from agentworks.resources.kind import KIND_REGISTRY, synthesize_no_default
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from agentworks.config import Config, _SectionLineMap
-    from agentworks.resources import Registry
+    from agentworks.config import _SectionLineMap
     from agentworks.resources.reference import ResourceReference
 
 
@@ -131,42 +131,12 @@ def _load_user_commands(
     return entries
 
 
-def publish_to(registry: Registry, config: Config | None = None) -> None:
-    """Publish operator-declared TOML install-command entries into the registry.
-
-    Built-in install commands no longer publish here: they ship as bundled
-    YAML manifests under ``manifests/builtin/`` and land via
-    ``builtin_manifests.publish_to`` (which runs first in
-    ``build_registry``), with ``Origin.built_in`` and a shipped-file
-    source. This function now carries only the operator's deprecated TOML
-    surface for these two kinds (retired separately under ADR 0016).
-
-    When ``config`` is provided, operator-declared entries
-    (``[system_install_commands.<name>]``,
-    ``[user_install_commands.<name>]`` in the operator's TOML) publish with
-    ``Origin.operator_declared(...)``. Publish order + the kinds'
-    ``builtin_override = "allow"`` policy is what lets the operator row
-    replace the built-in at ``Registry.add``: the built-in manifests
-    publish first, then this operator publisher. Config-side publishing
-    lives here (rather than in ``Config.publish_to``) because parsing
-    operator install-command entries is this module's expertise; Config
-    just stashes the raw TOML dicts.
-
-    ``declared_at`` falls through to the loaders' default synthesized shim
-    here (the deprecated TOML surface does not carry the section-line map);
-    manifest entries carry a real location via the decoders.
-    """
-    if config is None:
-        return
-
-    from agentworks.config import CONFIG_PATH
-    from agentworks.resources import Origin
-
-    op_origin = Origin.operator_declared(file=CONFIG_PATH, line=0)
-    for sys_name, sys_cmd in _load_system_commands(config.system_install_commands).items():
-        registry.add("system-install-command", sys_name, sys_cmd, op_origin)
-    for user_name, user_cmd in _load_user_commands(config.user_install_commands).items():
-        registry.add("user-install-command", user_name, user_cmd, op_origin)
+# The operator install-command publisher was deleted with the TOML resource
+# surface (ADR 0022): built-in install commands ship as bundled YAML
+# manifests (via ``builtin_manifests.publish_to``), and operator
+# install-command entries are YAML manifests too. ``_load_system_commands``
+# / ``_load_user_commands`` above survive because the manifest install
+# decoders still delegate to them.
 
 
 # -- Framework kind strategies -------------------------------------------------

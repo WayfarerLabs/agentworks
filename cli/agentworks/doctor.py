@@ -470,13 +470,25 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
         config = load_config(warn_issues=False)
     except (ConfigError, ValidationError) as e:
         # ValidationError is a SIBLING of ConfigError under AgentworksError,
-        # not a subclass, so it must be named explicitly: the secrets loader
-        # (_load_secrets -> validate_name) raises it for a non-conforming
-        # explicit [secrets.*] name. Catching it here yields a fail row and
-        # lets the rest of the report render, per doctor's maximal-visibility
-        # contract, instead of aborting with a bare one-liner and no report.
+        # not a subclass, so it must be named explicitly. Catching it here
+        # yields a fail row and lets the rest of the report render, per
+        # doctor's maximal-visibility contract, instead of aborting with a
+        # bare one-liner and no report.
         g.fail("Config", str(e), hint=e.hint)
-        return g, None, None
+        # The resource-section hard error (config.toml still declares
+        # resources) is exactly the mid-migration operator doctor helps most,
+        # so it must NOT truncate the report to one fail row. Retry
+        # settings-only: that skips the hard-error check, so the SSH,
+        # manifest, and registry checks below still render (mirroring the
+        # non-fatal manifest-load handling further down). A genuine settings
+        # error (bad [operator], non-conforming name, ...) re-raises on the
+        # retry and we return.
+        from agentworks.config import load_config as _load_settings_only
+
+        try:
+            config = _load_settings_only(warn_issues=False, resources=False)
+        except (ConfigError, ValidationError):
+            return g, None, None
     except SystemExit:
         g.fail("Config", "failed to load")
         return g, None, None
@@ -532,13 +544,9 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
     # can silence the ambient per-command warning), but doctor is the
     # explicit full-health surface. Doctor rows are scannable one-liners
     # (maintainer ruling, 2026-07-06): render the FACT with one next
-    # step; the full teaching text (sample pointer, silencer flag,
-    # removal forecast) stays on the ambient command warning.
-    if config.deprecated_sections:
-        g.warn(
-            "Config has deprecated TOML resource declarations",
-            "migrate to YAML with `agw resource migrate`",
-        )
+    # step; the full teaching text stays on the ambient command warning.
+    # (The old TOML-resource-declaration nudge is a hard error now, rendered
+    # as the Config fail row above, so it no longer has a warn row here.)
     if manifests is not None and manifests.deprecated_shape_resources:
         g.warn(
             "Manifests use the deprecated capability config shape",

@@ -53,21 +53,16 @@ def build_registry(config: Config, manifests: ManifestSet | None = None) -> Regi
     """Build a finalized ``Registry`` from the standard set of publishers.
 
     Publisher order: the bundled built-in manifests first
-    (``builtin_manifests``), then the ``apt`` / ``install_commands``
-    operator publishers (the deprecated TOML surface for those two kinds;
-    they follow the bundled manifests, which now supply the built-in
-    apt/install-command entries), then the built-in capability rows
-    (``git_credential``, ``harness_integration``, ``secrets``,
-    ``vm_platforms``), then
-    the system plugins (``plugins.publish_plugins``: every shipped plugin's
-    capability rows plus the enabled plugins' bundled manifests), then the
-    operator sources (``Config.publish_to`` for TOML, then the YAML
-    ``ManifestSet``). Plugin capability rows publish unconditionally and are
-    marked disabled at finalize when not opted in (the injected
-    ``plugin_enablement_source``). Operator rows may replace built-in rows
-    only where the kind's ``builtin_override`` allows;
-    operator-vs-operator collisions (a resource declared in both TOML and
-    a manifest) error at ``Registry.add``.
+    (``builtin_manifests``, which supply the built-in apt/install-command
+    entries too), then the built-in capability rows (``git_credential``,
+    ``harness_integration``, ``secrets``, ``vm_platforms``), then the system
+    plugins (``plugins.publish_plugins``: every shipped plugin's capability
+    rows plus the enabled plugins' bundled manifests), then the operator's
+    YAML ``ManifestSet`` (``Config.publish_to`` is a no-op now: config.toml
+    is settings only, ADR 0022). Plugin capability rows publish
+    unconditionally and are marked disabled at finalize when not opted in
+    (the injected ``plugin_enablement_source``). Operator rows may replace
+    built-in rows only where the kind's ``builtin_override`` allows.
 
     When ``manifests`` is None (the standard path), the resources
     directory next to the loaded config file (``<config-dir>/resources/``)
@@ -76,20 +71,12 @@ def build_registry(config: Config, manifests: ManifestSet | None = None) -> Regi
     Pass an explicit ``ManifestSet`` (e.g. ``ManifestSet.empty()``) to skip
     the auto-load.
     """
-    from agentworks import apt, install_commands, plugins, secrets
+    from agentworks import plugins, secrets
     from agentworks.capabilities import git_credential, harness_integration
     from agentworks.capabilities import vm_platform as vm_platforms
-    from agentworks.errors import StateError
     from agentworks.manifests import RESOURCES_DIRNAME, load_manifests
     from agentworks.manifests import builtin as builtin_manifests
     from agentworks.vms import sites as vm_sites
-
-    if not config.resources_loaded:
-        raise StateError(
-            "build_registry requires a Config loaded with resources=True; "
-            "this one was loaded settings-only (load_config(resources=False)), "
-            "so publishing it would silently drop every TOML-declared resource"
-        )
 
     if manifests is None:
         resources_dir = config.source_path.parent / RESOURCES_DIRNAME
@@ -104,15 +91,12 @@ def build_registry(config: Config, manifests: ManifestSet | None = None) -> Regi
     # bundled rows always publish. Using a not-ready site is a typed error at
     # resolve time; doctor warns on references to one.
     registry = Registry.empty()
-    # Built-in publishers first. The bundled manifests now supply the
-    # built-in apt/install-command entries too (apt sources/packages and
-    # install commands ship as manifests/builtin/*.yaml), so they must
-    # precede the apt / install_commands operator publishers, which publish
-    # only the operator's deprecated TOML extensions (operator-declared
-    # rows): built-in rows must never land on top of operator rows.
+    # Built-in publishers first. The bundled manifests supply the built-in
+    # apt/install-command entries (apt sources/packages and install commands
+    # ship as manifests/builtin/*.yaml); operator apt/install rows are YAML
+    # manifests now (config.toml is settings only, ADR 0022), so there is no
+    # separate apt / install_commands operator publisher anymore.
     builtin_manifests.publish_to(registry)
-    apt.publish_to(registry, config)
-    install_commands.publish_to(registry, config)
     git_credential.publish_to(registry)
     harness_integration.publish_to(registry)
     secrets.publish_to(registry)
