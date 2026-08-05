@@ -3,7 +3,7 @@
 - Status: Draft
 - Start date: 2026-08-05
 - Target release: 0.14.0
-- Roadmap: `docs/sdd/2026-08-04-next-steps` (this effort is wave 1 of that program; its
+- Roadmap: `docs/sdd/2026-08-04-next-steps` (this effort is wave 1 of that roadmap; its
   deprecation-removal perspective is the source material for this FRD)
 - Related SDDs: `docs/sdd/2026-08-03-harness-integration`, `docs/sdd/2026-08-04-session-resume`,
   `docs/sdd/2026-07-31-declarative-schema`
@@ -19,7 +19,7 @@ is untouched; everything coupled to the declarative-schema effort stays with tha
 ships this cleanup alongside the declarative-schema phase 1 TOML sunset as one coherent
 breaking-cleanup release (operator ruling, 2026-08-05).
 
-Removing these shapes before declarative-schema phase 2 begins is a program-level constraint, not a
+Removing these shapes before declarative-schema phase 2 begins is a roadmap-level constraint, not a
 convenience: phase 2's per-kind modeling explicitly sequences around the legacy harness selector and
 `restart_command` shims, and modeling shapes that are about to be deleted is the waste the phase
 gate exists to avoid.
