@@ -28,8 +28,9 @@ spec:
   mise_packages: [terraform@1.14.5, adr-tools@3.0.0]
 ```
 
-(The classic TOML form, `[admin.config]` with `mise_packages = [...]` in `config.toml`, keeps
-working but is deprecated; see [resources.md](resources.md).)
+Resource declarations in `config.toml` are not loaded at runtime. If you still have a classic
+`[admin.config]` declaration, migrate it with `agw resource migrate`; see
+[resources.md](resources.md).
 
 Run `agw vm create <name>` or `agw vm reinit <name>` and the tools will be available.
 

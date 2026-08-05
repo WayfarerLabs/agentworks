@@ -61,11 +61,17 @@ def parse_source_ref(source: str, *, default_filename: str = "") -> SourceRef:
 
     # Strip file:: prefix
     if source.startswith("file::"):
-        return SourceRef(kind="file", path=source[6:], subpath="", ref="")
+        path = source[6:]
+        if not path:
+            raise SourceRefError("file source path cannot be empty")
+        return SourceRef(kind="file", path=path, subpath="", ref="")
 
     # Git source
     if source.startswith("git::"):
         return _parse_git_source(source[5:], default_filename)
+
+    if "::" in source:
+        raise SourceRefError("source reference scheme must be file:: or git::")
 
     # Default: local file
     return SourceRef(kind="file", path=source, subpath="", ref="")
@@ -76,18 +82,13 @@ def _parse_git_source(url_str: str, default_filename: str) -> SourceRef:
     if not url_str:
         raise SourceRefError("git source URL cannot be empty")
 
-    # Split on // to separate URL from subpath
+    # Split on // to separate URL from subpath. For HTTPS, skip the
+    # protocol separator; SCP-style git@ URLs have no protocol separator.
     subpath = ""
-    if "//" in url_str:
-        # Find the first // that is NOT part of https://
-        # Strategy: split on //, skip the protocol portion
-        parts = url_str.split("//")
-        if len(parts) >= 3:
-            # e.g. ["https:", "github.com/user/repo.git", "path/to/file?ref=main"]
-            # Rejoin protocol + host, take the rest as subpath
-            url_str = parts[0] + "//" + parts[1]
-            subpath = "/".join(parts[2:])
-        # If only 2 parts, it's just a URL with protocol (https://...) and no subpath
+    separator_start = len("https://") if url_str.startswith("https://") else 0
+    separator = url_str.find("//", separator_start)
+    if separator >= 0:
+        url_str, subpath = url_str[:separator], url_str[separator + 2 :]
 
     # Extract query params from either the URL or the subpath
     ref = ""
@@ -118,10 +119,10 @@ def _parse_git_source(url_str: str, default_filename: str) -> SourceRef:
 
 def _extract_ref(query: str) -> str:
     """Extract ref= value from a query string."""
-    for param in query.split("&"):
-        if param.startswith("ref="):
-            return param[4:]
-    return ""
+    params = query.split("&")
+    if len(params) != 1 or not params[0].startswith("ref=") or not params[0][4:]:
+        raise SourceRefError("git source query must contain exactly one non-empty ref parameter")
+    return params[0][4:]
 
 
 def fetch_file(

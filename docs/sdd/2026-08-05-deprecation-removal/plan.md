@@ -115,21 +115,21 @@ caller or teaching surface; canonical consoles and unrelated tmuxinator behavior
 
 ## Phase 4: Mise reconciliation and small gap closure
 
-- [ ] Audit every unchecked item in `2026-03-26-mise-integration/plan.md` against current code,
+- [x] Audit every unchecked item in `2026-03-26-mise-integration/plan.md` against current code,
       tests, permanent docs, and recorded verification. Check only items with evidence and leave all
       completed historical records untouched.
-- [ ] Add focused unit coverage for source-reference parsing/fetch behavior and mise configuration
+- [x] Add focused unit coverage for source-reference parsing/fetch behavior and mise configuration
       and install-flow branches that lack evidence today.
-- [ ] Add early validation for malformed mise package/source reference and ordering inputs where
+- [x] Add early validation for malformed mise package/source reference and ordering inputs where
       current decoding defers errors until operation time, without redesigning the resource schema.
-- [ ] Record later design deviations: YAML declarative resources superseded classic TOML resource
+- [x] Record later design deviations: YAML declarative resources superseded classic TOML resource
       configuration, mise is always installed, catalog abstractions were removed, and the absent
       `install_mise` toggle is not introduced by this effort.
-- [ ] Correct stale `docs/guides/mise.md` guidance that presents TOML resource declarations as an
+- [x] Correct stale `docs/guides/mise.md` guidance that presents TOML resource declarations as an
       accepted or deprecated runtime path.
-- [ ] Record any live verification that is actually performed. Leave unperformed manual matrix items
+- [x] Record any live verification that is actually performed. Leave unperformed manual matrix items
       unchecked and state that limitation in closeout rather than inferring success.
-- [ ] Review the slice, resolve every valid finding, and run focused mise/source-reference tests,
+- [x] Review the slice, resolve every valid finding, and run focused mise/source-reference tests,
       manifest and initializer tests, docs lint, and the full gate.
 
 Definition of done: the stale mise plan tells the truth, small validation and test gaps are closed,

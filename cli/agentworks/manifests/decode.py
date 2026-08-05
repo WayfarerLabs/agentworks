@@ -378,6 +378,19 @@ def _decode_agent_template(doc: Document, spec: dict[str, Any], issues: list[str
     name = doc.name
     _warn_unexpected_keys(spec, _AGENT_TEMPLATE_KEYS, f"agent_templates.{name}", issues)
 
+    packages = _require_string_list(spec, "mise_packages", f"agent_templates.{name}")
+    lockfile_value = spec.get("mise_lockfile")
+    if lockfile_value is not None and not isinstance(lockfile_value, str):
+        raise ConfigError(f"agent_templates.{name}.mise_lockfile must be a string")
+    lockfile = lockfile_value
+    install_before_value = spec.get("mise_install_before", "7d")
+    if not isinstance(install_before_value, str):
+        raise ConfigError(f"agent_templates.{name}.mise_install_before must be a string")
+    install_before = install_before_value
+    from agentworks.config.validation import validate_mise_settings
+
+    validate_mise_settings(packages, lockfile, install_before, context=f"agent_templates.{name}")
+
     return AgentTemplate(
         name=name,
         inherits=list(spec.get("inherits", [])),
@@ -389,10 +402,10 @@ def _decode_agent_template(doc: Document, spec: dict[str, Any], issues: list[str
         dotfiles_destination=(str(spec["dotfiles_destination"]) if "dotfiles_destination" in spec else None),
         dotfiles_install_cmd=(str(spec["dotfiles_install_cmd"]) if "dotfiles_install_cmd" in spec else None),
         mise_activate=bool(spec["mise_activate"]) if "mise_activate" in spec else None,
-        mise_packages=list(spec["mise_packages"]) if "mise_packages" in spec else None,
-        mise_lockfile=str(spec["mise_lockfile"]) if "mise_lockfile" in spec else None,
+        mise_packages=packages if "mise_packages" in spec else None,
+        mise_lockfile=lockfile,
         mise_allow_unlocked=(bool(spec["mise_allow_unlocked"]) if "mise_allow_unlocked" in spec else None),
-        mise_install_before=(str(spec["mise_install_before"]) if "mise_install_before" in spec else None),
+        mise_install_before=(install_before if "mise_install_before" in spec else None),
         mise_prune_on_reinit=(bool(spec["mise_prune_on_reinit"]) if "mise_prune_on_reinit" in spec else None),
         claude_marketplaces=(
             _require_string_list(spec, "claude_marketplaces", f"agent_templates.{name}")
@@ -654,6 +667,19 @@ def _decode_admin_template(doc: Document, spec: dict[str, Any], issues: list[str
     env = raw.pop("env", None)
     _warn_unexpected_keys(raw, _USER_CONFIG_KEYS, "admin.config", issues)
 
+    packages = _require_string_list(raw, "mise_packages", "admin.config")
+    lockfile_value = raw.get("mise_lockfile")
+    if lockfile_value is not None and not isinstance(lockfile_value, str):
+        raise ConfigError("admin.config.mise_lockfile must be a string")
+    lockfile = lockfile_value
+    install_before_value = raw.get("mise_install_before", "7d")
+    if not isinstance(install_before_value, str):
+        raise ConfigError("admin.config.mise_install_before must be a string")
+    install_before = install_before_value
+    from agentworks.config.validation import validate_mise_settings
+
+    validate_mise_settings(packages, lockfile, install_before, context="admin.config")
+
     return AdminConfig(
         name=doc.name,
         description=str(raw["description"]) if "description" in raw else None,
@@ -665,10 +691,10 @@ def _decode_admin_template(doc: Document, spec: dict[str, Any], issues: list[str
         dotfiles_destination=str(raw.get("dotfiles_destination", "~/.dotfiles")),
         dotfiles_install_cmd=str(raw.get("dotfiles_install_cmd", "./install.sh")),
         mise_activate=bool(raw.get("mise_activate", True)),
-        mise_packages=list(raw.get("mise_packages", [])),
-        mise_lockfile=str(raw["mise_lockfile"]) if "mise_lockfile" in raw else None,
+        mise_packages=packages,
+        mise_lockfile=lockfile,
         mise_allow_unlocked=bool(raw.get("mise_allow_unlocked", False)),
-        mise_install_before=str(raw.get("mise_install_before", "7d")),
+        mise_install_before=install_before,
         mise_prune_on_reinit=bool(raw.get("mise_prune_on_reinit", True)),
         git_force_safe_directory=bool(raw.get("git_force_safe_directory", True)),
         claude_marketplaces=_require_string_list(raw, "claude_marketplaces", "admin.config"),

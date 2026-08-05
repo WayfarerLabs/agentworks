@@ -196,6 +196,19 @@ def _load_admin_config(
 
     _warn_unexpected_keys(raw, _USER_CONFIG_KEYS, "admin.config", issues)
 
+    packages = _require_string_list(raw, "mise_packages", "admin.config")
+    lockfile_value = raw.get("mise_lockfile")
+    if lockfile_value is not None and not isinstance(lockfile_value, str):
+        raise ConfigError("admin.config.mise_lockfile must be a string")
+    lockfile = lockfile_value
+    install_before_value = raw.get("mise_install_before", "7d")
+    if not isinstance(install_before_value, str):
+        raise ConfigError("admin.config.mise_install_before must be a string")
+    install_before = install_before_value
+    from agentworks.config.validation import validate_mise_settings
+
+    validate_mise_settings(packages, lockfile, install_before, context="admin.config")
+
     return AdminConfig(
         name=name,
         description=str(raw["description"]) if "description" in raw else None,
@@ -207,10 +220,10 @@ def _load_admin_config(
         dotfiles_destination=str(raw.get("dotfiles_destination", "~/.dotfiles")),
         dotfiles_install_cmd=str(raw.get("dotfiles_install_cmd", "./install.sh")),
         mise_activate=bool(raw.get("mise_activate", True)),
-        mise_packages=list(raw.get("mise_packages", [])),
-        mise_lockfile=str(raw["mise_lockfile"]) if "mise_lockfile" in raw else None,
+        mise_packages=packages,
+        mise_lockfile=lockfile,
         mise_allow_unlocked=bool(raw.get("mise_allow_unlocked", False)),
-        mise_install_before=str(raw.get("mise_install_before", "7d")),
+        mise_install_before=install_before,
         mise_prune_on_reinit=bool(raw.get("mise_prune_on_reinit", True)),
         git_force_safe_directory=bool(raw.get("git_force_safe_directory", True)),
         claude_marketplaces=_require_string_list(raw, "claude_marketplaces", "admin.config"),
@@ -241,6 +254,19 @@ def _load_agent_templates(
             raise ConfigError(f"agent_templates.{name} must be a table")
         _warn_unexpected_keys(tdata, _AGENT_TEMPLATE_KEYS, f"agent_templates.{name}", issues)
 
+        packages = _require_string_list(tdata, "mise_packages", f"agent_templates.{name}")
+        lockfile_value = tdata.get("mise_lockfile")
+        if lockfile_value is not None and not isinstance(lockfile_value, str):
+            raise ConfigError(f"agent_templates.{name}.mise_lockfile must be a string")
+        lockfile = lockfile_value
+        install_before_value = tdata.get("mise_install_before", "7d")
+        if not isinstance(install_before_value, str):
+            raise ConfigError(f"agent_templates.{name}.mise_install_before must be a string")
+        install_before = install_before_value
+        from agentworks.config.validation import validate_mise_settings
+
+        validate_mise_settings(packages, lockfile, install_before, context=f"agent_templates.{name}")
+
         templates[name] = AgentTemplate(
             name=name,
             inherits=list(tdata.get("inherits", [])),
@@ -252,10 +278,10 @@ def _load_agent_templates(
             dotfiles_destination=(str(tdata["dotfiles_destination"]) if "dotfiles_destination" in tdata else None),
             dotfiles_install_cmd=(str(tdata["dotfiles_install_cmd"]) if "dotfiles_install_cmd" in tdata else None),
             mise_activate=bool(tdata["mise_activate"]) if "mise_activate" in tdata else None,
-            mise_packages=list(tdata["mise_packages"]) if "mise_packages" in tdata else None,
-            mise_lockfile=str(tdata["mise_lockfile"]) if "mise_lockfile" in tdata else None,
+            mise_packages=packages if "mise_packages" in tdata else None,
+            mise_lockfile=lockfile,
             mise_allow_unlocked=(bool(tdata["mise_allow_unlocked"]) if "mise_allow_unlocked" in tdata else None),
-            mise_install_before=(str(tdata["mise_install_before"]) if "mise_install_before" in tdata else None),
+            mise_install_before=(install_before if "mise_install_before" in tdata else None),
             mise_prune_on_reinit=(bool(tdata["mise_prune_on_reinit"]) if "mise_prune_on_reinit" in tdata else None),
             claude_marketplaces=(
                 _require_string_list(tdata, "claude_marketplaces", f"agent_templates.{name}")
