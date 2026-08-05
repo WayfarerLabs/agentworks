@@ -128,13 +128,23 @@ seam (the `cast("type[VMPlatform]", ...)` in each adapter's `seat` today plus th
 (`_validate_descriptor`, `plugins/registration.py:60`), BEFORE any registry mutation, so atomic
 seating (prepare-all-then-seat) is unchanged. Per impl, keyed by its kind's descriptor:
 
-1. **Implementation-contract conformance**: `issubclass(impl, descriptor.implementation_contract)`
-   (the `Capability` ABC for three kinds; the `SecretBackend` Protocol, `@runtime_checkable`, for
-   secret-backend).
+1. **Implementation-contract conformance**, branched by contract shape (the contract is NOT uniform,
+   verified at HEAD):
+   - The three ABC kinds (`Capability`-derived):
+     `issubclass(impl, descriptor.implementation_contract)`.
+   - The secret-backend kind: `issubclass` is NOT usable. `SecretBackend` (`secrets/backends.py:58`)
+     is a plain `Protocol`, not `@runtime_checkable`, and its `name`/`description`/`interactive` are
+     `@property` members (`backends.py:95-102`); `issubclass()` against a Protocol with non-method
+     members raises `TypeError` even after adding `@runtime_checkable`. So the Protocol kind is
+     conformance-checked STRUCTURALLY, by the required metadata (check 2) and required operations
+     (check 4) being present on the impl, which is the real enforcement for a Protocol anyway. The
+     descriptor's `implementation_contract` for secret-backend is documentary (the target Protocol)
+     rather than an `issubclass` argument.
 2. **Required metadata present**: `name` (non-empty, `/`-free `str`) and `description` (`str`),
-   readable at class level. Concrete impls expose these as class attributes uniformly (verified:
-   `secrets/backends.py:189` constructs instances of classes that carry `name`/`description` as
-   class attributes, `plugins/onepassword/backend.py:248`).
+   readable at class level. Concrete impls expose these as class attributes uniformly, including the
+   secret backends whose Protocol declares them as properties (verified: `secrets/env_var.py:42-43`,
+   `secrets/prompt.py:39-40`, `plugins/onepassword/backend.py:248-249` all set `name`/`description`
+   as class attributes), so the check reads them off the class without constructing.
 3. **Side-effect-free constructibility check** (settled below).
 4. **Required operations implemented**: every name in `descriptor.required_operations` is present
    and callable on the impl.
@@ -150,18 +160,22 @@ seating (prepare-all-then-seat) is unchanged. Per impl, keyed by its kind's desc
 The check is purely STRUCTURAL and NEVER calls `impl(...)`:
 
 - `inspect.isabstract(impl) is False` (no unimplemented `@abstractmethod`), decisive for the three
-  ABC kinds (each subclasses the `Capability` ABC, `capabilities/base.py:276`, whose domain ops are
-  abstract).
+  ABC kinds. The abstract domain ops live on the per-kind capability bases, not on the shared
+  `Capability` ABC (`capabilities/base.py:276`, which has zero abstractmethods, only ClassVars and
+  concrete no-op preflight/runup defaults): `vm_platform/base.py` (6 abstract ops),
+  `harness_integration/base.py` (3), `git_credential/base.py` (3). `isabstract` is thus decisive
+  because a concrete impl must implement its kind base's abstract ops.
 - The metadata and required-operation attributes (checks 2 and 4) are present, which for the
   Protocol kind (secret-backend, no ABC to leave abstract) is the real structural enforcement.
 
-Keeping the check construction-free is the whole point: it is then IDENTICAL across both registry
-policies and independent of the interim singleton. The `impl()` call that DOES happen for
-secret-backend is the `CONSTRUCTED_SINGLETON` `prepare` step (pass 2, `registration.py:126`), the
-registry-payload construction, not the conformance check. That call stays fallible-and-caught as
-today (`registration.py:127`), and it dies during the precheck (no mutation), preserving atomicity.
-When wave 3 removes the singleton policy, the constructibility check does not change, because it
-never depended on construction.
+Keeping the check construction-free is the whole point: it never constructs regardless of registry
+policy (only check 1 branches by contract shape, above; constructibility itself is uniform), so it
+is independent of the interim singleton. The `impl()` call that DOES happen for secret-backend is
+the `CONSTRUCTED_SINGLETON` `prepare` step (pass 2, `registration.py:126`), the registry-payload
+construction, not the conformance check. That call stays fallible-and-caught as today
+(`registration.py:127`), and it dies during the precheck (no mutation), preserving atomicity. When
+wave 3 removes the singleton policy, the constructibility check does not change, because it never
+depended on construction.
 
 ## 5. Readiness, publisher, registry loaders, snapshot
 
@@ -214,12 +228,29 @@ Site 6 is the capability-config tagged-fold ENUMERATION, and only that. Two thin
   capability-kind enumeration), and are replaced by kind-spec MODELS in step 2.5. Step 2.0 does NOT
   touch them. This is the coordinated boundary with 2.5: 2.0 absorbs (A); 2.5 owns (B) in full.
 
-Derivation of (A): `CAPABILITY_FIELDS` becomes a comprehension over descriptors whose
-`manifest_section` declares a tagged host pair, keyed by `host_kind` (identical contents to today;
-secret-backend's `manifest_section is None`, so it contributes nothing, as its `backend_mappings` is
-map-keyed). The decode dispatch replaces the hardcoded `if doc.kind == "session-template"` branch
-with a lookup: find the descriptor whose `manifest_section.host_kind == doc.kind` and apply its
-fold.
+Derivation of (A): `CAPABILITY_FIELDS` today has exactly two entries (`vm-site`, `git-credential`),
+NOT session-template, which is handled by the separate `_normalize_session_harness_selector` branch.
+To reproduce that byte-for-byte, `CAPABILITY_FIELDS` derives ONLY from descriptors whose fold is the
+sibling-pair accept-warn path, i.e.
+`manifest_section is not None and manifest_section.legacy_string_shape == "accept-warn"`:
+
+```python
+CAPABILITY_FIELDS = {
+    d.manifest_section.host_kind: (d.manifest_section.naming_field, d.manifest_section.config_field)
+    for d in CAPABILITY_DESCRIPTORS
+    if d.manifest_section is not None and d.manifest_section.legacy_string_shape == "accept-warn"
+}
+```
+
+That filter is load-bearing: without it the harness-integration descriptor (whose `manifest_section`
+is non-None but `legacy_string_shape == "reject"`, session-template having hardened in wave 1) would
+add a third entry and route session-template through the accept-warn fold, a real behavior change.
+secret-backend contributes nothing regardless (`manifest_section is None`; `backend_mappings` is
+map-keyed). The decode DISPATCH replaces the hardcoded `if doc.kind == "session-template"` branch
+with a lookup over all descriptors' `manifest_section.host_kind`, selecting the fold by
+`legacy_string_shape` (accept-warn -> `_normalize_capability_field`, reject ->
+`_normalize_session_harness_selector`), so both host kinds route to their current fold and messages
+are unchanged.
 
 The two fold FUNCTIONS and their exact messages stay unchanged at 2.0, because
 `tests/manifests/test_capability_shape.py` pins them (e.g. `match="spec.{field} is a tagged table"`,
@@ -303,17 +334,25 @@ meatiest) last:
    record's fields match the live wiring (registry object identity,
    `kind_strategy is KIND_REGISTRY[kind]`, source labels, host pairs) and that the built-in impls
    pass the section-4 conformance checks.
-3. **Snapshot/restore tuple** (`_capability_registries`) derives from the table.
-4. **Bootstrap publication**: collapse the four `publish_to` into the generic publisher;
-   `bootstrap.py` iterates the table.
-5. **Registry loaders** (`_CAPABILITY_REGISTRY_LOADERS`) derive from the `registry` field.
-6. **Graph kind set + readiness dispatch** (`_CAPABILITY_KINDS`, `_capability_node_readiness`)
+3. **Wire registration-time conformance** into `register_plugin`'s pass 1 (`_validate_descriptor`,
+   `registration.py:60`, which today checks none of section 4). Behavior-ADDITIVE: every shipped
+   built-in and the one shipped plugin (onepassword) conform, so the gate stays green; the negative
+   conformance tests (section 12) land with this commit. Distinct from the derivations, so it is its
+   own step rather than folded into the table introduction.
+4. **Snapshot/restore tuple** (`_capability_registries`) derives from the table.
+5. **Bootstrap publication**: collapse the four `publish_to` (entry points `secrets/__init__.py:37`
+   fronting `backends.py:200`, plus the three capability-package `publish_to`s) into the generic
+   publisher; `bootstrap.py` iterates the table. NOT purely mechanical: this harmonizes
+   publish-iteration to sorted-by-name (section 5); first verify no test pins vm-platform or
+   secret-backend insertion order, and adjust in this same commit if one does.
+6. **Registry loaders** (`_CAPABILITY_REGISTRY_LOADERS`) derive from the `registry` field.
+7. **Graph kind set + readiness dispatch** (`_CAPABILITY_KINDS`, `_capability_node_readiness`)
    derive.
-7. **Adapter table**: replace the four adapters with `_DescriptorAdapter`; `CAPABILITY_ADAPTERS`
+8. **Adapter table**: replace the four adapters with `_DescriptorAdapter`; `CAPABILITY_ADAPTERS`
    derives.
-8. **Manifest decode** (site 6, part A): `CAPABILITY_FIELDS` and the session-template dispatch
-   derive; fold functions/messages unchanged (section 6).
-9. **Flip the guard test** and reconcile the sibling drift guards (section 12).
+9. **Manifest decode** (site 6, part A): `CAPABILITY_FIELDS` (accept-warn-filtered, section 6) and
+   the session-template dispatch derive; fold functions/messages unchanged.
+10. **Flip the guard test** and reconcile the sibling drift guards (section 12).
 
 The migrator's kind-participation flags stay hand-maintained throughout (section 11); no commit.
 
@@ -340,7 +379,8 @@ site derives from the descriptor." It keeps the original assertion (descriptor k
 - `set(_CAPABILITY_REGISTRY_LOADERS) == {d.kind for d in descriptors}` and each loader IS
   `d.registry`.
 - the snapshot tuple's registries ARE the descriptors' registries, in table order.
-- `CAPABILITY_FIELDS == {d.manifest_section.host_kind: (naming, config) for d ... if d.manifest_section}`.
+- `CAPABILITY_FIELDS` equals the accept-warn-filtered comprehension of section 6 (the same filter,
+  so the guard asserts exactly two entries, `vm-site` and `git-credential`, not three).
 - `d.kind_strategy is KIND_REGISTRY[d.kind]` for every descriptor (no drift).
 - non-vacuity: the table has exactly the four known kinds (so a scan that silently sees nothing
   fails loudly).
