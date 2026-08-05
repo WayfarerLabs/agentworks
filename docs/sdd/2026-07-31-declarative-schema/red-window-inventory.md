@@ -9,7 +9,7 @@ down (fixture conversion to green).
 
 ## Suite state at the close of 1.2
 
-- `566 failed, 2857 passed, 22 errors` (`uv run pytest -q` from `cli/`).
+- `565 failed, 2858 passed, 22 errors` (`uv run pytest -q` from `cli/`).
 - The 22 errors are fixture-setup hard errors (a shared fixture builds a config with a resource
   section), not a distinct failure class.
 

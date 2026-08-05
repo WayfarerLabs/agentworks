@@ -464,6 +464,7 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
 
     g.ok("Config file", str(CONFIG_PATH))
 
+    config_load_failed = False
     try:
         from agentworks.config import load_config
 
@@ -475,6 +476,7 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
         # doctor's maximal-visibility contract, instead of aborting with a
         # bare one-liner and no report.
         g.fail("Config", str(e), hint=e.hint)
+        config_load_failed = True
         # The resource-section hard error (config.toml still declares
         # resources) is exactly the mid-migration operator doctor helps most,
         # so it must NOT truncate the report to one fail row. Retry
@@ -538,7 +540,7 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
             g.warn("Manifest", issue)
     for notice in deprecated_field_notices:
         g.warn("Deprecated manifest field", notice)
-    if not config.config_issues and manifests is not None and not manifests.issues:
+    if not config_load_failed and not config.config_issues and manifests is not None and not manifests.issues:
         g.ok("Config is valid")
     # Deprecation nudges ride their own channel (so --no-deprecations
     # can silence the ambient per-command warning), but doctor is the

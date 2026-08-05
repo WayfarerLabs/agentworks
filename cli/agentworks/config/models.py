@@ -108,12 +108,6 @@ class Config:
     # (``_raise_for_resource_sections``), so it no longer rides this channel.
     deprecation_issues: tuple[str, ...] = ()
     noop_secret_backend_sections: tuple[str, ...] = ()
-    # Session-template declarations that still spell the pre-0.13 selector.
-    # config.toml can no longer declare session templates (hard error), so
-    # this is always empty from the config side now; the request boundary
-    # still combines it with manifest facts into one warning, and the
-    # manifest side carries the live values.
-    deprecated_harness_selectors: tuple[str, ...] = ()
 
     def publish_to(self, registry: Registry) -> None:
         """Publish Config's resources into ``registry`` (now a no-op).

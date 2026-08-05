@@ -123,7 +123,9 @@ def build_registry(config: Config, manifests: ManifestSet | None = None) -> Regi
 
 def harness_selector_deprecation(config: Config, manifests: ManifestSet) -> str | None:
     """Return the one combined old-selector warning, without emitting it."""
-    resources = (*config.deprecated_harness_selectors, *manifests.deprecated_harness_selectors)
+    # config.toml can no longer declare session templates (hard error), so the
+    # old selector can now only come from the manifest side.
+    resources = manifests.deprecated_harness_selectors
     if not resources:
         return None
     return (
