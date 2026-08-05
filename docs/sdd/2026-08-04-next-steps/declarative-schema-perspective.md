@@ -23,6 +23,29 @@ TOML resource path hard-errors, the loaders are relocated into the migrator as a
 verification oracle, and the fixture suite is mid-conversion under a deliberately bounded window);
 phase 2 is fully specified but not yet implemented.
 
+## Recommended Disposition: Complete Phase 1, Hold Phase 2
+
+This is the load-bearing recommendation of this perspective, and the next-steps planning should
+treat it as fixed input:
+
+- **Phase 1 should be driven to completion and considered done, independent of this SDD.** A single
+  declaration frontend is a precondition under every sequencing option the other perspectives
+  propose: you cannot cleanly model per-kind config, consolidate a descriptor, or remove the 0.14
+  compatibility shapes while two decode frontends are kept in lockstep. Phase 1 is therefore not a
+  sequencing question; it is groundwork that is nearly finished (only the bounded fixture burndown
+  remains) and should land green rather than sit paused. Next-steps design can assume the TOML
+  resource path is gone.
+- **Phase 2 should be HELD at the phase gate until this next-steps SDD settles.** Per-kind Pydantic
+  modeling is exactly where the open ownership boundaries bite: modeling the legacy harness selector
+  and then unwinding it in 0.14 is wasted work, and modeling each kind before the capability-kind
+  descriptor exists bakes in the per-kind switchboard the capability perspective wants consolidated.
+  Phase 2's decisions (the model-as-authority contract, the two-walker extraction, the tagged-union
+  assembly) are proven and should be adopted, but they should be adopted THROUGH the descriptor and
+  after the 0.14 removals, not ahead of them.
+
+In short: phase 1 clears the ground now; phase 2's design is sound but its execution should be
+resequenced into this SDD's ordering rather than run standalone.
+
 ## Executive Assessment
 
 The declarative model is the right consolidation lever, and the effort has de-risked it enough to
@@ -31,8 +54,9 @@ principle (reference extraction over malformed config, a native tagged union for
 validation timing against the finalize fold) have concrete, decided answers that hold up against the
 shipped registry contracts. The parts that remain genuinely open are ownership boundaries the
 broader next-steps work must settle: the capability-kind descriptor, the secret-source instance
-layer, and the multi-scope harness facets. This effort should land its two phases on the current
-four kinds and leave those generalizations to the design phases that own them.
+layer, and the multi-scope harness facets. The recommended disposition (above) follows directly:
+land phase 1 as a completed precondition, hold phase 2 at the phase gate, and adopt phase 2's proven
+decisions through this SDD's descriptor and removal ordering rather than as a standalone run.
 
 | Area                                            | Assessment                                       |
 | ----------------------------------------------- | ------------------------------------------------ |
