@@ -8,7 +8,8 @@ forks the per-kind assembly with the oracle: the two carry near-duplicate
 validation on purpose, so the migrator's registry-equivalence check is a
 real test of the emission mapping rather than a tautology. Phase 2's kind
 spec models dissolve this decoder side. The decoders share the leaf
-validators (``_warn_unexpected_keys``, ``_parse_env_table``, the two
+validators (``_warn_unexpected_keys``, ``_raise_unexpected_keys``,
+``_parse_env_table``, the two
 nonconforming-secret-name helpers, ``validate_name``) with the oracle, so
 the fork stays narrow. The apt / install-command decoders are the one
 exception: their emission is trivial envelope-wrapping, so they still
@@ -462,7 +463,7 @@ _SESSION_TEMPLATE_KEYS = {
 
 
 def _decode_session_template(doc: Document, spec: dict[str, Any], issues: list[str]) -> Any:
-    from agentworks.config.loaders_core import _parse_env_table
+    from agentworks.config.loaders_core import _parse_env_table, _raise_unexpected_keys
     from agentworks.sessions.template import SessionTemplate
 
     # The selector normalization (tagged harness_integration table -> the
@@ -473,9 +474,7 @@ def _decode_session_template(doc: Document, spec: dict[str, Any], issues: list[s
     # harness_integration_config. This kind is strict at its own boundary so
     # misspelled or removed fields do not degrade into warn-mode handling.
     name = doc.name
-    unexpected = sorted(set(spec) - _SESSION_TEMPLATE_KEYS)
-    if unexpected:
-        raise ConfigError(f"unexpected keys in [session_templates.{name}]: {unexpected}")
+    _raise_unexpected_keys(spec, _SESSION_TEMPLATE_KEYS, f"session_templates.{name}")
     harness_integration = spec.get("harness_integration")
     if harness_integration is not None and not isinstance(harness_integration, str):
         raise ConfigError(f"session_templates.{name}.harness_integration must be a string")

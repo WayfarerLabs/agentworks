@@ -443,7 +443,7 @@ panes you want preloaded into a session's window.
 - `--all-running` -- like `--all` but restricted to sessions whose live tmux state on the VM is OK
   (one SSH round-trip; same probe `agw session list` uses). Mutually exclusive with `--all`.
   Requires the VM to be reachable.
-- `--add-admin-shell` -- include a top-level admin-shell window as window 0.
+- `--add-admin-shell`: include a top-level admin-shell window as window 0.
 
 `console list` accepts `--vm`, `--workspace`, and `--agent` to narrow the result set. Each filter
 takes a single value or a comma-separated list (`--workspace ws1,ws2`); commas within a filter are

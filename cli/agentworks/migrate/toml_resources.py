@@ -14,10 +14,10 @@ These loaders were split out of ``agentworks.config`` (``loaders_resources``
 in full, ``loaders_sessions``'s ``_load_session_templates``,
 ``loaders_secrets``'s ``_load_secrets``, and ``loaders_core``'s
 ``_load_git_credentials``). They still import the shared leaf machinery
-(``_warn_unexpected_keys``, ``_parse_env_table``, the two nonconforming-
-secret-name helpers, ``validate_name``) from ``config``, so the fork with
-the manifest decoders (which own their per-kind validation now) shares its
-measuring stick and stays narrow.
+(``_warn_unexpected_keys``, ``_raise_unexpected_keys``, ``_parse_env_table``,
+the two nonconforming-secret-name helpers, ``validate_name``) from ``config``,
+so the fork with the manifest decoders (which own their per-kind validation
+now) shares its measuring stick and stays narrow.
 """
 
 from __future__ import annotations
@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from agentworks.agents.template import AgentTemplate
 from agentworks.config.loaders_core import (
     _parse_env_table,
+    _raise_unexpected_keys,
     _require_string_list,
     _warn_nonconforming_derived_secret,
     _warn_nonconforming_secret_name,
@@ -521,9 +522,7 @@ def _load_session_templates(
     for name, tdata in raw.items():
         if not isinstance(tdata, dict):
             raise ConfigError(f"session_templates.{name} must be a table")
-        unexpected = sorted(set(tdata) - _SESSION_TEMPLATE_KEYS)
-        if unexpected:
-            raise ConfigError(f"unexpected keys in [session_templates.{name}]: {unexpected}")
+        _raise_unexpected_keys(tdata, _SESSION_TEMPLATE_KEYS, f"session_templates.{name}")
         env: dict[str, EnvEntry] | None = None
         if "env" in tdata:
             env = _parse_env_table(

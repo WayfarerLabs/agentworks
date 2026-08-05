@@ -119,10 +119,14 @@ def _parse_git_source(url_str: str, default_filename: str) -> SourceRef:
 
 def _extract_ref(query: str) -> str:
     """Extract ref= value from a query string."""
-    params = query.split("&")
-    if len(params) != 1 or not params[0].startswith("ref=") or not params[0][4:]:
+    refs = []
+    for param in query.split("&"):
+        key, _, value = param.partition("=")
+        if key == "ref":
+            refs.append(value)
+    if len(refs) != 1 or not refs[0]:
         raise SourceRefError("git source query must contain exactly one non-empty ref parameter")
-    return params[0][4:]
+    return refs[0]
 
 
 def fetch_file(

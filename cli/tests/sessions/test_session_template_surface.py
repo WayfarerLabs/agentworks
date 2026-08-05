@@ -124,7 +124,10 @@ def _pair(body: str, name: str) -> tuple[str | None, dict[str, object] | None]:
 
 
 def test_flat_toml_restart_command_is_rejected(tmp_path: Path) -> None:
-    with pytest.raises(ConfigError, match=r"unexpected keys.*'restart_command'"):
+    with pytest.raises(
+        ConfigError,
+        match=r"unexpected keys in \[session_templates.claude\]: restart_command",
+    ):
         _oracle_row(
             tmp_path,
             """
@@ -153,7 +156,7 @@ def test_flat_toml_resume_command_is_canonical(tmp_path: Path) -> None:
 
 
 def test_local_resume_and_restart_command_conflict(tmp_path: Path) -> None:
-    with pytest.raises(ConfigError, match=r"unexpected keys.*'restart_command'"):
+    with pytest.raises(ConfigError, match=r"unexpected keys.*restart_command"):
         _oracle_rows(
             tmp_path,
             """
@@ -197,7 +200,7 @@ def test_canonical_toml_harness_integration_pair_normalizes_to_internal_pair(tmp
 
 
 def test_toml_harness_old_and_canonical_pairs_cannot_mix(tmp_path: Path) -> None:
-    with pytest.raises(ConfigError, match=r"unexpected keys.*'harness'"):
+    with pytest.raises(ConfigError, match=r"unexpected keys.*harness"):
         _oracle_rows(
             tmp_path,
             """
@@ -236,7 +239,7 @@ def test_flat_fields_with_non_shell_harness_is_an_error(tmp_path: Path) -> None:
 def test_flat_fields_with_explicit_harness_config_is_an_error(
     tmp_path: Path,
 ) -> None:
-    with pytest.raises(ConfigError, match=r"unexpected keys.*'harness_config'"):
+    with pytest.raises(ConfigError, match=r"unexpected keys.*harness_config"):
         _oracle_rows(
             tmp_path,
             """
@@ -249,7 +252,7 @@ def test_flat_fields_with_explicit_harness_config_is_an_error(
 
 
 def test_harness_config_without_harness_is_an_error(tmp_path: Path) -> None:
-    with pytest.raises(ConfigError, match=r"unexpected keys.*'harness_config'"):
+    with pytest.raises(ConfigError, match=r"unexpected keys.*harness_config"):
         _oracle_rows(
             tmp_path,
             """
@@ -306,7 +309,7 @@ def test_manifest_flat_field_is_rejected(tmp_path: Path) -> None:
           command: claude
         """,
     )
-    with pytest.raises(ConfigError, match=r"unexpected keys.*'command'"):
+    with pytest.raises(ConfigError, match=r"unexpected keys.*command"):
         load_manifests(root)
 
 

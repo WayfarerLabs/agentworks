@@ -167,7 +167,10 @@ def test_session_template_canonical_selector_is_not_a_capability_shape_deprecati
 
 
 def test_legacy_session_harness_config_without_selector_is_rejected(tmp_path: Path) -> None:
-    with pytest.raises(ConfigError, match=r"unexpected keys.*'harness_config'"):
+    with pytest.raises(
+        ConfigError,
+        match=r"unexpected keys in \[session_templates.htop\]: harness_config",
+    ):
         _load_one(
             tmp_path,
             "ownerless-config",
@@ -184,7 +187,7 @@ def test_legacy_session_harness_config_without_selector_is_rejected(tmp_path: Pa
 
 
 def test_legacy_session_harness_empty_scalar_is_rejected(tmp_path: Path) -> None:
-    with pytest.raises(ConfigError, match=r"unexpected keys.*'harness'"):
+    with pytest.raises(ConfigError, match=r"unexpected keys.*harness"):
         _load_one(
             tmp_path,
             "empty-selector",
@@ -200,7 +203,7 @@ def test_legacy_session_harness_empty_scalar_is_rejected(tmp_path: Path) -> None
 
 
 def test_legacy_session_harness_non_string_scalar_is_rejected(tmp_path: Path) -> None:
-    with pytest.raises(ConfigError, match=r"unexpected keys.*'harness'"):
+    with pytest.raises(ConfigError, match=r"unexpected keys.*harness"):
         _load_one(
             tmp_path,
             "non-string-selector",
@@ -218,7 +221,7 @@ def test_legacy_session_harness_non_string_scalar_is_rejected(tmp_path: Path) ->
 def test_legacy_session_harness_is_rejected_with_location(tmp_path: Path) -> None:
     with pytest.raises(
         ConfigError,
-        match=r"res.yaml:2:.*unexpected keys.*'harness'",
+        match=r"res.yaml:2:.*unexpected keys.*harness",
     ):
         _load_one(
             tmp_path,
@@ -235,7 +238,7 @@ def test_legacy_session_harness_is_rejected_with_location(tmp_path: Path) -> Non
 
 
 def test_session_template_old_and_canonical_selectors_cannot_mix(tmp_path: Path) -> None:
-    with pytest.raises(ConfigError, match=r"unexpected keys.*'harness'"):
+    with pytest.raises(ConfigError, match=r"unexpected keys.*harness"):
         _load_one(
             tmp_path,
             "mixed-selector",

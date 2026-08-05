@@ -28,12 +28,28 @@ def test_parse_git_source_with_subpath_and_ref() -> None:
         "git::http://example.com/repo.git",
         "git::https://x/y//../lock",
         "git::https://x/y?depth=1",
+        "git::https://x/y?ref",
         "git::https://x/y?ref=",
+        "git::https://x/y?ref=main&ref=other",
+        "git::https://x/y?ref&ref=main",
+        "git::https://x/y?ref=&ref=main",
     ],
 )
 def test_parse_source_ref_rejects_malformed_inputs(source: str) -> None:
     with pytest.raises(SourceRefError):
         parse_source_ref(source)
+
+
+@pytest.mark.parametrize(
+    ("query", "expected_ref"),
+    [
+        ("depth=1&ref=main", "main"),
+        ("ref=main&depth=1", "main"),
+    ],
+)
+def test_parse_git_source_accepts_additional_query_parameters(query: str, expected_ref: str) -> None:
+    ref = parse_source_ref(f"git::https://example.com/repo.git?{query}", default_filename="mise.lock")
+    assert ref == SourceRef("git", "https://example.com/repo.git", "mise.lock", expected_ref)
 
 
 def test_parse_git_source_applies_default_filename() -> None:
