@@ -16,6 +16,9 @@
 #  user_install_commands: []
 #  mise_activate: true
 #  mise_packages: [terraform@1.14.5]
+#  # mise_lockfile: git::https://github.com/user/infra.git//mise.lock?ref=main
+#  mise_allow_unlocked: false
+#  mise_install_before: 7d
 #  # claude_marketplaces: ["https://github.com/WayfarerLabs/nerftools#4.1.0"]
 #  # claude_plugins: [nerftools-default@nerftools]
 #  env:

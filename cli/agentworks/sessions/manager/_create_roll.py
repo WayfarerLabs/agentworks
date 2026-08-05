@@ -336,18 +336,15 @@ def _start_session_slice(
             output.warn(f"Could not capture PID for session '{name}', will auto-repair on next access")
 
     # The section is closed: the terminal result line and the
-    # post-start bookkeeping (tmuxinator regen, console add) render
+    # post-start tmuxinator regeneration renders
     # at column 0, mirroring resume_session. They stay inside the
     # outer try so a failure here still triggers the ephemeral
     # rollback (a completed session itself is never rolled back).
     mode_label = f"agent: {resolved_agent_name}" if resolved_agent_name else "admin"
     output.result(f"Session '{name}' started ({mode_label}, template: {template.name})")
 
-    # Update tmuxinator config and add to console if it exists
+    # Update the workspace's tmuxinator config.
     _mgr._regenerate_tmuxinator(db, config, vm, ws)
-    from agentworks.sessions.console import add_session_to_console
-
-    add_session_to_console(name, run_command=run_command, socket_path=sock)
 
 
 def _roll_forward(

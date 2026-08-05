@@ -9,7 +9,10 @@ import first from anywhere in the package.
 from __future__ import annotations
 
 import re
+from datetime import date
 from pathlib import Path
+
+from agentworks.errors import ConfigError
 
 CONFIG_DIR = Path.home() / ".config" / "agentworks"
 CONFIG_PATH = CONFIG_DIR / "config.toml"
@@ -190,3 +193,42 @@ def validate_vm_workspaces(path: str) -> None:
             "'/opt/agentworks/workspaces', or mount a data volume at that path (or "
             "symlink it there), rather than nesting workspaces under /home."
         )
+
+
+_MISE_DURATION_RE = re.compile(r"^[1-9][0-9]*[dhwmy]$")
+
+
+def _has_unsafe_mise_component_char(value: str) -> bool:
+    return any(char.isspace() or ord(char) < 32 or ord(char) == 127 or char in {'"', "\\"} for char in value)
+
+
+def validate_mise_settings(packages: list[str], lockfile: str | None, install_before: str, *, context: str) -> None:
+    """Validate mise inputs before they reach config rendering or provisioning."""
+    from agentworks.sources import SourceRefError, parse_source_ref
+
+    for package in packages:
+        name, separator, version = package.rpartition("@")
+        if (
+            not separator
+            or not name
+            or not version
+            or "@" in version
+            or _has_unsafe_mise_component_char(name)
+            or _has_unsafe_mise_component_char(version)
+        ):
+            raise ConfigError(f"{context}.mise_packages entries must use non-empty name@version syntax")
+
+    if lockfile is not None:
+        try:
+            parse_source_ref(lockfile, default_filename="mise.lock")
+        except SourceRefError as exc:
+            raise ConfigError(f"{context}.mise_lockfile is invalid: {exc}") from exc
+
+    if _MISE_DURATION_RE.fullmatch(install_before):
+        return
+    try:
+        date.fromisoformat(install_before)
+    except ValueError as exc:
+        raise ConfigError(
+            f"{context}.mise_install_before must be a positive duration such as '7d' or an ISO date"
+        ) from exc

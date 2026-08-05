@@ -1,5 +1,5 @@
 """Phase 5 CLI surface: `vm create --site`, the boolean
-`vm shell --platform` (with the legacy `--provisioner` alias), the
+`vm shell --platform`, the
 removed `--vm-host` / `vm-host` group, and the doctor VM-sites group.
 """
 
@@ -118,10 +118,10 @@ def test_vm_shell_platform_flag_routes_native(monkeypatch: pytest.MonkeyPatch) -
     assert captured["platform_transport"] is True
 
 
-def test_vm_shell_provisioner_alias_still_works(
+def test_vm_shell_provisioner_alias_is_removed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The legacy spelling survives one release as an alias."""
+    """The retired spelling fails like any other unknown option."""
     captured: dict[str, Any] = {}
     result = _invoke(
         monkeypatch,
@@ -129,8 +129,17 @@ def test_vm_shell_provisioner_alias_still_works(
         "agentworks.vms.manager.shell_vm",
         captured,
     )
+    assert result.exit_code != 0
+    assert "--provisioner" in _ANSI_RE.sub("", result.output)
+    assert captured == {}
+
+
+def test_vm_shell_help_only_lists_platform() -> None:
+    result = CliRunner().invoke(app, ["vm", "shell", "--help"])
+    output = _ANSI_RE.sub("", result.output)
     assert result.exit_code == 0, result.output
-    assert captured["platform_transport"] is True
+    assert "--platform" in output
+    assert "--provisioner" not in output
 
 
 def _config_stub(default_site: str | None = None) -> Any:

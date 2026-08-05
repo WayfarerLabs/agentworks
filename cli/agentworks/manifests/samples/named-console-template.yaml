@@ -1,8 +1,7 @@
 ## kind: named-console-template -- settings for named multi-session
 ## consoles created via `agw console create`. There is exactly one; the
-## envelope accepts only the name `default`. Scope: the legacy
-## `vm console` and the workspace-console template generator do NOT
-## read these values.
+## envelope accepts only the name `default`. The workspace-console
+## template generator does not read these values.
 ##
 ## tmux_layout is the layout applied to every multi-pane session window
 ## in a named console. Most values map 1:1 to tmux's built-in

@@ -121,21 +121,6 @@ def build_registry(config: Config, manifests: ManifestSet | None = None) -> Regi
     return registry
 
 
-def harness_selector_deprecation(config: Config, manifests: ManifestSet) -> str | None:
-    """Return the one combined old-selector warning, without emitting it."""
-    # config.toml can no longer declare session templates (hard error), so the
-    # old selector can now only come from the manifest side.
-    resources = manifests.deprecated_harness_selectors
-    if not resources:
-        return None
-    return (
-        f"deprecated session-template selector in: {', '.join(resources)}. "
-        "`harness` is deprecated; use `harness_integration` instead. "
-        "It will be removed in 0.14.0. Run `agw resource migrate` to rewrite these declarations. "
-        "Silence this warning with --no-deprecations."
-    )
-
-
 def load_request_registry(config: Config, manifests: ManifestSet | None = None, *, warn: bool = True) -> Registry:
     """Build a registry and render request-scoped warnings once."""
     from agentworks import output
@@ -152,6 +137,4 @@ def load_request_registry(config: Config, manifests: ManifestSet | None = None, 
         if not output.deprecations_suppressed():
             for issue in resolved.deprecation_issues:
                 output.warn(f"Manifest: {issue}")
-            if message := harness_selector_deprecation(config, resolved):
-                output.warn(message)
     return registry

@@ -5,7 +5,7 @@ These tests pin the flip from the old aggregated warning to
 ``_raise_for_resource_sections`` (fires with resource sections present at
 ``resources=True``; no error at ``resources=False`` or for a settings-only
 config), the remaining deprecation-channel content (the ``[secret_backends]``
-no-op and the ``defaults.platform`` alias), and the exempted commands that
+no-op), and the exempted commands that
 load ``resources=False`` so they can still read a config carrying resource
 sections.
 """
@@ -160,7 +160,7 @@ def test_secret_backends_keeps_its_no_op_deprecation(tmp_path: Path) -> None:
     assert config.noop_secret_backend_sections == ("[secret_backends.env-var]",)
 
 
-def test_defaults_platform_alias_stays_a_deprecation(tmp_path: Path) -> None:
+def test_defaults_platform_is_a_hard_error(tmp_path: Path) -> None:
     cfg = _config(
         tmp_path,
         """
@@ -168,8 +168,8 @@ def test_defaults_platform_alias_stays_a_deprecation(tmp_path: Path) -> None:
         platform = "azure"
         """,
     )
-    config = load_config(cfg, warn_issues=False)
-    assert any("defaults.platform is deprecated" in issue for issue in config.deprecation_issues)
+    with pytest.raises(ConfigError, match=r"unexpected keys in \[defaults\]: platform"):
+        load_config(cfg, warn_issues=False)
 
 
 # ---------------------------------------------------------------------------

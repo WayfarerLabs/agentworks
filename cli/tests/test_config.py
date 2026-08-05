@@ -256,11 +256,11 @@ def test_git_credential_name_conforming_but_derived_over_cap_warns(tmp_path: Pat
     ), issues
 
 
-def test_legacy_singleton_spelling_gets_a_pointed_hint(tmp_path: Path) -> None:
+def test_legacy_singleton_spelling_gets_a_pointed_error(tmp_path: Path) -> None:
     """A doubly-legacy ``[vm.config]`` / ``[agent.config]`` section (renamed to
     the template shape before this effort, now a resource) is not a resource
-    section in KIND_SECTIONS, so it does not hard-error; it falls to the
-    unexpected-key path, which points it at the modern YAML-manifest
+    section in KIND_SECTIONS, so it falls to the strict unexpected-key path,
+    which points it at the modern YAML-manifest
     destination rather than the generic message or the stale rename target."""
     pub = tmp_path / "id.pub"
     priv = tmp_path / "id"
@@ -281,16 +281,17 @@ def test_legacy_singleton_spelling_gets_a_pointed_hint(tmp_path: Path) -> None:
         shell = "/bin/bash"
     """)
     )
-    cfg = load_config(config_file)
-    issues = cfg.config_issues
-    assert any("[vm.config]" in i and "vm-template" in i and "resource sample" in i for i in issues), issues
-    assert any("[agent.config]" in i and "agent-template" in i for i in issues), issues
+    with pytest.raises(ConfigError) as excinfo:
+        load_config(config_file)
+    message = str(excinfo.value)
+    assert "[vm.config]" in message and "vm-template" in message and "resource sample" in message
+    assert "[agent.config]" in message and "agent-template" in message
     # The pointed hints replace, not augment, the generic "unexpected top-level
     # keys" line for these known spellings.
-    assert not any("unexpected top-level keys" in i for i in issues), issues
+    assert "unexpected top-level keys" not in message
 
 
-def test_unexpected_top_level_keys_warns(tmp_path: Path) -> None:
+def test_unexpected_top_level_keys_fail(tmp_path: Path) -> None:
     """Bare keys before any section header land at top level."""
     pub = tmp_path / "id.pub"
     priv = tmp_path / "id"
@@ -308,8 +309,29 @@ def test_unexpected_top_level_keys_warns(tmp_path: Path) -> None:
         ssh_private_key = "{priv.as_posix()}"
     """)
     )
-    cfg = load_config(config_file)
-    assert any("oops" in issue for issue in cfg.config_issues)
+    with pytest.raises(ConfigError, match="unexpected top-level keys in config: oops"):
+        load_config(config_file)
+
+
+def test_dotfiles_keeps_its_removal_guidance(tmp_path: Path) -> None:
+    pub = tmp_path / "id.pub"
+    priv = tmp_path / "id"
+    pub.write_text("key")
+    priv.write_text("key")
+    config_file = tmp_path / "config.toml"
+    config_file.write_text(
+        dedent(f"""\
+        [operator]
+        ssh_public_key = "{pub.as_posix()}"
+        ssh_private_key = "{priv.as_posix()}"
+
+        [dotfiles]
+        source = "example"
+    """)
+    )
+
+    with pytest.raises(ConfigError, match=r"\[dotfiles\] section has been removed.*\[admin.config\]"):
+        load_config(config_file)
 
 
 def test_orphaned_key_under_commented_section(tmp_path: Path) -> None:
@@ -580,8 +602,7 @@ def test_proxmox_section_absent(config_dir: Path) -> None:
         registry.lookup("vm-site", "proxmox")
 
 
-def test_user_section_deprecated_alias(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    """[user] section is accepted as a deprecated alias for [operator]."""
+def test_user_section_is_rejected(tmp_path: Path) -> None:
     pub = tmp_path / "id.pub"
     priv = tmp_path / "id"
     pub.write_text("key")
@@ -596,12 +617,46 @@ def test_user_section_deprecated_alias(tmp_path: Path, capsys: pytest.CaptureFix
     """)
     )
 
-    cfg = load_config(config_file)
-    assert cfg.operator.ssh_public_key == pub
-    assert cfg.operator.ssh_private_key == priv
-    captured = capsys.readouterr()
-    assert "deprecated" in captured.err.lower()
-    assert "[operator]" in captured.err
+    with pytest.raises(ConfigError, match="unexpected top-level keys in config: user"):
+        load_config(config_file)
+
+
+def test_code_workspaces_fails_before_default_vscode_write(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A retired path key cannot fall through to the default output directory."""
+    from typer.testing import CliRunner
+
+    from agentworks.cli import app
+
+    home = tmp_path / "home"
+    home.mkdir()
+    pub = tmp_path / "id.pub"
+    priv = tmp_path / "id"
+    pub.write_text("key")
+    priv.write_text("key")
+    config_file = tmp_path / "config.toml"
+    config_file.write_text(
+        dedent(f"""\
+        [operator]
+        ssh_public_key = "{pub.as_posix()}"
+        ssh_private_key = "{priv.as_posix()}"
+
+        [paths]
+        code_workspaces = "{tmp_path / "retired"}"
+    """)
+    )
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setattr("agentworks.config.CONFIG_PATH", config_file)
+    monkeypatch.setattr(
+        "agentworks.cli.commands.config.get_db",
+        lambda: pytest.fail("database access must happen after config validation"),
+    )
+
+    result = CliRunner().invoke(app, ["config", "sync-vscode-workspaces"])
+
+    assert result.exit_code != 0
+    assert isinstance(result.exception, ConfigError)
+    assert "unexpected keys in [paths]: code_workspaces" in str(result.exception)
+    assert not (home / "aw-vscode-workspaces").exists()
 
 
 # -- Claude plugin config validation ----------------------------------------

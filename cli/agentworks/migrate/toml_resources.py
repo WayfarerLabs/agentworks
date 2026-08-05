@@ -14,10 +14,10 @@ These loaders were split out of ``agentworks.config`` (``loaders_resources``
 in full, ``loaders_sessions``'s ``_load_session_templates``,
 ``loaders_secrets``'s ``_load_secrets``, and ``loaders_core``'s
 ``_load_git_credentials``). They still import the shared leaf machinery
-(``_warn_unexpected_keys``, ``_parse_env_table``, the two nonconforming-
-secret-name helpers, ``validate_name``) from ``config``, so the fork with
-the manifest decoders (which own their per-kind validation now) shares its
-measuring stick and stays narrow.
+(``_warn_unexpected_keys``, ``_raise_unexpected_keys``, ``_parse_env_table``,
+the two nonconforming-secret-name helpers, ``validate_name``) from ``config``,
+so the fork with the manifest decoders (which own their per-kind validation
+now) shares its measuring stick and stays narrow.
 """
 
 from __future__ import annotations
@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from agentworks.agents.template import AgentTemplate
 from agentworks.config.loaders_core import (
     _parse_env_table,
+    _raise_unexpected_keys,
     _require_string_list,
     _warn_nonconforming_derived_secret,
     _warn_nonconforming_secret_name,
@@ -196,6 +197,19 @@ def _load_admin_config(
 
     _warn_unexpected_keys(raw, _USER_CONFIG_KEYS, "admin.config", issues)
 
+    packages = _require_string_list(raw, "mise_packages", "admin.config")
+    lockfile_value = raw.get("mise_lockfile")
+    if lockfile_value is not None and not isinstance(lockfile_value, str):
+        raise ConfigError("admin.config.mise_lockfile must be a string")
+    lockfile = lockfile_value
+    install_before_value = raw.get("mise_install_before", "7d")
+    if not isinstance(install_before_value, str):
+        raise ConfigError("admin.config.mise_install_before must be a string")
+    install_before = install_before_value
+    from agentworks.config.validation import validate_mise_settings
+
+    validate_mise_settings(packages, lockfile, install_before, context="admin.config")
+
     return AdminConfig(
         name=name,
         description=str(raw["description"]) if "description" in raw else None,
@@ -207,10 +221,10 @@ def _load_admin_config(
         dotfiles_destination=str(raw.get("dotfiles_destination", "~/.dotfiles")),
         dotfiles_install_cmd=str(raw.get("dotfiles_install_cmd", "./install.sh")),
         mise_activate=bool(raw.get("mise_activate", True)),
-        mise_packages=list(raw.get("mise_packages", [])),
-        mise_lockfile=str(raw["mise_lockfile"]) if "mise_lockfile" in raw else None,
+        mise_packages=packages,
+        mise_lockfile=lockfile,
         mise_allow_unlocked=bool(raw.get("mise_allow_unlocked", False)),
-        mise_install_before=str(raw.get("mise_install_before", "7d")),
+        mise_install_before=install_before,
         mise_prune_on_reinit=bool(raw.get("mise_prune_on_reinit", True)),
         git_force_safe_directory=bool(raw.get("git_force_safe_directory", True)),
         claude_marketplaces=_require_string_list(raw, "claude_marketplaces", "admin.config"),
@@ -241,6 +255,19 @@ def _load_agent_templates(
             raise ConfigError(f"agent_templates.{name} must be a table")
         _warn_unexpected_keys(tdata, _AGENT_TEMPLATE_KEYS, f"agent_templates.{name}", issues)
 
+        packages = _require_string_list(tdata, "mise_packages", f"agent_templates.{name}")
+        lockfile_value = tdata.get("mise_lockfile")
+        if lockfile_value is not None and not isinstance(lockfile_value, str):
+            raise ConfigError(f"agent_templates.{name}.mise_lockfile must be a string")
+        lockfile = lockfile_value
+        install_before_value = tdata.get("mise_install_before", "7d")
+        if not isinstance(install_before_value, str):
+            raise ConfigError(f"agent_templates.{name}.mise_install_before must be a string")
+        install_before = install_before_value
+        from agentworks.config.validation import validate_mise_settings
+
+        validate_mise_settings(packages, lockfile, install_before, context=f"agent_templates.{name}")
+
         templates[name] = AgentTemplate(
             name=name,
             inherits=list(tdata.get("inherits", [])),
@@ -252,10 +279,10 @@ def _load_agent_templates(
             dotfiles_destination=(str(tdata["dotfiles_destination"]) if "dotfiles_destination" in tdata else None),
             dotfiles_install_cmd=(str(tdata["dotfiles_install_cmd"]) if "dotfiles_install_cmd" in tdata else None),
             mise_activate=bool(tdata["mise_activate"]) if "mise_activate" in tdata else None,
-            mise_packages=list(tdata["mise_packages"]) if "mise_packages" in tdata else None,
-            mise_lockfile=str(tdata["mise_lockfile"]) if "mise_lockfile" in tdata else None,
+            mise_packages=packages if "mise_packages" in tdata else None,
+            mise_lockfile=lockfile,
             mise_allow_unlocked=(bool(tdata["mise_allow_unlocked"]) if "mise_allow_unlocked" in tdata else None),
-            mise_install_before=(str(tdata["mise_install_before"]) if "mise_install_before" in tdata else None),
+            mise_install_before=(install_before if "mise_install_before" in tdata else None),
             mise_prune_on_reinit=(bool(tdata["mise_prune_on_reinit"]) if "mise_prune_on_reinit" in tdata else None),
             claude_marketplaces=(
                 _require_string_list(tdata, "claude_marketplaces", f"agent_templates.{name}")
@@ -466,31 +493,26 @@ def _load_secrets(
 
 
 # The legacy flat fields (``shell``'s config vocabulary) plus the canonical
-# harness-integration pair and its deprecated aliases. The flat fields keep
+# harness-integration pair. The flat fields keep
 # loading verbatim; the loader hoists them into the canonical
 # ``harness_integration = "shell"`` plus ``harness_integration_config`` shape.
 _SESSION_TEMPLATE_KEYS = {
     "inherits",
     "description",
-    "harness",
-    "harness_config",
     "harness_integration",
     "harness_integration_config",
     "command",
     "resume_command",
-    "restart_command",
     "required_commands",
     "env",
 }
-_SHELL_FLAT_FIELDS = ("command", "resume_command", "restart_command", "required_commands")
+_SHELL_FLAT_FIELDS = ("command", "resume_command", "required_commands")
 
 
 def _load_session_templates(
     data: dict[str, object],
     issues: list[str],
     decls: _SectionLineMap,
-    deprecated_harness_selectors: list[str] | None = None,
-    deprecated_restart_commands: list[str] | None = None,
 ) -> dict[str, SessionTemplate]:
     raw = data.get("session_templates", {})
     if not isinstance(raw, dict):
@@ -500,7 +522,7 @@ def _load_session_templates(
     for name, tdata in raw.items():
         if not isinstance(tdata, dict):
             raise ConfigError(f"session_templates.{name} must be a table")
-        _warn_unexpected_keys(tdata, _SESSION_TEMPLATE_KEYS, f"session_templates.{name}", issues)
+        _raise_unexpected_keys(tdata, _SESSION_TEMPLATE_KEYS, f"session_templates.{name}")
         env: dict[str, EnvEntry] | None = None
         if "env" in tdata:
             env = _parse_env_table(
@@ -508,34 +530,13 @@ def _load_session_templates(
                 context=f"session_templates.{name}",
                 issues=issues,
             )
-        harness_integration, harness_integration_config, used_old_selector = _session_harness_integration_pair(
-            name, tdata
-        )
-        if (
-            harness_integration == "shell"
-            and harness_integration_config is not None
-            and "resume_command" in harness_integration_config
-            and "restart_command" in harness_integration_config
-        ):
-            raise ConfigError(
-                f"session_templates.{name}: resume_command and restart_command cannot be combined; "
-                "use resume_command only"
-            )
-        uses_restart_command = _uses_restart_command(harness_integration, harness_integration_config)
-        if uses_restart_command:
-            if deprecated_restart_commands is not None:
-                deprecated_restart_commands.append(f"session-template/{name}")
-            assert harness_integration_config is not None
-            harness_integration_config["resume_command"] = harness_integration_config.pop("restart_command")
-        if used_old_selector and deprecated_harness_selectors is not None:
-            deprecated_harness_selectors.append(f"session-template/{name}")
+        harness_integration, harness_integration_config = _session_harness_integration_pair(name, tdata)
         templates[name] = SessionTemplate(
             name=name,
             inherits=list(tdata.get("inherits", [])),
             description=str(tdata["description"]) if "description" in tdata else None,
             harness_integration=harness_integration,
             harness_integration_config=harness_integration_config,
-            restart_command_compat=uses_restart_command,
             env=env,
             declared_at=decls.lookup("session_templates", name),
         )
@@ -545,35 +546,20 @@ def _load_session_templates(
 
 def _session_harness_integration_pair(
     name: str, tdata: dict[str, object]
-) -> tuple[str | None, dict[str, object] | None, bool]:
+) -> tuple[str | None, dict[str, object] | None]:
     """Resolve a TOML session-template's harness-integration selector/config pair.
 
-    The deprecated literals are ``harness`` and ``harness_config``. Legacy flat fields are hoisted
-    onto the ``shell`` harness integration. ``None`` on either result means "not declared here".
+    Legacy flat fields are hoisted onto the ``shell`` harness integration.
+    ``None`` on either result means "not declared here".
     """
-    old_fields = {"harness", "harness_config"} & set(tdata)
-    new_fields = {"harness_integration", "harness_integration_config"} & set(tdata)
-    if old_fields and new_fields:
-        names = ", ".join(sorted(old_fields | new_fields))
-        raise ConfigError(
-            f"session_templates.{name}: old and new harness integration selector/config fields cannot be mixed: "
-            f"{names}; "
-            "use harness_integration and harness_integration_config only"
-        )
-    old = bool(old_fields)
-    selector = "harness" if old else "harness_integration"
-    config_selector = "harness_config" if old else "harness_integration_config"
+    selector = "harness_integration"
+    config_selector = "harness_integration_config"
     flat_present = [key for key in _SHELL_FLAT_FIELDS if key in tdata]
     harness_integration_val = tdata.get(selector)
     if harness_integration_val is not None and not isinstance(harness_integration_val, str):
         raise ConfigError(f"session_templates.{name}.{selector} must be a string")
 
     if flat_present:
-        if "resume_command" in tdata and "restart_command" in tdata:
-            raise ConfigError(
-                f"session_templates.{name}: resume_command and restart_command cannot be combined; "
-                "use resume_command only"
-            )
         if harness_integration_val is not None and harness_integration_val != "shell":
             raise ConfigError(
                 f"session_templates.{name}: the legacy field(s) "
@@ -593,8 +579,6 @@ def _session_harness_integration_pair(
             blob["command"] = str(tdata["command"])
         if "resume_command" in tdata:
             blob["resume_command"] = str(tdata["resume_command"])
-        if "restart_command" in tdata:
-            blob["restart_command"] = str(tdata["restart_command"])
         if "required_commands" in tdata:
             blob["required_commands"] = _require_string_list(tdata, "required_commands", f"session_templates.{name}")
         harness_integration: str | None = "shell"
@@ -613,12 +597,7 @@ def _session_harness_integration_pair(
                 f'(a blob with no owner); add {selector} = "..."'
             )
 
-    return harness_integration, harness_integration_config, old
-
-
-def _uses_restart_command(integration: str | None, config: dict[str, object] | None) -> bool:
-    """Return whether a shell declaration uses the compatibility spelling."""
-    return integration == "shell" and config is not None and "restart_command" in config
+    return harness_integration, harness_integration_config
 
 
 def _load_git_credentials(

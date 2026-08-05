@@ -611,10 +611,6 @@ def resume_session(
         output.result(f"Session '{name}' resumed")
 
         _mgr._regenerate_tmuxinator(db, config, vm, ws)
-        # Don't re-add the session to the legacy vm-console here. The existing
-        # window's wrapper polls the session's socket indefinitely and re-attaches
-        # when the new tmux server comes back. Adding a new window here would
-        # create a duplicate.
 
 
 def stop_all_sessions(

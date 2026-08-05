@@ -106,18 +106,19 @@ cd ..
 
 This phase is blocked until 0.13.0 has shipped.
 
-- [ ] Delete the `session restart` command wrapper, warning, completion mappings, and compatibility
+- [x] Delete the `session restart` command wrapper, warning, completion mappings, and compatibility
       tests; assert the old command is unknown.
-- [ ] Delete `restart_command` normalization, warning, migrator rewrite, and old-input fixtures;
+- [x] Delete `restart_command` normalization, warning, migrator rewrite, and old-input fixtures;
       assert the old key is rejected.
-- [ ] Remove compatibility-only exceptions from the residual inventory and add release notes.
+- [x] Remove compatibility-only exceptions from the residual inventory and hand the generated 0.14.0
+      release record to the release-spanning deprecation-removal effort.
 - DoD: only canonical `resume` surfaces remain in live code and current docs; old inputs fail
   clearly; the full gate and reviews pass.
 
 ## Phase 7: Closeout
 
-- [ ] Confirm all load-bearing behavior and plugin-author guidance lives in permanent docs.
-- [ ] Create `locked.md` with the final state and release timeline.
+- [x] Confirm all load-bearing behavior and plugin-author guidance lives in permanent docs.
+- [x] Create `locked.md` with the final state and release timeline.
 - DoD: every applicable plan item is complete, permanent docs reflect HEAD, and the locked SDD is
   safe to remove without losing current-system knowledge.
 

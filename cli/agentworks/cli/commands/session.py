@@ -289,45 +289,6 @@ def session_resume(
     )
 
 
-@session_app.command("restart")
-def session_restart(
-    name: Annotated[str | None, typer.Argument(help="Session name")] = None,
-    all_stopped: Annotated[bool, typer.Option("--all-stopped", help="Resume all stopped sessions")] = False,
-    all_sessions: Annotated[bool, typer.Option("--all", help="Resume all sessions (prompts for running)")] = False,
-    vm: Annotated[str | None, typer.Option("--vm", help="Filter by VM (with --all/--all-stopped)")] = None,
-    workspace: Annotated[
-        str | None,
-        typer.Option("--workspace", help="Filter by workspace (with --all/--all-stopped)"),
-    ] = None,
-    agent: Annotated[
-        str | None,
-        typer.Option("--agent", help="Filter by agent (with --all/--all-stopped)"),
-    ] = None,
-    admin: Annotated[
-        bool,
-        typer.Option("--admin", help="Only admin-mode sessions (with --all/--all-stopped)"),
-    ] = False,
-    force: Annotated[bool, typer.Option("--force", help="Force-kill broken sessions via PID")] = False,
-    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation prompts")] = False,
-) -> None:
-    """[Deprecated] Resume a session. Use ``agw session resume`` instead."""
-    from agentworks import output
-
-    if not output.deprecations_suppressed():
-        output.warn("'agw session restart' is deprecated; use 'agw session resume'. It will be removed in 0.14.0.")
-    _resume_sessions(
-        name,
-        all_stopped=all_stopped,
-        all_sessions=all_sessions,
-        vm=vm,
-        workspace=workspace,
-        agent=agent,
-        admin=admin,
-        force=force,
-        yes=yes,
-    )
-
-
 @session_app.command("attach")
 def session_attach(
     name: Annotated[str, typer.Argument(help="Session name")],

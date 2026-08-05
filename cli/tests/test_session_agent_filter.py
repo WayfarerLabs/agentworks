@@ -295,7 +295,7 @@ def test_session_resume_admin_filter_flows_to_manager(
 
     result = CliRunner().invoke(
         app,
-        ["session", "restart", "--all-stopped", "--admin"],
+        ["session", "resume", "--all-stopped", "--admin"],
     )
     assert result.exit_code == 0, result.output
     assert captured.get("admin_only") is True
@@ -312,7 +312,7 @@ def test_session_resume_admin_and_agent_are_mutually_exclusive(
 
     result = CliRunner().invoke(
         app,
-        ["session", "restart", "--all-stopped", "--admin", "--agent", "a1"],
+        ["session", "resume", "--all-stopped", "--admin", "--agent", "a1"],
     )
     assert result.exit_code != 0
     assert "--admin" in _plain(result.output)

@@ -432,7 +432,9 @@ def test_sweep_predicts_a_harness_integration_config_secret_with_owner_usage_fra
     # finalize reaches through HARNESS_INTEGRATION_REGISTRY to walk the template's
     # harness_integration_config dependencies (the auto-declaration input).
     monkeypatch.setitem(HARNESS_INTEGRATION_REGISTRY, "scanner", _SecretHarnessIntegration)
-    template = [ManifestDoc("session-template", "scan", {"harness": "scanner"})] if declared else []
+    template = (
+        [ManifestDoc("session-template", "scan", {"harness_integration": {"name": "scanner"}})] if declared else []
+    )
     config = write_operator_config(tmp_path, '[secret_config]\nbackends = ["env-var"]\n', manifests=template)
     registry = build_registry(config)
     # Prove the parametrization actually forks the declaration path: a

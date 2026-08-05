@@ -33,10 +33,10 @@ contract it relies on (validate / construct / preflight / runup / ops) is docume
 > model or behavior decided here.
 >
 > Note (2026-08-04): `session resume` is now the canonical lifecycle command and integration method.
-> `session restart` remains a warning-producing compatibility alias in 0.13.0 and is removed in
-> 0.14.0. Similarly, `resume_command` is the canonical shell config field; `restart_command` is a
-> warning-producing compatibility input for 0.13.0. The older vocabulary below records the decision
-> as it stood when this ADR was accepted.
+> `session restart` and the `restart_command`, `harness`, and `harness_config` compatibility inputs
+> were removed in 0.14.0. `session resume`, `resume_command`, and `harness_integration` are the
+> accepted surfaces. The older vocabulary below records the decision as it stood when this ADR was
+> accepted.
 
 ## Context
 

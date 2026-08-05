@@ -1,14 +1,14 @@
-"""Tests for ``agw vm shell --provisioner``.
+"""Tests for ``agw vm shell --platform``.
 
-The provisioner-shell path uses the platform-native transport (limactl
+The platform-shell path uses the platform-native transport (limactl
 shell, wsl.exe, Azure SSH via public IP) instead of Tailscale SSH. It
 exists primarily so an operator can reach a VM to fix Tailscale itself
 (e.g. the issue #117 latched DNS state, whose heal involves stopping
 tailscaled and would terminate a Tailscale-SSH session mid-sequence).
 
 These tests pin the branching behavior in ``shell_vm`` and the typed-
-error wrapping in ``_provisioner_shell_target``. They mock the
-interactive SSH layer so the tests stay hermetic.
+error wrapping in the native transport factory. They mock the interactive
+SSH layer so the tests stay hermetic.
 """
 
 from __future__ import annotations
@@ -133,12 +133,12 @@ def _patch_common(
 # -- Tailscale-host gate ------------------------------------------------------
 
 
-def test_shell_vm_raises_when_no_tailscale_host_and_no_provisioner_flag(
+def test_shell_vm_raises_when_no_tailscale_host_and_no_platform_flag(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Existing behavior: refuse to open a Tailscale-SSH shell when the VM
-    has no Tailscale IP. The hint must now mention --provisioner as the
+    has no Tailscale IP. The hint must now mention --platform as the
     escape hatch (it's the whole reason we added the flag)."""
     from agentworks.vms import manager as vm_manager
 
@@ -154,11 +154,11 @@ def test_shell_vm_raises_when_no_tailscale_host_and_no_provisioner_flag(
     db.close()
 
 
-def test_shell_vm_provisioner_flag_bypasses_tailscale_check(
+def test_shell_vm_platform_flag_bypasses_tailscale_check(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """--provisioner is the path operators use when Tailscale isn't
+    """--platform is the path operators use when Tailscale isn't
     available (or is the thing they're trying to fix). The function must
     not raise the no-Tailscale-IP error when the flag is set."""
     from agentworks.vms import manager as vm_manager
@@ -167,14 +167,14 @@ def test_shell_vm_provisioner_flag_bypasses_tailscale_check(
     interactive_log: list[bool] = []
     _patch_common(monkeypatch, vm_manager, interactive_log=interactive_log)
 
-    def _stub_provisioner_factory(*_a: object, **_k: object) -> object:
+    def _stub_platform_factory(*_a: object, **_k: object) -> object:
         t = _stub_target()
         t.interactive = lambda *_a, **_k: interactive_log.append(True) or 0  # type: ignore[attr-defined]
         return t
 
     monkeypatch.setattr(
         "agentworks.transports.native_transport",
-        _stub_provisioner_factory,
+        _stub_platform_factory,
     )
 
     # shell_vm returns interactive()'s exit code (0, stubbed); the CLI
@@ -190,14 +190,14 @@ def test_shell_vm_provisioner_flag_bypasses_tailscale_check(
     db.close()
 
 
-# -- Provisioner-target routing ----------------------------------------------
+# -- Native-platform routing ----------------------------------------------
 
 
-def test_shell_vm_provisioner_uses_native_transport(
+def test_shell_vm_platform_uses_native_transport(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """When --provisioner is set, shell_vm must route through
+    """When --platform is set, shell_vm must route through
     ``transports.native_transport`` (fed by the bridge-dispatched
     platform's ``native_transport``), NOT the canonical
     ``transports.transport`` (which would go via Tailscale)."""
@@ -205,20 +205,20 @@ def test_shell_vm_provisioner_uses_native_transport(
 
     from agentworks.vms import manager as vm_manager
 
-    db = _seed_db(tmp_path)  # tailscale_host populated; should still route via provisioner
+    db = _seed_db(tmp_path)  # tailscale_host populated; should still route via the native platform
     interactive_log: list[bool] = []
     _patch_common(monkeypatch, vm_manager, interactive_log=interactive_log)
 
-    provisioner_calls: list[tuple[str, object]] = []
+    platform_calls: list[tuple[str, object]] = []
 
-    class _StubProvisioner:
+    class _StubPlatform:
         name = "stub"
 
         def preflight(self, ctx: object) -> None:
             return None
 
         def native_transport(self, vm: object, ctx: object, *, config: object | None = None) -> object:
-            provisioner_calls.append((getattr(vm, "name", "?"), config))
+            platform_calls.append((getattr(vm, "name", "?"), config))
             return _stub_target()
 
         @contextlib.contextmanager  # type: ignore[arg-type]
@@ -231,16 +231,16 @@ def test_shell_vm_provisioner_uses_native_transport(
     # The orchestrated root reaches the platform through the node's
     # site edge, whose only constructor is resolve_site; override the
     # conftest stub (installed by _patch_common) with this test's
-    # provisioner-shaped platform.
+    # platform-shaped stub.
     monkeypatch.setattr(
         "agentworks.vms.sites.resolve_site",
-        lambda name, registry: _StubProvisioner(),
+        lambda name, registry: _StubPlatform(),
     )
 
     # Also pin the Tailscale path so it would explode if accidentally taken.
     def _transport_must_not_be_called(*_a: object, **_k: object) -> object:
         raise AssertionError(
-            "transports.transport must not be called when --provisioner is set",
+            "transports.transport must not be called when --platform is set",
         )
 
     monkeypatch.setattr(
@@ -258,15 +258,15 @@ def test_shell_vm_provisioner_uses_native_transport(
         == 0
     )
 
-    assert len(provisioner_calls) == 1
-    assert provisioner_calls[0][0] == "vm1"
+    assert len(platform_calls) == 1
+    assert platform_calls[0][0] == "vm1"
     db.close()
 
 
-# -- Typed-error wrapping for unavailable provisioner shells ------------------
+# -- Typed-error wrapping for unavailable native transports ------------------
 
 
-def test_provisioner_shell_target_wraps_missing_native_transport(
+def test_native_transport_wraps_missing_native_transport(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -281,7 +281,7 @@ def test_provisioner_shell_target_wraps_missing_native_transport(
 
     db = _seed_db(tmp_path, platform="lima")
 
-    class _UnsupportedProvisioner:
+    class _UnsupportedPlatform:
         name = "stub"
         no_native_transport_hint = "no interactive transport here"
 
@@ -298,7 +298,7 @@ def test_provisioner_shell_target_wraps_missing_native_transport(
     with contextlib.ExitStack() as stack, pytest.raises(StateError) as exc_info:
         _native_transport(
             vm,
-            _UnsupportedProvisioner(),
+            _UnsupportedPlatform(),
             _make_config(),
             ctx=RunContext(),
             stack=stack,
@@ -310,7 +310,7 @@ def test_provisioner_shell_target_wraps_missing_native_transport(
     db.close()
 
 
-def test_provisioner_shell_target_proxmox_hint_points_at_web_console(
+def test_native_transport_proxmox_hint_points_at_web_console(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -327,7 +327,7 @@ def test_provisioner_shell_target_proxmox_hint_points_at_web_console(
 
     from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 
-    class _ProxmoxProvisioner:
+    class _ProxmoxPlatformStub:
         name = "proxmox"
         # The real platform's hint: this test pins the operator-facing
         # prose, so read it from the class rather than restating it.
@@ -344,7 +344,7 @@ def test_provisioner_shell_target_proxmox_hint_points_at_web_console(
     with contextlib.ExitStack() as stack, pytest.raises(StateError) as exc_info:
         _native_transport(
             vm,
-            _ProxmoxProvisioner(),
+            _ProxmoxPlatformStub(),
             _make_config(),
             ctx=RunContext(),
             stack=stack,
@@ -354,18 +354,18 @@ def test_provisioner_shell_target_proxmox_hint_points_at_web_console(
     assert err.entity_kind == "vm"
     hint = err.hint or ""
     # Proxmox-specific guidance: point at the web UI's serial console as
-    # the equivalent of the per-platform escape hatch other provisioners
+    # the equivalent of the per-platform escape hatch other platforms
     # have (limactl shell, wsl.exe, Azure public IP attach).
     assert "serial console" in hint
     assert "Proxmox VE web UI" in hint
     db.close()
 
 
-def test_provisioner_shell_target_opens_route_and_registers_close_for_azure(
+def test_native_transport_opens_route_and_registers_close_for_azure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """On Azure, the provisioner shell must open the scoped SSH route
+    """On Azure, the native platform shell must open the scoped SSH route
     (heal a missing public IP, converge the NSG, poke the ephemeral
     allow) AND register the allow removal as an ExitStack callback. The
     allow must come down regardless of how shell_vm unwinds (success,
@@ -382,7 +382,7 @@ def test_provisioner_shell_target_opens_route_and_registers_close_for_azure(
     open_calls: list[str] = []
     close_calls: list[str] = []
 
-    class _FakeAzureProvisioner(AzureVMPlatform):
+    class _FakeAzurePlatform(AzureVMPlatform):
         # Chain super with a minimal valid config (validate re-runs
         # at construct, so a bare {} would fail) so the base's cache slots
         # exist even though the overrides below never touch Azure.
@@ -425,7 +425,7 @@ def test_provisioner_shell_target_opens_route_and_registers_close_for_azure(
     with contextlib.ExitStack() as stack:
         target = _native_transport(
             vm,
-            _FakeAzureProvisioner(),
+            _FakeAzurePlatform(),
             _make_config(),
             ctx=RunContext(),
             stack=stack,
@@ -442,7 +442,7 @@ def test_provisioner_shell_target_opens_route_and_registers_close_for_azure(
     db.close()
 
 
-def test_provisioner_shell_target_closes_allow_on_exception_for_azure(
+def test_native_transport_closes_allow_on_exception_for_azure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -466,7 +466,7 @@ def test_provisioner_shell_target_closes_allow_on_exception_for_azure(
     close_calls: list[str] = []
 
     class _AzureRaisesAfterOpen(AzureVMPlatform):
-        # Chain super with a minimal valid config; see _FakeAzureProvisioner.
+        # Chain super with a minimal valid config; see _FakeAzurePlatform.
         def __init__(self) -> None:  # noqa: D401
             super().__init__(
                 "az-test",
@@ -509,7 +509,7 @@ def test_provisioner_shell_target_closes_allow_on_exception_for_azure(
     db.close()
 
 
-def test_provisioner_shell_target_retries_reachability_probe(
+def test_native_transport_retries_reachability_probe(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -575,16 +575,16 @@ def test_provisioner_shell_target_retries_reachability_probe(
     db.close()
 
 
-def test_provisioner_shell_target_raises_defensively_on_empty_host(
+def test_native_transport_raises_defensively_on_empty_host(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Defensive guard: if a provisioner returns an SSHTarget with host=""
+    """Defensive guard: if a platform returns an SSHTransport with host=""
     (e.g. an Azure NIC with no public IP whose heal silently failed, or a
-    future provisioner has a bug), surface a clear StateError rather than
+    future platform has a bug), surface a clear StateError rather than
     letting interactive() hang trying to ssh to an empty hostname.
 
-    Uses a non-Azure stub provisioner so the route-opening path doesn't
+    Uses a non-Azure stub platform so the route-opening path doesn't
     fire; we want to test the empty-host guard in isolation."""
     import contextlib
 
