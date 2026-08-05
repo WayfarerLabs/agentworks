@@ -78,20 +78,20 @@ generic deprecation framework remains live and tested.
 
 ## Phase 2: Older settings, option, and dead Python surfaces
 
-- [ ] Make unknown config top-level sections, `[defaults]` keys, and `[paths]` keys fail through
+- [x] Make unknown config top-level sections, `[defaults]` keys, and `[paths]` keys fail through
       ordinary validation, then delete alias consumption for `[defaults].platform`, `[user]`, and
       `[paths].code_workspaces` in the same behavior-and-documentation slice. Do not add a
       retired-key hint table.
-- [ ] Pin the `code_workspaces` safety contract with a regression proving configuration fails before
+- [x] Pin the `code_workspaces` safety contract with a regression proving configuration fails before
       any VS Code workspace file can be written to the default directory.
-- [ ] Remove `agw vm shell --provisioner` while preserving `--platform`, native transport routing,
+- [x] Remove `agw vm shell --provisioner` while preserving `--platform`, native transport routing,
       platform-specific remediation, and route cleanup behavior.
-- [ ] Remove `UserConfig` and its export, `output.phase()` and its wrapper-only test, and
+- [x] Remove `UserConfig` and its export, `output.phase()` and its wrapper-only test, and
       `env_compat.py` with its self-contained test module.
-- [ ] Update current CLI documentation, help assertions, sample config verification, and any
+- [x] Update current CLI documentation, help assertions, sample config verification, and any
       comments that teach the retired aliases. Add release-facing text that explicitly names the two
       aliases that never warned.
-- [ ] Review the slice, resolve every valid finding, and run config, VM shell, output,
+- [x] Review the slice, resolve every valid finding, and run config, VM shell, output,
       sample-config, docs, and full-gate verification.
 
 Definition of done: R4 and R6 are complete; old settings and option names fail clearly; canonical

@@ -131,7 +131,7 @@ def _render_header(title: str, level: int) -> str:
     ``--- t ---`` at level 1, plain ``t`` at level 2+.
 
     The rule characters are literal text (not ANSI), so they survive a
-    pipe, matching today's ``phase()`` output. This helper is shared by
+    pipe. This helper is shared by
     the terminal handlers so their decoration cannot drift apart.
     """
     if level == 0:
@@ -389,18 +389,6 @@ def section(title: str | None = None) -> Iterator[None]:
         yield
     finally:
         _level.reset(token)
-
-
-def phase(title: str) -> None:
-    """Emit a delineated phase header (e.g. 'Preflight', 'Provisioning').
-
-    .. deprecated::
-        Use :func:`section` instead. ``phase`` emits a bare header at the
-        current level and cannot scope a body (it does not push a level),
-        which is exactly what ``section()`` adds. Kept as a thin
-        compatibility wrapper until its call sites are converted.
-    """
-    _handler.emit(Role.HEADER, title, _current_level())
 
 
 def count(n: int, noun: str, plural: str | None = None) -> str:

@@ -205,9 +205,6 @@ def vm_shell(
         bool,
         typer.Option(
             "--platform",
-            # Legacy alias for one release. Visible in help: click has
-            # no per-alias hiding.
-            "--provisioner",
             help=(
                 "Use the platform-native transport (limactl shell, wsl.exe, "
                 "Azure public-IP SSH) instead of Tailscale SSH. Useful when "

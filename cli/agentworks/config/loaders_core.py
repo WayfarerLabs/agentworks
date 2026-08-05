@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import ipaddress
 import re
-import sys
 from pathlib import Path
 
 from agentworks.config.models import DefaultsConfig, OperatorConfig, PathsConfig
@@ -67,6 +66,14 @@ def _warn_unexpected_keys(
     if unexpected:
         keys = ", ".join(sorted(unexpected))
         issues.append(f"unexpected keys in [{section}]: {keys}")
+
+
+def _raise_unexpected_keys(raw: dict[str, object], known: set[str], section: str) -> None:
+    """Reject unexpected keys in a strict settings section."""
+    unexpected = set(raw) - known
+    if unexpected:
+        keys = ", ".join(sorted(unexpected))
+        raise ConfigError(f"unexpected keys in [{section}]: {keys}")
 
 
 def _warn_nonconforming_secret_name(name: str, *, location: str, issues: list[str]) -> None:
@@ -231,28 +238,18 @@ _OPERATOR_KEYS = {
 
 def _load_operator(data: dict[str, object], issues: list[str]) -> OperatorConfig:
     raw = data.get("operator")
-    section_name = "operator"
     if not isinstance(raw, dict):
-        # Accept [user] as a deprecated alias for [operator]
-        raw = data.get("user")
-        if isinstance(raw, dict):
-            print(
-                "WARNING: config [user] section is deprecated; rename it to [operator].",
-                file=sys.stderr,
-            )
-            section_name = "user"
-        else:
-            raise ConfigError("[operator] section is required")
+        raise ConfigError("[operator] section is required")
 
-    _warn_unexpected_keys(raw, _OPERATOR_KEYS, section_name, issues)
+    _warn_unexpected_keys(raw, _OPERATOR_KEYS, "operator", issues)
 
-    pub = _expand(str(_require(raw, "ssh_public_key", section_name)))
-    priv = _expand(str(_require(raw, "ssh_private_key", section_name)))
+    pub = _expand(str(_require(raw, "ssh_public_key", "operator")))
+    priv = _expand(str(_require(raw, "ssh_private_key", "operator")))
 
     if not pub.exists():
-        raise ConfigError(f"{section_name}.ssh_public_key does not exist: {pub}")
+        raise ConfigError(f"operator.ssh_public_key does not exist: {pub}")
     if not priv.exists():
-        raise ConfigError(f"{section_name}.ssh_private_key does not exist: {priv}")
+        raise ConfigError(f"operator.ssh_private_key does not exist: {priv}")
 
     ssh_config = Path.home() / ".ssh" / "config"
     if "ssh_config" in raw:
@@ -262,7 +259,7 @@ def _load_operator(data: dict[str, object], issues: list[str]) -> OperatorConfig
     for entry in raw.get("extra_ssh_public_keys", []):
         p = _expand(str(entry))
         if not p.exists():
-            raise ConfigError(f"{section_name}.extra_ssh_public_keys: file does not exist: {p}")
+            raise ConfigError(f"operator.extra_ssh_public_keys: file does not exist: {p}")
         extra_keys.append(p)
 
     # Extra sources allowed through the transient cloud SSH firewall
@@ -273,7 +270,7 @@ def _load_operator(data: dict[str, object], issues: list[str]) -> OperatorConfig
     # would otherwise iterate per character) a typed error too.
     raw_cidrs = raw.get("ssh_allow_cidrs", [])
     if not isinstance(raw_cidrs, list):
-        raise ConfigError(f"{section_name}.ssh_allow_cidrs must be a list of IPv4 addresses and/or CIDRs")
+        raise ConfigError("operator.ssh_allow_cidrs must be a list of IPv4 addresses and/or CIDRs")
     allow_cidrs: list[str] = []
     for entry in raw_cidrs:
         text = str(entry).strip()
@@ -281,20 +278,20 @@ def _load_operator(data: dict[str, object], issues: list[str]) -> OperatorConfig
             allow_cidrs.append(str(ipaddress.IPv4Network(text, strict=False)))
         except ValueError as exc:
             raise ConfigError(
-                f"{section_name}.ssh_allow_cidrs: invalid entry {text!r}: must be an IPv4 address or CIDR"
+                f"operator.ssh_allow_cidrs: invalid entry {text!r}: must be an IPv4 address or CIDR"
             ) from exc
 
     host_prefix = str(raw.get("ssh_host_prefix", "awvm--"))
     if not SSH_HOST_PREFIX_RE.match(host_prefix):
         raise ConfigError(
-            f"{section_name}.ssh_host_prefix must be alphanumeric with hyphens, underscores, "
+            f"operator.ssh_host_prefix must be alphanumeric with hyphens, underscores, "
             f"or dots (no whitespace or special characters), got: {host_prefix!r}"
         )
 
     agent_host_prefix = str(raw.get("ssh_agent_host_prefix", "awagent--"))
     if not SSH_HOST_PREFIX_RE.match(agent_host_prefix):
         raise ConfigError(
-            f"{section_name}.ssh_agent_host_prefix must be alphanumeric with hyphens, underscores, "
+            f"operator.ssh_agent_host_prefix must be alphanumeric with hyphens, underscores, "
             f"or dots (no whitespace or special characters), got: {agent_host_prefix!r}"
         )
 
@@ -314,27 +311,19 @@ def _load_paths(data: dict[str, object]) -> PathsConfig:
     raw = data.get("paths", {})
     if not isinstance(raw, dict):
         raise ConfigError("[paths] must be a table")
+    _raise_unexpected_keys(raw, {"vm_workspaces", "vscode_workspaces", "backups"}, "paths")
     defaults = PathsConfig()
     vm_ws = str(raw["vm_workspaces"]) if "vm_workspaces" in raw else defaults.vm_workspaces
     validate_vm_workspaces(vm_ws)
-    if "vscode_workspaces" in raw:
-        vscode_ws = _expand(str(raw["vscode_workspaces"]))
-    elif "code_workspaces" in raw:
-        vscode_ws = _expand(str(raw["code_workspaces"]))
-    else:
-        vscode_ws = defaults.vscode_workspaces
+    vscode_ws = _expand(str(raw["vscode_workspaces"])) if "vscode_workspaces" in raw else defaults.vscode_workspaces
     backups = _expand(str(raw["backups"])) if "backups" in raw else defaults.backups
     return PathsConfig(vm_workspaces=vm_ws, vscode_workspaces=vscode_ws, backups=backups)
 
 
-_DEFAULTS_KEYS = {"site", "platform", "runup_git_credentials"}
+_DEFAULTS_KEYS = {"site", "runup_git_credentials"}
 
 
-def _load_defaults(
-    data: dict[str, object],
-    issues: list[str],
-    deprecations: list[str],
-) -> DefaultsConfig:
+def _load_defaults(data: dict[str, object]) -> DefaultsConfig:
     raw = data.get("defaults", {})
     if not isinstance(raw, dict):
         raise ConfigError("[defaults] must be a table")
@@ -360,39 +349,14 @@ def _load_defaults(
             ),
         )
 
-    _warn_unexpected_keys(raw, _DEFAULTS_KEYS, "defaults", issues)
+    _raise_unexpected_keys(raw, _DEFAULTS_KEYS, "defaults")
 
     # `site` names a vm-site resource; existence is validated at the
     # composition boundary (vms.validate_sites), where the finalized
-    # registry knows every declared site. `platform` is the retired
-    # spelling, accepted as a one-release deprecated alias; its old
-    # values name the built-in and legacy-TOML sites, so the value
-    # carries over, with one translation: the old `lima` meant local
-    # Lima, whose bundled site is now named `lima-local`.
+    # registry knows every declared site.
     site = raw.get("site")
     if site is not None and (not isinstance(site, str) or not site):
         raise ConfigError("defaults.site must be a non-empty site name")
-    if "platform" in raw:
-        alias = str(raw["platform"])
-        if alias == "lima":
-            alias = "lima-local"
-        if site is not None:
-            if alias != site:
-                issues.append(
-                    f"defaults: both site ({site!r}) and the deprecated "
-                    f"platform alias ({raw['platform']!r}) are set and "
-                    f"disagree; site wins"
-                )
-        else:
-            site = alias
-        deprecations.append(
-            "defaults.platform is deprecated; rename the key to "
-            "defaults.site (old value `lima` becomes `lima-local`, the "
-            "bundled local-Lima site's new name; other values carry "
-            "over unchanged). The alias will be removed in the next "
-            "release."
-        )
-
     return DefaultsConfig(
         site=str(site) if site is not None else None,
         runup_git_credentials=bool(raw.get("runup_git_credentials", True)),

@@ -39,10 +39,6 @@ class OperatorConfig:
     ssh_allow_cidrs: list[str] = field(default_factory=list)
 
 
-#: Backward-compatible alias; prefer ``OperatorConfig``.
-UserConfig = OperatorConfig
-
-
 @dataclass(frozen=True)
 class PathsConfig:
     vm_workspaces: str = "/opt/agentworks/workspaces"
@@ -54,8 +50,7 @@ class PathsConfig:
 class DefaultsConfig:
     # Default vm-site name for `agw vm create` (validated against the
     # finalized registry by vms.validate_sites at the composition
-    # boundary). The retired `defaults.platform` key is accepted as a
-    # one-release deprecated alias.
+    # boundary).
     site: str | None = None
     # Run the git-credential runup stage: authenticate each token against
     # its provider API before it is written. Definitive rejection (401)
@@ -98,8 +93,7 @@ class Config:
     # plugins.publish_plugins / build_registry.
     enabled_system_plugins: tuple[str, ...] = ()
     config_issues: tuple[str, ...] = ()
-    # Deprecation nudges ([secret_backends.*] no-ops, the defaults.platform
-    # alias): a separate channel so real issues stay sharp for tests and
+    # Deprecation nudges ([secret_backends.*] no-ops): a separate channel so real issues stay sharp for tests and
     # callers, and so --no-deprecations can silence only these.
     # ``deprecation_issues`` holds the ambient teaching messages;
     # ``noop_secret_backend_sections`` holds the bare facts (display shapes

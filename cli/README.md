@@ -244,20 +244,19 @@ workspace's template env and the `AGENTWORKS_WORKSPACE` identity vars are not de
 platform-native transports (`limactl shell`, `wsl.exe`) drop the `env=` kwarg by design. Treat
 `--platform` as a transport-repair escape hatch, not a routine combination.
 
-`agw vm shell --platform` (legacy alias `--provisioner`, one release) opens the same shell over the
-platform-native transport (`limactl shell` for Lima, `wsl.exe` for WSL2, SSH via the VM's public IP
-for Azure) instead of Tailscale. Useful when Tailscale itself is the thing you need to reach the VM
-to fix (the issue #117 latched DNS state is the canonical case: its heal involves restarting
-tailscaled, which would terminate a Tailscale-SSH session mid-sequence). On Azure, the VM's firewall
-denies all inbound traffic at baseline; for the duration of the session an ephemeral SSH allow rule
-scoped to your detected public IP is created (one per session, so concurrent sessions never tear
-down each other's access), and removed again on exit (the public IP itself is permanent). If your
-SSH traffic egresses through a different address than the detection sees (VPN split tunnel, proxy,
-CGNAT), set `ssh_allow_cidrs` in the config's `[operator]` section to a list of IPv4 addresses
-and/or CIDRs to allow additionally; if detection fails entirely, those entries are used alone.
-Proxmox isn't supported by this flag because the QEMU guest agent's exec interface is one-shot and
-non-interactive; use the Proxmox web UI's serial console (`VM > Console` in the Proxmox VE web UI)
-as the equivalent escape hatch.
+`agw vm shell --platform` opens the same shell over the platform-native transport (`limactl shell`
+for Lima, `wsl.exe` for WSL2, SSH via the VM's public IP for Azure) instead of Tailscale. Useful
+when Tailscale itself is the thing you need to reach the VM to fix (the issue #117 latched DNS state
+is the canonical case: its heal involves restarting tailscaled, which would terminate a
+Tailscale-SSH session mid-sequence). On Azure, the VM's firewall denies all inbound traffic at
+baseline; for the duration of the session an ephemeral SSH allow rule scoped to your detected public
+IP is created (one per session, so concurrent sessions never tear down each other's access), and
+removed again on exit (the public IP itself is permanent). If your SSH traffic egresses through a
+different address than the detection sees (VPN split tunnel, proxy, CGNAT), set `ssh_allow_cidrs` in
+the config's `[operator]` section to a list of IPv4 addresses and/or CIDRs to allow additionally; if
+detection fails entirely, those entries are used alone. Proxmox isn't supported by this flag because
+the QEMU guest agent's exec interface is one-shot and non-interactive; use the Proxmox web UI's
+serial console (`VM > Console` in the Proxmox VE web UI) as the equivalent escape hatch.
 
 ### Workspaces
 
@@ -806,7 +805,7 @@ Settings sections (`config.toml`, permanent):
 
 - `[operator]` -- SSH keys (required), additional authorized keys, SSH config management
 - `[paths]` -- VM workspace, VS Code workspace file, and backup directories
-- `[defaults]`: `site`, the default vm-site for `vm create` (`platform` is the deprecated alias)
+- `[defaults]`: `site`, the default vm-site for `vm create`
 - `[session.config]` -- session defaults (history limit)
 - `[secret_config]` -- active secret backend chain (`[secret_backends.*]` sections are deprecated
   no-ops; see Secret Backends below)
