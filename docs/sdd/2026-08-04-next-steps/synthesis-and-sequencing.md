@@ -322,6 +322,32 @@ we live with it:
   the `sdd` skill as its permanent home, so future roadmap efforts follow it without reading this
   SDD. Until then, this section is the working definition.
 
+## Issue Intake (2026-08-05)
+
+A sweep of the open issue tracker pulled the following issues into the roadmap. Each carries a
+comment pointing back here so it is not worked out-of-band; issues not listed stay standalone.
+
+| Issue      | Lands in                                                                           |
+| ---------- | ---------------------------------------------------------------------------------- |
+| #76        | Wave 1 SDD closeouts (stale lockfile half only; the derive audit stays standalone) |
+| #165       | Continuous lane: the named-console-template selector SDD                           |
+| #170       | Wave 2 rider (expires metadata belongs in the envelope/metadata modeling)          |
+| #205, #212 | Design track: instance-state store and per-instance specs; future living-graph SDD |
+| #214       | Wave 2 (live samples, uniform validation; unknown keys go hard-error there)        |
+| #242       | Waves 4 and 5 (harness-owned adoption plus resume re-pointing)                     |
+| #257       | Operator-experience track (machine-readable output contract)                       |
+| #311       | Wave 2 (structural reference extraction from annotated models)                     |
+| #370       | Wave 3 (resolution-API evolution owns the batching question)                       |
+| #373       | Wave 4 (environment-appropriate defaults belong to facet config)                   |
+| #374       | Design track descriptor plus wave 3 (two-level model, not the current base class)  |
+| #387       | Waves 4 and 6 (workspace facets and features own post-clone setup)                 |
+| #390, #391 | Operator-experience track (schema-derived samples and plan A onboarding)           |
+
+Notes: #242 also picks up the 0.14 rename (it lands as `session resume --update-template`); the
+capability-contract sibling cluster #368 through #374 splits, with #370/#373/#374 rolled in and the
+platform-specific siblings staying standalone; #362 (codex enhancements) stays standalone as an
+open-ended research placeholder.
+
 ## Release Mapping
 
 - **0.14.0:** wave 0 plus wave 1. One breaking-cleanup story: single declaration frontend, expired
