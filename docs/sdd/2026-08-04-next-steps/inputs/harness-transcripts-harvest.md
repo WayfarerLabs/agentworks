@@ -13,17 +13,17 @@
 The 2026-07-29 harness-transcripts FRD was superseded in substance by
 `session-observability-perspective.md` once that document reframed transcript collection as a
 multi-source, integration-owned, best-effort event stream rather than a single write-only collector
-channel. Per the operator ruling recorded in `synthesis-and-sequencing.md`, the FRD and its branch
-are deleted once everything useful has been verifiably extracted. This document is that extraction.
+channel. Per the operator ruling recorded in `../target-state.md`, the FRD and its branch are
+deleted once everything useful has been verifiably extracted. This document is that extraction.
 
 It exists to feed two efforts on the next-steps roadmap:
 
 - **Wave 5, observability phase 1**: the event vocabulary, harness contract, and inspection surface
   that the FRD specified for transcripts, now expressed against the newer multi-source model.
 - **Wave 6, artifacts and the learning loop's write-back path**: the FRD's distillation design,
-  which `synthesis-and-sequencing.md` explicitly restores as through-line 5 (the memory-learning
-  loop) after noting it was dropped when the observability perspective reframed the collection
-  mechanism. Distillation was never superseded; only its substrate was.
+  which `../target-state.md` explicitly restores as destination 5 (the memory-learning loop) after
+  noting it was dropped when the observability perspective reframed the collection mechanism.
+  Distillation was never superseded; only its substrate was.
 
 Below, each topic notes where it lands in the roadmap and, where the newer perspective changed a
 claim rather than simply carrying it forward, says so explicitly.
@@ -200,10 +200,10 @@ The FRD's R8 specified three triggers:
 
 Distillation was required to be idempotent in effect: re-running over already-mined transcripts
 converges on "no new proposals" rather than accumulating duplicates. This wires directly into wave
-5: `synthesis-and-sequencing.md` already names the distiller as one of two consumers landing on the
-event stream shortly after wave 5 exists (the other being VM auto-suspend), so the "on session
-delete" trigger should be designed against wave 5's actual teardown and event-stream mechanics
-rather than the FRD's now-superseded collector model.
+5: `../phasing.md` already names the distiller as one of two consumers landing on the event stream
+shortly after wave 5 exists (the other being VM auto-suspend), so the "on session delete" trigger
+should be designed against wave 5's actual teardown and event-stream mechanics rather than the FRD's
+now-superseded collector model.
 
 ### 10. The distiller as a high-trust ordinary session
 
@@ -312,8 +312,8 @@ without separate tracking.
   repo process (SDD lifecycle rules, always-consider-docs). Recorded in topic 12 for completeness,
   not tracked separately.
 - **The FRD's own "resolved direction (maintainer, 2026-07-29)" framing language and terminology
-  section.** Superseded by `synthesis-and-sequencing.md`'s through-line 5, which restates the same
-  substance (topic 1) in the roadmap's current vocabulary. The underlying decision is preserved; the
-  specific wording and standalone terminology list are not reproduced verbatim here.
+  section.** Superseded by `../target-state.md`'s destination 5, which restates the same substance
+  (topic 1) in the roadmap's current vocabulary. The underlying decision is preserved; the specific
+  wording and standalone terminology list are not reproduced verbatim here.
 - **Migration notes (topic 14) as a tracked decision.** A generic, low-stakes rollout posture rather
   than new information; recorded for completeness only.
