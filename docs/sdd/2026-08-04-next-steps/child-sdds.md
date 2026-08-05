@@ -12,8 +12,8 @@ is locked.
 ### Wave 1: 2026-08-05-deprecation-removal
 
 - [x] Seeded (FRD, PR #401, reviewed with findings applied)
-- [ ] FRD merged to `main`
-- [ ] Picked up by an effort lead (HLA, plan)
+- [x] FRD merged to `main` (2026-08-05)
+- [ ] Picked up by an effort lead (HLA, plan; effort lead launched 2026-08-05)
 - [ ] Implementation complete, pre-roadmap SDD closeouts done (see `current-state.md` ledger)
 - [ ] Ships in 0.14.0 with phase 1
 - [ ] Locked
@@ -29,7 +29,7 @@ is locked.
 
 ### Design track: capability-kind descriptor contract
 
-- [ ] Contract artifact drafted (roadmap lead, in progress)
+- [x] Contract artifact drafted (`capability-descriptor-contract.md`, 2026-08-05)
 - [ ] Reviewed and merged to `main`
 - [ ] Consumed by wave 2 seeding
 
