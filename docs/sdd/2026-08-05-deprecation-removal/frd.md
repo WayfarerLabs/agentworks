@@ -6,7 +6,7 @@
 - Roadmap: `docs/sdd/2026-08-04-next-steps` (this effort is wave 1 of that roadmap; its
   deprecation-removal perspective is the source material for this FRD)
 - Related SDDs: `docs/sdd/2026-08-03-harness-integration`, `docs/sdd/2026-08-04-session-resume`,
-  `docs/sdd/2026-07-31-declarative-schema`
+  `docs/sdd/2026-07-31-declarative-schema` (lands on `main` with the phase 1 merge)
 
 ## Summary
 
@@ -35,13 +35,16 @@ gate exists to avoid.
   only by that normalization, inheritance conflict rules whose only purpose is distinguishing the
   two spellings, migration rewrites, and fixtures that exist only for the alias. A declared
   `restart_command` MUST fail as an unknown or unsupported field at the existing validation
-  boundary. `resume_command` behavior MUST be unchanged.
+  boundary, and the failure MUST be loud everywhere the field can appear, including nested inside
+  `harness_integration_config` tables in YAML manifests; it MUST NOT degrade to warn-mode
+  unknown-key handling. `resume_command` behavior MUST be unchanged.
 - **R3 (harness selectors).** The pre-0.13 session-template selectors `harness` and `harness_config`
   MUST be removed from manifest loading: old-selector normalization, mixed old-and-new conflict
   branches, aggregated old-selector facts and request warnings, doctor reporting specific to the old
   selector, and old-selector migration rewrites and compatibility fixtures. Old selectors MUST fail
-  as unknown fields. The canonical `harness_integration` tagged-table selector MUST be unchanged.
-  This is a deletion from the current decoder, not a redesign of resource modeling.
+  loudly as unknown fields, never via warn-mode unknown-key handling. The canonical
+  `harness_integration` tagged-table selector MUST be unchanged. This is a deletion from the current
+  decoder, not a redesign of resource modeling.
 - **R4 (older configuration aliases).** The following compatibility spellings MUST be removed:
   `[defaults].platform` (canonical: `site`), the top-level `[user]` section (canonical:
   `[operator]`), `[paths].code_workspaces` (canonical: `vscode_workspaces`), and
@@ -51,10 +54,11 @@ gate exists to avoid.
   can do so cheaply, the failure SHOULD name the canonical replacement. Canonical settings MUST keep
   their current behavior and defaults.
 - **R5 (vm console).** `agw vm console` MUST be removed together with its dedicated legacy
-  implementation. Reconnaissance established that it does not share code with the canonical
-  `agw console` family: it is a standalone VM-wide console module, so removal retires that module
-  after verifying no canonical caller depends on it. The canonical console command family MUST be
-  unchanged.
+  implementation and its completion-tree entries. It shares no code with the canonical `agw console`
+  family: it is a standalone VM-wide console module. One canonical caller feeds it today: session
+  create's roll-forward includes a best-effort hook that adds the new session as a window to a live
+  legacy VM console. That hook MUST be deleted with the module, so session create stops feeding the
+  legacy console. The canonical console command family MUST be unchanged.
 - **R6 (dead Python surfaces).** The unused `UserConfig` alias, the deprecated `output.phase()`
   wrapper (zero call sites), and `env_compat.py` (no production callers; retained only by its own
   tests) MUST be removed along with their exports and alias-only tests.
@@ -120,12 +124,14 @@ gate exists to avoid.
    appears in completions, help, docs, or samples.
 2. Canonical replacements behave exactly as they did in 0.13.0, verified by the existing coverage
    for `session resume`, `resume_command`, `harness_integration`, `[defaults].site`, `[operator]`,
-   `vscode_workspaces`, `--platform`, and the canonical console family.
+   `vscode_workspaces`, `--platform`, and the canonical console family. The one intended behavior
+   change beyond rejection errors: session create no longer adds new sessions to a live legacy VM
+   console (R5).
 3. An old `code_workspaces` key fails loading; no VS Code workspace file is written to the default
    directory as a silent fallback.
-4. `agw doctor` no longer references removed selectors yet still reports remaining deprecations
-   (TOML resource sections until phase 1 merges ordering resolves them, and the generic
-   discriminator shape), and `--no-deprecations` still suppresses ambient notices.
+4. `agw doctor` no longer references removed selectors yet still reports the remaining deprecation
+   (the generic capability discriminator shape; on the post-phase-1 base, TOML resource sections are
+   hard errors rather than deprecations), and `--no-deprecations` still suppresses ambient notices.
 5. The full gate passes with the alias-only tests removed and the surviving fixtures converted to
    canonical spellings.
 6. The five SDDs named in R10 are locked, with promoted permanent docs verified.
