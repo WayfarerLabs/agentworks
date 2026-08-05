@@ -164,6 +164,35 @@ Derived surfaces:
   (rendered samples load cleanly and build a registry), and any remaining checked-in derived docs
   are pinned by tests that fail when regeneration would change them.
 
+Wave 2 additions (folded in from the roadmap seed, 2026-08-05; the roadmap is
+`docs/sdd/2026-08-04-next-steps/`):
+
+- **FR18.** Structural secret-name reference extraction (rolls in issue #311). Secret references are
+  derived structurally from the model's reference-annotated fields (the `SecretRef` marker and its
+  owner-templated default), not by string-scraping the blob. This is FR6's reference typing carried
+  to secret-name derivation specifically: adding or renaming a secret-bearing field changes the
+  extracted references with no other edit, and the capabilities' current ad hoc secret-name logic is
+  deleted.
+- **FR19.** Contributed-sample uniform validation (rolls in issue #214). Operator-authored and
+  plugin-contributed manifests validate through the single model regime exactly as first-party ones
+  do, and unknown keys are hard errors there. FR12's strict closed-world direction is the resolution
+  of #214's open warn-versus-error tradeoff; there is not a second, looser validation path for
+  contributed content.
+- **FR20.** Envelope `metadata.expires` rider (rolls in issue #170). An optional `expires` field is
+  modeled once on the shared envelope `metadata` (beside `name` and `description`), so every kind
+  inherits it uniformly rather than each kind re-modeling it. This effort models and validates the
+  field only (a datetime); any behavior that acts on expiry is a separate effort and out of scope.
+- **FR21.** Forward-compatibility with the living-graph roadmap. This effort keeps open the four
+  doors the roadmap's `target-state.md` requires, and closes none: (a) reference extraction stays
+  source-agnostic (a pure function of model, blob, and owner, indifferent to whether the blob is
+  declared config or a future persisted instance spec); (b) the effective-config merge is a general
+  layer-stack operation, not a template-inheritance-only chain, so a future runtime instance-spec
+  layer composes on top; (c) the graph's post-finalize immutability stays a registry/fold property,
+  not a model-layer assumption, so a future living-graph effort can relax it without touching the
+  models; (d) nothing precludes one shared instance-state store (instance specs, facet
+  applied-state, artifact-ownership records). FR15 and FR17 already realize parts of (a) and (b);
+  FR21 records the whole set as an explicit non-regression constraint the design honors.
+
 Stretch (in scope only if phase 2 lands cleanly; may be descoped to a follow-up without
 renegotiating this FRD):
 

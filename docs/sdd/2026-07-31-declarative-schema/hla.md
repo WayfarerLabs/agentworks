@@ -1,8 +1,9 @@
 # HLA: TOML Resource Sunset and the Declarative Schema Model
 
-Date: 2026-08-01
+Date: 2026-08-01 (phase 2 framed by the descriptor contract, 2026-08-05)
 
-Status: DRAFT. Companion to [frd.md](frd.md); plan and LLDs follow.
+Status: DRAFT. Companion to [frd.md](frd.md); plan and LLDs follow. Phase 1 is on `main`; phase 2
+executes through the capability-kind descriptor (see the phase-2 callout and Component 0).
 
 ## Architecture overview
 
@@ -57,6 +58,47 @@ Small architecture, mostly deletion. Components:
   SDDs whose stance it revises).
 
 ## Phase 2: the declarative schema model
+
+> **Executed through the capability-kind descriptor (wave 2, 2026-08-05).** Phase 2 is a child of
+> the next-steps roadmap SDD, and its architecture is now framed by the roadmap's
+> `capability-descriptor-contract.md` (the authority; this HLA does not restate it, it adopts it).
+> The descriptor is the execution vehicle: Component 0 below adopts it before any schema modeling,
+> and the per-kind config models of Components 2 and 4 register into the descriptor's schema slots
+> rather than as bare `config_model` attributes. The reconciliation with this HLA's original framing
+> is recorded in the contract: keep the plan's 2.4-before-2.5 ordering (the HLA had folded hardening
+> into the kind-model swap; the split stands so the old-shape error survives the decoder swap),
+> union assembly stays at the existing post-registration boundary, and the lazier-plugin-load risk
+> transfers to the roadmap's wave 8 unchanged.
+
+### Component 0: capability-kind descriptor adoption
+
+One frozen, typed, core-owned `CapabilityKindDescriptor` per kind, registered in a single table that
+becomes the only capability-kind enumeration in the codebase. The switchboard collapses onto it:
+today's independently-enumerating sites (the adapter table, the graph's kind set and readiness
+dispatch, the per-kind registry loaders, bootstrap publication, the plugin snapshot/restore tuple,
+and manifest decode's per-kind capability branches) derive from the descriptor instead.
+`KIND_REGISTRY` and manifest decode's `KIND_SECTIONS` legitimately enumerate all resource kinds and
+stay; the descriptor's `kind_strategy` field feeds `KIND_REGISTRY` rather than replacing it. The
+migrator's kind-participation flags stay hand-maintained (the migrator is a deliberately independent
+frozen oracle; the deferred `migration_participation` field exists only for the future in which it
+derives).
+
+The descriptor also makes trust-but-verify enforceable at registration, replacing the current
+type-and-cast seam: implementation-contract conformance, required metadata, a side-effect-free
+constructibility check, required operations, per-slot model conformance, and `contract_version`
+compatibility (declared from day one so the discipline predates the first incompatible change).
+Atomic seating is preserved. This strengthens the internal extension framework; it makes no public
+plugin promise (that stays gated on the roadmap's wave 8). Secret-backend's constructed-singleton
+registry policy is a descriptor-carried interim exception that wave 3 removes; `_VMPlatformKind`
+moves in from `vms/kinds.py` for symmetry during adoption.
+
+**Schema slots.** The descriptor's config contract is a set of named schema slots, not exactly one
+model per kind. Every current kind declares a single default slot, so Components 2 and 4 proceed as
+written; slot presence IS the support claim (no separate support flag can disagree). The slot layer
+exists for the roadmap's wave-4 harness facets (one slot per facet, presence = support), added then
+without reshaping the descriptor. This is the one deliberate deviation from this HLA's single-model
+framing, chosen because the cost now is a naming layer while retrofitting multi-model kinds after
+wave 2 would re-migrate every registration site.
 
 ### Component 1: the schema foundation
 

@@ -6,16 +6,14 @@ Status: DRAFT (authored alongside the FRD and HLA; implementation gated, see pre
 
 ## How to work this plan
 
-- **Split delivery (revised 2026-08-04).** Originally one branch and PR
-  (`feat/declarative-schema-sdd`, PR #316) for both phases. Phase 2 is now HELD at the phase gate
-  pending the next-steps SDD (`docs/sdd/2026-08-04-next-steps/`), which owns the capability-kind
-  descriptor and the 0.14 compatibility removals that per-kind modeling should follow rather than
-  precede (see that SDD's declarative-schema perspective). Because phase 1 (the TOML sunset) is a
-  precondition under every next-steps sequencing and carries independent standalone value, it MERGES
-  TO MAIN ON ITS OWN via PR #316 (SDD artifacts included), once the red window is closed and phase
-  1's records land. Phase 2 becomes a later feature branch tracking this same plan when next-steps
-  unblocks it; the SDD is not locked (no `locked.md`) until phase 2 completes. This is the SDD
-  skill's multi-branch model.
+- **Split delivery.** Phase 1 (the TOML sunset) merged to main on its own via PR #316 (2026-08-05),
+  as a precondition that carries independent standalone value. Phase 2 was then HELD at the phase
+  gate pending the next-steps roadmap SDD (`docs/sdd/2026-08-04-next-steps/`), which owned the
+  capability-kind descriptor and the 0.14 compatibility-removal ordering. **The hold is released as
+  of 2026-08-05** (descriptor contract PR #405, removals PR #406; see the phase-2 callout below);
+  phase 2 runs on the `feat/declarative-schema-phase2` branch as a child of that roadmap. The SDD
+  stays unlocked (no `locked.md`) until phase 2 completes, then locks summarizing both phases. This
+  is the SDD skill's multi-branch model.
 - The suite stays green at every step, with ONE deliberate, operator-approved exception: step 1.2's
   config-load hard error breaks ~58 test fixtures that declare resources in TOML, and the operator
   chose (2026-08-04) a bounded red window over the additive-first alternative. So the core 1.2
@@ -117,13 +115,63 @@ enumerated by 1.2f (operator-approved bounded window, see the preamble). The ste
 
 ## Phase 2: the declarative schema model
 
-> **HELD at the phase gate (2026-08-04).** Phase 1 merges to main on its own; phase 2 does not start
-> until the next-steps SDD (`docs/sdd/2026-08-04-next-steps/`) settles the capability-kind
-> descriptor and the 0.14 compatibility-removal ordering. Phase 2's decisions below are proven and
-> stand, but they should be executed THROUGH that SDD's descriptor and after the 0.14 removals, not
-> ahead of them (modeling the legacy harness selector only to unwind it, or baking in the per-kind
-> switchboard before the descriptor exists, is the waste this gate avoids). Resume on a fresh
-> feature branch tracking this plan when next-steps unblocks it.
+> **HOLD RELEASED (2026-08-05).** The phase gate is lifted: the next-steps roadmap SDD
+> (`docs/sdd/2026-08-04-next-steps/`) settled both prerequisites. The capability-kind descriptor
+> contract merged via PR #405 (`capability-descriptor-contract.md`, the authority for step 2.0
+> below), and the 0.14 compatibility removals landed and locked via PR #406
+> (`docs/sdd/2026-08-05-deprecation-removal/`). Phase 2 (wave 2 in the roadmap) now executes on the
+> `feat/declarative-schema-phase2` branch. This SDD is a child of that roadmap: the roadmap lead
+> reviews these PRs before merge and tracks status from merged PRs (this SDD does not edit the
+> roadmap ledger); inconsistencies found in roadmap or sibling SDDs are flagged, not edited.
+>
+> Two structural changes the roadmap seed folds into this plan, integrated below. (1) Phase 2
+> executes THROUGH the descriptor: a new **step 2.0** adopts it before the schema foundation. (2)
+> Per-kind config models register into named **schema slots** (every current kind uses a single
+> default slot, so 2.1/2.3/2.5 proceed as planned), and registration carries `contract_version` and
+> registration-time conformance from day one. The removals having landed first discharges the
+> harness-selector-shim and `restart_command` coordination notes in 2.5 (confirmed in code at
+> seeding); the 2.4-before-2.5 hardening order stands (the generic sibling-shape deprecation is
+> still live on main, so 2.4 is real work). The four open doors from the roadmap's `target-state.md`
+> (source-agnostic extraction, layer-stack merge, graph immutability as a registry/fold property,
+> one instance-state store) are honored, not closed; see FR21.
+
+### 2.0 Descriptor adoption (step zero)
+
+Adopt the capability-kind descriptor per
+`docs/sdd/2026-08-04-next-steps/capability-descriptor-contract.md` before any schema modeling.
+Always-green and mechanical: stand up the descriptor table from the existing wiring, then derive one
+switchboard site at a time with the full gate passing after each. `KIND_REGISTRY` and manifest
+decode's `KIND_SECTIONS` legitimately enumerate all resource kinds and STAY; only the duplicative
+per-kind capability branches are derivation targets. Secret-backend's constructed-singleton registry
+policy is recorded as an explicit descriptor-carried interim exception (wave 3 removes it);
+`_VMPlatformKind` moves in from `vms/kinds.py` for symmetry.
+
+- [ ] `descriptor-adoption-lld.md` written and reviewed: the frozen `CapabilityKindDescriptor`
+      record shape (day-one fields per the contract, deferred fields recorded with their triggers),
+      the single descriptor table as the only capability-kind enumeration, the generic adapter
+      parameterized by descriptor (replacing the four hand-written five-method adapters), and the
+      registration-time conformance checks (`implementation_contract`, required metadata,
+      side-effect-free constructibility, required ops, per-slot model conformance,
+      `contract_version`) that replace the current type-and-cast seam. Settles the contract's open
+      questions carried to the seed: the constructibility check shape, slot-vocabulary naming (and
+      whether the default slot is spelled in single-slot kinds), and whether the four entry
+      dataclasses unify behind a generic entry or stay per-kind behind `entry_factory`.
+- [ ] Descriptor table introduced, populated from existing wiring; full gate green (no site derives
+      yet, table is additive).
+- [ ] Each switchboard site derived from the descriptor, one commit per site, full gate green after
+      each: the adapter table (`plugins/adapters.py` `CAPABILITY_ADAPTERS`), the graph kind set and
+      readiness dispatch (`resources/graph.py` `_CAPABILITY_KINDS`, `_capability_node_readiness`),
+      the per-kind registry loaders (`resources/graph.py` `_CAPABILITY_REGISTRY_LOADERS`), bootstrap
+      publication (`bootstrap.py`), and the plugin snapshot/restore tuple (`plugins/registration.py`
+      `_capability_registries`). Manifest decode's per-kind capability branches derive too, except
+      the phase-1 interim decode fork the LLD scopes to 2.5. The migrator's kind-participation flags
+      stay hand-maintained (deferred `migration_participation` field; the migrator is a deliberately
+      independent frozen oracle).
+- [ ] The guard test (`tests/plugins/test_plugin_framework.py`
+      `test_capability_adapters_keys_match_the_capability_category_kinds`) flips from "detect an
+      omitted site" to "assert every site derives from the descriptor"; the sibling drift guards
+      (`test_recipe_gate_drift.py`, `test_harness_integration_gate_drift.py`) are reconciled.
+- [ ] Reviewer pass on the whole step; findings fixed. (Roadmap lead reviews the PR before merge.)
 
 ### 2.1 Schema foundation
 
@@ -138,6 +186,12 @@ enumerated by 1.2f (operator-approved bounded window, see the preamble). The ste
 - [ ] pydantic dependency added; mypy plugin enabled; strict mypy green across the repo.
 - [ ] `pydantic` and related vocabulary promoted from the SDD cspell dictionary to the root
       dictionary (it now appears in permanent code).
+- [ ] Structural secret-name reference extraction (issue #311): the `SecretRef` marker carries the
+      owner-templated default name, and `extract_references` derives secret references structurally
+      from the annotated model fields rather than by string-scraping the blob. This is the
+      model-layer replacement for the ad hoc secret-name derivation the capabilities do today;
+      pinned by a test that a renamed/added secret field changes the extracted references with no
+      other edit.
 
 ### 2.2 Error bridge
 
@@ -165,16 +219,24 @@ enumerated by 1.2f (operator-approved bounded window, see the preamble). The ste
       resolvability prediction, and dependency listings; readiness/enablement propagation across it
       is this LLD's policy call), and the retirement of the session resolver's use-time completeness
       call (`sessions/templates.py::_validate_merged`) in favor of the finalize pass.
-- [ ] Per-capability models declared and registered via `config_model` (empty-config shared model
-      where applicable). Inventory re-enumerated 2026-08-02, still re-check at implementation:
-      vm-platform lima, wsl2, azure-vm (including the nested `service_principal` model), proxmox,
-      aws-ec2 (new, renamed from ec2 by PR #363; nested `credentials` model with `access_key_secret`
-      as a `SecretRef` defaulting to the well-known name, plus the `instance_types` catalog);
-      git-credential-provider github (scope union: repos/owner mutual exclusion as a model
-      validator; `token` as `SecretRef` with the `git-token-{owner}` template), azdo;
-      harness-integration (the kind renamed by PR #383) shell (config: command, resume_command,
-      required_commands; the deprecated restart_command alias is the session-resume SDD's to
-      remove), claude-code, codex (`extra_args` list plus flag fields); secret backends env-var,
+- [ ] Per-capability models registered into the descriptor's **default schema slot** (the
+      slot-shaped registration from step 2.0; every current kind is single-slot, so this is
+      `config_model` under a naming layer, and slot presence is the support claim). Registration
+      carries `contract_version` (day-one, operator ruling) and passes the registration-time
+      conformance checks from 2.0 (implementation-contract, metadata, constructibility, required
+      ops, per-slot model conformance) that replace the retired type-and-cast seam. The
+      secret-backend `mapping_model` registers as that kind's default slot; its
+      constructed-singleton instance policy stays the descriptor-carried interim exception (wave 3
+      re-homes it, not this effort). Empty-config capabilities register the shared empty model.
+      Inventory re-enumerated 2026-08-02, still re-check at implementation: vm-platform lima, wsl2,
+      azure-vm (including the nested `service_principal` model), proxmox, aws-ec2 (new, renamed from
+      ec2 by PR #363; nested `credentials` model with `access_key_secret` as a `SecretRef`
+      defaulting to the well-known name, plus the `instance_types` catalog); git-credential-provider
+      github (scope union: repos/owner mutual exclusion as a model validator; `token` as `SecretRef`
+      with the `git-token-{owner}` template), azdo; harness-integration (the kind renamed by PR
+      #383) shell (config: command, resume_command, required_commands; the `restart_command` alias
+      was removed by the session-resume SDD before wave 2, so shell's config is just those three
+      fields), claude-code, codex (`extra_args` list plus flag fields); secret backends env-var,
       prompt (no mapping), onepassword (mapping is itself a union: `op://` string or
       account/reference table).
 - [ ] Core-driven validation and extraction wired: registry name-to-model maps per capability kind;
@@ -202,10 +264,9 @@ enumerated by 1.2f (operator-approved bounded window, see the preamble). The ste
       GENERALIZATION of the migrator's shipped YAML-rewrite machinery (PR #383's `YamlRewrite`:
       ruamel round-trip with document-marker text patching, digest/CAS guards, backup-first
       rollback, YAML-native units), extended from the bespoke session-template selector fold to the
-      platform/provider sibling fold. Coordination is part of this LLD: the legacy
-      `harness`/`harness_config` selector's hard cut belongs to the harness-integration SDD's 0.14.0
-      phase and the `restart_command` removal to the session-resume SDD; this step must neither
-      remove nor break their still-supported warning paths if it lands first.
+      platform/provider sibling fold. (The harness-selector and `restart_command` removals already
+      landed in wave 1, so the earlier cross-SDD coordination is discharged; this step is scoped to
+      the still-live `platform`/`platform_config` and `provider`/`provider_config` sibling shapes.)
 - [ ] Old sibling shape (`platform` + `platform_config`, `provider` + `provider_config`) becomes a
       hard error naming the exact rewrite; #349's dual-shape normalization, its aggregated warning
       channel (`ManifestSet.deprecation_issues` for shape), and the bundle-gate special case are
@@ -219,16 +280,24 @@ enumerated by 1.2f (operator-approved bounded window, see the preamble). The ste
       per the LLD's decided policy; result loads clean; idempotent re-run is a no-op).
 - [ ] The hardening commit carries the breaking-change marker and an operator upgrade note (run the
       manifest-upgrade mode) for release-please.
+- [ ] Decide `agw resource migrate`'s future (the roadmap hands this decision to wave 2). Options:
+      it stays as the frozen TOML-to-YAML oracle plus the new manifest-upgrade mode, or it retires
+      once the last legacy shape is gone. Record the decision and its rationale here; if it retires,
+      that is its own commit with an operator note. Note the descriptor's deferred
+      `migration_participation` field exists precisely for the "migrate survives and derives from
+      the live descriptor" branch, against the counterargument that the migrator is a deliberately
+      independent frozen oracle.
 
 ### 2.5 Kind spec models replace the decoders
 
 - [ ] `kind-spec-models-lld.md` written and reviewed: the per-kind model-vs-thin-wrapper calls,
       semantic-validator placement (name/length caps, cross-field rules), and the decode entry point
-      contract the swap preserves. The session-template model must absorb or sequence around the
-      bespoke `_normalize_session_harness_selector` decode shim (the legacy `harness` selector's
-      warning path, owned by the harness-integration SDD until its 0.14.0 removal) and the
-      `restart_command` alias (session-resume SDD); if those removals land first, the shims are
-      simply gone, else the model keeps their behavior byte-compatible.
+      contract the swap preserves. The session-template model is simpler than earlier drafts
+      assumed: the legacy `harness`/`harness_config` selector shim and the `restart_command` alias
+      were both removed in wave 1 (confirmed in code at seeding), so the model has no compatibility
+      shim to absorb. It covers the canonical `harness_integration` tagged surface only. The phase-1
+      interim decode fork this step also resolves (how much the 2.0 descriptor adoption already
+      absorbed is settled in the 2.0 LLD; the remainder lands here).
 - [ ] Kind-by-kind migration behind the stable decode entry points, smallest first to bed in the
       pattern: apt-package, apt-source, system/user-install-command, workspace-template,
       named-console-template, admin-template, agent-template, vm-template, secret, git-credential,
@@ -241,6 +310,11 @@ enumerated by 1.2f (operator-approved bounded window, see the preamble). The ste
       `strip_source_fields` stops silently no-oping when decl classes become models).
 - [ ] Decl classes are frozen models (or thin wrappers where behavior-rich; per-kind LLD calls),
       with `DeclaredResource`'s hooks preserved for the registry.
+- [ ] `metadata.expires` rider (issue #170): model the optional `expires` field once on the shared
+      envelope `metadata` (alongside `name` / `description`), not per kind, so every kind inherits
+      it uniformly. Scope is the modeling and validation of the field (a datetime, TOML/YAML native
+      or RFC 3339 string); any behavior that acts on expiry is out of scope and left to its own
+      effort. Pinned by a test that the field validates on any kind and rejects a malformed value.
 
 ### 2.6 Model-layer defaulting (FR15)
 
@@ -281,9 +355,15 @@ enumerated by 1.2f (operator-approved bounded window, see the preamble). The ste
       manifest path, and builds a registry; fixture-schema renderer unit tests).
 - [ ] `agw resource describe` (or the sibling surface the LLD names) renders the field reference for
       kinds and capabilities from the same stream; completions updated for any new command or
-      argument surface.
+      argument surface. The `agw resource schema` / describe surface NAMES are settled here (open in
+      the phase-2 plan and left open by the descriptor contract), coordinated with the roadmap's
+      onboarding-and-discovery child SDD, since those surfaces are its raw material.
 - [ ] Prose blurbs authored for every bundled kind and capability (content lifted from today's
       samples' narrative lines, field lists dropped).
+- [ ] Contributed-sample uniform validation (issue #214): operator-authored and plugin-contributed
+      manifests validate through the one model regime, and unknown keys are hard errors there
+      (FR12's strict direction resolves #214's open warn-vs-error tradeoff). Pinned by a test that a
+      contributed sample with an unknown key fails validation the same way a first-party one does.
 
 ### 2.9 Pointer sweep and docs promotion (FR16, FR4 tail)
 
@@ -291,13 +371,15 @@ enumerated by 1.2f (operator-approved bounded window, see the preamble). The ste
       the rendered sample / describe surfaces; redundant hand-stated field lists deleted
       (narrative-necessary ones may stay).
 - [ ] Permanent-doc promotion: `capabilities/README.md` rewritten for the declare-schema contract
-      (the invoked-validation sections and their standing deprecation notes retire);
-      `capabilities/harness_integration/README.md` (the harness developer guide, added 2026-08-02
-      and renamed with the kind, whose `validate`/`dependencies` sections document the retired
-      contract) updated the same way; `cli/agentworks/plugins/README.md` documents `config_model`
-      for plugin capability authors; `docs/guides/resources.md` updated; the superseding ADR
-      extended or a sibling ADR added for the schema model if the phase 1 ADR did not already cover
-      it.
+      AND the capability-kind descriptor (the single kind-enumeration table, schema slots,
+      registration-time conformance, `contract_version`) so the descriptor contract has a permanent
+      home once the roadmap SDD is gone; the invoked-validation sections and their standing
+      deprecation notes retire; `capabilities/harness_integration/README.md` (the harness developer
+      guide, added 2026-08-02 and renamed with the kind, whose `validate`/`dependencies` sections
+      document the retired contract) updated the same way; `cli/agentworks/plugins/README.md`
+      documents the slot-shaped registration for plugin capability authors;
+      `docs/guides/resources.md` updated; the superseding ADR extended or a sibling ADR added for
+      the schema model and the descriptor if the phase 1 ADR (0022) did not already cover it.
 - [ ] Dated lockfile entries: resource-manifests (Phase 5.7 invoked-validation contract retired;
       sample machinery replaced) and vm-sites (its "schema-registration is future work" deferral
       resolved).
@@ -315,9 +397,13 @@ enumerated by 1.2f (operator-approved bounded window, see the preamble). The ste
 
 - [ ] Full-suite gates green; end-to-end live verification (fresh config init, sample-driven
       resource authoring with editor schema association, vm-site declare, migrate fixture, doctor).
-- [ ] Final `agentworks-reviewer` pass over the whole branch; findings fixed.
-- [ ] `locked.md` written summarizing final state, decisions, and deviations; PR #316 to non-draft;
-      Copilot review triaged.
+- [ ] Final `agentworks-reviewer` pass over the whole phase-2 branch; findings fixed. (The roadmap
+      lead reviews the phase-2 PRs before merge; this SDD does not edit the roadmap ledger, the
+      roadmap lead checks off wave-2 status from the merged PRs.)
+- [ ] `locked.md` written summarizing final state across BOTH phases, decisions, and deviations; the
+      descriptor-contract concepts, the schema-model contract, and the four honored doors promoted
+      to permanent homes (see 2.9) so the locked SDD is deletable; phase-2 PR ready; Copilot /
+      roadmap-lead review triaged. The roadmap SDD locks separately once every child does.
 
 ## Pressure-test notes (what writing this plan surfaced)
 
