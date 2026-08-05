@@ -302,6 +302,14 @@ we live with it:
 - The roadmap SDD stays open until every child SDD is closed, then locks. Its ledger is the
   program's source of truth for what is spawned, in flight, blocked, and done, the same role plan
   checkboxes play in an ordinary SDD, one level up.
+- All program state lives on `main` so it is visible across the individual SDD tracks: every change
+  (a new child SDD, a status change, a design revision) is a PR merged to `main`, and child SDDs
+  point back to this roadmap SDD so the program is discoverable from any effort.
+- Division of labor (operator ruling, 2026-08-05): the roadmap lead seeds each child SDD with its
+  FRD, plus critical architectural constraints the program has already settled, but not the full HLA
+  and not the plan. A separately launched effort lead picks the SDD up from `main` on a new branch
+  and owns its HLA, plan, and implementation per the standard development process. The roadmap lead
+  reviews each child SDD's PRs before merge.
 
 ## Release Mapping
 
