@@ -6,13 +6,21 @@ Status: DRAFT (authored alongside the FRD and HLA; implementation gated, see pre
 
 ## How to work this plan
 
-- One feature branch and PR (`feat/declarative-schema-sdd`, PR #316); phases land as ordered commits
-  on it. The suite stays green at every step, with ONE deliberate, operator-approved exception: step
+- **Split delivery (revised 2026-08-04).** Originally one branch and PR (`feat/declarative-schema-sdd`,
+  PR #316) for both phases. Phase 2 is now HELD at the phase gate pending the next-steps SDD
+  (`docs/sdd/2026-08-04-next-steps/`), which owns the capability-kind descriptor and the 0.14
+  compatibility removals that per-kind modeling should follow rather than precede (see that SDD's
+  declarative-schema perspective). Because phase 1 (the TOML sunset) is a precondition under every
+  next-steps sequencing and carries independent standalone value, it MERGES TO MAIN ON ITS OWN via
+  PR #316 (SDD artifacts included), once the red window is closed and phase 1's records land. Phase 2
+  becomes a later feature branch tracking this same plan when next-steps unblocks it; the SDD is not
+  locked (no `locked.md`) until phase 2 completes. This is the SDD skill's multi-branch model.
+- The suite stays green at every step, with ONE deliberate, operator-approved exception: step
   1.2's config-load hard error breaks ~58 test fixtures that declare resources in TOML, and the
   operator chose (2026-08-04) a bounded red window over the additive-first alternative. So the core
   1.2 production change lands first (suite red on a tracked, enumerated set of fixture files), and
   step 1.2f converts those fixtures back to green by area. The window is CLOSED (suite fully green)
-  before step 1.2 is checked off; phase 1 does not complete red.
+  before step 1.2 is checked off; phase 1 does not merge red.
 - Each numbered step is delegated to an `agentworks-dev` subagent (LLD first where one is called
   for, then implementation), then reviewed by `agentworks-reviewer` before its boxes are checked.
 - Every step's definition of done includes the standing gates: `ruff check`, `ruff format --check`,
@@ -107,6 +115,14 @@ enumerated by 1.2f (operator-approved bounded window, see the preamble). The ste
 - [ ] Reviewer pass on the whole phase; findings fixed.
 
 ## Phase 2: the declarative schema model
+
+> **HELD at the phase gate (2026-08-04).** Phase 1 merges to main on its own; phase 2 does not start
+> until the next-steps SDD (`docs/sdd/2026-08-04-next-steps/`) settles the capability-kind descriptor
+> and the 0.14 compatibility-removal ordering. Phase 2's decisions below are proven and stand, but
+> they should be executed THROUGH that SDD's descriptor and after the 0.14 removals, not ahead of
+> them (modeling the legacy harness selector only to unwind it, or baking in the per-kind switchboard
+> before the descriptor exists, is the waste this gate avoids). Resume on a fresh feature branch
+> tracking this plan when next-steps unblocks it.
 
 ### 2.1 Schema foundation
 
