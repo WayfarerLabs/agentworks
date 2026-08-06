@@ -50,10 +50,10 @@ identifies all wave 2 gates, and has no unresolved review finding.
 - [x] The guide LLD inventories documented, unambiguous Claude Code and Codex environment
       signatures; pins explicit flag, signature, then TTY detection precedence; rejects general
       configuration and secret variables as signatures; and tests `--human` for piped output.
-- [ ] Immutable `TopicContribution`, typed anchors, and closed block records implemented with strict
+- [x] Immutable `TopicContribution`, typed anchors, and closed block records implemented with strict
       registration validation; unknown fields, duplicate slugs, broken links, placeholder syntax,
       and executable contributions rejected.
-- [ ] `GuideView` implemented over finalized registry and graph facts with no capability object,
+- [x] `GuideView` implemented over finalized registry and graph facts with no capability object,
       secret resolver, raw config, run target, mutation, or arbitrary traversal surface.
 - [ ] Tests prove rendering performs no probe, secret resolution, capability invocation, finalize,
       or mutation and rejects an expression-evaluation attempt from plugin content.
