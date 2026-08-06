@@ -31,7 +31,7 @@ from agentworks.capabilities.descriptor import (
 )
 from agentworks.capabilities.publish import publish_capability_rows
 from agentworks.errors import StateError
-from agentworks.manifests.decode import CAPABILITY_FIELDS
+from agentworks.manifests.decode import capability_fields
 from agentworks.resources.graph import Readiness, _capability_node_readiness
 from agentworks.resources.kind import KIND_REGISTRY
 from agentworks.resources.registry import Registry
@@ -275,17 +275,19 @@ def test_vm_platform_readiness_carries_the_host_support_sentence() -> None:
 
 
 def test_manifest_sections_match_the_decoders_host_surfaces() -> None:
-    """The host pairs are exactly decode's ``CAPABILITY_FIELDS``, and only
-    for the accept-warn surfaces: session-template hardened to the tagged
-    shape in wave 1 and is handled by its own decoder branch, so folding it
-    into ``CAPABILITY_FIELDS`` would be a real behavior change."""
-    accept_warn = {
-        d.manifest_section.host_kind: (d.manifest_section.naming_field, d.manifest_section.config_field)
-        for d in _descriptors()
-        if d.manifest_section is not None and d.manifest_section.legacy_string_shape == "accept-warn"
+    """Decode's accept-warn capability fields are exactly the two pairs they
+    have always been.
+
+    Spelled out rather than recomputed from the descriptors, because decode
+    now DERIVES the table from them (accept-warn-filtered): comparing the
+    derivation against itself would only prove a comprehension runs. The
+    filter is what this pins. session-template is a host surface too, but it
+    hardened to the tagged shape in wave 1 and keeps its own rejecting fold,
+    so a third entry here would be a real behavior change."""
+    assert dict(capability_fields()) == {
+        "vm-site": ("platform", "platform_config"),
+        "git-credential": ("provider", "provider_config"),
     }
-    assert accept_warn == CAPABILITY_FIELDS
-    assert set(accept_warn) == {"vm-site", "git-credential"}
 
     hardened = {d.kind: d.manifest_section for d in _descriptors() if d.manifest_section is not None}
     assert hardened["harness-integration"].host_kind == "session-template"

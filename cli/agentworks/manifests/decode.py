@@ -30,13 +30,16 @@ sides cannot disagree about what maps to what.
 
 from __future__ import annotations
 
+from functools import cache
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 from agentworks.errors import AgentworksError, ConfigError
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
 
+    from agentworks.capabilities.descriptor import HostSurface
     from agentworks.config import _SectionLineMap
     from agentworks.env import EnvEntry
     from agentworks.manifests.envelope import Document
@@ -66,21 +69,59 @@ KIND_SECTIONS: dict[str, tuple[str, ...]] = {
 }
 
 
-# Kind identifier -> (naming field, sibling config field) for the three
-# hosting surfaces whose spec selects a capability and hands it a config
-# blob. The canonical manifest shape is one tagged table on the naming
-# field (``platform: {name: lima, vm_host: ...}``; ``name`` selects the
-# capability, the remaining keys are its config). The old sibling shape
-# (``platform: lima`` plus ``platform_config: {...}``) still loads but
-# is deprecated for removal; ``_normalize_capability_field`` folds the
-# tagged shape back into the sibling pair so the decoders and the shared
-# TOML loaders underneath them see one internal shape. The secret kind's
-# ``backend_mappings`` is not listed: its map key already names the
-# capability.
-CAPABILITY_FIELDS: dict[str, tuple[str, str]] = {
-    "vm-site": ("platform", "platform_config"),
-    "git-credential": ("provider", "provider_config"),
-}
+@cache
+def _host_surfaces() -> Mapping[str, HostSurface]:
+    """Declarable kind -> the capability host surface its spec carries.
+
+    Derived from the capability-kind descriptor table, which is where a
+    kind records how it is selected inside its host's spec. Three of the
+    four kinds have a host surface (``vm-site`` hosts vm-platform,
+    ``git-credential`` hosts git-credential-provider, ``session-template``
+    hosts harness-integration); ``secret-backend`` has none, because the
+    per-secret ``backend_mappings`` map key already names the capability.
+
+    Collected inside the function, and read inside ``decode_document``, for
+    the table's cycle discipline: this module loads before the capability
+    packages (see ``agentworks.capabilities.descriptor``).
+    """
+    from agentworks.capabilities.descriptor import capability_descriptors
+
+    return MappingProxyType(
+        {
+            descriptor.manifest_section.host_kind: descriptor.manifest_section
+            for descriptor in capability_descriptors()
+            if descriptor.manifest_section is not None
+        }
+    )
+
+
+@cache
+def capability_fields() -> Mapping[str, tuple[str, str]]:
+    """Kind identifier -> (naming field, sibling config field), for the
+    hosting surfaces that still ACCEPT the deprecated sibling shape.
+
+    The canonical manifest shape is one tagged table on the naming field
+    (``platform: {name: lima, vm_host: ...}``; ``name`` selects the
+    capability, the remaining keys are its config). The old sibling shape
+    (``platform: lima`` plus ``platform_config: {...}``) still loads but is
+    deprecated for removal; ``_normalize_capability_field`` folds the tagged
+    shape back into the sibling pair so the decoders and the shared TOML
+    loaders underneath them see one internal shape.
+
+    The ``accept-warn`` filter is load-bearing, not decoration.
+    ``session-template`` is a host surface too, but it hardened to the
+    tagged shape in wave 1 and REJECTS the legacy string outright
+    (``_normalize_session_harness_selector``). Dropping the filter would
+    add a third entry here and route session-template through the
+    accept-warn fold, which is a real behavior change.
+    """
+    return MappingProxyType(
+        {
+            host_kind: (surface.naming_field, surface.config_field)
+            for host_kind, surface in _host_surfaces().items()
+            if surface.legacy_string_shape == "accept-warn"
+        }
+    )
 
 
 def _normalize_session_harness_selector(spec: dict[str, object]) -> None:
@@ -118,7 +159,7 @@ def _normalize_capability_field(kind: str, spec: dict[str, object]) -> bool:
     recognize (a missing or non-string, non-mapping naming field) pass
     through untouched to the surface's own error paths.
     """
-    pair = CAPABILITY_FIELDS.get(kind)
+    pair = capability_fields().get(kind)
     if pair is None:
         return False
     field, config_field = pair
@@ -219,9 +260,13 @@ def decode_document(
     try:
         # Capability-shape normalization (tagged table -> internal
         # sibling pair) runs next, so every decoder and the shared TOML
-        # loaders underneath see exactly one shape. Old-shape usage is
-        # collected for the caller's aggregated deprecation warning.
-        if doc.kind == "session-template":
+        # loaders underneath see exactly one shape. Which fold a host kind
+        # gets is its surface's legacy string shape: ``reject`` for the
+        # hardened session-template selector, ``accept-warn`` for the
+        # surfaces that still tolerate the deprecated sibling pair and
+        # collect it for the caller's aggregated deprecation warning.
+        surface = _host_surfaces().get(doc.kind)
+        if surface is not None and surface.legacy_string_shape == "reject":
             _normalize_session_harness_selector(spec)
         elif _normalize_capability_field(doc.kind, spec) and deprecated_shapes is not None:
             deprecated_shapes.append(f"{doc.kind}/{doc.name}")
