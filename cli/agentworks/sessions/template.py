@@ -48,7 +48,7 @@ class SessionTemplate(DeclaredResource):
     The workload the session runs is selected by the ``harness_integration`` /
     ``harness_integration_config`` pair (the inline capability reference, ADR
     0016): ``harness_integration`` names the capability and ``harness_integration_config`` is
-    the blob that capability owns and validates. ``None`` on either
+    the blob whose shape that capability declares and the core validates. ``None`` on either
     means "not declared here" (distinct from a declared-empty blob),
     so inheritance can tell a restating child from a silent one (FRD
     R5). An undeclared harness_integration resolves to the ``shell`` built-in (a

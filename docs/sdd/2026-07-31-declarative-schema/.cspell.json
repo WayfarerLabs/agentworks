@@ -1,6 +1,8 @@
 {
   "version": "0.2",
-  "import": ["../../../.cspell.json"],
+  "import": [
+    "../../../.cspell.json"
+  ],
   "words": [
     "abstractmethods",
     "apischema",
@@ -42,7 +44,6 @@
     "typedload",
     "unaddressable",
     "unbuildable",
-    "unmigrated",
     "voluptuous",
     "wyfo"
   ]

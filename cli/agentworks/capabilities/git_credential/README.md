@@ -106,7 +106,7 @@ subclasses `GitCredentialProvider` (`base.py`), sources a personal access token 
 secret, checks that token against the host at the `runup` stage, and produces the materials that get
 written to a VM: the store line, the selection entry for the generated credential helper, and the
 username the helper keys on. The provider never touches the VM, the database, or the CLI; it
-validates its own config, probes its host, and returns strings.
+declares its config, probes its host, and returns strings.
 
 Two providers ship today and are the working references throughout this guide:
 
@@ -219,6 +219,17 @@ provider.
 Register the class in `GIT_CREDENTIAL_PROVIDER_REGISTRY` for a core built-in; a plugin-shipped
 provider is seated into the same registry by the plugin machinery at import and its row publishes
 with a `system-plugin` origin instead (the `azdo` shape).
+
+Three class-level declarations are REQUIRED and none is defaulted, because a default would let an
+unmigrated implementation inherit a claim it never made. Registration refuses an implementation
+missing any of them, naming the plugin:
+
+- `contract_version`: the capability contract version this implementation is written against.
+  Registration requires an exact match with the version its kind's descriptor declares supported, so
+  a contract change is a hard cutover rather than a silent re-certification.
+- `config_model`: what the config IS (see below). A capability that accepts none declares a model
+  with no fields beyond its tag, which is closed-world by construction.
+- `name` / `description`: the registry row's identity.
 
 #### The Token-Secret Edge: A Marker, Not a Method
 
@@ -410,9 +421,9 @@ templates:
   `build_credential_materials` over scoped and unscoped credentials, the generated helper's
   selection (verified against a real git version), scope-collision errors, and the store-username
   disjointness rule.
-- **Config contract:** `cli/tests/test_capability_config_contract.py`. The `dependencies` / declared
-  model at the `provider_config` boundary: accepted shapes, unknown-field and wrong-type raises, and
-  the token edge extraction.
+- **Config contract:** `cli/tests/test_capability_config_contract.py`. The declared model at the
+  `provider_config` boundary: accepted shapes, unknown-field and wrong-type raises, and the token
+  edge extraction.
 - **Kind and miss policy:** `cli/tests/resources/test_git_credential_provider_kind.py` (the provider
   kind and its published rows) and `cli/tests/test_git_credentials_typo_errors.py` (the
   `git-credential` kind's error miss policy: a typo'd or undeclared name errors at finalize with the
@@ -426,9 +437,8 @@ templates:
 - [`../README.md`](../README.md): the capability lifecycle contract and prerequisite for this guide.
 - [`vm_platform/README.md`](../vm_platform/README.md): the sibling deep-dive; its credentials
   section is the reference for the secret-by-name discipline shared here.
-- `base.py`: the `GitCredentialProvider` ABC, `HelperEntry`, and the shared helpers
-  (`token_dependency`, `validate_token_field`, `default_token_secret`, `credential_name_from_owner`,
-  `_probe_pat`, `_http_probe`).
+- `base.py`: the `GitCredentialProvider` ABC, `TokenSourcedConfig` (the shared config model carrying
+  the marked `token` field), `HelperEntry`, and the shared probes (`_probe_pat`, `_http_probe`).
 - `github.py`: the `github` provider (the scoped, fine-grained-PAT reference).
 - `agentworks/plugins/azure/azdo.py`: the `azdo` provider (the plugin-shipped reference).
 - `kinds.py`, `__init__.py`: the `git-credential` / `git-credential-provider` kinds, the kind's

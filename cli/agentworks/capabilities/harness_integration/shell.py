@@ -101,8 +101,8 @@ class ShellIntegration(HarnessIntegration):
         The union runs only when BOTH sides are clean lists of strings:
         the merge sees raw declared blobs, and filtering a mixed list
         into a valid-looking union would hide the invalid entry from the
-        merged-blob ``validate`` pass. An unclean side falls through to
-        the shallow merge, so ``validate`` still rejects it."""
+        validation of the merged blob. An unclean side falls through to
+        the shallow merge, so validation still rejects it."""
         merged = {**base, **child}
         base_cmds = _as_str_list(base.get("required_commands"))
         child_cmds = _as_str_list(child.get("required_commands"))

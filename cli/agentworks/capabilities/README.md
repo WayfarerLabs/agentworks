@@ -504,8 +504,7 @@ capability author's contract, so it lives in
 The shared surface is real (it is a lifecycle, not a boilerplate default), so it earns a base class
 (`capabilities/base.py`). The base owns the contract above and nothing domain-specific:
 
-- the `config_model` declaration and the `config_for(facet)` hook whose default answers with it by
-  capabilities declaring their config schema at registration time;
+- the `config_model` declaration and the `config_for(facet)` hook whose default answers with it;
 - the construct, `preflight`, and `runup` instance contract (both readiness stages no-op by default:
   resolvability prediction belongs to the operation's preflight sweep, not to the instance or its
   node, and the capabilities with nothing to check or authenticate get the right behavior for free);

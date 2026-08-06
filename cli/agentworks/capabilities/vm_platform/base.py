@@ -89,9 +89,10 @@ class VMPlatform(Capability):
     ``secret_refs`` and their values arrive per op call through the
     context (``ctx.secret``).
 
-    Class-level contract (consumed by the vm-site kind decoder, the
-    capability publisher, and the DB migration): ``name``,
-    ``description``, ``dependencies`` / ``validate``, and
+    Class-level contract (consumed by registration conformance, the
+    capability publisher, the core's config validation and reference
+    extraction, and the DB migration): ``name``, ``description``,
+    ``contract_version``, ``config_model``, and
     ``legacy_platform_metadata``.
 
     Idempotency: ops flagged with ``@idempotent_op`` (``start``,

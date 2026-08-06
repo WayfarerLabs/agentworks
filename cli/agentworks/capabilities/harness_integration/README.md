@@ -148,8 +148,8 @@ A **harness integration** is a harness's runtime adapter: it knows how a session
 shell, Claude Code, Codex, ...) is configured, started, and resumed, and what the launch target must
 provide for that to work. The session is the rich consuming resource: a session node HOLDS an
 integration instance, composes its readiness, and the session manager invokes its ops. The
-integration never touches tmux, the database, or the CLI; it validates its config, probes its
-target, and returns pane command strings.
+integration never touches tmux, the database, or the CLI; it declares its config, probes its target,
+and returns pane command strings.
 
 Three integrations ship today and serve as references:
 
@@ -199,6 +199,17 @@ A new harness integration implements this surface (see `base.py` for the full do
 
 `name` and `description` ClassVars (the registry row), inherited `owner_kind = "session-template"`
 (error framing: config errors render as `session-template/<name>`).
+
+Three class-level declarations are REQUIRED and none is defaulted, because a default would let an
+unmigrated implementation inherit a claim it never made. Registration refuses an implementation
+missing any of them, naming the plugin:
+
+- `contract_version`: the capability contract version this implementation is written against.
+  Registration requires an exact match with the version its kind's descriptor declares supported, so
+  a contract change is a hard cutover rather than a silent re-certification.
+- `config_model`: what the config IS (see below). A capability that accepts none declares a model
+  with no fields beyond its tag, which is closed-world by construction.
+- `name` / `description`: the registry row's identity.
 
 #### Config: One Declared Model
 

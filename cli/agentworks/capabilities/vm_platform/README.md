@@ -271,7 +271,11 @@ process having warmed a credential cache.
   one is not. WSL2 reports a site with no `wsl` on PATH not-ready even on Windows. The fold calls it
   off the graph-carried impl to fold into the vm-site's verdict.
 
-**Class-level contract methods**:
+**Class-level contract**. `contract_version`, `config_model`, `name`, and `description` are all
+REQUIRED and none is defaulted, because a default would let an unmigrated implementation inherit a
+claim it never made; registration refuses an implementation missing any of them, naming the plugin.
+`contract_version` must match exactly the version the vm-platform descriptor declares supported, so
+a contract change is a hard cutover rather than a silent re-certification.
 
 - `config_model` declares what the `platform_config` IS, as an `AgwModel` carrying the platform's
   own name as a `Literal` tag plus one field per accepted key. The core validates against it
