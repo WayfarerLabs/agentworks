@@ -160,10 +160,15 @@ def capability_adapters() -> Mapping[str, CapabilityAdapter]:
     than a missing one. Read-only and cached: the adapters are stateless
     views onto their descriptors, so one per kind is enough.
 
-    An accessor rather than a module-level constant, for the table's cycle
-    discipline: binding it at import would load the four capability packages
-    from a module that itself loads early (see
-    ``agentworks.capabilities.descriptor``). Call it inside your own
-    functions for the same reason.
+    An accessor rather than a module-level constant, for UNIFORMITY with the
+    derived sites where laziness is forced. Verified, rather than assumed:
+    no cycle is reachable here today, because none of the four contributing
+    ``kinds.py`` modules loads anything under ``agentworks.plugins``. The
+    graph's accessors are the forced ones (the capability packages do load
+    ``resources.graph``), and every switchboard site reading the table the
+    same way is worth more than each site relitigating whether its own
+    import graph happens to permit a constant. It also keeps the load
+    boundary where the descriptor module puts it: the table is collected on
+    first use, not at import of whoever imports this.
     """
     return MappingProxyType({d.kind: _DescriptorAdapter(d) for d in capability_descriptors()})

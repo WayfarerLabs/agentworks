@@ -80,9 +80,19 @@ def _host_surfaces() -> Mapping[str, HostSurface]:
     hosts harness-integration); ``secret-backend`` has none, because the
     per-secret ``backend_mappings`` map key already names the capability.
 
-    Collected inside the function, and read inside ``decode_document``, for
-    the table's cycle discipline: this module loads before the capability
-    packages (see ``agentworks.capabilities.descriptor``).
+    An accessor rather than a module-level constant, for UNIFORMITY with the
+    derived sites where laziness is forced, not because a cycle threatens
+    here: none of the four contributing ``kinds.py`` modules loads anything
+    under ``agentworks.manifests``, and ``agentworks.manifests.__init__``
+    already loads all four. It does keep the load boundary where the
+    descriptor module puts it, collecting the table on first use rather than
+    at import of whoever imports this.
+
+    Host kinds are unique across the table (a declarable kind hosts at most
+    one capability kind), so keying by ``host_kind`` loses nothing. The
+    descriptor-table tests assert that, because if two records ever claimed
+    the same host, one of them would silently vanish here along with its
+    fold.
     """
     from agentworks.capabilities.descriptor import capability_descriptors
 

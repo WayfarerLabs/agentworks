@@ -307,6 +307,15 @@ def test_manifest_sections_match_the_decoders_host_surfaces() -> None:
         "git-credential": ("provider", "provider_config"),
     }
 
+    hosted = [d.manifest_section for d in _descriptors() if d.manifest_section is not None]
+    host_kinds = [surface.host_kind for surface in hosted]
+    assert len(host_kinds) == len(set(host_kinds)), (
+        f"two capability kinds claim the same host: {host_kinds}. Decode keys both "
+        f"its fold dispatch and its capability-field map by host_kind, so the "
+        f"second record would silently overwrite the first and one host's fold "
+        f"would vanish."
+    )
+
     hardened = {d.kind: d.manifest_section for d in _descriptors() if d.manifest_section is not None}
     assert hardened["harness-integration"].host_kind == "session-template"
     assert hardened["harness-integration"].legacy_string_shape == "reject"
