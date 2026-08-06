@@ -41,7 +41,6 @@ from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
 
-    from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.resources.reference import ReferenceEntry, ResourceReference
     from agentworks.secrets.backends import SecretBackend
 
@@ -361,14 +360,23 @@ def build_graph(
 
 # -- The readiness fold (LLD c) ---------------------------------------------
 
-# The four capability kinds whose node readiness comes from their impl (a
-# config-independent host-support check), not from a resource-level
-# ``not_ready`` hook. The fold dispatches per kind here because the impl is
-# heterogeneous (a class for platform/harness-integration/provider, an instance for
-# secret-backend) and each kind's host-support source differs (LLD c's table).
-_CAPABILITY_KINDS = frozenset(
-    {"vm-platform", "harness-integration", "git-credential-provider", "secret-backend"},
-)
+
+@cache
+def _capability_kinds() -> frozenset[str]:
+    """The kinds whose node readiness comes from their IMPL (a
+    config-independent host-support check) rather than from a resource-level
+    ``not_ready`` hook: the capability kinds, which the descriptor table
+    enumerates.
+
+    Cached and lazily collected for the same reason as
+    :func:`_capability_registry_loaders`, which it shares its key set with by
+    construction. The two stay separate accessors because they answer
+    different questions of the table: which kinds the fold dispatches on, and
+    where each kind's impl lives.
+    """
+    from agentworks.capabilities.descriptor import capability_descriptors
+
+    return frozenset(descriptor.kind for descriptor in capability_descriptors())
 
 
 @runtime_checkable
@@ -446,7 +454,7 @@ def node_readiness(
     if opt_in.get(key, Enablement.enabled) is Enablement.disabled:
         return Readiness.ready()  # placeholder; enablement answers for a disabled node
     kind, name = key
-    if kind in _CAPABILITY_KINDS:
+    if kind in _capability_kinds():
         return _capability_node_readiness(kind, name)
     resource = resources[kind][name]
     if not isinstance(resource, _ReadinessResource):
@@ -472,26 +480,23 @@ def node_readiness(
 
 def _capability_node_readiness(kind: str, name: str) -> Readiness:
     """A capability node's own readiness: its impl's config-independent
-    host-support check (LLD c's table). ``vm-platform`` wraps
-    ``unsupported_reason``; ``secret-backend`` asks the backend instance;
-    ``harness-integration`` / ``git-credential-provider`` have no host-support concept and
-    are always ready.
+    host-support check (LLD c's table).
+
+    The verdict is the kind's own, so it comes from the kind's descriptor
+    rather than from an if-chain here. Each ``readiness`` callable lives
+    beside the capability it interrogates: ``vm-platform`` wraps
+    ``unsupported_reason`` into the host-support sentence, ``secret-backend``
+    asks the backend instance, and ``harness-integration`` /
+    ``git-credential-provider`` have no host-support concept and are always
+    ready. The fold's job is to know WHEN to ask, not WHAT the answer is.
+
+    Distinct from the config-dependent ``Capability.not_ready(config)`` a
+    CONSUMING resource (``vm-site``) uses; this is the capability node's own
+    verdict, which such a consumer then propagates.
     """
-    impl = _impl_for(kind, name)
-    if kind == "vm-platform":
-        reason = cast("type[VMPlatform]", impl).unsupported_reason()
-        # Store the readiness-vocabulary host-support sentence (R9.1/R6): the
-        # platform row's own projection renders it directly, and the vm-site
-        # that depends on it propagates this same verdict (LLD c target string).
-        # "unsupported here" is the readiness phrasing; "disabled" is reserved
-        # for the opt-in axis and never used for host support.
-        if reason is None:
-            return Readiness.ready()
-        return Readiness.blocked(f"platform '{name}' is unsupported here: {reason}")
-    if kind == "secret-backend":
-        return cast("SecretBackend", impl).not_ready()
-    # harness-integration, git-credential-provider: no host-support, no override.
-    return Readiness.ready()
+    from agentworks.capabilities.descriptor import descriptor_for
+
+    return descriptor_for(kind).readiness(name, _impl_for(kind, name))
 
 
 def _reverse_topo_order(

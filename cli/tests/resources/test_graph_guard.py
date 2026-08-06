@@ -308,9 +308,8 @@ _NOT_READY_ALLOWLIST = frozenset(
         # secret-backend branch, relocated onto the descriptor so the fold
         # stops enumerating kinds (declarative-schema step 2.0). It is fold
         # code living beside its kind, not a projection surface recomputing
-        # a verdict. Until the fold derives from the table, the descriptor
-        # self-test pins this callable's verdict equal to the fold's branch,
-        # so the two cannot disagree while both exist.
+        # a verdict, and it is now the SOLE implementation: the fold calls it
+        # rather than duplicating it.
         "secrets/kinds.py",
     }
 )

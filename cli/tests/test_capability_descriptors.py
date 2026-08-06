@@ -220,9 +220,18 @@ def test_publication_covers_every_registered_impl(descriptor: CapabilityKindDesc
 
 
 @pytest.mark.parametrize("descriptor", _descriptors(), ids=lambda d: d.kind)
-def test_readiness_reproduces_the_graphs_per_kind_dispatch(descriptor: CapabilityKindDescriptor) -> None:
-    """Same verdict AND same sentence as the graph's capability-node
-    readiness branches, which the reason strings are pinned on elsewhere."""
+def test_the_graph_routes_each_kind_to_its_own_readiness_callable(
+    descriptor: CapabilityKindDescriptor,
+) -> None:
+    """The graph's capability-node readiness IS this kind's callable, asked
+    about this kind's seated impl.
+
+    The fold no longer branches per kind, so what is left to get wrong is the
+    routing: dispatching a kind to another kind's record, or handing the
+    callable something other than the impl its registry holds. Both produce a
+    plausible verdict from the wrong source, which is exactly what this
+    compares away. The sentences themselves are pinned against stubs with
+    known answers below."""
     seated_impls = list(descriptor.registry().items())
     assert seated_impls, f"{descriptor.kind} has an empty registry; this test would prove nothing"
     for name, seated in seated_impls:
