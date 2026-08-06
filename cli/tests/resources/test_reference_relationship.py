@@ -26,6 +26,19 @@ from agentworks.vms.template import VMTemplate
 from agentworks.workspaces.template import WorkspaceTemplate
 
 
+def test_every_relationship_has_a_closure() -> None:
+    """A new ``RefRelationship`` must be assigned to a closure, out loud.
+
+    The graph's closures name the relationships they CROSS rather than the
+    ones they skip, so a third member joins neither by default: edges of
+    that relationship silently vanish from both the runtime-need answer and
+    the source-composition one. That is the safe direction and the invisible
+    one, which is what this test is for. Adding a member means deciding
+    which closures cross it and saying so here.
+    """
+    assert set(RefRelationship) == {RefRelationship.USES, RefRelationship.INHERITS}
+
+
 def test_a_template_reference_is_a_use_unless_it_says_otherwise() -> None:
     """``TemplateReference`` types the TARGET, never the relationship.
 

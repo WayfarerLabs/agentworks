@@ -616,9 +616,15 @@ class _StubGraph:
     """Minimal ``DependencyGraph`` double over a :class:`_StubRegistry`.
 
     ``edges_of`` recomputes a row's outbound edges from its ``dependencies``
-    (the stub is not finalized, so there is no frozen edge map to read);
-    ``reachable_from`` DFS-walks those; readiness is always ready. Enough for
-    the consumer reads the manager entries make against namespace fixtures.
+    (the stub is not finalized, so there is no frozen edge map to read); the
+    two closures DFS-walk those, filtered by relationship exactly as the real
+    graph does; readiness is always ready. Enough for the consumer reads the
+    manager entries make against namespace fixtures.
+
+    The double must carry EVERY closure the real graph offers, not only the
+    ones today's consumers reach: a missing one surfaces as an
+    ``AttributeError`` from a fixture rather than as behavior, which is a
+    confusing way to learn that the double is behind.
     """
 
     def __init__(self, registry: _StubRegistry) -> None:
@@ -633,12 +639,22 @@ class _StubGraph:
             return ()
         return tuple(method(FinalizeContext()))
 
-    def reachable_from(self, kind: str, name: str) -> list[tuple[str, str]]:
-        # Tolerate a missing start node, exactly as the real graph does
-        # (graph.py:228-230): the DFS below catches the edges_of KeyError and
-        # yields an empty closure, so a consumer that walks a template resolved
-        # off a namespace fixture (not a registry row) gets [] rather than a
-        # KeyError. The recipe use-gate (ensure_recipe_enabled) relies on this.
+    def runtime_reachable_from(self, kind: str, name: str) -> list[tuple[str, str]]:
+        from agentworks.resources.reference import RefRelationship
+
+        return self._closure(kind, name, RefRelationship.USES)
+
+    def composed_from(self, kind: str, name: str) -> list[tuple[str, str]]:
+        from agentworks.resources.reference import RefRelationship
+
+        return self._closure(kind, name, RefRelationship.INHERITS)
+
+    def _closure(self, kind: str, name: str, crossing: object) -> list[tuple[str, str]]:
+        # Tolerate a missing start node, exactly as the real graph does: the
+        # DFS below catches the edges_of KeyError and yields an empty closure,
+        # so a consumer that walks a template resolved off a namespace fixture
+        # (not a registry row) gets [] rather than a KeyError. The recipe
+        # use-gate (ensure_recipe_enabled) relies on this.
         visited: set[tuple[str, str]] = {(kind, name)}
         ordered: list[tuple[str, str]] = []
         stack: list[tuple[str, str]] = [(kind, name)]
@@ -649,6 +665,8 @@ class _StubGraph:
             except KeyError:
                 continue
             for ref in edges:
+                if ref.relationship is not crossing:
+                    continue
                 target = (ref.kind, ref.name)
                 if target not in visited:
                     visited.add(target)

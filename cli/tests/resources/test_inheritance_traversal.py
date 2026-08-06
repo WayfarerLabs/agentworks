@@ -27,7 +27,7 @@ from agentworks.config import load_config
 from agentworks.errors import StateError
 from agentworks.resources import Origin, Registry, collect_secrets_for
 from agentworks.resources.access import ensure_recipe_enabled
-from agentworks.resources.graph import DisabledMark, Enablement
+from agentworks.resources.graph import DisabledMark, Enablement, EnablementSource
 from agentworks.resources.reference import RefRelationship
 from agentworks.vms.template import VMTemplate
 from tests.conftest import ManifestDoc
@@ -110,12 +110,16 @@ def test_the_inherited_need_still_reaches_the_child(inheriting_registry: Registr
     assert "base-env-secret" in {decl.name for decl in collect_secrets_for(inheriting_registry, ("vm-template", "kid"))}
 
 
+def _disabling(*keys: tuple[str, str]) -> EnablementSource:
+    return lambda _rows: dict.fromkeys(keys, DisabledMark(reason="enable its unit", source="test"))
+
+
 def test_enablement_still_propagates_across_the_inheritance_edge() -> None:
     """FR17's policy call, asserted rather than left implicit: the recipe
-    use-gate walks the FULL closure on purpose, because a parent template
-    is source about to be compiled into the child's recipe, not a runtime
-    need the child happens to have. Disabling the parent must therefore
-    refuse the child at use.
+    use-gate crosses the inheritance edge on purpose, because a parent
+    template is source about to be compiled into the child's recipe, not a
+    runtime need the child happens to have. Disabling the parent must
+    therefore refuse the child at use.
 
     Built through ``finalize``'s own enablement-source seam rather than a
     fixture plugin, so what is under test is the gate and not a plugin's
@@ -125,10 +129,40 @@ def test_enablement_still_propagates_across_the_inheritance_edge() -> None:
     origin = Origin.built_in(source="tests.inheritance")
     registry.add("vm-template", "base", VMTemplate(name="base"), origin)
     registry.add("vm-template", "kid", VMTemplate(name="kid", inherits=["base"]), origin)
-    registry.finalize([lambda _rows: {("vm-template", "base"): DisabledMark(reason="enable its unit", source="test")}])
+    registry.finalize([_disabling(("vm-template", "base"))])
 
     # The child is enabled and names nothing disabled of its own; what
     # refuses it is the parent it inherits, reached across the edge.
     assert registry.graph.enablement_of("vm-template", "kid") is Enablement.enabled
     with pytest.raises(StateError, match="vm-template 'base' is disabled"):
         ensure_recipe_enabled(registry, "vm-template", "kid")
+
+
+def test_the_gate_does_not_refuse_over_an_ancestor_leaf_the_child_overrode() -> None:
+    """The other edge of the same policy, and the one a crosses-everything
+    closure got wrong: the recipe is what the child NEEDS plus what it is
+    MADE OF, not everything an ancestor happens to touch.
+
+    ``kid`` renamed the auth key it inherits, so the parent's own key is in
+    nothing the child runs. Refusing over it would be an operator blocked
+    on a secret no part of the recipe reads, and it fails SAFE, so nothing
+    but a test would ever surface it.
+    """
+    from agentworks.secrets.base import SecretDecl
+
+    registry = Registry.empty()
+    origin = Origin.built_in(source="tests.inheritance")
+    registry.add("vm-template", "base", VMTemplate(name="base"), origin)
+    registry.add("vm-template", "kid", VMTemplate(name="kid", inherits=["base"], tailscale_auth_key="kid-key"), origin)
+    # Published rather than left to auto-declaration, because a row the
+    # materialize pass synthesizes is not in the enablement map the fold
+    # built and so cannot carry a mark.
+    registry.add("secret", "tailscale-auth-key", SecretDecl(name="tailscale-auth-key", description=""), origin)
+    registry.finalize([_disabling(("secret", "tailscale-auth-key"))])
+
+    assert ("secret", "tailscale-auth-key") in registry.graph.runtime_reachable_from("vm-template", "base")
+    ensure_recipe_enabled(registry, "vm-template", "kid")  # no raise
+    # The parent, which does use it, is still refused: the gate narrowed
+    # rather than stopped gating.
+    with pytest.raises(StateError, match="secret 'tailscale-auth-key' is disabled"):
+        ensure_recipe_enabled(registry, "vm-template", "base")

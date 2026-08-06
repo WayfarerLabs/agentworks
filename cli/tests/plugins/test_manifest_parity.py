@@ -152,7 +152,7 @@ def test_ensure_recipe_enabled_is_noop_when_enabled(monkeypatch: pytest.MonkeyPa
 
 def test_ensure_recipe_enabled_is_noop_for_implicit_default(monkeypatch: pytest.MonkeyPatch) -> None:
     # A missing start node (an implicit default template) is a safe no-op:
-    # enablement_of tolerates it and reachable_from returns empty.
+    # enablement_of tolerates it and both closures return empty.
     registry = _build(monkeypatch)
     ensure_recipe_enabled(registry, "agent-template", "no-such-template")  # no raise
 
@@ -188,7 +188,7 @@ def test_ensure_recipe_enabled_excludes_capability_nodes(monkeypatch: pytest.Mon
         registry.finalize(enablement_sources=[plugin_enablement_source(config)])
 
         # The disabled harness integration IS in the enabled template's closure...
-        assert ("harness-integration", "fixture-harness") in registry.graph.reachable_from(
+        assert ("harness-integration", "fixture-harness") in registry.graph.runtime_reachable_from(
             "session-template", "op-session"
         )
         # ...but the recipe gate does NOT refuse on it (capability exclusion).

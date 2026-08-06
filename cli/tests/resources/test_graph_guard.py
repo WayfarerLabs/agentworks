@@ -13,8 +13,8 @@ THE FOUR BANNED PATTERNS (each a way to re-derive the graph outside the build):
    OUTSIDE the graph build (was: cycle detection at ``registry.py``, the
    ``collect_secrets_for`` DFS in ``walk.py``, the ``secret_refs`` recompute in
    the two node factories). The honest path: cycle detection three-colors over
-   the built edge map, and every other consumer reads ``edges_of`` /
-   ``reachable_from``.
+   the built edge map, and every other consumer reads ``edges_of`` or one of
+   the two closures.
 2. A ``*_REGISTRY.get(...)`` availability probe in edge production or readiness
    (was: ``VM_PLATFORM_REGISTRY`` in ``vms/kinds.py``'s ``disabled_reason``,
    ``SECRET_BACKEND_REGISTRY`` in ``secrets/resolve.py``'s resolver). The honest
@@ -448,7 +448,7 @@ def test_pattern1_no_dependencies_rewalk_outside_the_builder() -> None:
     assert not offenders, (
         "Banned pattern 1 (re-walking dependencies() to reconstruct edges "
         "outside the graph build). Read edges off the retained graph "
-        "(edges_of / reachable_from) instead, or add the module to the "
+        "(edges_of / the graph closures) instead, or add the module to the "
         "documented edge-production/builder allow-list if it is genuinely one:\n" + "\n".join(offenders)
     )
 
@@ -532,23 +532,25 @@ def _enclosing_functions(source: str, predicate: Callable[[ast.AST], bool]) -> l
 
 def test_collect_secrets_for_reads_the_runtime_closure() -> None:
     """The secret walk reads the graph, and reads the RUNTIME-need closure
-    specifically (FR17): the full ``reachable_from`` crosses inheritance
-    edges, which would attribute a parent's standalone secrets to a child
-    that overrode them. Both halves matter, so both are asserted."""
+    specifically (FR17): a closure that crossed inheritance edges would
+    attribute a parent's standalone secrets to a child that overrode them.
+    Both halves matter, so both are asserted."""
     source = _function_source("resources/walk.py", "collect_secrets_for")
     assert "runtime_reachable_from" in source
-    assert "graph.reachable_from" not in source
+    assert "composed_from" not in source
     assert find_dependencies_calls(source) == []
 
 
-def test_the_recipe_gate_reads_the_full_closure() -> None:
-    """The other side of the same call, and the reason the two closures are
-    separate methods: enablement DOES propagate across an inheritance edge,
-    because the resolver compiles the parent's declaration into the recipe
-    this gate is about to act on."""
+def test_the_recipe_gate_reads_both_closures() -> None:
+    """The other side of the same call. A recipe is what the row NEEDS plus
+    what it is MADE OF, and it is the union rather than one or the other:
+    dropping ``composed_from`` would stop refusing a disabled parent
+    template (the FR17 enablement policy), while widening back to a
+    crosses-everything closure would refuse an operator over an ancestor
+    leaf the child overrode away."""
     source = _function_source("resources/access.py", "ensure_recipe_enabled")
-    assert "graph.reachable_from" in source
-    assert "runtime_reachable_from" not in source
+    assert "composed_from" in source
+    assert "runtime_reachable_from" in source
 
 
 def test_node_factories_read_edges_of() -> None:

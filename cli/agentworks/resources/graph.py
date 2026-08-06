@@ -9,9 +9,11 @@ field off each resource dataclass:
 - ``edges_of``: a node's outbound reference edges (who it points at).
 - ``dependents_of``: a node's inbound references (who points at it), the
   replacement for the removed per-resource ``references`` field.
-- ``reachable_from`` / ``runtime_reachable_from``: the transitive closure of
-  ``edges_of`` from a node, over every edge and over runtime-need edges only
-  (FR17: an inheritance edge is source composition, not a runtime need).
+- ``runtime_reachable_from`` / ``composed_from``: the two transitive closures of
+  ``edges_of`` from a node, over what it NEEDS and over what it is MADE OF
+  (FR17: an inheritance edge is source composition, not a runtime need). There
+  is deliberately no closure over both: a caller has to say which question it
+  is asking, because getting it wrong is a wrong answer rather than a crash.
 - ``readiness_of`` / ``is_ready``: the node's stored readiness verdict.
 - ``impl_of``: a capability node's stamped implementation (for secret
   resolution to reach a backend off the graph, not the live registry).
@@ -28,7 +30,7 @@ vm-platform / harness-integration / git-credential-provider, an instance for
 secret-backend) so consumers reach a capability's code off the graph rather
 than the live registry. ``readiness_of`` / ``enablement_of`` return stored
 verdicts; ``edges_of`` / ``dependents_of`` are the two edge directions;
-``reachable_from`` and ``runtime_reachable_from`` are the two transitive
+``runtime_reachable_from`` and ``composed_from`` are the two transitive
 closures. The retention was introduced by the 2026-07 registry-readiness
 refactor.
 """
@@ -44,7 +46,7 @@ from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
 
-    from agentworks.resources.reference import ReferenceEntry, ResourceReference
+    from agentworks.resources.reference import ReferenceEntry, RefRelationship, ResourceReference
     from agentworks.secrets.backends import SecretBackend
 
 
@@ -212,17 +214,17 @@ class DependencyGraph:
         Raises ``KeyError`` on an unknown key."""
         return self._nodes[(kind, name)].inbound
 
-    def reachable_from(self, kind: str, name: str) -> list[tuple[str, str]]:
-        """The transitive closure of ``outbound`` from this node, over EVERY
-        edge: what this node composes with, inheritance included.
+    def runtime_reachable_from(self, kind: str, name: str) -> list[tuple[str, str]]:
+        """The transitive closure over RUNTIME-NEED edges: what this node
+        needs to have resolved for it to work.
 
-        The SOURCE-COMPOSITION closure. Its caller is the recipe use-gate,
-        which is right to cross an inheritance edge because a template
-        resolver merges the whole lineage into the acted-on recipe. A caller
-        asking what this node NEEDS AT RUN TIME wants
-        :meth:`runtime_reachable_from` instead (FR17); getting that choice
-        wrong is a wrong answer rather than a crash, which is why the two
-        are separate methods rather than a defaulted flag.
+        Crosses ``USES`` and stops at everything else, which today means
+        it stops at inheritance (FR17). Inheritance is source composition:
+        the parent's declaration is merged into this node's, and this node
+        already publishes the merged result's needs as edges of its own,
+        so crossing the edge as well would attribute the parent's
+        STANDALONE needs (the secret name the child overrode, say) to the
+        child and prompt for a secret it does not use.
 
         Excludes the start node, deduped, in first-encountered order. A
         graph-owned DFS over the frozen ``outbound`` edges, so consumers stop
@@ -231,25 +233,40 @@ class DependencyGraph:
         built before that pass in tests). Returns keys; callers resolve rows via
         ``registry.lookup``.
         """
-        return self._closure(kind, name, runtime_only=False)
-
-    def runtime_reachable_from(self, kind: str, name: str) -> list[tuple[str, str]]:
-        """The transitive closure over RUNTIME-NEED edges only: what this
-        node needs to have resolved for it to work.
-
-        :meth:`reachable_from` minus the ``INHERITS`` edges (FR17).
-        Inheritance is source composition: the parent's declaration is
-        merged into this node's, and this node already publishes the merged
-        result's needs as edges of its own, so crossing the edge as well
-        would attribute the parent's STANDALONE needs (the secret name the
-        child overrode, say) to the child and prompt for a secret it does
-        not use.
-        """
-        return self._closure(kind, name, runtime_only=True)
-
-    def _closure(self, kind: str, name: str, *, runtime_only: bool) -> list[tuple[str, str]]:
         from agentworks.resources.reference import RefRelationship
 
+        return self._closure(kind, name, crossing=frozenset({RefRelationship.USES}))
+
+    def composed_from(self, kind: str, name: str) -> list[tuple[str, str]]:
+        """The transitive closure over SOURCE-COMPOSITION edges: the
+        declarations this node is assembled out of, nearest first.
+
+        The other half of the FR17 split, and the answer to a different
+        question: not "what does this need" but "whose declarations am I".
+        Its caller is the recipe use-gate, which must refuse a lineage
+        whose parent is turned off even though the child's own needs are
+        all satisfiable.
+
+        Same walk contract as :meth:`runtime_reachable_from`.
+        """
+        from agentworks.resources.reference import RefRelationship
+
+        return self._closure(kind, name, crossing=frozenset({RefRelationship.INHERITS}))
+
+    def _closure(
+        self,
+        kind: str,
+        name: str,
+        *,
+        crossing: frozenset[RefRelationship],
+    ) -> list[tuple[str, str]]:
+        """The closure over the edges whose relationship is in ``crossing``.
+
+        The set is EXPLICIT rather than a "everything but X" filter so a
+        new ``RefRelationship`` cannot join a closure by default: it stays
+        out of both until someone decides, and
+        ``test_every_relationship_has_a_closure`` fails until they do.
+        """
         start = (kind, name)
         visited: set[tuple[str, str]] = {start}
         ordered: list[tuple[str, str]] = []
@@ -259,7 +276,7 @@ class DependencyGraph:
             if node is None:
                 continue
             for ref in node.outbound:
-                if runtime_only and ref.relationship is not RefRelationship.USES:
+                if ref.relationship not in crossing:
                     continue
                 target = (ref.kind, ref.name)
                 if target not in visited:

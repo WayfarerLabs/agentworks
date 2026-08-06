@@ -134,40 +134,53 @@ def ensure_reference_enabled(registry: Registry, kind: str, name: str) -> None:
 def ensure_recipe_enabled(registry: Registry, kind: str, name: str) -> None:
     """The recipe use-gate for a template consumption (Phase 7, LLD b).
 
-    A template resolver merges EVERYTHING reachable from the named template into
-    the resolved recipe (parent templates via ``inherits``, install-commands,
-    apt packages/sources), so gating only the named row would let a disabled
-    plugin's transitively-referenced declarable leak into the acted-on recipe.
-    This applies ``ensure_reference_enabled`` to the named node and to every
-    node in its ``reachable_from`` closure whose kind is DECLARABLE, refusing on
-    the first disabled one. Capability nodes in the closure are deliberately
-    EXCLUDED: each capability kind keeps its own R14 use-model (a platform
-    propagates via its site, a harness integration is gated by
-    ``ensure_harness_integration_enabled``,
-    etc.), so the recipe gate neither duplicates nor contradicts them.
+    A template resolver merges a whole lineage into the resolved recipe, so
+    gating only the named row would let a disabled plugin's
+    transitively-referenced declarable leak into the acted-on recipe. This
+    applies ``ensure_reference_enabled`` to the named node and to every
+    DECLARABLE node the recipe is made of, refusing on the first disabled one.
+    Capability nodes are deliberately EXCLUDED: each capability kind keeps its
+    own R14 use-model (a platform propagates via its site, a harness
+    integration is gated by ``ensure_harness_integration_enabled``, etc.), so
+    the recipe gate neither duplicates nor contradicts them.
+
+    The recipe is TWO closures, and taking their union is the whole point
+    (FR17):
+
+    - ``runtime_reachable_from``, everything the named row needs, which since
+      an inheriting row publishes the needs of its MERGED declaration already
+      includes everything it inherited and still uses; and
+    - ``composed_from``, the ancestor template rows themselves.
 
     **ENABLEMENT PROPAGATES ACROSS AN INHERITANCE EDGE, and this is the one
     traversal that says so** (FR17's policy call, settled here rather than
-    left to fall out). The full ``reachable_from`` closure is deliberate: a
-    disabled parent template is not a runtime need this row happens to have,
-    it is SOURCE the resolver is about to compile in, so using the child
-    means using it. Readiness is the other half of the call and propagates
-    nowhere: no template kind implements ``not_ready``, so the fold gives
-    every template row a ready verdict and an inheritance edge changes
-    nothing, which is the answer to keep (a base template that a plugin has
-    turned off is an enablement fact, and enablement is the axis that
-    answers for it). If a future inheriting kind grows a ``not_ready`` hook,
-    the fold hands it every out-edge's state including the inherited one and
-    the hook decides, which is R4's rule and not this gate's to pre-empt.
+    left to fall out): a disabled parent template is not a runtime need this
+    row happens to have, it is SOURCE the resolver is about to compile in, so
+    using the child means using it. What the union deliberately does NOT
+    include is an ancestor's own standalone needs, because those are exactly
+    the ones a child may have overridden: a child that renames the auth key
+    it inherits does not use the parent's, and gating on it would refuse an
+    operator over a secret nothing in the recipe reads.
 
-    Safe no-op for an implicit ``default`` template (a missing start node:
-    ``reachable_from`` returns empty, ``enablement_of`` reads ``enabled``) and
-    for an all-enabled registry.
+    Readiness is the other half of the call and propagates nowhere: no
+    template kind implements ``not_ready``, so the fold gives every template
+    row a ready verdict and an inheritance edge changes nothing, which is the
+    answer to keep (a base template a plugin has turned off is an enablement
+    fact, and enablement is the axis that answers for it). If a future
+    inheriting kind grows a ``not_ready`` hook, the fold hands it every
+    out-edge's state including the inherited one and the hook decides, which
+    is R4's rule and not this gate's to make in advance.
+
+    Safe no-op for an implicit ``default`` template (a missing start node: both
+    closures return empty, ``enablement_of`` reads ``enabled``) and for an
+    all-enabled registry.
     """
     from agentworks.resources.kind import KIND_REGISTRY
 
+    graph = registry.graph
     ensure_reference_enabled(registry, kind, name)
-    for dep_kind, dep_name in registry.graph.reachable_from(kind, name):
+    recipe = [*graph.composed_from(kind, name), *graph.runtime_reachable_from(kind, name)]
+    for dep_kind, dep_name in recipe:
         handler = KIND_REGISTRY.get(dep_kind)
         if handler is not None and handler.category == "declarable":
             ensure_reference_enabled(registry, dep_kind, dep_name)
