@@ -130,8 +130,10 @@ Sources:
 
 ## Questions the research does not settle
 
-- Prior art did not settle how onboarding success should be measured. The HLA resolves this for the
-  first release with an explicit three-question operator prompt and no telemetry.
+- Prior art did not settle how onboarding success should be measured. The HLA defers general product
+  feedback collection for the first release; acceptance runs keep their own timing and intervention
+  evidence. A focused `concept-reporting-bugs` topic handles encountered defects without becoming a
+  general feedback channel.
 - Which wave 2 CLI names will expose schema and field-reference presentations.
 - Whether future external plugins need localized guide content. The first contract should not claim
   localization support it does not implement.

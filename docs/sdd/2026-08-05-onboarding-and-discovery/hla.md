@@ -149,16 +149,35 @@ connection, probes the workstation, invokes a capability, or mutates data. Datab
 inventory is a read-only stored-row query already used by resource inspection; it cannot initiate a
 remote operation.
 
+Guide remains usable when operator configuration is broken. It always loads and validates authored
+core content independently, then attempts a normal config load and full registry build for every
+guide request. If config load or finalization fails, authored content still renders, each affected
+dynamic block says its facts are unavailable, and the original framed config error appears in the
+markdown. `GuideView` construction is non-interactive by construction and can never prompt for or
+resolve a secret. A malformed plugin contribution is isolated to the guide-scoped catalog build,
+reported as unavailable, and cannot break unrelated CLI commands or valid core topics.
+
 ## Guide rendering and agent shaping
 
 `agw guide` always writes markdown to stdout. With no topic it renders a compact overview, security
 disclosure, golden-path entry, and live topic index.
 
-The CLI exposes a paired `--agent/--human` override with a tri-state default:
+The CLI exposes a paired `--agent/--human` override. Detection precedence is:
 
-- stdout attached to a TTY defaults to human mode;
-- redirected or piped stdout defaults to agent mode;
-- either flag makes automation deterministic.
+1. An explicit flag always wins.
+2. A registered, unambiguous harness signature selects agent mode.
+3. Otherwise, stdout attached to a TTY selects human mode and redirected or piped stdout selects
+   agent mode.
+
+Harness signatures are exact, non-secret environment markers documented or contractually supplied by
+the harness, registered beside its bootstrap adapter, and pinned by tests. General configuration
+variables are not signatures: `CODEX_HOME`, provider selectors, API keys, and similar variables can
+exist in an ordinary shell. The current public Codex environment-variable contract does not expose a
+stable execution signature, so the first slice does not treat an internal variable observed in one
+session as a contract. The guide LLD inventories both harnesses again at implementation time.
+`--human` is the documented override when a human pipes or redirects markdown; `--agent` makes an
+agent invocation deterministic when no signature exists. Detection never inspects parent processes,
+session files, or other workstation state.
 
 Both modes traverse the same topic and block sequence. Agent mode may move `AgentContract` blocks
 immediately after the summary, expand their heading, and foreground the R12 disclosure and R4
@@ -191,6 +210,17 @@ manual alternative when consent is declined. Guided and replayable modes consume
 action records. Equivalence means both produce the same registry, graph, stored-row, and explicit
 verification outcomes for the same inputs. A refusal produces the same `unverifiable` outcome in
 both modes.
+
+### Verification surface inventory
+
+| Need                          | Existing surface                                                                                                                                        | Gap and commitment                                                                                                                                                                                                                                                                |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Secret reference availability | `agw secret describe` predicts the ready backend without resolving or exposing a value. Doctor reports the same prediction in its consented full check. | Prediction is not proof. Add a named-secret verification operation that resolves through the normal boundary, returns only success or framed failure, never emits or returns the value to the caller, and cannot fall through to an interactive backend without explicit consent. |
+| Required host tools           | `agw doctor` checks `ssh`, `scp`, and `tailscale`; finalized capability rows carry already-computed readiness for their host requirements.              | The LLD inventories every onboarding action's required tool and adds a safe explicit check only where doctor or readiness does not already cover it. Agent-side discovery of other installed tools remains consent-first.                                                         |
+| SSH connectivity              | VM lifecycle code verifies connectivity during mutating operations, but there is no dedicated read-only operator surface for an existing VM.            | Add a non-mutating named-VM connection verification operation that uses the standard transport and reports success or framed failure without repairing, rekeying, or changing power state.                                                                                        |
+
+Doctor and the new proof operations run only as explicit, consented action records. Guide rendering
+never calls them.
 
 ## Machine-readable output contract
 
@@ -227,16 +257,17 @@ period. Unknown requested output formats fail before work begins. Business error
 using the existing error route and a nonzero exit. `doctor --output json` emits the complete report
 then preserves doctor's current nonzero exit when any check fails.
 
-`--names-only` remains a completion-specific text projection and is mutually exclusive with JSON.
-Guide markdown is deliberately outside this contract.
+`--names-only` remains completion plumbing, not a guide rendering mode, and is mutually exclusive
+with JSON. User-facing guide output is markdown only and deliberately outside this contract.
 
 ## CLI and completion integration
 
 The root Typer application gains a `guide` command module. Topic completion uses the existing
-dynamic-completion map and calls a cheap `agw guide --names-only` catalog projection. It builds the
-static topic set without loading operator configuration when possible; the full guide request loads
-the registry only for dynamic topics. Bash, Zsh, and PowerShell snippets and completion tests land
-with the command.
+dynamic-completion map and calls `agw guide --names-only`. Every full guide request attempts the
+normal config load and full registry build so its inventory is consistent; the graceful-degradation
+contract above keeps authored help available on failure. Completion uses the guide-scoped catalog's
+fail-soft projection, returning validated authored topics plus any dynamic topics available from a
+successful build. Bash, Zsh, and PowerShell snippets and completion tests land with the command.
 
 The topic catalog and guide renderer live below Typer. CLI functions parse options, load request
 state, call the service, and emit the returned markdown. This mirrors the existing resource
@@ -266,11 +297,16 @@ returned v1 documents rather than merely checking that the flags exist.
 
 ## Feedback decision
 
-The first release adds no telemetry. At the end of onboarding, the guide asks the operator three
-explicit questions: whether a first working session was reached, where the path stalled, and what
-required unexplained intervention. The agent reports the answers in the current interaction for the
-operator to share deliberately. Any persisted or automatic feedback channel requires a separate
-operator decision.
+General feedback collection is deferred. The first release adds no telemetry, product-feedback
+prompt, or request for the operator to relay non-bug comments manually. Acceptance runs record their
+own timing and intervention evidence as test artifacts. A real product feedback channel requires a
+later operator decision.
+
+`agw guide concept-reporting-bugs` covers the narrower case where the operator or agent encounters a
+defect. It teaches how to reproduce the problem, remove secrets and identifying data from evidence,
+check existing issues, and use the repository's bug-report template. The topic may direct the agent
+to prepare or submit an issue only with the operator's explicit authorization. It never files an
+issue automatically and is not presented as a channel for general feedback.
 
 ## Wave 2 coordination boundary
 
@@ -290,6 +326,11 @@ the recipient accepts it:
 Each adapter is gated only on its required surface merging to `main`, so schema-derived depth can
 adopt field docs, samples, or descriptor inventory incrementally as they land. If wave 2 lands a
 different authoritative shape, this HLA and plan are updated before the affected adapter is built.
+The agreed record shape is the coordination contract, not an implementation dependency in either
+direction. Whichever effort reaches the seam first implements the record where it naturally lives;
+the other consumes that landed shape. Wave 2 never waits for onboarding phase 1. If it reaches plan
+section 2.8 first, it proceeds with the agreed shape, or with its own blurb surface if agreement has
+not completed, and onboarding adapts after re-verifying the authoritative `main` contract.
 
 ## Documentation and compatibility
 
@@ -297,6 +338,15 @@ Permanent CLI docs define topic taxonomy, agent shaping, JSON v1, bootstrap inst
 safe contribution contract in the same commits as their code. Package-level contributor docs explain
 how to colocate inert topic data. The sample config changes only if onboarding introduces a new
 setting; no setting is currently planned.
+
+The contributor contract also becomes durable agent guidance through Rulesync's canonical sources.
+An always-on rule tells developers that code adding or changing a resource kind, capability
+implementation, plugin, or documented workflow must add or update its colocated topic contribution.
+The `agentworks-dev` role treats that contribution as part of implementation completeness, and the
+`agentworks-reviewer` role checks the code and contribution together for missing or stale teaching.
+The implementation audits other agent roles for a real need rather than copying the rule blindly,
+then regenerates and commits the Claude Code, Codex, and Copilot projections with the existing
+Rulesync drift check.
 
 `agw guide` and JSON v1 are additive. Bootstrap packages state their minimum compatible CLI.
 Machine-contract breaking changes follow the repository's normal warn-and-migrate then reject

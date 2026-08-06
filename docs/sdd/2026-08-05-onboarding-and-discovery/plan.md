@@ -33,7 +33,7 @@
       code.
 - [x] HLA and plan reviewed by `agentworks-reviewer`; every valid finding resolved.
 - [x] Artifact files lint clean with vocabulary scoped in this SDD's `.cspell.json`.
-- [ ] Artifact-only commit pushed and draft PR opened for roadmap-lead pre-implementation review.
+- [x] Artifact-only commit pushed and draft PR opened for roadmap-lead pre-implementation review.
 - [ ] Draft PR feedback resolved and explicit approval received before implementation starts.
 
 Definition of done: the draft PR makes every design choice needed for the conflict-free first slice,
@@ -44,7 +44,12 @@ identifies all wave 2 gates, and has no unresolved review finding.
 - [ ] `guide-contract-lld.md` pins Python records, validation errors, catalog build timing, package
       data layout, semantic block identity, the deny-by-construction `GuideView` API, and the inert
       onboarding action record (identifier, sanitized precondition, required inputs, consent,
-      command, expected state, verification, and refusal alternative).
+      command, expected state, verification, and refusal alternative). Catalog construction is
+      guide-scoped and fail-soft, so invalid contributed content cannot break unrelated commands or
+      valid core topics.
+- [ ] The guide LLD inventories documented, unambiguous Claude Code and Codex environment
+      signatures; pins explicit flag, signature, then TTY detection precedence; rejects general
+      configuration and secret variables as signatures; and tests `--human` for piped output.
 - [ ] Immutable `TopicContribution`, typed anchors, and closed block records implemented with strict
       registration validation; unknown fields, duplicate slugs, broken links, placeholder syntax,
       and executable contributions rejected.
@@ -52,15 +57,28 @@ identifies all wave 2 gates, and has no unresolved review finding.
       secret resolver, raw config, run target, mutation, or arbitrary traversal surface.
 - [ ] Tests prove rendering performs no probe, secret resolution, capability invocation, finalize,
       or mutation and rejects an expression-evaluation attempt from plugin content.
+- [ ] Broken-config fixtures prove authored content and the framed config error still render, every
+      affected dynamic block reports unavailable, full guide requests attempt the normal registry
+      build, and `GuideView` construction cannot prompt for a secret.
 - [ ] Core concept topics and initial kind topics colocated with their owning packages, including
       security disclosure, consent-first behavior, progressive onboarding, management, secrets, and
-      troubleshooting.
+      troubleshooting. `concept-reporting-bugs` covers redacted reproduction, existing-issue search,
+      the repository bug template, and explicit operator authorization before external submission;
+      it does not solicit general feedback.
 - [ ] `concept-onboarding` assessment derives done, not-ready, disabled, and unverifiable status
       only from registry rows, finalized graph verdicts and relationships, and stored instance rows,
       with no raw-config reach-around, doctor execution, or persistent onboarding ledger.
 - [ ] Guided and replayable modes consume the same ordered action records; fixture scenarios prove
       equal registry, graph, stored-row, and explicit verification outcomes for equal inputs,
       including equal `unverifiable` outcomes after refusal.
+- [ ] Verification-surface inventory is rechecked against HEAD in the guide LLD: secret describe and
+      doctor prediction, doctor and readiness tool checks, and lifecycle-only SSH checks are marked
+      existing; actual secret proof and a non-mutating named-VM connection check are marked gaps.
+- [ ] A named-secret verification operation resolves through the normal boundary and reports only
+      success or framed failure, never returns or emits the value, and never invokes an interactive
+      backend without explicit consent.
+- [ ] A non-mutating named-VM connection verification operation uses the standard transport and
+      reports success or framed failure without repair, rekey, or implicit power-state change.
 - [ ] `agw guide [topic ...]`, `--agent/--human`, and `--names-only` implemented with atomic
       multi-topic validation, exact lookup, deterministic ordering, and markdown-only output.
 - [ ] Dynamic topic completion implemented and tested for Bash, Zsh, and PowerShell, including
@@ -71,6 +89,10 @@ identifies all wave 2 gates, and has no unresolved review finding.
       capability, resolving upgrade deprecations, and consented doctor-driven troubleshooting.
 - [ ] Permanent CLI and contributor documentation shipped with the command. Sample config reviewed;
       either updated for a real new setting or recorded as unaffected in the commit handoff.
+- [ ] Canonical Rulesync sources gain an always-on guide-contribution rule plus matching
+      `agentworks-dev` completeness and `agentworks-reviewer` drift checks; other roles are audited,
+      shared Claude Code, Codex, and Copilot outputs regenerated, and
+      `./scripts/rulesync-upgen.sh --check` passes.
 - [ ] Unit, integration, CLI, completion, packaging, typing, and lint gates pass.
 - [ ] Step reviewed by `agentworks-reviewer` and a fresh-eyes reviewer; valid findings resolved.
 - [ ] Always-green ready-to-merge implementation PR opened and roadmap-lead review requested.
@@ -120,6 +142,8 @@ one fact source.
 - [ ] Both bootstrap packages drive the same guide action inventory through guided and
       non-interactive fixture runs, exercising consent boundaries, refusal handling, rerun no-op
       behavior, post-upgrade newly available capability reporting, and JSON v1 consumption.
+- [ ] Every bootstrap fixture asserts the R12 disclosure is emitted before its first setup command,
+      probe, verification command, or other action.
 - [ ] Permanent installation and security documentation ships with the packages.
 - [ ] Packaging, generation, lint, and end-to-end gates pass; step reviewed by `agentworks-reviewer`
       and a fresh-eyes reviewer; valid findings resolved.
@@ -166,9 +190,11 @@ authoritative wave 2 sources.
 
 - [ ] Fresh-operator acceptance matrix run for Claude Code, Codex, and README-only paths with
       evidence for all 13 FRD acceptance criteria.
-- [ ] Feedback step asks the operator whether the path reached a first working session, where it
-      stalled, and what required unexplained intervention. No telemetry is added without a separate
-      operator decision.
+- [ ] No telemetry, general-feedback prompt, or non-bug manual-relay request ships; acceptance runs
+      retain their own timing and unexplained-intervention evidence as test artifacts.
+- [ ] `concept-reporting-bugs` is tested to redact sensitive evidence, point at the repository bug
+      template, require explicit operator authorization for external submission, and never
+      auto-submit an issue.
 - [ ] All load-bearing guide, JSON, contribution, packaging, and security contracts promoted to
       permanent docs so deleting this SDD would not remove operating knowledge.
 - [ ] `./scripts/lint-files.sh --fix`, focused tests, full test suite, typing, completion
