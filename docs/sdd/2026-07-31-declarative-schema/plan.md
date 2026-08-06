@@ -156,15 +156,17 @@ policy is recorded as an explicit descriptor-carried interim exception (wave 3 r
       questions carried to the seed: the constructibility check shape, slot-vocabulary naming (and
       whether the default slot is spelled in single-slot kinds), and whether the four entry
       dataclasses unify behind a generic entry or stay per-kind behind `entry_factory`.
-- [ ] `_VMPlatformKind` relocated into `capabilities/vm_platform/kinds.py` (LLD section 9); pure
-      relocation, full gate green.
-- [ ] Descriptor table introduced, populated from existing wiring; full gate green (no site derives
-      yet, table is additive).
-- [ ] Registration-time conformance wired into `register_plugin`'s pass 1 (LLD section 4: contract
+- [x] `_VMPlatformKind` relocated into `capabilities/vm_platform/kinds.py` (LLD section 9); pure
+      relocation, full gate green. (Commit `2f4d8c77`.)
+- [x] Descriptor table introduced, populated from existing wiring; full gate green (no site derives
+      yet, table is additive). (Commit `7b8d69c4`; reached via the `capability_descriptors()`
+      accessor, LLD section 2's implementation note.)
+- [x] Registration-time conformance wired into `register_plugin`'s pass 1 (LLD section 4: contract
       shape, required metadata and attributes, side-effect-free constructibility, required
       operations, `contract_version`), replacing the type-and-cast seam. Rejection happens before
       any registry mutation, so atomic seating is preserved; negative tests cover every defect
-      class. Behavior-additive: all shipped built-ins and the onepassword plugin conform.
+      class. Behavior-additive: all shipped built-ins and the onepassword plugin conform. (Commits
+      `2d366643`, `98e80831`.)
 - [ ] Each switchboard site derived from the descriptor, one commit per site, full gate green after
       each: the adapter table (`plugins/adapters.py` `CAPABILITY_ADAPTERS`), the graph kind set and
       readiness dispatch (`resources/graph.py` `_CAPABILITY_KINDS`, `_capability_node_readiness`),
@@ -179,6 +181,20 @@ policy is recorded as an explicit descriptor-carried interim exception (wave 3 r
       omitted site" to "assert every site derives from the descriptor"; the sibling drift guards
       (`test_recipe_gate_drift.py`, `test_harness_integration_gate_drift.py`) are reconciled.
 - [ ] Reviewer pass on the whole step; findings fixed. (Roadmap lead reviews the PR before merge.)
+
+**Progress note, 2026-08-05 (paused here for a design revision).** The first batch (the three boxes
+above, LLD section 10 steps 1-3) is landed, reviewed, and green at 3443 tests; the reviewer's two
+substantive findings are fixed (`interactive` escaped the conformance check entirely and would have
+surfaced as a late `AttributeError` in the resolve loop; the four new graph-guard exemptions are now
+function-scoped rather than whole-file, commit `32d3b88f`). Two review calls were taken beyond the
+LLD: `contract_version` no longer defaults on `Capability` (each impl states its own, so a future
+base bump cannot silently re-certify unmigrated impls), and the conformance branch keys on
+protocol-ness rather than `Capability`-ness (so a future plain-ABC contract keeps its nominal
+check). Outstanding review minors, deliberately not yet done: a deterministic stub pinning the
+vm-platform blocked-readiness branch on every host (today it only runs because `wsl2` happens to be
+unsupported on Linux), non-vacuity guards on the two descriptor tests that iterate registry
+contents, and trimming `descriptor.py`'s lazy-collection docstring to claim cycle safety only (it no
+longer buys import deferral). Steps 4-10 of the derivation sequence are not started.
 
 ### 2.1 Schema foundation
 
