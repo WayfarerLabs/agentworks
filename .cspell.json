@@ -142,6 +142,7 @@
     "reinitializable",
     "reprovisioning",
     "reqs",
+    "requiredness",
     "rollbackable",
     "rollouts",
     "rootfs",
