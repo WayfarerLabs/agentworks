@@ -26,8 +26,9 @@ Lifecycles are what Agentworks already provides. VMs and agents initialize and i
 reinitialize (setup). Workspaces initialize once at create (setup). Sessions start and resume
 (runtime), fixed at create with narrow resume evolution. Admin-scope setup rides the VM lifecycle,
 as the perspective already held: admin identity work happens during VM init and reinit (today's
-admin plugin installs inside the VM initializer are the precedent). Whether it surfaces as an
-`admin_init` method or an admin phase of `vm_init` is the wave 4 seed's call.
+admin plugin installs inside the VM initializer are the precedent). It surfaces through the same
+user-level method as agents: `user_init` runs for the admin user during VM init and reinit, and for
+each agent during agent init and reinit.
 
 ### The setup pipeline
 
@@ -50,21 +51,26 @@ hooks): composition and hook semantics belong to wave 6.
 
 Harness integrations are the only participants that straddle scopes, so the scope surface lives
 directly on the one registered integration API as methods (names indicative): `vm_init`,
-`agent_init`, `workspace_init`, alongside the existing session `start` and `resume`. The per-scope
-orchestrators call these at the end of their pipelines for the integrations the owning template
-selects. Env is delivered through the run targets; agent artifacts arrive as inputs. The base class
-provides no-op defaults, and an integration implements what it supports; this deliberately
-supersedes the perspective's absence-means-unsupported rule (review and testing catch a mistyped
-override), and whether a lightweight supported-scopes report exists for doctor and guide output is
-the effort lead's call. A per-scope invocation is constructed for its owning resource; it never
-reuses a session instance's target identity, readiness cache, or state namespace, which stay
+`user_init`, `workspace_init`, alongside the existing session `start` and `resume`. `user_init` is
+one surface for user-level setup: it is invoked for the admin user during VM init and for each agent
+during agent init, the invocation context says which user, and one method body serves both. The
+per-scope orchestrators call these at the end of their pipelines for the integrations the owning
+template selects. Env is delivered through the run targets; agent artifacts arrive as inputs. The
+base class provides no-op defaults, and an integration implements what it supports; this
+deliberately supersedes the perspective's absence-means-unsupported rule (review and testing catch a
+mistyped override), and whether a lightweight supported-scopes report exists for doctor and guide
+output is the effort lead's call. A per-scope invocation is constructed for its owning resource; it
+never reuses a session instance's target identity, readiness cache, or state namespace, which stay
 session-bound. The Claude-specific template fields (`claude_marketplaces`, `claude_plugins`) migrate
-into the Claude integration's agent-scope and admin-scope config as wave 4 work.
+into the Claude integration's user-scope config as wave 4 work (they already carry the same shape on
+admin config and agent templates today).
 
-Templates at each owning level select integrations and may attach per-scope config. An integration
-registers a config model for each scope it accepts config for (a named-model mapping under the
-descriptor's config contract; kinds with one model are unaffected). Config validation follows the
-platform's standard declarative rules.
+Config is simply part of the stuff. A template that selects an integration may attach a config blob
+at that spot, and like every other blob in the declarative world it is validated by a model the
+integration registers for that spot (vm, user, workspace, session; the user model serves both the
+admin attachment on the vm-template and agent attachments on agent-templates). The same model may
+serve several spots, and accepting no config at a spot means registering no model. That is the
+entirety of "per-scope config models": ordinary blob validation, not a mechanism.
 
 ### Trust, not enforcement
 
@@ -149,8 +155,8 @@ not as a permission system.
   (wave 4).
 - Whether a supported-scopes report exists for doctor and guide, and its mechanism (wave 4).
 - The interim state home before the instance-state store lands (wave 4).
-- The admin execution surface (an `admin_init` method versus an admin phase of `vm_init`) and
-  whether admin shares the VM template attachment or is independently configured (wave 4).
+- The admin attachment's spelling on the vm-template (it validates against the same user-scope model
+  as agent attachments) (wave 4).
 - The retry contract for a partially created workspace with some artifacts already written (wave 4).
 - Ordering and conflict reporting when multiple integrations attach at one broader scope (wave 4).
 - The first slice of the universal event vocabulary and its source/origin/fidelity metadata (wave

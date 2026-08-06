@@ -118,20 +118,20 @@ lifetime source clients. The simple case must not get more verbose.
 
 One registered integration identity with per-scope participation (operator simplification,
 2026-08-05, superseding the earlier facet framing; see `scope-participation-contract.md`). The
-integration API carries per-scope init methods (vm, agent, workspace, with admin riding the VM
-lifecycle) alongside session start and resume, called by the per-scope orchestrators at the end of
-each setup pipeline: core first, then features in declaration order receiving env-to-date, then
-integrations receiving all env and agent artifacts for the scope. Templates at each owning level
-select their integrations and may attach per-scope config, validated by per-scope config models.
-Scope discipline is trust-based: core does not enforce harness behavior; code review and testing
-gate system plugins, and wave 8's distribution-trust model gates external ones. Sessions receive all
-ancestor env and artifacts, and the integration owns hoisted representation, deduplication, and
-double-provisioning avoidance (isolation, not security). Session operations diagnose upstream gaps
-but never repair them. Artifact conduct is conventional: smallest ownership unit, no silent
-overwrite of repository or generator-owned content, applied state recorded, drift reported. The
-Claude-specific template fields (`claude_marketplaces`, `claude_plugins`) migrate into the Claude
-integration's agent-scope and admin-scope config. Rulesync informs the artifact design but is not a
-runtime dependency.
+integration API carries per-scope init methods (vm, user, workspace, where `user_init` runs for the
+admin during VM init and for each agent during agent init) alongside session start and resume,
+called by the per-scope orchestrators at the end of each setup pipeline: core first, then features
+in declaration order receiving env-to-date, then integrations receiving all env and agent artifacts
+for the scope. Templates at each owning level select their integrations and may attach per-scope
+config, validated by per-scope config models. Scope discipline is trust-based: core does not enforce
+harness behavior; code review and testing gate system plugins, and wave 8's distribution-trust model
+gates external ones. Sessions receive all ancestor env and artifacts, and the integration owns
+hoisted representation, deduplication, and double-provisioning avoidance (isolation, not security).
+Session operations diagnose upstream gaps but never repair them. Artifact conduct is conventional:
+smallest ownership unit, no silent overwrite of repository or generator-owned content, applied state
+recorded, drift reported. The Claude-specific template fields (`claude_marketplaces`,
+`claude_plugins`) migrate into the Claude integration's agent-scope and admin-scope config. Rulesync
+informs the artifact design but is not a runtime dependency.
 
 ### Observability (destinations 5 and 6)
 
