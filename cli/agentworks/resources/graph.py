@@ -9,7 +9,9 @@ field off each resource dataclass:
 - ``edges_of``: a node's outbound reference edges (who it points at).
 - ``dependents_of``: a node's inbound references (who points at it), the
   replacement for the removed per-resource ``references`` field.
-- ``reachable_from``: the transitive closure of ``edges_of`` from a node.
+- ``reachable_from`` / ``runtime_reachable_from``: the transitive closure of
+  ``edges_of`` from a node, over every edge and over runtime-need edges only
+  (FR17: an inheritance edge is source composition, not a runtime need).
 - ``readiness_of`` / ``is_ready``: the node's stored readiness verdict.
 - ``impl_of``: a capability node's stamped implementation (for secret
   resolution to reach a backend off the graph, not the live registry).
@@ -26,8 +28,9 @@ vm-platform / harness-integration / git-credential-provider, an instance for
 secret-backend) so consumers reach a capability's code off the graph rather
 than the live registry. ``readiness_of`` / ``enablement_of`` return stored
 verdicts; ``edges_of`` / ``dependents_of`` are the two edge directions;
-``reachable_from`` is the transitive closure. The retention was introduced by
-the 2026-07 registry-readiness refactor.
+``reachable_from`` and ``runtime_reachable_from`` are the two transitive
+closures. The retention was introduced by the 2026-07 registry-readiness
+refactor.
 """
 
 from __future__ import annotations
@@ -210,16 +213,43 @@ class DependencyGraph:
         return self._nodes[(kind, name)].inbound
 
     def reachable_from(self, kind: str, name: str) -> list[tuple[str, str]]:
-        """The transitive closure of ``outbound`` from this node: every node
-        reachable by following edges, excluding the start node, deduped, in
-        first-encountered order.
+        """The transitive closure of ``outbound`` from this node, over EVERY
+        edge: what this node composes with, inheritance included.
 
-        A graph-owned DFS over the frozen ``outbound`` edges, so consumers stop
+        The SOURCE-COMPOSITION closure. Its caller is the recipe use-gate,
+        which is right to cross an inheritance edge because a template
+        resolver merges the whole lineage into the acted-on recipe. A caller
+        asking what this node NEEDS AT RUN TIME wants
+        :meth:`runtime_reachable_from` instead (FR17); getting that choice
+        wrong is a wrong answer rather than a crash, which is why the two
+        are separate methods rather than a defaulted flag.
+
+        Excludes the start node, deduped, in first-encountered order. A
+        graph-owned DFS over the frozen ``outbound`` edges, so consumers stop
         hand-rolling one. Cycle-safe via a visited set (the graph is acyclic
         after finalize's cycle pass, but this query may be called on a graph
         built before that pass in tests). Returns keys; callers resolve rows via
         ``registry.lookup``.
         """
+        return self._closure(kind, name, runtime_only=False)
+
+    def runtime_reachable_from(self, kind: str, name: str) -> list[tuple[str, str]]:
+        """The transitive closure over RUNTIME-NEED edges only: what this
+        node needs to have resolved for it to work.
+
+        :meth:`reachable_from` minus the ``INHERITS`` edges (FR17).
+        Inheritance is source composition: the parent's declaration is
+        merged into this node's, and this node already publishes the merged
+        result's needs as edges of its own, so crossing the edge as well
+        would attribute the parent's STANDALONE needs (the secret name the
+        child overrode, say) to the child and prompt for a secret it does
+        not use.
+        """
+        return self._closure(kind, name, runtime_only=True)
+
+    def _closure(self, kind: str, name: str, *, runtime_only: bool) -> list[tuple[str, str]]:
+        from agentworks.resources.reference import RefRelationship
+
         start = (kind, name)
         visited: set[tuple[str, str]] = {start}
         ordered: list[tuple[str, str]] = []
@@ -229,6 +259,8 @@ class DependencyGraph:
             if node is None:
                 continue
             for ref in node.outbound:
+                if runtime_only and ref.relationship is not RefRelationship.USES:
+                    continue
                 target = (ref.kind, ref.name)
                 if target not in visited:
                     visited.add(target)

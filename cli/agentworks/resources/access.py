@@ -146,6 +146,20 @@ def ensure_recipe_enabled(registry: Registry, kind: str, name: str) -> None:
     ``ensure_harness_integration_enabled``,
     etc.), so the recipe gate neither duplicates nor contradicts them.
 
+    **ENABLEMENT PROPAGATES ACROSS AN INHERITANCE EDGE, and this is the one
+    traversal that says so** (FR17's policy call, settled here rather than
+    left to fall out). The full ``reachable_from`` closure is deliberate: a
+    disabled parent template is not a runtime need this row happens to have,
+    it is SOURCE the resolver is about to compile in, so using the child
+    means using it. Readiness is the other half of the call and propagates
+    nowhere: no template kind implements ``not_ready``, so the fold gives
+    every template row a ready verdict and an inheritance edge changes
+    nothing, which is the answer to keep (a base template that a plugin has
+    turned off is an enablement fact, and enablement is the axis that
+    answers for it). If a future inheriting kind grows a ``not_ready`` hook,
+    the fold hands it every out-edge's state including the inherited one and
+    the hook decides, which is R4's rule and not this gate's to pre-empt.
+
     Safe no-op for an implicit ``default`` template (a missing start node:
     ``reachable_from`` returns empty, ``enablement_of`` reads ``enabled``) and
     for an all-enabled registry.

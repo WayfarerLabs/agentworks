@@ -530,10 +530,25 @@ def _enclosing_functions(source: str, predicate: Callable[[ast.AST], bool]) -> l
     return hits
 
 
-def test_collect_secrets_for_reads_reachable_from() -> None:
+def test_collect_secrets_for_reads_the_runtime_closure() -> None:
+    """The secret walk reads the graph, and reads the RUNTIME-need closure
+    specifically (FR17): the full ``reachable_from`` crosses inheritance
+    edges, which would attribute a parent's standalone secrets to a child
+    that overrode them. Both halves matter, so both are asserted."""
     source = _function_source("resources/walk.py", "collect_secrets_for")
-    assert "reachable_from" in source
+    assert "runtime_reachable_from" in source
+    assert "graph.reachable_from" not in source
     assert find_dependencies_calls(source) == []
+
+
+def test_the_recipe_gate_reads_the_full_closure() -> None:
+    """The other side of the same call, and the reason the two closures are
+    separate methods: enablement DOES propagate across an inheritance edge,
+    because the resolver compiles the parent's declaration into the recipe
+    this gate is about to act on."""
+    source = _function_source("resources/access.py", "ensure_recipe_enabled")
+    assert "graph.reachable_from" in source
+    assert "runtime_reachable_from" not in source
 
 
 def test_node_factories_read_edges_of() -> None:
