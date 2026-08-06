@@ -101,8 +101,9 @@ registered through it; the premise was verified against HEAD first, and no imple
 than one model today.) The one shape decision that survives from that episode: the framework never
 asks an implementation for "its schema", it asks for **"your schema for
 `<consuming resource kind>`"**. The capability base's default `config_model_for(consuming_kind)`
-ignores the argument and returns the single declared model, so simple capability authors write
-`config_model = X` and never see the parameter, while every framework consumer (validation, union
+returns the single declared model for the kind's own consuming resource kind and RAISES on any
+other, so a wrong-kind lookup fails loudly instead of returning a plausible-but-wrong model. Simple
+capability authors still write only `config_model = X`, while every framework consumer (validation,
 assembly, emission, rendering) passes the consuming kind it already has. Union assembly is per
 `(kind, consuming resource kind)` pair, which reduces to today's per-kind union while each kind has
 one consumer.

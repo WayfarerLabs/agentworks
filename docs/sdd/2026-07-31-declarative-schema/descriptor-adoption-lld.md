@@ -311,10 +311,19 @@ class Capability:
 ```
 
 An author of a vm-platform writes `config_model = LimaConfig` and never sees the parameter, so the
-keying costs the simple kinds nothing. Every framework consumer of a config model (validation at the
-finalize fold, union assembly in 2.3, emission in 2.7, sample and describe rendering in 2.8) passes
-the consuming resource kind, which it always has: it is walking a consuming resource of a known
-kind.
+keying costs the simple kinds nothing.
+
+**The default REJECTS an unexpected consuming kind** (operator, 2026-08-05). It does not blindly
+return `config_model`: it first checks `consuming_kind` against the kind's known consuming resource
+kind (`manifest_section.host_kind` for the three hosted kinds, `secret` for map-keyed
+secret-backend) and raises a framework error naming both kinds if they disagree. Without that check
+the parameter is decorative for three of the four kinds, and a wrong-kind bug returns a
+plausible-but-wrong model instead of failing, which is exactly the silent-wrong-answer class FR12's
+strict direction exists to eliminate. With it, the keying is load-bearing from day one rather than
+becoming real only when wave 4 arrives. Every framework consumer of a config model (validation at
+the finalize fold, union assembly in 2.3, emission in 2.7, sample and describe rendering in 2.8)
+passes the consuming resource kind, which it always has: it is walking a consuming resource of a
+known kind.
 
 Why key it now rather than when wave 4 needs it: wave 4's harness-integration keys its schema by
 hosting surface (vm-template including the admin attachment, agent-template, workspace-template,
