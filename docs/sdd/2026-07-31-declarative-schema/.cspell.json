@@ -22,6 +22,8 @@
     "jsonschema2md",
     "karuppiah",
     "kubebuilder",
+    "metaschema",
+    "metaschemas",
     "mkdocstrings",
     "modeline",
     "monkeypatched",
@@ -35,6 +37,7 @@
     "ruamel",
     "schemars",
     "steampunk",
+    "subclassing",
     "tamasfe",
     "taplo",
     "tfplugindocs",
@@ -42,7 +45,9 @@
     "typedload",
     "unaddressable",
     "unbuildable",
+    "uncommentable",
     "undiscriminated",
+    "unmodeled",
     "voluptuous",
     "wyfo"
   ]
