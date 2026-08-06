@@ -628,14 +628,48 @@ which is FR14's to sweep when settings sections become models, not this step's.
 
 ### 2.7 Schema emission and editor association
 
-- [ ] JSON Schema (2020-12) emitted per kind plus the envelope schema, unions expressed as `oneOf` +
+- [x] JSON Schema (2020-12) emitted per kind plus the envelope schema, unions expressed as `oneOf` +
       discriminator over `name`; CLI surface (working name `agw resource schema`) prints/writes the
       set; completions tree updated for the new command.
-- [ ] `agw resource sample --write` and migrator-emitted YAML stamp the yaml-language-server
+- [x] `agw resource sample --write` and migrator-emitted YAML stamp the yaml-language-server
       modeline referencing written schema files; end-to-end check that a schema-aware editor setup
       validates a sample manifest (documented manual check plus an automated schema-validates-the-
       sample test using a JSON Schema validator in tests only, if the LLD approves the dev-only
       dependency).
+
+**Step 2.7 records, 2026-08-06.**
+
+**The dev-only `jsonschema` validator paid for itself before the step closed.** The argument for
+taking it was that assertions hand-written by the emitter's own author encode that author's beliefs
+about JSON Schema, so they pass in exactly the cases where those beliefs are wrong. It found three
+places where emission was STRICTER than the loader, each of which would have shipped an editor
+red-underlining valid configuration: `GitHubConfig.token` emitted as required (pydantic computes
+`required` from the declared field and knows nothing about owner-template filling, so
+`provider: {name: github}`, which every unscoped credential in the shipped sample writes, would have
+been flagged); a bare `spec:` that the envelope reads as an empty mapping; and `expires` emitted as
+`format: date-time` alone when the before-validator also accepts a plain date.
+
+**The one-arm union is the SHIPPED case, not a hypothetical**, for `harness-integration`/shell and
+`git-credential-provider`/github. `Union[(X,)]` collapses, but pydantic keeps the tagged-union core
+schema through the collapse, so a one-arm kind emits the same `discriminator` plus `oneOf` shape a
+multi-arm one does. Emission classifies on `descriptor.config_schema.discriminator is not None`,
+never on the annotation still being a union, and the pin seats a fixture capability rather than
+leaning on the two kinds that happen to be one-arm today.
+
+**The document envelope is modeled for EMISSION ONLY**, discharging 2.5's deferral rather than
+deferring it again. `manifests/envelope.py` keeps its hand-rolled runtime validation, because 2.5's
+reasons stand: it has the best errors in the codebase and must name the kind before a kind model is
+in hand. That is one authority, not two, because everything else is read (`API_VERSION`,
+`KIND_REGISTRY`, `METADATA_FIELDS`, the kind's own row), and the single fact the emission model owns
+(the top-level key set) is pinned against `envelope._ENVELOPE_KEYS`.
+
+**ESCALATED, not deferred silently: the map-keyed splice for `backend_mappings` is not built.** The
+descriptor table has no record of where a map-keyed capability is hosted (`secret-backend`'s
+`manifest_section` is `None`), so emission would have to hard-code `secret` / `backend_mappings`,
+reintroducing exactly the switchboard the descriptor exists to have killed. Building it properly
+needs a descriptor-contract change, and that contract is the ROADMAP's artifact, not this SDD's.
+Today's emission there is under-constrained but never wrong. Trigger for revisiting: the first
+backend whose mapping is a real table (1Password). Raised to the operator 2026-08-06.
 
 ### 2.8 Live-rendered samples and describe
 
