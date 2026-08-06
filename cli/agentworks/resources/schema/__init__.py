@@ -5,6 +5,9 @@ hand-validated lives here:
 
 - :class:`AgwModel` / :class:`AgwRootModel`, the shared strict, frozen,
   closed-world bases every spec and capability config model extends.
+- :class:`SecretRef` / :class:`ResourceRef`, the ``Annotated`` markers
+  that say what a field means about another Resource, and their
+  ``x-agw-ref`` JSON Schema encoding.
 
 This package sits BELOW the domains that use it. It may import
 ``resources/reference.py`` (the reference records it produces) and
@@ -18,8 +21,20 @@ imports ``resources/reference.py``, never the reverse.
 from __future__ import annotations
 
 from agentworks.resources.schema.base import AgwModel, AgwRootModel
+from agentworks.resources.schema.markers import (
+    REF_SCHEMA_KEY,
+    RefMarker,
+    RefOwner,
+    ResourceRef,
+    SecretRef,
+)
 
 __all__ = [
+    "REF_SCHEMA_KEY",
     "AgwModel",
     "AgwRootModel",
+    "RefMarker",
+    "RefOwner",
+    "ResourceRef",
+    "SecretRef",
 ]

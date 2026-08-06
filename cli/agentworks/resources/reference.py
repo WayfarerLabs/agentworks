@@ -49,10 +49,34 @@ one directly.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
+
+
+class RefRelationship(Enum):
+    """What the referring Resource MEANS by pointing at the target.
+
+    - ``USES``: a runtime need. The target must resolve for the referrer
+      to work.
+    - ``INHERITS``: source composition. The target's declaration is
+      merged into the referrer's.
+
+    The distinction is the relationship, never the target's kind: today
+    a template is pointed at only to inherit from it, but a future
+    uses-a-template edge would be misclassified by any filter that reads
+    "points at a template" as "inherits from it".
+
+    Defined here, beside the reference records that carry it, rather than
+    with the field markers that declare it: it is the reference
+    vocabulary's word, and this module is a leaf that
+    ``resources/schema/`` imports, never the reverse.
+    """
+
+    USES = "uses"
+    INHERITS = "inherits"
 
 
 @dataclass(frozen=True)
