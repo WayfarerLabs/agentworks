@@ -22,8 +22,9 @@ Two structural rules make the table safe to consume from anywhere:
   call it inside their own functions rather than binding the table at module
   import. Early modules (``resources/graph.py``, ``plugins/adapters.py``,
   ``manifests/decode.py``) load before the capability packages, so this
-  inherits the cycle discipline ``_CAPABILITY_REGISTRY_LOADERS`` already uses
-  rather than inventing a new one. The ``registry`` field is a callable for
+  inherits the cycle discipline the graph builder's per-kind registry
+  loaders already used rather than inventing a new one (those loaders now
+  derive from this table). The ``registry`` field is a callable for
   the same reason. Cycle safety is the whole benefit: it buys no import
   DEFERRAL, because ``resources/kinds/__init__`` already imports all four
   contributing modules, so anything reaching the resource machinery has

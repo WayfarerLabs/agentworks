@@ -34,6 +34,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from functools import cache
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
 
@@ -538,6 +539,9 @@ def _impl_for(kind: str, name: str) -> object | None:
     instance for secret-backend); the node just stores whatever the kind's
     registry holds.
 
+    A kind with no descriptor is not a capability kind, which is what makes the
+    ``None`` return total: the table IS the capability-kind enumeration.
+
     A published capability row whose name has no registered implementation is a
     framework/publisher invariant violation (the capability resources mirror the
     code registry), not a config error, so this fails fast with ``StateError``
@@ -545,7 +549,7 @@ def _impl_for(kind: str, name: str) -> object | None:
     the phase-3 fold or phase-4 resolution. The build stays total for malformed
     *config* (R1); this is a different failure class.
     """
-    registry = _CAPABILITY_REGISTRY_LOADERS.get(kind)
+    registry = _capability_registry_loaders().get(kind)
     if registry is None:
         return None
     impl = registry().get(name)
@@ -556,36 +560,17 @@ def _impl_for(kind: str, name: str) -> object | None:
     return impl
 
 
-def _load_vm_platform_registry() -> Mapping[str, object]:
-    from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
+@cache
+def _capability_registry_loaders() -> Mapping[str, Callable[[], Mapping[str, object]]]:
+    """Each capability kind's lazy code-registry accessor, which IS its
+    descriptor's ``registry`` field.
 
-    return VM_PLATFORM_REGISTRY
+    Everything here stays lazy for the same reason it always was: this module
+    is imported by ``agentworks.resources`` before the capability packages, so
+    neither the table nor the registries may be reached at module load. The
+    descriptor table is collected on first call and cached; each value is
+    still a callable that imports its own registry when invoked.
+    """
+    from agentworks.capabilities.descriptor import capability_descriptors
 
-
-def _load_harness_integration_registry() -> Mapping[str, object]:
-    from agentworks.capabilities.harness_integration import HARNESS_INTEGRATION_REGISTRY
-
-    return HARNESS_INTEGRATION_REGISTRY
-
-
-def _load_git_credential_provider_registry() -> Mapping[str, object]:
-    from agentworks.capabilities.git_credential import GIT_CREDENTIAL_PROVIDER_REGISTRY
-
-    return GIT_CREDENTIAL_PROVIDER_REGISTRY
-
-
-def _load_secret_backend_registry() -> Mapping[str, object]:
-    from agentworks.secrets.backends import SECRET_BACKEND_REGISTRY
-
-    return SECRET_BACKEND_REGISTRY
-
-
-# The four capability kinds and the (lazily-imported) code registry each reads
-# its impl from. Lazy loaders avoid an import cycle at module load: this module
-# is imported by ``agentworks.resources`` before the capability packages.
-_CAPABILITY_REGISTRY_LOADERS: dict[str, Callable[[], Mapping[str, object]]] = {
-    "vm-platform": _load_vm_platform_registry,
-    "harness-integration": _load_harness_integration_registry,
-    "git-credential-provider": _load_git_credential_provider_registry,
-    "secret-backend": _load_secret_backend_registry,
-}
+    return {descriptor.kind: descriptor.registry for descriptor in capability_descriptors()}

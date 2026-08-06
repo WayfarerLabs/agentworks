@@ -38,9 +38,12 @@ allow-listed modules are trusted; each is justified inline on its allow-list.
   ``dependencies(config)`` (not a graph re-walk).
 - ``resources/graph.py`` + ``resources/registry.py``: the graph BUILDER. It
   walks each resource's ``dependencies(context)`` (handing it the build
-  context), reads the four capability code registries to stamp each capability
+  context), reaches the capability code registries to stamp each capability
   node's impl (``_impl_for`` / ``build_context``), and calls ``not_ready`` in
-  the fold. This is the sanctioned builder-reads-registry path.
+  the fold. This is the sanctioned builder-reads-registry path. It reaches
+  them through the descriptors' accessors now, so it NAMES no registry and is
+  no longer exempt from pattern 2: the exempt spelling moved to the four
+  ``kinds.py`` modules below.
 - the four capability ``kinds.py`` modules (``capabilities/vm_platform``,
   ``capabilities/harness_integration``, ``capabilities/git_credential``,
   ``secrets``): each kind's ``CapabilityKindDescriptor`` carries the lazy
@@ -257,7 +260,7 @@ _DEPENDENCIES_ALLOWLIST = frozenset(
 
 _REGISTRY_READ_ALLOWLIST = frozenset(
     {
-        # Publishers (own the registry).
+        # Owners (each declares its kind's registry).
         "capabilities/vm_platform/__init__.py",
         "capabilities/harness_integration/__init__.py",
         "capabilities/git_credential/__init__.py",
@@ -269,14 +272,13 @@ _REGISTRY_READ_ALLOWLIST = frozenset(
         # (declarative-schema step 2.0), so it names no registry at all and
         # exempting it would only excuse a future probe.
         "plugins/adapters.py",
-        # Graph builder (stamps impls, assembles the build context, folds).
-        "resources/graph.py",
         # The four capability-kind descriptors (declarative-schema step 2.0).
         # Each carries the lazy accessor for its own registry, which IS the
         # builder's per-kind loader relocated beside the kind it belongs to:
-        # ``resources/graph.py``'s ``_CAPABILITY_REGISTRY_LOADERS`` derives
-        # from these, so the sanctioned builder-reads-registry path moved
-        # here, it did not multiply. Same exemption, new address.
+        # the graph builder's loader map derives from these, so the sanctioned
+        # builder-reads-registry path moved here, it did not multiply. Same
+        # exemption, new address, and ``resources/graph.py`` gave its own up
+        # (it names no registry now).
         "capabilities/vm_platform/kinds.py",
         "capabilities/harness_integration/kinds.py",
         "capabilities/git_credential/kinds.py",
