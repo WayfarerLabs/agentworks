@@ -1,10 +1,14 @@
 """The plugin framework, provable in isolation against a fixture (Phase 2).
 
 Covers the ``Plugin`` descriptor and its immutability, the atomic validating
-``register_plugin`` and its seating-guard collision layer, the per-kind
+``register_plugin`` and its seating-guard collision layer, the descriptor-driven
 ``CapabilityAdapter`` table, the ``seated_plugin`` snapshot helper, and the
 inverted installed index. No ``build_registry`` wiring, no publish, no
 enablement: the fixture proves the framework.
+
+It also carries the capability-switchboard drift guard at the end: the one
+place asserting that every site which used to enumerate the capability kinds
+now derives its enumeration from the descriptor table.
 """
 
 from __future__ import annotations
@@ -15,8 +19,10 @@ from typing import cast
 import pytest
 
 import agentworks.plugins as plugins_pkg
+from agentworks.capabilities.descriptor import capability_descriptors
 from agentworks.capabilities.vm_platform.base import VMPlatform
 from agentworks.errors import StateError
+from agentworks.manifests.decode import capability_fields
 from agentworks.plugins import (
     SYSTEM_PLUGINS,
     Plugin,
@@ -25,7 +31,13 @@ from agentworks.plugins import (
     register_plugin,
     seated_plugin,
 )
-from agentworks.resources.graph import Readiness
+from agentworks.plugins.adapters import _DescriptorAdapter
+from agentworks.plugins.registration import _capability_registries
+from agentworks.resources.graph import (
+    Readiness,
+    _capability_kinds,
+    _capability_registry_loaders,
+)
 from agentworks.resources.kind import KIND_REGISTRY
 from agentworks.resources.origin import Origin
 from tests.plugins._fixtures import (
@@ -404,9 +416,82 @@ def test_build_row_on_an_unseated_name_raises_state_error() -> None:
         adapter.build_row("definitely-not-seated", _plugin_origin())
 
 
-def test_capability_adapters_keys_match_the_capability_category_kinds() -> None:
-    capability_kinds = {kind for kind, handler in KIND_REGISTRY.items() if handler.category == "capability"}
-    assert set(capability_adapters()) == capability_kinds
+# -- The switchboard: every site derives from the descriptor table ----------
+
+
+def test_every_capability_switchboard_site_derives_from_the_descriptor() -> None:
+    """One table, and every site that used to enumerate the capability kinds
+    is a view of it (declarative-schema SDD step 2.0).
+
+    This began life as an OMISSION detector, watching the hand-written
+    adapter table for a kind someone forgot to add. Each site is now BUILT
+    from the descriptor table, so the assertions below are near-tautological
+    by construction, which is exactly the point: they regression-lock the
+    derivation and fail the moment someone reintroduces an independent
+    enumeration at a site.
+
+    Object IDENTITY wherever an object is at stake, so a site that rebuilds
+    an equal-looking registry, loader, or adapter fails here rather than
+    diverging silently later.
+
+    Only the sites with static structure to compare appear here. The other
+    two (the generic built-in publisher and the graph's readiness dispatch)
+    have none, and are pinned by their OUTPUT in
+    ``tests/test_capability_descriptors.py``.
+    """
+    descriptors = capability_descriptors()
+    kinds = {d.kind for d in descriptors}
+
+    # Non-vacuity first: a table read too early, or a contributor that
+    # stopped being imported, must fail loudly here rather than satisfy
+    # every assertion below trivially.
+    assert tuple(d.kind for d in descriptors) == (
+        "vm-platform",
+        "harness-integration",
+        "git-credential-provider",
+        "secret-backend",
+    )
+
+    # The original assertion, kept: a new capability kind added without its
+    # record fails here. Plus the identity that lets the four
+    # ``KIND_REGISTRY[...] = ...`` lines stay co-located with their kinds.
+    assert kinds == {kind for kind, handler in KIND_REGISTRY.items() if handler.category == "capability"}
+    for descriptor in descriptors:
+        assert descriptor.kind_strategy is KIND_REGISTRY[descriptor.kind], descriptor.kind
+
+    # Site: the plugin framework's adapter table. One generic adapter per
+    # kind, each a view of that kind's record.
+    adapters = capability_adapters()
+    assert set(adapters) == kinds
+    for descriptor in descriptors:
+        adapter = adapters[descriptor.kind]
+        assert isinstance(adapter, _DescriptorAdapter), descriptor.kind
+        assert adapter.descriptor is descriptor, descriptor.kind
+
+    # Sites: the graph's capability-kind set and its per-kind registry loaders.
+    assert set(_capability_kinds()) == kinds
+    loaders = _capability_registry_loaders()
+    assert set(loaders) == kinds
+    for descriptor in descriptors:
+        assert loaders[descriptor.kind] is descriptor.registry, descriptor.kind
+
+    # Site: the plugin snapshot/restore tuple, in table order. Restore
+    # clears and updates these dicts in place, so identity is the whole
+    # contract.
+    snapshot = _capability_registries()
+    for registry, descriptor in zip(snapshot, descriptors, strict=True):
+        assert registry is descriptor.registry(), descriptor.kind
+
+    # Site: manifest decode's capability fields, ACCEPT-WARN-FILTERED. The
+    # filter is load-bearing: session-template is a host surface too, but it
+    # rejects the legacy string shape and keeps its own fold, so an
+    # unfiltered derivation would sweep it into the accept-warn fold.
+    assert dict(capability_fields()) == {
+        d.manifest_section.host_kind: (d.manifest_section.naming_field, d.manifest_section.config_field)
+        for d in descriptors
+        if d.manifest_section is not None and d.manifest_section.legacy_string_shape == "accept-warn"
+    }
+    assert set(capability_fields()) == {"vm-site", "git-credential"}
 
 
 # -- The installed index (inverted registration) ----------------------------

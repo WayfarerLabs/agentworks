@@ -7,8 +7,10 @@ a registry through, which is not additive). That places a standing risk: a
 future third caller of either factory could construct a session on a disabled
 plugin harness integration without gating it.
 
-This guard is the analog of the ``CAPABILITY_ADAPTERS.keys()`` adapter-drift
-test: it must FAIL when a real bypass is introduced. The protection is
+This guard is the analog of the capability-switchboard drift guard (which asserts
+every switchboard site derives from the descriptor table, in
+``tests/plugins/test_plugin_framework.py``): it must FAIL when a real bypass is
+introduced. The protection is
 per-FUNCTION, not per-file: every function whose body calls a session-node
 factory must also call ``ensure_harness_integration_enabled`` within that same function body.
 A per-file substring check would be defeated by a second, ungated factory call
