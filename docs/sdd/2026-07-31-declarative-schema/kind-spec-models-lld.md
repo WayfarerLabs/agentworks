@@ -1009,3 +1009,46 @@ Written during implementation. Everything above stands except where named here.
   a hand-typed `harness_integration: shell` was answered with a command that printed "nothing to
   migrate" for the exact document that had just failed to load. A test pins the invariant (every
   host surface decode can refuse is one the migrator's upgrade covers) rather than the entry.
+
+## 16. What the step-2.5 review corrected
+
+The review found one wrong answer and five degraded messages. Two of its findings contradict claims
+made above, so those are corrected here rather than left standing.
+
+**Section 3.3's "strictly more coverage than today" is false, and the soft edge was a regression.**
+That section calls a plugin capability's blob contributing no advisory at manifest-load time "a
+missed ADVISORY line, never a wrong answer". For `vm-site.token_secret` it is LESS coverage: the
+check it replaces was not platform-gated, so it fired for every site. And it was not confined to
+plugins seating late in `build_registry`: a plugin's impls seat when `agentworks.plugins` is
+imported, which no caller of `load_manifests` is obliged to have done, so doctor (the surface this
+advisory exists for) reported `Config is valid` for a non-conforming `token_secret` on an ENABLED
+proxmox site. `_hosted_capability_references` imports the index itself now, which makes the advisory
+a property of the document rather than of who loaded it first.
+
+**Section 6's shadow-guard deletion argument is right but incomplete.** Deleting the guard is
+correct (a stray `platform` key inside one tagged table cannot re-pick the capability, so it is the
+platform's model's business), but its replacement is readiness-gated: `_validate_resources` skips a
+not-ready or disabled node, so the refusal only runs on a host where that platform can run. A `wsl2`
+site carrying junk loads clean on Linux. Consistent with R9.4 and accepted as a narrowing; named in
+`VMSiteDecl.validate_config` so the next reader does not have to rediscover it.
+
+**Three fields transcribed the wrong requiredness.** Section 6 says `apt-package`'s `apt` is
+required. It reads that way on the dataclass and NOT on the operator surface, because the loader
+read it through `_require_list`, whose `get(key, [])` defaults it. The mismatch dead-ended the
+migrator: a config.toml that hard-errors on load carried a remediation that aborted at verification
+and rolled back. `vm-template.tailscale_auth_key` lost its non-empty guard, which was the one wrong
+answer in the step: `None` means inherit and the merge overrides on `is not None`, so an empty
+string replaced the resolved default with the name of no secret at all. And a declared `secret`
+needs a non-empty description (it is the prompt text), which is checked at decode for the same
+reason the name cap is: the framework builds secret rows with an empty one on purpose.
+
+**Two message regressions, both fixed in the bridge rather than the field.** A pattern-constrained
+string rendered pydantic's raw text; `string_pattern_mismatch` joins the normalization table, which
+also improves five pre-existing fields across two capabilities. An orphan or mixed `*_config` blob
+lost its fold steer, because `_reject_legacy_shape` returned early unless the naming field was a
+string.
+
+**The lens, which is the durable part.** In three of these the test was rewritten to assert the
+degraded output, which stops it being a guard. FR12 makes error quality a non-regression
+requirement, so when output changes the question is whether the new message is at least as good, and
+when the honest answer is no, the fix is the code.
