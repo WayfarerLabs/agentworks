@@ -51,8 +51,8 @@ CapabilityKindDescriptor
                              wave 3)
     config_schema            the kind's config model contract (see below)
     union_assembly           framework-built discriminated union per kind at the registration
-                             boundary, cached on the kind's registry entry (per hosting surface
-                             where a kind keys its schemas by surface)
+                             boundary, cached on the kind's registry entry (per consuming kind
+                             where a kind keys its schemas)
     entry_factory            builds the kind's read-only resource row
     kind_strategy            the ResourceKind strategy object for KIND_REGISTRY
     readiness                uniform classmethod contract over config; instance-scoped readiness
@@ -85,12 +85,19 @@ Each capability implementation registers exactly one config model, precisely as 
 specifies; there is no slot vocabulary and nothing extra to spell for the common case (operator
 ruling, 2026-08-05, rescinding the earlier slot framing). Validation is one blob at a time: the
 graph walk reaches each consuming resource and validates its blob against the schema for that
-hosting surface, so no schema mapping is ever assembled or consumed whole. The multi-schema case is
-capability-specific, with the harness-integration kind the odd one out at first and possibly
-forever: in wave 4 it keys its config schema by hosting surface (vm-template including the admin
-attachment, agent-template, workspace-template, session-template). The descriptor's config contract
-only has to avoid preventing a kind from exposing more than one model; it provides no mechanism
-around that. Scope support is carried by the integration's implementation, never by schema presence.
+consuming resource kind, so no schema mapping is ever assembled or consumed whole. The multi-schema
+case is capability-specific, with the harness-integration kind the odd one out at first and possibly
+forever: in wave 4 it keys its config schema by consuming resource kind (vm-template including the
+admin attachment, agent-template, workspace-template, session-template). The resolution API settled
+with the wave 2 effort (2026-08-05) makes this concrete: the framework never asks an implementation
+for "its schema"; it asks `config_model_for(consuming_kind)` (names indicative). The base default
+ignores the argument and returns the single declared `config_model`, so ordinary capability authors
+never see the parameter, and the harness-integration kind overrides it in wave 4 with a mapping
+keyed by consuming resource kind, touching zero framework call sites. The descriptor's config
+contract provides no mechanism beyond that defaulted hook. Scope support is carried by the
+integration's implementation, never by schema presence. `manifest_section` stays singular (wave 2
+effort call): its only plural driver is the legacy accept-warn decode fold, which steps 2.4 and 2.5
+remove before wave 4 needs multiple surfaces.
 
 ## What derives from the descriptor
 
