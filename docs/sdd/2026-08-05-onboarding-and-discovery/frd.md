@@ -110,9 +110,15 @@ surfaces, dynamic content) adopts wave 2's surfaces as they land rather than blo
   changes what the guide says. Output is markdown only; structured data appears only inside the
   markdown. R7's machine-readable contract is a separate surface and stays so. Topics are sized like
   skills, with sub-topics referenced rather than inlined, and topic names participate in shell
-  completions. Prior art for the effort's `prior-art-research.md`: PowerShell's module-contributed
-  `about_*` topics, `kubectl explain`'s live schema walks, `git help` concept guides, `go help`
-  topics, `rustc --explain`, and Terraform's per-provider schema-plus-prose docs generation.
+  completions. An agent-shaping mode (an `--agent` flag with a TTY-informed default; the exact
+  mechanism is the HLA's call) MAY adjust emphasis, never substance: in agent mode the rendering
+  foregrounds the behavioral contract (ask for consent before any tool call that examines the
+  operator's machine; test only for the presence of sensitive material such as SSH keys and secrets,
+  never view values; restate R12's access disclosure). Both renderings derive from one source; there
+  are never two contents. Prior art for the effort's `prior-art-research.md`: PowerShell's
+  module-contributed `about_*` topics, `kubectl explain`'s live schema walks, `git help` concept
+  guides, `go help` topics, `rustc --explain`, and Terraform's per-provider schema-plus-prose docs
+  generation.
 - **R14 (universal contribution).** Guide content MUST arrive through one generic contract that
   every participant uses: core resource kinds, capability implementations, and plugins (system
   today, external later) each contribute their own topics. Built-in static content lives beside the
@@ -242,6 +248,8 @@ surfaces, dynamic content) adopts wave 2's surfaces as they land rather than blo
 
 - How `concept-onboarding` determines done versus not-yet-done from live state, and whether any
   step-state must persist beyond what the system already records (HLA's call).
+- The agent-mode mechanism: flag spelling, the TTY-informed default, and how emphasis differs
+  between renderings without forking content (HLA's call).
 - The machine-readable output contract's shape: per-command `--json` versus a global output mode,
   and its versioning story (HLA's call, informed by issue #257).
 - The R14 contribution contract's shape, including whether it becomes a descriptor concern, and the
