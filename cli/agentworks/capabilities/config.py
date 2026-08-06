@@ -248,16 +248,9 @@ def offered_model(impl: type, facet: Facet | None = None) -> type[BaseModel]:
 
 
 def _seated_impl(descriptor: CapabilityKindDescriptor, name: str) -> type | None:
-    """The implementation CLASS seated under ``name``, or ``None``.
-
-    One kind's registry holds a constructed instance rather than the class
-    (secret-backend, the descriptor-carried interim exception), and the
-    class is what carries the declaration, so the type is taken there.
-    """
+    """The implementation CLASS seated under ``name``, or ``None``."""
     seated = descriptor.registry().get(name)
-    if seated is None:
-        return None
-    return seated if isinstance(seated, type) else type(seated)
+    return None if seated is None else _impl_class(seated)
 
 
 def _build_union(
@@ -289,6 +282,12 @@ def _build_union(
 
 
 def _impl_class(seated: object) -> type:
+    """What a registry holds, as the CLASS that carries the declaration.
+
+    One kind's registry holds a constructed instance rather than the class
+    (secret-backend, the descriptor-carried interim exception that wave 3
+    removes), and the declaration is class-level either way.
+    """
     return seated if isinstance(seated, type) else type(seated)
 
 

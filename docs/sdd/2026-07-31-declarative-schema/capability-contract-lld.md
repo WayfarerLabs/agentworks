@@ -2,8 +2,11 @@
 
 Date: 2026-08-06
 
-Status: DRAFT, awaiting review. Companion to [frd.md](frd.md) (FR5, FR8, FR12, FR15, FR18, FR21),
-[hla.md](hla.md) (Components 0, 2, and 3), [plan.md](plan.md) (step 2.3). Builds on
+Status: IMPLEMENTED (2026-08-06). Deviations found by building it are recorded inline against the
+section they revise, and gathered in section 14.
+
+Originally: DRAFT, awaiting review. Companion to [frd.md](frd.md) (FR5, FR8, FR12, FR15, FR18,
+FR21), [hla.md](hla.md) (Components 0, 2, and 3), [plan.md](plan.md) (step 2.3). Builds on
 [schema-foundation-lld.md](schema-foundation-lld.md) (the model vocabulary, the walkers, and the
 error bridge, all implemented) and [descriptor-adoption-lld.md](descriptor-adoption-lld.md) section
 7 (the config contract, settled per facet by the operator ruling of 2026-08-06). Authority for the
@@ -51,8 +54,8 @@ NOT delivered by 2.3, deliberately, each with its reason:
   whatever decode produces.
 - **Kind spec models and the decode swap.** Step 2.5. The interim synthesis of section 6 exists
   exactly because decode still hands us a naming field plus a sibling blob, and it is deleted there.
-- **The operator upgrade note** for the two deliberate breaks (section 9.6). The plan puts the note
-  in 2.9; 2.3 carries the breaking-change marker on its commit, and section 9.6 is the material the
+- **The operator upgrade note** for the deliberate breaks (section 9.6). The plan puts the note in
+  2.9; 2.3 carries the breaking-change marker on its commit, and section 9.6 is the material the
   note is written from.
 - **The FR15 defaulting sweep.** Step 2.6. One exception, argued in section 10.3: three proxmox
   consumer-side defaults move onto the model here, because the ops migration rewrites those exact
@@ -263,14 +266,24 @@ union over the registered implementations' offered models:
 
 ```python
 # capabilities/config.py
-def capability_config_union(kind: str, facet: Facet | None = None) -> TypeAdapter[Any]:
+def capability_config_union(kind: str, facet: Facet | None = None) -> type[BaseModel]:
     """The tagged union over every registered ``kind`` implementation's
     config at ``facet``, cached."""
 ```
 
 Arms are `impl.config_for(facet)` for every name in the kind's live registry, in registry order; the
-discriminator is `contract.discriminator`. The adapter is a `TypeAdapter`, not a model, because the
-union is a TYPE and there is nothing to name it.
+discriminator is `contract.discriminator`.
+
+> **Correction (implementation): the union is a generated ROOT MODEL, not the bare `TypeAdapter`
+> this section first specified.** The bridge frames against a MODEL, and that is what buys the
+> operator-facing path: as a root model, a failure's leading tag segment (`('lima', 'vm_host')`) is
+> recognized as the tag it is and dropped, so an operator reads `vm-site/lab.vm_host` rather than a
+> path with our dispatch mechanism in it. Verified by execution against pydantic 2.13.4 before
+> adopting it; the same run confirmed the arm's own field list survives into an unknown-key message
+> and that a bad tag renders `unknown name 'nope'; registered: ...`. Generating a model rather than
+> authoring one is legal precisely because it declares no fields of its own (the step 2.1 rule is
+> about attribute docstrings, which only authored fields have): every field, and every field
+> description, comes from the authored arms.
 
 Assembly happens at the existing post-registration boundary in the sense that matters: it is
 performed lazily on first use and every use is downstream of `build_registry` (`bootstrap.py:52`),
@@ -603,6 +616,13 @@ schema-foundation LLD's section 2.1.
   message has to name the backend to be worth reading, so a shared model could only say something
   vaguer than what it replaces.
 
+> **Correction (implementation): a backend mapping's errors frame with the mapping KEY.** A root
+> model's errors carry no field path of their own, and a secret may map several backends, so
+> `secret/<name>` alone would leave an operator reading "must not be empty" with no way to tell
+> which mapping to fix. The owner therefore carries a `label` of
+> `secret/<name>.backend_mappings.<backend>`, the second user of the field section 7.6 added for the
+> migrator, and strictly better than the `secret 'name'` framing it replaces.
+
 **The generic `False` opt-out is NOT modeled**, in any of the three. It is filtered by the caller
 before a backend ever sees a mapping (`secrets/base.py:133-134`), so putting a `Literal[False]` arm
 in a backend's model would declare a value that cannot reach it and would emit a schema arm that is
@@ -617,11 +637,19 @@ references are structurally underivable.
 ### 9.5 The shared vocabulary
 
 `NonEmptyStr` (`Annotated[str, Field(min_length=1)]`) and `PositiveInt`
-(`Annotated[int, Field(gt=0)]`) live in `resources/schema/base.py` beside the model bases. Ten of
-the thirteen models want one or both, and the alternative is ten spellings of `min_length=1` whose
-drift nobody would notice. `PositiveInt` also carries the bool-is-an-int concern for free:
-pydantic's strict mode rejects `True` for an `int` field (verified), which is what today's
-`isinstance(cpus, bool)` guards do by hand.
+(`Annotated[int, Field(gt=0)]`) live in `schema/base.py` beside the model bases. Ten of the thirteen
+models want one or both, and the alternative is ten spellings of `min_length=1` whose drift nobody
+would notice. `PositiveInt` also carries the bool-is-an-int concern for free: pydantic's strict mode
+rejects `True` for an `int` field (verified), which is what today's `isinstance(cpus, bool)` guards
+do by hand.
+
+> **Correction (implementation): every `SecretRef`-marked field is `NonEmptyStr`, not `str`.** The
+> owner template fills a field that is ABSENT or `null`, and an empty string is neither, so a bare
+> `str` would accept `token: ""` where every shipped validator rejects it. Found by the
+> git-credential parity test, which is what those tests are for. A related floor is why the two
+> operator-overridable catalogs keep `min_length=1` on the LIST itself: selection does `max()` over
+> the catalog when nothing fits, so an empty catalog is a site on which no VM can be created.
+> Contrast github's `repos`, where the shipped non-empty rule is dropped deliberately (section 14).
 
 ### 9.6 The two deliberate breaks, and a third the plan under-states
 
@@ -677,6 +705,15 @@ hand, so the arm is already chosen.
 `facet` defaults to `None` and no shipped call site passes it (section 3.3). It is on the signature
 because construction is exactly where wave 4 must say which level it is building for, and adding it
 later would touch every construction site.
+
+> **Correction (implementation): the tag synthesis at construct derives from the impl's KIND, which
+> may be absent.** `validate_own_config` needs the kind's discriminator to know whether to
+> synthesize, and it reads it through `descriptor_for_impl`, which answers by asking which kind's
+> implementation contract the class satisfies. A bare `Capability` subclass satisfies none, so that
+> lookup returns `None` rather than raising and such a class validates its blob as written. Not a
+> tolerance: registration refuses any implementation that does not derive from its kind's contract,
+> so the only classes reaching it with no kind are ones that never register (a test double
+> exercising the base's own contract).
 
 **Typed access.** `Capability.config` becomes a read-only property returning `AgwModel`; each
 implementation overrides it with its own return type:
@@ -921,9 +958,23 @@ red window.
    one"). That was superseded by the facet ruling of 2026-08-06. The comment is replaced when the
    field is created (step 13.2). Noted because it is the only place on `main` where the rescinded
    design still reads as settled.
+7. **The step 2.1 LLD's `resources/schema/` placement did not survive the first capability models.**
+   Recorded as contradiction 0 above, with the verified reproduction. The package is
+   `agentworks/schema/` now, and a boundary test keeps it a leaf.
+8. **github's `repos: []` is accepted where the shipped validator rejected it.** A deliberate
+   loosening, pinned by a test that says so: an empty list and an absent field mean the same thing
+   to every consumer of that field (`store_username` and `helper_entry` both test truthiness), so a
+   floor would only buy an error an operator can hit by writing something inert. The two vm-platform
+   CATALOGS keep their floor for the opposite reason (section 9.5), which is why the two cases are
+   worth stating together.
 
 **Residual decisions for the lead.**
 
+- **`test_capability_config_contract.py`'s signing-provider fixture is monkeypatched into the live
+  registry rather than seated through `register_plugin`**, which is how it was before this step and
+  which now means it skips conformance check five. Its model is correct (the suite would fail
+  otherwise), but a fixture that dodges registration cannot catch a registration-time defect. Left
+  as found, flagged rather than silently widened.
 - **The scope call: effective-config validation, provenance, and the FR17 traversal split are left
   to a follow-on step** (section 12), against the plan's step-2.3 boxes. The reason is that they
   share no code with the contract flip and would double this step's review surface, and the flip is
