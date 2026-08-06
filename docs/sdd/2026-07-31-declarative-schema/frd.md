@@ -107,11 +107,14 @@ Declaration:
 - **FR17.** Inheritance is not a dependency. An inheritance edge (a session template's `inherits`,
   and any future inheriting surface) is source composition: it participates in existence checking,
   cycle detection, and merge ordering, and is EXCLUDED from runtime-need traversal (the secret
-  resolve union, preflight's resolvability prediction, dependency listings). A resource's runtime
-  dependencies derive from its EFFECTIVE config only (FR12's merged blob), so a child overriding a
-  parent's secret name depends on the override alone; the parent's own edge to its default secret
-  describes the parent's standalone use and never attributes to the child. Without this rule, a
-  transitive walk would prompt the operator for a secret the child does not use.
+  resolve union, preflight's resolvability prediction, and OUTBOUND dependency listings). **Amended
+  2026-08-06:** INBOUND listings (`dependents_of`, the REFS count) deliberately still cross, because
+  a parent template genuinely IS referenced by its children and hiding that would misreport the
+  parent, which is the opposite error. A resource's runtime dependencies derive from its EFFECTIVE
+  config only (FR12's merged blob), so a child overriding a parent's secret name depends on the
+  override alone; the parent's own edge to its default secret describes the parent's standalone use
+  and never attributes to the child. Without this rule, a transitive walk would prompt the operator
+  for a secret the child does not use.
 
   **Correction (2026-08-06, found by the step 2.3b implementation and verified by the lead): this
   requirement has TWO halves, and excluding the edge is only the second.** The framing above, and
@@ -160,17 +163,27 @@ Derived surfaces:
   or used, when finalize validates it like any other. Validation operates on the EFFECTIVE config:
   where a surface supports inheritance (session templates), declared blobs merge along the graph's
   declared chain first and the merged blob is what validates, because a declared blob may be
-  legitimately partial (completed by a parent or child) and has no completeness of its own to check.
-  Every other surface is a chain of length one, so effective-config validation is one uniform rule,
-  not a special case; it also moves the merged-blob completeness check from first use (today's
-  session-resolve timing) to load, where the rest of hard validation lives. A capability name with
-  no registration on this host stays what it is today: a hard finalize error (the registry-readiness
-  refactor's R9.2/R9.11 rulings, preserved). Every host registers every shipped plugin's
-  capabilities, enablement being a separate axis, so an unregistered name can only be a typo, and
-  the cross-host sharing story rides the enablement axis above, not name tolerance. Revisit only if
-  out-of-tree plugins ever make unregistered-but-real names possible. Error quality does not
-  regress: errors keep owner-scoped framing (`<owner>.<field>: ...`) and file/position context at
-  least as good as today's.
+  legitimately partial (completed by a PARENT) and has no completeness of its own to check.
+  **Amended 2026-08-06:** this clause originally said "completed by a parent or child", and the
+  shipped rule is parent-completion only. Validation is per row over that row's OWN chain, so an
+  abstract base whose blob only a child completes is a load error. That is a deliberate amendment,
+  not a reading: `--template` is a plain string on all four create commands, there is no `abstract`
+  marker and no leaf-only filter, so a base that cannot stand alone is directly namable and would
+  fail at `session create` anyway. Failing at load, uniformly, with no hidden second mode, is the
+  more debuggable answer and costs nothing today because no capability declares a required field
+  yet. If abstract bases are ever wanted, the right shape is an explicit `abstract: true` on the
+  template envelope, refused by name at create time, rather than scoping validation to leaves, which
+  would let a broken base be named directly and fail late. Flagged to the operator; cheap to
+  overturn until a capability ships a required field. Every other surface is a chain of length one,
+  so effective-config validation is one uniform rule, not a special case; it also moves the
+  merged-blob completeness check from first use (today's session-resolve timing) to load, where the
+  rest of hard validation lives. A capability name with no registration on this host stays what it
+  is today: a hard finalize error (the registry-readiness refactor's R9.2/R9.11 rulings, preserved).
+  Every host registers every shipped plugin's capabilities, enablement being a separate axis, so an
+  unregistered name can only be a typo, and the cross-host sharing story rides the enablement axis
+  above, not name tolerance. Revisit only if out-of-tree plugins ever make unregistered-but-real
+  names possible. Error quality does not regress: errors keep owner-scoped framing
+  (`<owner>.<field>: ...`) and file/position context at least as good as today's.
 - **FR13.** Drift is structurally impossible or test-caught: schema facts appear in exactly one
   authored place (the model), samples and describe output are rendered from it (so they cannot drift
   by construction), the renderer is pinned by tests over fixture schemas plus every bundled kind
