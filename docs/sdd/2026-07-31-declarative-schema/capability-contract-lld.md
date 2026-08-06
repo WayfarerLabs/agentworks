@@ -289,27 +289,36 @@ Assembly happens at the existing post-registration boundary in the sense that ma
 performed lazily on first use and every use is downstream of `build_registry` (`bootstrap.py:52`),
 which seats plugins before it publishes and finalizes. Nothing is built at import.
 
-### 5.2 The cache key is the registry's contents
+### 5.2 The cache key is the union's own arms
 
 ```python
-_UNION_CACHE: dict[tuple[str, Facet | None, frozenset[tuple[str, object]]], TypeAdapter[Any]] = {}
+_UNION_CACHE: dict[tuple[str, Facet | None, frozenset[tuple[str, type[BaseModel]]]], type[BaseModel]] = {}
 ```
 
-**Settled: cache on a snapshot of the live registry rather than on `(kind, facet)` with an
+**Settled: cache on what the union would be BUILT from rather than on `(kind, facet)` with an
 invalidation protocol.** The alternative needs every mutator of a capability registry to remember to
 invalidate: plugin seating, `seated_plugin`'s snapshot/restore (`plugins/registration.py:170`), and
 every test that installs a fixture capability. A forgotten invalidation is a stale union, which
 presents as a capability that validates against another capability's schema, which is a
-silent-wrong-answer bug rather than a crash. Keying on the contents makes staleness structurally
-impossible: the key is built from the same dict the arms come from, so a changed registry is a
-different key by construction. The cost is building a small frozenset per lookup (O(registered
-capabilities), a dozen entries), against rebuilding a pydantic union, which is the expensive part.
-The HLA's "cached on the kind's registry entry" is satisfied in substance; the mechanism is this
-LLD's call, and the reason to differ is stated rather than assumed.
+silent-wrong-answer bug rather than a crash. Keying on the arms makes staleness structurally
+impossible: the key and the arms come from one read, so the key cannot describe a union different
+from the one it would assemble. The cost is resolving the models per lookup (O(registered
+capabilities), a dozen attribute reads), which is what building the union already pays per arm on a
+miss, against rebuilding a pydantic union, which is the expensive part. The HLA's "cached on the
+kind's registry entry" is satisfied in substance; the mechanism is this LLD's call, and the reason
+to differ is stated rather than assumed.
 
-Registry values are classes for three kinds and constructed instances for secret-backend (the
-descriptor-carried interim exception), and both are hashable, so one key shape serves.
-Secret-backend never reaches the union anyway (`discriminator is None`).
+> **Correction (review, 2026-08-06): the key was first the registry MAPPING, and that left one
+> silent path open.** It covered every case enumerated above, and missed a seated class whose
+> `config_model` changed: same name, same class object, so the entry survived and the capability
+> went on being validated against the model it no longer offered. Reproduced before fixing.
+> Unreachable in production, where `config_model` is a ClassVar set at class definition, and closed
+> anyway, because the entire argument for keying over invalidating is that invalidation fails
+> silently; a residual silent path undercuts that rather than sitting beside it.
+
+The cache never evicts. Its size is bounded by the distinct arm sets a process ever sees, which is
+one per kind plus one per test that seats a fixture capability: a deliberate choice, recorded so it
+is not mistaken for an oversight.
 
 ### 5.3 What the union is for
 
@@ -506,10 +515,12 @@ Survives, and must not be confused with the above:
 
 ### 7.6 Owner framing, and the migrator's TOML vocabulary
 
-`RefOwner(kind, name)` renders `kind/name`, which reproduces every consuming resource's shipped
-framing exactly. The migrator is the one caller that frames differently and deliberately: it reports
-in the operator's TOML vocabulary (`[azure].region is required ...`, `migrate/planning.py:514`)
-because the operator is looking at a TOML file that has not been rewritten yet.
+`RefOwner(kind, name)` renders `kind/name`, which is the address every consuming resource already
+frames with (the punctuation shifts, since the bridge adopts the FRD's uniform colon form:
+`[azure].region is required` becomes `[azure].region: is required`). The migrator is the one caller
+that frames differently and deliberately: it reports in the operator's TOML vocabulary
+(`[azure].region is required ...`, `migrate/planning.py:514`) because the operator is looking at a
+TOML file that has not been rewritten yet.
 
 **Settled: `RefOwner` gains an optional `label`,** with `display` returning
 `label or f"{kind}/{name}"`. The alternative (make the migrator adopt `vm-site/<name>` framing)
@@ -656,7 +667,7 @@ do by hand.
 Carried on the commit's breaking-change marker; the operator note is 2.9's box, written from here.
 
 1. **Proxmox loses lax scalars.** `template_vmid: "9000"` stops loading
-   (`plugins/proxmox/platform.py:93` does `int(str(...))` today) and `verify_ssl: "no"` stops
+   (`plugins/proxmox/platform.py:94` does `int(str(...))` today) and `verify_ssl: "no"` stops
    silently meaning `True` (`platform.py:131` does `bool(self._cfg("verify_ssl", True))`, and a
    non-empty string is truthy). `api_url`, `node`, `token_id`, `storage`, `bridge`, and `pool` gain
    a type check they have never had. No `Field(strict=False)` carve-outs: the second case is config
@@ -668,7 +679,7 @@ Carried on the commit's breaking-change marker; the operator note is 2.9's box, 
 3. **`null` also flips VALIDATION for all THREE, not azure alone.** The plan (`plan.md:366-376`)
    names azure specifically, on the grounds that `_parse_service_principal`
    (`plugins/azure/platform.py:279`) raises today with a message telling the operator to omit the
-   key. Checked at HEAD: `plugins/aws/platform.py:132-137` and `plugins/proxmox/platform.py:96-101`
+   key. Checked at HEAD: `plugins/aws/platform.py:129-134` and `plugins/proxmox/platform.py:97-102`
    raise on exactly the same input, with the same "omit the key to use the default" advice. So all
    three today tell an operator to omit the key and, after this step, silently accept `null` as the
    default. The note must name all three; an operator who followed any of those errors' advice will
@@ -785,9 +796,10 @@ shipped contract tests.
 **The contract itself.** `test_capability_config_contract.py` is reworked from "capabilities are
 invoked to validate" to declare-and-receive: a fixture capability declaring a model gets its config
 validated, its references extracted, and a typed instance bound, with no method of its own invoked
-(pinned by a fixture whose `validate` / `dependencies`, if anyone re-added them, would raise). It
-keeps its end-to-end shape (real manifests through `build_registry`), because that is what proves
-the finalize pass reaches the new path.
+(pinned by a fixture capability carrying both retired methods, each raising if called: deleting the
+base's declarations is not the same promise as nothing calling them, and only the second one is what
+keeps a plugin's code out of the finalize pass). It keeps its end-to-end shape (real manifests
+through `build_registry`), because that is what proves the finalize pass reaches the new path.
 
 **`test_capability_base.py`** pins construction: the bound instance is the validated model, a
 malformed blob raises at construct with owner framing, and `_secret_refs` comes from extraction.
@@ -851,6 +863,15 @@ Recorded here in full so the remaining work is a build, not a re-design.
   uses-a-template edge and reintroduce the conflation one level down.
 - **`merge_config` is capability-owned merge semantics and stays on the capability.** It is not
   validation, and it runs on raw declared blobs by design.
+
+**The interim constraint, enforced (added by review, 2026-08-06).** Until the merged blob is what
+validates, a harness-integration config model may not declare a REQUIRED field beyond its tag and
+its owner-templated references: a child template's declared blob is legitimately partial, so the
+finalize pass would fail it with nothing in the error naming inheritance as the cause. Nothing
+breaks today only because no shipped model has one, which is exactly why it is refused at class
+definition (`HarnessIntegration.__init_subclass__`) rather than written down: the trap is invisible
+from the author's side, since the model looks right and every test of the capability alone passes.
+That method is deleted by the step below, which is what makes the constraint's expiry real.
 
 **Left to build, and it is a real body of work:** resolving each inheritance chain over registry
 rows inside finalize, a per-key provenance channel so the bridge can name the template that declared
@@ -929,7 +950,7 @@ red window.
 1. **The plan under-states break 2: `secret: null` flips VALIDATION for all three cloud platforms,
    not azure alone.** `plan.md:373-376` names azure's `_parse_service_principal` as "the more
    visible half" and implies aws and proxmox only change their edge. At HEAD,
-   `aws/platform.py:132-137` and `proxmox/platform.py:96-101` raise on explicit `null` with the same
+   `aws/platform.py:129-134` and `proxmox/platform.py:97-102` raise on explicit `null` with the same
    omit-the-key advice. Section 9.6 records all three. This matters because the 2.9 upgrade note is
    written from that box.
 2. **The HLA and the plan spell the secret-backend attribute `mapping_model`** (`hla.md:190`,
@@ -968,13 +989,21 @@ red window.
    CATALOGS keep their floor for the opposite reason (section 9.5), which is why the two cases are
    worth stating together.
 
+9. **The flip left eight DEAD exemptions in the graph guard's allow-lists** (four registry-read,
+   four dependencies), found by review and measured by removing each entry and re-running the
+   scanners: none was dead at the step's base commit. A guard that was exactly tight was loosened
+   while this LLD's own comment claimed the exempted surface had shrunk. Deleted, and
+   `test_every_exemption_is_load_bearing` now fails any entry whose removal changes nothing, so the
+   same rot cannot follow the next migration silently.
+10. **A one-arm discriminated union collapses**, which this step's assembled union did not account
+    for. `Union[(X,)]` is `X`, so a capability kind with a single registered implementation produced
+    a bare model; pydantic still dispatched on the tag, but the shape classifier read it as a nested
+    block, so the bridge rendered the tag as a field the operator never wrote and lost the arm's
+    field list. Latent only because every shipped kind currently has two or more implementations.
+    Fixed in the classifier, where the shape rule belongs.
+
 **Residual decisions for the lead.**
 
-- **`test_capability_config_contract.py`'s signing-provider fixture is monkeypatched into the live
-  registry rather than seated through `register_plugin`**, which is how it was before this step and
-  which now means it skips conformance check five. Its model is correct (the suite would fail
-  otherwise), but a fixture that dodges registration cannot catch a registration-time defect. Left
-  as found, flagged rather than silently widened.
 - **The scope call: effective-config validation, provenance, and the FR17 traversal split are left
   to a follow-on step** (section 12), against the plan's step-2.3 boxes. The reason is that they
   share no code with the contract flip and would double this step's review surface, and the flip is

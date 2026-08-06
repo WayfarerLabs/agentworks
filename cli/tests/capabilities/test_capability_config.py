@@ -162,6 +162,57 @@ def test_a_per_facet_capability_answers_per_facet_and_refuses_the_rest() -> None
         offered_model(PerFacet, Facet.VM)
 
 
+# -- No capability code runs --------------------------------------------------
+
+
+class TripwireConfig(AgwModel):
+    """The tripwire's own config: a templated secret, so extraction has
+    something to find, and a tag of its own so it registers."""
+
+    name: Literal["tripwire-platform"]
+    region: str
+    token: Annotated[str, SecretRef(usage="the fixture token", default_template="fixture-{owner_name}")]
+
+
+class TripwirePlatform(ConformingVMPlatform):
+    """A capability carrying the retired invoked contract's two methods.
+
+    The base no longer declares either, so these are just methods nothing
+    should call. If the core ever reaches for a capability to validate a
+    blob or to derive what it references, this is where it shows up: the
+    whole point of the flip is that a plugin's code cannot run in the
+    finalize pass, and "we deleted the base methods" is not the same
+    promise as "nothing calls them".
+    """
+
+    name: ClassVar[str] = "tripwire-platform"
+    description: ClassVar[str] = "raises if the core invokes it"
+    config_model: ClassVar[type[AgwModel]] = TripwireConfig
+
+    @classmethod
+    def validate(cls, owner: str, config: object) -> None:
+        raise AssertionError("the core invoked a capability to validate its config")
+
+    @classmethod
+    def dependencies(cls, owner: str, config: object) -> tuple[object, ...]:
+        raise AssertionError("the core invoked a capability to derive its references")
+
+
+def test_neither_validation_nor_extraction_invokes_the_capability() -> None:
+    with seated_plugin(Plugin(name="tripwire", capabilities={"vm-platform": (TripwirePlatform,)})):
+        validated = validate_capability_config(
+            kind="vm-platform", name="tripwire-platform", blob={"region": "eu"}, owner=OWNER
+        )
+        refs = capability_config_references(
+            kind="vm-platform", name="tripwire-platform", blob={"region": "eu"}, owner=OWNER
+        )
+        instance = TripwirePlatform("lab", {"region": "eu"})
+
+    assert isinstance(validated, TripwireConfig)
+    assert [ref.name for ref in refs] == ["fixture-lab"]
+    assert isinstance(instance.config, TripwireConfig)
+
+
 # -- Validation ---------------------------------------------------------------
 
 

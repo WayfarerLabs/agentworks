@@ -206,9 +206,7 @@
     "workstreams",
     "worktree"
   ],
-  "ignoreRegExpList": [
-    "`[^`\\r\\n]+`"
-  ],
+  "ignoreRegExpList": ["`[^`\\r\\n]+`"],
   "useGitignore": true,
   "ignorePaths": [
     "node_modules",
