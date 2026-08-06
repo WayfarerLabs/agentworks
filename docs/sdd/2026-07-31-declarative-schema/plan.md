@@ -478,6 +478,16 @@ the derivation sequence are not started.
 
 ### 2.8 Live-rendered samples and describe
 
+> **GATE, operator instruction 2026-08-06: do not start 2.8 until the onboarding effort's
+> topic-content-contract message has arrived.** The onboarding-and-discovery child SDD has kicked
+> off, and it owns the `agw guide` teaching surface that consumes this step's blurbs and rendering
+> sources. Before starting 2.8, check this feature directory on `origin/main` for a
+> topic-content-contract message from that effort (new-file message passing, as the four roadmap
+> notes arrived). If none has arrived, TELL THE OPERATOR and pause 2.8 specifically; every other
+> step may continue. The reason the gate is here and not earlier: 2.8 is where the blurb shape and
+> the describe-surface naming get fixed, and both are cross-SDD coordination points, so guessing at
+> the contract and renegotiating later is the expensive order.
+
 - [ ] `emission-and-renderer-lld.md` (shared with 2.7 if the seams overlap) written and reviewed:
       renderer output contract, blurb registration surface, and the describe surface's naming. Per
       the roadmap's guide-surface note (2026-08-05), the LLD must (a) shape blurbs as structured
