@@ -113,6 +113,19 @@ Declaration:
   describes the parent's standalone use and never attributes to the child. Without this rule, a
   transitive walk would prompt the operator for a secret the child does not use.
 
+  **Correction (2026-08-06, found by the step 2.3b implementation and verified by the lead): this
+  requirement has TWO halves, and excluding the edge is only the second.** The framing above, and
+  the plan's, treated inheritance as a capability-config surface ("a chain of length one everywhere
+  but session templates"). That is true of capability config and FALSE of the graph. The edges that
+  actually cross an inheritance edge in the shipped runtime-need traversal are the NON-capability
+  ones: `vm-template`'s `env` and `tailscale_auth_key`, `agent-template`'s `git_credentials` and
+  `user_install_commands`, `workspace-template`'s `env`. So excluding the edge ALONE is itself a
+  regression: a child would stop reporting its inherited env secrets, a silent under-answer, which
+  is the failure class this whole effort treats as worse than a crash. The requirement is therefore
+  that every inheriting kind PRODUCES the runtime needs of its EFFECTIVE declaration, and only then
+  is the inheritance edge excluded from the runtime closure. FR17 is not scoped to session
+  templates; it applies to every inheriting kind.
+
 Derived surfaces:
 
 - **FR9.** The framework can emit a machine-readable schema (JSON Schema) per resource kind,
