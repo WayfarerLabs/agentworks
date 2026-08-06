@@ -48,8 +48,8 @@ if TYPE_CHECKING:
     from agentworks.schema import RefOwner
     from agentworks.source_location import SourceLocation
 
-#: Assembled unions, keyed by ``(kind, facet)`` PLUS a snapshot of the
-#: kind's live registry. See :func:`capability_config_union`.
+#: Assembled unions, keyed by ``(kind, facet)`` PLUS the arms the union
+#: would be built from. See :func:`capability_config_union`.
 _UNION_CACHE: dict[tuple[str, Facet | None, frozenset[tuple[str, Any]]], type[BaseModel]] = {}
 
 
@@ -161,16 +161,28 @@ def capability_config_union(kind: str, facet: Facet | None = None) -> type[BaseM
     precisely because it declares no fields of its own: every field, and
     every field description, comes from the authored arms.
 
-    **The cache key includes a snapshot of the live registry**, rather than
-    being ``(kind, facet)`` with an invalidation protocol. Every mutator of
-    a capability registry (plugin seating, ``seated_plugin``'s
-    snapshot/restore, a test installing a fixture capability) would
-    otherwise have to remember to invalidate, and a forgotten invalidation
-    is a stale union: a capability validated against ANOTHER capability's
-    schema, which is a silent wrong answer rather than a crash. Keying on
-    the contents makes that impossible by construction, and the cost is
-    building a small frozenset per lookup against rebuilding a pydantic
-    union, which is the expensive half.
+    **The cache key is the union's own ARMS**, rather than ``(kind, facet)``
+    with an invalidation protocol. Every mutator of a capability registry
+    (plugin seating, ``seated_plugin``'s snapshot/restore, a test
+    installing a fixture capability) would otherwise have to remember to
+    invalidate, and a forgotten invalidation is a stale union: a capability
+    validated against ANOTHER capability's schema, which is a silent wrong
+    answer rather than a crash. Keying on what the union would be BUILT
+    from makes that impossible by construction.
+
+    Keying on the registry MAPPING alone would not, quite: a seated class
+    whose ``config_model`` changed would keep its cache entry, same name
+    and same class object, and go on being validated against the model it
+    used to offer. Unreachable in production, where ``config_model`` is a
+    ClassVar set at class definition, but the whole reason to prefer this
+    over invalidation is that the alternative fails silently, so a residual
+    silent path is not one to leave open. Resolving the models costs what
+    :func:`_build_union` already pays per arm on a miss, against rebuilding
+    a pydantic union, which is the expensive half.
+
+    The cache never evicts. Its size is bounded by the distinct arm sets a
+    process ever sees, which is one per kind plus one per test that seats a
+    fixture capability; a deliberate choice, not an oversight.
     """
     descriptor = descriptor_for(kind)
     discriminator = descriptor.config_schema.discriminator
@@ -179,12 +191,12 @@ def capability_config_union(kind: str, facet: Facet | None = None) -> type[BaseM
             f"the {kind} capability kind dispatches its config by map key, not by a tagged union, "
             f"so there is no union to assemble"
         )
-    registry = descriptor.registry()
-    key = (kind, facet, frozenset(registry.items()))
+    arms = _arms(descriptor, facet)
+    key = (kind, facet, frozenset(arms.items()))
     cached = _UNION_CACHE.get(key)
     if cached is not None:
         return cached
-    union = _build_union(descriptor, registry, facet, discriminator)
+    union = _build_union(descriptor, tuple(arms.values()), discriminator)
     _UNION_CACHE[key] = union
     return union
 
@@ -253,13 +265,21 @@ def _seated_impl(descriptor: CapabilityKindDescriptor, name: str) -> type | None
     return None if seated is None else _impl_class(seated)
 
 
+def _arms(descriptor: CapabilityKindDescriptor, facet: Facet | None) -> dict[str, type[BaseModel]]:
+    """The config model every registered implementation of this kind offers
+    at ``facet``, keyed by the name it is registered under.
+
+    Both the cache key and the union's arms come from this one read, so the
+    key cannot describe a union different from the one it would build.
+    """
+    return {name: offered_model(_impl_class(seated), facet) for name, seated in descriptor.registry().items()}
+
+
 def _build_union(
     descriptor: CapabilityKindDescriptor,
-    registry: Mapping[str, Any],
-    facet: Facet | None,
+    arms: tuple[type[BaseModel], ...],
     discriminator: str,
 ) -> type[BaseModel]:
-    arms = tuple(offered_model(_impl_class(seated), facet) for seated in registry.values())
     if not arms:
         raise StateError(
             f"no {descriptor.kind} implementation is registered, so its config union has no arms; "

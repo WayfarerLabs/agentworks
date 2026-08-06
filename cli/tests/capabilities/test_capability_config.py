@@ -277,8 +277,26 @@ def test_seating_a_capability_changes_the_union_with_no_invalidation_call(seated
     assert after == before
 
 
-def test_the_union_is_rebuilt_only_when_the_registry_changes(seated: None) -> None:
+def test_the_union_is_rebuilt_only_when_its_arms_change(seated: None) -> None:
     assert capability_config_union("vm-platform") is capability_config_union("vm-platform")
+
+
+def test_a_capability_swapping_its_model_gets_a_fresh_union(seated: None) -> None:
+    """The case a registry-mapping key would miss: the same name, the same
+    class object, a different model. Unreachable in production, where
+    ``config_model`` is a ClassVar set at class definition, and pinned
+    anyway because the whole reason to key the cache rather than
+    invalidate it is that the alternative fails SILENTLY, by validating a
+    capability against a model it no longer offers."""
+    before = capability_config_union("vm-platform")
+    original = FixturePlatform.config_model
+    try:
+        FixturePlatform.config_model = ThirdConfig
+        assert capability_config_union("vm-platform") is not before
+        assert _arm_names() == {"ThirdConfig", "OtherConfig"}, "the arms follow the models, not the registry mapping"
+    finally:
+        FixturePlatform.config_model = original
+    assert capability_config_union("vm-platform") is before, "and back again, from the cache"
 
 
 def test_a_map_keyed_kind_has_no_union_to_assemble() -> None:
