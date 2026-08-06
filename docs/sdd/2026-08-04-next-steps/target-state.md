@@ -52,10 +52,24 @@ agent deliberately sits outside Agentworks (a managed agent must not modify the 
 so the agentic-artifacts layer is not the delivery path for onboarding skills. Onboarding is
 idempotent and rerunnable, and conspicuously consent-first about probing the operator's machine.
 Discovery and schema help are derived from registries, schema emission, live samples, and describe
-surfaces so they cannot drift. A live example of the artifact need (operator observation,
-2026-08-05): this workspace authenticates GitHub through a custom git credential helper serving
-fine-grained PATs by full HTTP path, environment knowledge an agent currently must be told in
-conversation; a feature provisioning such a helper should emit exactly that fact as a skill.
+surfaces so they cannot drift.
+
+The teaching surface (operator rulings, 2026-08-05): `agw guide [topic ...]` serves skill-shaped
+markdown for agents and humans alike, blending static authored content with dynamic content from the
+live system. Topics span resource kinds (with live instance lists), specific resources, capability
+implementations, and `concept-` prefixed meta topics (collision-free and discoverable by
+completion). Output is markdown only. Every kind, implementation, and plugin contributes its own
+topics through one generic contract, with built-in content living beside the kind it documents, and
+contributed content is data rendered through locked-down templating, never code. The published
+harness plugins reduce to thin bootstraps (install, disclose, run `agw guide`), which makes
+cross-harness parity structural. The command is named `guide`, not `skill`, reserving the skill noun
+for the artifacts layer (destination 6's rules, skills, hooks). Reference surfaces (describe,
+schema, samples) and the teaching surface render the same underlying sources: wave 2 owns the
+sources and the reference surfaces, the onboarding child owns the guide. A live example of the
+artifact need (operator observation, 2026-08-05): this workspace authenticates GitHub through a
+custom git credential helper serving fine-grained PATs by full HTTP path, environment knowledge an
+agent currently must be told in conversation; a feature provisioning such a helper should emit
+exactly that fact as a skill.
 
 ### Declarative model (destination 2)
 
