@@ -100,6 +100,14 @@ class ManifestRewrite:
     new_text: str
     new_digest: str
     resources: tuple[str, ...]
+    appended: int = 0
+    """How many TOML-derived documents this replacement also carries.
+
+    Non-zero when a TOML unit's target file is one being upgraded: the two
+    writes coalesce into this one replacement (``_coalesce_writes_and_rewrites``).
+    Recorded so the preview can still account for those documents, which
+    would otherwise vanish from it along with their ``FileWrite``.
+    """
 
 
 def spec_is_legacy(kind: str, spec: object) -> bool:

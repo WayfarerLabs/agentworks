@@ -28,6 +28,7 @@ from hashlib import sha256
 from typing import TYPE_CHECKING
 
 from agentworks.errors import StateError
+from agentworks.migrate.planning import appended_yaml_text
 from agentworks.migrate.verify import first_difference, normalized_rows
 
 if TYPE_CHECKING:
@@ -78,7 +79,7 @@ def execute_plan(plan: MigrationPlan, config: Config) -> ExecutionResult:
                 old_digest = sha256(old_bytes).hexdigest()
                 _require_digest(write.path, old_digest, f"append to {write.path}")
                 old_text = old_bytes.decode("utf-8")
-                new_text = _appended_text(old_text, write.documents)
+                new_text = appended_yaml_text(old_text, write.documents)
                 new_digest = sha256(new_text.encode()).hexdigest()
                 appended[write.path] = (old_digest, new_digest, snapshot)
                 _atomic_write(
@@ -200,11 +201,6 @@ def _ensure_parents(path: Path, resources_dir: Path) -> list[Path]:
         path.parent.mkdir(parents=True, exist_ok=True)
         created.extend(reversed(missing))
     return created
-
-
-def _appended_text(existing: str, documents: list[str]) -> str:
-    prefix = "" if existing.endswith("\n") or not existing else "\n"
-    return existing + prefix + "".join(f"---\n{document}" for document in documents)
 
 
 def _atomic_write(

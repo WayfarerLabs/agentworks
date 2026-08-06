@@ -280,12 +280,26 @@ def _coalesce_writes_and_rewrites(
         if write is None:
             merged.append(rewrite)
             continue
-        new_text = _appended_yaml_text(rewrite.new_text, write.documents)
-        merged.append(replace(rewrite, new_text=new_text, new_digest=sha256(new_text.encode()).hexdigest()))
+        new_text = appended_yaml_text(rewrite.new_text, write.documents)
+        merged.append(
+            replace(
+                rewrite,
+                new_text=new_text,
+                new_digest=sha256(new_text.encode()).hexdigest(),
+                appended=len(write.documents),
+            )
+        )
     return list(pending.values()), merged
 
 
-def _appended_yaml_text(existing: str, documents: list[str]) -> str:
+def appended_yaml_text(existing: str, documents: list[str]) -> str:
+    """``existing`` with ``documents`` appended, each after a ``---``.
+
+    The one spelling of "append manifest documents to a file's text",
+    shared with ``execute_plan``: the coalesced case builds it at plan
+    time and the ordinary append builds it at write time, and the two
+    must produce identical bytes for the same inputs.
+    """
     prefix = "" if existing.endswith("\n") or not existing else "\n"
     return existing + prefix + "".join(f"---\n{document}" for document in documents)
 

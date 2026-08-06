@@ -20,6 +20,12 @@ def render_preview(plan: MigrationPlan) -> list[str]:
         for write in plan.writes:
             action = "append to" if write.exists else "create"
             lines.append(f"  {action} {write.path} ({len(write.documents)} document(s))")
+        for rewrite in plan.rewrites:
+            # A target file that is also being upgraded has no FileWrite of
+            # its own (the two coalesce into one replacement), so its
+            # documents are accounted for here instead of vanishing.
+            if rewrite.appended:
+                lines.append(f"  append to {rewrite.path} ({rewrite.appended} document(s), within its upgrade below)")
         verb = "commented out in" if plan.toml_mode == "comment" else "deleted from"
         lines.append(f"  migrated sections will be {verb} {plan.config_path}")
     if plan.rewrites:

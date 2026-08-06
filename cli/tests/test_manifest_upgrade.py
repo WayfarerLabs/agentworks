@@ -21,6 +21,7 @@ from agentworks.config import load_config
 from agentworks.errors import ConfigError, StateError
 from agentworks.manifests import load_manifests
 from agentworks.migrate import execute_plan, plan_migration
+from agentworks.migrate.render import render_dry_run, render_preview
 
 _COMMENTED_LEGACY = """\
 # The homelab, at the top of the file.
@@ -273,10 +274,17 @@ def test_an_append_targeting_an_upgraded_file_is_one_write(tmp_path: Path) -> No
     names = {d["metadata"]["name"] for d in yaml.safe_load_all((resources / "vm-sites.yaml").read_text()) if d}
     assert names == {"gpu-box", "ado", "azure"}
 
+    # The coalesced documents are still accounted for in the preview. They
+    # have no FileWrite of their own any more, so without this the unit
+    # would be listed as migrating with nothing shown receiving it.
+    (rewrite,) = plan.rewrites
+    assert rewrite.appended == 1
+    preview = render_preview(plan)
+    assert f"  append to {resources / 'vm-sites.yaml'} (1 document(s), within its upgrade below)" in preview
+    assert "  vm-site/azure to resources/vm-sites.yaml" in preview
+
 
 def test_dry_run_writes_nothing_and_shows_the_diff(tmp_path: Path) -> None:
-    from agentworks.migrate.render import render_dry_run
-
     cfg = _write_config(tmp_path)
     resources = _resources(tmp_path, sites=_COMMENTED_LEGACY)
     before = (resources / "sites.yaml").read_bytes()
