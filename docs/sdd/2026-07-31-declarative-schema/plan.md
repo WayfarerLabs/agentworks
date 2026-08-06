@@ -311,7 +311,7 @@ the derivation sequence are not started.
     template. FR17 must not be implemented as `isinstance(ref, TemplateReference)`: that filter
     really means "points at a template" and would silently misclassify any future uses-a-template
     edge as inheritance, reintroducing the same conflation one level down. The LLD names the
-    explicit relationship marker instead. - [ ] Per-capability config offered per FACET (operator
+    explicit relationship marker instead. - [x] Per-capability config offered per FACET (operator
     ruling, 2026-08-06, roadmap note 4; settles the contract after two superseded designs, schema
     slots and `config_model_for(consuming_kind)`). A facet is the level a capability is driven at
     (`vm`, `user`, `workspace`, `session`), pairing that level's methods with its config. A
@@ -376,18 +376,18 @@ the derivation sequence are not started.
       to OMIT the key instead, and under the model that same input silently resolves to the
       default-named secret. Verified against the pre-flip sources. An operator who followed the old
       error's advice will not otherwise connect the two, so the 2.9 note must name all three.
-- [ ] Core-driven validation and extraction wired: registry name-to-model maps per capability kind;
+- [x] Core-driven validation and extraction wired: registry name-to-model maps per capability kind;
       `Capability.validate` / `Capability.dependencies` classmethods and
       `SecretBackend.validate_mapping` retired; per-capability hand-rolled validate code deleted;
       `capabilities/git_credential/base.py`'s token helpers absorbed into the model layer.
-- [ ] Construction binds the validated model instance; ops read typed fields (this is a real
+- [x] Construction binds the validated model instance; ops read typed fields (this is a real
       per-capability migration: azure and proxmox ops currently read `self.platform_config[...]`
       dict keys; each capability's op code moves to model attributes with mypy enforcing it).
-- [ ] Fold-gated severity proven by tests: broken blob on a disabled plugin's resource loads with
+- [x] Fold-gated severity proven by tests: broken blob on a disabled plugin's resource loads with
       the row marked, errors on enable/use; broken blob on an enabled resource is a load error; an
       unregistered capability name remains a hard finalize error (R9.2/R9.11 preserved, operator
       decision 2026-08-01; the cross-host story rides the enablement axis, not name tolerance).
-- [ ] `test_capability_config_contract.py` and `test_capability_base.py` reworked to pin the new
+- [x] `test_capability_config_contract.py` and `test_capability_base.py` reworked to pin the new
       contract (declare-and-receive: models in, typed instances out).
 
 ### 2.3b Effective-config validation at finalize (deferred out of 2.3)
