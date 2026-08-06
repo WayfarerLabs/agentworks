@@ -1,8 +1,11 @@
 """Kind registrations for the vms domain: ``vm-template``,
 ``admin-template`` (the admin user is a per-VM concept, provisioned by
-``vms/initializer``, one per VM; its ``instances()`` iterates VMs),
-``vm-site`` (the declarable "configured place to create VMs"), and
-``vm-platform`` (the capability kind backing sites).
+``vms/initializer``, one per VM; its ``instances()`` iterates VMs), and
+``vm-site`` (the declarable "configured place to create VMs").
+
+The ``vm-platform`` capability kind backing sites registers from
+``agentworks.capabilities.vm_platform.kinds``, beside the platform
+implementations, like every other capability kind.
 
 Lives in the ``vms`` domain package next to the code that implements VM
 templates; ``agentworks.resources.kinds.__init__`` imports this module so
@@ -134,40 +137,6 @@ class _AdminTemplateKind:
 
 
 KIND_REGISTRY["admin-template"] = _AdminTemplateKind()
-
-
-@dataclass(frozen=True)
-class _VMPlatformKind:
-    """Implementation of ``ResourceKind`` for ``"vm-platform"``."""
-
-    kind: str = "vm-platform"
-    description: str = "Capability for running VMs on one backend kind (lima, wsl2, azure-vm, aws-ec2, proxmox)"
-    miss_policy: Literal["auto-declare", "error"] = "error"
-    auto_declare_names: frozenset[str] | None = None
-    category: Literal["declarable", "capability"] = "capability"
-    # Not load-bearing: manifests of a capability kind are rejected
-    # wholesale by category before the override policy is consulted.
-    # Set to the conservative value for uniformity with vm-site.
-    builtin_override: Literal["allow", "reserved"] = "reserved"
-
-    def synthesize(self, references: Sequence[ResourceReference]) -> Any:
-        # Unreachable under the error miss policy; honors the
-        # empty-references contract via the typed framework error.
-        from agentworks.resources.kind import NoUnreferencedDefaultError
-
-        raise NoUnreferencedDefaultError(
-            "the vm-platform kind has miss_policy='error'; synthesize "
-            "should never be invoked (the framework raises ConfigError "
-            "first)"
-        )
-
-    # No per-kind readiness hook: readiness projection is unified on
-    # ``inspect.not_ready_reason_for`` reading ``graph.readiness_of`` directly
-    # (Phase 4 retired the per-kind shim, including the Phase-3 vm-platform
-    # projection pulled forward to render the now-published not-ready row).
-
-
-KIND_REGISTRY["vm-platform"] = _VMPlatformKind()
 
 
 @dataclass(frozen=True)

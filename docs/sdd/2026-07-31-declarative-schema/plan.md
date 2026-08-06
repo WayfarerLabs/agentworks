@@ -146,7 +146,7 @@ per-kind capability branches are derivation targets. Secret-backend's constructe
 policy is recorded as an explicit descriptor-carried interim exception (wave 3 removes it);
 `_VMPlatformKind` moves in from `vms/kinds.py` for symmetry.
 
-- [ ] `descriptor-adoption-lld.md` written and reviewed: the frozen `CapabilityKindDescriptor`
+- [x] `descriptor-adoption-lld.md` written and reviewed: the frozen `CapabilityKindDescriptor`
       record shape (day-one fields per the contract, deferred fields recorded with their triggers),
       the single descriptor table as the only capability-kind enumeration, the generic adapter
       parameterized by descriptor (replacing the four hand-written five-method adapters), and the
