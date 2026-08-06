@@ -11,12 +11,13 @@ persist on the VM.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal
 
-from pydantic import Field
+from pydantic import BeforeValidator, Field
 from pydantic.json_schema import SkipJsonSchema
 
 from agentworks.declared_resource import DeclaredResource
+from agentworks.naming import MAX_SECRET_NAME_LENGTH
 from agentworks.schema import RefOwner
 from agentworks.source_location import SourceLocation, synthesized
 
@@ -24,7 +25,17 @@ if TYPE_CHECKING:
     from agentworks.resources.graph import FinalizeContext
     from agentworks.resources.reference import ResourceReference
 
-MappingValue = str | dict[str, object] | Literal[False]
+
+def _refuse_true(value: Any) -> Any:
+    """``true`` keeps its own message: the alternatives list the union
+    would otherwise render says what IS accepted without teaching that
+    ``false`` is the opt-out an operator was reaching for."""
+    if value is True:
+        raise ValueError("boolean must be `false` (opt-out); `true` is not a valid value")
+    return value
+
+
+MappingValue = Annotated[str | dict[str, object] | Literal[False], BeforeValidator(_refuse_true)]
 """One entry in ``SecretDecl.backend_mappings``: an identifier override
 (string or structured), or ``False`` for an explicit opt-out."""
 
@@ -47,13 +58,20 @@ class SecretDecl(DeclaredResource):
       soft-skip (backend reports as "no mapping" via ``would_attempt``).
     """
 
+    # Secrets are never derived into Linux usernames, so they take the
+    # larger cap rather than the freeform one.
+    NAME_MAX_LENGTH: ClassVar[int | None] = MAX_SECRET_NAME_LENGTH
+
     # Override the base's optional ``description``: a secret must carry one
     # (it is the operator-facing prompt/hint text), so it is required here.
-    # ``SkipJsonSchema`` rides along because the field is still METADATA:
-    # without it the override would re-enter this kind's spec surface.
     description: SkipJsonSchema[str]
+
     hint: str | None = None
+    """Operator-facing text shown when the secret has to be entered by
+    hand: where to generate it, which account it belongs to."""
+
     backend_mappings: dict[str, MappingValue] = Field(default_factory=dict)
+    """Per-backend identifier overrides, keyed by backend name."""
 
     def dependencies(self, context: FinalizeContext) -> list[ResourceReference]:
         """The secret's ``secret -> secret-backend`` edges: the candidate

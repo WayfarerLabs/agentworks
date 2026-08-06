@@ -21,14 +21,10 @@ import re
 from pathlib import Path
 
 from agentworks.config.models import DefaultsConfig, OperatorConfig, PathsConfig
-from agentworks.config.validation import (
-    MAX_SECRET_NAME_LENGTH,
-    SSH_HOST_PREFIX_RE,
-    validate_name,
-    validate_vm_workspaces,
-)
+from agentworks.config.validation import validate_vm_workspaces
 from agentworks.env import EnvEntry
 from agentworks.errors import ConfigError, ValidationError
+from agentworks.naming import MAX_SECRET_NAME_LENGTH, SSH_HOST_PREFIX_RE, validate_name
 
 
 def _expand(path_str: str) -> Path:

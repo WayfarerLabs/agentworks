@@ -11,8 +11,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from agentworks.config import MAX_FREEFORM_NAME_LENGTH, validate_name
 from agentworks.errors import ConnectivityError, NotFoundError, ValidationError
+from agentworks.naming import MAX_FREEFORM_NAME_LENGTH, validate_name
 
 if TYPE_CHECKING:
     from agentworks.config import Config

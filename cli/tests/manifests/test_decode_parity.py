@@ -467,7 +467,7 @@ def test_vm_site_uses_freeform_cap(tmp_path: Path) -> None:
     they are NOT derived into hostnames or SSH aliases, VM names are), so they
     use the freeform cap (64), not the tighter VM-name cap. A 40-char name that
     the old 30-char cap rejected now decodes and registers."""
-    from agentworks.config import MAX_FREEFORM_NAME_LENGTH
+    from agentworks.naming import MAX_FREEFORM_NAME_LENGTH
 
     name = "a" * 40
     assert MAX_FREEFORM_NAME_LENGTH == 64 and len(name) > 30
@@ -489,7 +489,7 @@ def test_vm_site_uses_freeform_cap(tmp_path: Path) -> None:
 
 def test_vm_site_over_freeform_cap_rejected(tmp_path: Path) -> None:
     """A vm-site name past the freeform cap (64) is still rejected."""
-    from agentworks.config import MAX_FREEFORM_NAME_LENGTH
+    from agentworks.naming import MAX_FREEFORM_NAME_LENGTH
 
     _manifest(
         tmp_path,

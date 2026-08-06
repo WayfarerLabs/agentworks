@@ -386,7 +386,7 @@ def test_secret_name_over_secret_cap_rejected_from_manifest(tmp_path: Path) -> N
     """A secret name beyond the secret cap (253) is rejected, and the error
     reports the correct (secret) max, not 30. The name-validation error is a
     spec-level failure, so the decoder surfaces it as ConfigError."""
-    from agentworks.config import MAX_SECRET_NAME_LENGTH
+    from agentworks.naming import MAX_SECRET_NAME_LENGTH
 
     cfg_file = tmp_path / "config.toml"
     _write_base(

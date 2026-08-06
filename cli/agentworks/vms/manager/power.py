@@ -11,13 +11,13 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.capabilities.base import RunContext
-from agentworks.config import MAX_VM_NAME_LENGTH
 from agentworks.db import SYSTEM_SLUG_KEY, VMStatus
 from agentworks.errors import (
     AgentworksError,
     StateError,
     UserAbort,
 )
+from agentworks.naming import MAX_VM_NAME_LENGTH
 
 from ._helpers import (
     _guard_failed_vm,

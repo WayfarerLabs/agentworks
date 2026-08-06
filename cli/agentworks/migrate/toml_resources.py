@@ -35,9 +35,9 @@ from agentworks.config.loaders_core import (
     _warn_unexpected_keys,
 )
 from agentworks.config.models import _SectionLineMap
-from agentworks.config.validation import MAX_SECRET_NAME_LENGTH, validate_name
 from agentworks.errors import ConfigError
 from agentworks.git_credentials.credential import GitCredentialConfig
+from agentworks.naming import MAX_SECRET_NAME_LENGTH, validate_name
 from agentworks.secrets import SecretDecl
 from agentworks.sessions.layouts import AW_SESSION_VERTICAL_LAYOUT, VALID_TMUX_LAYOUTS, TmuxLayout
 from agentworks.sessions.template import NamedConsoleConfig, SessionTemplate

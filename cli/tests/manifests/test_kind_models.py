@@ -20,7 +20,6 @@ from agentworks.schema import iter_field_docs
 #: ``decode._DECODERS``.
 _NOT_YET_MODELED = {
     "git-credential",
-    "secret",
     "session-template",
     "vm-site",
 }

@@ -115,7 +115,7 @@ def test_long_secret_name_over_username_cap_loads(tmp_path: Path) -> None:
 def test_secret_name_over_secret_cap_errors(tmp_path: Path) -> None:
     """A secret name beyond the secret cap (253) is still rejected, with the
     document location and the correct (secret) max in the message."""
-    from agentworks.config import MAX_SECRET_NAME_LENGTH
+    from agentworks.naming import MAX_SECRET_NAME_LENGTH
 
     root = tmp_path / "resources"
     _write(root, "a.yaml", _secret_doc("s" * (MAX_SECRET_NAME_LENGTH + 1)))
@@ -399,7 +399,10 @@ def test_merge_keys_rejected(tmp_path: Path) -> None:
         load_manifests(root)
 
 
-def test_spec_unknown_key_warns_with_location_for_warn_kinds(tmp_path: Path) -> None:
+def test_an_unknown_spec_key_is_a_located_error(tmp_path: Path) -> None:
+    """FR12's flip: it used to be a warning beside a config that loaded
+    anyway. It still carries the document's file and line, and it names
+    the fields that ARE valid."""
     root = tmp_path / "resources"
     _write(
         root,
@@ -414,7 +417,32 @@ def test_spec_unknown_key_warns_with_location_for_warn_kinds(tmp_path: Path) -> 
           bogus: 1
         """,
     )
+    with pytest.raises(ConfigError) as caught:
+        load_manifests(root)
+
+    assert str(caught.value).endswith(
+        "a.yaml:2: secret/s1.bogus: unknown field; expected one of: backend_mappings, hint"
+    )
+
+
+def test_an_advisory_carries_the_documents_location(tmp_path: Path) -> None:
+    """The warning channel that survives the flip is still navigable: an
+    operator reads a file and a line, not just a resource name."""
+    root = tmp_path / "resources"
+    _write(
+        root,
+        "a.yaml",
+        """
+        apiVersion: agentworks/v1
+        kind: vm-template
+        metadata:
+          name: t1
+        spec:
+          env:
+            AGENTWORKS_VM: override
+        """,
+    )
     manifests = load_manifests(root)
+
     assert len(manifests.issues) == 1
-    assert "a.yaml:2" in manifests.issues[0]
-    assert "bogus" in manifests.issues[0]
+    assert "a.yaml:2: vm-template/t1.env sets agentworks-managed identity variable" in manifests.issues[0]

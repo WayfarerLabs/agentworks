@@ -67,7 +67,7 @@ def test_site_names_obey_the_freeform_name_rules(tmp_path: Path) -> None:
     derived into hostnames or SSH aliases: VM names are), so they use the
     freeform cap (64). They still obey validate_name's character rules
     (lowercase, no double hyphen) and reject a name past the freeform cap."""
-    from agentworks.config import MAX_FREEFORM_NAME_LENGTH
+    from agentworks.naming import MAX_FREEFORM_NAME_LENGTH
 
     # Character rules still hold: uppercase is rejected regardless of length.
     doc = SITE_DOC.replace("name: azure-dev", "name: MY_Site")

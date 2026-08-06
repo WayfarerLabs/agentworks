@@ -19,8 +19,8 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.agents.manager import agent_scope
-from agentworks.config.validation import LINUX_GROUPNAME_MAX_LENGTH
 from agentworks.errors import NotFoundError, ValidationError
+from agentworks.naming import LINUX_GROUPNAME_MAX_LENGTH
 from agentworks.transports import transport
 from agentworks.vms.manager import gated_vm_boundary
 

@@ -45,9 +45,9 @@ lower than every package that inherits it.
 from __future__ import annotations
 
 import dataclasses
-from typing import TYPE_CHECKING, Annotated, Any, Final
+from typing import TYPE_CHECKING, Any, ClassVar, Final
 
-from pydantic import AfterValidator, BaseModel, Field
+from pydantic import BaseModel, Field
 from pydantic.json_schema import SkipJsonSchema
 
 from agentworks.errors import StateError
@@ -108,6 +108,24 @@ class DeclaredResource(EnvelopeMetadata):
 
     declared_at: SkipJsonSchema[SourceLocation] = Field(default_factory=synthesized)
     origin: SkipJsonSchema[Origin | None] = None
+
+    NAME_MAX_LENGTH: ClassVar[int | None] = None
+    """The cap this kind's names are checked against AT DECODE, or ``None``
+    when the kind does not check its names at all (which is every kind but
+    ``secret`` and ``vm-site``).
+
+    Declared as data the decoder reads rather than as a validator on the
+    ``name`` field, and the distinction is load-bearing: only a name an
+    OPERATOR wrote is checked. Auto-declared and synthesized rows carry
+    whatever name the reference that summoned them used, and the shipped
+    decision for issue #279 is that those stay tolerant, so a
+    non-conforming reference still declares and resolves rather than
+    sinking the config. A field validator would fire on every
+    construction and break exactly that.
+
+    The cap is never defaulted here: each kind's ceiling is derived at the
+    module that owns its sink (see ``agentworks.naming.validate_name``).
+    """
 
     @classmethod
     def __pydantic_init_subclass__(cls, **kwargs: Any) -> None:
@@ -238,37 +256,3 @@ def replace_fields(row: Any, **updates: Any) -> Any:
     if isinstance(row, BaseModel):
         return row.model_copy(update=updates)
     raise StateError(f"cannot replace fields on {type(row).__name__}: it is neither a frozen dataclass nor a model")
-
-
-def ResourceName(max_length: int) -> object:  # noqa: N802  (an annotation factory, named like the type it builds)
-    """The ``name`` annotation for a kind whose names are validated at
-    load, with that kind's cap.
-
-    The cap is never defaulted here: there is no single correct ceiling,
-    and each kind's is derived at the module that owns its sink (see
-    ``validate_name``). A kind that does not validate its names at load
-    keeps the base's plain ``str``, exactly as it does today.
-
-    The wrapper converts the agentworks ``ValidationError`` into a
-    ``ValueError`` because the former is NOT a ``ValueError`` subclass
-    (it extends ``AgentworksError``), and pydantic re-raises an exception
-    that is neither, so it would escape ``model_validate`` and bypass the
-    error bridge entirely, losing the batch framing for that one error
-    class.
-    """
-
-    def _check(value: str) -> str:
-        # Imported inside the validator, not at module scope: importing
-        # ``agentworks.config.validation`` runs the config package, which
-        # imports the very domain modules that declare the rows using
-        # this annotation.
-        from agentworks.config.validation import validate_name
-        from agentworks.errors import ValidationError
-
-        try:
-            validate_name(value, max_length=max_length)
-        except ValidationError as exc:
-            raise ValueError(str(exc)) from None
-        return value
-
-    return Annotated[str, AfterValidator(_check)]

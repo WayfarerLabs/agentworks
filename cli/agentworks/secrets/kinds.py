@@ -49,6 +49,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
     from agentworks.db import Database, SessionRow, VMRow
+    from agentworks.declared_resource import DeclaredResource
     from agentworks.resources.graph import Readiness
     from agentworks.resources.reference import ResourceReference
     from agentworks.resources.registry import Registry
@@ -86,6 +87,7 @@ class _SecretKind:
     """
 
     kind: str = SECRET_KIND_NAME
+    model: type[DeclaredResource] = SecretDecl
     description: str = "Declared secrets and their backend mappings"
     miss_policy: Literal["auto-declare", "error"] = "auto-declare"
     auto_declare_names: frozenset[str] | None = None  # None = any name accepted

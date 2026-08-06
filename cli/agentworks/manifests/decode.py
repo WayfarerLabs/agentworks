@@ -226,6 +226,7 @@ def decode_document(doc: Document, issues: list[str]) -> Any:
         return _legacy_decode(doc, spec, issues)
 
     owner = RefOwner(kind=doc.kind, name=doc.name)
+    _check_declared_name(doc, owner, model)
     payload = {**spec, **_metadata_payload(doc)}
     try:
         resource = model.model_validate(payload, context=validation_context(owner))
@@ -278,6 +279,26 @@ def _reject_spec_metadata(doc: Document, spec: Mapping[str, object]) -> None:
         raise ConfigError(
             f"{doc.where}: {', '.join(reserved)} belong(s) in metadata, not in spec",
         )
+
+
+def _check_declared_name(doc: Document, owner: RefOwner, model: type[DeclaredResource]) -> None:
+    """Apply the kind's name cap, for the kinds that declare one.
+
+    Read off the model rather than dispatched per kind, and applied HERE
+    rather than as a validator on the ``name`` field, because only a name
+    an operator wrote is checked: auto-declared and synthesized rows carry
+    whatever name summoned them and stay tolerant (issue #279). See
+    ``DeclaredResource.NAME_MAX_LENGTH``.
+    """
+    if model.NAME_MAX_LENGTH is None:
+        return
+    from agentworks.errors import ValidationError
+    from agentworks.naming import validate_name
+
+    try:
+        validate_name(doc.name, max_length=model.NAME_MAX_LENGTH)
+    except ValidationError as exc:
+        raise ConfigError(f"{doc.where}: {owner.display}: {exc}") from None
 
 
 def advisory_issues(resource: DeclaredResource, doc: Document) -> list[str]:
@@ -368,8 +389,8 @@ def _hosted_capability_references(
 
 
 def _conforming_secret(name: str) -> bool:
-    from agentworks.config.validation import MAX_SECRET_NAME_LENGTH, validate_name
     from agentworks.errors import ValidationError
+    from agentworks.naming import MAX_SECRET_NAME_LENGTH, validate_name
 
     try:
         validate_name(name, max_length=MAX_SECRET_NAME_LENGTH)
@@ -387,7 +408,7 @@ def _nonconforming_secret(owner: RefOwner, ref: ConfigReference) -> str:
     unifies the guarantee at the operator boundary (issues #279, #308)
     without breaking a config that already loads.
     """
-    from agentworks.config.validation import MAX_SECRET_NAME_LENGTH
+    from agentworks.naming import MAX_SECRET_NAME_LENGTH
 
     return (
         f"{owner.display}: secret name {ref.name!r} for {ref.usage} does not follow the secret naming "
@@ -414,58 +435,6 @@ def _legacy_decode(doc: Document, spec: dict[str, Any], issues: list[str]) -> An
         raise ConfigError(f"{doc.where}: {exc}", hint=exc.hint) from exc
     issues.extend(f"{doc.where}: {issue}" for issue in local_issues)
     return resource
-
-
-_SECRET_KEYS = {"description", "hint", "backend_mappings"}
-
-
-def _decode_secret(doc: Document, spec: dict[str, Any], issues: list[str]) -> Any:
-    from typing import Literal
-
-    from agentworks.config.loaders_core import _warn_unexpected_keys
-    from agentworks.config.validation import MAX_SECRET_NAME_LENGTH, validate_name
-    from agentworks.secrets import SecretDecl
-
-    name = doc.name
-    # Single validation point for the secret kind (secret names use the
-    # larger cap; they are never derived into Linux usernames).
-    validate_name(name, max_length=MAX_SECRET_NAME_LENGTH)
-    _warn_unexpected_keys(spec, _SECRET_KEYS, f"secrets.{name}", issues)
-
-    description = spec.get("description")
-    if not isinstance(description, str) or not description:
-        raise ConfigError(f"secrets.{name}.description is required and must be a non-empty string")
-    hint = spec.get("hint")
-    if hint is not None and not isinstance(hint, str):
-        raise ConfigError(f"secrets.{name}.hint must be a string")
-
-    raw_mappings = spec.get("backend_mappings", {})
-    if not isinstance(raw_mappings, dict):
-        raise ConfigError(f"secrets.{name}.backend_mappings must be a table")
-    backend_mappings: dict[str, str | dict[str, object] | Literal[False]] = {}
-    for kind, mapping in raw_mappings.items():
-        kind_str = str(kind)
-        if isinstance(mapping, bool):
-            if mapping is True:
-                raise ConfigError(
-                    f"secrets.{name}.backend_mappings.{kind_str}: "
-                    "boolean must be `false` (opt-out); `true` is not a valid value"
-                )
-            backend_mappings[kind_str] = False
-        elif isinstance(mapping, str):
-            backend_mappings[kind_str] = mapping
-        elif isinstance(mapping, dict):
-            backend_mappings[kind_str] = dict(mapping)
-        else:
-            raise ConfigError(f"secrets.{name}.backend_mappings.{kind_str}: must be a string, inline table, or false")
-
-    return SecretDecl(
-        name=name,
-        description=description,
-        hint=hint,
-        backend_mappings=backend_mappings,
-        declared_at=doc.location,
-    )
 
 
 _SESSION_TEMPLATE_KEYS = {
@@ -587,7 +556,7 @@ def _decode_git_credential(doc: Document, spec: dict[str, Any], issues: list[str
 
 
 def _decode_vm_site(doc: Document, spec: dict[str, Any], issues: list[str]) -> Any:
-    from agentworks.config import MAX_FREEFORM_NAME_LENGTH, validate_name
+    from agentworks.naming import MAX_FREEFORM_NAME_LENGTH, validate_name
     from agentworks.vms.sites import VMSiteDecl
 
     # Site names hit no OS-level identifier limit: they are a registry key and
@@ -665,7 +634,6 @@ def _decode_vm_site(doc: Document, spec: dict[str, Any], issues: list[str]) -> A
 
 
 _DECODERS: dict[str, Callable[[Document, dict[str, Any], list[str]], Any]] = {
-    "secret": _decode_secret,
     "session-template": _decode_session_template,
     "git-credential": _decode_git_credential,
     "vm-site": _decode_vm_site,

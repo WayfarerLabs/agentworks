@@ -221,7 +221,7 @@ def test_git_credential_nonconforming_name_with_explicit_token_no_derived_warnin
 def test_git_credential_name_deriving_secret_at_length_cap_no_warning(tmp_path: Path) -> None:
     """A credential name whose derived ``git-token-<name>`` lands exactly at
     MAX_SECRET_NAME_LENGTH emits no warning: the cap is inclusive (issue #308)."""
-    from agentworks.config.validation import MAX_SECRET_NAME_LENGTH
+    from agentworks.naming import MAX_SECRET_NAME_LENGTH
 
     # 'git-token-' is 10 chars, so a name of (cap - 10) makes the derived
     # secret name exactly the cap.
@@ -240,7 +240,7 @@ def test_git_credential_name_conforming_but_derived_over_cap_warns(tmp_path: Pat
     subtle property that the fix validates the DERIVED string, not the bare
     name (issue #308): a future edit validating the bare name would pass this
     name and silently regress."""
-    from agentworks.config.validation import MAX_SECRET_NAME_LENGTH, validate_name
+    from agentworks.naming import MAX_SECRET_NAME_LENGTH, validate_name
 
     # One char past the cap once the 10-char 'git-token-' prefix is added.
     name = "a" * (MAX_SECRET_NAME_LENGTH - len("git-token-") + 1)
