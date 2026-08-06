@@ -145,6 +145,9 @@ GIT_CREDENTIAL_PROVIDER_DESCRIPTOR = CapabilityKindDescriptor(
     registry_policy=RegistryPolicy.CLASS_BY_NAME,
     registry=_registry,
     required_operations=frozenset({"helper_entry", "credential_lines"}),
+    # Empty: GitCredentialProvider supplies every non-operation member a
+    # subclass needs.
+    required_attributes=frozenset(),
     config_slots={},  # step 2.3 registers the provider config model here
     entry_factory=_entry,
     kind_strategy=KIND_REGISTRY["git-credential-provider"],

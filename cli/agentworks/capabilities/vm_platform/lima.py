@@ -93,6 +93,7 @@ provision:
 class LimaPlatform(VMPlatform):
     """Runs VMs via limactl, locally or on a remote host over SSH."""
 
+    contract_version: ClassVar[int] = 1
     name: ClassVar[str] = "lima"
     description: ClassVar[str] = "Lima VMs (local, or on a remote host via SSH)"
     # No unsupported_reason override: the platform is supported on

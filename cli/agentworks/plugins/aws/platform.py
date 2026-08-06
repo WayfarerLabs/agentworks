@@ -275,6 +275,7 @@ class EC2Platform(VMPlatform):
     services could plausibly back platforms of their own someday (the same
     one-service rationale ``azure-vm`` follows for Azure)."""
 
+    contract_version: ClassVar[int] = 1
     name: ClassVar[str] = "aws-ec2"
     description: ClassVar[str] = "Amazon EC2 instances (region + optional VPC subnet)"
 

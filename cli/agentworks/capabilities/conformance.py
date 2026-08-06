@@ -23,10 +23,15 @@ from __future__ import annotations
 import inspect
 from typing import TYPE_CHECKING
 
-from agentworks.capabilities.base import Capability
+from agentworks.errors import StateError
 
 if TYPE_CHECKING:
     from agentworks.capabilities.descriptor import CapabilityKindDescriptor
+
+_MISSING = object()
+"""Absence sentinel for attribute presence checks. ``None`` cannot serve:
+a member whose legitimate value is ``None`` (or ``False``) must read as
+present, not missing."""
 
 
 def conformance_error(descriptor: CapabilityKindDescriptor, impl: type) -> str | None:
@@ -35,11 +40,14 @@ def conformance_error(descriptor: CapabilityKindDescriptor, impl: type) -> str |
 
     Returns a reason rather than raising so each caller frames it in its own
     vocabulary (``register_plugin`` attributes it to the plugin; the table
-    self-test reports it against the built-in).
+    self-test reports it against the built-in). A malformed DESCRIPTOR is a
+    different failure class and raises: that is a framework bug, not
+    something an impl author can fix.
     """
     return (
         _contract_error(descriptor, impl)
         or _metadata_error(impl)
+        or _attributes_error(descriptor, impl)
         or _constructibility_error(impl)
         or _operations_error(descriptor, impl)
         or _version_error(descriptor, impl)
@@ -51,27 +59,45 @@ def conformance_error(descriptor: CapabilityKindDescriptor, impl: type) -> str |
     )
 
 
-def _contract_error(descriptor: CapabilityKindDescriptor, impl: type) -> str | None:
-    """Check 1: conformance to the implementation contract, branched by the
-    contract's SHAPE.
+def _is_protocol(contract: type) -> bool:
+    """Whether ``contract`` is a ``typing.Protocol``.
 
-    The four contracts are not uniform, and that is a code fact rather than
-    an oversight. Three kinds derive from the ``Capability`` ABC and get a
-    real nominal check. ``SecretBackend`` is a plain ``Protocol`` (not
-    ``@runtime_checkable``) whose ``name`` / ``description`` / ``interactive``
-    members are properties, so ``issubclass`` against it raises ``TypeError``
-    even with the decorator added. A Protocol's real enforcement is
-    structural anyway, and that is exactly what the metadata and
-    required-operation checks below do, so its descriptor's
-    ``implementation_contract`` is documentary.
+    ``typing.is_protocol`` is the public spelling and landed in 3.13; this
+    project's floor is 3.12, so read the flag the typing machinery stamps on
+    every Protocol class (and only on Protocol classes: a concrete
+    implementer inheriting one carries ``False``). Swap in
+    ``typing.is_protocol`` when the floor moves.
     """
-    if not issubclass(descriptor.implementation_contract, Capability):
-        return None
-    if not issubclass(impl, descriptor.implementation_contract):
-        return (
-            f"it does not derive from {descriptor.implementation_contract.__name__}, "
-            f"the {descriptor.kind} implementation contract"
+    return bool(getattr(contract, "_is_protocol", False))
+
+
+def _contract_error(descriptor: CapabilityKindDescriptor, impl: type) -> str | None:
+    """Check 1: conformance to the implementation contract, branched on
+    whether the contract is a Protocol.
+
+    The four contracts are not uniform in shape, and that is a code fact
+    rather than an oversight. A Protocol cannot be checked nominally:
+    ``issubclass`` against one whose members include properties raises
+    ``TypeError`` even with ``@runtime_checkable``, which is exactly
+    ``SecretBackend``'s shape. Its enforcement is structural instead, and
+    that is what the metadata, attribute, and operation checks do, so its
+    descriptor's ``implementation_contract`` is documentary.
+
+    Anything else, ABC or plain class alike, gets the nominal check. The
+    branch keys on protocol-ness rather than on deriving from ``Capability``
+    so that a future kind declaring a non-``Capability`` base still gets a
+    real check instead of quietly degrading to the structural one.
+    """
+    contract = descriptor.implementation_contract
+    if not isinstance(contract, type):
+        raise StateError(
+            f"the {descriptor.kind} descriptor's implementation_contract is {contract!r}, "
+            f"which is neither a class nor a Protocol; conformance cannot be checked against it"
         )
+    if _is_protocol(contract):
+        return None
+    if not issubclass(impl, contract):
+        return f"it does not derive from {contract.__name__}, the {descriptor.kind} implementation contract"
     return None
 
 
@@ -92,6 +118,21 @@ def _metadata_error(impl: type) -> str | None:
     return None
 
 
+def _attributes_error(descriptor: CapabilityKindDescriptor, impl: type) -> str | None:
+    """Check 2b: the kind's other non-operation members are present.
+
+    The metadata check above covers what EVERY capability row carries;
+    this covers what a particular kind's consumers read. Presence only, not
+    type: the framework's use of the value is the domain's business, and a
+    class-level property (rather than a plain attribute) must still read as
+    present.
+    """
+    missing = sorted(attr for attr in descriptor.required_attributes if getattr(impl, attr, _MISSING) is _MISSING)
+    if missing:
+        return f"it is missing the required {descriptor.kind} attributes: {', '.join(missing)}"
+    return None
+
+
 def _constructibility_error(impl: type) -> str | None:
     """Check 3: the side-effect-free constructibility check.
 
@@ -100,7 +141,7 @@ def _constructibility_error(impl: type) -> str | None:
     kinds ``isabstract`` is decisive, because each kind's own base declares
     its domain operations abstract (the shared ``Capability`` ABC declares
     none), so a concrete impl must have implemented them. For the Protocol
-    kind there is nothing to leave abstract, and the metadata and
+    kind there is nothing to leave abstract, and the metadata, attribute, and
     required-operation checks are the real structural enforcement.
     """
     if inspect.isabstract(impl):
@@ -124,6 +165,12 @@ def _version_error(descriptor: CapabilityKindDescriptor, impl: type) -> str | No
     Trivially satisfied while there is one version, which is the point: the
     declaration and the comparison both exist before the first incompatible
     change, so nothing has to be retrofitted when one arrives.
+
+    Exact equality, deliberately: a contract change is a hard cutover, and
+    every impl migrates before the descriptor's number moves. Supporting two
+    versions at once is a real decision (a supported range, a compatibility
+    rule) to make when a migration actually needs it, not a default to drift
+    into.
     """
     declared = getattr(impl, "contract_version", None)
     if declared != descriptor.contract_version:

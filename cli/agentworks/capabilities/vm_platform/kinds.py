@@ -109,6 +109,8 @@ VM_PLATFORM_DESCRIPTOR = CapabilityKindDescriptor(
     required_operations=frozenset(
         {"create", "start", "stop", "delete", "status", "display_backend_name"},
     ),
+    # Empty: VMPlatform supplies every non-operation member a subclass needs.
+    required_attributes=frozenset(),
     config_slots={},  # step 2.3 registers the platform config model here
     entry_factory=_entry,
     kind_strategy=KIND_REGISTRY["vm-platform"],

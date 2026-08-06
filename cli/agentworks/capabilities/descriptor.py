@@ -108,17 +108,20 @@ class CapabilityKindDescriptor:
     """The capability kind identifier, matching ``KIND_REGISTRY``'s key."""
 
     contract_version: int
-    """The implementation contract version this build supports. Every impl
-    declares its own ``contract_version`` and registration compares the two.
-    Trivial while there is one version; the discipline exists before the
-    first incompatible change rather than being retrofitted after it."""
+    """The single implementation contract version this build supports. Every
+    impl declares its own ``contract_version`` and registration requires an
+    exact match, so a contract change is a HARD CUTOVER: bumping this number
+    refuses every impl still on the old one until each is migrated. That is
+    the intent at 2.0 (one version, nothing to straddle); supporting two
+    versions at once would need a supported-range field and a compatibility
+    rule, which is a decision to make when a real migration needs it."""
 
     implementation_contract: type
     """The base class or protocol an impl must satisfy. NOT uniform in
-    shape: the three capability kinds derive from the ``Capability`` ABC and
-    are checked nominally, while ``SecretBackend`` is a plain ``Protocol``
-    whose members include properties, so it is checked structurally and this
-    field is documentary for that kind. See
+    shape: three kinds declare an ABC and are checked nominally, while
+    ``SecretBackend`` is a ``Protocol`` whose members include properties, so
+    it is checked structurally (``required_attributes`` plus
+    ``required_operations``) and this field is documentary for that kind. See
     :func:`agentworks.capabilities.conformance.conformance_error`."""
 
     registry_policy: RegistryPolicy
@@ -136,6 +139,15 @@ class CapabilityKindDescriptor:
     callable on an impl. For the ABC kinds this restates what
     ``inspect.isabstract`` already enforces; for ``secret-backend`` (a
     Protocol, with nothing to leave abstract) it IS the enforcement."""
+
+    required_attributes: frozenset[str]
+    """The non-operation members the framework reads off an impl, beyond the
+    universal ``name`` / ``description``. EMPTY for the ABC kinds, whose base
+    class supplies every such member to any subclass. For ``secret-backend``
+    it carries ``interactive``, which the resolve loop reads on every chain
+    pass: a Protocol declares it but cannot supply it, so without this field
+    a backend omitting it seats cleanly and raises ``AttributeError`` deep in
+    resolution, which is the exact failure this module exists to end."""
 
     config_slots: Mapping[str, object]
     """Named schema slots, each naming a config model contract. EMPTY for

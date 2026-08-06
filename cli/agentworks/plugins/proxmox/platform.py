@@ -44,6 +44,7 @@ _OPTIONAL_KEYS = ("storage", "bridge", "pool", "verify_ssl", "token_secret")
 class ProxmoxPlatform(VMPlatform):
     """Runs VMs on a Proxmox VE cluster."""
 
+    contract_version: ClassVar[int] = 1
     name: ClassVar[str] = "proxmox"
     description: ClassVar[str] = "Proxmox VE cluster VMs (clone + cloud-init)"
     no_native_transport_hint: ClassVar[str] = (

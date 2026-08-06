@@ -104,6 +104,9 @@ HARNESS_INTEGRATION_DESCRIPTOR = CapabilityKindDescriptor(
     registry_policy=RegistryPolicy.CLASS_BY_NAME,
     registry=_registry,
     required_operations=frozenset({"start", "resume"}),
+    # Empty: HarnessIntegration supplies every non-operation member a
+    # subclass needs.
+    required_attributes=frozenset(),
     config_slots={},  # step 2.3 registers the harness config model here
     entry_factory=_entry,
     kind_strategy=KIND_REGISTRY["harness-integration"],

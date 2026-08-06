@@ -39,6 +39,8 @@ class ConformingVMPlatform(VMPlatform):
     """A concrete ``VMPlatform``: the six abstract power ops implemented so
     the class is seatable. Subclasses add ``name`` / ``description``."""
 
+    contract_version = 1
+
     def create(self, request: ProvisionRequest, ctx: RunContext) -> ProvisionResult:
         raise NotImplementedError
 
@@ -62,6 +64,8 @@ class ConformingHarnessIntegration(HarnessIntegration):
     """A concrete ``HarnessIntegration``. Subclasses add ``name`` /
     ``description``."""
 
+    contract_version = 1
+
     def start(self, ctx: RunContext) -> str:
         raise NotImplementedError
 
@@ -75,6 +79,8 @@ class ConformingHarnessIntegration(HarnessIntegration):
 class ConformingGitCredentialProvider(GitCredentialProvider):
     """A concrete ``GitCredentialProvider``. Subclasses add ``name`` /
     ``description``."""
+
+    contract_version = 1
 
     def _verify_token(self, token: str) -> None:
         raise NotImplementedError

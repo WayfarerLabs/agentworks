@@ -477,6 +477,7 @@ def _keepalive(distro_name: str) -> Iterator[None]:
 class WSL2Platform(VMPlatform):
     """Runs VMs as WSL2 Debian distributions on Windows."""
 
+    contract_version: ClassVar[int] = 1
     name: ClassVar[str] = "wsl2"
     description: ClassVar[str] = "WSL2 Debian distributions on Windows"
 

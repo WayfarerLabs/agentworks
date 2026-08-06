@@ -309,6 +309,7 @@ class _Layer2(NamedTuple):
 class CodexIntegration(HarnessIntegration):
     """Runs Codex, resuming or launching fresh per on-disk state."""
 
+    contract_version: ClassVar[int] = 1
     name: ClassVar[str] = "codex"
     description: ClassVar[str] = "Run Codex, resuming its session when one exists"
 

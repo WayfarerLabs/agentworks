@@ -47,6 +47,7 @@ _PROJECTS_DIR = "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects"
 class ClaudeCodeIntegration(HarnessIntegration):
     """Runs Claude Code, resuming or launching fresh per on-disk state."""
 
+    contract_version: ClassVar[int] = 1
     name: ClassVar[str] = "claude-code"
     description: ClassVar[str] = "Run Claude Code, resuming its session when one exists"
 

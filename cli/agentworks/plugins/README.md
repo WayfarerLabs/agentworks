@@ -80,16 +80,18 @@ anything is seated, so a class that merely looks plausible is refused at registr
 failing far from the mistake. The checks:
 
 - **Contract**: derives from the kind's capability base. `secret-backend`'s contract is a `Protocol`
-  rather than a base class, so it is checked structurally instead (see the operations check below);
-  a Protocol's enforcement is structural anyway.
+  rather than a base class, so it cannot be checked nominally; the attribute and operation checks
+  below are its enforcement, which is what a Protocol's enforcement is anyway.
 - **Metadata**: `name` (non-empty, `/`-free) and `description`, readable as class attributes.
+- **Attributes**: the kind's other non-operation members are present (`secret-backend`'s
+  `interactive`, which the resolve loop reads on every chain pass). Empty for the three base-class
+  kinds, whose base supplies these to every subclass.
 - **Constructibility**: nothing would stop the class being constructed (no unimplemented
   `@abstractmethod`). Checked structurally; the impl is never constructed to find out.
 - **Operations**: the domain operations the framework depends on are present and callable.
-- **Contract version**: the impl's `contract_version` is one this build supports. The `Capability`
-  base defaults it, so only an impl deliberately pinned to an older contract spells it;
-  `secret-backend` impls always spell it, because Protocol bodies are not inherited by structural
-  implementers.
+- **Contract version**: the impl's `contract_version` equals the version this build supports. Every
+  impl of every kind spells it; nothing defaults it, so a version claim is always made rather than
+  inherited. Exact equality, so a contract change is a hard cutover.
 
 Each failure is a `PluginError` naming the plugin, the kind, the impl, and what is missing.
 

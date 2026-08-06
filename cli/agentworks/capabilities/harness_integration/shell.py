@@ -72,6 +72,7 @@ def _append_dedupe(target: list[str], source: list[str]) -> list[str]:
 class ShellIntegration(HarnessIntegration):
     """Runs an operator command (or a login shell) as the session."""
 
+    contract_version: ClassVar[int] = 1
     name: ClassVar[str] = "shell"
     description: ClassVar[str] = "Run an operator command or a login shell"
 

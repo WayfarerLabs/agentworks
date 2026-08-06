@@ -25,6 +25,7 @@ from agentworks.plugins import (
     register_plugin,
     seated_plugin,
 )
+from agentworks.resources.graph import Readiness
 from agentworks.resources.kind import KIND_REGISTRY
 from agentworks.resources.origin import Origin
 from tests.plugins._fixtures import (
@@ -161,12 +162,48 @@ class _PlatformWithoutADescription(ConformingVMPlatform):
 class _BackendMissingItsOperations:
     """Structurally NOT a ``SecretBackend``. The Protocol kind cannot be
     checked nominally (``issubclass`` against a Protocol with property
-    members raises ``TypeError``), so operation presence IS its
-    conformance check."""
+    members raises ``TypeError``), so member presence IS its conformance
+    check. Carries ``interactive`` so this case isolates the missing
+    OPERATIONS, leaving the missing-attribute case to the next class."""
 
     contract_version = 1
     name = "barely-a-backend"
     description = "none of the backend operations"
+    interactive = False
+
+
+class _BackendWithoutInteractive:
+    """Every operation implemented, but not the ``interactive`` member the
+    resolve loop reads on every chain pass. Nominally unenforceable (the
+    contract is a Protocol) and not an operation, so without the descriptor's
+    ``required_attributes`` this would seat and then raise ``AttributeError``
+    deep in resolution.
+
+    Spelled out rather than derived from ``ConformingSecretBackend``: the
+    defect is an ABSENT member, and a subclass cannot un-inherit one.
+    """
+
+    contract_version = 1
+    name = "no-interactive-backend"
+    description = "omits the interactive member"
+
+    def not_ready(self) -> Readiness:
+        raise NotImplementedError
+
+    def validate_mapping(self, owner: str, mapping: object) -> None:
+        raise NotImplementedError
+
+    def dependencies(self, mapping: object) -> tuple[object, ...]:
+        raise NotImplementedError
+
+    def would_attempt(self, secret: object, mapping: object) -> bool:
+        raise NotImplementedError
+
+    def describe_lookup(self, secret: object, mapping: object) -> str | None:
+        raise NotImplementedError
+
+    def batch_get(self, wants: object) -> dict[str, str]:
+        raise NotImplementedError
 
 
 class _PlatformOnAnOldContract(ConformingVMPlatform):
@@ -182,9 +219,17 @@ class _PlatformOnAnOldContract(ConformingVMPlatform):
         ("vm-platform", _AbstractPlatform, "it is abstract"),
         ("vm-platform", _PlatformWithoutADescription, "'description' class attribute"),
         ("secret-backend", _BackendMissingItsOperations, "does not implement the required"),
+        ("secret-backend", _BackendWithoutInteractive, "missing the required secret-backend attributes"),
         ("vm-platform", _PlatformOnAnOldContract, "declares contract_version 0"),
     ],
-    ids=["wrong-base", "abstract", "missing-metadata", "missing-operations", "unsupported-version"],
+    ids=[
+        "wrong-base",
+        "abstract",
+        "missing-metadata",
+        "missing-operations",
+        "missing-attribute",
+        "unsupported-version",
+    ],
 )
 def test_rejects_a_non_conforming_impl_naming_the_plugin(kind: str, impl: type, expected: str) -> None:
     """Each conformance check refuses its own defect with a ``PluginError``

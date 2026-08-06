@@ -100,6 +100,7 @@ class GitHubCredentialProvider(GitCredentialProvider):
     credentials keep the released host-level line verbatim.
     """
 
+    contract_version = 1
     name = "github"
     description = "GitHub personal access token"
 

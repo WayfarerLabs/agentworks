@@ -287,14 +287,18 @@ class Capability(ABC):
     description: ClassVar[str]
     owner_kind: ClassVar[str]
 
-    contract_version: ClassVar[int] = 1
+    contract_version: ClassVar[int]
     """The capability contract version this implementation is written
-    against. Registration compares it to the version its kind's descriptor
-    declares supported, so an impl written against an older contract is
-    refused with a version message instead of failing somewhere downstream.
-    Defaulted here because every implementation today is on version 1; an
-    impl that stays on an old contract overrides it, and the check starts
-    failing the day a kind's descriptor moves on."""
+    against. Registration requires it to equal the version its kind's
+    descriptor declares supported, so an impl on an older contract is refused
+    with a version message instead of failing somewhere downstream.
+
+    Declared, never defaulted, for the same reason ``name`` and
+    ``description`` are: a default would make the version claim inherited
+    rather than made, and bumping this base alongside a descriptor would then
+    silently re-certify every impl that had not actually been migrated. Each
+    implementation states its own, exactly as the ``SecretBackend`` Protocol
+    kind's impls must."""
 
     def __init__(
         self,

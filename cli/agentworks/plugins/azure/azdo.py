@@ -30,6 +30,7 @@ _ORG_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 class AzDOCredentialProvider(GitCredentialProvider):
     """Configures git credentials for Azure DevOps via a personal access token."""
 
+    contract_version = 1
     name = "azdo"
     description = "Azure DevOps personal access token"
 
