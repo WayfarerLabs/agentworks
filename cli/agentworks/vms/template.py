@@ -16,7 +16,7 @@ from pydantic import Field
 
 from agentworks.declared_resource import DeclaredResource
 from agentworks.env.entry import EnvTable, env_references
-from agentworks.schema import ResourceRef, SecretRef
+from agentworks.schema import NonEmptyStr, ResourceRef, SecretRef
 from agentworks.schema.reference import RefRelationship
 
 if TYPE_CHECKING:
@@ -114,9 +114,16 @@ class VMTemplate(DeclaredResource):
     # secret reference. The marker carries NO default_template, and the row
     # base enforces that: this kind composes along an ``inherits`` chain, so
     # filling an absent value would make ``None`` stop meaning "inherit".
-    tailscale_auth_key: Annotated[str, SecretRef(usage="the Tailscale auth key")] | None = None
+    #
+    # ``NonEmptyStr`` is load-bearing rather than tidy, and for a reason
+    # ``None``-means-inherit creates: the merge overrides on ``is not
+    # None``, so an empty string is a VALUE and would replace the resolved
+    # default with the name of no secret at all. That auto-declares a
+    # secret called ``''`` and sends ``vm create`` to resolve it.
+    tailscale_auth_key: Annotated[NonEmptyStr, SecretRef(usage="the Tailscale auth key")] | None = None
     """The secret naming this VM's Tailscale auth key. Omit it to inherit,
-    which falls back to ``tailscale-auth-key`` once the chain resolves."""
+    which falls back to ``tailscale-auth-key`` once the chain resolves;
+    writing it empty is a mistake, not a way to unset it."""
 
     def dependencies(self, context: FinalizeContext) -> list[ResourceReference]:
         """This template's outbound edges: its ``inherits`` edges as

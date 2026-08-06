@@ -8,13 +8,14 @@ absent value from a template.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Annotated
 
 import pytest
 
 from agentworks.agents.template import AgentTemplate
 from agentworks.env import EnvEntry
-from agentworks.errors import StateError
+from agentworks.errors import ConfigError, StateError
 from agentworks.schema import SecretRef, marker_of
 from agentworks.vms.template import VMTemplate
 
@@ -173,3 +174,36 @@ def test_a_non_inheriting_row_is_left_alone() -> None:
         token: Annotated[str, SecretRef(usage="a token", default_template="token-{owner_name}")] | None = None
 
     assert "inherits" not in _Fine.model_fields
+
+
+def test_an_empty_auth_key_is_refused_rather_than_overriding_the_default() -> None:
+    """``None`` means inherit and the merge overrides on ``is not None``,
+    so an empty string is a VALUE: it would replace the resolved default
+    with the name of no secret at all, auto-declare a secret called ``''``,
+    and send ``vm create`` to resolve it instead of the deployment
+    default. The advisory does not fire for it either, so nothing else
+    would have caught it."""
+    assert rejection("vm-template", "big", {"tailscale_auth_key": ""}) == (
+        "res.yaml:7: vm-template/big.tailscale_auth_key: must not be empty"
+    )
+
+
+def test_an_empty_auth_key_never_reaches_the_resolved_template(tmp_path: Path) -> None:
+    """The end-to-end half, because the field is only half the mechanism:
+    what made the empty string dangerous is the merge, three modules
+    away."""
+    from agentworks.bootstrap import build_registry
+    from agentworks.config import load_config
+    from tests.conftest import ManifestDoc, write_manifests
+
+    (tmp_path / "k.pub").write_text("ssh-ed25519 AAAA test")
+    (tmp_path / "k").write_text("key")
+    cfg = tmp_path / "config.toml"
+    cfg.write_text(
+        f'[operator]\nssh_public_key = "{(tmp_path / "k.pub").as_posix()}"\n'
+        f'ssh_private_key = "{(tmp_path / "k").as_posix()}"\n'
+    )
+    write_manifests(tmp_path, ManifestDoc("vm-template", "big", {"tailscale_auth_key": ""}))
+
+    with pytest.raises(ConfigError, match="tailscale_auth_key: must not be empty"):
+        build_registry(load_config(cfg, warn_issues=False))
