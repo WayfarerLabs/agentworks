@@ -219,10 +219,12 @@ operator-facing description. The core validates against it (closed-world, so an 
 hard error naming the valid fields) and extracts whatever references it marks. No integration code
 runs for either. Two rules with teeth:
 
-- **Careful with required fields.** Validation runs per DECLARED blob at finalize, and a child
-  template may declare a partial blob that only becomes complete after the inheritance merge; the
-  merged blob is validated again at resolve, which is where a required field is actually required.
-  No shipped integration has one.
+- **A required field is a claim about the whole lineage.** Validation runs at finalize on each
+  template's EFFECTIVE (merged) blob, so a child may declare a partial one that its parents
+  complete. What a required field does forbid is a template whose whole chain never supplies it,
+  including a base template that expects only its children to: every template is directly namable at
+  `session create`, so every template's chain has to be complete on its own. An error on an
+  inherited key names the template that declared it. No shipped integration has a required field.
 - **Do not model tool-owned choice sets.** `claude-code` forwards `permission_mode` and `model`
   values verbatim: the valid choices are the tool's and drift between its releases, so a stale
   integration-side enum would reject values a newer CLI accepts. An invalid value surfaces as the
@@ -259,7 +261,9 @@ The resolver calls `merge_config` on every declared-blob fold, with `base={}` wh
 starts (a template with no parents included) or when a child switches to a different integration.
 Every implementation must therefore accept an empty base. A different integration's blob never lands
 in `base`: the resolver discards accumulated config on an integration switch, so a parent's config
-cannot leak across it.
+cannot leak across it. The fold also runs during the finalize build walk, where nothing may raise
+and no name has been checked yet, so `merge_config` must be a pure function of its two arguments; an
+unregistered name gets the base contract's own child-wins default rather than an error.
 
 #### Construction: Cheap, No I/O
 

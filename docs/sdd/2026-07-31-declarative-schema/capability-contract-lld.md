@@ -49,7 +49,8 @@ NOT delivered by 2.3, deliberately, each with its reason:
   re-litigated, and states plainly what is left to build. What 2.3 DOES do there is repoint
   `sessions/templates.py::_validate_merged` at the core entry point so no capability code is invoked
   from it either; its TIMING is unchanged. Flagged for the lead in section 14 as the one scope call
-  in this LLD.
+  in this LLD. **Delivered by step 2.3b (2026-08-06); section 12 now records what was built and the
+  one place the design did not survive contact.**
 - **The old-sibling-shape hard error.** Step 2.4. Decode still normalizes both shapes; 2.3 consumes
   whatever decode produces.
 - **Kind spec models and the decode swap.** Step 2.5. The interim synthesis of section 6 exists
@@ -840,9 +841,11 @@ must PRESERVE, so the tests are written against the new path and assert today's 
 unions, per the schema-foundation LLD's section 9), the `value_error` entry, and the untagged-union
 entry.
 
-## 12. The inheritance surface: what is settled, and what is left
+## 12. The inheritance surface: what was settled, and what step 2.3b built
 
-Recorded here in full so the remaining work is a build, not a re-design.
+Recorded here in full so the remaining work was a build, not a re-design. Everything below the
+"Settled" heading was written for 2.3; the "As built" subsection records step 2.3b (2026-08-06),
+including the one place the design did not survive contact.
 
 **Settled.**
 
@@ -872,6 +875,7 @@ breaks today only because no shipped model has one, which is exactly why it is r
 definition (`HarnessIntegration.__init_subclass__`) rather than written down: the trap is invisible
 from the author's side, since the model looks right and every test of the capability alone passes.
 That method is deleted by the step below, which is what makes the constraint's expiry real.
+**Deleted 2026-08-06 by step 2.3b, as scheduled.**
 
 **Left to build, and it is a real body of work:** resolving each inheritance chain over registry
 rows inside finalize, a per-key provenance channel so the bridge can name the template that declared
@@ -886,6 +890,89 @@ the core entry point so no capability code runs there either.
 validates, this is about WHICH BLOB and WHEN. Landing them together would produce one change whose
 two halves fail independently, and the flip is the one the other eleven boxes of step 2.3 depend on.
 Flagged for the lead as the scope call of this LLD (section 14).
+
+### 12.1 As built (step 2.3b, 2026-08-06)
+
+**The one thing that did not survive contact: the traversal split alone is a REGRESSION, and the
+effective-config rule has to reach all four inheriting kinds, not only session-template capability
+config.** Everything above is written about the harness blob, on the reasoning that "chain length is
+one everywhere but session templates". That is true of CAPABILITY CONFIG and false of the graph. The
+edges that actually flow through the one runtime-need traversal today are the non-capability ones:
+`vm-template`'s `env` block and its `tailscale_auth_key`, `agent-template`'s `git_credentials` and
+`user_install_commands`, `workspace-template`'s `env`. Before this step a child reached all of them
+by CROSSING the inheritance edge, so:
+
+- excluding the edge without any other change makes `collect_secrets_for` on a child stop returning
+  its inherited env secrets, which is a silent under-answer on a live surface; and
+- keeping the edge leaves FR17 unmet in shipped code, not hypothetically:
+  `vm-template.tailscale_auth_key` IS an owner-defaulted secret name on an inheriting kind.
+  Reproduced at HEAD before the change, with a child overriding it: `collect_secrets_for` returned
+  both `kid-auth-key` and the parent's `tailscale-auth-key`.
+
+So the two halves are one change and were built as two commits with a green step between them,
+ordered so no window under-reports:
+
+1. **Effective-declaration edges.** Each of the four inheriting kinds resolves its own chain at
+   finalize and emits its runtime-need refs off the merged result, keeping `inherits` itself as the
+   declared `INHERITS` edge. The traversals still crossed at this point, so the graph over-reported
+   exactly as before rather than losing anything.
+2. **The traversal split.** `DependencyGraph.runtime_reachable_from` is the closure over `USES`
+   edges only and `collect_secrets_for` reads it; `reachable_from` keeps the full closure for its
+   one caller.
+
+Details worth having in one place:
+
+- **The seam is the build context, renamed.** `BuildContext` carries the published rows and became
+  `FinalizeContext`, because the validate pass is handed the same object: a row's edges and its
+  shape check are two readings of one merged declaration and must not be computed from two different
+  ones. `enabled_backends` deliberately did NOT move onto it: that set is only known after the fold,
+  so a field for it would read empty during the build walk, which is the
+  silently-wrong-at-one-call-site shape this effort keeps finding.
+- **Totality needed two mechanisms, neither of them a bare `except ConfigError`.**
+  `InheritanceCycleError` (new, `errors.py`, raised by all four resolvers' cycle guards through one
+  shared constructor) lets the finalize view degrade on a cyclic chain and nothing else; the
+  degraded value is provably never observed, because a degraded row implies a loop among present
+  nodes and finalize's cycle pass raises before the graph is built (pinned by a test on
+  `vm-template`, whose degraded edge set loses the auth-key secret). And the harness merge is
+  reached by name (`merged_config`), falling back to the base contract's own child-wins default for
+  an unregistered name, because the build walk merges a chain before any name has been checked.
+  Verified by a real failure during implementation: a blanket `except ConfigError` around the merge
+  swallowed the unknown-integration-name case and the miss policy then never fired, which is exactly
+  the silent-wrong-answer class.
+- **A bare `FinalizeContext()` degrades to "this declaration alone", not to nothing.** Each emitter
+  merges itself into the rows it was handed (`{**context.rows_of(kind), self.name: self}`), a no-op
+  during the real walk. Found the same way: without it, four existing tests that call
+  `dependencies(BuildContext())` directly went silently empty rather than failing loudly.
+- **`ResolvedVMTemplate.dependencies` is deleted.** It was a second derivation of the edge set the
+  declared template now computes, with no production caller.
+- **Provenance** is per top-level key of the merged blob, recording the LAST declarer in merge order
+  (the one child-wins keeps) and restricted to the keys that survived. The bridge renders it as an
+  `(inherited from <owner>)` tail and suppresses it when the declarer is the owner already at the
+  head of the line. It fires when the CHILD's row is the one the validate pass reaches first; the
+  parent's own row reports the same key on its own account, which is what makes the tail necessary
+  rather than redundant.
+- **`_validate_merged` retired**, and `_resolve` now validates nothing at all: finalize checks the
+  shape and construction re-validates the blob it binds, so the resolve-time call was the third copy
+  and the one at the wrong time.
+
+**The policy call, made explicitly (FR17 left it to this LLD).** ENABLEMENT propagates across an
+inheritance edge; READINESS does not. Enablement, because a template resolver compiles the parent's
+declaration into the recipe the use-gate is about to act on, so a disabled parent is not a runtime
+need the child happens to have, it is source the child is made of. That is what
+`ensure_recipe_enabled` already did by walking the full closure, and the split is precisely why it
+now has to be stated: it is the one caller that must NOT switch to the runtime closure, and it is
+pinned both behaviorally and by the graph guard. Readiness, because no template kind implements
+`not_ready`, so every template row folds to a ready verdict and an inheritance edge changes nothing;
+a future inheriting kind that grows a hook is handed every out-edge's state and decides for itself,
+which is R4's rule and not a traversal's to decide in advance.
+
+**One operator-visible semantic this creates, flagged for the lead.** Validation is per ROW over
+that row's own chain, so a base template whose blob only a CHILD completes is now a load error in
+its own right. That is the honest reading of FR12 (any template is directly namable at
+`session create`, so "abstract base template" is not a thing the schema supports) and it is pinned,
+but it is only reachable now that a required field is declarable at all, so nothing shipped changes
+today. If the lead wants abstract bases, that is a new concept (an `abstract: true` marker, or
+validation scoped to leaves) and should be decided before a capability ships a required field.
 
 ## 13. Implementation sequence
 
@@ -922,6 +1009,23 @@ red window.
    declare-and-receive; the standing "may be deprecated" notes on the retired API are deleted with
    the API. The full permanent-doc promotion is 2.9's box; what lands here is the correction of text
    that would otherwise describe a contract that no longer exists.
+
+Step 2.3b's own sequence, appended when it landed (2026-08-06; rationale in section 12.1):
+
+1. **Type the inheritance edge by relationship.** `ResourceReference.relationship`, defaulted to
+   `USES`; `inherits_reference` as the one spelling, used by all four inheriting kinds;
+   `sourced_references` carries a modeled reference's relationship through. Additive, no consumer.
+1. **Effective-declaration edges.** `FinalizeContext` carries the published rows; each inheriting
+   kind emits its runtime needs off its merged declaration. The traversals still cross at this
+   point, so the graph over-reports exactly as before rather than losing anything: this is what
+   makes the green step between the two halves honest rather than merely compiling.
+1. **The traversal split.** `runtime_reachable_from`, the secret walk repointed at it, the
+   enablement-propagation policy stated and pinned, and the FR17 regression test.
+1. **Effective-config validation at finalize.** The merged harness blob validates in the finalize
+   pass with per-key provenance through the bridge; `_validate_merged` and the interim
+   `HarnessIntegration.__init_subclass__` guard are both deleted.
+1. **Docs.** This section, section 12.1, `capabilities/README.md`, and
+   `capabilities/harness_integration/README.md`.
 
 ## 14. Contradictions and residual decisions for the lead
 
@@ -1001,6 +1105,18 @@ red window.
     block, so the bridge rendered the tag as a field the operator never wrote and lost the arm's
     field list. Latent only because every shipped kind currently has two or more implementations.
     Fixed in the classifier, where the shape rule belongs.
+11. **The FR17 traversal split's blast radius is wider than the artifacts describe** (found by step
+    2.3b, 2026-08-06; full account in section 12.1). The plan's FR17 survey concludes that "what is
+    missing is only the consuming half", and the HLA and this LLD both discuss the inheritance
+    surface as a capability-config question, on the reasoning that chain length is one everywhere
+    but session templates. That holds for capability config and not for the graph: the edges that
+    actually cross an inheritance edge in the shipped runtime-need traversal are `vm-template`'s env
+    and auth key, `agent-template`'s credentials and install commands, and `workspace-template`'s
+    env. Implementing the consuming half alone silently drops a child's inherited env secrets;
+    implementing neither leaves FR17 unmet against a shipped owner-defaulted secret name
+    (`tailscale_auth_key`). Both reproduced. The producing half (every inheriting kind emitting the
+    runtime needs of its EFFECTIVE declaration) is therefore part of the same change, and the FR17
+    boxes cannot be read as scoped to session templates.
 
 **Residual decisions for the lead.**
 
@@ -1009,7 +1125,11 @@ red window.
   share no code with the contract flip and would double this step's review surface, and the flip is
   what every other 2.3 box depends on. If the lead wants them in 2.3, the sequence is section 13
   plus three more commits and the step roughly doubles. Stated here rather than absorbed silently,
-  because it is the one place this LLD narrows what the plan asked for.
+  because it is the one place this LLD narrows what the plan asked for. **Resolved: taken as step
+  2.3b and delivered 2026-08-06 (section 12.1).**
+- **Abstract base templates are now a load error, and that is a new ruling** (section 12.1, last
+  paragraph). Latent until a capability declares a required field, so it costs nothing to overturn
+  today and gets expensive once one ships.
 - **`facet_config` raises `StateError`, not `ConfigError`.** An unoffered facet is a consumer asking
   a producer for a level it does not serve: a framework mistake, not an operator's. If the lead
   expects a facet to ever be operator-selectable, that changes and should change now.

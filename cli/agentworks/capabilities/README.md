@@ -286,6 +286,12 @@ The two halves the core derives keep the contracts the split classmethods used t
   extracts, and validation is a distinct, later pass.
 - **Validation throws**, and only in the finalize pass over the READY and ENABLED set (plus at
   construct). It never runs at decode, so graph construction never depends on a blob being valid.
+- **Both read the EFFECTIVE blob on a host that inherits.** A `session-template` merges its
+  `inherits` chain and the merged result is what its edges and its shape check are computed from, so
+  a required field is a claim about the whole lineage rather than about one declaration (see
+  `harness_integration/README.md`). Every other host is a chain of one, so this is a uniform rule
+  rather than a special case, and it is why the inheritance edge itself is excluded from
+  runtime-need traversal: the child already carries what it inherited.
 - **Both are pure**, and structurally so: they read `model_fields` and a raw blob, and invoke no
   user code at all.
 - **Host-agnostic.** The owner is a `(kind, name)` pair used for error framing, reference
