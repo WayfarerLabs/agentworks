@@ -39,7 +39,9 @@ from agentworks.schema._shape import marker_of
 from agentworks.schema.markers import RefOwner
 
 if TYPE_CHECKING:
-    from pydantic import ValidationInfo
+    from pydantic import GetJsonSchemaHandler, ValidationInfo
+    from pydantic.json_schema import JsonSchemaValue
+    from pydantic_core import CoreSchema
 
     from agentworks.schema.markers import RefMarker
 
@@ -130,6 +132,42 @@ class AgwModel(BaseModel):
             if rendered:
                 filled[name] = rendered
         return filled
+
+    @classmethod
+    def __get_pydantic_json_schema__(
+        cls,
+        core_schema: CoreSchema,
+        handler: GetJsonSchemaHandler,
+    ) -> JsonSchemaValue:
+        """A field this model FILLS is not a field an operator must write.
+
+        Pydantic computes ``required`` from the declared field, which
+        knows nothing about the before-validator above, so an
+        owner-templated field emits as required and an editor would
+        red-underline the very omission the framework exists to resolve
+        (``provider: {name: github}`` with no ``token``, which is what
+        every unscoped credential writes).
+
+        Stated here, on the class that does the filling, rather than in
+        the emitter: the rule is a property of this model's validation
+        behavior, and a consumer correcting for it downstream would be a
+        second place to keep in sync. The field's own ``x-agw-ref``
+        already carries the template, so a hover still shows what the
+        omission resolves to.
+        """
+        json_schema = handler(core_schema)
+        templated = {name for name, _marker in _owner_templated_fields(cls)}
+        if not templated:
+            return json_schema
+        # The model's schema may arrive as a ``$ref`` into ``$defs``; the
+        # required list lives on the definition it points at.
+        resolved = handler.resolve_ref_schema(json_schema)
+        required = [name for name in resolved.get("required", ()) if name not in templated]
+        if required:
+            resolved["required"] = required
+        else:
+            resolved.pop("required", None)
+        return json_schema
 
 
 class AgwRootModel[T](RootModel[T]):

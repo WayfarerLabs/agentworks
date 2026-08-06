@@ -14,7 +14,7 @@ from pydantic import ValidationError
 from agentworks.errors import StateError
 from agentworks.schema import RefOwner, extract_references, validation_context
 
-from ._fixture_models import AzureLike, GithubLike, SiteLike, UnmarkedLike
+from ._fixture_models import AzureLike, CredsLike, GithubLike, SiteLike, UnmarkedLike
 
 OWNER = RefOwner(kind="git-credential", name="prod")
 CONTEXT = validation_context(OWNER)
@@ -82,6 +82,33 @@ def test_untemplated_fields_are_still_required() -> None:
         AzureLike.model_validate({"service_principal": {}}, context=CONTEXT)
     missing = {error["loc"] for error in exc.value.errors()}
     assert missing == {("region",), ("service_principal", "client_id"), ("service_principal", "tenant_id")}
+
+
+def test_a_templated_field_is_not_required_in_emitted_schema() -> None:
+    """A field the model FILLS is not a field an operator must write, and
+    emitted schema has to say so or an editor red-underlines the very
+    omission this mechanism exists to resolve. Pydantic computes
+    ``required`` from the declared field, which knows nothing about the
+    before-validator, so ``AgwModel`` corrects it where the filling
+    happens.
+
+    Nested models and union arms too, since the filling reaches them.
+    """
+    assert "token" not in GithubLike.model_json_schema().get("required", ())
+
+    azure = AzureLike.model_json_schema()
+    assert azure["required"] == ["region"]
+    assert azure["$defs"]["PrincipalLike"]["required"] == ["client_id", "tenant_id"]
+
+    arm = SiteLike.model_json_schema()["$defs"]["ProxmoxArm"]
+    assert "token_secret" not in arm.get("required", ())
+
+
+def test_an_untemplated_reference_field_stays_required_in_emitted_schema() -> None:
+    """The correction is per MARKER, exactly like the filling: a
+    reference field with nothing to default to is still the operator's to
+    write."""
+    assert CredsLike.model_json_schema()["required"] == ["secret"]
 
 
 def test_validation_and_extraction_derive_the_same_name() -> None:

@@ -45,6 +45,29 @@ What the loader checks and the schema does not, today:
 direction that matters: every document the real loader accepts also validates against the emitted
 schema. Nothing pins the other direction, because the other direction is false by design.
 
+### 2.1 Three places the schema WOULD have been stricter than the loader
+
+All three were found by that test rather than by reading, which is the argument for section 7's
+dependency in one sentence. Each is fixed at the layer that owns the fact, never by the emitter
+patching its own output.
+
+- **A field the model FILLS emitted as required.** Pydantic computes `required` from the declared
+  field, which knows nothing about `AgwModel._fill_owner_templated_defaults`, so
+  `GitHubConfig.token` (marker default `git-token-{owner_name}`) emitted as required and an editor
+  would have red-underlined `provider: {name: github}`, which is what every unscoped credential in
+  the shipped sample writes. Fixed on `AgwModel.__get_pydantic_json_schema__`: the class that does
+  the filling is the class that says so, and a consumer correcting for it downstream would be a
+  second place to keep in sync. The field's `x-agw-ref` still carries the template, so a hover shows
+  what the omission resolves to.
+- **`spec:` with nothing after it.** The envelope reads a null `spec` as an empty mapping, so the
+  emitted `spec` is required but NULLABLE.
+- **`expires` emitted as `format: date-time` alone.** `Expiry` is a before-validator over a
+  `datetime`, and pydantic emits the type it PRODUCES rather than the ones it accepts, so
+  `expires: 2026-01-01` (which the validator takes) would have failed in an editor that asserts
+  formats. Fixed by naming the accepted input on the validator itself
+  (`json_schema_input_type=str | date | datetime`), which is pydantic's own hook for the
+  distinction.
+
 ## 3. The per-kind document schema
 
 ### 3.1 It is a DOCUMENT schema, not a spec schema

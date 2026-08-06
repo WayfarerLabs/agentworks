@@ -157,4 +157,14 @@ dev = [
     "mypy>=1.19.1",
     "pytest>=9.0.0",
     "types-pyyaml>=6.0.12.20260518",
+    # The reference JSON Schema implementation, for the emission tests only:
+    # agentworks/manifests/emit.py has no runtime dependency on it, and
+    # nothing under agentworks/ imports it. Emission's failure mode is a
+    # schema that is subtly wrong, which an editor turns into a confident
+    # red underline on valid config, and assertions hand-written by the
+    # author of the emitter would encode the same misunderstanding. This is
+    # the independent oracle: it meta-validates what we emit against the
+    # 2020-12 metaschema, and validates real sample documents against it.
+    "jsonschema>=4.26.0",
+    "types-jsonschema>=4.26.0.20260518",
 ]

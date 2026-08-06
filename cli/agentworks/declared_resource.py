@@ -80,11 +80,22 @@ def _an_expiry_spelling(value: Any) -> Any:
     raise ValueError("must be a date or an RFC 3339 timestamp")
 
 
-Expiry = Annotated[datetime, Field(strict=False), BeforeValidator(_an_expiry_spelling)]
+Expiry = Annotated[
+    datetime,
+    Field(strict=False),
+    BeforeValidator(_an_expiry_spelling, json_schema_input_type=str | date | datetime),
+]
 """When a declared resource stops being valid.
 
 This effort models and validates the field only; acting on expiry is a
-separate effort (issue #170), so nothing reads it yet."""
+separate effort (issue #170), so nothing reads it yet.
+
+``json_schema_input_type`` names what the validator ACCEPTS, because a
+before-validator otherwise emits the schema of what it produces: a bare
+``format: date-time``, which an editor asserting formats would
+red-underline for the ``2026-01-01`` this field accepts. Emitted schema
+has to describe the document an operator writes, not the object
+validation yields."""
 
 
 class EnvelopeMetadata(AgwModel):
