@@ -27,20 +27,24 @@ The skill is positioned as onboarding, discovery, and management, one lifecycle:
 onboarding on an ongoing basis (a section of the same skill, not a separate thing), and management
 is the day-two work the same agent keeps doing with the same CLI surfaces.
 
+The centerpiece mechanism is the guide command (R13): the CLI serves its own teaching content,
+blending static authored material with dynamic material from the live system, and the published
+plugins reduce to thin bootstraps that point at it. Teaching content versions with the surfaces it
+teaches and cannot fork across harnesses, because there is exactly one copy and the CLI serves it.
+
 The first slice needs nothing from wave 2. The schema-derived depth (generated samples, describe
 surfaces, dynamic content) adopts wave 2's surfaces as they land rather than blocking on them.
 
 ## Functional requirements
 
-- **R1 (marketplace and plugin delivery).** Agentworks MUST publish a marketplace and plugin (or the
-  harness's equivalent packaging) in its own repository, installable directly from GitHub, for both
-  Claude Code and Codex. The marketplace MUST be structured so additional Agentworks plugins can be
-  added to it later; this effort's plugin is the first entry, not the marketplace's shape. The
-  plugin's skills MUST teach an agent to onboard, discover, and manage Agentworks using the CLI,
-  structured as one skill whose sections cover onboarding, discovery (ongoing onboarding), and
-  management; when that content is too much for a single `SKILL.md`, it splits into sub-documents
-  referenced from `SKILL.md`. Plugins MUST track CLI releases in a defined way (the versioning
-  scheme is the HLA's call).
+- **R1 (marketplace and thin-bootstrap plugins).** Agentworks MUST publish a marketplace and plugin
+  (or the harness's equivalent packaging) in its own repository, installable directly from GitHub,
+  for both Claude Code and Codex. The marketplace MUST be structured so additional Agentworks
+  plugins can be added to it later; this effort's plugin is the first entry, not the marketplace's
+  shape. Each plugin's skill is a deliberately thin bootstrap: install the CLI, state the R12
+  security disclosure, and direct the agent to run the guide command (R13) for everything else.
+  Teaching content lives in the CLI, not the plugins, so it versions with the surfaces it teaches;
+  the bootstrap's own (small) compatibility story is the HLA's call.
 - **R2 (progressive golden path).** Onboarding MUST reach a first working session in minutes, with
   the major capability areas (config, resources, plugins, secrets, VMs, workspaces, sessions)
   discoverable progressively from there rather than front-loaded.
@@ -81,15 +85,47 @@ surfaces, dynamic content) adopts wave 2's surfaces as they land rather than blo
   day-two operations (creating and changing resources, adopting new capability, resolving
   deprecations across upgrades, troubleshooting with doctor) through the same CLI surfaces, so the
   agent that onboarded the operator remains useful for the life of the installation.
-- **R11 (cross-harness content parity).** Skill content MUST NOT fork silently between the harness
-  plugins. Share or generate it from one source where the harness formats allow (the repo's own
-  Rulesync pipeline is prior art); where duplication is unavoidable, a CI guard MUST verify
-  equivalence.
+- **R11 (cross-harness parity, by construction).** Teaching content lives in the CLI (R13), so it
+  cannot fork between harnesses. The thin bootstraps (R1) MUST NOT drift apart in substance: share
+  or generate them from one source where the harness formats allow (the repo's own Rulesync pipeline
+  is prior art); otherwise a CI guard verifies equivalence. The guard's scope is the bootstraps
+  only.
 - **R12 (security disclosure).** Before setup proceeds, onboarding MUST state plainly that an agent
   managing Agentworks gains access to everything Agentworks can reach: every managed resource and
   secret reference, and anything accessible over SSH from the operator's machine. It MUST recommend
   a strict harness security posture, especially once Agentworks is in real use, and point at the
   relevant settings rather than leaving the recommendation abstract.
+- **R13 (the guide command).** The CLI MUST provide `agw guide [topic ...]`, serving skill-shaped
+  markdown for agents and humans alike. With no topic it gives a top-level overview and lists the
+  available topics. Topics MUST cover at least: resource kinds (`agw guide vm-template`, including
+  the live list of defined instances with descriptions), specific resources
+  (`agw guide vm-template/heavy`, a cheap delegation over the same sources describe uses),
+  capability implementations (`agw guide secret-backend/onepassword`, including configuration), and
+  `concept-` prefixed meta topics (`agw guide concept-secrets`, `agw guide concept-onboarding`)
+  whose shared prefix avoids collisions with kind names and makes concept docs discoverable by
+  completion. Content blends static authored material with dynamic material from the live system
+  (registries, resources, enablement state), so a disabled implementation or an added resource
+  changes what the guide says. Output is markdown only; structured data appears only inside the
+  markdown. R7's machine-readable contract is a separate surface and stays so. Topics are sized like
+  skills, with sub-topics referenced rather than inlined, and topic names participate in shell
+  completions. Prior art for the effort's `prior-art-research.md`: PowerShell's module-contributed
+  `about_*` topics, `kubectl explain`'s live schema walks, `git help` concept guides, `go help`
+  topics, `rustc --explain`, and Terraform's per-provider schema-plus-prose docs generation.
+- **R14 (universal contribution).** Guide content MUST arrive through one generic contract that
+  every participant uses: core resource kinds, capability implementations, and plugins (system
+  today, external later) each contribute their own topics. Built-in static content lives beside the
+  kind or implementation it documents, so it is maintained with the code it describes; plugin
+  content is bundled with the plugin. A participant that contributes nothing simply has no topic;
+  there are no empty stubs. The contract's shape (and whether it becomes a descriptor concern) is
+  the HLA's call, designed with wave 2 so schema walkers, samples, and blurbs are shared sources
+  rendered differently by describe (reference) and guide (teaching).
+- **R15 (safe templating).** Contributed content that needs dynamic material (concept docs, kind
+  overviews, anything that lists) uses a locked-down template mechanism: declarative placeholders
+  and core-provided dynamic blocks (live instance lists, enablement state, schema fragments), not a
+  general-purpose template engine with expression evaluation. Contributed guide content MUST be
+  data, never code, and rendering MUST NOT execute anything a contribution supplies. This holds for
+  curated system plugins now precisely so the content channel is already safe when external plugins
+  arrive (wave 8).
 
 ## Personas and stories
 
@@ -103,8 +139,11 @@ surfaces, dynamic content) adopts wave 2's surfaces as they land rather than blo
   not adopted, without redoing what is already configured.
 - As an operator who scripts environments, I run the non-interactive path in provisioning and get
   the same result the guided path produces.
-- As an agent operating the CLI on an operator's behalf, I read machine-readable list, describe, and
-  doctor output and skills that teach the current surface, not a stale tutorial.
+- As an agent operating the CLI on an operator's behalf, I run `agw guide` to learn the current
+  surface (never a stale tutorial) and read machine-readable list, describe, and doctor output for
+  facts.
+- As a human operator, I run `agw guide concept-secrets` in a terminal and get the same teaching
+  content my agent gets.
 - As the wave 2 effort lead, my emitted schemas and samples get consumed by this effort's surfaces
   instead of a parallel hand-maintained copy.
 
@@ -124,8 +163,9 @@ surfaces, dynamic content) adopts wave 2's surfaces as they land rather than blo
 
 ## Acceptance criteria
 
-1. A fresh operator with a vanilla Claude Code and no prior Agentworks knowledge reaches a working
-   session using only the published plugin and its skills, with every probe consented.
+1. A fresh operator with a vanilla Claude Code or Codex and no prior Agentworks knowledge reaches a
+   working session using only the published bootstrap plugin and the guide command, with every probe
+   consented.
 2. Rerunning onboarding on an unchanged, fully-adopted system is a clean no-op; rerunning after an
    upgrade reports the delta (new and not-yet-adopted capability) without redoing completed work.
 3. The non-interactive path reproduces the guided path's result on a clean machine.
@@ -134,12 +174,18 @@ surfaces, dynamic content) adopts wave 2's surfaces as they land rather than blo
 5. Discovery answers are generated from the live registry inventory; adding an implementation
    changes the answers without touching onboarding content.
 6. Completions and docs are current for every surface this effort adds (repo rule).
-7. Both harness plugins exist with equivalent skill content, proven by shared sourcing or the R11 CI
-   guard, and both pass criterion 1's fresh-operator test.
+7. Both harness bootstraps exist, equivalent per R11, and both pass criterion 1's fresh-operator
+   test.
 8. The security disclosure (R12) appears before any setup action in both the guided and
    non-interactive paths.
 9. Consented probes verify configured secrets and connections during onboarding (resolution checked
    without reading values); a declined probe leaves an explicit manual-verification note.
+10. `agw guide` with no topic lists every available topic; a kind topic reflects the live instance
+    list; disabling an implementation visibly changes its topic's rendering.
+11. Guide topics complete in the shell, including `concept-` prefix discovery, and the completion
+    tree includes dynamic topic elements per the repo's completions mechanism.
+12. A plugin's contributed guide content renders with zero contributed code executed (R15),
+    demonstrated by a test that rejects a contribution attempting expression evaluation.
 
 ## Decisions
 
@@ -154,17 +200,25 @@ surfaces, dynamic content) adopts wave 2's surfaces as they land rather than blo
   wave 2's live-rendered samples (adopted here per R6) provide example content that cannot drift,
   and this effort's discovery surfaces present it. No separate examples plugin ships; #390 closes
   against that combination.
+- **D5 (the guide command; operator rulings, 2026-08-05).** The teaching command is `agw guide`,
+  deliberately not `skill` (wave 6 needs "skill" as an artifact noun). Output is markdown only. Meta
+  topics carry the `concept-` prefix. Teaching content lives in the CLI with thin plugin bootstraps,
+  and contributed content is data rendered through locked-down templating, never code.
 
 ## Open questions
 
-- The concrete onboarding form: a guided `agw` command, a skill-driven tour, or both, and where the
-  step-state for rerunnability lives (HLA's call).
+- How `concept-onboarding` determines done versus not-yet-done from live state, and whether any
+  step-state must persist beyond what the system already records (HLA's call).
 - The machine-readable output contract's shape: per-command `--json` versus a global output mode,
   and its versioning story (HLA's call, informed by issue #257).
-- Plugin release engineering: how marketplace entries version against CLI releases and how
-  compatibility is checked at onboarding time (HLA's call).
-- The R11 sharing mechanism: single-source generation across both harness plugin formats (the repo's
-  Rulesync pipeline as prior art) versus guarded duplication, and what the CI guard checks (HLA's
-  call).
+- The R14 contribution contract's shape, including whether it becomes a descriptor concern, and the
+  exact split with wave 2 (shared sources, two presentations); being negotiated with the wave 2
+  effort lead via the roadmap's note.
+- The R15 template vocabulary: which core-provided dynamic blocks exist first, and how a
+  contribution declares which blocks it uses (HLA's call).
+- Topic taxonomy details: precedence if a future topic name ever collides with a kind slug, and the
+  behavior of multiple topics in one invocation.
+- Bootstrap release engineering: how the thin bootstraps declare which CLI versions they bootstrap
+  (small, since teaching content ships in the CLI), and the R11 bootstrap-sharing mechanism.
 - What feedback loop tells us onboarding is working for new operators (recorded from the user
   perspective; may resolve to a simple ask-the-operator step rather than telemetry).
