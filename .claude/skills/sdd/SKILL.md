@@ -92,6 +92,19 @@ directory is the standing example); the restriction is on modifying another effo
 artifacts. A delivered message file belongs to the receiving effort once read: integrate it into
 your own artifacts, then keep or delete it as you see fit.
 
+Delivery semantics: messages deliver via `main`, never by committing to another effort's live
+branch. A branch is mutable state under its owner's control (a rebase or force-push can silently
+drop a foreign commit, so branch delivery can lose messages while looking delivered), and the
+PR-to-main hop is the operator's review gate on inter-agent instructions. A running effort only sees
+messages that existed at its branch point, so a sender whose message lands after the recipient's
+branch was cut must tell the operator so the recipient gets nudged. Pickup is cheap and needs no
+branch changes: `git show origin/main:<path>` reads the message as delivered. To bring it in-tree,
+cherry-pick the message commit or merge `main` in. To keep cherry-picking clean, a sender delivers
+each message as a single commit touching only the message file (other changes ride separate commits,
+even in the same PR), and the nudge carries that commit's sha. Recipients on long-running branches
+should also glance at their feature directory on `origin/main` at natural checkpoints for messages
+that arrived mid-flight.
+
 ## Lockfile
 
 When work on the SDD is done, a `locked.md` file should be created in the feature directory. This
