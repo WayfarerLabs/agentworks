@@ -263,10 +263,12 @@ _REGISTRY_READ_ALLOWLIST = frozenset(
         "capabilities/git_credential/__init__.py",
         "secrets/backends.py",
         # Plugin framework: the per-kind adapters SEAT plugin impls into the
-        # four registries (the plugin analog of the built-in publishers), and
-        # register_plugin snapshots/restores them for the seat/unseat helper.
+        # four registries (the plugin analog of the built-in publishers).
+        # ``plugins/registration.py`` is deliberately ABSENT: its
+        # snapshot/restore tuple now derives from the descriptor table
+        # (declarative-schema step 2.0), so it names no registry at all and
+        # exempting it would only excuse a future probe.
         "plugins/adapters.py",
-        "plugins/registration.py",
         # Graph builder (stamps impls, assembles the build context, folds).
         "resources/graph.py",
         # The four capability-kind descriptors (declarative-schema step 2.0).

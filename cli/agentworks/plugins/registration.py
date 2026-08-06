@@ -22,7 +22,7 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
 from agentworks.capabilities.conformance import conformance_error
-from agentworks.capabilities.descriptor import descriptor_for
+from agentworks.capabilities.descriptor import capability_descriptors, descriptor_for
 from agentworks.plugins.adapters import CAPABILITY_ADAPTERS
 from agentworks.plugins.base import Plugin, PluginError
 
@@ -198,17 +198,13 @@ def seated_plugin(plugin: Plugin) -> Iterator[None]:
 
 
 def _capability_registries() -> tuple[dict[str, Any], ...]:
-    """The four live capability registries, in a stable order, for the
+    """Every live capability registry, in descriptor-table order, for the
     snapshot/restore helper. Restore mutates these dicts IN PLACE (clear +
-    update) because other modules hold references to them."""
-    from agentworks.capabilities.git_credential import GIT_CREDENTIAL_PROVIDER_REGISTRY
-    from agentworks.capabilities.harness_integration import HARNESS_INTEGRATION_REGISTRY
-    from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
-    from agentworks.secrets.backends import SECRET_BACKEND_REGISTRY
+    update) because other modules hold references to them.
 
-    return (
-        VM_PLATFORM_REGISTRY,
-        HARNESS_INTEGRATION_REGISTRY,
-        GIT_CREDENTIAL_PROVIDER_REGISTRY,
-        SECRET_BACKEND_REGISTRY,
-    )
+    Derived from the descriptor table rather than enumerated here:
+    participation in snapshot/restore IS membership in the table, so a
+    capability kind cannot be added without its registry being snapshotted.
+    Called inside the function (not bound at import) for the table's cycle
+    discipline."""
+    return tuple(descriptor.registry() for descriptor in capability_descriptors())
