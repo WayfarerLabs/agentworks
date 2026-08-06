@@ -238,13 +238,13 @@ the derivation sequence are not started.
       encoding, `extract_references` (total, never raising, reads raw blobs, applies owner
       templates) and `iter_field_docs` signatures, and the pydantic pin policy (latest stable v2 at
       implementation time, checked then, not from memory).
-- [ ] `resources/schema/` package implemented with unit tests, including totality tests for
+- [x] `resources/schema/` package implemented with unit tests, including totality tests for
       `extract_references` over malformed blobs (property-style: no input raises) and marker
       round-trip into emitted JSON Schema.
-- [ ] pydantic dependency added; mypy plugin enabled; strict mypy green across the repo.
-- [ ] `pydantic` and related vocabulary promoted from the SDD cspell dictionary to the root
+- [x] pydantic dependency added; mypy plugin enabled; strict mypy green across the repo.
+- [x] `pydantic` and related vocabulary promoted from the SDD cspell dictionary to the root
       dictionary (it now appears in permanent code).
-- [ ] **Collections of models walk in both walkers** (`list[Model]`, `tuple[Model, ...]`,
+- [x] **Collections of models walk in both walkers** (`list[Model]`, `tuple[Model, ...]`,
       `dict[str, Model]`), with the element index or mapping key in the `FieldDoc` path. Surfaced by
       the 2.1 implementation: the LLD's walk enumerated a marked list of SCALARS and a single nested
       model, but not a collection whose elements are models, so such a field contributes no
@@ -254,7 +254,7 @@ the derivation sequence are not started.
       operator-overridable catalogs of models whose entry fields would render opaque, which FR10
       forbids. Fixed here rather than at 2.8, because discovering it there means reworking the
       renderer's input contract after the onboarding child's guide has started consuming it.
-- [ ] Structural secret-name reference extraction (issue #311): the `SecretRef` marker carries the
+- [x] Structural secret-name reference extraction (issue #311): the `SecretRef` marker carries the
       owner-templated default name, and `extract_references` derives secret references structurally
       from the annotated model fields rather than by string-scraping the blob. This is the
       model-layer replacement for the ad hoc secret-name derivation the capabilities do today;

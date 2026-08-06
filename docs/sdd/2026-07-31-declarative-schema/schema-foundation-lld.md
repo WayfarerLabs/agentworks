@@ -448,6 +448,35 @@ into silently missing graph edges, which is a worse failure than a crash: the gr
 finalize would pass, and a secret would go unresolved with no message anywhere. Totality is a
 property of the code plus the property test (section 9), not a suppression.
 
+> **Implementation record (2026-08-06), reviewed and folded.** Four things about the walk that this
+> section did not anticipate, all found by review or by building it:
+>
+> - **Metadata lives in three legal places**, not one: lifted onto the field, inside the `Annotated`
+>   around a union, and inside a union arm. Reading only the first meant
+>   `Annotated[A | B, Discriminator("x")] | None` silently lost its discriminator (no refs, no arms)
+>   while pydantic validated it happily, which is a wrong graph from a working model. One shared
+>   `spine_metadata` now reads all three, which also repaired `marker_of` under a multi-arm union
+>   and constraint lookup under the inner-annotated spelling.
+> - **An arm may answer to several tags** (`Literal["aws-ec2", "ec2"]`, exactly what a renamed
+>   capability keeping its old name looks like). Only the first was read, so the old name was
+>   unaddressable. Arms are enumerated per tag value.
+> - **Non-string discriminators stay unsupported, deliberately.** Pydantic accepts them; widening
+>   `tag` to `object` would push through to `FieldDoc.union_arms[].tag`, which presenters render
+>   directly. Stated and fixture-pinned rather than accidental.
+> - **`extract_references` could raise after all** (see 4.2's contract):
+>   `model_rebuild(raise_errors= False)` suppresses only `PydanticUndefinedAnnotation`, so a forward
+>   reference resolving to an unbuildable type escaped as `PydanticSchemaGenerationError`. Verified
+>   by the lead: a parent holding such a child is incomplete at definition, so the walker's own
+>   rebuild is exactly where it surfaces. Fixed by catching the two NAMED pydantic errors around
+>   that single call, which is not the blanket guard 4.2 forbids: it handles a documented failure
+>   mode of the one pydantic call the walker makes, rather than swallowing a walker bug. Confirmed
+>   at HEAD: extraction returns `()` and `iter_field_docs` raises `StateError`.
+>
+> Also settled here: `RefOwner` lives in `markers.py`, not `extract.py` as section 8 says, because
+> `base.py` needs it for the templated fill and importing `extract` from `base` would invert the
+> layering. A private `_shape.py` holds the field classification both walkers share, which is what
+> keeps them from drifting on a shape.
+
 ### 4.3 The walk
 
 Per field of `model_cls.model_fields`, in declaration order:
