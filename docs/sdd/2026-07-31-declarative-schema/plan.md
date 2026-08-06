@@ -360,7 +360,12 @@ the derivation sequence are not started.
       rule is that absent OR `None` emits the owner template, matching git-credential's
       `token_dependency` today, so `null` flips from "no dependency" to "the default-named
       dependency" for those three. Deliberate and tested, and it makes the four capabilities
-      consistent, but it is operator-visible and belongs in the same note.
+      consistent, but it is operator-visible and belongs in the same note. **For azure it flips
+      VALIDATION too, which is the more visible half:** `_parse_service_principal`
+      (`plugins/azure/platform.py:279`) raises a `ConfigError` today on `secret: null` whose message
+      explicitly tells the operator to omit the key instead, and under the model that same input
+      silently resolves to `azure-client-secret`. An operator who followed the old error's advice
+      will not otherwise connect the two, so the note must name it.
 - [ ] Core-driven validation and extraction wired: registry name-to-model maps per capability kind;
       `Capability.validate` / `Capability.dependencies` classmethods and
       `SecretBackend.validate_mapping` retired; per-capability hand-rolled validate code deleted;
