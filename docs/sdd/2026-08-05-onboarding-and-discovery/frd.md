@@ -34,11 +34,13 @@ surfaces, dynamic content) adopts wave 2's surfaces as they land rather than blo
 
 - **R1 (marketplace and plugin delivery).** Agentworks MUST publish a marketplace and plugin (or the
   harness's equivalent packaging) in its own repository, installable directly from GitHub, for both
-  Claude Code and Codex. The plugin's skills MUST teach an agent to onboard, discover, and manage
-  Agentworks using the CLI, structured as one skill whose sections cover onboarding, discovery
-  (ongoing onboarding), and management; when that content is too much for a single `SKILL.md`, it
-  splits into sub-documents referenced from `SKILL.md`. Plugins MUST track CLI releases in a defined
-  way (the versioning scheme is the HLA's call).
+  Claude Code and Codex. The marketplace MUST be structured so additional Agentworks plugins can be
+  added to it later; this effort's plugin is the first entry, not the marketplace's shape. The
+  plugin's skills MUST teach an agent to onboard, discover, and manage Agentworks using the CLI,
+  structured as one skill whose sections cover onboarding, discovery (ongoing onboarding), and
+  management; when that content is too much for a single `SKILL.md`, it splits into sub-documents
+  referenced from `SKILL.md`. Plugins MUST track CLI releases in a defined way (the versioning
+  scheme is the HLA's call).
 - **R2 (progressive golden path).** Onboarding MUST reach a first working session in minutes, with
   the major capability areas (config, resources, plugins, secrets, VMs, workspaces, sessions)
   discoverable progressively from there rather than front-loaded.
