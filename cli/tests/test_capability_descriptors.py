@@ -29,12 +29,16 @@ from agentworks.capabilities.descriptor import (
     capability_descriptors,
     descriptor_for,
 )
+from agentworks.capabilities.git_credential.kinds import GitCredentialProviderEntry
+from agentworks.capabilities.harness_integration.kinds import HarnessIntegrationEntry
 from agentworks.capabilities.publish import publish_capability_rows
+from agentworks.capabilities.vm_platform import VMPlatformEntry
 from agentworks.errors import StateError
 from agentworks.manifests.decode import capability_fields
 from agentworks.resources.graph import Readiness, _capability_node_readiness
 from agentworks.resources.kind import KIND_REGISTRY
 from agentworks.resources.registry import Registry
+from agentworks.secrets.kinds import SecretBackendEntry
 from tests.plugins._fixtures import ConformingVMPlatform
 
 _KNOWN_KINDS = ("vm-platform", "harness-integration", "git-credential-provider", "secret-backend")
@@ -48,6 +52,17 @@ _BUILTIN_PUBLISHER_SOURCES = {
 """The ``Origin.built_in`` source label each kind's built-in rows carry, as
 operators see it in ``agw resource describe``. Held here as the expectation,
 not read off the descriptor."""
+
+_ROW_TYPES: dict[str, type[Any]] = {
+    "vm-platform": VMPlatformEntry,
+    "harness-integration": HarnessIntegrationEntry,
+    "git-credential-provider": GitCredentialProviderEntry,
+    "secret-backend": SecretBackendEntry,
+}
+"""The row type each kind publishes, named here rather than read back off
+the descriptor that built it. The generic publisher builds every row through
+``entry_factory``, so comparing a published row's type against another call
+of the same factory would only prove a factory is deterministic."""
 
 _ROWS_CARRY_DESCRIPTION = {
     "vm-platform": True,
@@ -188,15 +203,17 @@ def test_entry_factory_builds_the_kinds_current_row(descriptor: CapabilityKindDe
     description, harness-integration and git-credential-provider do not), and
     the generic publisher must not quietly level them: unifying the rows
     would change row content, which is row-semantics work rather than
-    switchboard work. That split is asserted from the expectation table
-    below, so a factory that starts (or stops) carrying a description fails
-    here rather than in whatever surface renders the row."""
+    switchboard work. Both the type and the split are asserted from the
+    expectation tables above rather than from the factory that produced the
+    row, so a factory that starts (or stops) carrying a description, or that
+    starts building some other row type, fails here rather than in whatever
+    surface renders the row."""
     published = _published_rows(descriptor)
     assert published, f"{descriptor.kind} published no built-in rows; this test would prove nothing"
     carries_description = _ROWS_CARRY_DESCRIPTION[descriptor.kind]
     for name, row in published:
         impl = descriptor.registry()[name]
-        assert type(row) is type(descriptor.entry_factory(name, impl, None))
+        assert type(row) is _ROW_TYPES[descriptor.kind], name
         assert row.name == name
         if carries_description:
             assert row.description == impl.description, name
@@ -216,6 +233,7 @@ def test_publication_covers_every_registered_impl(descriptor: CapabilityKindDesc
     from agentworks.plugins.registration import plugin_seated_names
 
     expected = set(descriptor.registry()) - set(plugin_seated_names(descriptor.kind))
+    assert expected, f"{descriptor.kind} has no built-in impls; this test would prove nothing"
     assert {name for name, _row in _published_rows(descriptor)} == expected
 
 

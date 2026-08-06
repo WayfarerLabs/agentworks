@@ -575,7 +575,11 @@ def _capability_registry_loaders() -> Mapping[str, Callable[[], Mapping[str, obj
     neither the table nor the registries may be reached at module load. The
     descriptor table is collected on first call and cached; each value is
     still a callable that imports its own registry when invoked.
+
+    Read-only, because the cache means every caller for the life of the
+    process shares this one object: a plain dict here would let any of them
+    reshape the loader map for all the others.
     """
     from agentworks.capabilities.descriptor import capability_descriptors
 
-    return {descriptor.kind: descriptor.registry for descriptor in capability_descriptors()}
+    return MappingProxyType({descriptor.kind: descriptor.registry for descriptor in capability_descriptors()})
