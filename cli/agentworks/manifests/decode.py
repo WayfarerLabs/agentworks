@@ -420,15 +420,25 @@ def _hosted_capability_references(
     """The references the capability block this kind hosts implies, read
     off that capability's own declared model.
 
-    One honest soft edge: a capability seated by a PLUGIN has not been
-    imported when manifests load (``bootstrap.build_registry`` seats
-    plugins after ``load_manifests``), so its blob contributes nothing
-    here. That is a missed advisory line, never a wrong answer, and the
-    finalize pass still checks the blob's shape.
+    The model is reachable only once the capability's implementation is
+    SEATED, and a plugin's impls seat when ``agentworks.plugins`` is
+    imported, which no caller of ``load_manifests`` is obliged to have
+    done first. Doctor is the surface this advisory exists for and it
+    loads manifests before it reaches anything that imports the index, so
+    without the import below a non-conforming ``token_secret`` on a
+    proxmox site produced no line at all and doctor said "Config is
+    valid". That is a REGRESSION rather than a soft edge, because the
+    check this replaces was not platform-gated.
+
+    Importing the index here rather than making every caller order itself
+    correctly is what keeps the advisory a property of the document. It is
+    idempotent and cannot re-enter: building the index only seats impls,
+    and the bundled manifests a plugin ships are published later.
     """
     descriptor = _hosting_descriptors().get(doc.kind)
     if descriptor is None or descriptor.manifest_section is None:
         return ()
+    import agentworks.plugins  # noqa: F401  (imported for the seating side effect)
     from agentworks.capabilities.config import capability_config_references
     from agentworks.schema import CapabilityBlock
 

@@ -9,6 +9,8 @@ that follow from that.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from agentworks.git_credentials.credential import GitCredentialConfig
@@ -136,15 +138,55 @@ def test_a_non_conforming_secret_inside_the_block_is_warned_about() -> None:
     assert issue.startswith("res.yaml:7: git-credential/gh: secret name 'Bad_Name' for the auth token")
 
 
-def test_an_unseated_capabilitys_block_earns_no_advisory() -> None:
-    """The one honest soft edge, named rather than left to be discovered:
-    the walk reads the capability's declared model, so a capability with
-    no seated implementation contributes nothing. In production that also
-    covers a plugin capability at MANIFEST-LOAD time, because plugins seat
-    after `load_manifests` runs. A missed advisory line, never a wrong
-    answer; the finalize pass still checks the blob's shape once the
-    implementation is there."""
+def test_an_unknown_capabilitys_block_earns_no_advisory() -> None:
+    """The walk reads the capability's declared model, so a capability
+    nothing implements contributes nothing. The dangling capability edge
+    is what reports the name (R9.2), and the finalize pass checks the
+    blob once an implementation exists."""
     assert decode_issues("vm-site", "px", {"platform": {"name": "not-installed", "token_secret": "Bad_Name"}}) == []
+
+
+def test_a_plugin_capabilitys_block_earns_its_advisory_at_load(tmp_path: Path) -> None:
+    """A plugin's impls seat when ``agentworks.plugins`` is imported, and
+    no caller of ``load_manifests`` is obliged to have done that first.
+    Doctor is the surface this advisory exists for and loads manifests
+    before it reaches anything that imports the index, so this used to
+    produce no line at all and doctor said "Config is valid".
+
+    Run in a SUBPROCESS on purpose: in-process the suite has long since
+    imported the plugin index, so an assertion here would pass whether or
+    not decode does the import itself. The import order is the thing under
+    test."""
+    import subprocess
+    import sys
+    from textwrap import dedent
+
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    (resources / "site.yaml").write_text(
+        dedent("""\
+        apiVersion: agentworks/v1
+        kind: vm-site
+        metadata:
+          name: px
+        spec:
+          platform:
+            name: proxmox
+            api_url: https://pve:8006
+            node: n
+            token_id: t
+            template_vmid: 9000
+            token_secret: Bad_Name
+        """)
+    )
+    script = dedent(f"""\
+        from pathlib import Path
+        from agentworks.manifests import load_manifests
+        print(len(load_manifests(Path({str(resources)!r})).issues))
+        """)
+    result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, check=True)  # noqa: S603
+
+    assert result.stdout.strip() == "1", result.stderr
 
 
 def test_a_derived_secret_name_is_warned_about_without_being_written() -> None:
