@@ -50,7 +50,7 @@ is locked.
 ### Onboarding and discovery (destination 1): 2026-08-05-onboarding-and-discovery
 
 - [x] Seeded (FRD, PR #413, 2026-08-05; runs parallel to wave 2 per `phasing.md`)
-- [ ] FRD merged to `main`
+- [x] FRD merged to `main` (2026-08-06)
 - [ ] Picked up by an effort lead (HLA, plan)
 - [ ] First-slice implementation (plugin, skills, output contract); schema-derived depth adopts wave
       2 surfaces as they land
@@ -109,7 +109,7 @@ open-ended research placeholder.
    release ships when cut.
 6. Done (2026-08-05): wave 2 seed notes merged (PR #411) and effort lead launched.
 7. Done (2026-08-05): onboarding-and-discovery seeded (FRD, PR #413).
-8. Merge the onboarding seed (PR #413, reviewer pass in flight), then launch its effort lead.
+8. Done (2026-08-06): onboarding seed merged (PR #413). Launch its effort lead when ready.
 9. Roadmap lead reviews wave 2 and onboarding PRs as they arrive.
 10. Design track: scope participation contract in review (PR #407); then the instance-state store
     schema and the event vocabulary's first slice.
