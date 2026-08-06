@@ -13,8 +13,9 @@ that let five kinds ship without ``description``).
 lets one class be both.** A row carries three kinds of field:
 
 - the kind's own SPEC fields, which is what a manifest's ``spec`` may say;
-- the ENVELOPE fields (``EnvelopeMetadata`` below), which the operator
-  writes in the document's ``metadata`` block;
+- the ENVELOPE fields (``EnvelopeMetadata`` below: ``name``,
+  ``description``, ``expires``), which the operator writes in the
+  document's ``metadata`` block;
 - the FRAMEWORK fields (``declared_at``, ``origin``), which nothing
   outside the framework sets.
 
@@ -45,9 +46,10 @@ lower than every package that inherits it.
 from __future__ import annotations
 
 import dataclasses
-from typing import TYPE_CHECKING, Any, ClassVar, Final
+from datetime import date, datetime
+from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Final
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, BeforeValidator, Field
 from pydantic.json_schema import SkipJsonSchema
 
 from agentworks.errors import StateError
@@ -58,6 +60,31 @@ from agentworks.source_location import SourceLocation, synthesized
 if TYPE_CHECKING:
     from agentworks.resources.graph import FinalizeContext
     from agentworks.resources.reference import ResourceReference
+
+
+def _an_expiry_spelling(value: Any) -> Any:
+    """Refuse everything but the three spellings a YAML document can
+    produce for a moment in time.
+
+    ``expires`` is one of the base model's sanctioned per-field
+    carve-outs: pyyaml's safe loader yields a ``datetime`` for
+    ``2026-01-01T00:00:00Z``, a ``date`` for ``2026-01-01``, and a ``str``
+    for ``"2026-01-01"``, and strict mode accepts only the first. Lax mode
+    accepts all three, and one thing more: a bare ``int``, which it reads
+    as a unix timestamp, so ``expires: 12`` would validate to 1970. That
+    is nonsense as an expiry, so the carve-out widens the accepted
+    SPELLINGS and never the accepted types.
+    """
+    if isinstance(value, str | date | datetime):
+        return value
+    raise ValueError("must be a date or an RFC 3339 timestamp")
+
+
+Expiry = Annotated[datetime, Field(strict=False), BeforeValidator(_an_expiry_spelling)]
+"""When a declared resource stops being valid.
+
+This effort models and validates the field only; acting on expiry is a
+separate effort (issue #170), so nothing reads it yet."""
 
 
 class EnvelopeMetadata(AgwModel):
@@ -81,6 +108,7 @@ class EnvelopeMetadata(AgwModel):
 
     name: SkipJsonSchema[str]
     description: SkipJsonSchema[str | None] = None
+    expires: SkipJsonSchema[Expiry | None] = None
 
 
 #: The metadata keys a manifest document may carry, derived from the base

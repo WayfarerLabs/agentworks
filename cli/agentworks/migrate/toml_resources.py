@@ -15,9 +15,11 @@ in full, ``loaders_sessions``'s ``_load_session_templates``,
 ``loaders_secrets``'s ``_load_secrets``, and ``loaders_core``'s
 ``_load_git_credentials``). They still import the shared leaf machinery
 (``_warn_unexpected_keys``, ``_raise_unexpected_keys``, ``_parse_env_table``,
-the two nonconforming-secret-name helpers, ``validate_name``) from ``config``,
-so the fork with the manifest decoders (which own their per-kind validation
-now) shares its measuring stick and stays narrow.
+``validate_name``) from ``config``, so the fork with the manifest side stays
+narrow. The fork itself is the point: the manifest side is the kinds' own
+spec MODELS now, written independently of these loaders, which is what
+keeps the registry-equivalence check a real test of the emission mapping
+rather than a tautology.
 """
 
 from __future__ import annotations
@@ -30,8 +32,6 @@ from agentworks.config.loaders_core import (
     _parse_env_table,
     _raise_unexpected_keys,
     _require_string_list,
-    _warn_nonconforming_derived_secret,
-    _warn_nonconforming_secret_name,
     _warn_unexpected_keys,
 )
 from agentworks.config.models import _SectionLineMap
@@ -136,9 +136,6 @@ def _load_vm_templates(
                     f'"tailscale-auth-key"'
                 )
             ts_key_raw = tdata["tailscale_auth_key"]
-            _warn_nonconforming_secret_name(
-                ts_key_raw, location=f"vm_templates.{name}.tailscale_auth_key", issues=issues
-            )
 
         templates[name] = VMTemplate(
             name=name,
@@ -426,9 +423,6 @@ def _load_vm_sites_legacy(
         if not isinstance(raw, dict):
             raise ConfigError(f"[{section}] must be a table")
         platform_config: dict[str, object] = {key: raw[key] for key in known_keys if key in raw}
-        token_secret = platform_config.get("token_secret")
-        if isinstance(token_secret, str) and token_secret:
-            _warn_nonconforming_secret_name(token_secret, location=f"{section}.token_secret", issues=issues)
         sites[section] = VMSiteDecl(
             name=section,
             platform=CapabilityBlock.of(platform_name, **platform_config),
@@ -661,10 +655,7 @@ def _load_git_credentials(
                     f"omit the key to inherit the default secret name "
                     f'"git-token-{name}"'
                 )
-            _warn_nonconforming_secret_name(cdata["token"], location=f"git_credentials.{name}.token", issues=issues)
             provider_config["token"] = cdata["token"]
-        else:
-            _warn_nonconforming_derived_secret(name, issues)
         # The flat TOML shape only ever read ``org`` (azdo). github scope
         # keys warn (silence would ship a broader-authority credential than
         # declared); other stray keys stay silently ignored.

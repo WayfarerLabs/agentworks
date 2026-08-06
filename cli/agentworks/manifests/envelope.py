@@ -47,6 +47,13 @@ class Document:
     kind: str
     name: str
     description: str | None
+    expires: object | None
+    """When the operator says this resource stops being valid, as written.
+
+    Carried unvalidated: the row model owns what an expiry may be, so the
+    envelope's job is only to accept the key and hand the value over.
+    """
+
     spec: dict[str, object]
     location: SourceLocation
 
@@ -137,6 +144,7 @@ def validate_envelope(raw: object, location: SourceLocation) -> Document:
         kind=kind,
         name=name,
         description=description,
+        expires=metadata.get("expires"),
         spec=spec,
         location=location,
     )

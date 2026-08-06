@@ -1,14 +1,17 @@
 """Generic TOML-loading helpers plus the settings-section loaders
 (``[operator]`` / ``[paths]`` / ``[defaults]``).
 
-The ``[git_credentials]`` resource loader relocated to
-``agentworks.migrate.toml_resources`` when config.toml stopped declaring
-resources (ADR 0022), but the two shared nonconforming-secret-name helpers
-it used (``_warn_nonconforming_secret_name`` and
-``_warn_nonconforming_derived_secret``) stay here: both the migrator's
-oracle and the manifest decoders (which own their per-kind validation now)
-call them, so keeping them in one leaf module keeps the two sides sharing
-one measuring stick.
+The resource loaders relocated to ``agentworks.migrate.toml_resources``
+when config.toml stopped declaring resources (ADR 0022). ``_parse_env_table``
+and the two unknown-key helpers stayed behind and are shared from here;
+the settings sections still use the unknown-key ones, and the migrator's
+frozen TOML oracle uses all three.
+
+The two nonconforming-secret-name helpers that used to live here are gone.
+The manifest side derives that warning structurally from the ``SecretRef``
+edges the models declare (``manifests.decode.advisory_issues``, which is
+what issue #311 asked for), and the oracle's copy warned into a list it
+discards.
 
 Split out of the former monolithic ``agentworks/config.py`` (see
 ``agentworks/config/__init__.py`` for the package overview).
@@ -23,8 +26,8 @@ from pathlib import Path
 from agentworks.config.models import DefaultsConfig, OperatorConfig, PathsConfig
 from agentworks.config.validation import validate_vm_workspaces
 from agentworks.env import EnvEntry
-from agentworks.errors import ConfigError, ValidationError
-from agentworks.naming import MAX_SECRET_NAME_LENGTH, SSH_HOST_PREFIX_RE, validate_name
+from agentworks.errors import ConfigError
+from agentworks.naming import SSH_HOST_PREFIX_RE
 
 
 def _expand(path_str: str) -> Path:
@@ -70,78 +73,6 @@ def _raise_unexpected_keys(raw: dict[str, object], known: set[str], section: str
     if unexpected:
         keys = ", ".join(sorted(unexpected))
         raise ConfigError(f"unexpected keys in [{section}]: {keys}")
-
-
-def _warn_nonconforming_secret_name(name: str, *, location: str, issues: list[str]) -> None:
-    """Record a non-fatal warning when an operator-supplied secret NAME does
-    not follow the secret naming rules, then leave the name unchanged.
-
-    Names declared explicitly in ``[secrets.*]`` are validated with a hard
-    error (``_load_secrets``). The covered set here is the operator-supplied
-    secret-name REFERENCE sites, which historically bypassed that check. There
-    are four: an env entry's ``env.<KEY>.secret``, a git credential's
-    ``git_credentials.<name>.token``, a VM template's
-    ``vm_templates.<name>.tailscale_auth_key``, and a vm-site's
-    ``platform_config.token_secret`` (both the TOML ``[proxmox]`` legacy path
-    and the YAML manifest path). Validating them here at load unifies the
-    guarantee at the operator boundary (issue #279) WITHOUT breaking configs
-    that already load: a non-conforming reference still declares and resolves
-    exactly as before. The runtime synthesize and resolve paths stay tolerant
-    by design, so the warning is the only effect.
-
-    Deriving this coverage structurally from the ``ConfigReference(kind=
-    "secret")`` edges, rather than hand-enumerating the loaders that reference
-    a secret, is tracked in issue #311.
-    """
-    try:
-        validate_name(name, max_length=MAX_SECRET_NAME_LENGTH)
-    except ValidationError:
-        issues.append(
-            f"{location}: secret name {name!r} does not follow the secret naming rules "
-            f"(lowercase alphanumeric with hyphens or underscores, starting and ending "
-            f"with a letter or digit, at most {MAX_SECRET_NAME_LENGTH} characters). It "
-            f"still resolves as declared; rename it to conform."
-        )
-
-
-def _warn_nonconforming_derived_secret(credential_name: str, issues: list[str]) -> None:
-    """Warn (do not raise) when a git-credential NAME would derive a
-    non-conforming default token secret.
-
-    When ``[git_credentials.<name>]`` omits an explicit ``token``, the token
-    secret name defaults to ``git-token-<name>`` (``default_token_secret``),
-    and that derived name inherits any non-conformance in the credential name
-    (uppercase, an over-length name, a trailing hyphen, ...). Nothing
-    downstream re-validates it: ``Registry.add`` rejects only ``/`` and
-    ``_SecretKind.synthesize`` imposes no name restriction, so a name like
-    ``[git_credentials.GITHUB]`` silently produces the secret
-    ``git-token-GITHUB``. Warning at the operator boundary unifies the
-    "conforming secret names" guarantee (issue #308) WITHOUT breaking configs
-    that already load: the credential and its derived secret still declare and
-    resolve exactly as before, so the warning is the only effect. Deriving this
-    coverage structurally from the ConfigReference(kind="secret") edges, rather
-    than hand-wiring it here, is tracked in issue #311.
-
-    The fully-derived ``git-token-<name>`` is validated (not the bare
-    credential name) against ``MAX_SECRET_NAME_LENGTH``: that string is exactly
-    the secret name that will exist, so it predicts conformance precisely,
-    including the length ceiling the ``git-token-`` prefix eats into (a
-    credential name that fits on its own can still push the derived name past
-    the cap). This matches how an explicitly declared ``[secrets.<name>]`` is
-    validated in ``_load_secrets``.
-    """
-    derived = f"git-token-{credential_name}"
-    try:
-        validate_name(derived, max_length=MAX_SECRET_NAME_LENGTH)
-    except ValidationError:
-        issues.append(
-            f"git_credentials.{credential_name}: credential name {credential_name!r} does "
-            f"not follow the naming rules (lowercase alphanumeric with hyphens or "
-            f"underscores, starting and ending with a letter or digit, at most "
-            f"{MAX_SECRET_NAME_LENGTH} characters once the 'git-token-' prefix is added); "
-            f"its default token secret {derived!r} inherits this. Rename the credential to "
-            f"conform, or set an explicit conforming 'token'."
-        )
 
 
 _ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -210,7 +141,6 @@ def _parse_env_table(
                     f"{context}.env.{key_str}: inline table must set "
                     "'secret = \"<name>\"' (or use a bare string for plaintext)"
                 )
-            _warn_nonconforming_secret_name(secret_name, location=f"{context}.env.{key_str}", issues=issues)
             result[key_str] = EnvEntry(secret=secret_name)
         else:
             raise ConfigError(

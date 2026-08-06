@@ -268,6 +268,8 @@ def _metadata_payload(doc: Document) -> dict[str, object]:
     payload: dict[str, object] = {"name": doc.name, "declared_at": doc.location}
     if doc.description is not None:
         payload["description"] = doc.description
+    if doc.expires is not None:
+        payload["expires"] = doc.expires
     return payload
 
 

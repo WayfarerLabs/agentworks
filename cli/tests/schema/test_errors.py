@@ -27,7 +27,6 @@ from agentworks.schema import (
     MAX_ERROR_LINES,
     AgwModel,
     AgwRootModel,
-    FramedConfigError,
     RefOwner,
     config_error_from,
     render_validation_error,
@@ -523,14 +522,13 @@ def test_a_validators_own_message_is_carried_without_pydantics_prefix() -> None:
     ]
 
 
-def test_the_bridge_produces_a_framed_error_the_finalize_pass_must_not_rewrap() -> None:
-    """The marker is on the ERROR, not on each call site, which is what
-    makes the no-double-framing rule hold through every caller without
-    any of them knowing about the wrapper."""
+def test_the_bridge_produces_a_plain_config_error() -> None:
+    """There is no marker type any more, and none is needed: every error a
+    resource's ``validate_config`` raises comes from here, so the finalize
+    pass has one framing to leave alone rather than two to tell apart."""
     raised = _raised(PrincipalLike, {})
 
-    assert isinstance(raised, FramedConfigError)
-    assert isinstance(raised, ConfigError)
+    assert type(raised) is ConfigError
 
 
 def test_an_owner_label_overrides_the_kind_slash_name_framing() -> None:

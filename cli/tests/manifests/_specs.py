@@ -24,8 +24,15 @@ from agentworks.source_location import SourceLocation
 WHERE = SourceLocation(file=Path("res.yaml"), line=7)
 
 
-def document(kind: str, name: str, spec: dict[str, object], *, description: str | None = None) -> Document:
-    return Document(kind=kind, name=name, description=description, spec=spec, location=WHERE)
+def document(
+    kind: str,
+    name: str,
+    spec: dict[str, object],
+    *,
+    description: str | None = None,
+    expires: object | None = None,
+) -> Document:
+    return Document(kind=kind, name=name, description=description, expires=expires, spec=spec, location=WHERE)
 
 
 def decode(
@@ -34,11 +41,15 @@ def decode(
     spec: dict[str, object],
     *,
     description: str | None = None,
+    expires: object | None = None,
     issues: list[str] | None = None,
 ) -> Any:
     """The row ``spec`` decodes to, appending any advisory lines to
     ``issues``."""
-    return decode_document(document(kind, name, spec, description=description), issues if issues is not None else [])
+    return decode_document(
+        document(kind, name, spec, description=description, expires=expires),
+        issues if issues is not None else [],
+    )
 
 
 def decode_issues(kind: str, name: str, spec: dict[str, object]) -> list[str]:
@@ -48,9 +59,16 @@ def decode_issues(kind: str, name: str, spec: dict[str, object]) -> list[str]:
     return issues
 
 
-def rejection(kind: str, name: str, spec: dict[str, object], *, description: str | None = None) -> str:
+def rejection(
+    kind: str,
+    name: str,
+    spec: dict[str, object],
+    *,
+    description: str | None = None,
+    expires: object | None = None,
+) -> str:
     """What an operator reads when ``spec`` is wrong: the raised message,
     verbatim and framed."""
     with pytest.raises(ConfigError) as caught:
-        decode(kind, name, spec, description=description)
+        decode(kind, name, spec, description=description, expires=expires)
     return str(caught.value)

@@ -468,25 +468,26 @@ class Registry:
         enablement: Mapping[tuple[str, str], Enablement],
         context: FinalizeContext,
     ) -> None:
-        """Run each READY + ENABLED Resource's ``validate()`` (the throwing
-        correctness check for its capability config sub-block), raising on
-        the first malformed block.
+        """Run each READY + ENABLED Resource's ``validate_config()`` (the
+        throwing correctness check for its capability config sub-block),
+        raising on the first malformed block.
 
         Scoped to the READY + ENABLED set (R3, R9.4): a not-ready or disabled
         resource's block is DEFERRED, not validated (there is nothing to run,
-        and its capability may be unavailable), so a malformed ``platform_config``
+        and its capability may be unavailable), so a malformed platform config
         on a site the host cannot run does not abort every command; it is
         validated when the resource becomes ready. A disabled node's stored
         readiness is a placeholder (enablement answers for it), so the gate
         checks enablement explicitly rather than leaning on ``is_ready``.
 
-        The capability's ``validate`` frames its message with the logical
-        owner label (``kind/name``); the source location that decode/load
-        used to supply (the manifest ``file:line``, the TOML section) is
-        gone once validation runs here, so this pass re-attaches it from
-        the Resource's ``origin`` (the same provenance operators see in
-        ``describe`` / ``doctor``, rendered location-only for the inline
-        message).
+        This pass adds NO framing of its own, and that is the whole story
+        now: every error reaching it comes from the schema error bridge,
+        which owns the location because pydantic reports every problem at
+        once and a suffix appended here could only reach the last line.
+        The pass used to carry a fork (re-raise what the bridge framed,
+        append the resource's origin to anything else) for as long as
+        hand-rolled validators raised unframed errors beside it; there are
+        none.
 
         The ``getattr(resource, "validate_config", None)`` guard skips the
         capability marker rows (``VMPlatformEntry`` and friends), which
@@ -506,8 +507,6 @@ class Registry:
         passes is what keeps the two readings of a chain from drifting.
         """
         from agentworks.resources.graph import Enablement
-        from agentworks.resources.render import format_origin_location
-        from agentworks.schema import FramedConfigError
 
         assert self._graph is not None  # built in pass 6, before this pass
         enabled_backends = frozenset(
@@ -523,23 +522,7 @@ class Registry:
                 validate_config = getattr(resource, "validate_config", None)
                 if validate_config is None:
                     continue
-                try:
-                    validate_config(enabled_backends, context)
-                except FramedConfigError:
-                    # Already located by the schema error bridge, which frames
-                    # its own batch because pydantic reports every problem at
-                    # once and this suffix can only reach the LAST line.
-                    # Re-framing here would locate it twice. INTERIM, with one
-                    # trigger: this branch and the wrapper below go together
-                    # when the last hand-rolled validator does (step 2.5), and
-                    # every error is framed one way after that.
-                    raise
-                except ConfigError as exc:
-                    origin = getattr(resource, "origin", None)
-                    raise ConfigError(
-                        f"{exc} ({format_origin_location(origin)})",
-                        hint=exc.hint,
-                    ) from exc
+                validate_config(enabled_backends, context)
 
     def _present_keys(self) -> set[tuple[str, str]]:
         """The ``(kind, name)`` of every currently-published Resource."""

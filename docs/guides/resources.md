@@ -51,11 +51,15 @@ spec:
 - `kind` is the lower-kebab resource kind (`secret`, `vm-template`, `session-template`,
   `git-credential`, `apt-package`, ...).
 - `metadata` carries the framework-uniform fields: `name` (required; `/` is not allowed in resource
-  names) and `description` (stored and shown for every declarable kind). One kind accepts only
+  names), `description` (stored and shown for every declarable kind), and `expires` (optional, a
+  date or an RFC 3339 timestamp; validated but not yet acted on). One kind accepts only
   `name: default` for now: `named-console-template` is an ordinary multi-instance kind in the
   framework, but no command can select a named instance yet, so a named declaration would be dead
   config (issue #165 adds the selector).
-- `spec` carries the kind-specific fields, validated by the manifest decoder for that kind.
+- `spec` carries the kind-specific fields, validated against that kind's declared model. The split
+  is strict in both directions: a metadata field written inside `spec` is refused (it would silently
+  override the envelope), and a `spec` key the kind does not declare is refused too, with a message
+  naming the fields it does. A misspelled key used to load and do nothing.
 - Multiple documents per file are separated with `---`.
 
 `agw resource sample vm-template` prints a commented starter for one kind (`--all` for every kind);

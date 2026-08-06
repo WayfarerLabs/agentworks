@@ -51,7 +51,6 @@ from agentworks.schema.base import (
 from agentworks.schema.block import CapabilityBlock
 from agentworks.schema.errors import (
     MAX_ERROR_LINES,
-    FramedConfigError,
     config_error_from,
     render_validation_error,
 )
@@ -85,7 +84,6 @@ __all__ = [
     "AgwRootModel",
     "CapabilityBlock",
     "FieldDoc",
-    "FramedConfigError",
     "ModelDoc",
     "NonEmptyStr",
     "PositiveInt",

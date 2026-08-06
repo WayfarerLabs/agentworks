@@ -32,7 +32,6 @@ from agentworks.plugins import Plugin, seated_plugin
 from agentworks.resources.reference import ConfigReference
 from agentworks.schema import (
     AgwModel,
-    FramedConfigError,
     RefOwner,
     SecretRef,
     render_validation_error,
@@ -255,7 +254,7 @@ def test_an_unknown_field_names_the_fields_that_are_valid(seated: None) -> None:
 def test_the_raised_error_carries_its_own_framing(seated: None) -> None:
     """So the finalize pass's origin-suffix wrapper leaves it alone rather
     than framing it a second time."""
-    with pytest.raises(FramedConfigError):
+    with pytest.raises(ConfigError):
         _validate({"region": 8})
 
 
@@ -395,5 +394,5 @@ def test_validating_against_an_impls_own_config_needs_no_registry() -> None:
 
 
 def test_construct_time_validation_raises_the_same_framed_error() -> None:
-    with pytest.raises(FramedConfigError, match="vm-site/lab.region: must be a string"):
+    with pytest.raises(ConfigError, match="vm-site/lab.region: must be a string"):
         validate_own_config(FixturePlatform, {"region": 8}, owner=OWNER)

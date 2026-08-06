@@ -88,9 +88,12 @@ class ManifestEntry:
 class ManifestSet:
     """All operator manifests, decoded, in config-load order.
 
-    ``issues`` mirrors ``Config.config_issues``: spec-level warnings
-    (unknown keys on warn-mode kinds, env hygiene) prefixed with the
-    document's ``file:line``.
+    ``issues`` mirrors ``Config.config_issues``: the load-time ADVISORIES
+    a document earns (a non-conforming secret name, env hygiene), prefixed
+    with the document's ``file:line``. Everything that used to warn about
+    the SHAPE of a spec is a hard error now (FR12), so what rides this
+    channel is only what an operator should act on without the config
+    refusing to load.
 
     There is no deprecation channel here. The one manifest deprecation
     that ever rode one (the sibling capability-config shape) is a hard

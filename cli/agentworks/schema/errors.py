@@ -107,25 +107,6 @@ _ALTERNATIVE_PHRASES: Final[Mapping[str, str]] = {
 _KEY_MARKER: Final = "[key]"
 
 
-class FramedConfigError(ConfigError):
-    """A ``ConfigError`` that already carries its own location framing.
-
-    :func:`config_error_from` produces only this type, and a caller must
-    not re-frame it. The one caller that would is the finalize validate
-    pass, which appends an origin suffix to whatever a resource's
-    ``validate`` raises (``resources/registry.py``): correct for the
-    hand-rolled validators that still raise unframed ``ConfigError``s,
-    and a double framing for anything from here.
-
-    Marking the ERROR rather than each call site is what makes the rule
-    hold through the four consuming resources, capability construction,
-    and the migrator without each of them knowing about a wrapper three
-    layers away. This class and that wrapper are one bounded fork with
-    one deletion trigger: they both go when the last hand-rolled
-    validator does (step 2.5), leaving one framing for everything.
-    """
-
-
 def render_validation_error(
     exc: PydanticValidationError,
     *,
@@ -156,7 +137,7 @@ def config_error_from(
     location: SourceLocation | None = None,
     hint: str | None = None,
     provenance: Mapping[str, RefOwner] | None = None,
-) -> FramedConfigError:
+) -> ConfigError:
     """The ``ConfigError`` a caller raises for ``exc``, framed by
     ``location``.
 
@@ -173,8 +154,10 @@ def config_error_from(
           platform.regions: unknown field; expected one of: cpus, vm_host
 
     Because this owns the framing, a caller must NOT also wrap the
-    result with a location of its own (the finalize pass's origin suffix,
-    ``resources/registry.py``): that would frame it twice.
+    result with a location of its own: that would frame it twice. There is
+    no marker type saying so any more, and none is needed: every error a
+    resource's ``validate_config`` raises comes from here, so the finalize
+    pass has one framing to leave alone rather than two to tell apart.
 
     ``provenance`` maps a top-level key of the validated blob to the owner
     that DECLARED it, for a blob assembled by merging an inheritance chain.
@@ -185,7 +168,7 @@ def config_error_from(
     declarer.
     """
     problems = _problems(exc, model_cls, owner, provenance)
-    return FramedConfigError(
+    return ConfigError(
         _framed_batch(problems, owner, location),
         entity_kind=owner.kind,
         entity_name=owner.name,
