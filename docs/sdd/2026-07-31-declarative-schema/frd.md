@@ -71,7 +71,7 @@ Declaration:
   The invoked `validate`/`dependencies` classmethods are retired.
 - **FR6.** The schema vocabulary covers agentworks' semantic needs beyond plain types: fields that
   are references to resources of a named kind, fields that are secret references with
-  owner-templated default names (e.g. `git-token-<owner>`), and per-field operator-facing
+  owner-templated default names (e.g. `git-token-{owner_name}`), and per-field operator-facing
   descriptions. These semantics survive into every derived surface (validation, extraction, docs,
   samples, emitted schema).
 - **FR7.** Resource kinds' own manifest specs are declared the same way, replacing the per-kind

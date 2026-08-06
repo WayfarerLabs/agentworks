@@ -315,11 +315,27 @@ the derivation sequence are not started.
       `credentials` model with `access_key_secret` as a `SecretRef` defaulting to the well-known
       name, plus the `instance_types` catalog); git-credential-provider github (scope union:
       repos/owner mutual exclusion as a model validator; `token` as `SecretRef` with the
-      `git-token-{owner}` template), azdo; harness-integration (the kind renamed by PR #383) shell
-      (config: command, resume_command, required_commands; the `restart_command` alias was removed
-      by the session-resume SDD before wave 2, so shell's config is just those three fields),
-      claude-code, codex (`extra_args` list plus flag fields); secret backends env-var, prompt (no
-      mapping), onepassword (mapping is itself a union: `op://` string or account/reference table).
+      `git-token-{owner_name}` template), azdo; harness-integration (the kind renamed by PR #383)
+      shell (config: command, resume_command, required_commands; the `restart_command` alias was
+      removed by the session-resume SDD before wave 2, so shell's config is just those three
+      fields), claude-code, codex (`extra_args` list plus flag fields); secret backends env-var,
+      prompt (no mapping), onepassword (mapping is itself a union: `op://` string or
+      account/reference table). **Modeling consequence (2.1 LLD):** a mapping whose root is a bare
+      string or a string-or-table union cannot be a `BaseModel` at all, so backend mapping models
+      extend the root-model base, not the mapping base. Do not model the generic `False` opt-out
+      into a backend's model: it is filtered by the loop before any backend sees it
+      (`secrets/base.py:133`).
+- [ ] **Strict-mode tightening is a BREAKING change and ships with an operator note.** The 2.1 base
+      model is `strict=True`, and while today's hand-rolled validators are almost all
+      `isinstance`-strict already, proxmox is not: `plugins/proxmox/platform.py:93` does
+      `int(str(config["template_vmid"]))`, so a quoted `template_vmid: "9000"` loads today and
+      becomes an error. Its `api_url`, `node`, `token_id`, `storage`, `bridge`, `pool`, and
+      `verify_ssl` get no type check at all today, and `verify_ssl` is consumed as
+      `bool(self._cfg("verify_ssl", True))`, so `verify_ssl: "no"` currently means `True` and
+      becomes an error too. Taking the break rather than carving out `Field(strict=False)` matches
+      the operator's standing direction (hard, helpful errors everywhere; break the schema now if
+      ever), but it needs a breaking-change marker and an upgrade note naming proxmox specifically,
+      and the migrator should be checked for whether it emits quoted scalars.
 - [ ] Core-driven validation and extraction wired: registry name-to-model maps per capability kind;
       `Capability.validate` / `Capability.dependencies` classmethods and
       `SecretBackend.validate_mapping` retired; per-capability hand-rolled validate code deleted;
