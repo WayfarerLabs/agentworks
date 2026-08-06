@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from agentworks.agents.template import AgentTemplate
 from agentworks.env.entry import EnvEntry
-from agentworks.resources.graph import BuildContext
+from agentworks.resources.graph import FinalizeContext
 from agentworks.resources.reference import (
     ConfigReference,
     RefRelationship,
@@ -88,7 +88,7 @@ def test_every_inheriting_kind_marks_its_inherits_edges_and_nothing_else() -> No
         "session-template": SessionTemplate(name="kid", inherits=["base"], env=env),
     }
     for kind, template in templates.items():
-        refs = template.dependencies(BuildContext())
+        refs = template.dependencies(FinalizeContext())
         inherited = {(ref.kind, ref.name) for ref in refs if ref.relationship is RefRelationship.INHERITS}
         used = {(ref.kind, ref.name) for ref in refs if ref.relationship is RefRelationship.USES}
         assert inherited == {(kind, "base")}, kind

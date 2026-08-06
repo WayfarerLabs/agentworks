@@ -30,11 +30,11 @@ if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping, Sequence
 
     from agentworks.resources.graph import (
-        BuildContext,
         DependencyGraph,
         DisabledMark,
         Enablement,
         EnablementSource,
+        FinalizeContext,
         Readiness,
     )
     from agentworks.resources.origin import Origin
@@ -458,12 +458,16 @@ class Registry:
                 self._resources[kind][name] = _polish_auto_declared_description(existing, kind, inbound)
 
         # 7: validate the ready + enabled set only (R3, R9.4).
-        self._validate_resources(enablement)
+        self._validate_resources(enablement, context)
 
         # 8: freeze.
         self._frozen = True
 
-    def _validate_resources(self, enablement: Mapping[tuple[str, str], Enablement]) -> None:
+    def _validate_resources(
+        self,
+        enablement: Mapping[tuple[str, str], Enablement],
+        context: FinalizeContext,
+    ) -> None:
         """Run each READY + ENABLED Resource's ``validate()`` (the throwing
         correctness check for its capability config sub-block), raising on
         the first malformed block.
@@ -494,6 +498,12 @@ class Registry:
         ``secret`` validates only mappings addressed to a present AND enabled
         backend (R9.9); a mapping to a disabled backend stays inert until
         enabled. Every non-secret resource ignores the set.
+
+        It is also handed the build walk's own ``context``, so an INHERITING
+        resource validates the same merged declaration its edges came from
+        (FR12: validation runs on the effective config, because a child's
+        declared blob is legitimately partial). One context object for both
+        passes is what keeps the two readings of a chain from drifting.
         """
         from agentworks.resources.graph import Enablement
         from agentworks.resources.render import format_origin_location
@@ -514,7 +524,7 @@ class Registry:
                 if validate is None:
                     continue
                 try:
-                    validate(enabled_backends)
+                    validate(enabled_backends, context)
                 except FramedConfigError:
                     # Already located by the schema error bridge, which frames
                     # its own batch because pydantic reports every problem at
@@ -571,14 +581,14 @@ class Registry:
         key: tuple[str, str],
         all_refs: dict[tuple[str, str], list[ResourceReference]],
         all_outbound: dict[tuple[str, str], list[ResourceReference]],
-        context: BuildContext,
+        context: FinalizeContext,
     ) -> None:
         """Walk one Resource's ``dependencies(context)``, appending its
         edges into ``all_refs`` (keyed by target) and ``all_outbound``
         (keyed by source). The source of every edge is ``key``, so
         ``all_outbound[key]`` holds this Resource's edges contiguously in
         emission order (LLD a's first-encountered guarantee). ``context`` is
-        the builder's threaded :class:`BuildContext` (the secret's
+        the builder's threaded :class:`FinalizeContext` (the secret's
         backend-list read; every other resource ignores it).
         """
         kind, name = key
@@ -629,7 +639,7 @@ class Registry:
         readiness: dict[tuple[str, str], Readiness],
         enablement: Mapping[tuple[str, str], Enablement],
         disabled_marks: Mapping[tuple[str, str], DisabledMark],
-        context: BuildContext,
+        context: FinalizeContext,
     ) -> None:
         """Materialize deferred auto-declare targets, readiness-gated (R12),
         looping to a fixpoint (LLD b subtlety 3).
@@ -759,12 +769,12 @@ class Registry:
 # -- Internal helpers --------------------------------------------------
 
 
-def _dependencies(resource: Any, context: BuildContext) -> Sequence[ResourceReference]:
+def _dependencies(resource: Any, context: FinalizeContext) -> Sequence[ResourceReference]:
     """Return the Resource's ``dependencies(context)`` edges or an empty
     sequence if it doesn't define the method. The capability marker rows
     (``SecretBackendEntry`` and friends) carry no ``dependencies``, so the
     ``getattr`` fallback keeps the walk safe. ``context`` is the builder's
-    threaded :class:`~agentworks.resources.graph.BuildContext` (the secret
+    threaded :class:`~agentworks.resources.graph.FinalizeContext` (the secret
     reads its available-backend list; every other resource ignores it).
     """
     method = getattr(resource, "dependencies", None)

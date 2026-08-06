@@ -20,7 +20,7 @@ from agentworks.schema import RefOwner
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from agentworks.resources.graph import BuildContext, DependencyState, Readiness
+    from agentworks.resources.graph import DependencyState, FinalizeContext, Readiness
     from agentworks.resources.reference import ResourceReference
 
 
@@ -72,7 +72,7 @@ class GitCredentialConfig(DeclaredResource):
     # matches the YAML manifest shape.
     provider_config: dict[str, object] = field(default_factory=dict)
 
-    def dependencies(self, context: BuildContext) -> list[ResourceReference]:
+    def dependencies(self, context: FinalizeContext) -> list[ResourceReference]:
         from agentworks.resources.reference import (
             ResourceReference as _ResourceReq,
         )
@@ -136,7 +136,7 @@ class GitCredentialConfig(DeclaredResource):
             return Readiness.blocked(f"depends on git-credential-provider '{self.provider}', which is disabled; {tail}")
         return Readiness.ready()
 
-    def validate(self, enabled_backends: frozenset[str]) -> None:
+    def validate(self, enabled_backends: frozenset[str], context: FinalizeContext) -> None:
         """Throwing shape check for the ``provider_config`` blob, run by
         the finalize ``validate`` pass (``enabled_backends`` is the
         secret-only R9.9 input, ignored here). Mirrors ``dependencies``:

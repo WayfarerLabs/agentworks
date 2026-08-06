@@ -30,7 +30,7 @@ from typing import TYPE_CHECKING
 from agentworks.source_location import SourceLocation, synthesized
 
 if TYPE_CHECKING:
-    from agentworks.resources.graph import BuildContext
+    from agentworks.resources.graph import FinalizeContext
     from agentworks.resources.origin import Origin
     from agentworks.resources.reference import ResourceReference
 
@@ -72,19 +72,20 @@ class DeclaredResource:
             return SourceLocation(file=origin.file, line=origin.line)
         return self.declared_at
 
-    def dependencies(self, context: BuildContext) -> list[ResourceReference]:
+    def dependencies(self, context: FinalizeContext) -> list[ResourceReference]:
         """The resource's outbound reference edges: the graph-node
         edge-extraction method the finalize build walk calls per present row.
 
-        The builder threads a :class:`~agentworks.resources.graph.BuildContext`
-        (today: the available-backend list a ``secret`` reads to emit its
-        ``secret -> secret-backend`` edges); every other resource ignores it.
-        Total and non-throwing, like the capability ``dependencies`` it
-        composes. Base behavior: no edges.
+        The builder threads a :class:`~agentworks.resources.graph.FinalizeContext`
+        (the available-backend list a ``secret`` reads to emit its
+        ``secret -> secret-backend`` edges, and the published rows an
+        inheriting resource resolves its chain over); every other resource
+        ignores it. Total and non-throwing, like the capability
+        ``dependencies`` it composes. Base behavior: no edges.
         """
         return []
 
-    def validate(self, enabled_backends: frozenset[str]) -> None:
+    def validate(self, enabled_backends: frozenset[str], context: FinalizeContext) -> None:
         """Throwing correctness check for the resource's own capability
         config sub-block(s): the resource-level counterpart of
         ``dependencies`` (the edge-extraction half). Mirrors that
@@ -98,6 +99,15 @@ class DeclaredResource:
         AND enabled backend (R9.9). Every non-secret resource ignores it; the
         param is uniform so the pass can call ``validate`` without per-kind
         dispatch.
+
+        ``context`` is the same :class:`~agentworks.resources.graph.FinalizeContext`
+        the build walk was handed, so an INHERITING resource validates the
+        merged declaration its edges came from rather than a partial
+        declared blob (FR12). It stays separate from ``enabled_backends``
+        rather than absorbing it: the enabled-backend set is only known
+        after the fold, so a context field for it would read empty during
+        the build walk, and a field that is silently wrong at one call site
+        is worse than a second parameter.
 
         Base behavior: no-op. A resource with no capability config block
         has nothing to validate. Resources that host a capability config

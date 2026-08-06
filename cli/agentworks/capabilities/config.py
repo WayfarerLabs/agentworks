@@ -75,6 +75,7 @@ def validate_capability_config(
     owner: RefOwner,
     facet: Facet | None = None,
     location: SourceLocation | None = None,
+    provenance: Mapping[str, RefOwner] | None = None,
 ) -> BaseModel | None:
     """Validate ``blob`` as ``kind``/``name``'s config; return the validated
     instance, or ``None`` when no such implementation is seated.
@@ -82,6 +83,12 @@ def validate_capability_config(
     Raises the error bridge's framed ``ConfigError``, which already carries
     ``location``: a caller must NOT wrap the result with a location of its
     own (see ``FramedConfigError``).
+
+    ``provenance`` is for a blob a caller ASSEMBLED by merging an
+    inheritance chain: it maps each top-level key to the owner that
+    declared it, so an error on an inherited key names that owner instead
+    of blaming the leaf. Every non-inheriting surface omits it, its blob
+    being its own declaration.
     """
     descriptor = descriptor_for(kind)
     impl = _seated_impl(descriptor, name)
@@ -90,10 +97,10 @@ def validate_capability_config(
     contract = descriptor.config_schema
     if contract.discriminator is None:
         model = offered_model(impl, facet)
-        return _validated(model, blob, owner=owner, location=location)
+        return _validated(model, blob, owner=owner, location=location, provenance=provenance)
     union = capability_config_union(kind, facet)
     tagged = tagged_config(name, blob, discriminator=contract.discriminator, owner=owner)
-    validated = _validated(union, tagged, owner=owner, location=location)
+    validated = _validated(union, tagged, owner=owner, location=location, provenance=provenance)
     # The union is a root model, so the thing the capability was written
     # against is what it wraps, never the wrapper.
     return cast("BaseModel", validated.root)  # type: ignore[attr-defined]
@@ -322,8 +329,9 @@ def _validated(
     *,
     owner: RefOwner,
     location: SourceLocation | None,
+    provenance: Mapping[str, RefOwner] | None = None,
 ) -> BaseModel:
     try:
         return model.model_validate(payload, context=validation_context(owner))
     except PydanticValidationError as exc:
-        raise config_error_from(exc, model_cls=model, owner=owner, location=location) from exc
+        raise config_error_from(exc, model_cls=model, owner=owner, location=location, provenance=provenance) from exc

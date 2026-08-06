@@ -26,7 +26,7 @@ from agentworks.resources import (
     KIND_REGISTRY,
     TemplateReference,
 )
-from agentworks.resources.graph import BuildContext
+from agentworks.resources.graph import FinalizeContext
 from agentworks.sessions.template import SessionTemplate
 from agentworks.workspaces.template import WorkspaceTemplate
 from tests.conftest import ManifestDoc, write_manifests
@@ -99,7 +99,7 @@ def test_synthesize_empty_builds_default(spec: _KindSpec) -> None:
 @pytest.mark.parametrize("spec", SPECS, ids=lambda s: s.kind)
 def test_no_inherits_produces_no_template_requirements(spec: _KindSpec) -> None:
     tmpl = spec.expected_type(name="alone")
-    template_reqs = [r for r in tmpl.dependencies(BuildContext()) if isinstance(r, TemplateReference)]
+    template_reqs = [r for r in tmpl.dependencies(FinalizeContext()) if isinstance(r, TemplateReference)]
     assert template_reqs == []
 
 
@@ -128,11 +128,11 @@ def test_synthesize_with_requirement_uses_first_source(spec: _KindSpec) -> None:
 def test_template_dependencies_emits_template_requirement(
     spec: _KindSpec,
 ) -> None:
-    """Each ``XxxTemplate.dependencies(BuildContext())`` emits a TemplateReference
+    """Each ``XxxTemplate.dependencies(FinalizeContext())`` emits a TemplateReference
     per name in ``inherits`` with the right kind and source.
     """
     tmpl = spec.expected_type(name="child", inherits=["base", "extras"])
-    reqs = tmpl.dependencies(BuildContext())
+    reqs = tmpl.dependencies(FinalizeContext())
     template_reqs = [r for r in reqs if isinstance(r, TemplateReference)]
     assert len(template_reqs) == 2
     by_name = {r.name: r for r in template_reqs}

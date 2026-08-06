@@ -40,7 +40,7 @@ if TYPE_CHECKING:
 
     from agentworks.capabilities.vm_platform import VMPlatform
     from agentworks.config import Config
-    from agentworks.resources.graph import BuildContext, DependencyState, Readiness
+    from agentworks.resources.graph import DependencyState, FinalizeContext, Readiness
     from agentworks.resources.reference import ResourceReference
     from agentworks.resources.registry import Registry
 
@@ -59,7 +59,7 @@ class VMSiteDecl(DeclaredResource):
     platform: str
     platform_config: dict[str, object] = field(default_factory=dict)
 
-    def dependencies(self, context: BuildContext) -> list[ResourceReference]:
+    def dependencies(self, context: FinalizeContext) -> list[ResourceReference]:
         from agentworks.resources.reference import (
             ResourceReference as _ResourceRef,
         )
@@ -142,7 +142,7 @@ class VMSiteDecl(DeclaredResource):
         # a construction.
         return cast("type[VMPlatform]", platform.impl).not_ready(self.platform_config)
 
-    def validate(self, enabled_backends: frozenset[str]) -> None:
+    def validate(self, enabled_backends: frozenset[str], context: FinalizeContext) -> None:
         """Throwing shape check for the ``platform_config`` blob, run by
         the finalize ``validate`` pass (``enabled_backends`` is the
         secret-only R9.9 input, ignored here). Mirrors ``dependencies``:

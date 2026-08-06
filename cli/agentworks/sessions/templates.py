@@ -19,9 +19,16 @@ resolver want the merge at different moments and in different shapes:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 from agentworks.errors import inheritance_cycle_error, unknown_template_error
+from agentworks.schema import RefOwner
+
+#: The workload a session runs when nothing in its lineage names one: a
+#: plain login shell, which is the behavior from before harness
+#: integrations existed.
+DEFAULT_HARNESS_INTEGRATION = "shell"
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -45,25 +52,44 @@ class ResolvedSessionTemplate:
     name: str
     description: str = "Login shell"
     env: dict[str, EnvEntry] = field(default_factory=dict)
-    harness_integration: str = "shell"
+    harness_integration: str = DEFAULT_HARNESS_INTEGRATION
     harness_integration_config: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
-class EffectiveSessionTemplate:
-    """One session template's chain, merged, as the finalize passes need it.
+class MergedHarness:
+    """The ``(harness_integration, config)`` pair a lineage merged to, and
+    where each surviving key came from.
 
-    ``harness_integration`` is the name the LINEAGE declared, or ``None``
-    when no template in it declared one. The distinction is load-bearing
-    here in a way it is not on :class:`ResolvedSessionTemplate`: a silent
-    lineage must publish no ``harness-integration`` edge at all, whereas
-    collapsing it to ``shell`` first would have every session template in
-    the registry pointing at the shell row.
+    ``name`` is the integration the LINEAGE declared, or ``None`` when no
+    template in it declared one. The distinction is load-bearing here in a
+    way it is not on :class:`ResolvedSessionTemplate`: a silent lineage
+    must publish no ``harness-integration`` edge at all, whereas collapsing
+    it to ``shell`` first would have every session template in the registry
+    pointing at the shell row.
+
+    ``provenance`` maps each key of ``config`` to the template that
+    declared the value that survived the merge, so a shape error on an
+    inherited key can name the template an operator has to go and edit
+    rather than the child that merely inherited it. It records the LAST
+    declarer of a key in merge order, which is the one child-wins keeps;
+    for a key an integration's ``merge_config`` COMBINES across layers
+    (``shell`` unions ``required_commands``) the last declarer is one
+    contributor among several, and the message says "inherited from" rather
+    than claiming sole authorship.
     """
 
+    name: str | None = None
+    config: Mapping[str, object] = MappingProxyType({})
+    provenance: Mapping[str, RefOwner] = MappingProxyType({})
+
+
+@dataclass(frozen=True)
+class EffectiveSessionTemplate:
+    """One session template's chain, merged, as the finalize passes need it."""
+
     resolved: ResolvedSessionTemplate
-    harness_integration: str | None
-    harness_integration_config: dict[str, object]
+    harness: MergedHarness = MergedHarness()
 
 
 def _merge_map(target: dict[str, EnvEntry], source: dict[str, EnvEntry]) -> dict[str, EnvEntry]:
@@ -108,11 +134,7 @@ def effective_template(templates: Mapping[str, SessionTemplate], name: str) -> E
     try:
         return _resolve_walk(templates, name)
     except InheritanceCycleError:
-        return EffectiveSessionTemplate(
-            resolved=ResolvedSessionTemplate(name=name),
-            harness_integration=None,
-            harness_integration_config={},
-        )
+        return EffectiveSessionTemplate(resolved=ResolvedSessionTemplate(name=name))
 
 
 def _resolve(
@@ -123,16 +145,16 @@ def _resolve(
     """Depth-first, left-to-right resolution.
 
     The USE view over :func:`_resolve_walk`: it collapses the walk's
-    ``(harness_integration | None, config)`` pair onto the dataclass (an
-    undeclared pair becomes the ``shell`` default) and runs the harness
-    integration's completeness validation once on the merged blob, the
-    value no single declaration saw.
+    ``(harness_integration | None, config)`` pair onto the dataclass, an
+    undeclared pair becoming the ``shell`` default. No validation happens
+    here: the merged blob's shape check runs at finalize over this same
+    merge, with the rest of hard validation (FR12), and construction
+    re-validates the blob it binds.
     """
     effective = _resolve_walk(templates, name, _visiting)
     result = effective.resolved
-    result.harness_integration = effective.harness_integration or "shell"
-    result.harness_integration_config = effective.harness_integration_config
-    _validate_merged(result)
+    result.harness_integration = effective.harness.name or DEFAULT_HARNESS_INTEGRATION
+    result.harness_integration_config = dict(effective.harness.config)
     return result
 
 
@@ -162,57 +184,44 @@ def _resolve_walk(
         raise inheritance_cycle_error("session-template", (*_visiting, name))
 
     if name not in templates:
-        return EffectiveSessionTemplate(
-            resolved=ResolvedSessionTemplate(name=name),
-            harness_integration=None,
-            harness_integration_config={},
-        )
+        return EffectiveSessionTemplate(resolved=ResolvedSessionTemplate(name=name))
 
     tmpl = templates[name]
     result = ResolvedSessionTemplate(name=name)
-    harness_integration: str | None = None
-    harness_integration_config: dict[str, object] = {}
+    harness = MergedHarness()
     next_visiting = (*_visiting, name)
 
     for parent_name in tmpl.inherits:
         parent = _resolve_walk(templates, parent_name, next_visiting)
         _merge(result, parent.resolved)
-        harness_integration, harness_integration_config = _merge_pair(
-            harness_integration,
-            harness_integration_config,
-            parent.harness_integration,
-            parent.harness_integration_config,
-        )
+        harness = _merge_pair(harness, parent.harness)
 
     _merge_template(result, tmpl)
-    harness_integration, harness_integration_config = _merge_pair(
-        harness_integration,
-        harness_integration_config,
-        tmpl.harness_integration,
-        tmpl.harness_integration_config,
+    harness = _merge_pair(
+        harness,
+        MergedHarness(
+            name=tmpl.harness_integration,
+            config=tmpl.harness_integration_config or {},
+            provenance=dict.fromkeys(
+                tmpl.harness_integration_config or {},
+                RefOwner(kind="session-template", name=name),
+            ),
+        ),
     )
     result.name = name
-    return EffectiveSessionTemplate(
-        resolved=result,
-        harness_integration=harness_integration,
-        harness_integration_config=harness_integration_config,
-    )
+    return EffectiveSessionTemplate(resolved=result, harness=harness)
 
 
-def _merge_pair(
-    acc_harness_integration: str | None,
-    acc_config: dict[str, object],
-    child_harness_integration: str | None,
-    child_config: dict[str, object] | None,
-) -> tuple[str | None, dict[str, object]]:
-    """Fold one declared (or resolved) ``(harness_integration, config)`` into the
+def _merge_pair(acc: MergedHarness, child: MergedHarness) -> MergedHarness:
+    """Fold one declared (or already-merged) harness pair into the
     accumulator:
 
     - a child that says nothing about the harness integration leaves the pair
       untouched (a ``harness_integration_config`` without a ``harness_integration`` cannot load,
       so silence is unambiguous);
     - a child naming a DIFFERENT harness integration starts from a fresh blob (the
-      parent's blob was addressed to the wrong capability, never leaks);
+      parent's blob was addressed to the wrong capability, never leaks),
+      and from fresh provenance with it;
     - a child naming the SAME harness integration merges via that integration's
       ``merge_config`` (child-wins per key; ``shell`` unions
       ``required_commands``).
@@ -220,38 +229,23 @@ def _merge_pair(
     Reaches the merge by NAME (``merged_config``), which is what keeps
     this total for the finalize walk: an unregistered name is a dangling
     edge the miss policy reports, not a reason for the merge to raise.
+
+    Provenance follows the value: it is restricted to the keys that
+    actually survived, so a key an integration's merge dropped cannot be
+    blamed on the template that declared it.
     """
-    if child_harness_integration is None:
-        return acc_harness_integration, acc_config
+    if child.name is None:
+        return acc
     from agentworks.capabilities.harness_integration import merged_config
 
-    base = acc_config if child_harness_integration == acc_harness_integration else {}
-    return child_harness_integration, merged_config(child_harness_integration, base, child_config or {})
-
-
-def _validate_merged(resolved: ResolvedSessionTemplate) -> None:
-    """Validate the MERGED blob against the selected integration's model.
-
-    A declared blob on an inheriting surface may be legitimately partial,
-    so this is where a required field is actually required. It runs at
-    resolve, which is where it has always run; FR12 moves it to finalize,
-    and that move needs a per-key provenance channel so an error can name
-    the template a bad key came from, which is its own body of work.
-
-    ``harness_integration_for`` raises a typed ``ConfigError`` on an
-    unknown name (defense in depth; typos are normally caught by the
-    kind's miss policy at finalize), and the core validates against the
-    model that integration declares."""
-    from agentworks.capabilities.config import validate_capability_config
-    from agentworks.capabilities.harness_integration import harness_integration_for
-    from agentworks.schema import RefOwner
-
-    harness_integration_for(resolved.harness_integration)
-    validate_capability_config(
-        kind="harness-integration",
-        name=str(resolved.harness_integration),
-        blob=resolved.harness_integration_config,
-        owner=RefOwner(kind="session-template", name=resolved.name),
+    same = child.name == acc.name
+    base = acc.config if same else {}
+    config = merged_config(child.name, base, child.config)
+    provenance = {**(acc.provenance if same else {}), **child.provenance}
+    return MergedHarness(
+        name=child.name,
+        config=config,
+        provenance={key: owner for key, owner in provenance.items() if key in config},
     )
 
 

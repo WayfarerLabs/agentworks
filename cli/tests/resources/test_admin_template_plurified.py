@@ -37,7 +37,7 @@ from agentworks.resources import (
     Origin,
     Registry,
 )
-from agentworks.resources.graph import BuildContext
+from agentworks.resources.graph import FinalizeContext
 from agentworks.vms.admin import AdminConfig
 from tests.conftest import ManifestDoc, write_manifests
 
@@ -87,7 +87,7 @@ def test_admin_dependencies_sources_from_self_name() -> None:
         name="work",
         env={"API_KEY": EnvEntry(key="API_KEY", secret="api-key")},
     )
-    reqs = custom.dependencies(BuildContext())
+    reqs = custom.dependencies(FinalizeContext())
     assert reqs  # at least the API_KEY secret requirement
     assert all(r.source == ("admin-template", "work") for r in reqs)
 

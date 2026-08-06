@@ -301,14 +301,23 @@ class DependencyGraph:
 
 
 @dataclass(frozen=True)
-class BuildContext:
-    """The controlled context the graph builder threads to each resource's
-    :meth:`~agentworks.declared_resource.DeclaredResource.dependencies` during
-    the finalize walk.
+class FinalizeContext:
+    """The controlled context finalize threads to each resource, at both of
+    the passes that hand a resource control:
+    :meth:`~agentworks.declared_resource.DeclaredResource.dependencies` in
+    the build walk and
+    :meth:`~agentworks.declared_resource.DeclaredResource.validate` in the
+    validate pass.
 
-    Two load-bearing fields, both BUILDER INPUTS supplied during the build
-    rather than a consumer reaching into a live registry, which is why the
-    R11 guard whitelists the builder's own call (LLD b):
+    Named for the phase rather than for the build because it serves both:
+    a resource that has to see its inheritance chain has to see it in both
+    places (its edges and its shape check are two readings of one merged
+    declaration), and there is nothing in it a build reads that a validate
+    should not.
+
+    Two load-bearing fields, both FRAMEWORK INPUTS supplied during
+    finalize rather than a consumer reaching into a live registry, which is
+    why the R11 guard whitelists the builder's own call (LLD b):
 
     - ``available_backends``: the present ``secret-backend`` nodes (name +
       impl), which a ``secret`` reads to decide (via each backend's pure
@@ -342,7 +351,7 @@ class BuildContext:
         merges ITSELF into the result before resolving
         (``{**context.rows_of(kind), self.name: self}``), which is a no-op
         during the real walk (the registry already holds it) and is what
-        makes a bare ``BuildContext()`` degrade to "this declaration
+        makes a bare ``FinalizeContext()`` degrade to "this declaration
         alone" rather than to "nothing at all": an empty answer for a
         template that declares an env secret would be a wrong answer, not
         an obviously-missing one.
@@ -350,8 +359,8 @@ class BuildContext:
         return self.rows.get(kind, {})
 
 
-def build_context(resources: Mapping[str, Mapping[str, object]]) -> BuildContext:
-    """Assemble the :class:`BuildContext` the finalize walk threads to every
+def build_context(resources: Mapping[str, Mapping[str, object]]) -> FinalizeContext:
+    """Assemble the :class:`FinalizeContext` the finalize walk threads to every
     resource's ``dependencies``.
 
     Reads each present ``secret-backend`` node's impl off the code registry via
@@ -371,7 +380,7 @@ def build_context(resources: Mapping[str, Mapping[str, object]]) -> BuildContext
     backends = tuple(
         (name, cast("SecretBackend", _impl_for("secret-backend", name))) for name in resources.get("secret-backend", {})
     )
-    return BuildContext(available_backends=backends, rows=resources)
+    return FinalizeContext(available_backends=backends, rows=resources)
 
 
 def build_graph(

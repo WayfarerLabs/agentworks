@@ -18,7 +18,7 @@ from agentworks.env.entry import env_references
 
 if TYPE_CHECKING:
     from agentworks.env import EnvEntry
-    from agentworks.resources.graph import BuildContext
+    from agentworks.resources.graph import FinalizeContext
     from agentworks.resources.reference import (
         ResourceReference,
         SecretReference,
@@ -82,7 +82,7 @@ class VMTemplate(DeclaredResource):
     # SDD; the field IS the secret reference.
     tailscale_auth_key: str | None = None
 
-    def dependencies(self, context: BuildContext) -> list[ResourceReference]:
+    def dependencies(self, context: FinalizeContext) -> list[ResourceReference]:
         """This template's outbound edges: its ``inherits`` edges as
         declared, and every runtime need of its EFFECTIVE declaration.
 

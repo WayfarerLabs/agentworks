@@ -18,7 +18,7 @@ from agentworks.schema import RefOwner
 from agentworks.source_location import SourceLocation, synthesized
 
 if TYPE_CHECKING:
-    from agentworks.resources.graph import BuildContext
+    from agentworks.resources.graph import FinalizeContext
     from agentworks.resources.reference import ResourceReference
 
 MappingValue = str | dict[str, object] | Literal[False]
@@ -56,7 +56,7 @@ class SecretDecl(DeclaredResource):
     hint: str | None = None
     backend_mappings: dict[str, MappingValue] = field(default_factory=dict)
 
-    def dependencies(self, context: BuildContext) -> list[ResourceReference]:
+    def dependencies(self, context: FinalizeContext) -> list[ResourceReference]:
         """The secret's ``secret -> secret-backend`` edges: the candidate
         backends that could resolve it, frozen into the graph at finalize.
 
@@ -136,7 +136,7 @@ class SecretDecl(DeclaredResource):
             emit(backend_name)
         return refs
 
-    def validate(self, enabled_backends: frozenset[str]) -> None:
+    def validate(self, enabled_backends: frozenset[str], context: FinalizeContext) -> None:
         """Throwing per-mapping spec check, run by the finalize ``validate``
         pass: every declared ``backend_mappings`` entry addressed to a PRESENT
         AND ENABLED backend is validated by the CORE against that backend's

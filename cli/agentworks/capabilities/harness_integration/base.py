@@ -135,51 +135,6 @@ class HarnessIntegration(Capability):
 
     owner_kind: ClassVar[str] = "session-template"
 
-    def __init_subclass__(cls, **kwargs: object) -> None:
-        """Refuse a config model with a REQUIRED field, for now.
-
-        INTERIM, with a named trigger: declarative-schema step 2.3b moves
-        session-template validation onto the EFFECTIVE (merged) blob,
-        which is where a required field is actually required. Until then
-        the finalize pass validates each DECLARED blob, and a child
-        template legitimately declares a partial one that only becomes
-        complete after the inheritance merge; a required field would fail
-        that child at ``build_registry`` with nothing in the error
-        pointing at inheritance as the cause.
-
-        Enforced rather than written down because the trap is silent from
-        the author's side: the model would look right, every test of the
-        capability alone would pass, and only an operator with an
-        inheriting template would ever see it. This whole method is
-        deleted by 2.3b.
-        """
-        from agentworks.schema import iter_field_docs
-
-        super().__init_subclass__(**kwargs)
-        model = cls.__dict__.get("config_model")
-        if model is None:
-            return
-        # Top-level fields only: a required field INSIDE an optional block
-        # is required only of a template that declares the block at all.
-        # Two exemptions, neither of which a template can fail to supply:
-        # the kind's discriminator (``ConfigContract`` in ``kinds.py``),
-        # which every arm carries by construction and no template writes,
-        # and an owner-templated reference, which the model layer fills
-        # from the owner when the field is absent.
-        required = sorted(
-            doc.path[0]
-            for doc in iter_field_docs(model)
-            if len(doc.path) == 1 and doc.required and doc.default_template is None and doc.path[0] != "name"
-        )
-        if required:
-            raise StateError(
-                f"{cls.__name__}'s config model declares required field(s) {', '.join(required)}, "
-                f"which a session template that INHERITS its config cannot satisfy: the finalize "
-                f"pass validates each declared blob, and a child's blob is legitimately partial "
-                f"until the inheritance merge. Make them optional, or land declarative-schema step "
-                f"2.3b (effective-config validation) first."
-            )
-
     def __init__(
         self,
         owner_name: str,  # the session-template name (config owner)

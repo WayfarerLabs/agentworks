@@ -22,7 +22,7 @@ from agentworks.sessions.layouts import AW_SESSION_VERTICAL_LAYOUT
 
 if TYPE_CHECKING:
     from agentworks.env import EnvEntry
-    from agentworks.resources.graph import BuildContext
+    from agentworks.resources.graph import FinalizeContext
     from agentworks.resources.reference import ResourceReference
 
 
@@ -64,7 +64,7 @@ class SessionTemplate(DeclaredResource):
     harness_integration_config: dict[str, object] | None = None
     env: dict[str, EnvEntry] | None = None
 
-    def dependencies(self, context: BuildContext) -> list[ResourceReference]:
+    def dependencies(self, context: FinalizeContext) -> list[ResourceReference]:
         """The ``inherits`` edges as declared, plus the runtime needs of
         the EFFECTIVE declaration (FR17; see ``VMTemplate.dependencies``
         for the rule the four inheriting kinds share).
@@ -86,7 +86,7 @@ class SessionTemplate(DeclaredResource):
 
         source = ("session-template", self.name)
         effective = effective_template({**context.rows_of("session-template"), self.name: self}, self.name)
-        integration = effective.harness_integration
+        integration = effective.harness.name
         refs: list[ResourceReference] = list(env_references(effective.resolved.env, source))
         refs.extend(inherits_reference(parent, source) for parent in self.inherits)
         if integration is not None:
@@ -115,7 +115,7 @@ class SessionTemplate(DeclaredResource):
                     capability_config_references(
                         kind="harness-integration",
                         name=integration,
-                        blob=effective.harness_integration_config,
+                        blob=effective.harness.config,
                         owner=RefOwner(kind="session-template", name=self.name),
                     ),
                     source,
@@ -123,28 +123,35 @@ class SessionTemplate(DeclaredResource):
             )
         return refs
 
-    def validate(self, enabled_backends: frozenset[str]) -> None:
-        """Throwing shape check for the ``harness_integration_config`` blob, run by
-        the finalize ``validate`` pass (``enabled_backends`` is the
+    def validate(self, enabled_backends: frozenset[str], context: FinalizeContext) -> None:
+        """Throwing shape check for the EFFECTIVE ``harness_integration_config``
+        blob, run by the finalize ``validate`` pass (``enabled_backends`` is the
         secret-only R9.9 input, ignored here). Mirrors ``dependencies``:
         the CORE validates the blob against the named integration's declared
-        model, and no integration code runs. An undeclared harness
-        integration (``None``) or an unknown name is a no-op here (the miss
-        policy reports the latter).
+        model, and no integration code runs. An unknown integration name is
+        a no-op here (the miss policy already reported it).
 
-        This validates the DECLARED blob, which on an inheriting surface
-        may legitimately be partial; the merged blob's own check runs at
-        resolve (``sessions/templates``). Moving that one here is the
-        effective-config work, which is not this step's.
+        The MERGED blob is what validates, never this row's declared one
+        (FR12): a child's declaration is legitimately partial until the
+        chain completes it, so a model's required field would wrongly
+        reject a child that its parent completes. The merge's per-key
+        provenance rides along so an error on an inherited key names the
+        template that declared it.
+
+        Unlike ``dependencies``, this uses the ``shell`` DEFAULT when the
+        lineage names no integration, and the asymmetry is deliberate: an
+        edge records what the operator named, while validation checks what
+        the session will actually run.
         """
-        if self.harness_integration is None:
-            return
         from agentworks.capabilities.config import validate_capability_config
+        from agentworks.sessions.templates import DEFAULT_HARNESS_INTEGRATION, effective_template
 
+        effective = effective_template({**context.rows_of("session-template"), self.name: self}, self.name)
         validate_capability_config(
             kind="harness-integration",
-            name=self.harness_integration,
-            blob=self.harness_integration_config or {},
+            name=effective.harness.name or DEFAULT_HARNESS_INTEGRATION,
+            blob=effective.harness.config,
             owner=RefOwner(kind="session-template", name=self.name),
             location=self.error_location,
+            provenance=effective.harness.provenance,
         )

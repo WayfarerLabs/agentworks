@@ -105,6 +105,7 @@ def render_validation_error(
     *,
     model_cls: type[BaseModel],
     owner: RefOwner,
+    provenance: Mapping[str, RefOwner] | None = None,
 ) -> list[str]:
     """One owner-framed line per problem in ``exc``, normalized.
 
@@ -113,9 +114,12 @@ def render_validation_error(
     model, whose errors carry no path).
 
     Pure: no raising, no I/O, no framing. This is the diagnostic form;
-    :func:`config_error_from` is the one that builds an exception.
+    :func:`config_error_from` is the one that builds an exception. It takes
+    ``provenance`` for the same reason it takes ``owner``: the two forms
+    are one rendering, and a diagnostic surface showing a different
+    attribution from the error would be its own bug.
     """
-    return [_owner_framed(owner, problem) for problem in _problems(exc, model_cls)]
+    return [_owner_framed(owner, problem) for problem in _problems(exc, model_cls, owner, provenance)]
 
 
 def config_error_from(
@@ -125,6 +129,7 @@ def config_error_from(
     owner: RefOwner,
     location: SourceLocation | None = None,
     hint: str | None = None,
+    provenance: Mapping[str, RefOwner] | None = None,
 ) -> FramedConfigError:
     """The ``ConfigError`` a caller raises for ``exc``, framed by
     ``location``.
@@ -144,8 +149,16 @@ def config_error_from(
     Because this owns the framing, a caller must NOT also wrap the
     result with a location of its own (the finalize pass's origin suffix,
     ``resources/registry.py``): that would frame it twice.
+
+    ``provenance`` maps a top-level key of the validated blob to the owner
+    that DECLARED it, for a blob assembled by merging an inheritance chain.
+    A problem on a key some other owner declared renders with an
+    ``(inherited from <owner>)`` tail, so the operator is sent to the file
+    that has the mistake in it rather than to the child that inherited it.
+    Omitted for every unmerged surface, where the owner already is the
+    declarer.
     """
-    problems = _problems(exc, model_cls)
+    problems = _problems(exc, model_cls, owner, provenance)
     return FramedConfigError(
         _framed_batch(problems, owner, location),
         entity_kind=owner.kind,
@@ -159,23 +172,62 @@ class _Problem:
     """One rendered validation error, before it is framed.
 
     ``path`` is the operator's dotted address for the offending value,
-    empty for a whole-document problem.
+    empty for a whole-document problem. ``inherited_from`` is the display
+    of the owner that declared the value, when that is not the owner being
+    validated.
     """
 
     path: str
     message: str
+    inherited_from: str | None = None
 
     def render(self) -> str:
-        return f"{self.path}: {self.message}" if self.path else self.message
+        text = f"{self.path}: {self.message}" if self.path else self.message
+        return f"{text} (inherited from {self.inherited_from})" if self.inherited_from else text
 
 
-def _problems(exc: PydanticValidationError, model_cls: type[BaseModel]) -> list[_Problem]:
-    return [_problem(model_cls, detail) for detail in exc.errors(include_url=False)]
+def _problems(
+    exc: PydanticValidationError,
+    model_cls: type[BaseModel],
+    owner: RefOwner,
+    provenance: Mapping[str, RefOwner] | None = None,
+) -> list[_Problem]:
+    return [_problem(model_cls, detail, owner, provenance) for detail in exc.errors(include_url=False)]
 
 
-def _problem(model_cls: type[BaseModel], detail: ErrorDetails) -> _Problem:
+def _problem(
+    model_cls: type[BaseModel],
+    detail: ErrorDetails,
+    owner: RefOwner,
+    provenance: Mapping[str, RefOwner] | None,
+) -> _Problem:
     path, container = _resolve_path(model_cls, detail["loc"])
-    return _Problem(path=path, message=_message(detail, container))
+    return _Problem(
+        path=path,
+        message=_message(detail, container),
+        inherited_from=_inherited_from(path, owner, provenance),
+    )
+
+
+def _inherited_from(path: str, owner: RefOwner, provenance: Mapping[str, RefOwner] | None) -> str | None:
+    """The owner that declared the value at ``path``, when that is someone
+    other than ``owner``; ``None`` otherwise.
+
+    ``None`` covers the three uninteresting cases together: the blob was
+    not merged (no provenance at all), the key has no recorded declarer
+    (a ``missing`` error, where nobody wrote the key by construction), or
+    the declarer is the owner already named at the head of the line, where
+    a tail would only repeat it.
+
+    Provenance is per TOP-LEVEL key, because that is the granularity a
+    merge has: a capability's merge combines whole values, so ``command``
+    has a declarer and ``sandbox.writable_dirs`` inherits its parent key's.
+    """
+    if not path or not provenance:
+        return None
+    key = path.split(".", 1)[0].split("[", 1)[0]
+    declarer = provenance.get(key)
+    return None if declarer is None or declarer == owner else declarer.display
 
 
 def _owner_framed(owner: RefOwner, problem: _Problem) -> str:

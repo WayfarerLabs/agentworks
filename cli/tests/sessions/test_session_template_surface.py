@@ -18,7 +18,7 @@ from agentworks.capabilities.harness_integration import HARNESS_INTEGRATION_REGI
 from agentworks.config import load_config
 from agentworks.errors import ConfigError
 from agentworks.manifests import load_manifests
-from agentworks.resources.graph import BuildContext
+from agentworks.resources.graph import FinalizeContext
 from agentworks.resources.inspect import describe_resource
 from agentworks.schema import AgwModel
 from agentworks.sessions.template import SessionTemplate
@@ -473,7 +473,7 @@ def test_undeclared_default_resolves_to_shell_empty() -> None:
 
 def test_declared_harness_integration_emits_a_reference() -> None:
     tmpl = SessionTemplate(name="claude", harness_integration="shell", harness_integration_config={"command": "claude"})
-    refs = tmpl.dependencies(BuildContext())
+    refs = tmpl.dependencies(FinalizeContext())
     harness_refs = [r for r in refs if r.kind == "harness-integration"]
     assert len(harness_refs) == 1
     assert harness_refs[0].name == "shell"
@@ -482,7 +482,7 @@ def test_declared_harness_integration_emits_a_reference() -> None:
 
 def test_undeclared_harness_integration_emits_no_reference() -> None:
     tmpl = SessionTemplate(name="plain")
-    assert [r for r in tmpl.dependencies(BuildContext()) if r.kind == "harness-integration"] == []
+    assert [r for r in tmpl.dependencies(FinalizeContext()) if r.kind == "harness-integration"] == []
 
 
 def test_harness_integration_row_lists_its_declaring_template(tmp_path: Path) -> None:

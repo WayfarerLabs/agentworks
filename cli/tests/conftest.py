@@ -625,13 +625,13 @@ class _StubGraph:
         self._registry = registry
 
     def edges_of(self, kind: str, name: str):  # noqa: ANN201 - mirrors DependencyGraph
-        from agentworks.resources.graph import BuildContext
+        from agentworks.resources.graph import FinalizeContext
 
         row = self._registry.lookup(kind, name)  # KeyError on unknown, like the real graph
         method = getattr(row, "dependencies", None)
         if method is None:
             return ()
-        return tuple(method(BuildContext()))
+        return tuple(method(FinalizeContext()))
 
     def reachable_from(self, kind: str, name: str) -> list[tuple[str, str]]:
         # Tolerate a missing start node, exactly as the real graph does

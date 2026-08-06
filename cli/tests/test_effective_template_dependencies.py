@@ -22,7 +22,7 @@ from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
 from agentworks.env.entry import EnvEntry
 from agentworks.errors import ConfigError, InheritanceCycleError
-from agentworks.resources.graph import BuildContext
+from agentworks.resources.graph import FinalizeContext
 from agentworks.sessions.template import SessionTemplate
 from agentworks.vms.template import VMTemplate
 from agentworks.vms.templates import effective_template
@@ -36,13 +36,13 @@ if TYPE_CHECKING:
     from agentworks.declared_resource import DeclaredResource
 
 
-def _context(kind: str, *rows: DeclaredResource) -> BuildContext:
+def _context(kind: str, *rows: DeclaredResource) -> FinalizeContext:
     """A build context holding ``rows`` under ``kind``, as finalize's own
     context does."""
-    return BuildContext(rows={kind: {row.name: row for row in rows}})
+    return FinalizeContext(rows={kind: {row.name: row for row in rows}})
 
 
-def _targets(row: DeclaredResource, context: BuildContext) -> set[tuple[str, str]]:
+def _targets(row: DeclaredResource, context: FinalizeContext) -> set[tuple[str, str]]:
     return {(ref.kind, ref.name) for ref in row.dependencies(context)}
 
 
@@ -99,11 +99,11 @@ def test_session_template_child_inherits_the_harness_selector_it_never_declared(
 
 
 def test_a_bare_context_degrades_to_the_declaration_itself_not_to_nothing() -> None:
-    """``BuildContext()`` carries no rows, so there are no ancestors to
+    """``FinalizeContext()`` carries no rows, so there are no ancestors to
     merge; the row's OWN declaration still has to come through, or a
     context-less caller would silently see an empty edge set."""
     template = VMTemplate(name="kid", inherits=["base"], env={"K": EnvEntry(key="K", secret="own-secret")})
-    assert ("secret", "own-secret") in _targets(template, BuildContext())
+    assert ("secret", "own-secret") in _targets(template, FinalizeContext())
 
 
 def test_the_effective_resolve_is_total_over_a_cyclic_chain() -> None:

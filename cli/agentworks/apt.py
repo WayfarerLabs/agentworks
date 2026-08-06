@@ -39,7 +39,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from agentworks.config import _SectionLineMap
-    from agentworks.resources.graph import BuildContext
+    from agentworks.resources.graph import FinalizeContext
     from agentworks.resources.reference import ResourceReference
 
 
@@ -76,7 +76,7 @@ class AptPackageEntry(DeclaredResource):
     apt: list[str]
     apt_sources: list[str] = field(default_factory=list)
 
-    def dependencies(self, context: BuildContext) -> list[ResourceReference]:
+    def dependencies(self, context: FinalizeContext) -> list[ResourceReference]:
         """Emit one ``ResourceReference`` per name in ``apt_sources``. The
         framework's ``apt-source`` kind uses an ``error`` miss policy, so
         an unknown source name surfaces as a clean ``ConfigError`` at

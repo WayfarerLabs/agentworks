@@ -20,7 +20,7 @@ from agentworks.git_credentials.credential import credential_references
 
 if TYPE_CHECKING:
     from agentworks.env import EnvEntry
-    from agentworks.resources.graph import BuildContext
+    from agentworks.resources.graph import FinalizeContext
     from agentworks.resources.reference import ResourceReference
 
 
@@ -45,7 +45,7 @@ class AgentTemplate(DeclaredResource):
     claude_plugins: list[str] | None = None
     env: dict[str, EnvEntry] = field(default_factory=dict)
 
-    def dependencies(self, context: BuildContext) -> list[ResourceReference]:
+    def dependencies(self, context: FinalizeContext) -> list[ResourceReference]:
         """The ``inherits`` edges as declared, plus the runtime needs of
         the EFFECTIVE declaration (FR17; see ``VMTemplate.dependencies``
         for the rule the four inheriting kinds share)."""

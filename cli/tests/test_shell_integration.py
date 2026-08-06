@@ -78,35 +78,18 @@ def _session_scope(
     )
 
 
-# -- The interim inheritance constraint ---------------------------------------
+# -- What a config model may declare ------------------------------------------
 
 
-def test_a_required_config_field_is_refused_while_declared_blobs_validate() -> None:
-    """A session template that INHERITS its config declares a partial
-    blob, and the finalize pass validates each declared blob, so a
-    required field would fail an inheriting child at ``build_registry``
-    with nothing in the error naming inheritance as the cause. The trap
-    is silent from the author's side, so the base refuses the model at
-    class definition rather than trusting a comment. Deleted by step
-    2.3b, which validates the merged blob instead.
-    """
-
-    class _Needy(AgwModel):
-        name: Literal["needy"]
-        must_have: str
-
-    with pytest.raises(StateError, match="must_have"):
-
-        class _NeedyIntegration(ConformingHarnessIntegration):
-            name: ClassVar[str] = "needy"
-            description: ClassVar[str] = "declares a required field"
-            config_model: ClassVar[type[AgwModel]] = _Needy
-
-
-def test_a_tag_and_an_owner_templated_reference_are_not_required_fields() -> None:
+def test_a_tag_and_an_owner_templated_reference_need_nothing_from_a_template() -> None:
     """Both are statically required and neither is something a template
-    can fail to supply: the tag is on every arm by construction, and the
-    model layer fills a templated reference from the owner."""
+    writes: the tag is on every arm by construction, and the model layer
+    fills a templated reference from the owner. Worth pinning because a
+    model that required something a template CAN write used to be refused
+    outright; now that the merged blob is what validates, a required field
+    is a legitimate thing to declare (see
+    ``tests/sessions/test_effective_config_validation.py``) and these two
+    are simply the cases no lineage has to supply at all."""
 
     class _Tagged(AgwModel):
         name: Literal["tagged"]
