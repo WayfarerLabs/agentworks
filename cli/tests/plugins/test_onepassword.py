@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
 from agentworks.bootstrap import build_registry
+from agentworks.capabilities.config import validate_capability_config
 from agentworks.config import load_config
 from agentworks.errors import (
     ConfigError,
@@ -29,6 +30,7 @@ from agentworks.errors import (
 from agentworks.plugins.onepassword import backend as op_mod
 from agentworks.plugins.onepassword.backend import OnePasswordBackend, _OpResult
 from agentworks.resources.graph import Readiness
+from agentworks.schema import RefOwner
 from agentworks.secrets import active_backends, resolve_secrets
 from agentworks.secrets.base import SecretDecl
 from agentworks.secrets.resolve import ActiveBackend, preview_resolution
@@ -136,7 +138,7 @@ def test_section_bearing_reference_validates_and_resolves(
     _install_runner(monkeypatch, runner)
     backend = OnePasswordBackend()
 
-    backend.validate_mapping("secret 's'", uri)
+    _validate(uri)
     secret = _decl("s-sec", backend_mappings={"onepassword": uri})
     got = backend.batch_get([(secret, secret.backend_mappings["onepassword"])])
     assert got == {"s-sec": "sectioned-value"}
@@ -163,22 +165,28 @@ def test_describe_lookup_none_when_unmapped() -> None:
     assert backend.describe_lookup(_decl("s"), None) is None
 
 
-# -- validate_mapping --------------------------------------------------------
+# -- Mapping validation ------------------------------------------------------
+#
+# Validation is the CORE's now, against the model this backend declares;
+# no backend code runs, which is why these go through the core entry
+# point rather than a method the backend no longer has.
 
 
-def test_validate_mapping_accepts_valid_forms() -> None:
-    backend = OnePasswordBackend()
-    backend.validate_mapping("secret 's'", "op://Work/npm/token")
-    backend.validate_mapping(
-        "secret 's'",
-        {"account": "my.1password.com", "reference": "op://Work/npm/token"},
+def _validate(mapping: object) -> None:
+    validate_capability_config(
+        kind="secret-backend",
+        name="onepassword",
+        blob=mapping,  # type: ignore[arg-type]
+        owner=RefOwner(kind="secret", name="s", label="secret/s.backend_mappings.onepassword"),
     )
+
+
+def test_mapping_accepts_valid_forms() -> None:
+    _validate("op://Work/npm/token")
+    _validate({"account": "my.1password.com", "reference": "op://Work/npm/token"})
     # A section segment (4 parts) is allowed, in both forms.
-    backend.validate_mapping("secret 's'", "op://Work/npm/section/token")
-    backend.validate_mapping(
-        "secret 's'",
-        {"account": "acct", "reference": "op://Work/npm/section/token"},
-    )
+    _validate("op://Work/npm/section/token")
+    _validate({"account": "acct", "reference": "op://Work/npm/section/token"})
 
 
 @pytest.mark.parametrize(
@@ -206,24 +214,20 @@ def test_validate_mapping_accepts_valid_forms() -> None:
         ),
     ],
 )
-def test_validate_mapping_rejects_bad_forms(mapping: Any) -> None:
-    backend = OnePasswordBackend()
+def test_mapping_rejects_bad_forms(mapping: Any) -> None:
     with pytest.raises(ConfigError):
-        backend.validate_mapping("secret 's'", mapping)
+        _validate(mapping)
 
 
-def test_validate_mapping_rejects_vault_item_field_table() -> None:
-    """A {vault, item, field} table is rejected as a plain unknown-key
+def test_mapping_rejects_vault_item_field_table() -> None:
+    """A {vault, item, field} table is rejected as a plain unknown-field
     ConfigError (naming the keys), with no migration language: those keys
     never shipped, so there is nothing to migrate from."""
-    backend = OnePasswordBackend()
-    with pytest.raises(ConfigError, match="unknown key") as excinfo:
-        backend.validate_mapping(
-            "secret 's'",
-            {"vault": "Work", "item": "npm", "field": "token"},
-        )
+    with pytest.raises(ConfigError, match="unknown field") as excinfo:
+        _validate({"vault": "Work", "item": "npm", "field": "token"})
     message = str(excinfo.value)
-    assert "'field', 'item', 'vault'" in message
+    for key in ("vault", "item", "field"):
+        assert f"{key}: unknown field; expected one of: account, reference" in message
     for word in ("no longer", "migrat", "legacy"):
         assert word not in message.lower()
 

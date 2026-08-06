@@ -16,7 +16,7 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 from types import MappingProxyType
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 import pytest
 
@@ -43,7 +43,7 @@ from agentworks.resources.graph import (
 )
 from agentworks.resources.kind import KIND_REGISTRY
 from agentworks.resources.origin import Origin
-from agentworks.schema import AgwModel
+from agentworks.schema import AgwModel, AgwRootModel
 from tests.plugins._fixtures import (
     ConformingSecretBackend,
     ConformingVMPlatform,
@@ -160,6 +160,17 @@ class _NotAPlatform:
     description = "has the metadata and none of the contract"
 
 
+class _PlatformWithoutAConfigModel(ConformingVMPlatform):
+    """Declares no config model at all, so nothing could validate its
+    blob. Spelled out rather than derived, because the fixture bases give
+    every subclass a model and a subclass cannot un-inherit one."""
+
+    name = "no-config-model-platform"
+    description = "declares no config model"
+    contract_version = 1
+    config_model = None  # type: ignore[assignment]
+
+
 class _AbstractPlatform(VMPlatform):
     """Derives from the contract but implements none of its power ops, so it
     can never be constructed."""
@@ -186,6 +197,7 @@ class _BackendMissingItsOperations:
     name = "barely-a-backend"
     description = "none of the backend operations"
     interactive = False
+    config_model: type[AgwRootModel[Any]] = AgwRootModel[str]
 
 
 class _BackendWithoutInteractive:
@@ -202,14 +214,9 @@ class _BackendWithoutInteractive:
     contract_version = 1
     name = "no-interactive-backend"
     description = "omits the interactive member"
+    config_model: type[AgwRootModel[Any]] = AgwRootModel[str]
 
     def not_ready(self) -> Readiness:
-        raise NotImplementedError
-
-    def validate_mapping(self, owner: str, mapping: object) -> None:
-        raise NotImplementedError
-
-    def dependencies(self, mapping: object) -> tuple[object, ...]:
         raise NotImplementedError
 
     def would_attempt(self, secret: object, mapping: object) -> bool:
@@ -279,6 +286,7 @@ class _PlatformWithAMistaggedModel(ConformingVMPlatform):
         ("secret-backend", _BackendMissingItsOperations, "does not implement the required"),
         ("secret-backend", _BackendWithoutInteractive, "missing the required secret-backend attributes"),
         ("vm-platform", _PlatformOnAnOldContract, "declares contract_version 0"),
+        ("vm-platform", _PlatformWithoutAConfigModel, "declares no config_model"),
         ("vm-platform", _PlatformWithoutAModel, "not a AgwModel subclass"),
         ("vm-platform", _PlatformWithAnUntaggedModel, "does not tag itself"),
         ("vm-platform", _PlatformWithAMistaggedModel, "does not tag itself"),
@@ -290,6 +298,7 @@ class _PlatformWithAMistaggedModel(ConformingVMPlatform):
         "missing-operations",
         "missing-attribute",
         "unsupported-version",
+        "no-config-model",
         "config-model-is-not-a-model",
         "config-model-carries-no-tag",
         "config-model-tagged-as-another-capability",

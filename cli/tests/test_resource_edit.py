@@ -209,7 +209,7 @@ def test_cli_edit_works_when_config_fails_validation(tmp_path: Path, monkeypatch
     assert result.exit_code == 0, result.output
     assert calls == [["test-editor", str(resources / "secrets.yaml")]]
     assert "config is currently failing validation" in result.output
-    assert "prompt backend has no meaning" in result.output
+    assert "prompt backend has no mapping vocabulary" in result.output
 
 
 def test_fallback_scan_tolerates_broken_sibling_files(tmp_path: Path) -> None:

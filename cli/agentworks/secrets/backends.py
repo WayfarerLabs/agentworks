@@ -43,14 +43,14 @@ so nothing here needs it until then.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from agentworks.secrets.env_var import EnvVarBackend
 from agentworks.secrets.prompt import PromptBackend
 
 if TYPE_CHECKING:
     from agentworks.resources.graph import Readiness
-    from agentworks.resources.reference import ConfigReference
+    from agentworks.schema import AgwRootModel
     from agentworks.secrets.base import MappingValue, SecretDecl
 
 
@@ -99,6 +99,21 @@ class SecretBackend(Protocol):
     the ``Capability`` ABC kinds (whose base carries the default) every
     backend spells it."""
 
+    config_model: type[AgwRootModel[Any]]
+    """The model this backend's per-secret ``backend_mappings`` value is
+    validated against, declared as a class attribute exactly as
+    ``contract_version`` is.
+
+    A ROOT model, and that is the kind's contract rather than this
+    backend's choice: a mapping value may be a bare string (env-var's is
+    an env var name), which no ``BaseModel`` can be. The core validates
+    against it and derives whatever references it implies; no backend
+    code runs for either.
+
+    The generic ``False`` opt-out is NOT part of what a model expresses:
+    the resolve loop strips it before any backend sees a mapping, so an
+    arm for it would declare a value that cannot arrive."""
+
     @property
     def name(self) -> str: ...
 
@@ -125,52 +140,6 @@ class SecretBackend(Protocol):
         interactive-optimism's concern at resolution time, kept optimistic).
         REQUIRED, not defaulted (Protocol bodies are not inherited by
         structural implementers): every registered backend implements it.
-        """
-        ...
-
-    def validate_mapping(
-        self,
-        owner: str,
-        mapping: MappingValue,
-    ) -> None:
-        """Validate one ``backend_mappings`` value addressed to this
-        backend -- capability-owned config in its per-secret host.
-        Invoked by the secret's own ``validate`` (run by the finalize
-        ``validate`` pass) for every PRESENT backend it addresses, so a
-        malformed mapping fails at ``build_registry`` with config vocabulary
-        instead of at first resolution (R9.9: every declared mapping, not just
-        the opted-in ones). The generic ``False`` opt-out never reaches this.
-        ``owner`` is display context.
-
-        REQUIRED, not defaulted: Protocol bodies are not inherited by
-        structural implementers, so every registered backend must
-        implement this (a backend with no mapping vocabulary rejects
-        everything, as prompt does).
-
-        NOTE: this invoked-validation API may be deprecated in favor of
-        capabilities pushing a declarative config schema definition at
-        registration time, letting the core engine validate (and derive
-        any implied references) without invoking the capability.
-        """
-        ...
-
-    def dependencies(
-        self,
-        mapping: MappingValue,
-    ) -> tuple[ConfigReference, ...]:
-        """The resource references one ``backend_mappings`` value implies:
-        the reference-deriving counterpart to :meth:`validate_mapping`
-        (this is the ``secret-backend`` half of the capability contract's
-        ``dependencies`` / ``validate`` split).
-
-        Total and non-throwing, like every capability's ``dependencies``.
-        Today every backend's mapping is a bare external identifier (an
-        env var name, an ``op://`` reference, or nothing) that implies no
-        agentworks resource, so all three shipped backends return ``()``;
-        the method exists so a ``secret``'s own ``dependencies`` can
-        compose its backends' implied edges uniformly when a future
-        backend implies one. REQUIRED, not defaulted (Protocol bodies are
-        not inherited by structural implementers).
         """
         ...
 

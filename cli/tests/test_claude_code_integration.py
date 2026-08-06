@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.capabilities.base import OperationScope, RunContext, ScopeLevel
-from agentworks.capabilities.config import validate_capability_config
+from agentworks.capabilities.config import capability_config_references, validate_capability_config
 from agentworks.errors import ConfigError, StateError
 from agentworks.plugins.claude.harness_integration import ClaudeCodeIntegration
 from agentworks.schema import RefOwner
@@ -68,18 +68,21 @@ def _session_scope() -> OperationScope:
 # -- config vocabulary -------------------------------------------------------
 
 
-def test_dependencies_imply_no_reference() -> None:
-    """``claude-code`` implies no edge, and ``dependencies`` is total: it
-    returns ``()`` for the known fields and even for a malformed blob."""
-    assert (
-        ClaudeCodeIntegration.dependencies(
-            "session-template/claude",
-            {"permission_mode": "acceptEdits", "model": "opus", "extra_args": ["--foo"]},
-        )
-        == ()
+def _refs(blob: dict[str, object]) -> tuple[object, ...]:
+    return capability_config_references(
+        kind="harness-integration",
+        name="claude-code",
+        blob=blob,
+        owner=RefOwner(kind="session-template", name="claude"),
     )
-    # Never raises, even on config that ``validate`` would reject.
-    assert ClaudeCodeIntegration.dependencies("session-template/claude", {"model": 3, "permision_mode": "typo"}) == ()
+
+
+def test_it_implies_no_reference() -> None:
+    """``claude-code`` names no Resource in its config, and extraction is
+    total: it returns ``()`` for the known fields and for a malformed blob
+    alike."""
+    assert _refs({"model": "x"}) == ()
+    assert _refs({"model": 3, "nonsense": "typo"}) == ()
 
 
 def _validate(blob: dict[str, object]) -> None:

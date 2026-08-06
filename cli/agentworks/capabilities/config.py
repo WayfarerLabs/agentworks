@@ -111,11 +111,12 @@ def validate_own_config(
     hand: there is no name to look up and no arm to select, so this skips
     the registry and the union entirely. The tagged synthesis still runs
     for a kind whose models carry a tag, because the model's own tag field
-    is required either way.
+    is required either way; a class of no registered kind has no such
+    contract and validates its blob as written.
     """
     descriptor = descriptor_for_impl(impl)
     model = offered_model(impl, facet)
-    discriminator = descriptor.config_schema.discriminator
+    discriminator = descriptor.config_schema.discriminator if descriptor is not None else None
     payload: object = blob
     if discriminator is not None:
         payload = tagged_config(str(impl.name), blob, discriminator=discriminator, owner=owner)  # type: ignore[attr-defined]

@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
 from agentworks.declared_resource import DeclaredResource
+from agentworks.schema import RefOwner
 from agentworks.source_location import SourceLocation, synthesized
 
 if TYPE_CHECKING:
@@ -77,7 +78,7 @@ class SecretDecl(DeclaredResource):
         backend name in first-encountered order (present backends in registry
         order, then any extra explicit keys).
         """
-        from agentworks.resources.reference import ResourceReference
+        from agentworks.resources.reference import ResourceReference, sourced_references
 
         source = ("secret", self.name)
         seen: set[str] = set()
@@ -104,6 +105,29 @@ class SecretDecl(DeclaredResource):
                 continue
             if backend.would_attempt(self, mapping):
                 emit(backend_name)
+        # (a2) whatever each declared mapping itself NAMES. Every shipped
+        # backend's mapping is an external identifier (an env var name, an
+        # ``op://`` reference) that implies no agentworks resource, so this
+        # contributes nothing today. It is wired anyway so secret-backend is
+        # not the one kind whose config references are structurally
+        # underivable: the core reads them off the backend's declared model,
+        # exactly as it does for the other three kinds.
+        from agentworks.capabilities.config import capability_config_references
+
+        for backend_name, mapping in self.backend_mappings.items():
+            if mapping is False:
+                continue
+            refs.extend(
+                sourced_references(
+                    capability_config_references(
+                        kind="secret-backend",
+                        name=backend_name,
+                        blob=mapping,  # type: ignore[arg-type]
+                        owner=self._mapping_owner(backend_name),
+                    ),
+                    source,
+                )
+            )
         # (b) explicit non-false mapping keys, including any naming no present
         # backend (a dangling edge that the "error" miss policy hard-errors).
         for backend_name, mapping in self.backend_mappings.items():
@@ -115,9 +139,10 @@ class SecretDecl(DeclaredResource):
     def validate(self, enabled_backends: frozenset[str]) -> None:
         """Throwing per-mapping spec check, run by the finalize ``validate``
         pass: every declared ``backend_mappings`` entry addressed to a PRESENT
-        AND ENABLED backend is validated via that backend's ``validate_mapping``
-        (R9.9: every declared mapping, not just the opted-in ones, so a stale
-        mapping for a configured-but-not-opted-in backend now fails at build).
+        AND ENABLED backend is validated by the CORE against that backend's
+        declared model (R9.9: every declared mapping, not just the opted-in
+        ones, so a stale mapping for a configured-but-not-opted-in backend
+        fails at build). No backend code runs.
 
         ``enabled_backends`` is the set of enabled ``secret-backend`` names the
         finalize pass threads from the graph's enablement axis. A mapping to a
@@ -128,7 +153,7 @@ class SecretDecl(DeclaredResource):
         ABSENT backend is the dangling edge the resolve pass already
         hard-errored (R9.11), so it never reaches here.
         """
-        from agentworks.secrets.backends import SECRET_BACKEND_REGISTRY
+        from agentworks.capabilities.config import validate_capability_config
 
         for backend_name, mapping in self.backend_mappings.items():
             if mapping is False:
@@ -137,9 +162,27 @@ class SecretDecl(DeclaredResource):
                 # Absent (dangling, already hard-errored) or present-but-disabled
                 # (inert until enabled): neither is validated here.
                 continue
-            backend = SECRET_BACKEND_REGISTRY.get(backend_name)
-            if backend is not None:
-                backend.validate_mapping(f"secret {self.name!r}", mapping)
+            validate_capability_config(
+                kind="secret-backend",
+                name=backend_name,
+                blob=mapping,  # type: ignore[arg-type]
+                owner=self._mapping_owner(backend_name),
+                location=self.error_location,
+            )
+
+    def _mapping_owner(self, backend_name: str) -> RefOwner:
+        """Who owns one ``backend_mappings`` value, for error framing.
+
+        The secret alone would be ambiguous: a secret may map several
+        backends, and a root model's errors carry no field path of their
+        own, so without the key an operator reading "must not be empty"
+        would not know WHICH mapping to fix.
+        """
+        return RefOwner(
+            kind="secret",
+            name=self.name,
+            label=f"secret/{self.name}.backend_mappings.{backend_name}",
+        )
 
 
 DEFAULT_BACKEND_CHAIN: tuple[str, ...] = ("env-var", "prompt")

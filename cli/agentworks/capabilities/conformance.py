@@ -168,17 +168,14 @@ def _config_model_error(descriptor: CapabilityKindDescriptor, impl: type) -> str
     levels therefore declares its offered models as DATA this can read,
     which is the second reason the offered set is a mapping rather than a
     computation.
-
-    The declaration is still OPTIONAL here, which is a bounded interim
-    with one trigger: no shipped capability declares a model until its
-    kind's commit lands, and the final commit of step 2.3 (the one that
-    deletes the invoked ``validate`` contract) makes it required, because
-    only then is a capability without a model genuinely unusable.
     """
     contract = descriptor.config_schema
     model = getattr(impl, "config_model", None)
     if model is None:
-        return None
+        return (
+            "it declares no config_model, so the framework has no schema to validate its "
+            "config against (a capability that accepts none declares a model with no fields)"
+        )
     if not isinstance(model, type) or not issubclass(model, contract.base):
         return (
             f"its config_model is {model!r}, which is not a {contract.base.__name__} subclass "

@@ -246,17 +246,6 @@ def test_legacy_toml_backend_unknown_name_still_errors(tmp_path: Path) -> None:
         )
 
 
-def test_shipped_backends_dependencies_are_total_and_empty() -> None:
-    """Every shipped backend's ``dependencies`` (the ``secret-backend``
-    half of the capability split) is total and implies no edge today: a
-    bare identifier mapping names no agentworks resource. It never raises,
-    even on a shape ``validate_mapping`` would reject."""
-    for backend in SECRET_BACKEND_REGISTRY.values():
-        assert backend.dependencies("AW_SECRET_X") == ()
-        assert backend.dependencies({"vault": "Work"}) == ()
-        assert backend.dependencies(None) == ()  # type: ignore[arg-type]
-
-
 def test_would_attempt_is_pure_of_secret_and_mapping() -> None:
     """``would_attempt`` must be a pure function of ``(secret, mapping)``
     with no host probing, so freezing it into edges at finalize is safe.

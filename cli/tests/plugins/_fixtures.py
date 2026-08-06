@@ -29,6 +29,7 @@ from agentworks.capabilities.harness_integration.base import HarnessIntegration
 from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
 from agentworks.plugins import Plugin
 from agentworks.resources.graph import Readiness
+from agentworks.schema import AgwRootModel
 
 if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
@@ -144,8 +145,11 @@ class ConformingGitCredentialProvider(GitCredentialProvider):
 
 class ConformingSecretBackend:
     """A structural ``SecretBackend``: a plain class, because the contract is
-    a ``Protocol``. It spells ``contract_version`` for the same reason every
-    real backend does (Protocol bodies are not inherited)."""
+    a ``Protocol``. It spells ``contract_version`` and ``config_model`` for
+    the same reason every real backend does (Protocol bodies are not
+    inherited)."""
+
+    config_model: type[AgwRootModel[Any]] = AgwRootModel[str]
 
     contract_version = 1
     interactive = False

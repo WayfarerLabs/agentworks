@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.capabilities.base import OperationScope, RunContext, ScopeLevel
-from agentworks.capabilities.config import validate_capability_config
+from agentworks.capabilities.config import capability_config_references, validate_capability_config
 from agentworks.capabilities.harness_integration import ShellIntegration
 from agentworks.errors import ConfigError, StateError
 from agentworks.schema import RefOwner
@@ -77,25 +77,24 @@ def _session_scope(
     )
 
 
-# -- config vocabulary: dependencies + validate ------------------------------
+# -- config vocabulary: extraction + validation -------------------------------
 
 
-def test_dependencies_imply_no_reference() -> None:
-    """``shell`` implies no edge, and ``dependencies`` is total: it
-    returns ``()`` for the known fields and even for a malformed blob."""
-    assert (
-        ShellIntegration.dependencies(
-            "session-template/claude",
-            {
-                "command": "claude",
-                "resume_command": "claude --resume",
-                "required_commands": ["claude", "rg"],
-            },
-        )
-        == ()
+def _refs(blob: dict[str, object]) -> tuple[object, ...]:
+    return capability_config_references(
+        kind="harness-integration",
+        name="shell",
+        blob=blob,
+        owner=RefOwner(kind="session-template", name="claude"),
     )
-    # Never raises, even on config that ``validate`` would reject.
-    assert ShellIntegration.dependencies("session-template/claude", {"commnad": "typo", "command": 3}) == ()
+
+
+def test_it_implies_no_reference() -> None:
+    """``shell`` names no Resource in its config, and extraction is
+    total: it returns ``()`` for the known fields and for a malformed blob
+    alike."""
+    assert _refs({"model": "x"}) == ()
+    assert _refs({"model": 3, "nonsense": "typo"}) == ()
 
 
 def _validate(blob: dict[str, object]) -> None:
@@ -178,7 +177,7 @@ def test_merge_never_launders_an_invalid_required_commands_entry() -> None:
     merged = ShellIntegration.merge_config({}, {"required_commands": ["rg", 5]})
     assert merged["required_commands"] == ["rg", 5]
     with pytest.raises(ConfigError, match="required_commands"):
-        ShellIntegration.validate("session-template/t", merged)
+        _validate(merged)
 
 
 def test_merge_child_overriding_only_command_keeps_parent_required() -> None:

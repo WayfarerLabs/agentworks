@@ -208,9 +208,9 @@ clones.
 ### The Contract
 
 A new provider implements this surface (see `base.py` for the full docstrings). The lifecycle it
-plugs into (the `dependencies` / `validate` split, the preflight/runup boundary, ops after the
-resolve pass) is the shared capability contract in `../README.md`; what follows is what is specific
-to a credential provider.
+plugs into (the declared config model, the preflight/runup boundary, ops after the resolve pass) is
+the shared capability contract in `../README.md`; what follows is what is specific to a credential
+provider.
 
 #### Class Identity and Registration
 
@@ -220,52 +220,43 @@ Register the class in `GIT_CREDENTIAL_PROVIDER_REGISTRY` for a core built-in; a 
 provider is seated into the same registry by the plugin machinery at import and its row publishes
 with a `system-plugin` origin instead (the `azdo` shape).
 
-#### The Token-Secret Edge: Total and Non-Throwing
+#### The Token-Secret Edge: A Marker, Not a Method
 
-The token-sourcing providers both do the same thing: return the one `ConfigReference` the PAT config
-implies. The shared helper `token_dependency(owner, config)` derives it: the `provider_config`'s
-`token` field NAMES the secret (a bare `git-token-<name>` default from `default_token_secret` when
-absent), and a malformed `token` field (present but not a non-empty string) makes the edge's
-identity underivable, so the helper returns `None` and the edge is omitted rather than raised. Both
-`github` and `azdo` wrap it identically:
+The token-sourcing providers share one base model, `TokenSourcedConfig`, whose single field carries
+the whole derivation:
 
 ```python
-@classmethod
-def dependencies(cls, owner: str, config: Mapping[str, object]) -> tuple[ConfigReference, ...]:
-    ref = token_dependency(owner, config)
-    return (ref,) if ref is not None else ()
+class TokenSourcedConfig(AgwModel):
+    token: Annotated[NonEmptyStr, SecretRef(usage="the auth token", default_template="git-token-{owner_name}")]
 ```
 
-Declaring that edge is what puts the token secret into the credential node's `secret_refs`, which is
-what gets it into the boundary resolve and therefore delivered to `ctx.secret` at runup. A future
-MINTING provider would instead declare its bootstrap secret(s) here (or none), and mint the token in
-an op rather than sourcing it.
+The marker says what the field MEANS, and the core does the rest: extraction reads it off the model
+(total, never raising; a malformed `token` makes the edge's identity underivable, so the edge is
+omitted rather than raised), validation fills the owner template when the field is absent, and
+emitted schema carries the same facts. Declaring that edge is what puts the token secret into the
+credential node's `secret_refs`, which is what gets it into the boundary resolve and therefore
+delivered to `ctx.secret` at runup. A future MINTING provider sources no token, so it extends
+`AgwModel` directly, declares whatever bootstrap secrets it needs, and mints in an op.
 
-#### Validation: Shape and Vocabulary Only
+#### Config: One Declared Model per Provider
 
-The throwing half of the split. It calls `validate_token_field(owner, config)` (the correctness
-check for the `token` field: present means a non-empty secret name) and adds its own provider-shaped
-rules:
+Each provider extends `TokenSourcedConfig` with its own `name` tag and its provider-shaped fields:
 
-- `github` (`_validated_scope`): `repos` and `owner` are mutually exclusive (a fine-grained PAT is
-  scoped to one or the other), `repos` is a non-empty list of `"owner/name"` strings restricted to
-  the GitHub name charset (`_NAME_RE`), `owner` is a single name with no slash, and an unknown field
-  raises (with a targeted hint when it is the singular `repo`). The charset rule has teeth: these
-  values are interpolated verbatim into gitconfig section headers and store URLs, so anything
-  outside the set would corrupt the VM's git config at first use.
-- `azdo`: `org` is REQUIRED and must match `_ORG_RE` (it is interpolated into the generated helper),
-  and the only other permitted field is `token`.
+- `github` (`GitHubConfig`): `repos` and `owner` are mutually exclusive (a fine-grained PAT is
+  scoped to one or the other), enforced by a model validator; both are pattern-constrained to the
+  GitHub name charset, because they are interpolated verbatim into gitconfig headers and store URLs.
+- `azdo` (`AzDOConfig`): `org` is REQUIRED and pattern-constrained for the same reason.
 
-`validate` stays limited to shape and vocabulary. Host-owned choice sets remain the host's
+The model stays limited to shape and vocabulary. Host-owned choice sets remain the host's
 responsibility, and checks requiring external state belong in runup.
 
 #### Construction: Cheap, No I/O
 
-The base `__init__` binds `(owner_name, config)` and re-runs `validate` (so a shape error dies at
-construction, never later); the provider constructor re-parses its own scope shape from the bound
-config (`github` re-runs `_validated_scope`, `azdo` re-reads `org`), which cannot raise because
-`validate` already passed. Nothing else: no network, no token resolution, no probe. The instance
-never holds a token or a resolver; the value arrives through the context at runup and op time.
+The base `__init__` validates the blob into the declared model and binds the validated INSTANCE, so
+a shape error dies at construction, never later, and every provider reads its scope as a typed field
+(`self.config.repos`, `self.config.org`) rather than re-parsing a dict. Nothing else: no network, no
+token resolution, no probe. The instance never holds a token or a resolver; the value arrives
+through the context at runup and op time.
 
 #### Verifying the Token at Runup
 
@@ -277,8 +268,8 @@ def runup(self, ctx: RunContext) -> None:
     self._verify_token(ctx.secret(self.secret_name))
 ```
 
-`secret_name` is the token secret the credential sources from: the single secret its `dependencies`
-declared (default `git-token-<name>`), read back from the node's `secret_refs`. A provider
+`secret_name` is the token secret the credential sources from: a plain read of `self.config.token`,
+which the model layer already resolved to `git-token-<name>` when the field was absent. A provider
 implements exactly one slot, `_verify_token(token)`, and drives it through the shared `_probe_pat`
 helper. `_probe_pat` does the whole HTTP dance and the failure classification, so a provider only
 supplies the URL, the auth headers, the reject-status set, and a host label:
@@ -355,10 +346,9 @@ are the contract:
 | Success enrichment    | announces `login` and (fine-grained) expiry           | announces success only                                     |
 | `review_remote` flags | any embedded username                                 | only a username that is not the org                        |
 
-The shared shape underneath: identical `dependencies` (both wrap `token_dependency`), both call
-`validate_token_field`, both drive `_verify_token` through `_probe_pat`, both return
-`credential_lines` and a `HelperEntry`. A third provider should look the same from the outside and
-differ only in these host-policy rows.
+The shared shape underneath: one base config model carrying the marked `token` field, both driving
+`_verify_token` through `_probe_pat`, both returning `credential_lines` and a `HelperEntry`. A third
+provider should look the same from the outside and differ only in these host-policy rows.
 
 ### Best Practices
 
@@ -368,10 +358,10 @@ Grounded in the two shipped providers.
 
 A provider names its token secret and reads the value only through the context; it never holds a
 token. The `provider_config`'s `token` field carries a NAME (defaulting to `git-token-<name>`), the
-edge is declared in `dependencies`, and the value is delivered to `runup` and the materials op
-through the framework's resolve pass. This is the same discipline the cloud platforms follow for
-their API credentials (see the credentials section of `vm_platform/README.md`): nothing ever invites
-an operator to paste a live credential into a plaintext config file.
+edge comes from the field's `SecretRef` marker, and the value is delivered to `runup` and the
+materials op through the framework's resolve pass. This is the same discipline the cloud platforms
+follow for their API credentials (see the credentials section of `vm_platform/README.md`): nothing
+ever invites an operator to paste a live credential into a plaintext config file.
 
 #### Probe at Runup, Not Before and Not at Construct
 
@@ -394,10 +384,10 @@ classification.
 #### Keep Interpolated Values Charset-Safe
 
 Anything a provider puts into a store URL, a gitconfig header, or the generated helper is validated
-to a safe charset at its source: github scopes via `_NAME_RE`, the azdo org via `_ORG_RE`, and the
-materials assembly re-checks store usernames and scope values with `_assert_sh_safe` before baking
-them into sh. Validate new config fields the same way; the helper generator is safe by construction,
-not by a distant invariant.
+to a safe charset at its source: github scopes via the `GitHubName` / `GitHubRepo` patterns, the
+azdo org via `AzDOOrg`, and the materials assembly re-checks store usernames and scope values with
+`_assert_sh_safe` before baking them into sh. Validate new config fields the same way; the helper
+generator is safe by construction, not by a distant invariant.
 
 #### Idempotency Is Free Here, and Stays Free
 
@@ -420,9 +410,9 @@ templates:
   `build_credential_materials` over scoped and unscoped credentials, the generated helper's
   selection (verified against a real git version), scope-collision errors, and the store-username
   disjointness rule.
-- **Config contract:** `cli/tests/test_capability_config_contract.py`. The `dependencies` /
-  `validate` split at the `provider_config` boundary: accepted shapes, unknown-field and wrong-type
-  raises, and the token edge extraction.
+- **Config contract:** `cli/tests/test_capability_config_contract.py`. The `dependencies` / declared
+  model at the `provider_config` boundary: accepted shapes, unknown-field and wrong-type raises, and
+  the token edge extraction.
 - **Kind and miss policy:** `cli/tests/resources/test_git_credential_provider_kind.py` (the provider
   kind and its published rows) and `cli/tests/test_git_credentials_typo_errors.py` (the
   `git-credential` kind's error miss policy: a typo'd or undeclared name errors at finalize with the

@@ -10,13 +10,14 @@ from __future__ import annotations
 
 import subprocess
 from contextlib import contextmanager
-from typing import Any
+from typing import Any, Literal
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from agentworks.capabilities.vm_platform import VMPlatform
 from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
+from agentworks.schema import AgwModel
 
 
 def _fake_vm(name: str = "wsltest", tailscale_host: str | None = None) -> Any:
@@ -308,9 +309,14 @@ def test_vm_active_releases_job_when_assignment_fails() -> None:
 def test_base_platform_vm_active_is_nullcontext() -> None:
     """Lima/Azure/Proxmox inherit the no-op default. Nothing is spawned."""
 
+    class _StubConfig(AgwModel):
+        name: Literal["stub"]
+
     class _Stub(VMPlatform):
         name = "stub"
         description = "stub"
+        contract_version = 1
+        config_model = _StubConfig
 
         def create(self, request: Any, ctx: Any) -> Any:
             raise NotImplementedError

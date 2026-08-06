@@ -258,17 +258,16 @@ SECRET_BACKEND_DESCRIPTOR = CapabilityKindDescriptor(
     required_operations=frozenset(
         {
             "not_ready",
-            "validate_mapping",
-            "dependencies",
             "would_attempt",
             "describe_lookup",
             "batch_get",
         },
     ),
-    # A Protocol declares ``interactive`` but cannot supply it, and the
-    # resolve loop reads it on every chain pass, so its presence is checked
-    # rather than assumed.
-    required_attributes=frozenset({"interactive"}),
+    # A Protocol declares these but cannot supply them, and the framework
+    # reads both without constructing (the resolve loop reads ``interactive``
+    # on every chain pass; the core reads ``config_model`` to validate a
+    # mapping), so their presence is checked rather than assumed.
+    required_attributes=frozenset({"interactive", "config_model"}),
     entry_factory=_backend_entry,
     kind_strategy=KIND_REGISTRY["secret-backend"],
     readiness=_backend_readiness,

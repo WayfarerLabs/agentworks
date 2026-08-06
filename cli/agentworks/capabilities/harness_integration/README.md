@@ -200,32 +200,36 @@ A new harness integration implements this surface (see `base.py` for the full do
 `name` and `description` ClassVars (the registry row), inherited `owner_kind = "session-template"`
 (error framing: config errors render as `session-template/<name>`).
 
-#### Validation: Shape and Vocabulary Only
+#### Config: One Declared Model
 
-Unknown fields raise `ConfigError` naming the integration and the field(s); each present field is
-type-checked. Two rules with teeth:
+The integration declares `config_model`, an `AgwModel` carrying its own `name` as a `Literal` tag
+plus one field per accepted key, each with its type and an attribute docstring that IS its
+operator-facing description. The core validates against it (closed-world, so an unknown key is a
+hard error naming the valid fields) and extracts whatever references it marks. No integration code
+runs for either. Two rules with teeth:
 
-- **No completeness rules here.** `validate` runs per declared blob, and a child template may
-  declare a partial blob that only becomes complete after the inheritance merge. Required-field and
-  cross-field rules belong in the second `validate` call the resolver makes on the merged blob (no
-  shipped integration has any; the slot exists).
-- **Do not validate tool-owned choice sets.** `claude-code` forwards `permission_mode` and `model`
+- **Careful with required fields.** Validation runs per DECLARED blob at finalize, and a child
+  template may declare a partial blob that only becomes complete after the inheritance merge; the
+  merged blob is validated again at resolve, which is where a required field is actually required.
+  No shipped integration has one.
+- **Do not model tool-owned choice sets.** `claude-code` forwards `permission_mode` and `model`
   values verbatim: the valid choices are the tool's and drift between its releases, so a stale
   integration-side enum would reject values a newer CLI accepts. An invalid value surfaces as the
   tool's own startup error in the pane, which is the right place. That promise holds even when the
   workload dies too fast for the pane to ever be attached: `session create` / `session resume`
   detect the instantly-dead pane, capture its output, and fold it into their own error message.
 
-#### Declaring Dependencies: Total and Pure
+#### Declaring References: A Marker, Not a Method
 
-`dependencies` returns the resource references the config blob implies, secrets above all. Never
-raises (malformed fields just omit their edge; `validate` owns the raising). Every shipped
-integration returns `()`; the plumbing behind it is live and tested at the framework level: the
-session node exposes the integration's declared references through its `config_secret_refs` (what
-the preflight sweep predicts resolvability over, with owner/usage framing sourced to the session
-template) and derives its bare-name `secret_refs` union from them, with values delivered through
-`ctx.secret(name)`. No shipped integration declares a secret yet, so a secret-declaring integration
-should expect to be the first real exerciser of that path.
+A field that names a secret (or any other resource) carries a `SecretRef` / `ResourceRef` marker,
+optionally with an owner-templated default. The core reads the markers off the model: total, never
+raising (a malformed field just omits its edge; validation owns the raising). No shipped integration
+marks a field, so extraction yields `()` for all three; the plumbing behind it is live and tested at
+the framework level: the session node exposes the integration's declared references through its
+`config_secret_refs` (what the preflight sweep predicts resolvability over, with owner/usage framing
+sourced to the session template) and derives its bare-name `secret_refs` union from them, with
+values delivered through `ctx.secret(name)`. No shipped integration declares a secret yet, so a
+secret-declaring integration should expect to be the first real exerciser of that path.
 
 #### Config Inheritance, Decided per Field
 
@@ -248,9 +252,10 @@ cannot leak across it.
 
 #### Construction: Cheap, No I/O
 
-The base `__init__` binds `(owner_name, config)` and re-runs `validate`; the integration constructor
-adds the session identity kwargs and the `state` blob. Nothing else: no probing, no network, no
-minting. Anything that needs the world happens in readiness or ops.
+The base `__init__` validates the blob into the declared model and binds the validated instance
+(reachable as `self.config`, typed); the integration constructor adds the session identity kwargs
+and the `state` blob. Nothing else: no probing, no network, no minting. Anything that needs the
+world happens in readiness or ops.
 
 #### Readiness: One Probe to Implement
 

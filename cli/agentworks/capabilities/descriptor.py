@@ -265,8 +265,9 @@ def capability_descriptors() -> tuple[CapabilityKindDescriptor, ...]:
     )
 
 
-def descriptor_for_impl(impl: type) -> CapabilityKindDescriptor:
-    """The descriptor of the kind ``impl`` implements.
+def descriptor_for_impl(impl: type) -> CapabilityKindDescriptor | None:
+    """The descriptor of the kind ``impl`` implements, or ``None`` when it
+    implements none.
 
     Derived from the implementation contract rather than from a
     ``capability_kind`` attribute each implementation would restate: the
@@ -279,16 +280,20 @@ def descriptor_for_impl(impl: type) -> CapabilityKindDescriptor:
     kind, whose implementations derive from nothing. That is the boundary
     of what needs it: secret backends never construct through the shared
     capability lifecycle, and every caller reaches them by kind and name.
+
+    ``None`` rather than an error for a class of no kind, and that is not
+    a tolerance: registration refuses any implementation that does not
+    derive from its kind's contract, so the only classes reaching here
+    with no kind are ones that never register (a bare ``Capability``
+    subclass in a test, exercising the base's own contract). Such a class
+    has no kind, so it has no kind-level config contract either, which is
+    exactly what the caller needs to know.
     """
     for descriptor in capability_descriptors():
         contract = descriptor.implementation_contract
         if not getattr(contract, "_is_protocol", False) and issubclass(impl, contract):
             return descriptor
-    known = ", ".join(d.kind for d in capability_descriptors())
-    raise StateError(
-        f"{impl.__name__} does not derive from any capability kind's implementation contract "
-        f"(known capability kinds: {known})"
-    )
+    return None
 
 
 def descriptor_for(kind: str) -> CapabilityKindDescriptor:

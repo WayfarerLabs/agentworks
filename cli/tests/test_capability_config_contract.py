@@ -285,7 +285,7 @@ def test_env_var_mapping_validated_at_build_registry(tmp_path: Path) -> None:
         ),
     )
     config = _config(tmp_path)
-    with pytest.raises(ConfigError, match="env-var backend must be a non-empty string"):
+    with pytest.raises(ConfigError, match="backend_mappings.env-var: must be a string"):
         build_registry(config)
 
 
@@ -299,7 +299,7 @@ def test_prompt_rejects_any_mapping(tmp_path: Path) -> None:
         ManifestDoc("secret", "npm-token", {"backend_mappings": {"prompt": "ignored"}}, description="npm token"),
     )
     config = _config(tmp_path)
-    with pytest.raises(ConfigError, match="prompt backend has no meaning"):
+    with pytest.raises(ConfigError, match="prompt backend has no mapping vocabulary"):
         build_registry(config)
 
 
@@ -337,7 +337,7 @@ def test_declared_mapping_for_non_opted_in_backend_is_validated_at_build(tmp_pat
         backends = ["prompt"]
         """,
     )
-    with pytest.raises(ConfigError, match="env-var backend must be a non-empty string"):
+    with pytest.raises(ConfigError, match="backend_mappings.env-var: must be a string"):
         build_registry(config)
 
 
@@ -349,7 +349,7 @@ def test_prompt_rejects_structured_mapping_too(tmp_path: Path) -> None:
         ),
     )
     config = _config(tmp_path)
-    with pytest.raises(ConfigError, match="prompt backend has no meaning"):
+    with pytest.raises(ConfigError, match="prompt backend has no mapping vocabulary"):
         build_registry(config)
 
 

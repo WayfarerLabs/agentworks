@@ -6,13 +6,13 @@ the ``SecretBackend`` API.
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from agentworks.errors import ConfigError
+from agentworks.schema import AgwRootModel, NonEmptyStr
 
 if TYPE_CHECKING:
     from agentworks.resources.graph import Readiness
-    from agentworks.resources.reference import ConfigReference
     from agentworks.secrets.base import MappingValue, SecretDecl
 
 
@@ -23,6 +23,16 @@ def env_var_name_for(secret_name: str) -> str:
     backend name ``env-var`` is kebab-case (operator-typed identifier).
     """
     return "AW_SECRET_" + secret_name.upper().replace("-", "_")
+
+
+class EnvVarMapping(AgwRootModel[NonEmptyStr]):
+    """An env-var mapping is the NAME of the environment variable to read.
+
+    A bare string, not a table, which is why it is a root model: there is
+    no key vocabulary here, only the identifier. Omit the mapping to use
+    the ``AW_SECRET_<NAME>`` convention derived from the secret's own
+    name.
+    """
 
 
 class EnvVarBackend:
@@ -40,6 +50,7 @@ class EnvVarBackend:
     """
 
     contract_version = 1
+    config_model: type[AgwRootModel[Any]] = EnvVarMapping
     name = "env-var"
     description = "resolves from AW_SECRET_<NAME> environment variables"
     interactive = False
@@ -51,22 +62,6 @@ class EnvVarBackend:
         from agentworks.resources.graph import Readiness
 
         return Readiness.ready()
-
-    def validate_mapping(self, owner: str, mapping: MappingValue) -> None:
-        # The load-time gate; ``_resolved_name`` keeps its own check as
-        # defense in depth for hand-built decls that never pass through
-        # validate_chain.
-        if not isinstance(mapping, str) or not mapping:
-            raise ConfigError(
-                f"{owner}: backend_mappings for the env-var backend must "
-                f"be a non-empty string (an env var name) or false"
-            )
-
-    def dependencies(self, mapping: MappingValue) -> tuple[ConfigReference, ...]:
-        """An env-var mapping is a bare env var name; it implies no
-        agentworks resource, so the edge set is empty (total,
-        non-throwing)."""
-        return ()
 
     def _resolved_name(self, secret: SecretDecl, mapping: MappingValue | None) -> str:
         if isinstance(mapping, str):

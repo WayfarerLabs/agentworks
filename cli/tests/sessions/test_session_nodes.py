@@ -872,9 +872,16 @@ def _toy_harness_integration(harness_integration_name: str) -> type:
 
     from agentworks.capabilities.harness_integration import HarnessIntegration
 
+    class _ToyConfig(AgwModel):
+        """The toy integration takes no config beyond its own tag."""
+
+        name: str
+
     class _ToyIntegration(HarnessIntegration):
         name: ClassVar[str] = harness_integration_name
         description: ClassVar[str] = "toy"
+        contract_version: ClassVar[int] = 1
+        config_model: ClassVar[type[AgwModel]] = _ToyConfig
 
         def start(self, ctx: RunContext) -> str:
             self._state["session_id"] = f"{harness_integration_name}-id"

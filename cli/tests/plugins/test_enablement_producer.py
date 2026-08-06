@@ -28,7 +28,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Annotated, Literal, cast
+from typing import TYPE_CHECKING, Annotated, Any, Literal, cast
 
 import pytest
 
@@ -46,7 +46,7 @@ from agentworks.resources.graph import (
 )
 from agentworks.resources.origin import Origin
 from agentworks.resources.registry import Registry
-from agentworks.schema import AgwModel, NonEmptyStr, SecretRef
+from agentworks.schema import AgwModel, AgwRootModel, NonEmptyStr, SecretRef
 from agentworks.secrets.base import SecretDecl
 from agentworks.secrets.resolve import active_backends
 from agentworks.sessions.manager._env import _display_harness_integration
@@ -109,17 +109,18 @@ class _FixtureProvider(ConformingGitCredentialProvider):
     # set stays just the provider edge.
 
 
+class _FixtureBackendMapping(AgwRootModel[Literal["good"]]):
+    """A mapping vocabulary of exactly one accepted value, so the sentinel
+    ``"bad"`` is rejected and the disabled-backend
+    mapping-validation exclusion is provable."""
+
+
 class _FixtureBackend(ConformingSecretBackend):
-    """A structural ``SecretBackend`` (Protocol, so a plain class). Trivial but
-    functional: ``validate_mapping`` rejects the sentinel ``"bad"`` so the
-    disabled-backend mapping-validation exclusion is provable."""
+    """A structural ``SecretBackend`` (Protocol, so a plain class)."""
 
     name = "fixture-backend"
     description = "Fixture secret backend (test plugin)"
-
-    def validate_mapping(self, owner: str, mapping: MappingValue) -> None:
-        if mapping == "bad":
-            raise ConfigError(f"{owner}: fixture-backend mapping {mapping!r} is malformed")
+    config_model: type[AgwRootModel[Any]] = _FixtureBackendMapping
 
     def would_attempt(self, secret: SecretDecl, mapping: MappingValue | None) -> bool:
         return mapping is not None
@@ -303,7 +304,7 @@ def test_disabled_plugin_backend_mapping_validation_is_inert_until_enabled() -> 
 
     with seated_plugin(_capable_plugin()):
         _build(enabled=False)  # disabled: malformed mapping inert, build succeeds
-        with pytest.raises(ConfigError, match="fixture-backend mapping"):
+        with pytest.raises(ConfigError, match="backend_mappings.fixture-backend: must be one of"):
             _build(enabled=True)  # enabled: the same mapping fails validation
 
 

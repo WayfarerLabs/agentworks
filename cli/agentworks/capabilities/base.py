@@ -5,12 +5,12 @@ A capability instance moves through stages with sharply different
 contracts (the full capability model is documented in
 ``capabilities/README.md``):
 
-1. ``dependencies`` / ``validate``: pure classmethods; ``dependencies``
-   extracts a config blob's implied resource references (total,
-   non-throwing) and ``validate`` is the throwing shape check.
-2. construct: cheap, config-valid by construction (re-runs
-   ``validate``); binds ``(name, config)``, never resolved
-   secret values. No network, no resolution, no prompt.
+1. declaration: a capability DECLARES its config as a model
+   (``config_model``) and the core does the rest, invoking no capability
+   code to validate a blob or to derive the references it implies.
+2. construct: cheap, config-valid by construction (the blob validates
+   into the declared model, and the validated INSTANCE is what binds),
+   never resolved secret values. No network, no resolution, no prompt.
 3. ``preflight``: pre-resolve, read-only, best-effort readiness;
    checks unauthenticated reachability / tools (the declared secrets'
    resolvability is predicted centrally by the holding node, not by
@@ -373,46 +373,30 @@ class Capability(ABC):
         driven at several levels has to say which one, and adding it
         later would touch every construction site.
         """
-        self.owner_name = owner_name
-        self._raw_config = config
-        owner = RefOwner(kind=self.owner_kind, name=owner_name)
-        model = getattr(type(self), "config_model", None)
-        if model is None:
-            # INTERIM, deleted with the invoked contract itself (step 2.3's
-            # last commit): a capability whose kind has not been migrated
-            # yet still validates and extracts through its own classmethods.
-            # Only that commit can remove this, because only then is a
-            # capability without a declared model genuinely unusable.
-            type(self).validate(owner.display, config)
-            self._config: BaseModel | None = None
-            self._secret_refs: tuple[ConfigReference, ...] = tuple(
-                ref for ref in type(self).dependencies(owner.display, config) if ref.kind == "secret"
-            )
-            return
         from agentworks.capabilities.config import validate_own_config
         from agentworks.schema import extract_references
 
+        self.owner_name = owner_name
+        owner = RefOwner(kind=self.owner_kind, name=owner_name)
+        model = type(self).config_for(facet)
         self._config = validate_own_config(type(self), config, owner=owner, facet=facet)
         # Extracted from the RAW blob, exactly as the finalize pass does,
         # so an instance's declared secrets are the same set the graph
         # carries for it.
-        self._secret_refs = tuple(ref for ref in extract_references(model, config, owner) if ref.kind == "secret")
+        self._secret_refs: tuple[ConfigReference, ...] = tuple(
+            ref for ref in extract_references(model, config, owner) if ref.kind == "secret"
+        )
 
     @property
-    def config(self) -> Any:
-        """This instance's bound config.
+    def config(self) -> BaseModel:
+        """This instance's bound config: the validated, fully-defaulted
+        model instance.
 
-        The validated MODEL instance where the capability declares one,
-        and the raw mapping where it does not.
-
-        The return type is the interim half of that sentence, and it is
-        deliberately loud: it is ``Any`` only until every capability kind
-        declares a model, at which point it becomes the model and
-        ``_raw_config`` goes. Every migrated capability narrows it to its
-        own model type immediately, so the hole is only ever open for a
-        kind that has not been migrated yet.
+        Every capability narrows this to its own model type through
+        :meth:`_config_as`, so an operation reads a typed field and mypy
+        checks it.
         """
-        return self._config if self._config is not None else self._raw_config
+        return self._config
 
     def _config_as[M: BaseModel](self, model: type[M]) -> M:
         """This instance's bound config, as ``model``.
@@ -435,51 +419,6 @@ class Capability(ABC):
     @property
     def _owner_display(self) -> str:
         return f"{self.owner_kind}/{self.owner_name}"
-
-    @classmethod
-    def dependencies(cls, owner: str, config: Mapping[str, object]) -> tuple[ConfigReference, ...]:
-        """The resource references ``config`` (the blob owned by ``owner``)
-        implies: this capability's config-derived graph out-edges.
-
-        Total and non-throwing: it never raises on a malformed blob and
-        emits every edge it can derive best-effort, omitting only an edge
-        whose identity depends on a field that is itself malformed (the
-        throwing correctness check is :meth:`validate`). Invoked by the
-        consuming resource's ``dependencies(context)`` at finalize and,
-        for the secret sub-refs, at construct. MUST be pure. ``owner`` is
-        display context (host-agnostic, never dispatched on); most kinds
-        that imply an edge derive its default name from it.
-
-        Base behavior: accepts no configuration, so it implies no
-        references. Subclasses with config-implied edges override
-        wholesale.
-        """
-        return ()
-
-    @classmethod
-    def validate(cls, owner: str, config: Mapping[str, object]) -> None:
-        """Validate ``config`` (the blob owned by ``owner``): the throwing
-        correctness check for the config block, raising ``ConfigError`` on
-        a malformed blob.
-
-        Invoked at each source's blob boundary (manifest decode with
-        ``file:line`` framing; legacy TOML loaders) and again at construct
-        (the construct-time invariant); MUST be pure. ``owner`` is display
-        context for error messages: host-agnostic, never dispatched on.
-
-        Base behavior: accepts no configuration. Subclasses with config
-        override wholesale.
-
-        NOTE: this invoked-validation API may be deprecated in favor of
-        capabilities pushing a declarative config schema definition at
-        registration time (fields typed as resource references to
-        specific kinds, with usage information), letting the core
-        engine validate and derive references without invoking the
-        capability.
-        """
-        if config:
-            display = getattr(cls, "name", cls.__name__)
-            raise ConfigError(f"{owner}: the {display} capability accepts no configuration; got {sorted(config)}")
 
     @classmethod
     def not_ready(cls, config: Mapping[str, object]) -> Readiness:

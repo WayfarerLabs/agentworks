@@ -273,11 +273,11 @@ process having warmed a credential cache.
 
 **Class-level contract methods**:
 
-- `dependencies(owner, config) -> tuple[ConfigReference, ...]` (total, non-throwing) declares any
-  secret references the `platform_config` implies, and `validate(owner, config) -> None` is the
-  throwing shape check. Both are pure classmethods. Proxmox returns a
-  `ConfigReference(kind="secret", ...)` for its API token from `dependencies`; declaring it is what
-  later lets the op read it (below).
+- `config_model` declares what the `platform_config` IS, as an `AgwModel` carrying the platform's
+  own name as a `Literal` tag plus one field per accepted key. The core validates against it
+  (closed-world) and extracts the references its `SecretRef` / `ResourceRef` markers imply (total,
+  never raising); no platform code runs for either. Proxmox marks its `token_secret` field; the
+  marker is what later lets the op read that secret (below).
 - `legacy_platform_metadata(cls, row, legacy) -> dict[str, str]` maps pre-migration DB rows into the
   `platform_metadata` shape, consumed only by the one-shot DB migration.
 
@@ -306,8 +306,8 @@ author most needs to get right.
 accessor methods rather than bare fields so a future permission model can gate them without changing
 signatures: `admin_target()` / `agent_target()` return execution `Transport`s, and `secret(name)`
 returns a resolved secret value. `ctx.secret(name)` raises a typed `ConfigError` if the context was
-assembled without a resolve pass, and it is scoped: an op can read only the names its `dependencies`
-declared.
+assembled without a resolve pass, and it is scoped: an op can read only the names its config model
+marked.
 
 What differs between stages is timing, not shape. `preflight` gets the command-start slice (existing
 targets only, no resolved secrets, which is what makes it structurally dependency-blind); `runup`
@@ -356,12 +356,13 @@ beside `secret` without a breaking change to declared sites. The `aws-ec2` platf
 analogue realized: a `credentials` table with the plain `access_key_id` and an `access_key_secret`
 naming the secret access key.
 
-**2. Declare the edge from `dependencies`, validate the shape in `validate`.** `dependencies` is
-total and non-throwing, so it emits the edge whenever it can derive the secret NAME (even if the
-table's other fields are malformed) and omits it only when the name itself is underivable.
-`validate` is where every shape error surfaces, including unknown keys inside the table. Declaring
-the edge is what puts the secret in the site node's `secret_refs`, which is what gets it into the
-boundary resolve and therefore delivered to `ctx.secret`.
+**2. Mark the field, and let the core do both halves.** Extraction is total and non-throwing, so it
+emits the edge whenever it can derive the secret NAME (even if the table's other fields are
+malformed) and omits it only when the name itself is underivable. Validation is where every shape
+error surfaces, including unknown keys inside the table. Marking the field is what puts the secret
+in the site node's `secret_refs`, which is what gets it into the boundary resolve and therefore
+delivered to `ctx.secret`, and the marker's `default_template` is where the well-known default name
+lives.
 
 **3. Explicit credentials never fall back.** `_get_credential(ctx)` forks on config, not on runtime
 luck: with the table present it builds exactly that credential and a failure is fatal; without it,
@@ -606,9 +607,9 @@ YAML block scalar, remote shell). Two traps that have already occurred:
    with a persistent client memoizes the derived client, not the secret (the Proxmox `_api`
    pattern). `create` is intentionally not `@idempotent_op`; the idempotent ops must land in-state
    themselves.
-2. `validate` checks the `platform_config` shape, and `dependencies` returns a `ConfigReference` for
-   each secret the implementation reads. Declaring a secret in `dependencies` authorizes the op to
-   read it later.
+2. `config_model` declares the `platform_config` shape, with a `SecretRef` marker on each field
+   naming a secret the implementation reads. Marking a field authorizes the op to read that secret
+   later.
 3. The class is registered in `VM_PLATFORM_REGISTRY` (`__init__.py`).
 4. `unsupported_reason` identifies platforms that cannot run on some hosts (WSL2 off Windows), while
    the non-constructing `not_ready(config)` handles per-site tool checks (Lima with no `limactl`).
@@ -625,9 +626,9 @@ YAML block scalar, remote shell). Two traps that have already occurred:
 
 The existing tests under `cli/tests/vms/` are the templates to copy from:
 
-- `test_platform_config_contract.py`: table-driven `validate` shape and `dependencies` edge
-  extraction across all platforms, plus a registry-name/class parity check. A good template for a
-  new platform's registration test.
+- `test_platform_config_contract.py`: table-driven validation and edge extraction across all
+  platforms, through the core entry points, plus a registry-name/class parity check. A good template
+  for a new platform's registration test.
 - `test_platform_support.py`: `unsupported_reason` (host-wide) vs. `not_ready` (per-site config) vs.
   the graph's stored `readiness_of` verdict (the fold composes the first two into the last). Uses
   the `stub_platform_support` fixture to pin platforms ready regardless of host, so dispatch-shape

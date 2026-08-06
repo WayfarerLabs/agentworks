@@ -259,37 +259,50 @@ created yet. (A future permission model omits fields the same way: a capability 
 or a secret just finds it absent.) The rule that pairs with it: pre-resolve concerns read `self`
 (config bound at construct); runup and ops read the context.
 
-#### Stage 1: Declare and Validate
+#### Stage 1: Declare
 
 ```python
-dependencies(owner: str, config: Mapping[str, object]) -> tuple[ConfigReference, ...]
-validate(owner: str, config: Mapping[str, object]) -> None
+config_model: ClassVar[type[BaseModel]]          # what this capability's config IS
+config_for(facet: Facet | None) -> type[BaseModel]   # which config, at which level
 ```
 
-The config-declaration contract is split in two. `dependencies` extracts the resource references the
-config blob implies (secrets it names, other resources it points at); `validate` is the throwing
-_shape_ check. This separation is what lets the registry build its dependency graph without
-validating: graph construction runs `dependencies` alone, and validation is a distinct pass. They
-are:
+A capability DECLARES the shape of its config as a model, and the core does everything else with it:
+shape validation, reference extraction, defaulting, schema emission, and rendering are all derived
+views of that one declaration. **No capability code is invoked for any of them**, which is what
+keeps a misbehaving plugin out of the finalize pass, and what makes it impossible for the validator
+and the documentation to disagree.
 
-- **Total vs throwing.** `dependencies` **never raises**: it emits every edge it can derive
-  best-effort, omitting only an edge whose _identity_ depends on a field that is itself malformed.
-  All the raising lives in `validate`. Together, for a valid blob, they reproduce what the earlier
-  fused method did: the same refs from `dependencies`, the same errors from `validate`.
-- **Pure.** No I/O, no secret resolution, no network. They are called repeatedly and in varied
-  contexts (registry finalize, construct), so they have to be cheap and side-effect-free everywhere;
-  finalize in particular is a pure graph-building pass where I/O has no place. (`validate` used to
-  also run at manifest decode / TOML load; it moved into a dedicated finalize pass so graph
-  construction never depends on a block being valid.)
-- **Classmethods.** They have no instance; they read a blob to declare refs (`dependencies`) or
-  check its shape (`validate`).
-- **Host-agnostic.** `owner` is a label used only for error framing and reference attribution, never
-  dispatched on, so the same methods serve config hosted in a dedicated kind, inline in a consumer,
-  or in a keyed map (see hosting shapes under Related). They are _not_ the consuming resource; if
-  they were, they could serve only one host. Examples: `git-credential/ado`, or a session template's
-  `harness_integration_config` site.
+The model is an `AgwModel` (`agentworks.schema`): strict, frozen, closed-world. A field that names
+another resource carries a `SecretRef` / `ResourceRef` marker, optionally with an owner-templated
+default (`git-token-{owner_name}`), and that marker is the single authored place the reference
+semantics live: extraction reads it, validation fills the default from it, and emitted JSON Schema
+carries it as `x-agw-ref`.
 
-The references `dependencies` returns are sourceless. The consuming resource attaches itself as the
+The two halves the core derives keep the contracts the split classmethods used to carry:
+
+- **Extraction is total.** It emits every edge it can derive best-effort, omitting only an edge
+  whose _identity_ depends on a field that is itself malformed, and it never raises for any input.
+  That is what lets the registry build its dependency graph without validating: graph construction
+  extracts, and validation is a distinct, later pass.
+- **Validation throws**, and only in the finalize pass over the READY and ENABLED set (plus at
+  construct). It never runs at decode, so graph construction never depends on a blob being valid.
+- **Both are pure**, and structurally so: they read `model_fields` and a raw blob, and invoke no
+  user code at all.
+- **Host-agnostic.** The owner is a `(kind, name)` pair used for error framing, reference
+  attribution, and rendering an owner-templated default. It is never dispatched on, so the same
+  model serves config hosted in a dedicated kind, inline in a consumer, or in a keyed map (see
+  hosting shapes under Related).
+
+`config_for(facet)` is how the core asks which config a capability offers at a given LEVEL. A facet
+is the level a capability is driven at (`vm`, `user`, `workspace`, `session`), pairing that level's
+methods with that level's config. Every capability today offers ONE config shared by all of its
+operations, so it declares `config_model` and names no facet, and `config_for` answers with it at
+every facet. A capability whose methods run at several levels overrides `config_for` and refuses a
+facet it does not offer, naming what it does. Offering a config at a facet is **not** a claim to
+support that level, and offering none is not a claim to lack it: support is carried by the
+implementation.
+
+The references the core extracts are sourceless. The consuming resource attaches itself as the
 source when it emits them, in its `dependencies()` at finalize ("whoever hosts the config that names
 the secret emits the reference"). The framework consumes those references two ways: statically, they
 feed the registry's reference graph and doctor's resolvability prediction; at runtime, their
@@ -301,9 +314,11 @@ command entry.
 
 The instance is constructed bound to its `(owner_name, config)`: its config, _not_ resolved secret
 values, and no secret machinery at all (the operation's boundary union comes from the plan's
-declared references; values arrive later through the context). Construction re-runs `validate` and
-**fails on an invalid config shape**: an instance is not built around an invalid blob, so a shape
-error dies here, at construction, never later in preflight. (Errors that need the world to detect,
+declared references; values arrive later through the context). Construction validates the blob into
+the declared model and **fails on an invalid config shape**: an instance is not built around an
+invalid blob, so a shape error dies here, at construction, never later in preflight. What binds is
+the validated, fully-defaulted model INSTANCE, reachable as `self.config`, so an operation reads a
+typed field rather than a dict key with a fallback beside it. (Errors that need the world to detect,
 an unreachable API, a missing tool, are preflight's job, not this.) Construction is otherwise cheap:
 no network, no secret resolution, no prompt.
 
@@ -458,9 +473,9 @@ authentication never falls through into a mutation) are spelled out in
 Provisioning re-runs: `reinit` re-applies everything, and a failed command is retried. So the
 lifecycle has to be safe to re-run, and the five stages divide cleanly on how they get there:
 
-- `dependencies` / `validate` (pure), `construct` (cheap, side-effect-free), and both readiness
-  stages, `preflight` and `runup` (read-only), are idempotent _by their existing contracts_. Their
-  stated re-runnability is idempotency by another name; nothing extra is required.
+- declaration (pure data), `construct` (cheap, side-effect-free), and both readiness stages,
+  `preflight` and `runup` (read-only), are idempotent _by their existing contracts_. Their stated
+  re-runnability is idempotency by another name; nothing extra is required.
 - **ops** are the mutation phase, so idempotency there is an _explicit_ contract, not a free
   consequence. Each kind's ABC **flags the ops that must be idempotent** (a marker plus the standing
   docstring note), and implementations must conform: a flagged op, run twice, lands in the same
@@ -489,9 +504,8 @@ capability author's contract, so it lives in
 The shared surface is real (it is a lifecycle, not a boilerplate default), so it earns a base class
 (`capabilities/base.py`). The base owns the contract above and nothing domain-specific:
 
-- the `dependencies` / `validate` classmethods, with sensible defaults (no implied references,
-  accepts no config) and the standing NOTE that this invoked-validation API may later be superseded
-  by capabilities declaring their config schema at registration time;
+- the `config_model` declaration and the `config_for(facet)` hook whose default answers with it by
+  capabilities declaring their config schema at registration time;
 - the construct, `preflight`, and `runup` instance contract (both readiness stages no-op by default:
   resolvability prediction belongs to the operation's preflight sweep, not to the instance or its
   node, and the capabilities with nothing to check or authenticate get the right behavior for free);
@@ -506,25 +520,26 @@ machinery, not framework machinery.
 ### Secrets Are Just Declared References
 
 A capability's config may name secrets (a Proxmox API token, a git PAT, an AWS client secret).
-Nothing special happens: the secret is an ordinary `ConfigReference` returned by `dependencies`. The
-framework owns everything after the declaration: non-prompting _prediction_ during the operation's
-preflight sweep (is this resolvable on this run?, computed centrally over the declarations by
-`orchestration.readiness.preflight_all`, never by the instance or the node holding it), _resolution_
-at the preflight boundary (everything the command declared, one batched prompt session, cached), and
-_delivery_ through the context, scoped to the declared names. The default secret name is the
-capability's to choose: a per-consumer default (`git-token-<name>`, derived from `owner`) where
-credentials are many, a shared well-known name (`proxmox-token`) where one is typical. Either way
-the capability owns the default; the framework only resolves what was declared.
+Nothing special happens: the secret is an ordinary `ConfigReference` the core reads off a
+`SecretRef`-marked field of the capability's model. The framework owns everything after the
+declaration: non-prompting _prediction_ during the operation's preflight sweep (is this resolvable
+on this run?, computed centrally over the declarations by `orchestration.readiness.preflight_all`,
+never by the instance or the node holding it), _resolution_ at the preflight boundary (everything
+the command declared, one batched prompt session, cached), and _delivery_ through the context,
+scoped to the declared names. The default secret name is the capability's to choose: a per-consumer
+default (`git-token-<name>`, derived from `owner`) where credentials are many, a shared well-known
+name (`proxmox-token`) where one is typical. Either way the capability owns the default, as the
+marker's `default_template`; the framework only resolves what was declared.
 
 #### Declare, Then Receive: The Contract That Keeps a Capability Forward-Compatible
 
 Everything above reduces, for a capability author, to two obligations at two moments, with the
 framework owning everything in between:
 
-1. **Declare, purely.** Name every secret (and every other resource reference) in `dependencies`: no
-   resolver, no I/O, no resolution. This is the capability's _entire_ input side. The framework
-   reads those references to build the resolvability prediction the preflight sweep runs and to
-   scope the one batched resolve pass.
+1. **Declare, purely.** Mark every field that names a secret (or any other resource) in the
+   capability's config model: no resolver, no I/O, no resolution, and no code at all. This is the
+   capability's _entire_ input side. The framework reads those markers to build the resolvability
+   prediction the preflight sweep runs and to scope the one batched resolve pass.
 2. **Receive, from the context.** Read resolved secret values only via `ctx.secret(name)`, in
    `runup` and in ops (their signatures converged on `RunContext`; a VM platform's power ops take
    the op-start context beside the row). There is no other value source: the instance holds no
@@ -614,10 +629,10 @@ in ways worth recording before that change, because it is a different animal:
 - **Hosting shapes.** A consuming resource can host a capability's config three ways: as a dedicated
   kind (reference + a config blob, like `vm-site`), inline in a richer consumer (like a
   session-template's inline harness-integration block), or in a map keyed by name (the planned shape
-  for an agent template's feature map, once `agent-feature` ships). `dependencies` / `validate`'s
-  host-agnostic `owner` is exactly what lets one capability serve any of these without knowing which
-  consumer hosts it.
-- `owner` is a host-agnostic string today. If a second consumer (preflight's richer context is the
-  likely trigger) needs more than a name, the right evolution is a small host-agnostic context
-  value, not passing the consuming resource, designed once, when two real consumers reveal its
-  shape.
+  for an agent template's feature map, once `agent-feature` ships). The host-agnostic owner the core
+  frames with is exactly what lets one capability serve any of these without knowing which consumer
+  hosts it.
+- `owner` is a host-agnostic `(kind, name)` pair today. If a second consumer (preflight's richer
+  context is the likely trigger) needs more than that, the right evolution is a small host-agnostic
+  context value, not passing the consuming resource, designed once, when two real consumers reveal
+  its shape.
