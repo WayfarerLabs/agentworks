@@ -36,6 +36,7 @@
     "tfplugindocs",
     "tomli",
     "typedload",
+    "unmigrated",
     "voluptuous",
     "wyfo"
   ]
