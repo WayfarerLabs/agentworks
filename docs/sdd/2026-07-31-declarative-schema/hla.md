@@ -64,10 +64,10 @@ Small architecture, mostly deletion. Components:
 > `capability-descriptor-contract.md` (the authority; this HLA does not restate it, it adopts it).
 > The descriptor is the execution vehicle: Component 0 below adopts it before any schema modeling,
 > and the per-implementation config models of Components 2 and 4 register as `config_model`
-> attributes, resolved by consuming resource kind. (An intermediate schema-slot mechanism was
-> specified and then rescinded by the operator on 2026-08-05; the contract on `main` and Component 0
-> below record the settled shape.) The reconciliation with this HLA's original framing is recorded
-> in the contract: keep the plan's 2.4-before-2.5 ordering (the HLA had folded hardening into the
+> attributes, resolved by consuming kind. (An intermediate schema-slot mechanism was specified and
+> then rescinded by the operator on 2026-08-05; the contract on `main` and Component 0 below record
+> the settled shape.) The reconciliation with this HLA's original framing is recorded in the
+> contract: keep the plan's 2.4-before-2.5 ordering (the HLA had folded hardening into the
 > kind-model swap; the split stands so the old-shape error survives the decoder swap), union
 > assembly stays at the existing post-registration boundary, and the lazier-plugin-load risk
 > transfers to the roadmap's wave 8 unchanged.
@@ -94,19 +94,18 @@ plugin promise (that stays gated on the roadmap's wave 8). Secret-backend's cons
 registry policy is a descriptor-carried interim exception that wave 3 removes; `_VMPlatformKind`
 moves in from `vms/kinds.py` for symmetry during adoption.
 
-**Config schemas, keyed by consuming resource kind.** Each capability IMPLEMENTATION registers
-exactly one config model, as Components 2 and 4 always specified. (A schema-slot mechanism was
-introduced by the roadmap seed and rescinded by the operator on 2026-08-05, before any model
-registered through it; the premise was verified against HEAD first, and no implementation needs more
-than one model today.) The one shape decision that survives from that episode: the framework never
-asks an implementation for "its schema", it asks for **"your schema for
-`<consuming resource kind>`"**. The capability base's default `config_model_for(consuming_kind)`
-returns the single declared model for the kind's own consuming resource kind and RAISES on any
-other, so a wrong-kind lookup fails loudly instead of returning a plausible-but-wrong model. Simple
-capability authors still write only `config_model = X`, while every framework consumer (validation,
-assembly, emission, rendering) passes the consuming kind it already has. Union assembly is per
-`(kind, consuming resource kind)` pair, which reduces to today's per-kind union while each kind has
-one consumer.
+**Config schemas, keyed by consuming kind.** Each capability IMPLEMENTATION registers exactly one
+config model, as Components 2 and 4 always specified. (A schema-slot mechanism was introduced by the
+roadmap seed and rescinded by the operator on 2026-08-05, before any model registered through it;
+the premise was verified against HEAD first, and no implementation needs more than one model today.)
+The one shape decision that survives from that episode: the framework never asks an implementation
+for "its schema", it asks for **"your schema for `<consuming kind>`"**. The capability base's
+default `config_model_for(consuming_kind)` returns the single declared model for the kind's own
+consuming kind and RAISES on any other, so a wrong-kind lookup fails loudly instead of returning a
+plausible-but-wrong model. Simple capability authors still write only `config_model = X`, while
+every framework consumer (validation, assembly, emission, rendering) passes the consuming kind it
+already has. Union assembly is per `(kind, consuming kind)` pair, which reduces to today's per-kind
+union while each kind has one consumer.
 
 That keying is what makes the roadmap's wave-4 harness work a local change: a harness integration
 serves several hosting surfaces (vm-template including the admin attachment, agent-template,
@@ -154,8 +153,8 @@ The capability contract changes from invoked validation to declared schema:
 - The core reaches a model only through `config_model_for(consuming_kind)`, never by reading
   `config_model` directly (Component 0). The base default ignores the argument, so the declaration
   above is all a simple capability author writes; the indirection exists so a capability serving
-  several consuming resource kinds (wave 4's harness integrations) overrides one classmethod instead
-  of changing a framework signature. Registration-time conformance checks whichever models an
+  several consuming kinds (wave 4's harness integrations) overrides one classmethod instead of
+  changing a framework signature. Registration-time conformance checks whichever models an
   implementation declares against the kind's model contract.
 - The base `Capability.validate` / `Capability.dependencies` classmethods are retired. The core
   performs both: validation is `model_validate` on the registered model (owner-framed by the error

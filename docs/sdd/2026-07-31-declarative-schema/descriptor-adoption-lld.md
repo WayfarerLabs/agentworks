@@ -13,7 +13,7 @@ independently enumerate the four capability kinds (`vm-platform`, `harness-integ
 `git-credential-provider`, `secret-backend`); each becomes a derived view of one frozen table. The
 work is mechanical and always-green: no schema modeling here, no behavior change, one site per
 commit with the full gate green after each. Phase 2's per-kind modeling (2.1/2.3/2.5) then registers
-one config model per capability implementation, resolved by consuming resource kind (section 7).
+one config model per capability implementation, resolved by consuming kind (section 7).
 
 ## 1. The `CapabilityKindDescriptor` record
 
@@ -51,7 +51,7 @@ class CapabilityKindDescriptor:
     #   config_schema            -> step 2.3, when the first config model registers. Holds the kind's model
     #                               CONTRACT (the base every impl's model must extend), which step 2.1 defines,
     #                               so it cannot be typed before then. Implementations declare the model, not
-    #                               the descriptor; resolution is keyed by consuming resource kind (section 7).
+    #                               the descriptor; resolution is keyed by consuming kind (section 7).
     #   consumer_gating          -> the first NEW consuming surface that consolidates gating (waves 3, 4).
     #                               Wave 2 changes no gating behavior, so no field yet.
     #   migration_participation  -> only if wave 2 rules `agw resource migrate` survives AND should derive
@@ -62,9 +62,9 @@ class CapabilityKindDescriptor:
 Two adjustments to the contract's illustrative list, settled here:
 
 - `union_assembly` is NOT a stored per-record field. Assembly is uniform across kinds (the framework
-  builds one discriminated union per `(kind, consuming resource kind)` pair at the registration
-  boundary and caches it), so it has no per-kind variation to carry. It is a framework operation
-  owned by Component 3 (step 2.3), not a descriptor field. The contract's field list is explicitly
+  builds one discriminated union per `(kind, consuming kind)` pair at the registration boundary and
+  caches it), so it has no per-kind variation to carry. It is a framework operation owned by
+  Component 3 (step 2.3), not a descriptor field. The contract's field list is explicitly
   "illustrative, not final code," so this is a settlement, not a contradiction.
 - The config field is ABSENT at 2.0, not present-and-empty (revised 2026-08-05 when slots were
   rescinded; see section 7). No models exist until step 2.3, the field cannot be typed until step
@@ -281,7 +281,7 @@ hard-error-naming-the-rewrite anyway). Settled: 2.0 derives the enumeration and 
 unifies the folds; 2.5 owns the `_decode_*` decoders. `KIND_SECTIONS` (`decode.py:49`) and
 `KIND_REGISTRY` legitimately enumerate ALL resource kinds and are untouched.
 
-## 7. Config schemas, keyed by consuming resource kind (slots RESCINDED)
+## 7. Config schemas, keyed by consuming kind (slots RESCINDED)
 
 > **Slots are rescinded** (operator ruling, 2026-08-05, roadmap note
 > `roadmap-note-config-schemas.md`; `capability-descriptor-contract.md` on `main` is updated to
@@ -298,8 +298,8 @@ surface today (session-template), because agent recipes carry no harness config.
 exercised cases.
 
 **Resolution is keyed by CONSUMING RESOURCE KIND, from day one.** The framework never asks an
-implementation for "its schema"; it asks for "your schema for `<consuming resource kind>`". The
-capability base supplies the default:
+implementation for "its schema"; it asks for "your schema for `<consuming kind>`". The capability
+base supplies the default:
 
 ```python
 class Capability:
@@ -322,8 +322,7 @@ plausible-but-wrong model instead of failing, which is exactly the silent-wrong-
 strict direction exists to eliminate. With it, the keying is load-bearing from day one rather than
 becoming real only when wave 4 arrives. Every framework consumer of a config model (validation at
 the finalize fold, union assembly in 2.3, emission in 2.7, sample and describe rendering in 2.8)
-passes the consuming resource kind, which it always has: it is walking a consuming resource of a
-known kind.
+passes the consuming kind, which it always has: it is walking a consuming resource of a known kind.
 
 Why key it now rather than when wave 4 needs it: wave 4's harness-integration keys its schema by
 hosting surface (vm-template including the admin attachment, agent-template, workspace-template,
@@ -334,9 +333,9 @@ onboarding child's guide surface will be consuming by then. Changing a signature
 depends on is the expensive version of this move; the cheap version is one ignored parameter today.
 Support for a scope is carried by the integration's implementation, never by schema presence.
 
-Union assembly is therefore per `(kind, consuming resource kind)` pair. At wave 2 every kind has
-exactly one consuming kind, so this reduces to today's per-kind union; wave 4 adds pairs without
-reshaping the mechanism.
+Union assembly is therefore per `(kind, consuming kind)` pair. At wave 2 every kind has exactly one
+consuming kind, so this reduces to today's per-kind union; wave 4 adds pairs without reshaping the
+mechanism.
 
 At 2.0 there is nothing to build: no models exist. The descriptor carries no config field at all,
 only a deferred-field comment recording the trigger (step 2.3, when the first model registers) and

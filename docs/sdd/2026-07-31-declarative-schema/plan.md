@@ -254,31 +254,30 @@ the derivation sequence are not started.
 - [ ] Per-capability models registered as `config_model` on the implementation, exactly one per
       implementation (schema slots were rescinded by the operator on 2026-08-05 before any model
       registered through them). The core reads a model only via `config_model_for(consuming_kind)`,
-      whose base default returns the single model for the kind's own consuming resource kind and
-      RAISES on any other (operator, 2026-08-05: without the check the parameter is decorative for
-      three of four kinds and a wrong-kind bug silently returns the wrong model). Authors still
-      write only `config_model = X`, and every framework consumer passes the consuming resource kind
-      it already has; wave 4's harness integrations override that one classmethod instead of
-      changing a framework signature. Pinned by a test that asking a capability for a foreign
-      consuming kind raises. The descriptor's deferred `config_schema` field (the kind's model
-      contract) is created here, and union assembly is per `(kind, consuming resource kind)` pair.
-      Registration carries `contract_version` (day-one, operator ruling) and passes the
-      registration-time conformance checks from 2.0 (implementation-contract, metadata,
-      constructibility, required ops, plus config model conformance added here) that replace the
-      retired type-and-cast seam. The secret-backend `mapping_model` registers as that kind's config
-      model; its constructed-singleton instance policy stays the descriptor-carried interim
-      exception (wave 3 re-homes it, not this effort). Empty-config capabilities register the shared
-      empty model. Inventory re-enumerated 2026-08-02, still re-check at implementation: vm-platform
-      lima, wsl2, azure-vm (including the nested `service_principal` model), proxmox, aws-ec2 (new,
-      renamed from ec2 by PR #363; nested `credentials` model with `access_key_secret` as a
-      `SecretRef` defaulting to the well-known name, plus the `instance_types` catalog);
-      git-credential-provider github (scope union: repos/owner mutual exclusion as a model
-      validator; `token` as `SecretRef` with the `git-token-{owner}` template), azdo;
-      harness-integration (the kind renamed by PR #383) shell (config: command, resume_command,
-      required_commands; the `restart_command` alias was removed by the session-resume SDD before
-      wave 2, so shell's config is just those three fields), claude-code, codex (`extra_args` list
-      plus flag fields); secret backends env-var, prompt (no mapping), onepassword (mapping is
-      itself a union: `op://` string or account/reference table).
+      whose base default returns the single model for the kind's own consuming kind and RAISES on
+      any other (operator, 2026-08-05: without the check the parameter is decorative for three of
+      four kinds and a wrong-kind bug silently returns the wrong model). Authors still write only
+      `config_model = X`, and every framework consumer passes the consuming kind it already has;
+      wave 4's harness integrations override that one classmethod instead of changing a framework
+      signature. Pinned by a test that asking a capability for a foreign consuming kind raises. The
+      descriptor's deferred `config_schema` field (the kind's model contract) is created here, and
+      union assembly is per `(kind, consuming kind)` pair. Registration carries `contract_version`
+      (day-one, operator ruling) and passes the registration-time conformance checks from 2.0
+      (implementation-contract, metadata, constructibility, required ops, plus config model
+      conformance added here) that replace the retired type-and-cast seam. The secret-backend
+      `mapping_model` registers as that kind's config model; its constructed-singleton instance
+      policy stays the descriptor-carried interim exception (wave 3 re-homes it, not this effort).
+      Empty-config capabilities register the shared empty model. Inventory re-enumerated 2026-08-02,
+      still re-check at implementation: vm-platform lima, wsl2, azure-vm (including the nested
+      `service_principal` model), proxmox, aws-ec2 (new, renamed from ec2 by PR #363; nested
+      `credentials` model with `access_key_secret` as a `SecretRef` defaulting to the well-known
+      name, plus the `instance_types` catalog); git-credential-provider github (scope union:
+      repos/owner mutual exclusion as a model validator; `token` as `SecretRef` with the
+      `git-token-{owner}` template), azdo; harness-integration (the kind renamed by PR #383) shell
+      (config: command, resume_command, required_commands; the `restart_command` alias was removed
+      by the session-resume SDD before wave 2, so shell's config is just those three fields),
+      claude-code, codex (`extra_args` list plus flag fields); secret backends env-var, prompt (no
+      mapping), onepassword (mapping is itself a union: `op://` string or account/reference table).
 - [ ] Core-driven validation and extraction wired: registry name-to-model maps per capability kind;
       `Capability.validate` / `Capability.dependencies` classmethods and
       `SecretBackend.validate_mapping` retired; per-capability hand-rolled validate code deleted;
@@ -420,8 +419,8 @@ the derivation sequence are not started.
       (narrative-necessary ones may stay).
 - [ ] Permanent-doc promotion: `capabilities/README.md` rewritten for the declare-schema contract
       AND the capability-kind descriptor (the single kind-enumeration table, config schemas keyed by
-      consuming resource kind, registration-time conformance, `contract_version`) so the contract
-      has a permanent home once the roadmap SDD is gone; the invoked-validation sections and their
+      consuming kind, registration-time conformance, `contract_version`) so the contract has a
+      permanent home once the roadmap SDD is gone; the invoked-validation sections and their
       standing deprecation notes retire; `capabilities/harness_integration/README.md` (the harness
       developer guide, added 2026-08-02 and renamed with the kind, whose `validate`/`dependencies`
       sections document the retired contract) updated the same way;
