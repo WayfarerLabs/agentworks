@@ -559,7 +559,17 @@ def _emit_document(doc: tomlkit.TOMLDocument, unit: MigrationUnit) -> str:
                     kind="git-credential-provider",
                     name=str(provider),
                     blob=provider_config,
-                    owner=RefOwner(kind="git-credential", name=unit.name),
+                    # Framed in the operator's TOML vocabulary, like the
+                    # vm-site branch above: this command is talking about a
+                    # file it has not rewritten yet, and the outer "cannot
+                    # migrate git-credential/<name>" already says which
+                    # resource, so a second copy of that address would be
+                    # noise where the TOML address is the useful thing.
+                    owner=RefOwner(
+                        kind="git-credential",
+                        name=unit.name,
+                        label=f"[{unit.section}.{unit.name}]",
+                    ),
                 )
             except ConfigError as exc:
                 raise ConfigError(
@@ -610,7 +620,11 @@ def _emit_document(doc: tomlkit.TOMLDocument, unit: MigrationUnit) -> str:
                     kind="harness-integration",
                     name=integration,
                     blob=integration_config,
-                    owner=RefOwner(kind="session-template", name=unit.name),
+                    owner=RefOwner(
+                        kind="session-template",
+                        name=unit.name,
+                        label=f"[{unit.section}.{unit.name}]",
+                    ),
                 )
             except ConfigError as exc:
                 raise ConfigError(

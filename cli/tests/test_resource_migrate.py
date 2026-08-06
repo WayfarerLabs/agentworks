@@ -320,8 +320,11 @@ def test_vm_site_stray_key_refused_before_write(tmp_path: Path) -> None:
     resources = MAXIMAL_RESOURCES.replace('region = "eastus"', 'region = "eastus"\nstray_key = "x"')
     cfg = _write_config(tmp_path, resources)
     config = load_config(cfg, warn_issues=False, resources=False)
-    with pytest.raises(ConfigError, match="cannot migrate vm-site/azure"):
+    with pytest.raises(ConfigError, match="cannot migrate vm-site/azure") as exc:
         plan_migration(config, ["vm-site/azure"])
+    # The flat legacy section, which is the address in the file the
+    # operator is still looking at.
+    assert r"[azure].stray_key: unknown field" in str(exc.value)
 
 
 def test_git_credential_type_becomes_provider(tmp_path: Path) -> None:
@@ -426,7 +429,7 @@ command = "tool"
 restart_command = "tool --resume"
 """,
     )
-    with pytest.raises(ConfigError, match="restart_command: unknown field"):
+    with pytest.raises(ConfigError, match=r"\[session_templates\.shell\]\.restart_command: unknown field"):
         _plan(cfg, ["session-template/shell"])
 
     assert not (tmp_path / "resources").exists()
@@ -1365,6 +1368,9 @@ bogus = "stray"
     )
     with pytest.raises(ConfigError, match="cannot migrate git-credential/ado") as exc:
         _plan(cfg, ["git-credential/ado"])
-    assert "bogus: unknown field" in str(exc.value)
+    # The inner message frames the TOML ADDRESS, not the resource address a
+    # second time: this command is talking about a file it has not
+    # rewritten yet, and the outer prefix already named the resource.
+    assert "[git_credentials.ado].bogus: unknown field" in str(exc.value)
     assert "Remove them from config.toml" in (exc.value.hint or "")
     assert not (tmp_path / "resources").exists()  # nothing written
