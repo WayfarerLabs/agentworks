@@ -87,13 +87,15 @@ ruling, 2026-08-05, rescinding the earlier slot framing). Validation is one blob
 graph walk reaches each consuming resource and validates its blob against the schema for that
 consuming resource kind, so no schema mapping is ever assembled or consumed whole. The multi-schema
 case is capability-specific, with the harness-integration kind the odd one out at first and possibly
-forever: in wave 4 it keys its config schema by consuming resource kind (vm-template including the
-admin attachment, agent-template, workspace-template, session-template). The resolution API settled
-with the wave 2 effort (2026-08-05) makes this concrete: the framework never asks an implementation
-for "its schema"; it asks `config_model_for(consuming_kind)` (names indicative). The base default
-ignores the argument and returns the single declared `config_model`, so ordinary capability authors
-never see the parameter, and the harness-integration kind overrides it in wave 4 with a mapping
-keyed by consuming resource kind, touching zero framework call sites. The descriptor's config
+forever: in wave 4 it offers per-facet configs consumed across the template surfaces. The resolution
+API (settled with the wave 2 effort, revised producer-oriented on 2026-08-06) makes this concrete: a
+capability offers a fixed set of facet configs the way it offers a fixed set of API methods, and the
+framework asks `config_for(facet)` (names indicative), where a facet is the level a capability is
+driven at (vm, user, workspace, session). Core owns the scope-to-facet mapping (admin and agent both
+resolve to the user facet), so producers never know their consumers. The base default declares a
+single config with no facet spelled, so ordinary capability authors never see the parameter; the
+harness-integration kind declares per-facet configs in wave 4, touching zero framework call sites.
+The association is introspectable at finalize, before any method runs. The descriptor's config
 contract provides no mechanism beyond that defaulted hook. Scope support is carried by the
 integration's implementation, never by schema presence. `manifest_section` stays singular (wave 2
 effort call): its only plural driver is the legacy accept-warn decode fold, which steps 2.4 and 2.5

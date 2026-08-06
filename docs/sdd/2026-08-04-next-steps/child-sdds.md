@@ -45,6 +45,9 @@ is locked.
 - [x] Recast as `scope-participation-contract.md` per operator simplification (2026-08-05): setup
       pipeline, per-scope init methods, trust-based scope discipline, grants dropped, facet
       vocabulary retired
+- [x] Facet returns as a plain noun (2026-08-06, operator ruling): the level a capability is driven
+      at (vm, user, workspace, session), pairing methods and config; core owns the scope-to-facet
+      mapping; the retired machinery meaning stays dead
 - [ ] Reviewed and merged to `main`
 
 ### Onboarding and discovery (destination 1): 2026-08-05-onboarding-and-discovery
