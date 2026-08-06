@@ -265,6 +265,32 @@ def capability_descriptors() -> tuple[CapabilityKindDescriptor, ...]:
     )
 
 
+def descriptor_for_impl(impl: type) -> CapabilityKindDescriptor:
+    """The descriptor of the kind ``impl`` implements.
+
+    Derived from the implementation contract rather than from a
+    ``capability_kind`` attribute each implementation would restate: the
+    descriptor already names the base an implementation must derive from,
+    and registration conformance already enforces it, so asking which base
+    this class satisfies is reading one fact rather than declaring a second
+    one that could disagree.
+
+    Nominal, so it answers for the three ABC kinds and not for the Protocol
+    kind, whose implementations derive from nothing. That is the boundary
+    of what needs it: secret backends never construct through the shared
+    capability lifecycle, and every caller reaches them by kind and name.
+    """
+    for descriptor in capability_descriptors():
+        contract = descriptor.implementation_contract
+        if not getattr(contract, "_is_protocol", False) and issubclass(impl, contract):
+            return descriptor
+    known = ", ".join(d.kind for d in capability_descriptors())
+    raise StateError(
+        f"{impl.__name__} does not derive from any capability kind's implementation contract "
+        f"(known capability kinds: {known})"
+    )
+
+
 def descriptor_for(kind: str) -> CapabilityKindDescriptor:
     """The descriptor for ``kind``.
 

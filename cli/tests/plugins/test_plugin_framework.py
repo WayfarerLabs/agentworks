@@ -253,7 +253,9 @@ class _PlatformWithoutAModel(ConformingVMPlatform):
 
     name = "no-model-platform"
     description = "declares something that is not a model"
-    config_model = _NotAModel
+    # The ignore is the point: mypy stops a first-party author here, and
+    # registration conformance is what stops a plugin that shipped without it.
+    config_model = _NotAModel  # type: ignore[assignment]
 
 
 class _PlatformWithAnUntaggedModel(ConformingVMPlatform):

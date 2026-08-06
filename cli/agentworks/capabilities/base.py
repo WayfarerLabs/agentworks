@@ -45,6 +45,9 @@ from agentworks.errors import ConfigError, StateError
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
+    from pydantic import BaseModel
+
+    from agentworks.capabilities.facets import Facet
     from agentworks.config import Config
     from agentworks.resources.graph import Readiness
     from agentworks.resources.reference import ConfigReference
@@ -299,6 +302,46 @@ class Capability(ABC):
     silently re-certify every impl that had not actually been migrated. Each
     implementation states its own, exactly as the ``SecretBackend`` Protocol
     kind's impls must."""
+
+    config_model: ClassVar[type[BaseModel]]
+    """The config this capability OFFERS, as a model.
+
+    Declared, never defaulted, for the same reason ``contract_version`` is:
+    defaulting it to an empty model would make "I accept no configuration"
+    the thing an author gets by FORGETTING, which is exactly how the retired
+    invoked ``validate`` behaved and is what would make an unmigrated
+    implementation look migrated.
+
+    The core reads it and does the rest: shape validation, reference
+    extraction, defaulting, schema emission, and rendering all derive from
+    this one declaration, and capability code is invoked for none of them.
+    Registration-time conformance checks it against the kind's model
+    contract (``CapabilityKindDescriptor.config_schema``)."""
+
+    @classmethod
+    def config_for(cls, facet: Facet | None = None) -> type[BaseModel]:
+        """The config model this capability offers at ``facet``.
+
+        A facet is the LEVEL a capability is driven at (vm, user,
+        workspace, session): the pairing of that level's API methods with
+        that level's config. Consumers choose the facet they drive, so a
+        producer never has to know who is asking.
+
+        Base behavior: ONE config, offered at every facet, which is every
+        capability shipped today and is why the ordinary author spells
+        nothing beyond ``config_model``. A capability whose methods run at
+        several levels with different config overrides this and resolves
+        through :func:`~agentworks.capabilities.facets.facet_config`,
+        which answers an offered facet and hard-errors on one it does not
+        offer, naming what it does.
+
+        Note what this does NOT say: offering a config at a facet is not a
+        claim to support that level, and offering none is not a claim to
+        lack it. Support is carried by the implementation. Reading this as
+        a support signal would rebuild the declaration-contract mechanism
+        that was rescinded on 2026-08-05, under a new name.
+        """
+        return cls.config_model
 
     def __init__(
         self,

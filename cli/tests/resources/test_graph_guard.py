@@ -362,6 +362,16 @@ _DESCRIPTOR_REGISTRY_ALLOWLIST = frozenset(
         "capabilities/publish.py",  # generic built-in publisher (registry -> rows)
         "plugins/adapters.py",  # generic adapter: peek / seat / build_row
         "plugins/registration.py",  # snapshot + restore around a seated plugin
+        # Core-driven capability config (declarative-schema step 2.3). It
+        # fetches the seated implementation CLASS to read the config model it
+        # declares, which is the edge-production-and-validate read the four
+        # consuming resources used to do by naming their kind's registry.
+        # Same sanctioned read, relocated: as each consuming resource moves
+        # onto this module it gives up its own exemption above, so the
+        # exempted surface shrinks from four call sites to one. Availability
+        # is never what it asks: an absent name yields no model, and the
+        # dangling capability edge is what reports it.
+        "capabilities/config.py",
         # Deliberately ABSENT, and each absence is load-bearing rather than an
         # oversight:
         #   resources/graph.py     -- the builder reaches registries through
