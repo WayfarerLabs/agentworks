@@ -92,6 +92,12 @@ directory is the standing example); the restriction is on modifying another effo
 artifacts. A delivered message file belongs to the receiving effort once read: integrate it into
 your own artifacts, then keep or delete it as you see fit.
 
+Delivery semantics: messages deliver via `main`, so a running effort only sees messages that existed
+at its branch point. A sender whose message lands after the recipient's branch was cut must tell the
+operator so the recipient gets nudged to pick it up (merge `main` in, or read the file straight from
+`origin/main`). Recipients on long-running branches should also glance at their feature directory on
+`origin/main` at natural checkpoints for messages that arrived mid-flight.
+
 ## Lockfile
 
 When work on the SDD is done, a `locked.md` file should be created in the feature directory. This
