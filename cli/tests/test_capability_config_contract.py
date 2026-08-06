@@ -160,6 +160,59 @@ def test_unknown_provider_defers_to_miss_policy(tmp_path: Path) -> None:
         build_registry(config)
 
 
+# -- Fold-gated severity: WHO validates changed, WHEN did not ----------------
+#
+# The gate itself is the finalize fold's and predates this effort
+# (``Registry.finalize`` pass 7 runs the throwing check over the READY and
+# ENABLED set only). What the flip changed is that the CORE does the
+# validating instead of the capability, so what these pin is that the
+# gating survived that change. The property they protect is the reason the
+# gate exists: a malformed ``platform_config`` on a site the host cannot
+# run must not abort every command.
+
+
+def _azure_site(tmp_path: Path, *, enabled: bool) -> Any:
+    """A vm-site on the opt-in azure plugin's platform, with a blob that
+    is malformed whatever the plugin's state (``regions`` is not a field)."""
+    _manifest(
+        tmp_path,
+        ManifestDoc(
+            "vm-site",
+            "lab",
+            {"platform": {"name": "azure-vm", "subscription_id": "s", "resource_group": "g", "regions": "eastus"}},
+        ),
+    )
+    return _config(tmp_path, enabled=enabled)
+
+
+def test_a_broken_blob_on_a_disabled_plugins_resource_loads_with_the_row_marked(tmp_path: Path) -> None:
+    """R9.4, the headline property: the config loads, so every command
+    that has nothing to do with this site still works, and the row says
+    why it is unusable rather than going silent."""
+    registry = build_registry(_azure_site(tmp_path, enabled=False))
+
+    reason = registry.graph.readiness_of("vm-site", "lab").reason
+    assert reason is not None, "a deferred row must carry its reason, not just fail quietly later"
+    assert "azure-vm" in reason
+
+
+def test_the_same_broken_blob_is_a_load_error_once_the_plugin_is_enabled(tmp_path: Path) -> None:
+    """The other half of the same property, and the enabled + ready case
+    the box names: enabling is what makes the resource's config this
+    host's problem, and the error is the ordinary owner-framed one."""
+    with pytest.raises(ConfigError, match="regions: unknown field") as exc:
+        build_registry(_azure_site(tmp_path, enabled=True))
+
+    assert "res.yaml" in str(exc.value)
+
+
+# An unregistered capability name staying a HARD finalize error (R9.2 /
+# R9.11, and the operator decision of 2026-08-01) is the third case the
+# fold-gated box names. It is pinned by
+# ``test_unknown_provider_defers_to_miss_policy`` above, end to end
+# through ``build_registry``, so it is not repeated here.
+
+
 # -- The finalize validate pass: timing + ordering (R3, R9.3) ----------------
 
 
