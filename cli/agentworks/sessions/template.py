@@ -76,9 +76,12 @@ class SessionTemplate(DeclaredResource):
     harness integration and whose remaining keys are that integration's own
     config (``{name: shell, command: htop}``)."""
 
-    env: EnvTable | None = None
+    env: EnvTable = Field(default_factory=dict)
     """Environment variables exported in this session, as a plaintext value
-    or a ``{secret: <name>}`` reference per key."""
+    or a ``{secret: <name>}`` reference per key. Merged
+    child-overrides-parent at resolution; an empty table adds nothing, so
+    there is no separate "unset" to distinguish (this matches the other
+    three template kinds, whose ``env`` has always defaulted empty)."""
 
     def dependencies(self, context: FinalizeContext) -> list[ResourceReference]:
         """The ``inherits`` edges as declared, plus the runtime needs of
@@ -117,7 +120,7 @@ class SessionTemplate(DeclaredResource):
         effective = effective_template(rows, self.name)
         integration = effective.harness.name
         declared_by = effective.harness.declared_by
-        by_env = declarers(merge_layers(rows, self.name), "session-template", lambda t: t.env or {})
+        by_env = declarers(merge_layers(rows, self.name), "session-template", lambda t: t.env)
         refs: list[ResourceReference] = list(env_references(effective.resolved.env, source, by_env))
         refs.extend(inherits_reference(parent, source) for parent in self.inherits)
         if integration is not None:

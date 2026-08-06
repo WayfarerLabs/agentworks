@@ -71,6 +71,7 @@ def _call_bootstrap(db: Database, platform: _SpyPlatform, on_ready: Any) -> tupl
         _stub_exec_target(),
         platform,  # type: ignore[arg-type]
         RunContext(),
+        admin_username="agentworks",
         tailscale_auth_key="tskey-test",
         git_tokens={},
         on_tailscale_ready=on_ready,

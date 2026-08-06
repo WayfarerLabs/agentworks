@@ -349,8 +349,13 @@ def describe_secret(
             entity_name=name,
             hint="check `agw secret list` for declared and auto-declared names",
         ) from None
-    origin = getattr(decl, "origin", None)
-    description = getattr(decl, "description", "") or ""
+    # Plain reads: ``decl`` is a validated ``SecretDecl``, whose
+    # ``description`` the kind re-declares as REQUIRED. A getattr default
+    # here would turn a future rename into an empty string on screen
+    # instead of an error (FR15: nothing downstream re-defaults a
+    # modeled field).
+    origin = decl.origin
+    description = decl.description
     # Inbound references come off the dependency graph (one entry per
     # reference that resolved here), populated by the finalize pass.
     references: tuple[ReferenceEntry, ...] = registry.graph.dependents_of(SECRET_KIND_NAME, name)
@@ -396,7 +401,7 @@ def describe_secret(
         kind=SECRET_KIND_NAME,
         origin=origin,
         description=description,
-        hint=getattr(decl, "hint", None),
+        hint=decl.hint,
         references=references,
         used_by=used_by_for(db, registry, SECRET_KIND_NAME, decl),
         backend_mappings=tuple(mappings),

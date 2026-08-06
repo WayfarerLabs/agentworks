@@ -205,6 +205,6 @@ def _shell_summary(shells: list[ShellEntry]) -> str:
     parts = []
     for s in shells:
         cwd = s.get("cwd") or "<workspace>"
-        user_tag = "admin" if s.get("admin", False) else "agent"
+        user_tag = "admin" if s["admin"] else "agent"
         parts.append(f"{user_tag}:{cwd}")
     return f"{len(shells)} shell(s): " + ", ".join(parts)

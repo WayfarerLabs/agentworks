@@ -16,6 +16,7 @@ from textwrap import dedent
 from typing import TYPE_CHECKING
 
 import pytest
+from pydantic import ValidationError
 
 from agentworks.agents.template import AgentTemplate
 from agentworks.bootstrap import build_registry
@@ -146,13 +147,16 @@ def test_agent_template_dependencies() -> None:
     assert reqs[0].source == ("agent-template", "claude")
 
 
-def test_session_template_dependencies_with_none_env() -> None:
-    """``SessionTemplate.env`` is ``Optional`` (uniquely so among the
-    template kinds). ``dependencies()`` handles ``env=None``
-    without erroring.
-    """
-    tmpl = SessionTemplate(name="t", env=None)
+def test_session_template_dependencies_with_omitted_env() -> None:
+    """``SessionTemplate.env`` defaults to an empty table, like the other
+    three template kinds, so an omitted env is a declaration with no
+    entries rather than a ``None`` every reader has to fold. Omitting it
+    yields no edges; writing ``env: null`` is now a type error."""
+    tmpl = SessionTemplate(name="t")
+    assert tmpl.env == {}
     assert tmpl.dependencies(FinalizeContext()) == []
+    with pytest.raises(ValidationError):
+        SessionTemplate(name="t", env=None)  # type: ignore[arg-type]  # the point of the test
 
 
 def test_session_template_dependencies_with_secrets() -> None:

@@ -274,5 +274,5 @@ def _merge_template(target: ResolvedSessionTemplate, tmpl: SessionTemplate) -> N
     overrides. Maps: merge with child wins."""
     if tmpl.description is not None:
         target.description = tmpl.description
-    if tmpl.env is not None:
+    if tmpl.env:
         target.env = _merge_map(target.env, tmpl.env)

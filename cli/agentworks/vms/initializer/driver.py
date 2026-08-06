@@ -76,7 +76,7 @@ def bootstrap_vm(
     platform: VMPlatform,
     ctx: RunContext,
     *,
-    admin_username: str = "agentworks",
+    admin_username: str,
     tailscale_auth_key: str,
     git_tokens: dict[str, str],
     bootstrap_complete: bool = False,

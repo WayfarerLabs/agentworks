@@ -155,6 +155,7 @@ def backup_vm(
                         target,
                         workspaces,
                         local_archive,
+                        vm.admin_username,
                     )
                 else:
                     output.info("No VM workspaces to archive.")
@@ -187,6 +188,7 @@ def _archive_workspaces(
     target: SSHTransport,
     vm_workspaces: list[WorkspaceRow],
     local_archive: Path,
+    admin_username: str,
 ) -> tuple[list[str], list[str]]:
     """Create a single zstd-compressed tar of all workspace paths and transfer locally.
 
@@ -195,6 +197,13 @@ def _archive_workspaces(
 
     The archive is created in a root-owned temp directory to avoid symlink
     attacks and collisions in /tmp.
+
+    ``admin_username`` is the account the archive is chowned to so scp can
+    read it. It comes from the VM row, which is where the value is
+    declared, rather than from ``target.user``: the transport's user is
+    optional (the VM-host transports defer to SSH config), and folding
+    that ``None`` to a literal "agentworks" would silently chown to the
+    wrong account on a VM whose admin-template renamed the admin user.
 
     Returns (archived_paths, skipped_paths) -- paths that were actually included
     and paths that were skipped because they didn't exist on the VM.
@@ -336,7 +345,7 @@ def _archive_workspaces(
 
         # Transfer to local. Chown the temp dir and archive to the admin
         # user so scp can read it (avoids making it world-readable).
-        admin = shlex.quote(target.user or "agentworks")
+        admin = shlex.quote(admin_username)
         target.run(f"chown {admin} {q_tmp} {q_archive}", sudo=True)
 
         # Get remote archive size for progress reporting

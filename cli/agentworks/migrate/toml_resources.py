@@ -520,7 +520,10 @@ def _load_session_templates(
         if not isinstance(tdata, dict):
             raise ConfigError(f"session_templates.{name} must be a table")
         _raise_unexpected_keys(tdata, _SESSION_TEMPLATE_KEYS, f"session_templates.{name}")
-        env: dict[str, EnvEntry] | None = None
+        # Empty, not None: the kind's ``env`` defaults to an empty table
+        # like its three sibling template kinds, so an absent section and
+        # an empty one are the same declaration.
+        env: dict[str, EnvEntry] = {}
         if "env" in tdata:
             env = _parse_env_table(
                 tdata["env"],

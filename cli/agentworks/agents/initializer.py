@@ -788,9 +788,12 @@ def _build_agent_test_command(
     """
     import shlex as _shlex
 
-    test_exec: str | None = getattr(entry, "test_exec", None)
-    test_file: str | None = getattr(entry, "test_file", None)
-    test_dir: str | None = getattr(entry, "test_dir", None)
+    # Plain reads, matching the VM-side twin in
+    # ``vms/initializer/packages.py``: all three are declared fields on the
+    # entry model, so a getattr default would only hide a rename.
+    test_exec = entry.test_exec
+    test_file = entry.test_file
+    test_dir = entry.test_dir
     if test_exec:
         inner = f"command -v {_shlex.quote(test_exec)} > /dev/null 2>&1"
         return f"{shell} -lc {_shlex.quote(inner)}"
