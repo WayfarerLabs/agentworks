@@ -398,23 +398,38 @@ own step rather than folded into 2.4 or 2.5 so it cannot quietly evaporate, and 
 because FR17 is an operator-raised requirement and the longer it waits the more consumers assume the
 current traversal.
 
-- [ ] Validation runs on the EFFECTIVE (merged) config, resolved along the graph's inherits chain at
+- [x] Validation runs on the EFFECTIVE (merged) config, resolved along the graph's inherits chain at
       finalize, never on a partial declared blob (a child template's blob is legitimately partial,
       so a model's required fields would wrongly reject it).
-- [ ] Per-key merge provenance tracked for error attribution, so a message names the layer the bad
+- [x] Per-key merge provenance tracked for error attribution, so a message names the layer the bad
       key actually came from.
-- [ ] FR17's traversal split: the inherits edge stays a typed, non-dependency edge, excluded from
+- [x] FR17's traversal split: the inherits edge stays a typed, non-dependency edge, excluded from
       the secret union, resolvability prediction, and dependency listings. Per the FR17 survey
       already in this plan, mark the RELATIONSHIP explicitly; do NOT filter on
       `isinstance(ref, TemplateReference)`, which means "points at a template" and would silently
       misclassify a future uses-a-template edge.
-- [ ] FR17 pinned by a regression test over a fixture inheriting surface: a child overriding the
+- [x] FR17 pinned by a regression test over a fixture inheriting surface: a child overriding the
       parent's default secret name declares only the override in its refs, the parent keeps its own
       default-secret edge, and no runtime-need traversal (secret union, resolvability prediction,
       dependency listing) attributes the parent's default secret to the child.
-- [ ] `sessions/templates.py::_validate_merged` retires in favor of the finalize pass. Step 2.3
+- [x] `sessions/templates.py::_validate_merged` retires in favor of the finalize pass. Step 2.3
       repointed it at the core entry point (no capability code runs) but left its resolve-time
       timing, so the timing change lands here.
+
+**Closed 2026-08-06 at 4441 tests.** Two recorded deviations, both accepted by the lead. (1) INBOUND
+dependency listings (`dependents_of`) deliberately still cross the inheritance edge, because a
+parent template genuinely IS referenced by its children; FR17 is amended to say OUTBOUND. (2)
+Inherited harness references are attributed at BLOCK granularity, to the layer that selected the
+integration, because a `ConfigReference` carries no field path. Exact for every shape a template can
+currently write; the inexact case needs a child that restates the selector while inheriting a
+ref-bearing key it does not touch, and closing it means threading field paths through the schema
+package's hot walker for a path no shipped integration exercises. Documented rather than hidden.
+
+Also landed here beyond the boxes: `reachable_from` deleted (no caller survived the gate narrowing,
+and its only property was crossing everything, which is what a future consumer reaches for instead
+of deciding), and the closures now name the relationships they CROSS rather than the ones they skip,
+so a third `RefRelationship` joins neither closure and `test_every_relationship_has_a_closure` fails
+until someone decides.
 
 ### 2.4 Tagged-shape hardening
 
