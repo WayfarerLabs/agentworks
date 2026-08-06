@@ -29,10 +29,10 @@ exceptions a reader can see.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Final
+from typing import TYPE_CHECKING, Annotated, Any, Final
 from weakref import WeakKeyDictionary
 
-from pydantic import BaseModel, ConfigDict, RootModel, model_validator
+from pydantic import BaseModel, ConfigDict, Field, RootModel, model_validator
 
 from agentworks.errors import StateError
 from agentworks.resources.schema._shape import marker_of
@@ -143,6 +143,23 @@ class AgwRootModel[T](RootModel[T]):
     """
 
     model_config = _AGW_ROOT_MODEL_CONFIG
+
+
+NonEmptyStr = Annotated[str, Field(min_length=1)]
+"""A string an operator must actually fill in.
+
+Declared once here rather than spelled ``Field(min_length=1)`` at each
+of the two dozen fields that want it, because a floor that drifts is a
+floor nobody notices drifting. The bridge renders its violation as
+"must not be empty" (only at a floor of 1, where that paraphrase is
+true)."""
+
+PositiveInt = Annotated[int, Field(gt=0)]
+"""A count or size that must be at least one.
+
+Carries the bool-is-an-int concern for free: strict mode rejects ``True``
+for an ``int`` field, which is what the hand-rolled
+``isinstance(value, bool)`` guards did by hand."""
 
 
 def validation_context(owner: RefOwner) -> dict[str, object]:

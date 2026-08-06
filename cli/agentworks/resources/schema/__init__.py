@@ -28,9 +28,16 @@ imports ``resources/reference.py``, never the reverse.
 
 from __future__ import annotations
 
-from agentworks.resources.schema.base import AgwModel, AgwRootModel, validation_context
+from agentworks.resources.schema.base import (
+    AgwModel,
+    AgwRootModel,
+    NonEmptyStr,
+    PositiveInt,
+    validation_context,
+)
 from agentworks.resources.schema.errors import (
     MAX_ERROR_LINES,
+    FramedConfigError,
     config_error_from,
     render_validation_error,
 )
@@ -63,7 +70,10 @@ __all__ = [
     "AgwModel",
     "AgwRootModel",
     "FieldDoc",
+    "FramedConfigError",
     "ModelDoc",
+    "NonEmptyStr",
+    "PositiveInt",
     "RefMarker",
     "RefOwner",
     "ResourceRef",

@@ -16,7 +16,7 @@ from typing import Annotated, Literal
 from pydantic import Discriminator, Field
 
 from agentworks.resources.reference import RefRelationship
-from agentworks.resources.schema import AgwModel, AgwRootModel, ResourceRef, SecretRef
+from agentworks.resources.schema import AgwModel, AgwRootModel, NonEmptyStr, ResourceRef, SecretRef
 
 
 class GithubLike(AgwModel):
@@ -274,6 +274,19 @@ class MappingRoot(AgwRootModel[GithubLike]):
     """A root model wrapping a mapping-shaped model."""
 
 
+class AccountRefLike(AgwModel):
+    """The table arm of a string-or-table mapping."""
+
+    account: NonEmptyStr
+    reference: NonEmptyStr
+
+
+class StringOrTableRoot(AgwRootModel[NonEmptyStr | AccountRefLike]):
+    """A backend mapping that is a bare string OR a table: the shipped
+    onepassword shape, and the framework's one UNdiscriminated union
+    (nothing tags a bare string)."""
+
+
 #: Every fixture model the totality suite throws garbage at.
 ALL_FIXTURES = (
     GithubLike,
@@ -302,4 +315,6 @@ ALL_FIXTURES = (
     ResolvesToUnbuildable,
     StringRoot,
     MappingRoot,
+    AccountRefLike,
+    StringOrTableRoot,
 )

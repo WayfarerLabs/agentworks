@@ -87,22 +87,20 @@ justification (`validate_mapping`'s sibling) is being deleted in this step. The 
 CONTRACT still differs (section 4), which is where the real asymmetry belongs. Recorded as a
 deviation from the HLA's wording in section 14.
 
-**Settled: `config_model` is REQUIRED, not defaulted.** A capability with no config declares the
-shared empty model explicitly:
+**Settled: `config_model` is REQUIRED, not defaulted.** Defaulting it to an empty model on the base
+would make "I accept no config" the thing an author gets by FORGETTING, which is how the retired
+base `validate` behaved and is precisely what makes an unmigrated plugin look migrated. The same
+reasoning already governs `contract_version` (`capabilities/base.py:290-301`); this follows it
+rather than inventing a second rule.
 
-```python
-# resources/schema/base.py
-class EmptyConfig(AgwModel):
-    """The config of a capability that accepts none. Validates ``{}`` and
-    rejects every key, which is exactly what the retired base
-    ``Capability.validate`` did."""
-```
-
-Defaulting `config_model = EmptyConfig` on the base would make "I accept no config" the thing an
-author gets by forgetting, which is how the retired base `validate` behaved and is precisely what
-makes an unmigrated plugin look migrated. The same reasoning already governs `contract_version`
-(`capabilities/base.py:290-301`); this follows it rather than inventing a second rule. The one
-shipped capability that accepts no config (wsl2) declares `EmptyConfig` by name.
+**Settled: there is no SHARED empty model, because at wave 2 it would have no user.** The plan asks
+for one (`plan.md:339`), and the shape it describes is right, but it does not survive contact with
+the tag: a kind whose config is dispatched by a discriminated union needs every model to carry the
+`name` field, so a shared model with no fields cannot be an arm of it. The one shipped capability
+that accepts no config (wsl2) therefore declares a two-line model carrying only its tag, and every
+other shipped capability has real fields. A shared empty model becomes real the moment a map-keyed
+or untagged surface wants one, and inventing it now, with nothing to use it, is speculative
+generality. Recorded in section 14.
 
 ### 2.2 Models live beside their implementation
 
@@ -183,8 +181,8 @@ Settled points, each with its reason:
   producer does not serve, which review and typing should have caught, not an operator's config
   mistake). Pinned by a test over a fixture capability that offers two facets.
 - **Config presence is NOT the support claim.** `config_for` answers "what shape is the config at
-  this level", never "do you support this level". A capability may support a facet and offer
-  `EmptyConfig` there; a capability that offers a config at a facet has claimed nothing about
+  this level", never "do you support this level". A capability may support a facet and offer an
+  empty config there; a capability that offers a config at a facet has claimed nothing about
   implementing it. Support is carried by the implementation, per the scope-participation contract.
   Wiring the two together would reinvent the rescinded slot mechanism under a new name, so
   `config_for` is documented in exactly these terms and no core code may read it as a support
@@ -542,13 +540,10 @@ extends `AgwModel` (or `AgwRootModel`, section 9.4) and inherits strict / frozen
 ### 9.1 vm-platform (5)
 
 - **`lima`** (`LimaConfig`): `name: Literal["lima"]`, `vm_host: str | None = None`.
-- **`wsl2`**: `EmptyConfig`. It has no `validate` override today, so the retired base rejected any
-  key; the shared empty model reproduces that exactly. **Correction to make in the same commit:**
-  `EmptyConfig` cannot carry a `name` tag, so a kind with a discriminator cannot use the shared
-  empty model as-is. wsl2 declares a two-line `Wsl2Config(AgwModel)` with only the tag field. The
-  shared `EmptyConfig` is still real and is what a map-keyed or untagged surface uses; the plan's
-  "empty-config capabilities register the shared empty model" holds in intent (no fields beyond the
-  tag) and section 14 records the wording.
+- **`wsl2`** (`Wsl2Config`): `name: Literal["wsl2"]` and nothing else. It has no `validate` override
+  today, so the retired base rejected every key, which a model carrying only its tag reproduces
+  exactly. This is the plan's "empty-config capabilities register the shared empty model" box, in
+  the only form a tagged kind admits (section 2.1).
 - **`azure-vm`** (`AzureVMConfig`): `subscription_id`, `resource_group`, `region` (required
   non-empty strings); `vm_sizes: list[AzureVMSize] | None = None`;
   `service_principal: AzureServicePrincipal | None = None`.
@@ -601,12 +596,12 @@ schema-foundation LLD's section 2.1.
   `mode="before"` shape guard that raises the shipped one-line message for a value that is neither a
   string nor a table. `OpUri` is `Annotated[str, ...]` carrying today's `op://vault/item/field`
   check; `OnePasswordAccountRef` is an `AgwModel` of `account` and `reference`.
-- **`prompt`** (`NoMappingConfig`): prompt has no mapping vocabulary and rejects EVERY value,
+- **`prompt`** (`PromptMapping`): prompt has no mapping vocabulary and rejects EVERY value,
   including `{}`. `typing.Never` is not expressible as a pydantic root (verified: 2.13.4 raises
-  `PydanticSchemaGenerationError`), so this is a shared root model whose `mode="before"` validator
-  always raises, carrying the shipped message. Shared rather than prompt-local because "this
-  capability accepts no configuration at all" is a real category and the next backend to have none
-  should not re-derive it.
+  `PydanticSchemaGenerationError`), so this is an `AgwRootModel[object]` whose `mode="before"`
+  validator always raises, carrying the shipped message. Prompt-local rather than shared: the
+  message has to name the backend to be worth reading, so a shared model could only say something
+  vaguer than what it replaces.
 
 **The generic `False` opt-out is NOT modeled**, in any of the three. It is filtered by the caller
 before a backend ever sees a mapping (`secrets/base.py:133-134`), so putting a `Literal[False]` arm
@@ -840,9 +835,9 @@ Each is one commit with the full gate green after it. Always additive-then-subtr
 path lands and is exercised beside the old one, then the old one is deleted per kind, so there is no
 red window.
 
-1. **Vocabulary and contract.** `Facet`, `facet_config`, `EmptyConfig` / `NoMappingConfig`,
-   `NonEmptyStr` / `PositiveInt`, `FramedConfigError`, the two bridge extensions (section 8) with
-   their corpus entries, `RefOwner.label`. Additive; nothing consumes them yet.
+1. **Vocabulary and contract.** `Facet`, `facet_config`, `NonEmptyStr` / `PositiveInt`,
+   `FramedConfigError`, the two bridge extensions (section 8) with their corpus entries,
+   `RefOwner.label`. Additive; nothing consumes them yet.
 2. **The descriptor's `config_schema` and conformance check five.** `ConfigContract` on the four
    records, the check, its negative tests. Still additive: no implementation declares a model, so
    the check is scoped to implementations that do (a model-less impl is refused only from step 4
@@ -886,9 +881,10 @@ red window.
    The substance the artifacts ask for is unchanged: the backend's per-secret mapping model IS that
    kind's registered config.
 3. **"Empty-config capabilities register the shared empty model"** (`plan.md:339`) cannot hold
-   literally for a kind with a discriminator: the shared empty model has no `name` field, so it
-   cannot be a union arm. wsl2 declares a two-field-less model carrying only its tag. The shared
-   `EmptyConfig` still exists and is the honest answer wherever no tag is required.
+   literally for a kind with a discriminator: a model with no fields has no `name` field, so it
+   cannot be a union arm. wsl2 declares a model carrying only its tag, which is the box's intent.
+   The consequence worth stating is that at wave 2 a SHARED empty model would have zero users, so
+   none is built (section 2.1); one becomes real when a map-keyed or untagged surface wants it.
 4. **`SecretBackend.dependencies` is dead surface**, not a contract half. `secrets/backends.py:157`
    documents it as "the `secret-backend` half of the capability contract's `dependencies`/`validate`
    split", and the secret-backend descriptor requires it (`secrets/kinds.py:260`), but it has zero

@@ -196,6 +196,8 @@ _EDGELESS_BY_DESIGN = {
     "LimaArm": "the arm that names nothing",
     "UnmarkedLike": "no marked field at any depth",
     "StringRoot": "a bare scalar root names nothing",
+    "StringOrTableRoot": "an undiscriminated root union addresses no arm",
+    "AccountRefLike": "nothing in an account reference names a Resource",
     "UndiscriminatedSite": "no discriminator, so no arm is addressable",
     "NumericallyTaggedSite": "tagged by something other than a name",
     "NeverResolved": "the model cannot be built",

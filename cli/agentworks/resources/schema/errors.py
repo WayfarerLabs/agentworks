@@ -41,7 +41,7 @@ from typing import TYPE_CHECKING, Final
 from pydantic import RootModel
 
 from agentworks.errors import ConfigError
-from agentworks.resources.schema._shape import model_fields_of, shape_of
+from agentworks.resources.schema._shape import is_model, model_fields_of, shape_of
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -80,6 +80,25 @@ _TYPE_MESSAGES: Final[Mapping[str, str]] = {
 }
 
 
+class FramedConfigError(ConfigError):
+    """A ``ConfigError`` that already carries its own location framing.
+
+    :func:`config_error_from` produces only this type, and a caller must
+    not re-frame it. The one caller that would is the finalize validate
+    pass, which appends an origin suffix to whatever a resource's
+    ``validate`` raises (``resources/registry.py``): correct for the
+    hand-rolled validators that still raise unframed ``ConfigError``s,
+    and a double framing for anything from here.
+
+    Marking the ERROR rather than each call site is what makes the rule
+    hold through the four consuming resources, capability construction,
+    and the migrator without each of them knowing about a wrapper three
+    layers away. This class and that wrapper are one bounded fork with
+    one deletion trigger: they both go when the last hand-rolled
+    validator does (step 2.5), leaving one framing for everything.
+    """
+
+
 def render_validation_error(
     exc: PydanticValidationError,
     *,
@@ -105,7 +124,7 @@ def config_error_from(
     owner: RefOwner,
     location: SourceLocation | None = None,
     hint: str | None = None,
-) -> ConfigError:
+) -> FramedConfigError:
     """The ``ConfigError`` a caller raises for ``exc``, framed by
     ``location``.
 
@@ -126,7 +145,7 @@ def config_error_from(
     ``resources/registry.py``): that would frame it twice.
     """
     problems = _problems(exc, model_cls)
-    return ConfigError(
+    return FramedConfigError(
         _framed_batch(problems, owner, location),
         entity_kind=owner.kind,
         entity_name=owner.name,
@@ -225,6 +244,15 @@ def _contextual_message(detail: ErrorDetails, container: type[BaseModel] | None)
             return f"{tag_field} is required" if tag_field else None
         case "union_tag_invalid":
             return _unknown_tag(ctx)
+        case "value_error" | "assertion_error":
+            # A model validator's own exception. Pydantic renders it as
+            # "Value error, <message>"; the prefix is its presentation and
+            # the message is the author's, exactly like the pre-quoted
+            # discriminator unquoted above. Reading the message off the
+            # context rather than stripping a prefix off the text keeps
+            # this from depending on that rendering.
+            error = ctx.get("error")
+            return str(error) if isinstance(error, Exception) else None
         case _:
             return None
 
@@ -289,6 +317,23 @@ class _AtTag:
 
 
 @dataclass(frozen=True)
+class _AtUnion:
+    """The next ``loc`` segment names one MEMBER of an undiscriminated
+    union.
+
+    Pydantic tries every member and reports an error per failure, each
+    prefixed with that member's own name: for a mapping declared
+    ``str | AccountRef``, a bad value reports ``('str',)`` and
+    ``('AccountRef', ...)``. The operator wrote neither segment, and the
+    second is an internal class name, so both are dropped, and the walk
+    continues INSIDE the named member when it is a model, which is what
+    keeps an unknown-key message able to list the valid fields.
+    """
+
+    members: tuple[object, ...]
+
+
+@dataclass(frozen=True)
 class _AtElement:
     """The next ``loc`` segment addresses one element of a collection: a
     list index or a table key, both of which the operator DID write."""
@@ -299,7 +344,7 @@ class _AtElement:
 #: Where a ``loc`` walk currently stands. ``None`` is "lost track", which
 #: is not a failure: the remaining segments render verbatim, which is
 #: pydantic's own rendering and is never wrong, only less polished.
-_Cursor = _AtModel | _AtTag | _AtElement | None
+_Cursor = _AtModel | _AtTag | _AtUnion | _AtElement | None
 
 
 def _resolve_path(
@@ -352,6 +397,17 @@ def _advance(cursor: _Cursor, segment: int | str) -> tuple[bool, _Cursor]:
             if arm.tag == segment:
                 return False, _AtModel(arm.model)
         return True, None
+    if isinstance(cursor, _AtUnion) and isinstance(segment, str):
+        # Dropped by POSITION, not by matching a spelling: pydantic labels
+        # each member in its own vocabulary ("str", "constrained-str", a
+        # class name), and a recognizer for those spellings would be a
+        # second thing to keep in sync with pydantic. What is reliable is
+        # that the segment immediately after an undiscriminated union IS
+        # the member label, which the operator never wrote either way.
+        # The walk continues inside a member it can name, which is what
+        # keeps that member's field list available.
+        member = next((m for m in cursor.members if getattr(m, "__name__", None) == segment), None)
+        return False, _AtModel(member) if is_model(member) else None
     if isinstance(cursor, _AtElement):
         return True, None if cursor.item_model is None else _AtModel(cursor.item_model)
     if isinstance(cursor, _AtModel) and isinstance(segment, str):
@@ -369,6 +425,8 @@ def _cursor_for(shape: FieldShape) -> _Cursor:
         return _AtElement(shape.item_model)
     if shape.arms:
         return _AtTag(shape.arms)
+    if shape.union_members:
+        return _AtUnion(shape.union_members)
     return None
 
 

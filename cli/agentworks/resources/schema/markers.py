@@ -61,11 +61,18 @@ class RefOwner:
 
     kind: str
     name: str
+    label: str | None = None
+    """An override for :attr:`display`, for the one caller that frames in
+    a different vocabulary on purpose: ``agw resource migrate`` reports
+    against the TOML file it has not rewritten yet (``[azure].region is
+    required ...``), because that is the file the operator is looking at.
+    Everything else leaves it unset and gets ``kind/name``."""
 
     @property
     def display(self) -> str:
-        """The ``"<kind>/<name>"`` form error messages frame with."""
-        return f"{self.kind}/{self.name}"
+        """The ``"<kind>/<name>"`` form error messages frame with, or
+        :attr:`label` when one was given."""
+        return self.label or f"{self.kind}/{self.name}"
 
 
 @dataclass(frozen=True, kw_only=True)

@@ -90,6 +90,17 @@ class FieldShape:
     """The union's arms, in declaration order; empty unless the field is
     a discriminated union of models."""
 
+    union_members: tuple[object, ...]
+    """The members of an UNDISCRIMINATED union, in declaration order, as
+    raw annotations. Empty unless the field is a union with no
+    discriminator (``str | AccountRef``, a secret backend's mapping).
+
+    Neither walker reads this: an undiscriminated union names no single
+    arm from a raw blob, so it contributes no references and does not
+    expand. The error bridge reads it, because pydantic reports one error
+    per member and prefixes each with the member's own name, a segment
+    the operator never wrote."""
+
 
 def spine_metadata(field: FieldInfo) -> list[object]:
     """Every ``Annotated`` metadata item attached to the field's OWN
@@ -153,6 +164,7 @@ def shape_of(field: FieldInfo) -> FieldShape:
     nested_model: type[BaseModel] | None = None
     discriminator: str | None = None
     arms: tuple[UnionArmType, ...] = ()
+    union_members: tuple[object, ...] = ()
 
     found = _collection_element(inner)
     if found is not None:
@@ -166,6 +178,8 @@ def shape_of(field: FieldInfo) -> FieldShape:
         discriminator = _discriminator_of(field)
         if discriminator is not None:
             arms = _arms_of(inner, discriminator)
+        else:
+            union_members = tuple(_split_annotated(arg)[0] for arg in get_args(inner))
 
     return FieldShape(
         annotation=strip_markers(field.annotation),
@@ -177,7 +191,14 @@ def shape_of(field: FieldInfo) -> FieldShape:
         nested_model=nested_model,
         discriminator=discriminator,
         arms=arms,
+        union_members=union_members,
     )
+
+
+def is_model(annotation: object) -> TypeGuard[type[BaseModel]]:
+    """Whether ``annotation`` is a model class. Shared so the bridge asks
+    the same question this module does."""
+    return _is_model(annotation)
 
 
 def model_fields_of(model_cls: type[BaseModel]) -> dict[str, FieldInfo] | None:

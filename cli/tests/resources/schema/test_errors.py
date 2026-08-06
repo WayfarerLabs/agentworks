@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 import pytest
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic import ValidationError as PydanticValidationError
 
 from agentworks.errors import ConfigError
@@ -27,6 +27,7 @@ from agentworks.resources.schema import (
     MAX_ERROR_LINES,
     AgwModel,
     AgwRootModel,
+    FramedConfigError,
     RefOwner,
     config_error_from,
     render_validation_error,
@@ -38,6 +39,7 @@ from ._fixture_models import (
     CatalogLike,
     PrincipalLike,
     SiteLike,
+    StringOrTableRoot,
     StringRoot,
     TemplateLike,
     UndiscriminatedSite,
@@ -319,17 +321,36 @@ def test_a_root_model_addresses_the_fields_of_what_it_wraps() -> None:
     ]
 
 
-def test_a_segment_the_walk_cannot_account_for_renders_verbatim() -> None:
-    """An UNdiscriminated union of models is the one shape whose loc this
-    cannot improve: pydantic addresses the arm by class name, and with no
-    discriminator there is no tag to recognize. Rendering it verbatim is
-    pydantic's own answer, which is never wrong, only less polished.
-    Every union this framework declares is discriminated by a capability
-    name, so this is a boundary rather than a live case.
+def test_an_undiscriminated_unions_arm_name_is_dropped_too() -> None:
+    """Pydantic tries every arm of an undiscriminated union and prefixes
+    each failure with that arm's own CLASS NAME, which the operator never
+    wrote and could not act on. It is the same problem as a
+    discriminated union's tag one shape over, so it gets the same answer:
+    the segment is dropped and the walk continues inside the named arm.
+    Live, not hypothetical: a secret backend's mapping is a bare string
+    or a table, which has no tag to discriminate on.
     """
     lines = _lines(UndiscriminatedSite, {"platform": {"name": "lima", "vm_host": 8}})
 
-    assert "vm-site/lab.platform.LimaArm.vm_host: must be a string" in lines
+    assert "vm-site/lab.platform.vm_host: must be a string" in lines
+
+
+def test_an_undiscriminated_union_keeps_its_arms_field_list() -> None:
+    """Continuing INTO the arm is what the drop buys: without it the walk
+    loses track and the unknown-key message cannot name the valid
+    fields."""
+    lines = _lines(UndiscriminatedSite, {"platform": {"name": "lima", "bogus": 1}})
+
+    assert "vm-site/lab.platform.bogus: unknown field; expected one of: name, vm_host" in lines
+
+
+def test_an_undiscriminated_root_models_scalar_arm_renders_unprefixed() -> None:
+    """A non-model arm has no fields to continue into, so dropping its
+    name leaves the message alone at the document level, which is where a
+    root model's problems belong anyway."""
+    lines = _lines(StringOrTableRoot, "")
+
+    assert "vm-site/lab: must not be empty" in lines
 
 
 # -- Normalization ------------------------------------------------------------
@@ -390,3 +411,49 @@ def test_the_pure_renderer_answers_for_every_corpus_entry() -> None:
         (StringRoot, {"a": 1}),
     ):
         assert _lines(model_cls, blob), f"{model_cls.__name__} rendered no line for {blob!r}"
+
+
+# -- A validator's own message, and the framing marker -------------------------
+
+
+class Exclusive(AgwModel):
+    """A model whose rule spans two fields, which is where an authored
+    ``ValueError`` reaches the bridge."""
+
+    repos: list[str] | None = None
+    owner: str | None = None
+
+    @model_validator(mode="after")
+    def _mutually_exclusive(self) -> Exclusive:
+        if self.repos is not None and self.owner is not None:
+            raise ValueError("repos and owner are mutually exclusive")
+        return self
+
+
+def test_a_validators_own_message_is_carried_without_pydantics_prefix() -> None:
+    """Pydantic renders an authored ``ValueError`` as "Value error, ...".
+    The message is the author's and the prefix is pydantic's
+    presentation, so the message is read off the error context rather
+    than sliced off the text."""
+    assert _lines(Exclusive, {"repos": ["a/b"], "owner": "o"}) == [
+        "vm-site/lab: repos and owner are mutually exclusive"
+    ]
+
+
+def test_the_bridge_produces_a_framed_error_the_finalize_pass_must_not_rewrap() -> None:
+    """The marker is on the ERROR, not on each call site, which is what
+    makes the no-double-framing rule hold through every caller without
+    any of them knowing about the wrapper."""
+    raised = _raised(PrincipalLike, {})
+
+    assert isinstance(raised, FramedConfigError)
+    assert isinstance(raised, ConfigError)
+
+
+def test_an_owner_label_overrides_the_kind_slash_name_framing() -> None:
+    """``agw resource migrate`` reports against the TOML file it has not
+    rewritten yet, so it frames in that file's vocabulary."""
+    owner = RefOwner(kind="vm-site", name="lab", label="[azure]")
+    exc = _fails(PrincipalLike, {})
+
+    assert render_validation_error(exc, model_cls=PrincipalLike, owner=owner)[0].startswith("[azure].")
