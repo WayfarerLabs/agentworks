@@ -31,17 +31,9 @@ class WorkspaceTemplate(DeclaredResource):
     env: dict[str, EnvEntry] = field(default_factory=dict)
 
     def dependencies(self, context: BuildContext) -> list[ResourceReference]:
-        from agentworks.resources.reference import TemplateReference
+        from agentworks.resources.reference import inherits_reference
 
         source = ("workspace-template", self.name)
         refs: list[ResourceReference] = list(env_references(self.env, source))
-        for parent in self.inherits:
-            refs.append(
-                TemplateReference(
-                    name=parent,
-                    kind="workspace-template",
-                    usage="a parent template",
-                    source=source,
-                )
-            )
+        refs.extend(inherits_reference(parent, source) for parent in self.inherits)
         return refs

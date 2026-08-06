@@ -69,21 +69,13 @@ class SessionTemplate(DeclaredResource):
             ResourceReference as _ResourceRef,
         )
         from agentworks.resources.reference import (
-            TemplateReference,
+            inherits_reference,
             sourced_references,
         )
 
         source = ("session-template", self.name)
         refs: list[ResourceReference] = list(env_references(self.env, source))
-        for parent in self.inherits:
-            refs.append(
-                TemplateReference(
-                    name=parent,
-                    kind="session-template",
-                    usage="a parent template",
-                    source=source,
-                )
-            )
+        refs.extend(inherits_reference(parent, source) for parent in self.inherits)
         if self.harness_integration is not None:
             # The selector edge: a declared harness_integration references the
             # capability row, so a typo is a finalize-time miss-policy

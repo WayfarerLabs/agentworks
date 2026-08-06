@@ -44,6 +44,16 @@ future kinds may. Producers always instantiate a concrete subclass --
 ``ResourceReference`` itself is abstract-by-convention, not by ``ABC``;
 the framework consumes references through the base type but never builds
 one directly.
+
+The subclass types the TARGET; ``relationship`` types the EDGE. They are
+different questions and FR17 turns on the second one: an inheritance edge
+is source composition rather than a runtime need, and a traversal that
+means "what does this resource need at run time" must not cross it.
+``TemplateReference`` answers "points at a template", which coincides with
+inheritance only for as long as ``inherits`` is the sole reason to point
+at one, so :func:`inherits_reference` is the single spelling of an
+inheritance edge and ``RefRelationship.INHERITS`` is what every consumer
+keys on.
 """
 
 from __future__ import annotations
@@ -84,12 +94,18 @@ class ResourceReference:
       always source from ``"default"``; the framework treats those kinds
       as named-multi-instance under the hood, so a future plurified
       operator surface flows through the same shape unchanged.
+    - ``relationship``: what the source MEANS by the edge (FR17). It
+      defaults to ``USES``, a runtime need, which is what all but the
+      inheritance edge is; ``INHERITS`` says the target's declaration is
+      composed into the source's, and is emitted only through
+      :func:`inherits_reference`.
     """
 
     name: str
     kind: str
     usage: str
     source: tuple[str, str]
+    relationship: RefRelationship = RefRelationship.USES
 
 
 @dataclass(frozen=True)
@@ -107,13 +123,18 @@ class TemplateReference(ResourceReference):
     """Outbound reference targeting a template-kind Resource (``vm-template``,
     ``workspace-template``, ``agent-template``, ``session-template``).
 
-    Emitted by each template type's ``dependencies(context)`` for every
-    name in its ``inherits = [...]`` list. The framework's miss policy
-    resolves the name (auto-declaring ``default`` when reserved, erroring
-    on other typos) and cycle detection catches inheritance loops.
-    Per-template field-merging (the actual ``inherits`` semantics) stays
-    in the existing template resolvers; this class is purely the
-    framework's handle on the reference.
+    Emitted for every name in an inheriting resource's ``inherits = [...]``
+    list (through :func:`inherits_reference`, which is what marks the edge
+    ``INHERITS``). The framework's miss policy resolves the name
+    (auto-declaring ``default`` when reserved, erroring on other typos) and
+    cycle detection catches inheritance loops. Per-template field-merging
+    (the actual ``inherits`` semantics) stays in the existing template
+    resolvers; this class is purely the framework's handle on the target.
+
+    It says "the target is a template" and nothing more. It is NOT the
+    inheritance marker: a future uses-a-template edge would be this type
+    with ``relationship=USES``, which is exactly why FR17 keys on the
+    relationship instead (see the module docstring).
 
     No extra fields beyond the base today; the subclass exists so
     producers and the framework agree on the target kind via the type.
@@ -151,6 +172,29 @@ class ReferenceEntry:
     usage: str
 
 
+def inherits_reference(parent: str, source: tuple[str, str]) -> TemplateReference:
+    """The outbound edge an inheriting resource publishes for one name in
+    its ``inherits = [...]`` list.
+
+    The ONE spelling of an inheritance edge, so no producer can emit one
+    that forgets to say so. That matters more than saving four lines: an
+    edge left at the default ``USES`` is not a crash but a wrong answer,
+    silently pulling a parent's runtime needs into the child's (FR17).
+
+    The target kind comes from ``source`` rather than from a parameter
+    because inheritance composes a declaration into another declaration OF
+    THE SAME KIND, so the two can never legitimately differ and a
+    parameter would only be a way to get them out of step.
+    """
+    return TemplateReference(
+        name=parent,
+        kind=source[0],
+        usage="a parent template",
+        source=source,
+        relationship=RefRelationship.INHERITS,
+    )
+
+
 def sourced_references(
     config_refs: Iterable[ConfigReference],
     source: tuple[str, str],
@@ -165,6 +209,11 @@ def sourced_references(
     edges into its own outbound references through this one helper,
     centralizing what the three capability-config resources
     (``vm-site``, ``git-credential``, ``session-template``) duplicated.
+
+    The ``ConfigReference``'s ``relationship`` rides along: a model's field
+    marker is where a modeled inheritance edge would be declared, and
+    dropping it here would leave the graph unable to tell one from a
+    runtime need (FR17).
     """
     result: list[ResourceReference] = []
     for cref in config_refs:
@@ -175,6 +224,7 @@ def sourced_references(
                 kind=cref.kind,
                 usage=cref.usage,
                 source=source,
+                relationship=cref.relationship,
             )
         )
     return result
@@ -187,5 +237,6 @@ __all__ = [
     "ResourceReference",
     "SecretReference",
     "TemplateReference",
+    "inherits_reference",
     "sourced_references",
 ]

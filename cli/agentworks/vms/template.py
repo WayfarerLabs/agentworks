@@ -87,26 +87,18 @@ class VMTemplate(DeclaredResource):
             ResourceReference as _ResourceReq,
         )
         from agentworks.resources.reference import (
-            TemplateReference,
+            inherits_reference,
         )
 
         source = ("vm-template", self.name)
         refs: list[ResourceReference] = list(env_references(self.env, source))
-        # Inherits: each parent template name in ``inherits = [...]`` is a
-        # TemplateReference targeting the same kind. The framework's
-        # VMTemplateKind miss policy auto-declares "default" when missing
-        # and errors on any other unknown name; framework cycle detection
-        # catches inheritance loops. Per-template field-merging stays in
-        # ``agentworks.vms.templates``.
-        for parent in self.inherits:
-            refs.append(
-                TemplateReference(
-                    name=parent,
-                    kind="vm-template",
-                    usage="a parent template",
-                    source=source,
-                )
-            )
+        # Inherits: each parent template name in ``inherits = [...]`` is an
+        # INHERITS edge (source composition, not a runtime need; FR17). The
+        # framework's VMTemplateKind miss policy auto-declares "default"
+        # when missing and errors on any other unknown name; framework
+        # cycle detection catches inheritance loops. Per-template
+        # field-merging stays in ``agentworks.vms.templates``.
+        refs.extend(inherits_reference(parent, source) for parent in self.inherits)
         # Apt / install-command references: each name in apt_packages /
         # system_install_commands resolves to a declared Resource via
         # the framework's miss policy (error on typo, citing this

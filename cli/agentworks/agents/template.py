@@ -50,21 +50,13 @@ class AgentTemplate(DeclaredResource):
             ResourceReference as _ResourceReq,
         )
         from agentworks.resources.reference import (
-            TemplateReference,
+            inherits_reference,
         )
 
         source = ("agent-template", self.name)
         refs: list[ResourceReference] = list(env_references(self.env, source))
         refs.extend(credential_references(self.git_credentials, source))
-        for parent in self.inherits:
-            refs.append(
-                TemplateReference(
-                    name=parent,
-                    kind="agent-template",
-                    usage="a parent template",
-                    source=source,
-                )
-            )
+        refs.extend(inherits_reference(parent, source) for parent in self.inherits)
         # Install-command references for user_install_commands.
         for cmd in self.user_install_commands or []:
             refs.append(
