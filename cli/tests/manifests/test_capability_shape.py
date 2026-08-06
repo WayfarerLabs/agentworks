@@ -18,7 +18,6 @@ import pytest
 
 from agentworks.errors import ConfigError
 from agentworks.manifests import load_manifests
-from agentworks.manifests.decode import MIGRATE_HINT
 from agentworks.migrate.manifest_upgrade import _LEGACY_SIBLING_SHAPES
 
 _SURFACES = [
@@ -133,13 +132,13 @@ def test_bare_naming_string_is_rejected_with_a_one_key_rewrite(tmp_path: Path) -
 def test_sibling_config_alone_names_the_unsupported_field(
     tmp_path: Path, kind: str, field: str, old_doc: str, rewrite: str
 ) -> None:
-    """A ``*_config`` table with no naming field beside it. The
-    hand-written "fold its keys into the tagged table" steer is gone with
-    the fold, and the unknown-key message says the same thing by naming
-    the field that IS valid."""
+    """A ``*_config`` table with no naming field beside it: the message
+    names the field that is not supported rather than reporting the
+    capability as missing, which is what the kind's own required-field
+    error would say."""
     config_field = f"{field}_config"
     document = "\n".join(line for line in dedent(old_doc).splitlines() if not line.strip().startswith(f"{field}:"))
-    with pytest.raises(ConfigError, match=f"{config_field}: unknown field; expected one of: .*{field}"):
+    with pytest.raises(ConfigError, match=f"spec.{config_field} is not a supported YAML field"):
         _load_one(tmp_path, "ownerless", document)
 
 
@@ -328,20 +327,19 @@ def test_session_template_without_selector_remains_a_valid_default_or_inheriting
 )
 def test_mixed_shape_is_a_hard_error_with_no_migrate_hint(tmp_path: Path, doc: str, field: str) -> None:
     """A tagged table beside a sibling ``*_config``: the message names the
-    unknown field AND the one that is valid, so the operator's next move
-    is to fold those keys in rather than to guess which half won.
+    field that is not supported, so the operator's next move is to fold
+    those keys in rather than to guess which half won.
 
-    And it does NOT carry the migrate hint. The migrator will not guess
-    which half of a mixed document wins either, so it leaves this file
-    alone; naming it here would send the operator to a command that does
-    nothing for them. The uniform sample hint every spec error carries is
-    a different remedy, and a true one: it shows the shape.
+    And it carries NO hint at all. The migrator will not guess which half
+    of a mixed document wins either, so it leaves this file alone; naming
+    it here would send the operator to a command that does nothing for
+    them. The sample hint every model-layer error carries is not reached
+    either, because this refusal runs ahead of validation.
     """
     with pytest.raises(ConfigError) as excinfo:
         _load_one(tmp_path, "mixed", doc)
-    assert f"{field}_config: unknown field; expected one of: " in str(excinfo.value)
-    assert field in str(excinfo.value)
-    assert excinfo.value.hint != MIGRATE_HINT
+    assert f"spec.{field}_config is not a supported YAML field" in str(excinfo.value)
+    assert excinfo.value.hint is None
 
 
 @pytest.mark.parametrize(

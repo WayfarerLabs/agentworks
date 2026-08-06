@@ -34,7 +34,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import ValidationError as PydanticValidationError
 
-from agentworks.declared_resource import DeclaredResource
+from agentworks.declared_resource import METADATA_FIELDS, DeclaredResource
 from agentworks.errors import ConfigError, StateError
 from agentworks.resources import KIND_REGISTRY
 from agentworks.schema import RefOwner, config_error_from, extract_references, validation_context
@@ -181,6 +181,14 @@ def _reject_legacy_shape(surface: HostSurface, spec: Mapping[str, object], where
     would discard what the operator wrote). Neither carries the migrate
     hint either, because the migrator refuses both documents too.
 
+    The retired sibling field is refused whatever sits beside it, which is
+    the ORPHAN case (a ``platform_config`` alone) and the MIXED one (a
+    tagged ``platform`` table beside a stray ``platform_config``). The
+    model layer would answer both with a generic unknown key, and the
+    operator's next move is the same in both: fold those keys in. No
+    migrate hint, because the migrator will not guess which half of a
+    mixed document wins and has nothing to fold in the orphan one.
+
     This is the one compatibility surface the model swap leaves behind,
     and it goes together with ``HostSurface.config_field``, whose only
     remaining job is to let this name the retired field. Delete both when
@@ -190,6 +198,11 @@ def _reject_legacy_shape(surface: HostSurface, spec: Mapping[str, object], where
     field, config_field = surface.naming_field, surface.config_field
     value = spec.get(field)
     if not isinstance(value, str):
+        if config_field in spec:
+            raise ConfigError(
+                f"{where}: spec.{config_field} is not a supported YAML field; "
+                f"fold its keys into the spec.{field} tagged table"
+            )
         return
     name = value or "<capability>"
     head = f"{where}: spec.{field} names the capability as a string, which is no longer supported"
@@ -275,18 +288,29 @@ def _metadata_payload(doc: Document) -> dict[str, object]:
 
 
 def _reject_spec_metadata(doc: Document, spec: Mapping[str, object]) -> None:
-    """Refuse a metadata field written inside ``spec``.
+    """Refuse a non-spec field written inside ``spec``.
 
     ``extra="forbid"`` closes the spec surface against keys the row does
-    not have, but the metadata fields ARE fields of the row, so
-    ``spec.name`` would be accepted and would silently override the
-    envelope. Derived from the base, so it cannot fall behind a new
-    metadata field.
+    not have, but the envelope and framework fields ARE fields of the row,
+    so ``spec.name`` would be accepted and would silently override the
+    envelope. Both sets are derived from the row base, so neither can fall
+    behind a new field.
+
+    The two get different answers because they have different remedies.
+    An envelope field belongs somewhere: ``metadata``. A framework field
+    belongs nowhere, and answering ``spec.origin`` with "it belongs in
+    metadata" would send an operator to write ``metadata.origin``, which
+    the envelope then refuses as an unknown metadata key.
     """
-    reserved = sorted(_ROW_METADATA_FIELDS & set(spec))
-    if reserved:
+    misplaced = sorted(METADATA_FIELDS & set(spec))
+    framework = sorted((_ROW_METADATA_FIELDS - METADATA_FIELDS) & set(spec))
+    if misplaced:
         raise ConfigError(
-            f"{doc.where}: {', '.join(reserved)} belong(s) in metadata, not in spec",
+            f"{doc.where}: {', '.join(misplaced)} belong(s) in metadata, not in spec",
+        )
+    if framework:
+        raise ConfigError(
+            f"{doc.where}: {', '.join(framework)} is set by the framework and cannot be declared",
         )
 
 

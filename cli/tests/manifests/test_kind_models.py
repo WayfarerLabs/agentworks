@@ -124,6 +124,16 @@ def test_a_malformed_expiry_is_refused(written: object, message: str) -> None:
         decode("apt-package", "tools", {"apt": ["jq"]}, expires=written)
 
 
+def test_a_framework_field_written_in_spec_gets_its_own_answer() -> None:
+    """``origin`` and ``declared_at`` belong NOWHERE an operator writes,
+    so answering them with "belongs in metadata" would send an operator to
+    write ``metadata.origin``, which the envelope refuses as an unknown
+    metadata key."""
+    assert rejection("apt-package", "tools", {"apt": ["jq"], "origin": "operator-declared"}) == (
+        "res.yaml:7: origin is set by the framework and cannot be declared"
+    )
+
+
 def test_an_expiry_is_not_spec_surface() -> None:
     """It is written in ``metadata``, so offering it under ``spec`` would
     be a lie the sample renderer would repeat."""
