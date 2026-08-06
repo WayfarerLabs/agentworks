@@ -129,6 +129,7 @@
     "pryce",
     "pushd",
     "pveapi",
+    "pydantic",
     "pyproject",
     "pytest",
     "pyyaml",

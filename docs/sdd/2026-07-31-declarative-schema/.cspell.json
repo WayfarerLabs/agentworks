@@ -26,7 +26,6 @@
     "msgspec",
     "populator",
     "precheck",
-    "pydantic",
     "repoints",
     "ruamel",
     "schemars",
