@@ -90,18 +90,18 @@ class ManifestSet:
 
     ``issues`` mirrors ``Config.config_issues``: spec-level warnings
     (unknown keys on warn-mode kinds, env hygiene) prefixed with the
-    document's ``file:line``. ``deprecation_issues`` mirrors
-    ``Config.deprecation_issues``: ambient teaching messages, silenced
-    per-invocation by --no-deprecations. ``deprecated_shape_resources``
-    is the underlying fact (the ``kind/name`` tokens still spelling the
-    deprecated sibling capability-config shape), for surfaces that
-    render their own tidy rows (doctor).
+    document's ``file:line``.
+
+    There is no deprecation channel here. The one manifest deprecation
+    that ever rode one (the sibling capability-config shape) is a hard
+    error now, so the channel would have been a field that is always
+    empty, a warn loop that never fires, and a bundle gate that always
+    passes. ``Config.deprecation_issues`` is a separate thing and stays:
+    config.toml still carries a deprecated section to nudge about.
     """
 
     entries: tuple[ManifestEntry, ...]
     issues: tuple[str, ...]
-    deprecation_issues: tuple[str, ...] = ()
-    deprecated_shape_resources: tuple[str, ...] = ()
 
     @classmethod
     def empty(cls) -> ManifestSet:
@@ -231,7 +231,6 @@ def load_manifests(resources_dir: Path) -> ManifestSet:
     """
     entries: list[ManifestEntry] = []
     issues: list[str] = []
-    deprecated_shapes: list[str] = []
     seen: dict[tuple[str, str], SourceLocation] = {}
 
     for path in _iter_manifest_files(resources_dir):
@@ -245,11 +244,7 @@ def load_manifests(resources_dir: Path) -> ManifestSet:
                     f'"{doc.name}" (also declared at {first.file}:{first.line})',
                 )
             seen[key] = location
-            resource = decode_document(
-                doc,
-                issues,
-                deprecated_shapes,
-            )
+            resource = decode_document(doc, issues)
             entries.append(
                 ManifestEntry(
                     kind=doc.kind,
@@ -259,18 +254,4 @@ def load_manifests(resources_dir: Path) -> ManifestSet:
                 )
             )
 
-    # Aggregate each deprecation class once across the whole set, mirroring
-    # the TOML resource-section nudge. A warning per document would be
-    # obnoxious on real configs.
-    deprecation_messages: list[str] = []
-    if deprecated_shapes:
-        from agentworks.manifests.decode import capability_shape_deprecation
-
-        deprecation_messages.append(capability_shape_deprecation(deprecated_shapes))
-
-    return ManifestSet(
-        entries=tuple(entries),
-        issues=tuple(issues),
-        deprecation_issues=tuple(deprecation_messages),
-        deprecated_shape_resources=tuple(deprecated_shapes),
-    )
+    return ManifestSet(entries=tuple(entries), issues=tuple(issues))

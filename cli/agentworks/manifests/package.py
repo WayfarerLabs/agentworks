@@ -111,13 +111,9 @@ def publish_manifest_package(
 
     if manifests.issues:
         raise ConfigError(f"bundled manifests under {anchor}/{subdir} must be issue-free: {manifests.issues}")
-    # Deprecated shapes in a first-party bundle are the same class of
-    # curation bug: shipped manifests are the pattern book operators
-    # copy, so they must always spell the canonical shape.
-    if manifests.deprecation_issues:
-        raise ConfigError(
-            f"bundled manifests under {anchor}/{subdir} must not use deprecated shapes: {manifests.deprecation_issues}"
-        )
+    # A bundle spelling the legacy sibling capability shape no longer needs
+    # its own gate here: that shape fails to load at all now, so the
+    # ``load_manifests`` call above is what refuses it.
 
     for entry in manifests.entries:
         file_name = entry.location.file.name

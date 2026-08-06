@@ -159,7 +159,6 @@ GIT_CREDENTIAL_PROVIDER_DESCRIPTOR = CapabilityKindDescriptor(
         host_kind="git-credential",
         naming_field="provider",
         config_field="provider_config",
-        legacy_string_shape="accept-warn",
     ),
 )
 """The git-credential-provider record in the capability-kind descriptor

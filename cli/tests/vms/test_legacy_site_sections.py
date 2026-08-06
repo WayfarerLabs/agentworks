@@ -107,8 +107,8 @@ def _write_site_manifest(manifest_dir: Path, token_secret: str) -> None:
         "metadata:\n"
         "  name: proxmox\n"
         "spec:\n"
-        "  platform: proxmox\n"
-        "  platform_config:\n"
+        "  platform:\n"
+        "    name: proxmox\n"
         '    api_url: "https://pve:8006"\n'
         "    node: pve1\n"
         f'    token_secret: "{token_secret}"\n'

@@ -135,7 +135,4 @@ def load_request_registry(config: Config, manifests: ManifestSet | None = None, 
         _warned_request_configs.set(_warned_request_configs.get() | {request_key})
         for issue in resolved.issues:
             output.warn(f"Manifest: {issue}")
-        if not output.deprecations_suppressed():
-            for issue in resolved.deprecation_issues:
-                output.warn(f"Manifest: {issue}")
     return registry

@@ -16,12 +16,15 @@ exception: their emission is trivial envelope-wrapping, so they still
 delegate to the ``agentworks.apt`` / ``agentworks.install_commands`` domain
 loaders (imported from there, not from the relocated oracle).
 
-Capability-owned blobs (``provider_config``, ``platform_config``,
-``harness_integration_config``) are NOT validated here: their shape check
+A capability is named by ONE tagged table on its host's naming field
+(``spec.platform: {name: lima, vm_host: ...}``), which
+``_fold_capability_table`` splits into the internal pair the decoders
+consume (a ``platform`` string plus a ``platform_config`` mapping). The
+CONTENT of a capability-owned blob is NOT validated here: its shape check
 is the finalize ``validate`` pass (R3). Decode still performs the
-kind-owned spec-shape checks (a blob must be a mapping, a field may not
-shadow kind-owned surface) and attaches the TRUE blob to the decl, so the
-finalize pass sees every capability field.
+kind-owned spec-shape checks (a field may not shadow kind-owned surface)
+and attaches the TRUE blob to the decl, so the finalize pass sees every
+capability field.
 
 ``KIND_SECTIONS`` maps kind identifiers to their legacy TOML section
 names; it is the shared table the manifest migrator consumes so the two
@@ -79,6 +82,8 @@ def _host_surfaces() -> Mapping[str, HostSurface]:
     ``git-credential`` hosts git-credential-provider, ``session-template``
     hosts harness-integration); ``secret-backend`` has none, because the
     per-secret ``backend_mappings`` map key already names the capability.
+    Membership IS the dispatch: a declarable kind in this map gets the
+    capability fold, and one absent from it names no capability.
 
     An accessor rather than a module-level constant, for UNIFORMITY with the
     derived sites where laziness is forced, not because a cycle threatens
@@ -105,115 +110,67 @@ def _host_surfaces() -> Mapping[str, HostSurface]:
     )
 
 
-@cache
-def capability_fields() -> Mapping[str, tuple[str, str]]:
-    """Kind identifier -> (naming field, sibling config field), for the
-    hosting surfaces that still ACCEPT the deprecated sibling shape.
+MIGRATE_HINT = "`agw resource migrate --all` rewrites your manifests in place."
+"""The one remediation for a document still spelling the legacy shape."""
 
-    The canonical manifest shape is one tagged table on the naming field
-    (``platform: {name: lima, vm_host: ...}``; ``name`` selects the
-    capability, the remaining keys are its config). The old sibling shape
-    (``platform: lima`` plus ``platform_config: {...}``) still loads but is
-    deprecated for removal; ``_normalize_capability_field`` folds the tagged
-    shape back into the sibling pair so the decoders and the shared TOML
-    loaders underneath them see one internal shape.
 
-    The ``accept-warn`` filter is load-bearing, not decoration.
-    ``session-template`` is a host surface too, but it hardened to the
-    tagged shape in wave 1 and REJECTS the legacy string outright
-    (``_normalize_session_harness_selector``). Dropping the filter would
-    add a third entry here and route session-template through the
-    accept-warn fold, which is a real behavior change.
+def _tagged_rewrite(field: str, name: str, config: object) -> str:
+    """The exact canonical spelling that replaces a legacy sibling pair.
+
+    Built from what the document actually says (the capability's name and
+    the config keys it carries) rather than a generic template, so the
+    error shows the operator their own resource in the shape it now needs.
     """
-    return MappingProxyType(
-        {
-            host_kind: (surface.naming_field, surface.config_field)
-            for host_kind, surface in _host_surfaces().items()
-            if surface.legacy_string_shape == "accept-warn"
-        }
-    )
+    keys = list(config) if isinstance(config, dict) else []
+    inner = ", ".join([f"name: {name}", *(f"{key}: ..." for key in keys)])
+    return f"{field}: {{{inner}}}"
 
 
-def _normalize_session_harness_selector(spec: dict[str, object]) -> None:
-    """Normalize the canonical tagged harness-integration table."""
-    new_fields = {"harness_integration", "harness_integration_config"} & set(spec)
-    # A template may intentionally declare no workload here: it inherits a
-    # selector from a parent, or remains the default login shell. Preserve
-    # that established no-selector form rather than treating absence as an
-    # invalid canonical selector.
-    if not new_fields:
-        return
-    value = spec.pop("harness_integration", None)
-    if "harness_integration_config" in spec:
-        raise ConfigError(
-            "spec.harness_integration is a tagged table; spec.harness_integration_config is not a supported YAML field"
-        )
-    if not isinstance(value, dict):
-        raise ConfigError("spec.harness_integration must be a tagged table with a string 'name' key")
-    name = value.get("name")
-    if not isinstance(name, str) or not name:
-        raise ConfigError("spec.harness_integration (table form) requires a 'name' key naming the capability")
-    config = {key: item for key, item in value.items() if key != "name"}
-    spec["harness_integration"] = name
-    if config:
-        spec["harness_integration_config"] = config
-
-
-def _normalize_capability_field(kind: str, spec: dict[str, object]) -> bool:
+def _fold_capability_table(surface: HostSurface, spec: dict[str, object]) -> None:
     """Fold the tagged capability table into the internal sibling pair.
 
-    Returns True when the document spelled the OLD (deprecated) sibling
-    shape: the naming field as a string, with or without the sibling
-    ``*_config`` table. Mixing the shapes (a tagged table plus a sibling
-    ``*_config``) is ambiguous and errors. Shapes this function does not
-    recognize (a missing or non-string, non-mapping naming field) pass
-    through untouched to the surface's own error paths.
+    The manifest shape is one tagged table on the naming field
+    (``platform: {name: lima, vm_host: ...}``): ``name`` selects the
+    capability and the remaining keys are its config. The decoders and the
+    shared TOML loaders underneath them consume a naming STRING plus a
+    ``*_config`` mapping, so this splits the table back into that internal
+    pair. Every host surface folds the same way; the field names come from
+    the kind's descriptor record.
+
+    A host that names no capability at all passes through untouched: a
+    session template legitimately inherits its selector or stays the
+    default login shell, and the kinds that REQUIRE one raise their own
+    required-field error in their decoder, where the kind's vocabulary is.
+
+    Every other spelling is a hard error, including the legacy sibling
+    pair (a naming string beside a ``*_config`` table) that decode accepted
+    with a deprecation warning through 0.14.
     """
-    pair = capability_fields().get(kind)
-    if pair is None:
-        return False
-    field, config_field = pair
-    value = spec.get(field)
-    if isinstance(value, dict):
-        if config_field in spec:
-            raise ConfigError(
-                f"spec.{field} is a tagged table (its 'name' key selects the "
-                f"capability and the other keys are its config), so a sibling "
-                f"spec.{config_field} is ambiguous; fold those keys into the "
-                f"spec.{field} table"
-            )
-        name = value.get("name")
-        if not isinstance(name, str) or not name:
-            raise ConfigError(
-                f"spec.{field} (table form) requires a 'name' key naming the capability",
-            )
-        config = {key: item for key, item in value.items() if key != "name"}
-        spec[field] = name
-        if config:
-            spec[config_field] = config
-        return False
-    return isinstance(value, str)
-
-
-def capability_shape_deprecation(resources: list[str]) -> str:
-    """The ONE aggregated deprecation message for old-shape documents.
-
-    ``resources`` are ``kind/name`` display tokens, in load order.
-    Aggregated for the same reason the TOML resource-section nudge is
-    (``_warn_deprecated_resource_sections``): one warning per document
-    would be obnoxious on real configs.
-    """
-    return (
-        f"deprecated capability config shape in: {', '.join(resources)}. "
-        f"Naming a capability as a string with its config in a sibling table "
-        f"(platform: lima plus platform_config:, and likewise "
-        f"provider/provider_config) is deprecated "
-        f"and will be removed in a future release. Fold the pair into one "
-        f"tagged table on the naming field, e.g. "
-        f"platform: {{name: <capability>, <config keys...>}} replacing "
-        f"platform: <capability> plus platform_config:. "
-        f"Silence this warning with --no-deprecations."
-    )
+    field, config_field = surface.naming_field, surface.config_field
+    if field not in spec and config_field not in spec:
+        return
+    value = spec.pop(field, None)
+    if isinstance(value, str):
+        rewrite = _tagged_rewrite(field, value or "<capability>", spec.get(config_field))
+        raise ConfigError(
+            f"spec.{field} names the capability as a string, which is no longer "
+            f"supported; write one tagged table instead: {rewrite}",
+            hint=MIGRATE_HINT,
+        )
+    if config_field in spec:
+        raise ConfigError(
+            f"spec.{config_field} is not a supported YAML field; fold its keys into the spec.{field} tagged table",
+            hint=MIGRATE_HINT,
+        )
+    if not isinstance(value, dict):
+        raise ConfigError(f"spec.{field} must be a tagged table with a string 'name' key")
+    name = value.get("name")
+    if not isinstance(name, str) or not name:
+        raise ConfigError(f"spec.{field} (table form) requires a 'name' key naming the capability")
+    config = {key: item for key, item in value.items() if key != "name"}
+    spec[field] = name
+    if config:
+        spec[config_field] = config
 
 
 def _doc_decls(section: str, doc: Document) -> _SectionLineMap:
@@ -236,20 +193,12 @@ def _doc_decls(section: str, doc: Document) -> _SectionLineMap:
     )
 
 
-def decode_document(
-    doc: Document,
-    issues: list[str],
-    deprecated_shapes: list[str] | None = None,
-) -> Any:
+def decode_document(doc: Document, issues: list[str]) -> Any:
     """Decode one validated envelope into the kind's Resource instance.
 
     Spec-level warnings (unknown keys on warn-mode kinds, env hygiene)
     are appended to ``issues`` prefixed with the document location.
     Spec-level errors re-raise as ``ConfigError`` with the same prefix.
-    When the document spells the deprecated sibling capability-config
-    shape, its ``kind/name`` is appended to ``deprecated_shapes`` (when
-    given); the caller aggregates the collected tokens into the ONE
-    deprecation warning (``capability_shape_deprecation``).
     """
     decoder = _DECODERS[doc.kind]
     spec = dict(doc.spec)
@@ -270,16 +219,11 @@ def decode_document(
     try:
         # Capability-shape normalization (tagged table -> internal
         # sibling pair) runs next, so every decoder and the shared TOML
-        # loaders underneath see exactly one shape. Which fold a host kind
-        # gets is its surface's legacy string shape: ``reject`` for the
-        # hardened session-template selector, ``accept-warn`` for the
-        # surfaces that still tolerate the deprecated sibling pair and
-        # collect it for the caller's aggregated deprecation warning.
+        # loaders underneath see exactly one shape. A kind with no host
+        # surface names no capability and needs no fold.
         surface = _host_surfaces().get(doc.kind)
-        if surface is not None and surface.legacy_string_shape == "reject":
-            _normalize_session_harness_selector(spec)
-        elif _normalize_capability_field(doc.kind, spec) and deprecated_shapes is not None:
-            deprecated_shapes.append(f"{doc.kind}/{doc.name}")
+        if surface is not None:
+            _fold_capability_table(surface, spec)
         resource = decoder(doc, spec, local_issues)
     except AgentworksError as exc:
         # A spec-level failure from any loader (the apt / install-command
@@ -521,26 +465,20 @@ def _decode_session_template(doc: Document, spec: dict[str, Any], issues: list[s
     from agentworks.config.loaders_core import _parse_env_table, _raise_unexpected_keys
     from agentworks.sessions.template import SessionTemplate
 
-    # The selector normalization (tagged harness_integration table -> the
-    # internal ``harness_integration`` name plus ``harness_integration_config``
-    # blob) already ran in
-    # ``decode_document`` before this decoder, so the spec here carries the
-    # canonical internal pair. Shell configuration lives only under
-    # harness_integration_config. This kind is strict at its own boundary so
-    # misspelled or removed fields do not degrade into warn-mode handling.
+    # The capability fold (tagged harness_integration table -> the internal
+    # ``harness_integration`` name plus ``harness_integration_config`` blob)
+    # already ran in ``decode_document`` before this decoder, so the spec here
+    # carries the canonical internal pair: a non-empty string selector, and a
+    # mapping blob only where there is a selector to own it. Shell
+    # configuration lives only under harness_integration_config. This kind is
+    # strict at its own boundary so misspelled or removed fields do not degrade
+    # into warn-mode handling.
     name = doc.name
     _raise_unexpected_keys(spec, _SESSION_TEMPLATE_KEYS, f"session_templates.{name}")
     harness_integration = spec.get("harness_integration")
     if harness_integration is not None and not isinstance(harness_integration, str):
         raise ConfigError(f"session_templates.{name}.harness_integration must be a string")
     raw_config = spec.get("harness_integration_config")
-    if raw_config is not None and not isinstance(raw_config, dict):
-        raise ConfigError("spec.harness_integration_config must be a mapping")
-    if harness_integration is None and raw_config is not None:
-        raise ConfigError(
-            f"session_templates.{name}: harness_integration_config needs a selector "
-            f'(a blob with no owner); add harness_integration = "..."'
-        )
     config_blob = dict(raw_config) if isinstance(raw_config, dict) else None
     env: dict[str, EnvEntry] | None = None
     if "env" in spec:
@@ -565,21 +503,19 @@ def _decode_git_credential(doc: Document, spec: dict[str, Any], issues: list[str
         raise ConfigError(
             'git-credential manifests use "provider", not "type"',
         )
-    # By this point ``_normalize_capability_field`` has already folded the
-    # tagged ``spec.provider: {name: ..., ...}`` table into the internal pair
-    # (a ``provider`` string plus a ``provider_config`` mapping), so this
-    # decoder always sees the normalized string form here.
+    # By this point ``_fold_capability_table`` has already split the tagged
+    # ``spec.provider: {name: ..., ...}`` table into the internal pair (a
+    # ``provider`` string plus a ``provider_config`` mapping), so this decoder
+    # always sees the normalized form: absent, or a non-empty string beside a
+    # mapping. Only absence is left to check here.
     provider = spec.pop("provider", None)
     if not isinstance(provider, str) or not provider:
         raise ConfigError(
             "git-credential requires spec.provider (github or azdo)",
         )
-    # Provider-owned configuration (azdo's org, the token secret name) rides the
-    # provider table operators write (or the deprecated sibling provider_config);
-    # both land in this normalized ``provider_config`` mapping.
+    # Provider-owned configuration (azdo's org, the token secret name) rides
+    # the provider table operators write and lands in this mapping.
     raw_config = spec.pop("provider_config", {})
-    if not isinstance(raw_config, dict):
-        raise ConfigError("spec.provider_config must be a mapping")
     # The blob may not shadow kind-owned surface. ``token`` is NOT reserved:
     # it is provider-owned config (the secret the provider sources its PAT
     # from) and lives under provider_config.
@@ -643,6 +579,10 @@ def _decode_vm_site(doc: Document, spec: dict[str, Any], issues: list[str]) -> A
     # alias (VM names, not site names, feed {slug}-{vm} hostnames). So they take
     # the freeform cap, not the tighter VM-name cap.
     validate_name(doc.name, max_length=MAX_FREEFORM_NAME_LENGTH)
+    # ``_fold_capability_table`` has already split the tagged
+    # ``spec.platform: {name: ..., ...}`` table into the internal pair, so the
+    # platform arrives absent or as a non-empty string beside a mapping. Only
+    # absence is left to check here.
     platform = spec.pop("platform", None)
     if not isinstance(platform, str) or not platform:
         raise ConfigError(
@@ -650,8 +590,6 @@ def _decode_vm_site(doc: Document, spec: dict[str, Any], issues: list[str]) -> A
             "e.g. lima, wsl2, azure-vm, aws-ec2, proxmox)",
         )
     raw_config = spec.pop("platform_config", {})
-    if not isinstance(raw_config, dict):
-        raise ConfigError("spec.platform_config must be a mapping")
     # ``token_secret`` (proxmox) is a bare operator-supplied secret name; warn
     # (only) when it is present and non-conforming, matching the other
     # reference sites. The location is kept relative; the decode layer prefixes
@@ -665,8 +603,6 @@ def _decode_vm_site(doc: Document, spec: dict[str, Any], issues: list[str]) -> A
 
     token_secret = raw_config.get("token_secret")
     if isinstance(token_secret, str) and token_secret:
-        # Shape-neutral location: the key arrives from the tagged
-        # platform table or the deprecated sibling platform_config.
         _warn_nonconforming_secret_name(token_secret, location="token_secret (platform config)", issues=issues)
     # The blob may not shadow kind-owned surface (the git-credential
     # precedent): platform/description in the blob would silently
@@ -674,9 +610,6 @@ def _decode_vm_site(doc: Document, spec: dict[str, Any], issues: list[str]) -> A
     reserved = {"platform", "description"} & set(raw_config)
     if reserved:
         names = ", ".join(sorted(reserved))
-        # Shape-neutral wording: the config arrives from the tagged
-        # platform table or the deprecated sibling platform_config, so
-        # the message names neither field.
         raise ConfigError(
             f"the platform config may not contain kind-owned field(s): {names}; they belong at the spec top level"
         )

@@ -199,12 +199,12 @@ spec:
     # (execute_plan verified this; double-check the reload works).
     reloaded = load_config(cfg, warn_issues=False)
     build_registry(reloaded)
-    # The emitted manifests spell the tagged capability shape, so they
-    # load warning-free: no deprecated-shape aggregate.
+    # The emitted manifests spell the tagged capability shape, which is the
+    # only one that loads at all: emission in the retired sibling shape
+    # would fail this load rather than merely warn.
     from agentworks.manifests import load_manifests
 
     emitted = load_manifests(tmp_path / "resources")
-    assert emitted.deprecation_issues == ()
     assert not emitted.issues
 
     # Per-kind layout: one file per kind with the plural-s convention.

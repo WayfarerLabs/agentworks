@@ -203,7 +203,8 @@ def _strip(resource: Any) -> Any:
               name: github
               description: gh access
             spec:
-              provider: github
+              provider:
+                name: github
             """,
         ),
         (
@@ -224,8 +225,8 @@ def _strip(resource: Any) -> Any:
             metadata:
               name: ado
             spec:
-              provider: azdo
-              provider_config:
+              provider:
+                name: azdo
                 org: my-org
                 token: git-token-ado
             """,
@@ -310,7 +311,8 @@ def test_admin_template_flat_spec(tmp_path: Path) -> None:
         metadata:
           name: github
         spec:
-          provider: github
+          provider:
+            name: github
         """,
     )
     manifest_admin = build_registry(_config(manifest_dir)).lookup("admin-template", "default")
@@ -349,8 +351,8 @@ def test_git_credential_provider_config_rejects_kind_owned_fields(
         metadata:
           name: gh
         spec:
-          provider: github
-          provider_config:
+          provider:
+            name: github
             provider: sneaky
         """,
     )
@@ -369,7 +371,8 @@ def test_git_credential_token_in_provider_config(tmp_path: Path) -> None:
         metadata:
           name: gh
         spec:
-          provider: github
+          provider:
+            name: github
           token: at-top-level
         """,
     )
@@ -377,9 +380,9 @@ def test_git_credential_token_in_provider_config(tmp_path: Path) -> None:
         load_manifests(tmp_path / "resources")
 
 
-def test_provider_config_must_be_a_mapping(tmp_path: Path) -> None:
-    """A non-mapping provider_config blob is rejected. (Post-collapse,
-    git-credential is the one kind carrying the blob.)"""
+def test_provider_must_be_a_tagged_table(tmp_path: Path) -> None:
+    """A scalar that is not even a capability name (so not the retired
+    string shape) is rejected as the wrong TYPE for the tagged table."""
     _manifest(
         tmp_path,
         """
@@ -388,11 +391,10 @@ def test_provider_config_must_be_a_mapping(tmp_path: Path) -> None:
         metadata:
           name: gh
         spec:
-          provider: github
-          provider_config: nope
+          provider: 42
         """,
     )
-    with pytest.raises(ConfigError, match="provider_config must be a mapping"):
+    with pytest.raises(ConfigError, match="spec.provider must be a tagged table"):
         load_manifests(tmp_path / "resources")
 
 
@@ -407,7 +409,8 @@ def test_git_credential_org_must_nest_under_provider_config(tmp_path: Path) -> N
         metadata:
           name: ado
         spec:
-          provider: azdo
+          provider:
+            name: azdo
           org: my-org
         """,
     )
@@ -471,7 +474,8 @@ def test_vm_site_uses_freeform_cap(tmp_path: Path) -> None:
         metadata:
           name: {name}
         spec:
-          platform: lima
+          platform:
+            name: lima
         """,
     )
     manifests = load_manifests(tmp_path / "resources")
@@ -490,7 +494,8 @@ def test_vm_site_over_freeform_cap_rejected(tmp_path: Path) -> None:
         metadata:
           name: {"a" * (MAX_FREEFORM_NAME_LENGTH + 1)}
         spec:
-          platform: lima
+          platform:
+            name: lima
         """,
     )
     with pytest.raises(ConfigError) as exc:

@@ -532,14 +532,9 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
     # explicit full-health surface. Doctor rows are scannable one-liners
     # (maintainer ruling, 2026-07-06): render the FACT with one next
     # step; the full teaching text stays on the ambient command warning.
-    # (The old TOML-resource-declaration nudge is a hard error now, rendered
-    # as the Config fail row above, so it no longer has a warn row here.)
-    if manifests is not None and manifests.deprecated_shape_resources:
-        g.warn(
-            "Manifests use the deprecated capability config shape",
-            f"{', '.join(manifests.deprecated_shape_resources)}: fold the "
-            "sibling pair into one tagged table, e.g. platform: {name: lima, ...}",
-        )
+    # (The old TOML-resource-declaration nudge and the sibling
+    # capability-config shape are hard errors now, rendered as the Config
+    # or Manifest fail rows above, so neither has a warn row here.)
     for section in config.noop_secret_backend_sections:
         g.warn(
             f"Config has a no-op {section} section",

@@ -354,8 +354,8 @@ def _registry_with_scoped_cred(tmp_path: Path):  # noqa: ANN202
         metadata:
           name: widgets-bot
         spec:
-          provider: github
-          provider_config:
+          provider:
+            name: github
             repos: [acme/widgets]
         """)
     )
@@ -399,8 +399,8 @@ def test_manifest_scope_validation_has_file_line(tmp_path: Path) -> None:
         metadata:
           name: bad
         spec:
-          provider: github
-          provider_config:
+          provider:
+            name: github
             repos: [not-a-repo]
         """)
     )

@@ -67,12 +67,12 @@ declaring a resource in `$EDITOR`.
 
 A `git-credential`'s `spec.provider` is one tagged table: its `name` key selects the provider
 capability (`github`, or `azdo` from the `azure` plugin) and the remaining keys are that provider's
-configuration. (The old sibling shape, a `provider:` string plus a `provider_config:` table, still
-loads unchanged but is deprecated and will be removed; fold the pair into the tagged table.) A
-github credential may carry a scope there: `repos: ["owner/name", ...]` pins the credential to
-specific repositories (always a list, even for one, matching a fine-grained PAT's selected repos),
-while `owner: "org"` covers every repository under that user or org, including repos an agent clones
-ad hoc that no workspace ever declared. The two are mutually exclusive; a credential with neither is
+configuration. (The old sibling shape, a `provider:` string plus a `provider_config:` table, is no
+longer accepted; `agw resource migrate --all` folds the pair into the tagged table.) A github
+credential may carry a scope there: `repos: ["owner/name", ...]` pins the credential to specific
+repositories (always a list, even for one, matching a fine-grained PAT's selected repos), while
+`owner: "org"` covers every repository under that user or org, including repos an agent clones ad
+hoc that no workspace ever declared. The two are mutually exclusive; a credential with neither is
 the unscoped fallback. Scopes are a manifest feature (the removed flat TOML shape never had GitHub
 fields).
 
@@ -158,8 +158,8 @@ spec:
   [System plugins](#system-plugins)), and the remaining keys are that platform's configuration,
   validated by it (unknown keys are errors). A platform needing no config is just
   `platform: {name: wsl2}`. Remote Lima is just a lima site with a `vm_host: user@host` key. The old
-  sibling shape (`platform: azure-vm` as a string plus a `platform_config:` table) still loads
-  unchanged but is deprecated and will be removed; fold the pair into the tagged table.
+  sibling shape (`platform: azure-vm` as a string plus a `platform_config:` table) is no longer
+  accepted; `agw resource migrate --all` folds the pair into the tagged table.
 - The `lima-local` and `wsl2` sites ship built in with empty config. Like every site they register
   on every host and report not-ready where this host lacks what they need (wsl2 is Windows-only; a
   local Lima site needs `limactl`); a not-ready site still lists and describes with its reason, and

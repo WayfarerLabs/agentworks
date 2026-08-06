@@ -114,14 +114,10 @@ HARNESS_INTEGRATION_DESCRIPTOR = CapabilityKindDescriptor(
     readiness=_readiness,
     publisher_source="agentworks.capabilities.harness_integration",
     config_schema=ConfigContract(base=AgwModel, discriminator="name"),
-    # session-template hardened to the tagged shape in wave 1, so its
-    # decoder REJECTS the legacy sibling string rather than warning. That
-    # difference is exactly what this field carries.
     manifest_section=HostSurface(
         host_kind="session-template",
         naming_field="harness_integration",
         config_field="harness_integration_config",
-        legacy_string_shape="reject",
     ),
 )
 """The harness-integration record in the capability-kind descriptor table

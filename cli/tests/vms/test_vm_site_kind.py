@@ -22,11 +22,20 @@ metadata:
   name: azure-dev
   description: Dev subscription
 spec:
-  platform: azure-vm
-  platform_config:
+  platform:
+    name: azure-vm
     subscription_id: "0000"
     resource_group: agw-dev
     region: eastus
+"""
+
+_NO_PLATFORM_DOC = """\
+apiVersion: agentworks/v1
+kind: vm-site
+metadata:
+  name: azure-dev
+  description: Dev subscription
+spec: {}
 """
 
 
@@ -102,15 +111,14 @@ def test_platform_named_site_must_declare_that_platform(tmp_path: Path) -> None:
     assert "azure" in SYSTEM_PLUGINS
     assert "azure-vm" in VM_PLATFORM_REGISTRY
 
-    doc = "apiVersion: agentworks/v1\nkind: vm-site\nmetadata:\n  name: azure-vm\nspec:\n  platform: lima\n"
+    doc = "apiVersion: agentworks/v1\nkind: vm-site\nmetadata:\n  name: azure-vm\nspec:\n  platform:\n    name: lima\n"
     (tmp_path / "site.yaml").write_text(doc)
     with pytest.raises(ConfigError, match="shadows a platform name"):
         load_manifests(tmp_path)
 
 
 def test_decode_requires_platform(tmp_path: Path) -> None:
-    doc = SITE_DOC.replace("  platform: azure-vm\n", "")
-    (tmp_path / "site.yaml").write_text(doc)
+    (tmp_path / "site.yaml").write_text(_NO_PLATFORM_DOC)
     with pytest.raises(ConfigError, match="spec.platform"):
         load_manifests(tmp_path)
 
@@ -162,7 +170,7 @@ def test_unknown_platform_site_hard_errors_at_finalize(tmp_path: Path) -> None:
     edge-suppression removed the site emits its platform edge
     unconditionally, and the absent ``vm-platform`` row is the error miss
     policy's unknown-reference. A typo no longer silently self-disables."""
-    doc = "apiVersion: agentworks/v1\nkind: vm-site\nmetadata:\n  name: mystery\nspec:\n  platform: nope\n"
+    doc = "apiVersion: agentworks/v1\nkind: vm-site\nmetadata:\n  name: mystery\nspec:\n  platform:\n    name: nope\n"
     site = _load_one(tmp_path, doc)
     assert site.platform == "nope"
     # The platform edge is always emitted now (suppression removed).
@@ -317,7 +325,7 @@ def test_bundled_sites_are_reserved(tmp_path: Path) -> None:
     from agentworks.manifests import builtin as builtin_manifests
 
     (tmp_path / "site.yaml").write_text(
-        "apiVersion: agentworks/v1\nkind: vm-site\nmetadata:\n  name: lima-local\nspec:\n  platform: lima\n"
+        "apiVersion: agentworks/v1\nkind: vm-site\nmetadata:\n  name: lima-local\nspec:\n  platform:\n    name: lima\n"
     )
     manifests = load_manifests(tmp_path)
     registry = Registry.empty()

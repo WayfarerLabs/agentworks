@@ -25,7 +25,7 @@ import agentworks.plugins as plugins_pkg
 from agentworks.capabilities.descriptor import capability_descriptors
 from agentworks.capabilities.vm_platform.base import VMPlatform
 from agentworks.errors import StateError
-from agentworks.manifests.decode import capability_fields
+from agentworks.manifests.decode import _host_surfaces
 from agentworks.plugins import (
     SYSTEM_PLUGINS,
     Plugin,
@@ -549,13 +549,13 @@ def test_every_capability_switchboard_site_derives_from_the_descriptor() -> None
     for registry, descriptor in zip(snapshot, descriptors, strict=True):
         assert registry is descriptor.registry(), descriptor.kind
 
-    # Site: manifest decode's capability fields, ACCEPT-WARN-FILTERED. The
-    # filter is load-bearing: session-template is a host surface too, but it
-    # rejects the legacy string shape and keeps its own fold, so an
-    # unfiltered derivation would sweep it into the accept-warn fold. Named
-    # as a literal, not recomputed from the same descriptors: the
-    # comprehension would only prove a comprehension runs.
-    assert set(capability_fields()) == {"vm-site", "git-credential"}
+    # Site: manifest decode's fold dispatch, keyed by HOST kind (the
+    # declarable kind whose spec names the capability) rather than by the
+    # capability kind. Membership is the dispatch: a kind in this map gets
+    # the tagged-table fold. Named as a literal, not recomputed from the
+    # same descriptors: the comprehension would only prove a comprehension
+    # runs.
+    assert set(_host_surfaces()) == {"vm-site", "git-credential", "session-template"}
 
 
 _DERIVED_SITES = {
@@ -564,9 +564,6 @@ _DERIVED_SITES = {
     ("resources/graph.py", "_capability_kinds"): "capability_descriptors",
     ("resources/graph.py", "_capability_registry_loaders"): "capability_descriptors",
     ("manifests/decode.py", "_host_surfaces"): "capability_descriptors",
-    # Two hops: decode's field map filters the host surfaces, which are
-    # themselves the table's ``manifest_section`` fields.
-    ("manifests/decode.py", "capability_fields"): "_host_surfaces",
 }
 """Every switchboard site with a derived enumeration, and the symbol its body
 must reach the descriptor table through."""
@@ -606,7 +603,7 @@ def test_each_derived_site_reads_the_descriptor_table_in_its_own_body() -> None:
     The sibling test above compares each site's enumeration against the
     table, which a hand-written enumeration satisfies just as well as a
     derived one: re-hardcoding ``_capability_kinds`` as a frozenset literal,
-    or ``capability_fields`` as a dict literal, keeps every set-equality and
+    or ``_host_surfaces`` as a dict literal, keeps every set-equality and
     identity assertion green. That is drift detection, not derivation
     enforcement, and the collapse this step performed is worth nothing if
     the switchboard can quietly grow back one correct-looking literal at a

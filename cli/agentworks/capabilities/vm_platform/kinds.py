@@ -125,7 +125,6 @@ VM_PLATFORM_DESCRIPTOR = CapabilityKindDescriptor(
         host_kind="vm-site",
         naming_field="platform",
         config_field="platform_config",
-        legacy_string_shape="accept-warn",
     ),
 )
 """The vm-platform record in the capability-kind descriptor table

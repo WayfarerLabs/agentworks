@@ -42,7 +42,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 from functools import cache
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 
 from agentworks.errors import StateError
 
@@ -100,12 +100,18 @@ class ConfigContract:
 class HostSurface:
     """How a capability kind is selected inside a declarable kind's spec.
 
-    The canonical manifest shape is one tagged table on the naming field
-    (``platform: {name: lima, vm_host: ...}``). The legacy sibling shape
-    (``platform: lima`` plus ``platform_config: {...}``) is still accepted
-    with a deprecation warning for vm-site and git-credential, and already
-    rejected for session-template (hardened in wave 1); step 2.4 flips the
-    remaining ``accept-warn`` surfaces to ``reject``.
+    The manifest shape is one tagged table on the naming field
+    (``platform: {name: lima, vm_host: ...}``), and it is the only shape:
+    the legacy sibling pair (``platform: lima`` plus
+    ``platform_config: {...}``) is a hard error on every surface, as of
+    step 2.4. Decode reads the two field names off this record to fold the
+    tagged table into the internal pair the decoders consume, so there is
+    one fold rather than one per host.
+
+    The record carried a ``legacy_string_shape`` field while the two folds
+    differed (session-template hardened in wave 1, ahead of its siblings).
+    Nothing distinguishes the surfaces now, so the field is gone rather
+    than left describing a difference that no longer exists.
     """
 
     host_kind: str
@@ -117,10 +123,8 @@ class HostSurface:
 
     config_field: str
     """The internal sibling field holding the capability's config blob
-    (``"platform_config"``)."""
-
-    legacy_string_shape: Literal["accept-warn", "reject"]
-    """What the host's decoder does with the legacy sibling shape."""
+    (``"platform_config"``). Internal: operators write one tagged table,
+    and decode splits it into this pair."""
 
 
 @dataclass(frozen=True)

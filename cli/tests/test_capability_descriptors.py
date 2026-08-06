@@ -34,7 +34,7 @@ from agentworks.capabilities.harness_integration.kinds import HarnessIntegration
 from agentworks.capabilities.publish import publish_capability_rows
 from agentworks.capabilities.vm_platform import VMPlatformEntry
 from agentworks.errors import StateError
-from agentworks.manifests.decode import capability_fields
+from agentworks.manifests.decode import _host_surfaces
 from agentworks.resources.graph import Readiness, _capability_node_readiness
 from agentworks.resources.kind import KIND_REGISTRY
 from agentworks.resources.registry import Registry
@@ -294,32 +294,28 @@ def test_vm_platform_readiness_carries_the_host_support_sentence() -> None:
 
 
 def test_manifest_sections_match_the_decoders_host_surfaces() -> None:
-    """Decode's accept-warn capability fields are exactly the two pairs they
-    have always been.
+    """Decode's fold dispatch is exactly the three host surfaces, with the
+    field pair each one names.
 
     Spelled out rather than recomputed from the descriptors, because decode
-    now DERIVES the table from them (accept-warn-filtered): comparing the
-    derivation against itself would only prove a comprehension runs. The
-    filter is what this pins. session-template is a host surface too, but it
-    hardened to the tagged shape in wave 1 and keeps its own rejecting fold,
-    so a third entry here would be a real behavior change."""
-    assert dict(capability_fields()) == {
+    now DERIVES this map from them: comparing the derivation against itself
+    would only prove a comprehension runs. Membership is the dispatch, so
+    the entries are the whole behavior. A kind gaining or losing a host
+    surface changes which specs get folded, which is why this is a literal.
+    """
+    assert {host: (s.naming_field, s.config_field) for host, s in _host_surfaces().items()} == {
         "vm-site": ("platform", "platform_config"),
         "git-credential": ("provider", "provider_config"),
+        "session-template": ("harness_integration", "harness_integration_config"),
     }
 
     hosted = [d.manifest_section for d in _descriptors() if d.manifest_section is not None]
     host_kinds = [surface.host_kind for surface in hosted]
     assert len(host_kinds) == len(set(host_kinds)), (
-        f"two capability kinds claim the same host: {host_kinds}. Decode keys both "
-        f"its fold dispatch and its capability-field map by host_kind, so the "
-        f"second record would silently overwrite the first and one host's fold "
-        f"would vanish."
+        f"two capability kinds claim the same host: {host_kinds}. Decode keys its "
+        f"fold dispatch by host_kind, so the second record would silently "
+        f"overwrite the first and one host's fold would vanish."
     )
-
-    hardened = {d.kind: d.manifest_section for d in _descriptors() if d.manifest_section is not None}
-    assert hardened["harness-integration"].host_kind == "session-template"
-    assert hardened["harness-integration"].legacy_string_shape == "reject"
     assert descriptor_for("secret-backend").manifest_section is None
 
 

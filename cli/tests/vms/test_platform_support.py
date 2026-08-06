@@ -40,16 +40,21 @@ def make_config(tmp_path: Path):
     return _make
 
 
-_GPU_BOX = (
-    "apiVersion: agentworks/v1\n"
-    "kind: vm-site\n"
-    "metadata:\n"
-    "  name: gpu-box\n"
-    "spec:\n"
-    "  platform: lima\n"
-    "  platform_config:\n"
-    "    vm_host: me@box\n"
-)
+def _site_doc(name: str, platform: str, **config: str) -> str:
+    """One vm-site manifest in the canonical tagged shape."""
+    keys = "".join(f"    {key}: {value}\n" for key, value in config.items())
+    return (
+        "apiVersion: agentworks/v1\n"
+        "kind: vm-site\n"
+        "metadata:\n"
+        f"  name: {name}\n"
+        "spec:\n"
+        "  platform:\n"
+        f"    name: {platform}\n" + keys
+    )
+
+
+_GPU_BOX = _site_doc("gpu-box", "lima", vm_host="me@box")
 
 
 def _support(
@@ -169,7 +174,7 @@ def test_declared_site_on_unsupported_platform_registers_not_ready(
     platform's reason, and only USING it errors."""
     _support(monkeypatch, wsl2="Windows only", lima_local=None)
     config = make_config(
-        resources=("apiVersion: agentworks/v1\nkind: vm-site\nmetadata:\n  name: my-wsl\nspec:\n  platform: wsl2\n")
+        resources=_site_doc("my-wsl", "wsl2"),
     )
     registry = build_registry(config)
     reason = registry.graph.readiness_of("vm-site", "my-wsl").reason
@@ -188,7 +193,7 @@ def test_unknown_platform_site_is_a_hard_error(make_config, monkeypatch: pytest.
     same loud failure every other kind's typo gets)."""
     _support(monkeypatch, wsl2=None, lima_local=None)
     config = make_config(
-        resources=("apiVersion: agentworks/v1\nkind: vm-site\nmetadata:\n  name: orbital\nspec:\n  platform: skynet\n")
+        resources=_site_doc("orbital", "skynet"),
     )
     with pytest.raises(ConfigError, match="unknown vm-platform 'skynet'"):
         build_registry(config)
@@ -200,7 +205,7 @@ def test_bundled_site_names_are_reserved_on_every_host(make_config, monkeypatch:
     an operator cannot squat lima-local on a limactl-less box."""
     _support(monkeypatch, wsl2="Windows only", lima_local="limactl not installed")
     config = make_config(
-        resources=("apiVersion: agentworks/v1\nkind: vm-site\nmetadata:\n  name: lima-local\nspec:\n  platform: lima\n")
+        resources=_site_doc("lima-local", "lima"),
     )
     with pytest.raises(ConfigError, match="reserved"):
         build_registry(config)

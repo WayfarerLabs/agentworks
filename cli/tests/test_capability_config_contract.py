@@ -94,8 +94,8 @@ def test_azdo_rejects_unknown_blob_fields_yaml(tmp_path: Path) -> None:
         metadata:
           name: ado
         spec:
-          provider: azdo
-          provider_config:
+          provider:
+            name: azdo
             org: my-org
             bogus: 1
         """,
@@ -144,8 +144,8 @@ def test_github_rejects_unknown_blob_fields(tmp_path: Path) -> None:
         metadata:
           name: gh
         spec:
-          provider: github
-          provider_config:
+          provider:
+            name: github
             org: nope
         """,
     )

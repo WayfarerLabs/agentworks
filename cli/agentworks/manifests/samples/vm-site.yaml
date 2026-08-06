@@ -13,7 +13,8 @@
 ## `spec.platform` is one tagged table: its `name` key selects the
 ## platform capability and the remaining keys are that platform's
 ## configuration. (The old sibling shape, `platform: <name>` plus a
-## `platform_config:` table, still loads but is deprecated for removal.)
+## `platform_config:` table, is no longer accepted;
+## `agw resource migrate --all` rewrites it.)
 ##
 ## Remote Lima over SSH:
 ##

@@ -107,13 +107,17 @@ def test_build_registry_with_explicit_manifest_set_does_not_render_warnings(tmp_
     config_path.write_text(f'[operator]\nssh_public_key = "{pub}"\nssh_private_key = "{priv}"\n')
     resources = tmp_path / "resources"
     resources.mkdir()
-    (resources / "old.yaml").write_text(
+    # A warn-mode unknown key, so the manifest set carries a real issue for
+    # the boundary to stay quiet about. An issue-free set would pass this
+    # test without proving anything.
+    (resources / "warned.yaml").write_text(
         """apiVersion: agentworks/v1
-kind: vm-site
+kind: vm-template
 metadata:
-  name: local-old
+  name: small
 spec:
-  platform: lima
+  cpus: 2
+  nonsense: true
 """
     )
     warnings: list[str] = []
@@ -123,5 +127,6 @@ spec:
     manifests = load_manifests(resources)
     build_registry(config, manifests)
 
-    assert manifests.deprecated_shape_resources == ("vm-site/local-old",)
+    assert len(manifests.issues) == 1
+    assert "nonsense" in manifests.issues[0]
     assert warnings == []

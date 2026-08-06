@@ -497,8 +497,8 @@ kind: vm-site
 metadata:
   name: azure-dev
 spec:
-  platform: azure-vm
-  platform_config:
+  platform:
+    name: azure-vm
     subscription_id: "0000"
     resource_group: agw-dev
     region: eastus

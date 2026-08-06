@@ -1,11 +1,12 @@
-"""The tagged capability-config shape (declarative-schema pre-support).
+"""The tagged capability-config shape: the ONE way to name a capability.
 
-The two stable hosting surfaces (vm-site's platform and git-credential's
-provider) accept the capability as ONE tagged table whose ``name`` key
-selects it and whose remaining keys are its config. Session templates use
-their distinct ``harness_integration`` selector. Old forms still load
-identically but record deprecation facts; mixing old and canonical forms
-on one resource is a hard error.
+Every hosting surface (vm-site's platform, git-credential's provider,
+session-template's harness_integration) takes the capability as one
+tagged table whose ``name`` key selects it and whose remaining keys are
+its config. The legacy sibling shape (a naming string plus a ``*_config``
+table) was accepted with a deprecation warning through 0.14 and is a hard
+error now, naming the exact rewrite; ``agw resource migrate`` is the
+remediation.
 """
 
 from __future__ import annotations
@@ -17,12 +18,11 @@ import pytest
 
 from agentworks.errors import ConfigError
 from agentworks.manifests import load_manifests
-from agentworks.migrate.verify import strip_source_fields
 
-_OLD_NEW_PAIRS = [
+_SURFACES = [
     (
         "vm-site",
-        "gpu-box",
+        "platform",
         """
         apiVersion: agentworks/v1
         kind: vm-site
@@ -33,20 +33,11 @@ _OLD_NEW_PAIRS = [
           platform_config:
             vm_host: me@gpu-box
         """,
-        """
-        apiVersion: agentworks/v1
-        kind: vm-site
-        metadata:
-          name: gpu-box
-        spec:
-          platform:
-            name: lima
-            vm_host: me@gpu-box
-        """,
+        "platform: {name: lima, vm_host: ...}",
     ),
     (
         "git-credential",
-        "ado",
+        "provider",
         """
         apiVersion: agentworks/v1
         kind: git-credential
@@ -58,19 +49,26 @@ _OLD_NEW_PAIRS = [
             org: my-org
             token: git-token-ado
         """,
+        "provider: {name: azdo, org: ..., token: ...}",
+    ),
+    (
+        "session-template",
+        "harness_integration",
         """
         apiVersion: agentworks/v1
-        kind: git-credential
+        kind: session-template
         metadata:
-          name: ado
+          name: htop
         spec:
-          provider:
-            name: azdo
-            org: my-org
-            token: git-token-ado
+          harness_integration: shell
+          harness_integration_config:
+            command: htop
         """,
+        "harness_integration: {name: shell, command: ...}",
     ),
 ]
+"""Per host surface: kind, naming field, a document in the retired sibling
+shape, and the exact rewrite its error must print."""
 
 
 def _load_one(tmp_path: Path, name: str, text: str):  # noqa: ANN202 - test helper
@@ -80,72 +78,60 @@ def _load_one(tmp_path: Path, name: str, text: str):  # noqa: ANN202 - test help
     return load_manifests(resources)
 
 
-@pytest.mark.parametrize(("kind", "name", "old_doc", "new_doc"), _OLD_NEW_PAIRS)
-def test_tagged_shape_decodes_identically_to_sibling_shape(
-    tmp_path: Path, kind: str, name: str, old_doc: str, new_doc: str
+@pytest.mark.parametrize(("kind", "field", "old_doc", "rewrite"), _SURFACES)
+def test_sibling_shape_is_rejected_with_the_exact_rewrite(
+    tmp_path: Path, kind: str, field: str, old_doc: str, rewrite: str
 ) -> None:
-    """Both shapes normalize to the same internal fields, so the config
-    reaches the finalize capability validation identically."""
-    old = _load_one(tmp_path, "old", old_doc)
-    new = _load_one(tmp_path, "new", new_doc)
-    assert [e.kind for e in new.entries] == [kind]
-    assert strip_source_fields(old.entries[0].resource) == strip_source_fields(new.entries[0].resource)
+    """The error shows the operator THEIR resource in the shape it needs:
+    the capability they named, plus the config keys they wrote, folded into
+    one table. A generic "use a tagged table" would leave them to work out
+    the fold themselves.
+
+    Every surface answers the same way. Session templates hardened a
+    release earlier than their siblings and kept a fold of their own
+    through that window; there is one fold now, so this is one table-driven
+    expectation rather than an asymmetry to describe.
+    """
+    with pytest.raises(ConfigError) as excinfo:
+        _load_one(tmp_path, "old", old_doc)
+    assert f"spec.{field} names the capability as a string" in str(excinfo.value)
+    assert rewrite in str(excinfo.value)
+    assert excinfo.value.hint == "`agw resource migrate --all` rewrites your manifests in place."
 
 
-@pytest.mark.parametrize(("kind", "name", "old_doc", "new_doc"), _OLD_NEW_PAIRS)
-def test_old_shape_warns_and_new_shape_does_not(
-    tmp_path: Path, kind: str, name: str, old_doc: str, new_doc: str
+def test_bare_naming_string_is_rejected_with_a_one_key_rewrite(tmp_path: Path) -> None:
+    """`platform: lima` alone is the old shape too; the rewrite is
+    `platform: {name: lima}` with nothing to fold in."""
+    with pytest.raises(ConfigError, match=r"platform: \{name: lima\}"):
+        _load_one(
+            tmp_path,
+            "old",
+            """
+            apiVersion: agentworks/v1
+            kind: vm-site
+            metadata:
+              name: bare
+            spec:
+              platform: lima
+            """,
+        )
+
+
+@pytest.mark.parametrize(("kind", "field", "old_doc", "rewrite"), _SURFACES)
+def test_sibling_config_alone_names_the_unsupported_field(
+    tmp_path: Path, kind: str, field: str, old_doc: str, rewrite: str
 ) -> None:
-    old = _load_one(tmp_path, "old", old_doc)
-    assert old.deprecated_shape_resources == (f"{kind}/{name}",)
-    assert len(old.deprecation_issues) == 1
-    # Deprecation rides its own channel, not the issue channel (which
-    # bundles treat as fatal and doctor renders as generic warnings).
-    assert not old.issues
-
-    new = _load_one(tmp_path, "new", new_doc)
-    assert not new.deprecation_issues
-    assert not new.deprecated_shape_resources
-    assert not new.issues
+    """A ``*_config`` table with no naming field beside it: the message
+    names the field that is not supported rather than reporting the
+    capability as missing, which is what the kind's own required-field
+    error would say."""
+    config_field = f"{field}_config"
+    document = "\n".join(line for line in dedent(old_doc).splitlines() if not line.strip().startswith(f"{field}:"))
+    with pytest.raises(ConfigError, match=f"spec.{config_field} is not a supported YAML field"):
+        _load_one(tmp_path, "ownerless", document)
 
 
-def test_old_shape_warning_aggregates_once_and_names_resources(tmp_path: Path) -> None:
-    resources = tmp_path / "resources"
-    resources.mkdir()
-    docs = "\n---\n".join(dedent(doc) for _kind, _name, doc, _new in _OLD_NEW_PAIRS)
-    (resources / "res.yaml").write_text(docs)
-    manifests = load_manifests(resources)
-    assert manifests.deprecated_shape_resources == (
-        "vm-site/gpu-box",
-        "git-credential/ado",
-    )
-    (message,) = manifests.deprecation_issues
-    for token in manifests.deprecated_shape_resources:
-        assert token in message
-    assert "deprecated" in message
-    assert "will be removed" in message
-    assert "platform: {name: <capability>, <config keys...>}" in message
-
-
-def test_old_string_without_sibling_config_counts_as_old_shape(tmp_path: Path) -> None:
-    """`platform: lima` alone is still the old shape; the rewrite is
-    `platform: {name: lima}`."""
-    manifests = _load_one(
-        tmp_path,
-        "old",
-        """
-        apiVersion: agentworks/v1
-        kind: vm-site
-        metadata:
-          name: bare
-        spec:
-          platform: lima
-        """,
-    )
-    assert manifests.deprecated_shape_resources == ("vm-site/bare",)
-
-
-def test_session_template_canonical_selector_is_not_a_capability_shape_deprecation(tmp_path: Path) -> None:
+def test_session_template_canonical_selector_decodes_to_the_internal_pair(tmp_path: Path) -> None:
     manifests = _load_one(
         tmp_path,
         "canonical",
@@ -163,61 +149,7 @@ def test_session_template_canonical_selector_is_not_a_capability_shape_deprecati
     (entry,) = manifests.entries
     assert entry.resource.harness_integration == "shell"
     assert entry.resource.harness_integration_config == {"command": "htop"}
-    assert not manifests.deprecation_issues
-
-
-def test_session_template_selector_rejects_the_legacy_string_shape(tmp_path: Path) -> None:
-    """session-template REJECTS ``harness_integration: <string>``.
-
-    Its sibling surfaces (vm-site, git-credential) still accept that shape
-    with a deprecation warning; session-template hardened to the tagged table
-    in wave 1 and takes it as a hard error instead. That asymmetry is the
-    whole content of the harness-integration descriptor's
-    ``legacy_string_shape = "reject"``, which is now one token in a data
-    record rather than a decode branch, so the OPERATOR-facing consequence
-    is pinned here rather than only in the table's shape.
-    """
-    with pytest.raises(ConfigError, match="must be a tagged table with a string 'name' key"):
-        _load_one(
-            tmp_path,
-            "string-selector",
-            """
-            apiVersion: agentworks/v1
-            kind: session-template
-            metadata:
-              name: htop
-            spec:
-              harness_integration: shell
-            """,
-        )
-
-
-def test_session_template_selector_rejects_a_sibling_config_table(tmp_path: Path) -> None:
-    """The tagged selector plus a sibling ``harness_integration_config``
-    names the unsupported FIELD, rather than falling back to the sibling
-    surfaces' generic ambiguous-keys wording.
-
-    The two folds still raise different sentences at 2.0 (unifying them
-    belongs to step 2.4, which reworks the accept-warn messages anyway), so
-    the distinct sentence is what proves session-template kept its own
-    rejecting fold and was not routed through the accept-warn one.
-    """
-    with pytest.raises(ConfigError, match="not a supported YAML field"):
-        _load_one(
-            tmp_path,
-            "sibling-config",
-            """
-            apiVersion: agentworks/v1
-            kind: session-template
-            metadata:
-              name: htop
-            spec:
-              harness_integration:
-                name: shell
-              harness_integration_config:
-                command: htop
-            """,
-        )
+    assert not manifests.issues
 
 
 def test_legacy_session_harness_config_without_selector_is_rejected(tmp_path: Path) -> None:
@@ -367,10 +299,27 @@ def test_session_template_without_selector_remains_a_valid_default_or_inheriting
             """,
             "provider",
         ),
+        (
+            """
+            apiVersion: agentworks/v1
+            kind: session-template
+            metadata:
+              name: htop
+            spec:
+              harness_integration:
+                name: shell
+              harness_integration_config:
+                command: htop
+            """,
+            "harness_integration",
+        ),
     ],
 )
 def test_mixed_shape_is_a_hard_error(tmp_path: Path, doc: str, field: str) -> None:
-    with pytest.raises(ConfigError, match=f"spec.{field} is a tagged table"):
+    """A tagged table beside a sibling ``*_config``: the message names the
+    field that is not supported, so the operator's next move is to fold
+    those keys in rather than to guess which half won."""
+    with pytest.raises(ConfigError, match=f"spec.{field}_config is not a supported YAML field"):
         _load_one(tmp_path, "mixed", doc)
 
 
@@ -487,35 +436,16 @@ spec:
 """
 
 
-def test_cli_warns_ambiently_and_no_deprecations_silences(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The aggregated warning rides the ambient deprecation channel:
-    printed by the registry auto-load, silenced by --no-deprecations."""
-    from typer.testing import CliRunner
-
-    from agentworks import output
-    from agentworks.cli import app
-
-    cfg = _write_config(tmp_path)
-    resources = tmp_path / "resources"
-    resources.mkdir()
-    (resources / "res.yaml").write_text(dedent(_OLD_SHAPE_MANIFEST))
-    monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
-    monkeypatch.setattr(output, "_suppress_deprecations", False)
-
-    with_warning = CliRunner().invoke(app, ["resource", "list", "--names-only"])
-    assert with_warning.exit_code == 0, with_warning.output
-    assert "deprecated capability config shape in: vm-site/gpu-box" in with_warning.output
-    assert "harness/harness_config" not in with_warning.output
-
-    silenced = CliRunner().invoke(app, ["--no-deprecations", "resource", "list", "--names-only"])
-    assert silenced.exit_code == 0, silenced.output
-    assert "deprecated capability config shape" not in silenced.output
-
-
-def test_cli_aggregates_multiple_generic_old_shapes_into_one_warning(
+def test_cli_fails_on_the_old_shape_and_no_deprecations_does_not_silence_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The retained generic warning aggregates across manifest files."""
+    """End to end through a real command: the old shape stops the run and
+    prints the rewrite plus the remediation command.
+
+    ``--no-deprecations`` silences ambient nudges. This is not one any
+    more, so the flag must not hide it: a silenced load error would leave
+    the operator with a command that fails for no visible reason.
+    """
     from typer.testing import CliRunner
 
     from agentworks import output
@@ -525,27 +455,19 @@ def test_cli_aggregates_multiple_generic_old_shapes_into_one_warning(
     resources = tmp_path / "resources"
     resources.mkdir()
     (resources / "res.yaml").write_text(dedent(_OLD_SHAPE_MANIFEST))
-    (resources / "res2.yaml").write_text(
-        dedent("""
-        apiVersion: agentworks/v1
-        kind: git-credential
-        metadata:
-          name: ado
-        spec:
-          provider: azdo
-        """)
-    )
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
     monkeypatch.setattr(output, "_suppress_deprecations", False)
 
-    result = CliRunner().invoke(app, ["resource", "list", "--names-only"])
-    assert result.exit_code == 0, result.output
-    assert result.output.count("deprecated capability config shape in:") == 1
-    assert "git-credential/ado" in result.output
-    assert "vm-site/gpu-box" in result.output
+    for argv in (["resource", "list"], ["--no-deprecations", "resource", "list"]):
+        result = CliRunner().invoke(app, argv)
+        assert result.exit_code != 0, result.output
+        assert isinstance(result.exception, ConfigError)
+        assert "res.yaml:2:" in str(result.exception)
+        assert "platform: {name: lima, vm_host: ...}" in str(result.exception)
+        assert result.exception.hint == "`agw resource migrate --all` rewrites your manifests in place."
 
 
-def test_cli_new_shape_does_not_warn(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cli_tagged_shape_loads_cleanly(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from typer.testing import CliRunner
 
     from agentworks import output
@@ -571,12 +493,13 @@ def test_cli_new_shape_does_not_warn(tmp_path: Path, monkeypatch: pytest.MonkeyP
 
     result = CliRunner().invoke(app, ["resource", "list", "--names-only"])
     assert result.exit_code == 0, result.output
-    assert "deprecated session-template selector" not in result.output
+    assert "session-template/htop" in result.output
 
 
-def test_doctor_surfaces_deprecated_shape_row(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Doctor renders the fact as a tidy one-liner naming the affected
-    resources with the rewrite pattern as the one next step."""
+def test_doctor_reports_the_old_shape_as_a_manifest_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Doctor carried a tidy WARN row for the old shape while it still
+    loaded. It is a load failure now, so the row it gets is the Manifest
+    FAIL row every unloadable manifest gets, carrying the same rewrite."""
     from agentworks.doctor import Status, _check_config
 
     cfg = _write_config(tmp_path)
@@ -586,16 +509,20 @@ def test_doctor_surfaces_deprecated_shape_row(tmp_path: Path, monkeypatch: pytes
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
 
     g, _, _ = _check_config()
-    warns = [(c.name, c.message or "") for c in g.checks if c.status == Status.WARN]
-    ((name, message),) = [w for w in warns if "deprecated capability config shape" in w[0]]
-    assert name == "Manifests use the deprecated capability config shape"
-    assert "vm-site/gpu-box" in message
-    assert "platform: {name: lima, ...}" in message
+    fails = [(c.name, c.message or "") for c in g.checks if c.status == Status.FAIL]
+    ((name, message),) = [f for f in fails if "platform" in f[1]]
+    assert name == "Manifest"
+    assert "platform: {name: lima, vm_host: ...}" in message
+    assert not [c for c in g.checks if c.status == Status.WARN and "capability config shape" in c.name]
 
 
 def test_builtin_bundle_publishes_cleanly() -> None:
-    """The shipped built-in bundle spells the tagged shape, so it clears
-    the deprecated-shape gate."""
+    """The shipped built-in bundle spells the tagged shape.
+
+    It needs no bundle-specific gate to prove it: a first-party bundle
+    loads through ``load_manifests`` like any other manifest source, so
+    the old shape would fail this publish outright.
+    """
     from agentworks.manifests.package import publish_manifest_package
     from agentworks.resources import Origin, Registry
 
@@ -605,21 +532,3 @@ def test_builtin_bundle_publishes_cleanly() -> None:
         subdir="builtin",
         origin_for=lambda name: Origin.built_in(source=name),
     )
-
-
-def test_bundled_manifests_reject_deprecated_shape(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Shipped bundles are the pattern book: a bundle spelling the old
-    shape fails loudly instead of teaching it."""
-    from agentworks.manifests import ManifestSet
-    from agentworks.manifests.package import publish_manifest_package
-    from agentworks.resources import Origin, Registry
-
-    dirty = ManifestSet(entries=(), issues=(), deprecation_issues=("deprecated capability config shape in: ...",))
-    monkeypatch.setattr("agentworks.manifests.package.load_manifests", lambda _dir: dirty)
-    with pytest.raises(ConfigError, match="must not use deprecated shapes"):
-        publish_manifest_package(
-            Registry.empty(),
-            anchor="agentworks.manifests",
-            subdir="builtin",
-            origin_for=lambda name: Origin.built_in(source=name),
-        )
