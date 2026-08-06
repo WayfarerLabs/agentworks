@@ -483,6 +483,59 @@ def test_vms_sites_exempt_reads_are_function_scoped() -> None:
     )
 
 
+def test_descriptor_exempt_reads_are_function_scoped() -> None:
+    """The four capability ``kinds.py`` modules are exempt only for the
+    descriptor accessors they carry, not wholesale.
+
+    Their exemption rests on "this is the graph builder's own code relocated
+    beside the kind it serves". Whole-file scoping does not say that: it would
+    equally excuse a readiness recompute or an availability probe added to a
+    kind strategy later, in the module whose PREDECESSOR
+    (``_VMSiteKind.disabled_reason``, reaching into ``VM_PLATFORM_REGISTRY``)
+    is one of the two sites banned pattern 2 was written about. So pin each
+    read to the accessor that owns it, exactly as ``vms/sites.py`` is pinned.
+
+    ``secrets/kinds.py`` needs it most: it is the only other module exempt for
+    two patterns at once, and it is where a "just ask the backend" recompute
+    would most naturally be written.
+    """
+    registry_owners = {
+        "capabilities/vm_platform/kinds.py": {"_registry"},
+        "capabilities/harness_integration/kinds.py": {"_registry"},
+        "capabilities/git_credential/kinds.py": {"_registry"},
+        "secrets/kinds.py": {"_backend_registry"},
+    }
+    offenders: list[str] = []
+    for rel, owners in registry_owners.items():
+        source = _read(rel)
+        aliases = _registry_aliases(ast.parse(source))
+
+        def _reads_registry(node: ast.AST, aliases: frozenset[str] = aliases) -> bool:
+            return _is_registry_read(node, aliases)
+
+        offenders += [
+            f"{rel}:{func}:{lineno}"
+            for func, lineno in _enclosing_functions(source, _reads_registry)
+            if func not in owners
+        ]
+    assert not offenders, (
+        "a capability kinds module reads a capability registry outside the "
+        "descriptor's registry accessor (the exemption covers that accessor, "
+        "not the module):\n" + "\n".join(offenders)
+    )
+
+    backend_source = _read("secrets/kinds.py")
+    not_ready_offenders = [
+        f"secrets/kinds.py:{func}:{lineno}"
+        for func, lineno in _enclosing_functions(backend_source, _is_not_ready_call)
+        if func != "_backend_readiness"
+    ]
+    assert not not_ready_offenders, (
+        "secrets/kinds.py calls not_ready outside the descriptor's readiness "
+        "callable (read the stored verdict via readiness_of instead):\n" + "\n".join(not_ready_offenders)
+    )
+
+
 # -- Non-vacuity self-check: each detector actually flags its banned shape and
 #    stays quiet on the honest / benign shape.
 
