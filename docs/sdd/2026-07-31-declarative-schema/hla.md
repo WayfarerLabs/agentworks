@@ -145,12 +145,12 @@ A new `resources/schema/` package owning the framework-wide model vocabulary:
     required/default, description, ref semantics, union arms) consumed by the sample renderer and
     the describe surface, plus the roadmap's teaching surface (`agw guide`, owned by the onboarding
     child SDD) as an external third presenter; Component 7 records that coordination. One walker,
-    three presentations, so those surfaces cannot disagree.
-    **Correction (step 2.1 LLD, 2026-08-06):** schema emission is NOT a consumer of this stream.
-    Component 6 derives it from `model_json_schema` over the same models, because deriving JSON
-    Schema from `FieldDoc` would mean writing a second schema generator. Emission and the stream are
-    SIBLING derivations from one authority (the models), not a chain; the marker's schema hook plus
-    a round-trip test is what keeps them from drifting.
+    three presentations, so those surfaces cannot disagree. **Correction (step 2.1 LLD,
+    2026-08-06):** schema emission is NOT a consumer of this stream. Component 6 derives it from
+    `model_json_schema` over the same models, because deriving JSON Schema from `FieldDoc` would
+    mean writing a second schema generator. Emission and the stream are SIBLING derivations from one
+    authority (the models), not a chain; the marker's schema hook plus a round-trip test is what
+    keeps them from drifting.
 
 ### Component 2: capability schema registration
 
