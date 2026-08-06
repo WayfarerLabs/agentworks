@@ -36,6 +36,7 @@ class PromptBackend:
     backend -- calling ``batch_get`` IS the operator interaction.
     """
 
+    contract_version = 1
     name = "prompt"
     description = "prompts interactively at resolution time"
     interactive = True

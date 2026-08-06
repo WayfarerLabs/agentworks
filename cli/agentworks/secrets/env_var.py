@@ -39,6 +39,7 @@ class EnvVarBackend:
     a soft miss -- just-not-set, fall through to the next backend.
     """
 
+    contract_version = 1
     name = "env-var"
     description = "resolves from AW_SECRET_<NAME> environment variables"
     interactive = False

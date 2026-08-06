@@ -245,6 +245,7 @@ class OnePasswordBackend:
       the chain, which is intended.
     """
 
+    contract_version = 1
     name = "onepassword"
     description = "resolves via the 1Password CLI (op read op://vault/item/field)"
 

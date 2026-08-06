@@ -92,6 +92,14 @@ class SecretBackend(Protocol):
     a separate backend or config, not this one.
     """
 
+    contract_version: int
+    """The secret-backend contract version this implementation is written
+    against, compared at registration to the version the kind's descriptor
+    declares supported. REQUIRED as a class attribute, not defaulted:
+    Protocol bodies are not inherited by structural implementers, so unlike
+    the ``Capability`` ABC kinds (whose base carries the default) every
+    backend spells it."""
+
     @property
     def name(self) -> str: ...
 

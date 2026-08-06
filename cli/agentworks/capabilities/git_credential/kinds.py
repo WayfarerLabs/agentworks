@@ -1,6 +1,7 @@
 """``_GitCredentialKind`` and ``_GitCredentialProviderKind``: framework
 strategies for the ``"git-credential"`` and ``"git-credential-provider"``
-kinds, plus the ``GitCredentialProviderEntry`` capability row.
+kinds, plus the ``GitCredentialProviderEntry`` capability row and the
+provider kind's ``CapabilityKindDescriptor``.
 
 Both live in the ``git_credentials`` domain package next to the provider
 implementations; ``agentworks.resources.kinds.__init__`` imports this
@@ -29,6 +30,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
+from agentworks.capabilities.descriptor import (
+    CapabilityKindDescriptor,
+    HostSurface,
+    RegistryPolicy,
+)
+from agentworks.capabilities.git_credential.base import GitCredentialProvider
+from agentworks.resources.graph import Readiness
 from agentworks.resources.kind import KIND_REGISTRY, NoUnreferencedDefaultError
 
 if TYPE_CHECKING:
@@ -110,3 +118,44 @@ class _GitCredentialProviderKind:
 
 KIND_REGISTRY["git-credential"] = _GitCredentialKind()
 KIND_REGISTRY["git-credential-provider"] = _GitCredentialProviderKind()
+
+
+def _registry() -> dict[str, Any]:
+    from agentworks.capabilities.git_credential import GIT_CREDENTIAL_PROVIDER_REGISTRY
+
+    return GIT_CREDENTIAL_PROVIDER_REGISTRY
+
+
+def _entry(name: str, impl: Any, origin: Origin | None) -> GitCredentialProviderEntry:
+    # The impl's ``description`` is deliberately not carried: this row is
+    # name-and-origin only, and giving it one would change row content.
+    return GitCredentialProviderEntry(name=name, origin=origin)
+
+
+def _readiness(name: str, impl: Any) -> Readiness:
+    """Always ready: a credential provider has no host-support concept (it
+    talks to a forge over the network, which is a runtime concern)."""
+    return Readiness.ready()
+
+
+GIT_CREDENTIAL_PROVIDER_DESCRIPTOR = CapabilityKindDescriptor(
+    kind="git-credential-provider",
+    contract_version=1,
+    implementation_contract=GitCredentialProvider,
+    registry_policy=RegistryPolicy.CLASS_BY_NAME,
+    registry=_registry,
+    required_operations=frozenset({"helper_entry", "credential_lines"}),
+    config_slots={},  # step 2.3 registers the provider config model here
+    entry_factory=_entry,
+    kind_strategy=KIND_REGISTRY["git-credential-provider"],
+    readiness=_readiness,
+    publisher_source="agentworks.capabilities.git_credential",
+    manifest_section=HostSurface(
+        host_kind="git-credential",
+        naming_field="provider",
+        config_field="provider_config",
+        legacy_string_shape="accept-warn",
+    ),
+)
+"""The git-credential-provider record in the capability-kind descriptor
+table (``agentworks.capabilities.descriptor``)."""

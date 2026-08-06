@@ -287,6 +287,15 @@ class Capability(ABC):
     description: ClassVar[str]
     owner_kind: ClassVar[str]
 
+    contract_version: ClassVar[int] = 1
+    """The capability contract version this implementation is written
+    against. Registration compares it to the version its kind's descriptor
+    declares supported, so an impl written against an older contract is
+    refused with a version message instead of failing somewhere downstream.
+    Defaulted here because every implementation today is on version 1; an
+    impl that stays on an old contract overrides it, and the check starts
+    failing the day a kind's descriptor moves on."""
+
     def __init__(
         self,
         owner_name: str,

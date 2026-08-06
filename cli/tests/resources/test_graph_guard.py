@@ -41,6 +41,14 @@ allow-listed modules are trusted; each is justified inline on its allow-list.
   context), reads the four capability code registries to stamp each capability
   node's impl (``_impl_for`` / ``build_context``), and calls ``not_ready`` in
   the fold. This is the sanctioned builder-reads-registry path.
+- the four capability ``kinds.py`` modules (``capabilities/vm_platform``,
+  ``capabilities/harness_integration``, ``capabilities/git_credential``,
+  ``secrets``): each kind's ``CapabilityKindDescriptor`` carries the lazy
+  accessor for its own code registry, and the secret-backend record carries the
+  readiness callable that asks the backend instance. Both are the graph
+  BUILDER's own exempt code relocated beside the kind it serves (the builder's
+  per-kind loaders and its readiness fold derive from the descriptor table), so
+  this is the same exemption at a new address, not a new bypass.
 - ``vms/sites.py`` / ``git_credentials/credential.py`` / ``sessions/template.py``:
   edge production. A resource's own ``dependencies(context)`` fetches its
   capability CLASS from the code registry (a host-agnostic type lookup, not an
@@ -261,6 +269,16 @@ _REGISTRY_READ_ALLOWLIST = frozenset(
         "plugins/registration.py",
         # Graph builder (stamps impls, assembles the build context, folds).
         "resources/graph.py",
+        # The four capability-kind descriptors (declarative-schema step 2.0).
+        # Each carries the lazy accessor for its own registry, which IS the
+        # builder's per-kind loader relocated beside the kind it belongs to:
+        # ``resources/graph.py``'s ``_CAPABILITY_REGISTRY_LOADERS`` derives
+        # from these, so the sanctioned builder-reads-registry path moved
+        # here, it did not multiply. Same exemption, new address.
+        "capabilities/vm_platform/kinds.py",
+        "capabilities/harness_integration/kinds.py",
+        "capabilities/git_credential/kinds.py",
+        "secrets/kinds.py",
         # Edge production + finalize validate (fetch the capability class).
         "vms/sites.py",
         "git_credentials/credential.py",
@@ -282,6 +300,14 @@ _NOT_READY_ALLOWLIST = frozenset(
     {
         "resources/graph.py",  # the readiness fold
         "vms/sites.py",  # VMSite.not_ready hook -> platform impl off the graph
+        # The secret-backend descriptor's readiness callable: the fold's own
+        # secret-backend branch, relocated onto the descriptor so the fold
+        # stops enumerating kinds (declarative-schema step 2.0). It is fold
+        # code living beside its kind, not a projection surface recomputing
+        # a verdict. Until the fold derives from the table, the descriptor
+        # self-test pins this callable's verdict equal to the fold's branch,
+        # so the two cannot disagree while both exist.
+        "secrets/kinds.py",
     }
 )
 

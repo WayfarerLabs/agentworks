@@ -1,6 +1,7 @@
 """Framework strategies for the ``"secret"`` and ``"secret-backend"``
-kinds, plus the ``SECRET_KIND_NAME`` identifier and the
-``SecretBackendEntry`` capability row.
+kinds, plus the ``SECRET_KIND_NAME`` identifier, the
+``SecretBackendEntry`` capability row, and the secret-backend kind's
+``CapabilityKindDescriptor``.
 
 Both live in the ``secrets`` domain package next to the code that
 implements secrets and backends; ``agentworks.resources.kinds.__init__``
@@ -26,8 +27,12 @@ manifest-declarable (ADR 0016).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
+from agentworks.capabilities.descriptor import (
+    CapabilityKindDescriptor,
+    RegistryPolicy,
+)
 from agentworks.resources.kind import (
     KIND_REGISTRY,
     InstanceRef,
@@ -35,12 +40,14 @@ from agentworks.resources.kind import (
 )
 from agentworks.resources.origin import Origin
 from agentworks.resources.walk import collect_secrets_for
+from agentworks.secrets.backends import SecretBackend
 from agentworks.secrets.base import SecretDecl
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
     from agentworks.db import Database, SessionRow, VMRow
+    from agentworks.resources.graph import Readiness
     from agentworks.resources.reference import ResourceReference
     from agentworks.resources.registry import Registry
 
@@ -217,3 +224,58 @@ class _SecretBackendKind:
 
 KIND_REGISTRY[SECRET_KIND_NAME] = _SecretKind()
 KIND_REGISTRY["secret-backend"] = _SecretBackendKind()
+
+
+def _backend_registry() -> dict[str, Any]:
+    from agentworks.secrets.backends import SECRET_BACKEND_REGISTRY
+
+    return SECRET_BACKEND_REGISTRY
+
+
+def _backend_entry(name: str, impl: Any, origin: Origin | None) -> SecretBackendEntry:
+    return SecretBackendEntry(name=name, description=impl.description, origin=origin)
+
+
+def _backend_readiness(name: str, impl: Any) -> Readiness:
+    """Ask the backend INSTANCE (this is the one kind whose registry holds
+    one). Config-independent by contract: a backend's host tool is present
+    or not, irrespective of any per-secret mapping."""
+    return cast("Readiness", impl.not_ready())
+
+
+SECRET_BACKEND_DESCRIPTOR = CapabilityKindDescriptor(
+    kind="secret-backend",
+    contract_version=1,
+    implementation_contract=SecretBackend,
+    # The interim exception, and the only place it is recorded: this kind's
+    # registry holds a constructed instance rather than the class. Wave 3
+    # flips it to CLASS_BY_NAME once the graph stamping and the resolve loop
+    # stop consuming constructed backends.
+    registry_policy=RegistryPolicy.CONSTRUCTED_SINGLETON,
+    registry=_backend_registry,
+    required_operations=frozenset(
+        {
+            "not_ready",
+            "validate_mapping",
+            "dependencies",
+            "would_attempt",
+            "describe_lookup",
+            "batch_get",
+        },
+    ),
+    config_slots={},  # step 2.3 registers the per-secret mapping model here
+    entry_factory=_backend_entry,
+    kind_strategy=KIND_REGISTRY["secret-backend"],
+    readiness=_backend_readiness,
+    # The publisher label is the PACKAGE, not the module fronting it:
+    # ``secrets/__init__.py``'s ``publish_to`` delegates to
+    # ``secrets/backends.py``, and the built-in rows have always carried
+    # ``"agentworks.secrets"``.
+    publisher_source="agentworks.secrets",
+    # No host surface: no declarable kind selects a backend. The per-secret
+    # ``backend_mappings`` map key already names the capability, so there is
+    # no naming/config sibling pair to fold.
+    manifest_section=None,
+)
+"""The secret-backend record in the capability-kind descriptor table
+(``agentworks.capabilities.descriptor``)."""
