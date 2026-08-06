@@ -30,8 +30,11 @@ design:
    establishes that colocation convention, the guide effort inherits it rather than inventing a
    second home.
 4. **Templating boundary.** Contributed guide content is data rendered through locked-down
-   templating, never code. If your sample/describe prose goes through any templating, aligning on
-   the same locked-down vocabulary avoids two template dialects.
+   templating, never code. The dynamic side renders against a pared-down, read-only projection of
+   the resource graph owned by core, anchored by `me` shorthand at the resource a topic documents;
+   your renderers plug in as dynamic blocks over shared sources rather than defining their own data
+   access. If your sample/describe prose goes through any templating, aligning on the same
+   locked-down vocabulary avoids two template dialects.
 
 Nothing here changes your plan's sequencing or your ownership of `agw resource schema` and describe
 naming. The coordination is at the source layer. The onboarding child's FRD carries the matching
