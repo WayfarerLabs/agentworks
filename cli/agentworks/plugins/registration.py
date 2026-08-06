@@ -156,9 +156,9 @@ def plugin_seated_names(kind: str) -> frozenset[str]:
     adapter seats it there at import, and ``_impl_for`` stamps it onto the graph
     node from there), but its RESOURCE ROW must be published exactly once, by
     ``publish_plugins`` with a ``system-plugin`` origin. So each core capability
-    ``publish_to`` skips the names reported here, leaving the plugin as the sole
-    publisher of its row; publishing it here too would collide (built-in vs
-    system-plugin) at ``Registry.add``. This reuses the same provenance the
+    built-in capability publisher skips the names reported here, leaving the
+    plugin as the sole publisher of its row; publishing it there too would
+    collide (built-in vs system-plugin) at ``Registry.add``. This reuses the same provenance the
     collision-message path uses (``_PLUGIN_SEATED``), so "seated by a plugin" has
     one source of truth."""
     return frozenset(name for (seated_kind, name) in _PLUGIN_SEATED if seated_kind == kind)

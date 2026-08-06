@@ -132,9 +132,11 @@ The capability ladder (`../README.md` has the full model), credential edition:
   reference, and a typo errors at finalize with the reference source named.
 - A **capability** is a `GitCredentialProvider` subclass registered in
   `GIT_CREDENTIAL_PROVIDER_REGISTRY` (`__init__.py`), plus a read-only `GitCredentialProviderEntry`
-  registry row (`kinds.py`) so it lists and describes like any resource. Core built-ins publish
-  their own rows (`publish_to`); a plugin-seated provider's row is published by the plugin machinery
-  with a `system-plugin` origin, and `publish_to` skips it (that is exactly how `azdo` publishes).
+  registry row (`kinds.py`) so it lists and describes like any resource. Core built-ins' rows come
+  from the generic capability publisher (`capabilities/publish.py`, driven by the kind's
+  descriptor); a plugin-seated provider's row is published by the plugin machinery with a
+  `system-plugin` origin, and the built-in publisher skips it (that is exactly how `azdo`
+  publishes).
 - An **instance** is one provider bound to one declared credential:
   `cls(credential_name, provider_config, description=...)`, its config only, never a resolved token.
   Constructed by the composition roots (see below).
@@ -439,8 +441,8 @@ templates:
   `_probe_pat`, `_http_probe`).
 - `github.py`: the `github` provider (the scoped, fine-grained-PAT reference).
 - `agentworks/plugins/azure/azdo.py`: the `azdo` provider (the plugin-shipped reference).
-- `kinds.py`, `__init__.py`: the `git-credential` / `git-credential-provider` kinds,
-  `GIT_CREDENTIAL_PROVIDER_REGISTRY`, and `publish_to`.
+- `kinds.py`, `__init__.py`: the `git-credential` / `git-credential-provider` kinds, the kind's
+  `CapabilityKindDescriptor`, and `GIT_CREDENTIAL_PROVIDER_REGISTRY`.
 - `agentworks/git_credentials/`: the consuming resource (`GitCredentialConfig`), its node, and the
   materials assembly (`build_credential_materials`, `runup_and_filter`, the helper generator) that
   writes credentials to a VM.

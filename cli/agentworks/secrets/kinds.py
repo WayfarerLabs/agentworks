@@ -270,10 +270,10 @@ SECRET_BACKEND_DESCRIPTOR = CapabilityKindDescriptor(
     entry_factory=_backend_entry,
     kind_strategy=KIND_REGISTRY["secret-backend"],
     readiness=_backend_readiness,
-    # The publisher label is the PACKAGE, not the module fronting it:
-    # ``secrets/__init__.py``'s ``publish_to`` delegates to
-    # ``secrets/backends.py``, and the built-in rows have always carried
-    # ``"agentworks.secrets"``.
+    # The publisher label is the PACKAGE, not the module that used to
+    # hold this kind's publisher (``secrets/backends.py``, fronted by
+    # ``secrets/__init__.py``): the built-in rows have always carried
+    # ``"agentworks.secrets"`` and operators read it as provenance.
     publisher_source="agentworks.secrets",
     # No host surface: no declarable kind selects a backend. The per-secret
     # ``backend_mappings`` map key already names the capability, so there is

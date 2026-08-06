@@ -59,10 +59,11 @@ def _source_disabling(*keys: tuple[str, str], reason: str = "enable its unit") -
 def _finalized(*sites: VMSiteDecl) -> Registry:
     """A finalized registry with every vm-platform row published and the
     given sites added (operator origin)."""
-    from agentworks.capabilities import vm_platform as vp
+    from agentworks.capabilities.descriptor import descriptor_for
+    from agentworks.capabilities.publish import publish_capability_rows
 
     registry = Registry.empty()
-    vp.publish_to(registry)
+    publish_capability_rows(registry, descriptor_for("vm-platform"))
     for decl in sites:
         registry.add("vm-site", decl.name, decl, Origin.operator_declared(file=Path("sites.yaml"), line=1))
     registry.finalize()
@@ -88,13 +89,14 @@ def _finalized_with_proxmox(
     from types import SimpleNamespace
     from typing import cast
 
-    from agentworks.capabilities import vm_platform as vp
+    from agentworks.capabilities.descriptor import descriptor_for
+    from agentworks.capabilities.publish import publish_capability_rows
     from agentworks.config import Config
     from agentworks.plugins import publish_plugins
     from agentworks.plugins.enablement import plugin_enablement_source
 
     registry = Registry.empty()
-    vp.publish_to(registry)
+    publish_capability_rows(registry, descriptor_for("vm-platform"))
     config = cast("Config", SimpleNamespace(enabled_system_plugins=("proxmox",)))
     publish_plugins(registry, config)
     for decl in sites:
@@ -160,10 +162,11 @@ def test_disabled_platform_node_folds_end_to_end_to_enable_its_unit() -> None:
     were enabled, isolating the enablement propagation from the tool check. The
     stub's default reason reproduces the original "enable its unit" verdict; the
     plugin source's specific reason is pinned in the producer tests."""
-    from agentworks.capabilities import vm_platform as vp
+    from agentworks.capabilities.descriptor import descriptor_for
+    from agentworks.capabilities.publish import publish_capability_rows
 
     registry = Registry.empty()
-    vp.publish_to(registry)
+    publish_capability_rows(registry, descriptor_for("vm-platform"))
     registry.add(
         "vm-site",
         "s",
@@ -188,13 +191,14 @@ def test_disabled_secret_backend_is_excluded_from_the_active_chain() -> None:
     from types import SimpleNamespace
     from typing import cast
 
+    from agentworks.capabilities.descriptor import descriptor_for
+    from agentworks.capabilities.publish import publish_capability_rows
     from agentworks.config import Config
     from agentworks.plugins import publish_plugins
-    from agentworks.secrets import backends as secret_backends
     from agentworks.secrets.resolve import active_backends
 
     registry = Registry.empty()
-    secret_backends.publish_to(registry)
+    publish_capability_rows(registry, descriptor_for("secret-backend"))
     # onepassword ships as a system plugin now (its built-in row is gone), so
     # publish its capability row through the plugin path; the stub source below
     # then disables it, exactly as the plugin opt-in source would.
@@ -245,14 +249,15 @@ def test_r9_9_mapping_to_disabled_backend_is_inert_until_enabled() -> None:
     from types import SimpleNamespace
     from typing import cast
 
+    from agentworks.capabilities.descriptor import descriptor_for
+    from agentworks.capabilities.publish import publish_capability_rows
     from agentworks.config import Config
     from agentworks.plugins import publish_plugins
-    from agentworks.secrets import backends as secret_backends
     from agentworks.secrets.base import SecretDecl
 
     def _build(*, disable_onepassword: bool) -> Registry:
         registry = Registry.empty()
-        secret_backends.publish_to(registry)
+        publish_capability_rows(registry, descriptor_for("secret-backend"))
         # onepassword's row now comes from the plugin path, not a built-in.
         publish_plugins(registry, cast("Config", SimpleNamespace(enabled_system_plugins=())))
         registry.add(

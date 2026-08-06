@@ -14,8 +14,9 @@ Two structural rules make the table safe to consume from anywhere:
 - **Per-package contribution.** Each capability package builds its own record
   beside its kind strategy (``capabilities/vm_platform/kinds.py``,
   ``capabilities/harness_integration/kinds.py``,
-  ``capabilities/git_credential/kinds.py``, ``secrets/kinds.py``), mirroring
-  the per-package ``publish_to``. Nothing here knows a kind's internals.
+  ``capabilities/git_credential/kinds.py``, ``secrets/kinds.py``), the way
+  each package used to carry its own publisher. Nothing here knows a
+  kind's internals.
 - **Lazy collection, for cycle safety.** :func:`capability_descriptors`
   imports the four contributing modules INSIDE the function, and consumers
   call it inside their own functions rather than binding the table at module

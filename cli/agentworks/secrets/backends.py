@@ -16,7 +16,7 @@ distinct is the design (ADR 0016):
   (``onepassword`` ships as the ``onepassword`` system plugin, whose
   adapter seats its instance here; its ROW, unlike the core two, is
   published by ``plugins.publish_plugins`` with a ``system-plugin``
-  origin, so ``publish_to`` below skips it). Capability kinds have no
+  origin, so the built-in publisher skips it). Capability kinds have no
   declarable form; ``SecretBackend`` is an ordinary well-defined API
   abstracting where secrets actually come from, consumed by the
   resolution loop (``agentworks.secrets.resolve``).
@@ -51,7 +51,6 @@ from agentworks.secrets.prompt import PromptBackend
 if TYPE_CHECKING:
     from agentworks.resources.graph import Readiness
     from agentworks.resources.reference import ConfigReference
-    from agentworks.resources.registry import Registry
     from agentworks.secrets.base import MappingValue, SecretDecl
 
 
@@ -203,33 +202,3 @@ SECRET_BACKEND_REGISTRY: dict[str, SecretBackend] = {
 seats its instance here at import through the ``secret-backend`` adapter;
 future plugins register the same way (and publish their own capability
 resources with ``system-plugin`` origins)."""
-
-
-def publish_to(registry: Registry) -> None:
-    """Publish one ``secret-backend`` capability resource per registered
-    backend, ``built-in`` origin (except backends seated by a system plugin,
-    which are published by ``plugins.publish_plugins`` with a ``system-plugin``
-    origin and skipped here). Read-only rows: the chain and per-secret mappings
-    validate against them uniformly, and the backends list/describe like every
-    other resource.
-    """
-    from agentworks.plugins.registration import plugin_seated_names
-    from agentworks.resources import Origin
-    from agentworks.secrets.kinds import SecretBackendEntry
-
-    # A backend seated by a system plugin (e.g. onepassword) keeps its impl in
-    # this registry so ``_impl_for`` can stamp it onto the graph node, but its
-    # row is published by ``plugins.publish_plugins`` with a ``system-plugin``
-    # origin. Skip those names here so the plugin is the sole publisher of the
-    # row; publishing it here too would collide (built-in vs system-plugin).
-    seated_by_plugin = plugin_seated_names("secret-backend")
-    origin = Origin.built_in(source="agentworks.secrets")
-    for name, backend in SECRET_BACKEND_REGISTRY.items():
-        if name in seated_by_plugin:
-            continue
-        registry.add(
-            "secret-backend",
-            name,
-            SecretBackendEntry(name=name, description=backend.description),
-            origin,
-        )

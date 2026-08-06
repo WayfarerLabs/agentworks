@@ -252,9 +252,9 @@ def _check_vm_platforms(registry: Registry) -> HealthGroup:
     from agentworks.resources.graph import Enablement
 
     g = HealthGroup("VM platforms")
-    # Registry-definition order (what ``publish_to`` established from
-    # ``VM_PLATFORM_REGISTRY``), preserved: the pre-refactor group rendered in
-    # this order, and the reordering is not one of the R9 deltas.
+    # Publication order (name order, what the built-in capability publisher
+    # establishes), preserved: the pre-refactor group rendered in this order,
+    # and the reordering is not one of the R9 deltas.
     for name, _decl in registry.iter_kind_items("vm-platform"):
         if registry.graph.enablement_of("vm-platform", name) is Enablement.disabled:
             continue

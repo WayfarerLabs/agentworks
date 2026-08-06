@@ -34,7 +34,6 @@ __all__ = [
     "ShellIntegration",
     "ensure_harness_integration_enabled",
     "harness_integration_for",
-    "publish_to",
     "require_commands",
 ]
 
@@ -49,7 +48,7 @@ __all__ = [
 # ``claude-code`` harness integration now ships as the ``claude`` system plugin
 # (``agentworks.plugins.claude``), whose adapter re-seats it here at import;
 # its ROW is published by ``plugins.publish_plugins`` with a ``system-plugin``
-# origin, so ``publish_to`` below skips it.
+# origin, so the built-in publisher skips it.
 HARNESS_INTEGRATION_REGISTRY: dict[str, type[HarnessIntegration]] = {
     ShellIntegration.name: ShellIntegration,
 }
@@ -108,36 +107,3 @@ def ensure_harness_integration_enabled(registry: Registry, name: str) -> None:
         entity_name=name,
         hint="`agw doctor` lists each plugin's state; enable the plugin providing this harness integration",
     )
-
-
-def publish_to(registry: Registry) -> None:
-    """Publish the core built-in harness integration types into the registry.
-
-    Each entry lands as a ``HarnessIntegrationEntry`` row, built-in with source
-    ``"agentworks.capabilities.harness_integration"``. Read-only rows: a
-    ``session-template`` ``spec.harness_integration`` reference validates against
-    them uniformly, and the harness integrations list/describe like every other
-    resource.
-
-    A harness integration seated by a system plugin (``claude-code`` via the ``claude``
-    plugin) keeps its impl in ``HARNESS_INTEGRATION_REGISTRY`` so the resolver can stamp it
-    onto the graph node, but its row is published by ``plugins.publish_plugins``
-    with a ``system-plugin`` origin. Skip those names here so the plugin is the
-    sole publisher of the row; publishing it here too would collide (built-in vs
-    system-plugin) at ``Registry.add``.
-    """
-    from agentworks.capabilities.harness_integration.kinds import HarnessIntegrationEntry
-    from agentworks.plugins.registration import plugin_seated_names
-    from agentworks.resources import Origin
-
-    seated_by_plugin = plugin_seated_names("harness-integration")
-    code_origin = Origin.built_in(source="agentworks.capabilities.harness_integration")
-    for type_name in sorted(HARNESS_INTEGRATION_REGISTRY):
-        if type_name in seated_by_plugin:
-            continue
-        registry.add(
-            "harness-integration",
-            type_name,
-            HarnessIntegrationEntry(name=type_name),
-            code_origin,
-        )

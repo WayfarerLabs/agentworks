@@ -329,14 +329,15 @@ def test_bundled_sites_are_reserved(tmp_path: Path) -> None:
 def test_bundled_sites_finalize_against_the_platform_rows(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from agentworks.capabilities import vm_platform as vm_platforms
+    from agentworks.capabilities.descriptor import descriptor_for
+    from agentworks.capabilities.publish import publish_capability_rows
     from agentworks.manifests import builtin as builtin_manifests
     from tests.conftest import stub_platform_support
 
     stub_platform_support(monkeypatch)
     registry = Registry.empty()
     builtin_manifests.publish_to(registry)
-    vm_platforms.publish_to(registry)
+    publish_capability_rows(registry, descriptor_for("vm-platform"))
     registry.finalize()
     assert registry.lookup("vm-site", "lima-local").platform == "lima"
     assert registry.lookup("vm-site", "wsl2").platform == "wsl2"

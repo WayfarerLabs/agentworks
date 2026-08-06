@@ -54,8 +54,8 @@ def build_registry(config: Config, manifests: ManifestSet | None = None) -> Regi
 
     Publisher order: the bundled built-in manifests first
     (``builtin_manifests``, which supply the built-in apt/install-command
-    entries too), then the built-in capability rows (``git_credential``,
-    ``harness_integration``, ``secrets``, ``vm_platforms``), then the system
+    entries too), then the built-in capability rows (one generic publisher
+    per capability-kind descriptor), then the system
     plugins (``plugins.publish_plugins``: every shipped plugin's capability
     rows plus the enabled plugins' bundled manifests), then the operator's
     YAML ``ManifestSet`` (``Config.publish_to`` is a no-op now: config.toml
@@ -72,8 +72,8 @@ def build_registry(config: Config, manifests: ManifestSet | None = None) -> Regi
     the auto-load.
     """
     from agentworks import plugins, secrets
-    from agentworks.capabilities import git_credential, harness_integration
-    from agentworks.capabilities import vm_platform as vm_platforms
+    from agentworks.capabilities.descriptor import capability_descriptors
+    from agentworks.capabilities.publish import publish_capability_rows
     from agentworks.manifests import RESOURCES_DIRNAME, load_manifests
     from agentworks.manifests import builtin as builtin_manifests
     from agentworks.vms import sites as vm_sites
@@ -97,10 +97,11 @@ def build_registry(config: Config, manifests: ManifestSet | None = None) -> Regi
     # manifests now (config.toml is settings only, ADR 0022), so there is no
     # separate apt / install_commands operator publisher anymore.
     builtin_manifests.publish_to(registry)
-    git_credential.publish_to(registry)
-    harness_integration.publish_to(registry)
-    secrets.publish_to(registry)
-    vm_platforms.publish_to(registry)
+    # One generic publisher per capability kind, over the descriptor table:
+    # publication is membership, so a new capability kind publishes its
+    # built-in rows by existing rather than by being added here.
+    for descriptor in capability_descriptors():
+        publish_capability_rows(registry, descriptor)
     # System plugins publish here, after the built-in capability rows and
     # before the operator sources: every shipped plugin's capability rows
     # unconditionally (present-but-disabled when not opted in, via the

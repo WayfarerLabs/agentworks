@@ -1,20 +1,24 @@
 """The capability-kind descriptor table matches the live wiring it
 describes (declarative-schema SDD step 2.0).
 
-The table is introduced ADDITIVELY: at this commit no switchboard site
-derives from it yet, so nothing else would notice a record that lies. These
-assertions are that notice. Every field is checked against the thing it
-claims to describe, by object IDENTITY wherever an object is at stake
-(``kind_strategy is KIND_REGISTRY[kind]``, ``registry() is`` the live dict),
-so a record cannot quietly drift from the wiring while looking plausible.
+Every field is checked against the thing it claims to describe, by object
+IDENTITY wherever an object is at stake (``kind_strategy is
+KIND_REGISTRY[kind]``, ``registry() is`` the live dict), so a record cannot
+quietly drift from the wiring while looking plausible.
 
-As each site derives (later commits in step 2.0), these checks stop being
-the only guard and become the regression lock underneath the derivations.
+The table was introduced additively, when no switchboard site derived from
+it yet and nothing else would notice a record that lied. As each site
+derives, these checks stop being the only guard and become the regression
+lock underneath the derivation. Where a check would go tautological on
+derivation (the row content and provenance labels a derived publisher now
+produces from the very fields it is being compared to), the expectation is
+spelled out here instead, so the assertion keeps holding the operator-facing
+behavior rather than holding a mirror up to the table.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import pytest
 
@@ -25,6 +29,7 @@ from agentworks.capabilities.descriptor import (
     capability_descriptors,
     descriptor_for,
 )
+from agentworks.capabilities.publish import publish_capability_rows
 from agentworks.errors import StateError
 from agentworks.manifests.decode import CAPABILITY_FIELDS
 from agentworks.resources.graph import Readiness, _capability_node_readiness
@@ -32,10 +37,28 @@ from agentworks.resources.kind import KIND_REGISTRY
 from agentworks.resources.registry import Registry
 from tests.plugins._fixtures import ConformingVMPlatform
 
-if TYPE_CHECKING:
-    from collections.abc import Callable
-
 _KNOWN_KINDS = ("vm-platform", "harness-integration", "git-credential-provider", "secret-backend")
+
+_BUILTIN_PUBLISHER_SOURCES = {
+    "vm-platform": "agentworks.capabilities.vm_platform",
+    "harness-integration": "agentworks.capabilities.harness_integration",
+    "git-credential-provider": "agentworks.capabilities.git_credential",
+    "secret-backend": "agentworks.secrets",
+}
+"""The ``Origin.built_in`` source label each kind's built-in rows carry, as
+operators see it in ``agw resource describe``. Held here as the expectation,
+not read off the descriptor."""
+
+_ROWS_CARRY_DESCRIPTION = {
+    "vm-platform": True,
+    "harness-integration": False,
+    "git-credential-provider": False,
+    "secret-backend": True,
+}
+"""Which kinds' rows carry a ``description``. The split is a latent
+inconsistency (recorded as a follow-up candidate, not fixed at 2.0, because
+levelling it would change row content), so it is pinned rather than
+described."""
 
 
 def _descriptors() -> tuple[CapabilityKindDescriptor, ...]:
@@ -60,18 +83,12 @@ def _live_registry(kind: str) -> dict[str, Any]:
     return registries[kind]
 
 
-def _builtin_publisher(kind: str) -> Callable[[Registry], None]:
-    """The kind's current built-in publisher, as ``bootstrap`` calls it."""
-    from agentworks import secrets
-    from agentworks.capabilities import git_credential, harness_integration
-    from agentworks.capabilities import vm_platform as vm_platforms
-
-    return {
-        "vm-platform": vm_platforms.publish_to,
-        "harness-integration": harness_integration.publish_to,
-        "git-credential-provider": git_credential.publish_to,
-        "secret-backend": secrets.publish_to,
-    }[kind]
+def _published_rows(descriptor: CapabilityKindDescriptor) -> list[tuple[str, Any]]:
+    """The kind's built-in rows, published into a fresh Registry exactly as
+    ``bootstrap`` publishes them."""
+    registry = Registry.empty()
+    publish_capability_rows(registry, descriptor)
+    return list(registry.iter_kind_items(descriptor.kind))
 
 
 def _impl_class(impl: Any) -> type:
@@ -144,35 +161,62 @@ def test_registry_policy_matches_what_the_registry_actually_holds(
 def test_publisher_source_is_the_label_the_builtin_rows_carry(
     descriptor: CapabilityKindDescriptor,
 ) -> None:
-    """Publish through the kind's real publisher and read the label back off
-    the rows. The labels are load-bearing operator-visible provenance, so
-    they must survive the switchboard collapse byte-for-byte (secret-backend
-    in particular publishes as ``agentworks.secrets``, the package, not the
-    ``backends`` module fronting it)."""
-    registry = Registry.empty()
-    _builtin_publisher(descriptor.kind)(registry)
-    published = list(registry.iter_kind_items(descriptor.kind))
+    """Publish the kind's built-in rows and read the label back off them.
+
+    The expected labels are spelled out here rather than read from the
+    descriptor: they are operator-visible provenance that the switchboard
+    collapse had to preserve byte-for-byte (secret-backend in particular
+    publishes as ``agentworks.secrets``, the package, not the ``backends``
+    module that used to hold its publisher). Comparing the rows against the
+    field that produced them would only prove the publisher can copy a
+    string."""
+    published = _published_rows(descriptor)
     assert published, f"{descriptor.kind} published no built-in rows"
+    expected = _BUILTIN_PUBLISHER_SOURCES[descriptor.kind]
+    assert descriptor.publisher_source == expected
     for name, row in published:
         assert row.origin.variant == "built-in", name
-        assert row.origin.source == descriptor.publisher_source, name
+        assert row.origin.source == expected, name
 
 
 @pytest.mark.parametrize("descriptor", _descriptors(), ids=lambda d: d.kind)
 def test_entry_factory_builds_the_kinds_current_row(descriptor: CapabilityKindDescriptor) -> None:
-    """The row the factory builds is the same type, with the same content,
-    as the one the kind's publisher builds today. This is what keeps the
-    generic publisher (a later commit) from quietly changing row content:
-    two of the four rows carry ``description`` and two do not."""
-    registry = Registry.empty()
-    _builtin_publisher(descriptor.kind)(registry)
-    rows = list(registry.iter_kind_items(descriptor.kind))
-    assert rows, f"{descriptor.kind} published no built-in rows; this test would prove nothing"
-    for name, published in rows:
-        built = descriptor.entry_factory(name, descriptor.registry()[name], None)
-        assert type(built) is type(published)
-        assert built.name == published.name
-        assert getattr(built, "description", None) == getattr(published, "description", None)
+    """The published row is the kind's own row type, carrying ``description``
+    only for the two kinds whose rows have ever carried it.
+
+    Today's four rows differ (vm-platform and secret-backend carry a
+    description, harness-integration and git-credential-provider do not), and
+    the generic publisher must not quietly level them: unifying the rows
+    would change row content, which is row-semantics work rather than
+    switchboard work. That split is asserted from the expectation table
+    below, so a factory that starts (or stops) carrying a description fails
+    here rather than in whatever surface renders the row."""
+    published = _published_rows(descriptor)
+    assert published, f"{descriptor.kind} published no built-in rows; this test would prove nothing"
+    carries_description = _ROWS_CARRY_DESCRIPTION[descriptor.kind]
+    for name, row in published:
+        impl = descriptor.registry()[name]
+        assert type(row) is type(descriptor.entry_factory(name, impl, None))
+        assert row.name == name
+        if carries_description:
+            assert row.description == impl.description, name
+        else:
+            assert not hasattr(row, "description"), name
+
+
+@pytest.mark.parametrize("descriptor", _descriptors(), ids=lambda d: d.kind)
+def test_publication_covers_every_registered_impl(descriptor: CapabilityKindDescriptor) -> None:
+    """The generic publisher has no static structure to compare against, so
+    it is pinned by its output: one row per registered impl, minus the impls
+    a system plugin seated (whose rows ``publish_plugins`` owns).
+
+    Publication is UNCONDITIONAL for the rest (R13): host support is the
+    row's folded readiness, never its absence, so no impl may be filtered out
+    here on any other ground."""
+    from agentworks.plugins.registration import plugin_seated_names
+
+    expected = set(descriptor.registry()) - set(plugin_seated_names(descriptor.kind))
+    assert {name for name, _row in _published_rows(descriptor)} == expected
 
 
 @pytest.mark.parametrize("descriptor", _descriptors(), ids=lambda d: d.kind)

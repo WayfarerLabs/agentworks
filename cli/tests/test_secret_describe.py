@@ -482,8 +482,9 @@ def test_resolution_preview_not_available_when_no_backend_attempts(tmp_path: Pat
     hand-published as auto-declared (the origin the reachability check
     exempts); the chain comes from config as always.
     """
+    from agentworks.capabilities.descriptor import descriptor_for
+    from agentworks.capabilities.publish import publish_capability_rows
     from agentworks.resources import Origin, Registry
-    from agentworks.secrets.backends import publish_to as publish_backends
     from agentworks.secrets.base import SecretDecl
 
     cfg = _write_cfg(tmp_path, ssh_keys, settings=_ENV_ONLY)
@@ -500,7 +501,7 @@ def test_resolution_preview_not_available_when_no_backend_attempts(tmp_path: Pat
     from tests.conftest import publish_all_platforms
 
     publish_all_platforms(registry)
-    publish_backends(registry)
+    publish_capability_rows(registry, descriptor_for("secret-backend"))
     decl = SecretDecl(
         name="api-key",
         description="API key",
