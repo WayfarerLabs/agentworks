@@ -734,14 +734,14 @@ secret backends, etc. The two commands below stop at the framework-uniform field
 mappings, template inheritance chains, resolution previews), reach for the per-kind command (e.g.
 `agw secret describe`).
 
-| Command                              | Description                                                          |
-| ------------------------------------ | -------------------------------------------------------------------- |
-| `agw resource list`                  | List every resource in the registry across all kinds                 |
-| `agw resource kinds`                 | List every kind: category (declarable/capability), counts, purpose   |
-| `agw resource describe KIND/NAME`    | Show the per-resource detail view (header + Referenced by + Used by) |
-| `agw resource edit KIND/NAME`        | Open the declaring YAML manifest in $EDITOR                          |
-| `agw resource migrate [SELECTOR]...` | Move TOML resources to YAML manifests                                |
-| `agw resource sample KIND [--write]` | Print (or save) a kind's commented sample manifest (--all for all)   |
+| Command                              | Description                                                           |
+| ------------------------------------ | --------------------------------------------------------------------- |
+| `agw resource list`                  | List every resource in the registry across all kinds                  |
+| `agw resource kinds`                 | List every kind: category (declarable/capability), counts, purpose    |
+| `agw resource describe KIND/NAME`    | Show the per-resource detail view (header + Referenced by + Used by)  |
+| `agw resource edit KIND/NAME`        | Open the declaring YAML manifest in $EDITOR                           |
+| `agw resource migrate [SELECTOR]...` | Move TOML resources to YAML, and upgrade manifests on a retired shape |
+| `agw resource sample KIND [--write]` | Print (or save) a kind's commented sample manifest (--all for all)    |
 
 `resource list` accepts `--kind <csv>` (e.g. `--kind secret,vm-template`) and `--origin <variant>`
 where variant is `operator`, `auto`, `builtin`, or `plugin`. Disabled rows (a not-enabled system
@@ -759,11 +759,18 @@ the file mapping for TOML-derived documents (default one multi-document file per
 `resources/vm-templates.yaml`).
 
 TOML-derived documents append after a `---` separator without rewriting the existing YAML content.
+Every run also upgrades manifests that still name a capability in the retired sibling shape
+(`platform: lima` plus a `platform_config:` table, and likewise `provider`/`provider_config`) to the
+tagged table `platform: {name: lima, ...}`, rewriting those files in place with their comments,
+quoting, key order, and unrelated documents intact. That half ignores the selectors: the retired
+shape no longer loads at all, so leaving one document behind would leave the whole resources
+directory unloadable.
+
 Before any write, the command backs up `config.toml` and stores recovery copies of existing YAML
-files it will append to under `paths.backups`. Digest checks refuse to replace a TOML or YAML file
-changed since planning. Writes are atomic, and rollback restores only files that still match this
-run's output digest, so a concurrent operator edit is never overwritten; an incomplete rollback
-reports the recovery copy for manual repair.
+files it will append to or rewrite under `paths.backups`. Digest checks refuse to replace a TOML or
+YAML file changed since planning. Writes are atomic, and rollback restores only files that still
+match this run's output digest, so a concurrent operator edit is never overwritten; an incomplete
+rollback reports the recovery copy for manual repair.
 
 Migrated TOML sections are commented out in place with a `# migrated to resources/<file>` marker
 (default) or removed with `--toml delete`. Deprecated `[secret_backends.*]` sections are dropped
