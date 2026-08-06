@@ -104,9 +104,9 @@ It does not. Every fact comes from the place that already owns it:
 | each metadata field's type  | THE KIND'S OWN ROW MODEL (section 3.3)                           |
 | every `spec` field          | the kind's row model, which is its spec model                    |
 
-`test_emit.py::test_document_schema_top_level_keys_match_the_envelope` asserts the third row against
-`envelope._ENVELOPE_KEYS` directly, so a fifth envelope key cannot be accepted by the loader and
-missing from the schema.
+`test_emit.py::test_the_document_schema_states_exactly_the_envelope_keys` asserts the third row
+against `envelope._ENVELOPE_KEYS` directly, so a fifth envelope key cannot be accepted by the loader
+and missing from the schema.
 
 ### 3.3 Metadata comes from the KIND's row, not from the shared base
 
@@ -317,8 +317,12 @@ depend on it and could not be written honestly without it:
 - `iter_errors` over real sample documents is the automated half of box 2's end-to-end check.
 
 Cost: six wheels in the dev environment (`jsonschema` plus `attrs`, `jsonschema-specifications`,
-`referencing`, `rpds-py`, `typing-extensions`), no network at test time (the metaschemas are
-vendored in `jsonschema-specifications`), and nothing in the wheel we ship.
+`referencing`, `rpds-py`, `typing-extensions`), plus `types-jsonschema` for strict mypy; no network
+at test time (the metaschemas are vendored in `jsonschema-specifications`), and nothing in the wheel
+we ship.
+
+It paid for itself before the step closed: all three soundness bugs in section 2.1 came out of it,
+and every one of them would have shipped an editor that underlines valid configuration.
 
 ## 8. Hand-off to 2.8
 
@@ -334,3 +338,9 @@ vendored in `jsonschema-specifications`), and nothing in the wheel we ship.
   it.
 - The map-keyed splice (section 5) is the one piece of Component 6 not built. Its trigger is a
   backend, not a step.
+- Two rules the renderer inherits, because they are properties of the models rather than of
+  emission. A field with an owner-templated default is NOT the operator's to write (section 2.1), so
+  a rendered sample should show it commented with its resolved-name template rather than as a
+  required line; and `expires` accepts three spellings, not just the RFC 3339 one. Both facts are on
+  the models and both reach `iter_field_docs` already (`FieldDoc.default_template`, and the
+  annotation), so this is a presentation choice for 2.8, not new plumbing.
