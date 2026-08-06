@@ -389,7 +389,12 @@ the derivation sequence are not started.
       fails; the four apt and install-command kinds gain closed-world validation with NO prior
       warning channel, unlike the kinds that got one; and `{value: x}` becomes an accepted env
       spelling, which is additive but changes what a config can say. None is large on its own, but
-      together they are the difference between an upgrade that loads and one that does not.
+      together they are the difference between an upgrade that loads and one that does not. **Ninth
+      and tenth, from step 2.6's defaulting sweep:** an explicit `null` is now a type error rather
+      than a synonym for omitting the key, on `shell`'s `command` / `resume_command` /
+      `required_commands`, `claude-code` and `codex` `extra_args`, `codex` `writable_dirs`, `github`
+      `repos`, and `session-template`'s `env`; and any out-of-tree VM platform must now supply the
+      four `ProvisionRequest` hardware fields rather than re-defaulting them.
 - [x] Core-driven validation and extraction wired: registry name-to-model maps per capability kind;
       `Capability.validate` / `Capability.dependencies` classmethods and
       `SecretBackend.validate_mapping` retired; per-capability hand-rolled validate code deleted;
@@ -583,17 +588,43 @@ until someone decides.
 
 ### 2.6 Model-layer defaulting (FR15)
 
-- [ ] Sweep and enumerate every consumer-side fallback for modeled fields (the
+- [x] Sweep and enumerate every consumer-side fallback for modeled fields (the
       is-not-None-else-literal and or-literal idioms on request/config reads). Known at authoring
       time: azure cpus=4 / memory=8 / disk=50 / swap=0, lima cpus=4 / memory=8 / disk=50 / swap=0
       (`capabilities/vm_platform/lima.py` ~220), wsl2 swap=0 (`wsl2.py` ~545), proxmox swap=0; the
       sweep is the authority and the in-tree platforms carry the same literals as the plugins.
-- [ ] Defaults declared on the models; post-decode types non-optional where defaulted; every
+- [x] Defaults declared on the models; post-decode types non-optional where defaulted; every
       enumerated fallback deleted; consumers observing an unexpectedly-unset modeled field raise
       (DB-sourced legacy rows included: raise, never locally default).
-- [ ] The end-to-end fixture-capability test (FRD success criterion): add a field with a default and
+- [x] The end-to-end fixture-capability test (FRD success criterion): add a field with a default and
       description to a fixture capability model and prove validation, extraction, sample, describe,
       and emitted schema all reflect it with no other edits.
+
+**Step 2.6 records, 2026-08-06.** The end-to-end box is ticked for the surfaces that exist:
+validation, extraction, emitted schema, and `iter_field_docs` are all proven from one fixture
+capability declaring a defaulted, described field. **The sample-renderer and describe arms are
+genuinely blocked on 2.8**, because `agw resource sample` still reads bundled YAML files that a
+fixture capability can never appear in; the test module reserves those arms against the same
+fixture, so 2.8 adds them rather than rebuilding.
+
+**One literal disagreed with its model**, and it was everywhere: `ResolvedVMTemplate.swap = 4`
+(matching the bundled sample) against all five platforms and `generate_bootstrap_script`
+substituting `0`. No shipped VM was mis-sized, and mypy proved it rather than a reading: making the
+four hardware fields required produced zero production errors, because `lifecycle.py` is the only
+production `ProvisionRequest` construction and always passes the template's value.
+
+**The near-miss worth remembering:** `vms/backup.py` chowned to `target.user or "agentworks"`, a
+literal re-spelling of `AdminConfig.username` while reading the TRANSPORT's optional user.
+Unreachable today, but a chown to the wrong account on a VM whose admin-template renamed the admin
+user is exactly the silent wrong answer this requirement exists to prevent. It now reads
+`vm.admin_username` from the row that declares it.
+
+**Deliberately kept, with reasons** (a fallback is not always a re-default): the `or ()` family in
+the inheriting templates' `dependencies()`, where `None` genuinely means "this layer declared
+nothing" for the per-layer scan; `resume_command or command`, a cross-field derivation the field's
+own description states; and the settings-layer `.get(key, literal)` cluster in
+`config/loaders_core.py`, `loaders_sessions.py`, `ssh_config.py`, and `vms/initializer/mise.py`,
+which is FR14's to sweep when settings sections become models, not this step's.
 
 ### 2.7 Schema emission and editor association
 
