@@ -39,6 +39,7 @@ from ._fixture_models import (
     MappingValueLike,
     OneArmSite,
     PrincipalLike,
+    ShoutyKey,
     SiteLike,
     StringOrTableRoot,
     StringRoot,
@@ -384,6 +385,41 @@ def test_a_table_key_spelled_like_the_marker_is_still_addressed() -> None:
     answer rather than a rough one."""
     assert _lines(TableWithConstrainedKeys, {"env": {"[key]": "x"}}) == [
         "vm-site/lab.env.[key]: invalid key '[key]' (must be upper case)"
+    ]
+
+
+def test_a_nested_table_keeps_a_key_spelled_like_the_marker() -> None:
+    """The drop is conditioned on the marker being the LAST segment as
+    well as on standing past a mapping key, and that is what this shape
+    needs: one level down, the operator's literal ``[key]`` is not last
+    and pydantic's marker after it is. Without the last-segment condition
+    the operator's own key was the one dropped."""
+
+    class Nested(AgwModel):
+        """A table of tables whose inner keys are constrained."""
+
+        outer: dict[str, dict[ShoutyKey, int]] = Field(default_factory=dict)
+
+    assert _lines(Nested, {"outer": {"a": {"[key]": 1}}}) == [
+        "vm-site/lab.outer.a.[key].[key]: invalid key '[key]' (must be upper case)"
+    ]
+
+
+def test_a_nested_tables_key_marker_is_noise_the_walk_does_not_reach() -> None:
+    """The half this does NOT fix, said out loud. The walk loses track at
+    a collection whose elements are themselves a collection, so it cannot
+    tell the marker from a segment the operator wrote and keeps it. Noise
+    in the path, never a wrong one, and no kind spec has this shape: the
+    env table is the only constrained-key mapping and its values are
+    models."""
+
+    class Nested(AgwModel):
+        """A table of tables whose inner keys are constrained."""
+
+        outer: dict[str, dict[ShoutyKey, int]] = Field(default_factory=dict)
+
+    assert _lines(Nested, {"outer": {"a": {"low": 1}}}) == [
+        "vm-site/lab.outer.a.low.[key]: invalid key 'low' (must be upper case)"
     ]
 
 

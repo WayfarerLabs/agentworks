@@ -557,8 +557,14 @@ def _resolve_path(model_cls: type[BaseModel], loc: tuple[int | str, ...]) -> _Ad
     container: type[BaseModel] | None = None
     at_union = False
     after_mapping_key = False
-    for segment in loc:
-        if segment == _KEY_MARKER and after_mapping_key:
+    last = len(loc) - 1
+    for index, segment in enumerate(loc):
+        # Pydantic appends the key marker AFTER the key it is about, so it
+        # is always the final segment. Requiring that, and not just that
+        # the walk stands past a mapping key, is what keeps a table whose
+        # key really is ``[key]`` from having it dropped: nested one level
+        # down, that key is not last and the marker after it is.
+        if segment == _KEY_MARKER and after_mapping_key and index == last:
             continue
         container = cursor.model if isinstance(cursor, _AtModel) else None
         at_union = isinstance(cursor, _AtUnion)
