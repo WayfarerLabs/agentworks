@@ -1,0 +1,299 @@
+"""Tests for ``iter_field_docs``, ``model_doc``, and ``render_type``.
+
+The last test in this file is the anti-drift pin: the same marker facts
+have to be readable off the stream and off emitted JSON Schema, since
+those are two derivations from one authored marker.
+"""
+
+from __future__ import annotations
+
+from enum import Enum
+from typing import Annotated, Literal
+
+import pytest
+from pydantic import Field
+
+from agentworks.errors import StateError
+from agentworks.resources.schema import (
+    REF_SCHEMA_KEY,
+    UNSET,
+    AgwModel,
+    FieldDoc,
+    SecretRef,
+    iter_field_docs,
+    model_doc,
+    render_type,
+)
+
+from ._fixture_models import (
+    AzureLike,
+    DiamondLike,
+    GithubLike,
+    LimaArm,
+    SelfReferential,
+    SiteLike,
+    TemplateLike,
+)
+
+
+class Arch(Enum):
+    """A closed catalog spelled as an enum."""
+
+    ARM64 = "arm64"
+    X86_64 = "x86_64"
+
+
+class Constrained(AgwModel):
+    """A model carrying every constraint kind a presenter reports."""
+
+    name: str = Field(min_length=1, pattern="^[a-z]+$")
+    cpus: int = Field(default=2, ge=1, le=64)
+    mode: Literal["fast", "safe"] = "safe"
+    arch: Arch | None = None
+    nickname: str | None = None
+    tags: list[str] = Field(default_factory=list)
+
+
+def docs(model_cls: type[AgwModel]) -> dict[tuple[str, ...], FieldDoc]:
+    return {doc.path: doc for doc in iter_field_docs(model_cls)}
+
+
+def paths(model_cls: type[AgwModel]) -> list[tuple[str, ...]]:
+    return [doc.path for doc in iter_field_docs(model_cls)]
+
+
+# --- order and shape of the stream ------------------------------------
+
+
+def test_fields_come_in_declaration_order() -> None:
+    assert paths(Constrained) == [("name",), ("cpus",), ("mode",), ("arch",), ("nickname",), ("tags",)]
+
+
+def test_a_nested_block_expands_inline_depth_first() -> None:
+    assert paths(AzureLike) == [
+        ("region",),
+        ("service_principal",),
+        ("service_principal", "client_id"),
+        ("service_principal", "tenant_id"),
+        ("service_principal", "secret"),
+    ]
+
+
+def test_the_nested_field_itself_names_the_model_it_opens() -> None:
+    from ._fixture_models import PrincipalLike
+
+    assert docs(AzureLike)[("service_principal",)].nested_model is PrincipalLike
+
+
+def test_two_sibling_fields_of_one_nested_model_both_expand() -> None:
+    # An accumulating visited set would render ``primary``'s block and
+    # emit nothing for ``fallback``, so the generated sample would be
+    # missing a whole section an operator has to write.
+    assert paths(DiamondLike) == [
+        ("primary",),
+        ("primary", "secret"),
+        ("fallback",),
+        ("fallback", "secret"),
+    ]
+
+
+def test_a_self_referential_model_terminates() -> None:
+    assert paths(SelfReferential) == [("secret",), ("child",)]
+
+
+def test_a_root_model_streams_its_one_root_field() -> None:
+    from ._fixture_models import MappingRoot, StringRoot
+
+    assert paths(StringRoot) == [("root",)]
+    assert paths(MappingRoot) == [("root",), ("root", "token"), ("root", "api_url")]
+
+
+def test_an_unbuildable_model_fails_loudly() -> None:
+    # The opposite of what extraction does with the same model, and
+    # deliberately: a silently truncated field reference is worse than a
+    # loud failure in a renderer.
+    class Unresolvable(AgwModel):
+        nested: NeverDefined  # type: ignore[name-defined]  # noqa: F821
+
+    with pytest.raises(StateError) as exc:
+        list(iter_field_docs(Unresolvable))
+    assert "Unresolvable" in str(exc.value)
+
+
+# --- required, defaults, descriptions ---------------------------------
+
+
+def test_a_required_field_reports_no_default() -> None:
+    doc = docs(Constrained)[("name",)]
+    assert doc.required is True
+    assert doc.default is UNSET
+
+
+def test_a_declared_default_is_reported() -> None:
+    assert docs(Constrained)[("cpus",)].default == 2
+
+
+def test_a_declared_default_of_none_is_not_the_absence_of_one() -> None:
+    doc = docs(Constrained)[("nickname",)]
+    assert doc.required is False
+    assert doc.default is None
+
+
+def test_a_default_factory_is_called() -> None:
+    assert docs(Constrained)[("tags",)].default == []
+
+
+def test_the_description_comes_from_the_attribute_docstring() -> None:
+    class Documented(AgwModel):
+        vm_host: str | None = None
+        """SSH host running limactl for a remote-Lima site. Omit for a local site."""
+
+        undocumented: str = "x"
+
+    assert docs(Documented)[("vm_host",)].description == (
+        "SSH host running limactl for a remote-Lima site. Omit for a local site."
+    )
+    # Not an error at this layer; it renders as an undocumented field.
+    assert docs(Documented)[("undocumented",)].description is None
+
+
+def test_a_models_own_description_is_the_first_docstring_paragraph() -> None:
+    class Paragraphs(AgwModel):
+        """The summary line,
+        wrapped across two source lines.
+
+        A second paragraph a heading has no room for.
+        """
+
+    assert model_doc(GithubLike).description == "A token-sourcing git-credential provider's config."
+    assert model_doc(Paragraphs).description == "The summary line, wrapped across two source lines."
+
+
+def test_a_model_with_no_docstring_reports_no_description() -> None:
+    class Bare(AgwModel):
+        name: str = "x"
+
+    assert model_doc(Bare).description is None
+    assert model_doc(Bare).title == "Bare"
+
+
+# --- choices and constraints ------------------------------------------
+
+
+def test_a_literal_field_reports_its_choices() -> None:
+    assert docs(Constrained)[("mode",)].choices == ("fast", "safe")
+
+
+def test_an_enum_field_reports_its_members() -> None:
+    assert docs(Constrained)[("arch",)].choices == (Arch.ARM64, Arch.X86_64)
+
+
+def test_a_discriminator_is_itself_a_literal_field() -> None:
+    assert docs(LimaArm)[("name",)].choices == ("lima",)
+
+
+def test_an_open_field_reports_no_choices() -> None:
+    assert docs(Constrained)[("nickname",)].choices == ()
+
+
+def test_constraints_are_normalized_to_plain_keys_and_values() -> None:
+    assert dict(docs(Constrained)[("name",)].constraints) == {"min_length": 1, "pattern": "^[a-z]+$"}
+    assert dict(docs(Constrained)[("cpus",)].constraints) == {"ge": 1, "le": 64}
+
+
+def test_no_annotated_types_object_leaks_into_the_record() -> None:
+    for doc in iter_field_docs(Constrained):
+        for value in doc.constraints.values():
+            assert isinstance(value, int | str | float)
+
+
+# --- reference semantics ----------------------------------------------
+
+
+def test_a_marked_field_carries_its_marker_verbatim() -> None:
+    doc = docs(GithubLike)[("token",)]
+    assert doc.ref is not None
+    assert doc.ref.kind == "secret"
+    assert doc.ref.usage == "the auth token"
+    assert doc.default_template == "git-token-{owner_name}"
+
+
+def test_a_marked_list_carries_the_element_marker_and_no_default_identity() -> None:
+    doc = docs(TemplateLike)[("inherits",)]
+    assert doc.ref is not None
+    assert doc.ref.kind == "vm-template"
+    assert doc.default_template is None
+
+
+def test_the_annotation_has_its_markers_stripped() -> None:
+    assert docs(GithubLike)[("token",)].annotation is str
+    assert docs(TemplateLike)[("inherits",)].annotation == list[str]
+    assert docs(TemplateLike)[("image",)].annotation == (str | None)
+
+
+# --- union arms -------------------------------------------------------
+
+
+def test_union_arms_are_handles_rather_than_expanded_fields() -> None:
+    doc = docs(SiteLike)[("platform",)]
+    assert [arm.tag for arm in doc.union_arms] == ["lima", "proxmox"]
+    # The arms' own fields are NOT in the stream: the presenter decides
+    # whether to render one arm, all of them, or a table.
+    assert paths(SiteLike) == [("platform",)]
+
+
+def test_each_arm_carries_its_own_identity() -> None:
+    arms = {arm.tag: arm.doc for arm in docs(SiteLike)[("platform",)].union_arms}
+    assert arms["lima"].title == "LimaArm"
+    assert arms["lima"].description == "The union arm that names no Resource."
+
+
+def test_an_arm_is_recursed_into_by_the_presenter_not_the_walker() -> None:
+    arm = next(arm for arm in docs(SiteLike)[("platform",)].union_arms if arm.tag == "proxmox")
+    assert paths(arm.doc.model) == [("name",), ("token_secret",)]
+
+
+# --- render_type ------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("annotation", "expected"),
+    [
+        (str, "string"),
+        (int, "integer"),
+        (float, "number"),
+        (bool, "boolean"),
+        (str | None, "string or null"),
+        (list[str], "list of string"),
+        (list[int] | None, "list of integer or null"),
+        (dict[str, str], "table of string"),
+        (Literal["fast", "safe"], "one of: fast, safe"),
+        (Arch, "one of: arm64, x86_64"),
+        (LimaArm, "table"),
+        (Annotated[str, SecretRef(usage="u")], "string"),
+    ],
+)
+def test_render_type(annotation: object, expected: str) -> None:
+    assert render_type(annotation) == expected
+
+
+def test_a_union_of_models_renders_once() -> None:
+    assert render_type(docs(SiteLike)[("platform",)].annotation) == "table"
+
+
+# --- the anti-drift pin -----------------------------------------------
+
+
+def test_the_stream_and_the_emitted_schema_report_the_same_marker() -> None:
+    # Two derivations, one authored marker. If these can disagree, the
+    # sample renderer and an operator's editor tooling can disagree.
+    stream = docs(GithubLike)[("token",)]
+    assert stream.ref is not None
+    assert stream.ref.schema_extension() == GithubLike.model_json_schema()["properties"]["token"][REF_SCHEMA_KEY]
+
+
+def test_the_stream_and_the_emitted_schema_agree_inside_a_nested_block() -> None:
+    stream = docs(AzureLike)[("service_principal", "secret")]
+    assert stream.ref is not None
+    emitted = AzureLike.model_json_schema()["$defs"]["PrincipalLike"]["properties"]["secret"][REF_SCHEMA_KEY]
+    assert stream.ref.schema_extension() == emitted

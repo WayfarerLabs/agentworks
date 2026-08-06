@@ -10,6 +10,9 @@ hand-validated lives here:
   ``x-agw-ref`` JSON Schema encoding.
 - :func:`extract_references`, the total, never-raising reference
   extractor that reads a raw blob through a model's markers.
+- :func:`iter_field_docs`, the ordered field-reference stream every human
+  presentation of a model derives from, and :func:`render_type` beside
+  it for the presenters that want our type rendering.
 
 This package sits BELOW the domains that use it. It may import
 ``resources/reference.py`` (the reference records it produces) and
@@ -24,6 +27,15 @@ from __future__ import annotations
 
 from agentworks.resources.schema.base import AgwModel, AgwRootModel, validation_context
 from agentworks.resources.schema.extract import extract_references
+from agentworks.resources.schema.fields import (
+    UNSET,
+    FieldDoc,
+    ModelDoc,
+    UnionArm,
+    iter_field_docs,
+    model_doc,
+    render_type,
+)
 from agentworks.resources.schema.markers import (
     REF_SCHEMA_KEY,
     RefMarker,
@@ -34,12 +46,19 @@ from agentworks.resources.schema.markers import (
 
 __all__ = [
     "REF_SCHEMA_KEY",
+    "UNSET",
     "AgwModel",
     "AgwRootModel",
+    "FieldDoc",
+    "ModelDoc",
     "RefMarker",
     "RefOwner",
     "ResourceRef",
     "SecretRef",
+    "UnionArm",
     "extract_references",
+    "iter_field_docs",
+    "model_doc",
+    "render_type",
     "validation_context",
 ]
