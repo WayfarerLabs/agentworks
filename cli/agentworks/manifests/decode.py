@@ -243,6 +243,7 @@ def decode_document(doc: Document, issues: list[str]) -> Any:
 
     owner = RefOwner(kind=doc.kind, name=doc.name)
     _check_declared_name(doc, owner, model)
+    _check_declared_description(doc, owner, model)
     payload = {**spec, **_metadata_payload(doc)}
     try:
         resource = model.model_validate(payload, context=validation_context(owner))
@@ -332,6 +333,27 @@ def _check_declared_name(doc: Document, owner: RefOwner, model: type[DeclaredRes
         validate_name(doc.name, max_length=model.NAME_MAX_LENGTH)
     except ValidationError as exc:
         raise ConfigError(f"{doc.where}: {owner.display}: {exc}") from None
+
+
+def _check_declared_description(doc: Document, owner: RefOwner, model: type[DeclaredResource]) -> None:
+    """A kind that REQUIRES a description requires a real one.
+
+    Derived from the model rather than declared per kind: a kind requires
+    a description exactly when its row makes the field required, which
+    today is ``secret`` alone (it is the operator-facing prompt text, and
+    ``secrets/prompt.py`` renders it into "Secret '<name>': <text>").
+
+    Checked HERE and not as a ``NonEmptyStr`` on the field for the reason
+    ``NAME_MAX_LENGTH`` is: the framework constructs secret rows with an
+    empty description deliberately (``synthesize`` for an auto-declared
+    secret, plus four placeholder sites), and the registry's polish pass
+    fills the auto-declared ones in afterwards. Only what an operator
+    wrote is checked.
+    """
+    field = model.model_fields.get("description")
+    if field is None or not field.is_required() or doc.description != "":
+        return
+    raise ConfigError(f"{doc.where}: {owner.display}.description: must not be empty")
 
 
 def advisory_issues(resource: DeclaredResource, doc: Document) -> list[str]:

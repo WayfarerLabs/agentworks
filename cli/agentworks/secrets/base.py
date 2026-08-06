@@ -18,7 +18,7 @@ from pydantic.json_schema import SkipJsonSchema
 
 from agentworks.declared_resource import DeclaredResource
 from agentworks.naming import MAX_SECRET_NAME_LENGTH
-from agentworks.schema import RefOwner
+from agentworks.schema import NonEmptyStr, RefOwner
 from agentworks.source_location import SourceLocation, synthesized
 
 if TYPE_CHECKING:
@@ -62,9 +62,12 @@ class SecretDecl(DeclaredResource):
     # larger cap rather than the freeform one.
     NAME_MAX_LENGTH: ClassVar[int | None] = MAX_SECRET_NAME_LENGTH
 
-    # Override the base's optional ``description``: a secret must carry one
-    # (it is the operator-facing prompt/hint text), so it is required here.
-    description: SkipJsonSchema[str]
+    # Override the base's optional ``description``: a secret must carry a
+    # NON-EMPTY one, because it is the operator-facing prompt text
+    # (``secrets/prompt.py`` renders it into "Secret '<name>': <text>"),
+    # so an empty one yields a prompt that asks for nothing in particular.
+    # The decoder this replaces checked both halves in one condition.
+    description: SkipJsonSchema[NonEmptyStr]
 
     hint: str | None = None
     """Operator-facing text shown when the secret has to be entered by

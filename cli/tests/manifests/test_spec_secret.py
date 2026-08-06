@@ -57,6 +57,16 @@ def test_a_missing_description_says_it_is_required() -> None:
     assert rejection("secret", "npm-token", {}) == "res.yaml:7: secret/npm-token.description: is required"
 
 
+def test_an_empty_description_is_refused_too() -> None:
+    """``secrets/prompt.py`` renders it into "Secret '<name>': <text>", so
+    an empty one asks the operator for nothing in particular. The decoder
+    this replaces checked presence and emptiness in one condition; the
+    model says them as the two problems they are."""
+    assert rejection("secret", "npm-token", {}, description="") == (
+        "res.yaml:7: secret/npm-token.description: must not be empty"
+    )
+
+
 def test_a_mapping_value_of_no_accepted_shape_reads_as_one_line() -> None:
     """Pydantic reports one failure per union member, all at this one
     address. The operator made one mistake and reads one line naming the
