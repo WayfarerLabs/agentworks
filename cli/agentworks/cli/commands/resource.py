@@ -429,6 +429,8 @@ def resource_migrate(
         output.detail(f"Backup: {result.backup_path}")
     if result.yaml_backup_path is not None:
         output.detail(f"YAML recovery copies: {result.yaml_backup_path}")
+    if result.schema_dir is not None:
+        output.detail(f"Editor schemas: {result.schema_dir} (created files reference them)")
     if result.dropped_secret_backends:
         output.detail("Dropped deprecated [secret_backends.*] sections.")
     output.result(f"verified: registry unchanged ({result.verified_rows} resources)")
@@ -490,6 +492,8 @@ def resource_sample(
     verb = "Appended sample to" if appended else "Wrote sample to"
     output.info(f"{verb} {path}")
     output.info("Uncomment the document lines (delete one leading '#') to activate.")
+    if not appended:
+        output.detail("The file opens with a schema modeline; a schema-aware editor will check it as you type.")
 
 
 @resource_app.command("schema")

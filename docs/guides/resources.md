@@ -67,6 +67,48 @@ spec:
 delete one leading `#` per line to activate. `agw resource edit KIND/NAME` opens the manifest
 declaring a resource in `$EDITOR`.
 
+## Editing manifests with schema support
+
+Agentworks emits JSON Schema (draft 2020-12) for manifests, so a schema-aware editor gives you
+completions, hover documentation, and live diagnostics as you type, including for kinds and
+capabilities a plugin contributed.
+
+```bash
+agw resource schema                    # the any-kind schema, to stdout
+agw resource schema vm-template        # one kind's
+agw resource schema --write            # the whole set, into resources/.schema/
+```
+
+Files that agentworks writes for you already carry the association, as a modeline on their first
+line:
+
+```yaml
+# yaml-language-server: $schema=.schema/vm-template.schema.json
+```
+
+Both `agw resource sample --write` and `agw resource migrate` stamp it on the files they CREATE, and
+write the schemas alongside so the reference resolves. They leave an existing file's first line
+alone, because a modeline has to be at the top and inserting one would shift every line number you
+already know. To get the association on a manifest you wrote by hand, add that line yourself
+(`agw resource schema --write` first, so the file it names exists).
+
+The schema describes THIS host: a capability from a plugin appears in it once the plugin is
+installed, so re-run `agw resource schema --write` after installing one. The schemas are generated
+artifacts; `.schema/` is a dot-directory, so the manifest loader never reads what is in it.
+
+**Setting up an editor.** In VS Code (or any editor with a YAML language server), install the
+[YAML extension](https://marketplace.visualstudio.com/items?itemName=redhat.vscode-yaml), open a
+manifest under `~/.config/agentworks/resources/`, and you should see completions on `spec` keys and
+hover text on each field. To confirm it is really working: change a `spec` key to a name the kind
+does not declare, and the editor should underline it immediately. If nothing happens, check that the
+first line of the file is the modeline and that the path it names exists.
+
+What the editor checks is a deliberate subset of what loading checks. Everything it flags is a real
+error, but agentworks also applies rules JSON Schema cannot state (cross-field constraints, name
+character rules, whether a capability is registered here at all), so a manifest with no editor
+diagnostics can still fail to load. The direction is on purpose: a schema that under-reports costs
+you a squiggle, while one that over-reports would underline valid configuration.
+
 ## Scoped GitHub credentials (fine-grained PATs)
 
 A `git-credential`'s `spec.provider` is one tagged table: its `name` key selects the provider

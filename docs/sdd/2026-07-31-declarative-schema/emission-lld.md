@@ -273,10 +273,18 @@ existing file means inserting at line 1 and shifting every line number an operat
 make. An operator who wants the header on an existing manifest adds one line; `agw resource schema`
 prints the path it should point at.
 
-Both writers ensure the schema SET exists before stamping (`write_schema_set`), because a modeline
-pointing at a file that does not exist is a red error banner in the operator's editor: strictly
-worse than no modeline. So `sample --write` and `migrate` both write `.schema/` as a visible,
-reported side effect.
+Both writers ensure the schema SET exists (`write_schema_set`), because a modeline pointing at a
+file that does not exist is a red error banner in the operator's editor: strictly worse than no
+modeline. So `sample --write` and `migrate` both write `.schema/` as a visible, reported side
+effect. The migrator writes it AFTER verification passes, outside its transactional block: it is an
+idempotent derived artifact, so making rollback responsible for it would add a failure mode to the
+recovery path in exchange for nothing.
+
+The migrator's header is a `FileWrite` PROPERTY rather than stored text, derived from the kinds the
+file ends up holding, and `created_yaml_text` is the one spelling of "the whole text of a file this
+run creates", shared by the dry run and the write. That pairing is what makes `--dry-run --full`
+show the bytes that land, header included, which is the same discipline `appended_yaml_text` already
+established for the append path.
 
 The referenced schema is the PER-KIND one when the file holds exactly one kind, and the envelope
 otherwise. That is the migrator's default (`--layout per-kind`) and its per-resource layout, so the

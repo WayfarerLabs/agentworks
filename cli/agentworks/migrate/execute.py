@@ -28,7 +28,8 @@ from hashlib import sha256
 from typing import TYPE_CHECKING
 
 from agentworks.errors import StateError
-from agentworks.migrate.planning import appended_yaml_text
+from agentworks.manifests.emit import SCHEMA_DIRNAME, write_schema_set
+from agentworks.migrate.planning import appended_yaml_text, created_yaml_text
 from agentworks.migrate.verify import first_difference, normalized_rows
 
 if TYPE_CHECKING:
@@ -50,6 +51,9 @@ class ExecutionResult:
     replaced: list[Path] = field(default_factory=list)
     verified_rows: int = 0
     dropped_secret_backends: bool = False
+    schema_dir: Path | None = None
+    """Where the run wrote the JSON Schemas the created manifests'
+    modelines refer to. ``None`` only if the run did not get that far."""
 
 
 def execute_plan(plan: MigrationPlan, config: Config) -> ExecutionResult:
@@ -93,7 +97,7 @@ def execute_plan(plan: MigrationPlan, config: Config) -> ExecutionResult:
                 # The atomic replace leaves no destination artifact until
                 # its write completes, so a mid-write failure needs no
                 # speculative rollback record.
-                new_text = "---\n".join(write.documents)
+                new_text = created_yaml_text(write)
                 created[write.path] = sha256(new_text.encode()).hexdigest()
                 _atomic_write(write.path, new_text, expect_absent=True, operation=f"create {write.path}")
                 result.created.append(write.path)
@@ -154,6 +158,15 @@ def execute_plan(plan: MigrationPlan, config: Config) -> ExecutionResult:
                 ),
             ) from exc
         raise
+
+    # After verification, never before: a created manifest opens with a
+    # modeline pointing here, and a modeline referring to a file that is
+    # not there is a red banner in the operator's editor. Written last so
+    # the transactional half above has nothing extra to roll back, and
+    # unconditionally, because an existing set describes whatever registry
+    # was current when it was last written rather than this one.
+    result.schema_dir = plan.resources_dir / SCHEMA_DIRNAME
+    write_schema_set(result.schema_dir)
     return result
 
 

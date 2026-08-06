@@ -70,7 +70,22 @@ def write_sample(
     Returns ``(path, appended)``. The content is fully commented, so no
     document separator is involved: appending comments to an existing
     manifest file cannot change what it declares.
+
+    A file this CREATES opens with the yaml-language-server modeline, and
+    the schema set it refers to is written alongside, because a modeline
+    pointing at a file that is not there is a red banner in the operator's
+    editor rather than a missing feature. An append leaves the existing
+    file's first line alone: a modeline has to be at the top, so stamping
+    one means shifting every line number in a file the operator already
+    knows.
+
+    The modeline is NOT part of :func:`sample_text`, which stays fully
+    commented under its own uncomment rule. It is a file header, so the
+    rule ("delete one leading ``#`` from the document lines") is still
+    true of the body.
     """
+    from agentworks.manifests.emit import SCHEMA_DIRNAME, modeline, write_schema_set
+
     target = _validated_target(resources_dir, filename)
     text = sample_text(kind, all_kinds=all_kinds)
     appended = target.exists()
@@ -83,7 +98,9 @@ def write_sample(
             handle.write("\n")
             handle.write(text)
     else:
-        target.write_text(text, encoding="utf-8")
+        header = modeline(manifest_path=target, resources_dir=resources_dir, kind=kind)
+        target.write_text(f"{header}\n{text}", encoding="utf-8")
+        write_schema_set(resources_dir / SCHEMA_DIRNAME)
     return target, appended
 
 

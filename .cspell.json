@@ -97,6 +97,7 @@
     "logind",
     "logname",
     "misalign",
+    "modeline",
     "mtime",
     "mtimes",
     "multicall",

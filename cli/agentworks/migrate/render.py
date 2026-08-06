@@ -52,9 +52,13 @@ def render_dry_run(plan: MigrationPlan, *, full: bool = False) -> list[str]:
         lines.append("(Pass --full to include the YAML documents and the config.toml diff.)")
         return lines
     for write in plan.writes:
-        header = "appended to" if write.exists else "written to"
+        verb = "appended to" if write.exists else "written to"
         lines.append("")
-        lines.append(f"Documents {header} {write.path}:")
+        lines.append(f"Documents {verb} {write.path}:")
+        if write.header is not None:
+            # A created file opens with the editor modeline, so a dry run
+            # that omitted it would not be showing what lands.
+            lines.append(write.header)
         for index, document in enumerate(write.documents):
             if index or write.exists:
                 lines.append("---")

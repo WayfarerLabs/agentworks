@@ -6,6 +6,7 @@
     "apischema",
     "argspec",
     "autodoc",
+    "chowned",
     "constructibility",
     "coveooss",
     "cuelang",

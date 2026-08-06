@@ -85,6 +85,36 @@ class FileWrite:
     path: Path
     documents: list[str]
     exists: bool  # target existed at plan time -> append
+    resources_dir: Path
+    kinds: list[str] = field(default_factory=list)
+    """The kind of each document, in the same order, so the file's editor
+    modeline can name the ONE kind it holds where there is one."""
+
+    @property
+    def header(self) -> str | None:
+        """The yaml-language-server modeline this file opens with, or
+        ``None`` when there is none to write.
+
+        Created files only. A modeline has to be the first line, so
+        stamping an existing file means inserting at line 1 and shifting
+        every line number an operator already knows, which is a bigger
+        change to their file than an append was asked to make. An operator
+        who wants one on an existing manifest adds a line;
+        ``agw resource schema`` prints the path it points at.
+
+        Derived rather than stored, so it always describes the documents
+        the file actually ends up holding.
+        """
+        if self.exists:
+            return None
+        from agentworks.manifests.emit import modeline
+
+        unique = set(self.kinds)
+        return modeline(
+            manifest_path=self.path,
+            resources_dir=self.resources_dir,
+            kind=unique.pop() if len(unique) == 1 else None,
+        )
 
 
 @dataclass
@@ -304,6 +334,16 @@ def appended_yaml_text(existing: str, documents: list[str]) -> str:
     return existing + prefix + "".join(f"---\n{document}" for document in documents)
 
 
+def created_yaml_text(write: FileWrite) -> str:
+    """The whole text of a manifest file this run CREATES.
+
+    The editor modeline first, then the documents. One spelling, shared by
+    the dry run and the write, so what an operator is shown is what lands.
+    """
+    body = "---\n".join(write.documents)
+    return body if write.header is None else f"{write.header}\n{body}"
+
+
 def _discover_units(doc: tomlkit.TOMLDocument) -> list[MigrationUnit]:
     """Every TOML-declared resource, in declaration order."""
     units: list[MigrationUnit] = []
@@ -499,9 +539,10 @@ def _build_writes(
         target = resources_dir / _relative_target(unit, layout)
         write = writes.get(target)
         if write is None:
-            write = FileWrite(path=target, documents=[], exists=target.exists())
+            write = FileWrite(path=target, documents=[], exists=target.exists(), resources_dir=resources_dir)
             writes[target] = write
         write.documents.append(_emit_document(doc, unit))
+        write.kinds.append(unit.kind)
     return list(writes.values())
 
 
