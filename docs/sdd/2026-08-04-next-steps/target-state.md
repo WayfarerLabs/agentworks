@@ -40,7 +40,7 @@ Destination 1 is the priority; the rest are not strictly ordered.
    restored as a first-class consumer. It is why the event vocabulary must stay analysis-friendly
    and Agentworks-owned.
 7. **A stable plugin boundary, last.** External plugin promises come only after the internal
-   contracts (descriptor, schema, facets) have been proven by first-party use.
+   contracts (descriptor, schema, scope participation) have been proven by first-party use.
 
 ## Settled contracts and rulings by area
 
@@ -83,8 +83,8 @@ keyed to the finalize fold. Phase 2 executes through the descriptor, not ahead o
 Four doors stay open for per-instance configuration and the future living graph: source-agnostic
 reference extraction, a general layer-stack merge rather than a template-only chain, graph
 post-finalize immutability staying a registry/fold property rather than a model-layer assumption,
-and one instance-state store designed once for instance specs, facet applied-state, and artifact
-ownership records (three perspectives converge on that store).
+and one instance-state store designed once for instance specs, integration applied-state, and
+artifact ownership records (three perspectives converge on that store).
 
 ### Capability descriptor (destination 3)
 
