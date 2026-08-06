@@ -35,6 +35,8 @@
     "tfplugindocs",
     "tomli",
     "typedload",
+    "unaddressable",
+    "unbuildable",
     "unmigrated",
     "voluptuous",
     "wyfo"
