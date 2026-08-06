@@ -88,6 +88,12 @@ editing it yourself. If you also have a working communication channel to that SD
 child SDD, the roadmap lead), flag it there too; until such channels exist, the operator is the
 reliable route.
 
+One sanctioned channel does exist: new-file message passing. Adding a NEW file to another SDD's
+feature directory as a message is fine (a roadmap delivering seed notes into an adopted child's
+directory is the standing example); the restriction is on modifying another effort's existing
+artifacts. A delivered message file belongs to the receiving effort once read: integrate it into
+your own artifacts, then keep or delete it as you see fit.
+
 ## Lockfile
 
 When work on the SDD is done, a `locked.md` file should be created in the feature directory. This

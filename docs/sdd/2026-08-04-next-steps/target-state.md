@@ -52,7 +52,22 @@ agent deliberately sits outside Agentworks (a managed agent must not modify the 
 so the agentic-artifacts layer is not the delivery path for onboarding skills. Onboarding is
 idempotent and rerunnable, and conspicuously consent-first about probing the operator's machine.
 Discovery and schema help are derived from registries, schema emission, live samples, and describe
-surfaces so they cannot drift. A live example of the artifact need (operator observation,
+surfaces so they cannot drift.
+
+The teaching surface (operator rulings, 2026-08-05): `agw guide [topic ...]` serves skill-shaped
+markdown for agents and humans alike, blending static authored content with dynamic content from the
+live system. Topics span resource kinds (with live instance lists), specific resources, capability
+implementations, and `concept-` prefixed meta topics (collision-free and discoverable by
+completion). Output is markdown only. Every kind, implementation, and plugin contributes its own
+topics through one generic contract, with built-in content living beside the kind it documents, and
+contributed content is data rendered through locked-down templating, never code, against a
+pared-down, read-only projection of the resource graph anchored by `me` shorthand (the resource the
+topic documents), with rendering side-effect-free. The published harness plugins reduce to thin
+bootstraps (install, disclose, run `agw guide`), which makes cross-harness parity structural. The
+command is named `guide`, not `skill`, reserving the skill noun for the artifacts layer (destination
+6's rules, skills, hooks). Reference surfaces (describe, schema, samples) and the teaching surface
+render the same underlying sources: wave 2 owns the sources and the reference surfaces, the
+onboarding child owns the guide. A live example of the artifact need (operator observation,
 2026-08-05): this workspace authenticates GitHub through a custom git credential helper serving
 fine-grained PATs by full HTTP path, environment knowledge an agent currently must be told in
 conversation; a feature provisioning such a helper should emit exactly that fact as a skill.
@@ -131,6 +146,27 @@ pattern). Deprecations are dropped on their scheduled release rather than accumu
 restores that baseline by clearing every expired surface, and each later breaking wave clears its
 own runway on schedule so the target state carries no expired compatibility. The generic deprecation
 framework survives every cleanup.
+
+### Cross-cutting: anchored projections (all destinations)
+
+A recurring principle, now named (operator agreement, 2026-08-05), that child SDDs should test
+designs against: contributions declare rather than do, and access arrives as an anchored, typed
+projection rather than ambient authority. Instances already settled across this roadmap: facet
+grants, the `me` anchored template projection, per-integration state namespacing, declared secret
+references resolved at the operation boundary, artifact materialization plans validated against
+grants, core performing tmux and PTY operations on integrations' behalf, and the universal event
+representation. The review question for any new contribution surface: what does the contribution
+see, and where is that view enforced?
+
+The template projection is expected to be the resource graph itself in a gated access mode, not a
+second structure kept in lockstep: powers (secret readers, run targets, capability API objects) sit
+behind callables a mode can gate, while universal facts are plain data on the nodes. Gated modes
+expose only already-materialized data; nothing lazily computes through a power while wearing
+attribute syntax. Gating by permission check or by leaving powers unwired are both legitimate
+mechanisms, chosen per surface and done properly. Authored content still carries the teaching; the
+graph carries the dynamic truth, and no effort should over-index on pushing everything into the
+graph. Where a projection is impossible (the workstation agent sits outside the platform), the
+principle inverts to disclosure, per the onboarding security disclosure.
 
 ## Explicitly out of scope
 
