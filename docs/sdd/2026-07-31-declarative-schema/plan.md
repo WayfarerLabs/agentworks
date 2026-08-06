@@ -439,33 +439,33 @@ until someone decides.
 
 ### 2.4 Tagged-shape hardening
 
-- [ ] `tagged-hardening-lld.md` written and reviewed: the old-shape detection and error text, how
-      the old-shape error survives 2.5's decoder-to-model swap, and the manifest-upgrade mode as a
-      GENERALIZATION of the migrator's YAML-rewrite machinery (**corrected 2026-08-06: NOT
-      shipped.** Wave 1's `6d44a12c` deleted `YamlRewrite` and dropped the ruamel dependency along
-      with the compatibility surfaces it served, so step 2.4 recovered it from that commit's parent
-      and generalized it. The outcome matches this box's intent; the premise that it was standing
-      machinery was stale. The recovery also improved on the original, which never set
-      `preserve_quotes`) (PR #383's `YamlRewrite`: ruamel round-trip with document-marker text
-      patching, digest/CAS guards, backup-first rollback, YAML-native units), extended from the
-      bespoke session-template selector fold to the platform/provider sibling fold. (The
-      harness-selector and `restart_command` removals already landed in wave 1, so the earlier
-      cross-SDD coordination is discharged; this step is scoped to the still-live
+- [x] WAIVED, see the step 2.4 records above: `tagged-hardening-lld.md` written and reviewed: the
+      old-shape detection and error text, how the old-shape error survives 2.5's decoder-to-model
+      swap, and the manifest-upgrade mode as a GENERALIZATION of the migrator's YAML-rewrite
+      machinery (**corrected 2026-08-06: NOT shipped.** Wave 1's `6d44a12c` deleted `YamlRewrite`
+      and dropped the ruamel dependency along with the compatibility surfaces it served, so step 2.4
+      recovered it from that commit's parent and generalized it. The outcome matches this box's
+      intent; the premise that it was standing machinery was stale. The recovery also improved on
+      the original, which never set `preserve_quotes`) (PR #383's `YamlRewrite`: ruamel round-trip
+      with document-marker text patching, digest/CAS guards, backup-first rollback, YAML-native
+      units), extended from the bespoke session-template selector fold to the platform/provider
+      sibling fold. (The harness-selector and `restart_command` removals already landed in wave 1,
+      so the earlier cross-SDD coordination is discharged; this step is scoped to the still-live
       `platform`/`platform_config` and `provider`/`provider_config` sibling shapes.)
-- [ ] Old sibling shape (`platform` + `platform_config`, `provider` + `provider_config`) becomes a
+- [x] Old sibling shape (`platform` + `platform_config`, `provider` + `provider_config`) becomes a
       hard error naming the exact rewrite; #349's dual-shape normalization, its aggregated warning
       channel (`ManifestSet.deprecation_issues` for shape), and the bundle-gate special case are
       removed (the hard error makes the gate redundant).
-- [ ] The old-sibling-shape entry joins the representative-mistakes corpus here, pinned end to end
+- [x] The old-sibling-shape entry joins the representative-mistakes corpus here, pinned end to end
       so 2.5's swap cannot degrade it to a generic unknown-key error (in the model regime the old
       shape would otherwise surface as exactly that on `platform` plus `platform_config`).
-- [ ] `agw resource migrate` gains the manifest-upgrade mode (backup-first discipline reused;
+- [x] `agw resource migrate` gains the manifest-upgrade mode (backup-first discipline reused;
       completions updated for any new flag/subcommand).
-- [ ] Upgrade mode proven on a fixture resources dir authored in the old shape (comments preserved
+- [x] Upgrade mode proven on a fixture resources dir authored in the old shape (comments preserved
       per the LLD's decided policy; result loads clean; idempotent re-run is a no-op).
-- [ ] The hardening commit carries the breaking-change marker and an operator upgrade note (run the
+- [x] The hardening commit carries the breaking-change marker and an operator upgrade note (run the
       manifest-upgrade mode) for release-please.
-- [ ] Decide `agw resource migrate`'s future (the roadmap hands this decision to wave 2). Options:
+- [x] Decide `agw resource migrate`'s future (the roadmap hands this decision to wave 2). Options:
       it stays as the frozen TOML-to-YAML oracle plus the new manifest-upgrade mode, or it retires
       once the last legacy shape is gone. Record the decision and its rationale here; if it retires,
       that is its own commit with an operator note. Note the descriptor's deferred
@@ -483,12 +483,38 @@ until someone decides.
   than selector-scoped, and folding parsed values for the verification pre-side. The reviewer signed
   off on all three and independently verified the whole-tree premise. Recording the waiver here so
   the absence is a decision rather than an omission.
-- **`agw resource migrate`'s future, DECIDED:** it survives, and stays a deliberately independent
-  frozen oracle with a hand-maintained kind-participation table. The descriptor's
-  `migration_participation` field stays deferred and uncreated. Deriving the migrator from live
-  wiring would defeat the independence phase 1 built deliberately, which is the whole reason the
-  TOML loaders were relocated into `migrate/` rather than deleted. Rationale also carried in
-  `manifest_upgrade.py:25-30` so it survives this SDD's deletion.
+- **`agw resource migrate`'s future, DECIDED for now, WITH AN OPEN EXPIRY QUESTION:** it survives
+  this effort, and stays a deliberately independent frozen oracle with a hand-maintained
+  kind-participation table.
+
+  **The cost, measured 2026-08-06:** about 4,650 lines (2,812 production across `planning.py` 735,
+  `toml_resources.py` 743, `execute.py` 465, `manifest_upgrade.py` 462, plus
+  render/verify/toml_edit; ~1,844 test). Line count understates it. `toml_resources.py` is 743 lines
+  of TOML loaders phase 1 RELOCATED rather than deleted, dead to the application and alive only so
+  migration verification has a pre-side independent of the emission mapping. And the migrator has
+  produced a disproportionate share of this phase's hard defects: phase 1 reworked its verification
+  wholesale, step 2.4 had to exhume `YamlRewrite` from a deleted commit, and the YAML 1.1-versus-1.2
+  dead end lived in that new code.
+
+  **The value:** it is the remediation path for breaking changes THIS effort ships (TOML resource
+  declarations, the sibling capability shape, and the four operator-visible breaks queued for 2.9),
+  and 2.4's error messages name it as the fix. Without it the upgrade instruction is "hand-edit
+  every manifest and config section".
+
+  **The open question for the operator:** that value is RUNWAY, not capability. The migrator exists
+  to carry operators across a one-time boundary, so it should carry an expiry scheduled like every
+  other compatibility surface here (the precedent is
+  `88fe4c85 feat(cli)!: complete 0.14 compatibility removal`), rather than becoming permanent
+  infrastructure by default. The two halves have DIFFERENT expiries and can retire independently:
+  the TOML half serves configs from before the phase-1 hard error and is the larger, older, more
+  duplicative one; the manifest-upgrade half serves the pre-2.4 sibling shape. Setting the expiry
+  needs input this effort does not have, namely how many operators are actually on old configs.
+  Raised 2026-08-06; not decided. The descriptor's `migration_participation` field stays deferred
+  and uncreated. Deriving the migrator from live wiring would defeat the independence phase 1 built
+  deliberately, which is the whole reason the TOML loaders were relocated into `migrate/` rather
+  than deleted. Rationale also carried in `manifest_upgrade.py:25-30` so it survives this SDD's
+  deletion.
+
 - **Selector asymmetry, deliberate:** selectors scope TOML units only; the manifest-upgrade half is
   always whole-tree, because a leftover legacy document makes the post-registry verification load
   raise, so a scoped run cannot complete. Documented in `cli/README.md` and
