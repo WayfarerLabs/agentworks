@@ -23,10 +23,12 @@ from ._fixture_models import (
     GithubLike,
     MappingRoot,
     MultiArmMarked,
+    NeverResolved,
     NumericallyTaggedSite,
     OptionalUnionSite,
     ProxmoxLike,
     RenamedArmSite,
+    ResolvesToUnbuildable,
     SelfReferential,
     SiteLike,
     StringRoot,
@@ -252,6 +254,15 @@ def test_an_unresolvable_model_contributes_nothing_rather_than_raising() -> None
         nested: NeverDefined  # type: ignore[name-defined]  # noqa: F821
 
     assert extract_references(Unresolvable, {"nested": {}}, OWNER) == ()
+
+
+@pytest.mark.parametrize("model_cls", [NeverResolved, ResolvesToUnbuildable])
+def test_a_model_that_cannot_be_built_contributes_nothing(model_cls: type[AgwModel]) -> None:
+    # Two different failures, and the second is the one that used to
+    # escape: pydantic's own ``raise_errors=False`` covers an annotation
+    # that never resolves, not one that resolves to a type it cannot
+    # build a schema for.
+    assert extract_references(model_cls, {"secret": "named"}, OWNER) == ()
 
 
 # --- parity with the shipped hand-rolled derivations -------------------

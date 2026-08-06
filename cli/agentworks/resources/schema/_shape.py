@@ -14,11 +14,13 @@ from __future__ import annotations
 
 import types
 import typing
+from contextlib import suppress
 from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Annotated, TypeGuard, Union, get_args, get_origin
 
 from pydantic import BaseModel, Discriminator
+from pydantic.errors import PydanticSchemaGenerationError, PydanticUndefinedAnnotation
 
 from agentworks.resources.schema.markers import RefMarker
 
@@ -185,13 +187,36 @@ def model_fields_of(model_cls: type[BaseModel]) -> dict[str, FieldInfo] | None:
     One rebuild attempt is made (the annotation may have become
     resolvable since class definition); a model still incomplete after
     it is reported as unusable rather than raising, and each caller
-    decides what that means for it.
+    decides what that means for it. Reference extraction contributes
+    nothing for such a model, while the field-reference stream raises,
+    which is the difference between a walker whose caller cannot handle
+    an exception and one whose caller is a renderer.
     """
     if not model_cls.__pydantic_complete__:
-        model_cls.model_rebuild(raise_errors=False)
+        _attempt_rebuild(model_cls)
         if not model_cls.__pydantic_complete__:
             return None
     return dict(model_cls.model_fields)
+
+
+def _attempt_rebuild(model_cls: type[BaseModel]) -> None:
+    """Try once to resolve a model's annotations, without raising.
+
+    ``raise_errors=False`` covers only the undefined-annotation case. A
+    forward reference that RESOLVES, to a type pydantic cannot build a
+    schema for, raises ``PydanticSchemaGenerationError`` straight out of
+    the rebuild, and a caller reaching such a model through the
+    annotation graph could not have screened for it.
+
+    This is not the blanket suppression the extractor's contract forbids,
+    and the distinction is worth stating: a blanket guard would swallow
+    bugs in the WALK, which is what turns a wrong graph silent. This
+    names the two documented failures of the single pydantic call this
+    module makes, and the model is reported as unusable either way, which
+    is the same answer its caller already handles.
+    """
+    with suppress(PydanticSchemaGenerationError, PydanticUndefinedAnnotation):
+        model_cls.model_rebuild(raise_errors=False)
 
 
 def _collection_element(annotation: object) -> tuple[Collection, object] | None:

@@ -35,9 +35,11 @@ from ._fixture_models import (
     GithubLike,
     LimaArm,
     MultiArmMarked,
+    NeverResolved,
     NumericallyTaggedSite,
     OptionalUnionSite,
     RenamedArmSite,
+    ResolvesToUnbuildable,
     SelfReferential,
     SiteLike,
     TemplateLike,
@@ -156,6 +158,15 @@ def test_an_unbuildable_model_fails_loudly() -> None:
     with pytest.raises(StateError) as exc:
         list(iter_field_docs(Unresolvable))
     assert "Unresolvable" in str(exc.value)
+
+
+@pytest.mark.parametrize("model_cls", [NeverResolved, ResolvesToUnbuildable])
+def test_every_unbuildable_model_fails_as_a_state_error(model_cls: type[AgwModel]) -> None:
+    # Including the one whose annotation RESOLVES to something pydantic
+    # cannot build: a raw pydantic error escaping here would contradict
+    # this walker's own docstring.
+    with pytest.raises(StateError):
+        list(iter_field_docs(model_cls))
 
 
 # --- required, defaults, descriptions ---------------------------------

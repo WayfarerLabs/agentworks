@@ -10,6 +10,7 @@ parity tests at them.
 
 from __future__ import annotations
 
+import socket
 from typing import Annotated, Literal
 
 from pydantic import Discriminator, Field
@@ -117,7 +118,13 @@ class RenamedArm(AgwModel):
     old name would."""
 
     name: Literal["aws-ec2", "ec2"]
-    access_key_secret: Annotated[str, SecretRef(usage="the AWS secret access key")] | None = None
+    access_key_secret: (
+        Annotated[
+            str,
+            SecretRef(usage="the AWS secret access key", default_template="aws-secret-access-key"),
+        ]
+        | None
+    ) = None
 
 
 class NumericallyTaggedArm(AgwModel):
@@ -232,6 +239,33 @@ class UnmarkedLike(AgwModel):
     nested: LimaArm | None = None
 
 
+class NeverResolved(AgwModel):
+    """A model whose annotation never resolves to anything at all."""
+
+    child: NeverDefinedAnywhere | None = None  # type: ignore[name-defined]  # noqa: F821
+    secret: Annotated[str, SecretRef(usage="an unreachable secret", default_template="never-resolved")] | None = None
+
+
+class ResolvesToUnbuildable(AgwModel):
+    """A model whose annotation RESOLVES, to a type pydantic has no
+    schema for.
+
+    The nastier half of the unbuildable case: the rebuild attempt raises
+    ``PydanticSchemaGenerationError`` rather than reporting failure, and
+    a walker reaching this model through the annotation graph could not
+    have screened for it.
+    """
+
+    sock: UnbuildableAlias | None = None
+    secret: Annotated[str, SecretRef(usage="an unreachable secret", default_template="unbuildable")] | None = None
+
+
+# Deliberately AFTER the model above: the annotation is unresolvable when
+# the class is created and resolvable, to something unbuildable, by the
+# time a walker asks for the model's fields.
+UnbuildableAlias = socket.socket
+
+
 class StringRoot(AgwRootModel[str]):
     """A backend mapping that is a bare string."""
 
@@ -264,6 +298,8 @@ ALL_FIXTURES = (
     MultiArmMarked,
     SelfReferential,
     UnmarkedLike,
+    NeverResolved,
+    ResolvesToUnbuildable,
     StringRoot,
     MappingRoot,
 )
