@@ -41,9 +41,17 @@ What the loader checks and the schema does not, today:
 - `envelope._NO_SELECTOR_KINDS` (`named-console-template` accepts only `name: default`);
 - capability config for an implementation this host has not registered.
 
-`tests/manifests/test_emit.py::test_emitted_schemas_accept_every_bundled_sample_document` pins the
-direction that matters: every document the real loader accepts also validates against the emitted
-schema. Nothing pins the other direction, because the other direction is false by design.
+`tests/manifests/test_emit.py::test_emitted_schemas_accept_every_document_the_full_load_path_accepts`
+pins the direction that matters: every document the real loader accepts also validates against the
+emitted schema. Nothing pins the other direction, because the other direction is false by design.
+
+**It runs `build_registry`, not `load_manifests`, and the difference is the point.** Capability
+config is checked at FINALIZE, not at decode, so a document with an unknown key inside a capability
+block passes `load_manifests` and is refused by `build_registry` (verified:
+`harness_integration: {name: shell, nonsense: 1}`). A pairing test that stopped at decode would be
+claiming "the loader accepts these" about a weaker loader than the one an operator runs. Both halves
+are one test over one set of documents for the same reason: two tests can drift onto different
+inputs, and then neither is pairing anything.
 
 ### 2.1 Three places the schema WOULD have been stricter than the loader
 
@@ -67,6 +75,30 @@ patching its own output.
   formats. Fixed by naming the accepted input on the validator itself
   (`json_schema_input_type=str | date | datetime`), which is pydantic's own hook for the
   distinction.
+
+### 2.2 Two more the review found, both about NULL
+
+Both slipped past section 2.1's test because no bundled sample and no migrator output writes an
+explicit `null`, and both are things a hand-written manifest does as a matter of course.
+
+- **The capability splice dropped the row's null arm.** `_spec_model` re-annotated the naming field
+  with the bare union while keeping the row's `FieldInfo`, so `session-template`'s
+  `harness_integration: CapabilityBlock | None = None` lost its `| None` and kept `default: null`.
+  Two failures in one: `harness_integration: null` loads and was refused, and the property
+  advertised a default its own subschema rejects, so an editor's insert-default produced config the
+  same schema flagged. The splice now replaces the field's MODEL and nothing else about it.
+- **The owner-template correction implemented half its own rule.** `_fill_owner_templated_defaults`
+  treats an omission and an explicit `null` alike, deliberately and in its own docstring, but the
+  schema hook only stripped the field from `required`. All five templated fields emitted
+  non-nullable, so `token: null` and azure's `secret: null` were refused while loading. The hook now
+  widens them, with the describing keywords hoisted outside the `anyOf` so hover text survives.
+
+The second one exposed something older than this step: a marker rides the branch its `Annotated`
+sits on, so `Annotated[str, SecretRef(...)] | None` has ALWAYS nested `x-agw-ref` one level down
+(pydantic's doing, with no hook of ours involved). The round-trip guards read the property's top
+level only, so they would have reported "no reference here" for a field that declares one.
+`tests/_emitted_schema.py` is now the single reader and searches the subtree, which makes the guards
+cover both shapes for a reason unrelated to the widening.
 
 ## 3. The per-kind document schema
 
@@ -161,12 +193,20 @@ and reference integrity, and there is no merge to get wrong.
 Which kinds splice comes from the descriptor table (`manifest_section.host_kind` selects the kind,
 `manifest_section.naming_field` selects the field), so nothing here enumerates hosts.
 
-### 3.5 The one-arm union, which is the shipped case for two kinds of three
+### 3.5 The one-arm union, which no host sees today
 
-`Union[(X,)]` collapses to `X`, so a capability kind with a single registered implementation has no
-union left in its annotation. That is not an edge case here: `harness-integration` (shell) and
-`git-credential-provider` (github) both have exactly one in-tree implementation, and a host with no
-plugins enabled sees them that way.
+**Corrected 2026-08-06, after review.** This section originally called the one-arm union "the
+shipped case for two kinds of three", and that was wrong. Measured live registries are vm-platform
+5, harness-integration 3, git-credential-provider 2, and `plugins/__init__.py` registers every
+shipped plugin's implementations unconditionally at import, so enablement never removes an arm. **No
+host sees a one-arm union.** The claim came from counting in-tree implementations and forgetting
+that the bundled plugins are in-tree too.
+
+The mechanism below is unchanged and stays, because what it guards against is real and cheap:
+`Union[(X,)]` collapses to `X`, so a capability kind that ever has a single registered
+implementation has no union left in its annotation, and a classifier keyed on "is this still a
+union" would silently drop the discriminator for it. A plugin author's out-of-tree kind, or the
+removal of a shipped implementation, gets there.
 
 Emission therefore classifies on **discriminator presence**
 (`descriptor.config_schema.discriminator is not None`), never on whether the annotation is still a
@@ -181,9 +221,10 @@ still emits `oneOf` plus `discriminator`, so a one-arm kind emits
 ```
 
 which is the shape a second implementation grows into with no change of form. Pinned by
-`test_emit.py::test_a_one_arm_union_still_carries_its_discriminator`, which builds the emission over
-a registry seated with a single fixture capability rather than relying on the two in-tree kinds that
-happen to be one-arm today.
+`test_emit.py::test_a_one_arm_union_still_carries_its_discriminator`, which seats a single fixture
+capability and sets the shipped ones aside for the duration. That construction is now the only way
+the case is reachable, which is exactly why the pin is written that way rather than leaning on a
+kind that happens to be one-arm.
 
 ## 4. The envelope schema
 
@@ -195,9 +236,10 @@ neither.
 
 It is SELF-CONTAINED rather than a set of `$ref`s to the sibling files. Cross-file references would
 make each file useless on its own and make the modeline's correctness depend on relative-path
-resolution in whatever editor is reading it. The cost is duplication across files (about 43 KB for
-the whole-set file against roughly 2 to 10 KB per kind), which is the right trade for generated
-artifacts nobody hand-edits.
+resolution in whatever editor is reading it. The cost is duplication across files: as written to
+disk, 99 KB for the any-kind file against 3 to 17 KB per kind (measured 2026-08-06; an earlier
+"about 43 KB" here was compact JSON from a prototype, not the indented text that lands). That is the
+right trade for generated artifacts nobody hand-edits.
 
 `discriminator` is an OpenAPI keyword, not a JSON Schema one, so an editor may ignore it. That
 degrades error QUALITY (a "matched none of the branches" report rather than a located one), never
@@ -210,20 +252,48 @@ schema and never meets the `oneOf` (section 6).
 Recorded rather than left for a reader to notice, per section 2's rule.
 
 - **The secret-backend map-keyed splice.** The HLA (Component 3) says `backend_mappings` "expresses
-  it as per-key properties". It does not, yet. `SecretDecl` declares
+  it as per-key properties". It does not. `SecretDecl` declares
   `dict[str, str | dict | Literal[False]]`, and that is what emits: sound, under-constrained, no
-  false diagnostics. Two things block the splice, and the first is the real one:
-  - The descriptor table has no record of WHERE a map-keyed capability is hosted. `manifest_section`
-    is `HostSurface | None` and secret-backend's is `None`, so emission would have to hard-code
-    `secret` / `backend_mappings`, which is precisely the switchboard the descriptor exists to have
-    killed. Doing it properly means a new descriptor record, which is a contract change and belongs
-    with an owner's decision, not smuggled into an emission step.
-  - Both shipped backends make the splice worth little today: `env-var`'s mapping is a bare string
-    (already fully expressed by the current schema) and `prompt`'s is a validator-only refusal that
-    JSON Schema cannot state at all.
-  - **Trigger:** the first secret backend whose mapping is a real table (1Password's
-    `{account, reference}` is the named candidate). At that point the per-key properties carry
-    something an editor can complete, and the descriptor record pays for itself.
+  false diagnostics.
+
+  **The blocker, and it is a real one.** The descriptor table has no record of WHERE a map-keyed
+  capability is hosted. `manifest_section` is `HostSurface | None` and secret-backend's is `None`,
+  so emission would have to hard-code `secret` / `backend_mappings`, which is precisely the
+  switchboard the descriptor exists to have killed. Nor does `propertyNames` over the backend
+  registry escape it: that constrains the KEYS without reaching each key's own model, which is the
+  whole value. Doing it properly means a new descriptor record, which is a contract change and an
+  owner's decision rather than something to smuggle into an emission step.
+
+  **Corrected 2026-08-06, after review: the cost is queued, not hypothetical.** This entry said
+  "both shipped backends" and named 1Password as the future trigger. Three backends are registered
+  (`env-var`, `prompt`, `onepassword`), and `onepassword` already ships in-tree with a fully modeled
+  mapping (`OnePasswordMapping = OpUri | OnePasswordAccountRef`, with `op://` validated). The
+  trigger fired before the deferral was written. So an operator writing
+  `backend_mappings.onepassword` today gets no completion on `account` or `reference`, no `op://`
+  check, and no key checking, all off a model the descriptor could already reach. The remaining two
+  are genuinely cheap to skip: `env-var`'s mapping is a bare string the current schema already
+  expresses exactly, and `prompt`'s is a validator-only refusal JSON Schema cannot state at all.
+
+  This is now a known missing feature with a live cost, not a deferral waiting on a trigger. The
+  roadmap lead owns when it lands.
+
+- **A required capability field an inheriting kind's PARENT supplies.** `session-template` composes
+  along an `inherits` chain and `SessionTemplate.validate_config` validates the MERGED harness blob,
+  because a child's declaration is legitimately partial until the chain completes it (FR12). JSON
+  Schema has no view of that chain, so it checks the child's fragment against the arm model
+  directly. A child that inherits a required field therefore loads and does not validate, which is
+  the FORBIDDEN direction rather than the safe one.
+
+  Exposure today is nil: no registered harness arm requires a field beyond its own tag.
+  `tests/manifests/test_inherited_capability_config.py` forces the divergence with a fixture arm (so
+  it rests on observed behavior, not on reasoning) and carries the tripwire that fires the day an
+  arm gains one.
+
+  Not fixed here, deliberately. The only structural fix is to relax `required` on the arms of an
+  inheriting kind's capability block, which buys soundness for inheriting templates by removing a
+  real missing-field diagnostic from standalone ones, and there is no evidence yet about which
+  matters more. Raised for a decision rather than taken.
+
 - **`_NO_SELECTOR_KINDS`.** `named-console-template` accepts only `name: default` at the envelope.
   Expressible as a `const`, and left out: the rule is transitional (it leaves when the kind's
   selector ships, issue #165), and wiring emission into an envelope-private constant to express a
@@ -313,16 +383,29 @@ config, and a reference implementation is the only independent oracle available 
 depend on it and could not be written honestly without it:
 
 - `Draft202012Validator.check_schema` meta-validates every emitted document against the 2020-12
-  metaschema, which is what catches a malformed `$defs` graph or a dangling `$ref`;
-- `iter_errors` over real sample documents is the automated half of box 2's end-to-end check.
+  metaschema, which catches a keyword misused or misspelled anywhere in the tree;
+- `iter_errors` over real documents is the automated half of box 2's end-to-end check, and it is
+  what found every soundness bug this step had.
+
+**Corrected 2026-08-06, after review: `check_schema` does NOT catch a dangling `$ref`.** This
+section claimed it did, and the test that asserted it said so too. Proven false in one line:
+`check_schema({"$ref": "#/$defs/nope"})` raises nothing, because reference resolution is a
+validation concern, not a meta-validation one. Only `iter_errors` catches a dangling pointer, and
+only on a branch some document happens to exercise, which for a `$defs` graph this size means most
+of it is never visited.
+
+So the walk is now written rather than assumed: `test_every_ref_is_local_and_resolves` collects
+every `$ref` in every emitted file and asserts each is local and present. Twelve lines, and a real
+guard for a graph nobody writes by hand. The emitted set was clean throughout; the gap was in what
+the tests proved, not in what they were proving it about.
 
 Cost: six wheels in the dev environment (`jsonschema` plus `attrs`, `jsonschema-specifications`,
 `referencing`, `rpds-py`, `typing-extensions`), plus `types-jsonschema` for strict mypy; no network
 at test time (the metaschemas are vendored in `jsonschema-specifications`), and nothing in the wheel
 we ship.
 
-It paid for itself before the step closed: all three soundness bugs in section 2.1 came out of it,
-and every one of them would have shipped an editor that underlines valid configuration.
+It paid for itself twice over: the three soundness bugs in section 2.1 during implementation, and
+two more (section 2.2) that review found with the same tool.
 
 ## 8. Hand-off to 2.8
 
@@ -336,11 +419,17 @@ and every one of them would have shipped an editor that underlines valid configu
   `schema` / `describe` surface naming in 2.8, coordinated with the onboarding child SDD. If that
   coordination renames the command, this step's completions entry and the two doc pointers move with
   it.
-- The map-keyed splice (section 5) is the one piece of Component 6 not built. Its trigger is a
-  backend, not a step.
+- The map-keyed splice (section 5) is the one piece of Component 6 not built, and it is a known
+  missing feature with a live cost rather than a deferral waiting on a trigger. The roadmap lead
+  owns when it lands.
 - Two rules the renderer inherits, because they are properties of the models rather than of
-  emission. A field with an owner-templated default is NOT the operator's to write (section 2.1), so
-  a rendered sample should show it commented with its resolved-name template rather than as a
-  required line; and `expires` accepts three spellings, not just the RFC 3339 one. Both facts are on
-  the models and both reach `iter_field_docs` already (`FieldDoc.default_template`, and the
-  annotation), so this is a presentation choice for 2.8, not new plumbing.
+  emission. A field with an owner-templated default is NOT the operator's to write and accepts an
+  explicit `null` meaning the same thing (sections 2.1 and 2.2), so a rendered sample should show it
+  commented with its resolved-name template rather than as a required line; and `expires` accepts
+  three spellings, not just the RFC 3339 one. Both facts are on the models and both reach
+  `iter_field_docs` already (`FieldDoc.default_template`, and the annotation), so this is a
+  presentation choice for 2.8, not new plumbing.
+- `tests/_emitted_schema.py` is the one reader of an emitted property. Any surface that grows a
+  consumer of `x-agw-ref` should go through it (or promote it beside the marker that writes it)
+  rather than indexing the property's top level, which is right only for the fields that happen not
+  to be nullable.
