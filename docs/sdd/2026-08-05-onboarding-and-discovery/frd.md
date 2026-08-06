@@ -52,14 +52,16 @@ surfaces, dynamic content) adopts wave 2's surfaces as they land rather than blo
   are recognized and reported rather than redone, so operators revisit it to confirm they are
   getting the most out of the platform as it evolves. Together with R2 and R5 this delivers the
   assisted onboarding flow of issue #391.
-- **R4 (consent-first, probe-forward).** Probing the operator's machine MUST happen with consent and
-  explanation, never silently: ask before looking for existing material (SSH keys are the canonical
-  example), state what will be looked for and what will never be read, and honor refusals with a
-  manual alternative. Within that consent frame, onboarding SHOULD probe and verify wherever
-  possible rather than trusting declarations: ask for a secret reference (a 1Password item, for
-  example) and confirm it resolves without reading its value, test SSH connections, confirm
-  installed tools respond. The result is verified setup, not blind configuration. Onboarding is
-  where trust is established, in both directions.
+- **R4 (agent probes, agw verifies; consent-first).** Agentworks itself never probes the operator's
+  machine. Discovery of existing material (SSH keys are the canonical example, installed tools
+  another) is the agent's act, and the guide's onboarding content MUST instruct it to be
+  consent-first: ask before looking, state what will be looked for and what will never be read, and
+  honor refusals with a manual alternative. Within that consent frame the content SHOULD direct the
+  agent to verify wherever possible rather than trusting declarations, using non-probing
+  verification surfaces `agw` provides for configured state: confirm a secret reference (a 1Password
+  item, for example) resolves without reading its value, test SSH connections, confirm installed
+  tools respond. The result is verified setup, not blind configuration, and onboarding is where
+  trust is established, in both directions.
 - **R5 (interactive and non-interactive).** Both a guided path and a scriptable, replayable
   non-interactive path MUST exist, producing equivalent results.
 - **R6 (derived content).** Onboarding and discovery content MUST derive from the platform's
@@ -143,6 +145,13 @@ surfaces, dynamic content) adopts wave 2's surfaces as they land rather than blo
   pushing everything into the graph. Contributed guide content MUST be data, never code, and
   rendering MUST NOT execute anything a contribution supplies. This holds for curated system plugins
   now precisely so the content channel is already safe when external plugins arrive (wave 8).
+- **R16 (README bootstrap block).** The repository README's getting-started section MUST lead with a
+  single copy-paste block (a fenced block, so GitHub renders a copy button) addressed to the
+  operator's agent, along these lines: "I'd like your help installing and setting up Agentworks.
+  It's available on PyPI as `agentworks-cli` and runs on any Python runtime >= 3.12 (uv is the
+  standard approach). Please install it and then run `agw guide` to get started." This is a
+  first-class zero-plugin onboarding path; the harness plugins (R1) say essentially the same thing
+  and remain primarily an advertising and discoverability channel.
 
 ## Personas and stories
 
@@ -195,13 +204,16 @@ surfaces, dynamic content) adopts wave 2's surfaces as they land rather than blo
    test.
 8. The security disclosure (R12) appears before any setup action in both the guided and
    non-interactive paths.
-9. Consented probes verify configured secrets and connections during onboarding (resolution checked
-   without reading values); a declined probe leaves an explicit manual-verification note.
-10. `agw guide` with no topic lists every available topic; a kind topic reflects the live instance
+9. Verification during onboarding is agent-driven and consented per the guide's instructions;
+   `agw`'s verification surfaces read no secret values, and a declined probe leaves an explicit
+   manual-verification note.
+10. The README's getting-started section leads with the R16 copy-paste block, and following it on a
+    clean machine reaches `agw guide` successfully.
+11. `agw guide` with no topic lists every available topic; a kind topic reflects the live instance
     list; disabling an implementation visibly changes its topic's rendering.
-11. Guide topics complete in the shell, including `concept-` prefix discovery, and the completion
+12. Guide topics complete in the shell, including `concept-` prefix discovery, and the completion
     tree includes dynamic topic elements per the repo's completions mechanism.
-12. A plugin's contributed guide content renders with zero contributed code executed (R15),
+13. A plugin's contributed guide content renders with zero contributed code executed (R15),
     demonstrated by a test that rejects a contribution attempting expression evaluation.
 
 ## Decisions
@@ -217,6 +229,10 @@ surfaces, dynamic content) adopts wave 2's surfaces as they land rather than blo
   wave 2's live-rendered samples (adopted here per R6) provide example content that cannot drift,
   and this effort's discovery surfaces present it. No separate examples plugin ships; #390 closes
   against that combination.
+- **D6 (bootstrap posture; operator rulings, 2026-08-06).** The README copy-paste block is an equal
+  first-class bootstrap beside the plugins, which are kept primarily for advertising and
+  discoverability. Agentworks never probes the operator's machine; agents probe (consent-first per
+  guide content) and `agw` verifies.
 - **D5 (the guide command; operator rulings, 2026-08-05).** The teaching command is `agw guide`,
   deliberately not `skill` (wave 6 needs "skill" as an artifact noun). Output is markdown only. Meta
   topics carry the `concept-` prefix. Teaching content lives in the CLI with thin plugin bootstraps,
