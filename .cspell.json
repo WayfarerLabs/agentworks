@@ -39,6 +39,7 @@
     "classmethods",
     "cmdline",
     "conftest",
+    "constructibility",
     "cpus",
     "creds",
     "cutover",

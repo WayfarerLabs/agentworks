@@ -66,11 +66,32 @@ each listed module is registered and seated at import. On import the index:
 - rejects a duplicate plugin name as a typed error.
 
 `register_plugin` validates the **whole** descriptor first (name shape; every capability kind has an
-adapter; every impl is a class with a non-empty, `/`-free `name`; no intra-descriptor name
-collisions), then seats every impl **atomically**: no capability registry is touched until every
-impl across the descriptor is known seatable, so a mid-descriptor failure can never leave orphaned
-impls behind. Registration is idempotent per impl name; a cross-plugin or plugin-versus-built-in
-name clash on the same capability is a typed error naming the occupant's real origin.
+adapter; every impl is a class with a non-empty, `/`-free `name`; every impl **conforms to its
+kind's contract**, see below; no intra-descriptor name collisions), then seats every impl
+**atomically**: no capability registry is touched until every impl across the descriptor is known
+seatable, so a mid-descriptor failure can never leave orphaned impls behind. Registration is
+idempotent per impl name; a cross-plugin or plugin-versus-built-in name clash on the same capability
+is a typed error naming the occupant's real origin.
+
+### Contract conformance
+
+Every impl is checked against its kind's descriptor (`agentworks/capabilities/descriptor.py`) before
+anything is seated, so a class that merely looks plausible is refused at registration rather than
+failing far from the mistake. The checks:
+
+- **Contract**: derives from the kind's capability base. `secret-backend`'s contract is a `Protocol`
+  rather than a base class, so it is checked structurally instead (see the operations check below);
+  a Protocol's enforcement is structural anyway.
+- **Metadata**: `name` (non-empty, `/`-free) and `description`, readable as class attributes.
+- **Constructibility**: nothing would stop the class being constructed (no unimplemented
+  `@abstractmethod`). Checked structurally; the impl is never constructed to find out.
+- **Operations**: the domain operations the framework depends on are present and callable.
+- **Contract version**: the impl's `contract_version` is one this build supports. The `Capability`
+  base defaults it, so only an impl deliberately pinned to an older contract spells it;
+  `secret-backend` impls always spell it, because Protocol bodies are not inherited by structural
+  implementers.
+
+Each failure is a `PluginError` naming the plugin, the kind, the impl, and what is missing.
 
 ## The enablement model: opt-in, present-but-disabled
 
@@ -120,9 +141,11 @@ A plugin contributes implementations of existing capability kinds only:
 - **`git-credential-provider`**: how a git token is obtained and served.
 - **`secret-backend`**: where a secret's value is read from.
 
-Each impl subclasses the kind's capability base class and exposes `name` / `description` class
-attributes. The published row is read-only and lists, describes, and is referenced like any other
-resource of that kind.
+Each impl subclasses the kind's capability base class (except `secret-backend`, whose contract is a
+`Protocol`, so its impls satisfy it structurally) and exposes `name` / `description` class
+attributes. Registration checks that conformance before seating anything; see
+[Contract conformance](#contract-conformance). The published row is read-only and lists, describes,
+and is referenced like any other resource of that kind.
 
 **Bundled manifests** are ordinary YAML resource documents the plugin ships, under the `manifests/`
 subdirectory of the package `manifests` points at. Only declarable kinds whose consumption sites are

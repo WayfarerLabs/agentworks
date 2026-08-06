@@ -15,6 +15,7 @@ from typing import cast
 import pytest
 
 import agentworks.plugins as plugins_pkg
+from agentworks.capabilities.vm_platform.base import VMPlatform
 from agentworks.errors import StateError
 from agentworks.plugins import (
     CAPABILITY_ADAPTERS,
@@ -27,9 +28,12 @@ from agentworks.plugins import (
 from agentworks.resources.kind import KIND_REGISTRY
 from agentworks.resources.origin import Origin
 from tests.plugins._fixtures import (
+    ConformingSecretBackend,
+    ConformingVMPlatform,
     FixtureBackend,
     FixtureHarnessIntegration,
     FixtureVMPlatform,
+    conforming_impl,
     fixture_plugin,
 )
 
@@ -118,30 +122,113 @@ def test_rejects_impl_with_slash_bearing_name() -> None:
 
 
 def test_rejects_intra_descriptor_collision() -> None:
-    class VMOne:
-        name = "dup"
+    one = conforming_impl("vm-platform", "dup")
+    two = conforming_impl("vm-platform", "dup")
 
-    class VMTwo:
-        name = "dup"
-
-    plugin = Plugin(name="p", capabilities={"vm-platform": (VMOne, VMTwo)})
+    plugin = Plugin(name="p", capabilities={"vm-platform": (one, two)})
     with pytest.raises(PluginError, match="intra-descriptor collision"):
         register_plugin(plugin)
+
+
+# -- Contract conformance (descriptor-derived, before any registry write) ---
+
+
+class _NotAPlatform:
+    """Plausible from a distance: the metadata is there, but it implements
+    nothing of the vm-platform contract. This is the class the old
+    ``isinstance(impl, type)`` gate and ``cast`` waved through."""
+
+    contract_version = 1
+    name = "not-a-platform"
+    description = "has the metadata and none of the contract"
+
+
+class _AbstractPlatform(VMPlatform):
+    """Derives from the contract but implements none of its power ops, so it
+    can never be constructed."""
+
+    contract_version = 1
+    name = "abstract-platform"
+    description = "abstract: no power ops implemented"
+
+
+class _PlatformWithoutADescription(ConformingVMPlatform):
+    name = "no-description-platform"
+    # ``description`` is what the published capability row carries, so an
+    # impl that omits it would publish a row with a missing field.
+
+
+class _BackendMissingItsOperations:
+    """Structurally NOT a ``SecretBackend``. The Protocol kind cannot be
+    checked nominally (``issubclass`` against a Protocol with property
+    members raises ``TypeError``), so operation presence IS its
+    conformance check."""
+
+    contract_version = 1
+    name = "barely-a-backend"
+    description = "none of the backend operations"
+
+
+class _PlatformOnAnOldContract(ConformingVMPlatform):
+    name = "old-contract-platform"
+    description = "written against a contract this build no longer supports"
+    contract_version = 0
+
+
+@pytest.mark.parametrize(
+    ("kind", "impl", "expected"),
+    [
+        ("vm-platform", _NotAPlatform, "does not derive from VMPlatform"),
+        ("vm-platform", _AbstractPlatform, "it is abstract"),
+        ("vm-platform", _PlatformWithoutADescription, "'description' class attribute"),
+        ("secret-backend", _BackendMissingItsOperations, "does not implement the required"),
+        ("vm-platform", _PlatformOnAnOldContract, "declares contract_version 0"),
+    ],
+    ids=["wrong-base", "abstract", "missing-metadata", "missing-operations", "unsupported-version"],
+)
+def test_rejects_a_non_conforming_impl_naming_the_plugin(kind: str, impl: type, expected: str) -> None:
+    """Each conformance check refuses its own defect with a ``PluginError``
+    that names the plugin, the kind, and the impl."""
+    plugin = Plugin(name="p", capabilities={kind: (impl,)})
+    with pytest.raises(PluginError) as exc:
+        register_plugin(plugin)
+    message = str(exc.value)
+    assert "'p'" in message
+    assert impl.__name__ in message
+    assert expected in message
+
+
+def test_a_non_conforming_impl_is_refused_before_any_registry_write() -> None:
+    """Conformance runs in the VALIDATING pass, so a descriptor whose first
+    impl would seat cleanly and whose second does not conform seats nothing.
+    Deferring the check to seating time would break that: the first impl
+    would already be in its registry with no rollback path."""
+    plugin = Plugin(
+        name="p",
+        capabilities={
+            "vm-platform": (FixtureVMPlatform,),  # would seat fine
+            "secret-backend": (_BackendMissingItsOperations,),  # does not conform
+        },
+    )
+    before = _snapshot_registries()
+    with pytest.raises(PluginError, match="does not satisfy"):
+        register_plugin(plugin)
+    assert _snapshot_registries() == before
 
 
 # -- Atomicity: a mid-descriptor collision seats NOTHING --------------------
 
 
 def test_atomic_registration_seats_nothing_on_a_mid_descriptor_collision() -> None:
-    class CollidingHarnessIntegration:
-        name = "shell"  # a core built-in harness integration, different class
+    # A core built-in harness integration's name, different class.
+    colliding = conforming_impl("harness-integration", "shell")
 
     # vm-platform seats cleanly first; harness-integration collides at the precheck.
     plugin = Plugin(
         name="p",
         capabilities={
             "vm-platform": (FixtureVMPlatform,),
-            "harness-integration": (CollidingHarnessIntegration,),
+            "harness-integration": (colliding,),
         },
     )
     before = _snapshot_registries()
@@ -154,7 +241,7 @@ def test_atomic_registration_survives_a_throwing_backend_constructor() -> None:
     # The secret-backend impl constructs during the precheck (before any
     # registry write), so a throwing __init__ leaves the earlier-planned
     # vm-platform UNSEATED and raises a typed PluginError, not a raw error.
-    class ThrowingBackend:
+    class ThrowingBackend(ConformingSecretBackend):
         name = "throwing-backend"
         description = "boom on construct"
 
@@ -187,11 +274,10 @@ def test_registering_the_same_plugin_twice_is_a_no_op() -> None:
 
 
 def test_a_different_impl_under_a_taken_name_is_a_typed_error() -> None:
-    class OtherVM:
-        name = "fixture-vm"  # same name, different class
+    other = conforming_impl("vm-platform", "fixture-vm")  # same name, different class
 
     with seated_plugin(fixture_plugin()):
-        clash = Plugin(name="other", capabilities={"vm-platform": (OtherVM,)})
+        clash = Plugin(name="other", capabilities={"vm-platform": (other,)})
         with pytest.raises(PluginError):
             register_plugin(clash)
 
@@ -201,7 +287,7 @@ def test_secret_backend_subclass_under_a_taken_name_is_not_idempotent() -> None:
     # not be silently merged. Seat the subclass first, then a registration of
     # the base class under the same name must collide (isinstance would have
     # wrongly treated it as an idempotent match).
-    class BaseBackend:
+    class BaseBackend(ConformingSecretBackend):
         name = "shared-backend"
         description = "base"
 
@@ -218,10 +304,10 @@ def test_secret_backend_subclass_under_a_taken_name_is_not_idempotent() -> None:
 
 
 def test_capability_clash_with_a_core_builtin_names_it_as_such() -> None:
-    class LimaLike:
-        name = "lima"  # collides with the CORE built-in LimaPlatform
+    # Collides with the CORE built-in LimaPlatform.
+    lima_like = conforming_impl("vm-platform", "lima")
 
-    plugin = Plugin(name="p", capabilities={"vm-platform": (LimaLike,)})
+    plugin = Plugin(name="p", capabilities={"vm-platform": (lima_like,)})
     with pytest.raises(PluginError) as exc:
         register_plugin(plugin)
     message = str(exc.value)
@@ -230,14 +316,11 @@ def test_capability_clash_with_a_core_builtin_names_it_as_such() -> None:
 
 
 def test_capability_clash_between_two_plugins_names_the_other_plugin() -> None:
-    class PlatformX1:
-        name = "x"
+    first_impl = conforming_impl("vm-platform", "x")
+    second_impl = conforming_impl("vm-platform", "x")  # same name, different class
 
-    class PlatformX2:
-        name = "x"  # same name, different class, different plugin
-
-    first = Plugin(name="first", capabilities={"vm-platform": (PlatformX1,)})
-    second = Plugin(name="second", capabilities={"vm-platform": (PlatformX2,)})
+    first = Plugin(name="first", capabilities={"vm-platform": (first_impl,)})
+    second = Plugin(name="second", capabilities={"vm-platform": (second_impl,)})
     with seated_plugin(first):
         with pytest.raises(PluginError) as exc:
             register_plugin(second)

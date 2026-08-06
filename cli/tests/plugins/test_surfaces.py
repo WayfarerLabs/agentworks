@@ -19,7 +19,6 @@ from typing import TYPE_CHECKING, cast
 import pytest
 
 from agentworks.capabilities.base import ScopeLevel
-from agentworks.capabilities.vm_platform.base import VMPlatform
 from agentworks.doctor import Status, _check_plugins
 from agentworks.plugins import Plugin, PluginCommand, plugin_enablement_source, publish_plugins, seated_plugin
 from agentworks.resources.graph import Enablement
@@ -32,6 +31,7 @@ from agentworks.resources.inspect import (
 from agentworks.resources.origin import Origin
 from agentworks.resources.registry import Registry
 from agentworks.vms.sites import VMSiteDecl
+from tests.plugins._fixtures import ConformingVMPlatform
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -44,10 +44,11 @@ if TYPE_CHECKING:
 _MANIFEST_ANCHOR = f"{__package__}._manifest_fixture"
 
 
-# -- Real fixture impls (subclasses, so they fold through their consumers) ------
+# -- Real fixture impls (subclasses, so they fold through their consumers, and
+#    so registration's conformance check accepts them) ---------------------------
 
 
-class _ReadyPlatform(VMPlatform):
+class _ReadyPlatform(ConformingVMPlatform):
     name = "alpha-platform"
     description = "A ready plugin platform"
 
@@ -56,7 +57,7 @@ class _ReadyPlatform(VMPlatform):
         return None
 
 
-class _NotReadyPlatform(VMPlatform):
+class _NotReadyPlatform(ConformingVMPlatform):
     name = "alpha-notready-platform"
     description = "An enabled-but-not-ready plugin platform"
 
@@ -69,7 +70,7 @@ class _NotReadyPlatform(VMPlatform):
         return "unsupported on this host (fixture)"
 
 
-class _BetaPlatform(VMPlatform):
+class _BetaPlatform(ConformingVMPlatform):
     name = "beta-platform"
     description = "A disabled plugin platform"
 

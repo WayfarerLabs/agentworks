@@ -26,8 +26,6 @@ from typing import TYPE_CHECKING, cast
 import pytest
 
 from agentworks.capabilities.harness_integration import ensure_harness_integration_enabled, harness_integration_for
-from agentworks.capabilities.harness_integration.base import HarnessIntegration
-from agentworks.capabilities.vm_platform.base import VMPlatform
 from agentworks.errors import ConfigError, StateError
 from agentworks.manifests.package import publish_manifest_package
 from agentworks.plugins import Plugin, plugin_enablement_source, publish_plugins, seated_plugin
@@ -38,6 +36,7 @@ from agentworks.resources.registry import Registry
 from agentworks.sessions.manager._env import _resolve_template
 from agentworks.sessions.template import SessionTemplate
 from agentworks.vms.sites import VMSiteDecl
+from tests.plugins._fixtures import ConformingHarnessIntegration, ConformingVMPlatform
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -57,10 +56,11 @@ _DIRTY_ANCHOR = f"{__package__}._manifest_dirty_fixture"
 _NO_SUBDIR_ANCHOR = f"{__package__}._manifest_no_subdir_fixture"
 
 
-# -- Real fixture impls (subclasses, so they fold through their consumers) ------
+# -- Real fixture impls (subclasses, so they fold through their consumers, and
+#    so registration's conformance check accepts them) ---------------------------
 
 
-class _FixtureVMPlatform(VMPlatform):
+class _FixtureVMPlatform(ConformingVMPlatform):
     name = "fixture-platform"
     description = "Fixture VM platform (plugin publish test)"
 
@@ -71,7 +71,7 @@ class _FixtureVMPlatform(VMPlatform):
         return None
 
 
-class _FixtureHarnessIntegration(HarnessIntegration):
+class _FixtureHarnessIntegration(ConformingHarnessIntegration):
     name = "fixture-harness"
     description = "Fixture harness (plugin publish test)"
 

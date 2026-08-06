@@ -21,6 +21,8 @@ from __future__ import annotations
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
+from agentworks.capabilities.conformance import conformance_error
+from agentworks.capabilities.descriptor import descriptor_for
 from agentworks.plugins.adapters import CAPABILITY_ADAPTERS
 from agentworks.plugins.base import Plugin, PluginError
 
@@ -62,6 +64,14 @@ def _validate_descriptor(plugin: Plugin) -> list[tuple[CapabilityAdapter, str, t
 
     Returns the ``(adapter, capability_name, impl_cls)`` plan for the seat
     passes. Each failure is a ``PluginError`` naming the plugin.
+
+    Contract conformance (``conformance_error``, derived from the kind's
+    descriptor) runs here, in the validating pass, so a non-conforming impl
+    is refused BEFORE any registry is mutated and atomic seating is
+    preserved. The bare ``isinstance(impl, type)`` and ``name`` checks stay
+    ahead of it: they are the shape the conformance check itself assumes,
+    and their messages name the specific mistake an author is most likely to
+    have made.
     """
     if not plugin.name or "/" in plugin.name:
         raise PluginError(f"system plugin name {plugin.name!r} must be non-empty and '/'-free")
@@ -87,6 +97,12 @@ def _validate_descriptor(plugin: Plugin) -> list[tuple[CapabilityAdapter, str, t
                 raise PluginError(
                     f"system plugin {plugin.name!r} {kind} impl {impl.__name__!r} has an invalid "
                     f"capability name {name!r} (must be a non-empty, '/'-free 'name' class attribute)"
+                )
+            reason = conformance_error(descriptor_for(kind), impl)
+            if reason is not None:
+                raise PluginError(
+                    f"system plugin {plugin.name!r} {kind} impl {impl.__name__!r} does not satisfy "
+                    f"the {kind} capability contract: {reason}"
                 )
             key = (kind, name)
             if key in seen:

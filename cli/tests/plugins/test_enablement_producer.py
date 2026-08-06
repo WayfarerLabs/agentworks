@@ -32,10 +32,7 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
-from agentworks.capabilities.git_credential.base import GitCredentialProvider
 from agentworks.capabilities.harness_integration import ensure_harness_integration_enabled
-from agentworks.capabilities.harness_integration.base import HarnessIntegration
-from agentworks.capabilities.vm_platform.base import VMPlatform
 from agentworks.errors import ConfigError, StateError
 from agentworks.git_credentials import remote_advisories
 from agentworks.git_credentials.credential import GitCredentialConfig
@@ -45,7 +42,6 @@ from agentworks.resources.graph import (
     DependencyState,
     DisabledMark,
     Enablement,
-    Readiness,
     compose_enablement,
 )
 from agentworks.resources.origin import Origin
@@ -56,6 +52,12 @@ from agentworks.sessions.manager._env import _display_harness_integration
 from agentworks.sessions.template import SessionTemplate
 from agentworks.vms.initializer.credentials import resolve_git_credential_providers
 from agentworks.vms.sites import VMSiteDecl, resolve_site
+from tests.plugins._fixtures import (
+    ConformingGitCredentialProvider,
+    ConformingHarnessIntegration,
+    ConformingSecretBackend,
+    ConformingVMPlatform,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -69,17 +71,17 @@ PLUGIN = "cap-plugin"
 
 
 # -- Fixture capability impls (REAL subclasses, so they fold through their
-#    consumers). Never instantiated by these tests except the secret backend,
-#    which the adapter constructs at seating; the other three are used as
-#    classes (host-support / dependencies classmethods only). ------------------
+#    consumers and pass registration's conformance check). Never instantiated
+#    by these tests except the secret backend, which the adapter constructs at
+#    seating; the other three are used as classes (host-support / dependencies
+#    classmethods only). ---------------------------------------------------
 
 
-class _FixtureVMPlatform(VMPlatform):
+class _FixtureVMPlatform(ConformingVMPlatform):
     name = "fixture-platform"
     description = "Fixture VM platform (test plugin)"
-    # Abstract ops (create/start/stop/delete/status/display_backend_name) are
-    # left unimplemented: the fold uses only the classmethods below, never an
-    # instance.
+    # The power ops come from the conforming base, which raises on each: the
+    # fold uses only the classmethods below, never an instance.
 
     @classmethod
     def dependencies(cls, owner: str, config: Mapping[str, object]) -> tuple[ConfigReference, ...]:
@@ -101,45 +103,32 @@ class _FixtureVMPlatform(VMPlatform):
         return None
 
 
-class _FixtureHarnessIntegration(HarnessIntegration):
+class _FixtureHarnessIntegration(ConformingHarnessIntegration):
     name = "fixture-harness"
     description = "Fixture harness (test plugin)"
 
 
-class _FixtureProvider(GitCredentialProvider):
+class _FixtureProvider(ConformingGitCredentialProvider):
     name = "fixture-provider"
     description = "Fixture git credential provider (test plugin)"
     # Inherits Capability.dependencies -> () (declares no token secret), keeping
     # the fixture credential's edge set to just the provider edge.
 
 
-class _FixtureBackend:
+class _FixtureBackend(ConformingSecretBackend):
     """A structural ``SecretBackend`` (Protocol, so a plain class). Trivial but
     functional: ``validate_mapping`` rejects the sentinel ``"bad"`` so the
     disabled-backend mapping-validation exclusion is provable."""
 
     name = "fixture-backend"
     description = "Fixture secret backend (test plugin)"
-    interactive = False
-
-    def not_ready(self) -> Readiness:
-        return Readiness.ready()
 
     def validate_mapping(self, owner: str, mapping: MappingValue) -> None:
         if mapping == "bad":
             raise ConfigError(f"{owner}: fixture-backend mapping {mapping!r} is malformed")
 
-    def dependencies(self, mapping: MappingValue) -> tuple[ConfigReference, ...]:
-        return ()
-
     def would_attempt(self, secret: SecretDecl, mapping: MappingValue | None) -> bool:
         return mapping is not None
-
-    def describe_lookup(self, secret: SecretDecl, mapping: MappingValue | None) -> str | None:
-        return None
-
-    def batch_get(self, wants: list[tuple[SecretDecl, MappingValue | None]]) -> dict[str, str]:
-        return {}
 
 
 def _capable_plugin(name: str = PLUGIN) -> Plugin:
