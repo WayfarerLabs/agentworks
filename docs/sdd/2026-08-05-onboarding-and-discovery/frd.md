@@ -131,10 +131,18 @@ surfaces, dynamic content) adopts wave 2's surfaces as they land rather than blo
   projection carries identity, descriptions, enablement and readiness, and relationships; secrets
   and secret-bearing config are excluded at the projection boundary, not by per-template discipline.
   Rendering is side-effect-free: it never resolves secrets, probes targets, or mutates state (probes
-  belong to onboarding actions, not to displaying a page). Contributed guide content MUST be data,
-  never code, and rendering MUST NOT execute anything a contribution supplies. This holds for
-  curated system plugins now precisely so the content channel is already safe when external plugins
-  arrive (wave 8).
+  belong to onboarding actions, not to displaying a page). The projection is expected to be the
+  resource graph itself running in a gated access mode, not a second structure kept in lockstep:
+  powers (secret readers, run targets, capability API objects) sit behind callables a mode can gate,
+  while universal facts are plain data on the nodes. In a gated mode, data is only what is already
+  materialized (finalize-computed verdicts, stored rows, declared relationships); nothing lazily
+  computes through a power while wearing attribute syntax, which is also what keeps rendering
+  side-effect-free. Whether a mode gates by permission check or by leaving the power unwired is the
+  HLA's call; both are legitimate mechanisms, done properly. Templates fill in the dynamic bits
+  only: the authored text still carries the teaching, and the effort should not over-index on
+  pushing everything into the graph. Contributed guide content MUST be data, never code, and
+  rendering MUST NOT execute anything a contribution supplies. This holds for curated system plugins
+  now precisely so the content channel is already safe when external plugins arrive (wave 8).
 
 ## Personas and stories
 
@@ -224,8 +232,9 @@ surfaces, dynamic content) adopts wave 2's surfaces as they land rather than blo
   exact split with wave 2 (shared sources, two presentations); being negotiated with the wave 2
   effort lead via the roadmap's note.
 - The R15 template vocabulary: which core-provided dynamic blocks exist first, how a contribution
-  declares which blocks it uses, the projection's traversal set from `me`, and how concept topics
-  anchor (named roots versus anchoring at the contributor) (HLA's call).
+  declares which blocks it uses, the projection's traversal set from `me`, how concept topics anchor
+  (named roots versus anchoring at the contributor), and the access-mode gating mechanism
+  (permission check versus unwired powers, per surface) (HLA's call).
 - Topic taxonomy details: precedence if a future topic name ever collides with a kind slug, and the
   behavior of multiple topics in one invocation.
 - Bootstrap release engineering: how the thin bootstraps declare which CLI versions they bootstrap
