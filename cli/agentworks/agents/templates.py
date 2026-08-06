@@ -10,9 +10,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from agentworks.errors import ConfigError, unknown_template_error
+from agentworks.errors import inheritance_cycle_error, unknown_template_error
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from agentworks.agents.template import AgentTemplate
     from agentworks.env import EnvEntry
     from agentworks.resources.registry import Registry
@@ -68,23 +70,35 @@ def resolve_template(registry: Registry, template_name: str | None = None) -> Re
     return resolve_from_dict(kind_dict(registry, "agent-template"), template_name)
 
 
+def effective_template(templates: Mapping[str, AgentTemplate], name: str) -> ResolvedAgentTemplate:
+    """The effective (merged) declaration of ``name``, for the finalize
+    passes. TOTAL; see ``vms/templates.effective_template`` for why the
+    degradation on a cyclic chain is never observed."""
+    from agentworks.errors import InheritanceCycleError
+
+    try:
+        return _resolve(templates, name)
+    except InheritanceCycleError:
+        return ResolvedAgentTemplate(name=name)
+
+
 def _resolve(
-    templates: dict[str, AgentTemplate],
+    templates: Mapping[str, AgentTemplate],
     name: str,
     _visiting: tuple[str, ...] = (),
 ) -> ResolvedAgentTemplate:
     """Depth-first, left-to-right resolution.
 
     ``_visiting`` carries the chain of in-progress resolves so cycles
-    raise a clean ``ConfigError`` instead of crashing with
+    raise a clean ``InheritanceCycleError`` instead of crashing with
     ``RecursionError``. The framework's ``Registry.finalize`` cycle pass
     is the canonical check at build_registry time; this resolver-internal
     guard is the safety net for the load-time eager-resolve path (Phase
-    2a.2; mirrors the vm_template resolver guard).
+    2a.2; mirrors the vm_template resolver guard), and
+    :func:`effective_template` keys on the type to stay total.
     """
     if name in _visiting:
-        path = " -> ".join((*_visiting, name))
-        raise ConfigError(f"agent_templates inheritance cycle detected: {path}")
+        raise inheritance_cycle_error("agent-template", (*_visiting, name))
 
     if name not in templates:
         return ResolvedAgentTemplate(name=name)

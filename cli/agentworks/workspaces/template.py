@@ -31,9 +31,14 @@ class WorkspaceTemplate(DeclaredResource):
     env: dict[str, EnvEntry] = field(default_factory=dict)
 
     def dependencies(self, context: BuildContext) -> list[ResourceReference]:
+        """The ``inherits`` edges as declared, plus the runtime needs of
+        the EFFECTIVE declaration (FR17; see ``VMTemplate.dependencies``
+        for the rule the four inheriting kinds share)."""
         from agentworks.resources.reference import inherits_reference
+        from agentworks.workspaces.templates import effective_template
 
         source = ("workspace-template", self.name)
-        refs: list[ResourceReference] = list(env_references(self.env, source))
+        effective = effective_template({**context.rows_of("workspace-template"), self.name: self}, self.name)
+        refs: list[ResourceReference] = list(env_references(effective.env, source))
         refs.extend(inherits_reference(parent, source) for parent in self.inherits)
         return refs

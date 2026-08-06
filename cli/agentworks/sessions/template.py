@@ -65,6 +65,16 @@ class SessionTemplate(DeclaredResource):
     env: dict[str, EnvEntry] | None = None
 
     def dependencies(self, context: BuildContext) -> list[ResourceReference]:
+        """The ``inherits`` edges as declared, plus the runtime needs of
+        the EFFECTIVE declaration (FR17; see ``VMTemplate.dependencies``
+        for the rule the four inheriting kinds share).
+
+        The harness pair is read off the merged lineage rather than off
+        this row, which is what makes a child that overrides only one key
+        of an inherited config still depend on the whole merged blob's
+        secrets, and a child that overrides the secret NAME depend on its
+        override alone.
+        """
         from agentworks.resources.reference import (
             ResourceReference as _ResourceRef,
         )
@@ -72,25 +82,28 @@ class SessionTemplate(DeclaredResource):
             inherits_reference,
             sourced_references,
         )
+        from agentworks.sessions.templates import effective_template
 
         source = ("session-template", self.name)
-        refs: list[ResourceReference] = list(env_references(self.env, source))
+        effective = effective_template({**context.rows_of("session-template"), self.name: self}, self.name)
+        integration = effective.harness_integration
+        refs: list[ResourceReference] = list(env_references(effective.resolved.env, source))
         refs.extend(inherits_reference(parent, source) for parent in self.inherits)
-        if self.harness_integration is not None:
+        if integration is not None:
             # The selector edge: a declared harness_integration references the
             # capability row, so a typo is a finalize-time miss-policy
             # error naming this template, and the harness integration row's
             # "Referenced by:" lists its templates (FRD R2).
             refs.append(
                 _ResourceRef(
-                    name=self.harness_integration,
+                    name=integration,
                     kind="harness-integration",
                     usage="the session harness integration",
                     source=source,
                 )
             )
             # Plus whatever the selected harness integration's config block
-            # implies, read structurally off its DECLARED model by the core
+            # implies, read structurally off its declared model by the core
             # (a future secret-declaring integration gets auto-declaration
             # and reachability for free; every built-in implies nothing).
             # Total and non-throwing; an unknown name contributes nothing
@@ -101,8 +114,8 @@ class SessionTemplate(DeclaredResource):
                 sourced_references(
                     capability_config_references(
                         kind="harness-integration",
-                        name=self.harness_integration,
-                        blob=self.harness_integration_config or {},
+                        name=integration,
+                        blob=effective.harness_integration_config,
                         owner=RefOwner(kind="session-template", name=self.name),
                     ),
                     source,

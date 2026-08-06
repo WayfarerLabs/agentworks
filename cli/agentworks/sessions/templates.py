@@ -3,6 +3,17 @@
 Handles inheritance (depth-first, left-to-right), merge rules, and the
 built-in default template fallback. Follows the same pattern as VM,
 workspace, and agent templates.
+
+Two entry points over one walk, because the framework and the session
+resolver want the merge at different moments and in different shapes:
+
+- :func:`effective_template` is the FINALIZE view. Total (it never
+  raises), and it keeps the harness pair exactly as the lineage declared
+  it, ``None`` and all, because "nobody named an integration" is a
+  different edge set from "somebody named ``shell``".
+- :func:`resolve_template` / :func:`resolve_from_dict` are the USE view:
+  the same merge, collapsed onto :class:`ResolvedSessionTemplate` with
+  the ``shell`` default applied, which is what a session is built from.
 """
 
 from __future__ import annotations
@@ -10,10 +21,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from agentworks.errors import ConfigError, unknown_template_error
-from agentworks.schema import RefOwner
+from agentworks.errors import inheritance_cycle_error, unknown_template_error
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from agentworks.env import EnvEntry
     from agentworks.resources.registry import Registry
     from agentworks.sessions.template import SessionTemplate
@@ -35,6 +47,23 @@ class ResolvedSessionTemplate:
     env: dict[str, EnvEntry] = field(default_factory=dict)
     harness_integration: str = "shell"
     harness_integration_config: dict[str, object] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class EffectiveSessionTemplate:
+    """One session template's chain, merged, as the finalize passes need it.
+
+    ``harness_integration`` is the name the LINEAGE declared, or ``None``
+    when no template in it declared one. The distinction is load-bearing
+    here in a way it is not on :class:`ResolvedSessionTemplate`: a silent
+    lineage must publish no ``harness-integration`` edge at all, whereas
+    collapsing it to ``shell`` first would have every session template in
+    the registry pointing at the shell row.
+    """
+
+    resolved: ResolvedSessionTemplate
+    harness_integration: str | None
+    harness_integration_config: dict[str, object]
 
 
 def _merge_map(target: dict[str, EnvEntry], source: dict[str, EnvEntry]) -> dict[str, EnvEntry]:
@@ -70,53 +99,74 @@ def resolve_template(registry: Registry, template_name: str | None = None) -> Re
     return resolve_from_dict(kind_dict(registry, "session-template"), template_name)
 
 
+def effective_template(templates: Mapping[str, SessionTemplate], name: str) -> EffectiveSessionTemplate:
+    """The effective (merged) declaration of ``name``, for the finalize
+    passes. TOTAL; see ``vms/templates.effective_template`` for why the
+    degradation on a cyclic chain is never observed."""
+    from agentworks.errors import InheritanceCycleError
+
+    try:
+        return _resolve_walk(templates, name)
+    except InheritanceCycleError:
+        return EffectiveSessionTemplate(
+            resolved=ResolvedSessionTemplate(name=name),
+            harness_integration=None,
+            harness_integration_config={},
+        )
+
+
 def _resolve(
-    templates: dict[str, SessionTemplate],
+    templates: Mapping[str, SessionTemplate],
     name: str,
     _visiting: tuple[str, ...] = (),
 ) -> ResolvedSessionTemplate:
     """Depth-first, left-to-right resolution.
 
-    The public wrapper over :func:`_resolve_walk`: it collapses the
-    walk's running ``(harness_integration | None, config)`` pair onto the dataclass
-    (an undeclared pair becomes the ``shell`` default) and runs the
-    harness integration's completeness validation once on the merged blob, the value
-    no single declaration saw.
+    The USE view over :func:`_resolve_walk`: it collapses the walk's
+    ``(harness_integration | None, config)`` pair onto the dataclass (an
+    undeclared pair becomes the ``shell`` default) and runs the harness
+    integration's completeness validation once on the merged blob, the
+    value no single declaration saw.
     """
-    result, harness_integration, harness_integration_config = _resolve_walk(templates, name, _visiting)
-    result.harness_integration = harness_integration or "shell"
-    result.harness_integration_config = harness_integration_config
+    effective = _resolve_walk(templates, name, _visiting)
+    result = effective.resolved
+    result.harness_integration = effective.harness_integration or "shell"
+    result.harness_integration_config = effective.harness_integration_config
     _validate_merged(result)
     return result
 
 
 def _resolve_walk(
-    templates: dict[str, SessionTemplate],
+    templates: Mapping[str, SessionTemplate],
     name: str,
     _visiting: tuple[str, ...] = (),
-) -> tuple[ResolvedSessionTemplate, str | None, dict[str, object]]:
+) -> EffectiveSessionTemplate:
     """Depth-first, left-to-right resolution, threading the raw harness_integration
     pair alongside the accumulating ``ResolvedSessionTemplate``.
 
-    Returns ``(result, harness_integration | None, harness_integration_config)`` where a ``None``
-    integration name means nothing in the lineage declared one (distinct from a
-    declared ``shell``): keeping that distinction is what lets a
-    selector-silent later parent leave an earlier parent's pair untouched
-    instead of switching the lineage back to ``shell``. ``description`` / ``env`` merge exactly as
-    before, independent of the pair.
+    A ``None`` integration name means nothing in the lineage declared one
+    (distinct from a declared ``shell``): keeping that distinction is what
+    lets a selector-silent later parent leave an earlier parent's pair
+    untouched instead of switching the lineage back to ``shell``.
+    ``description`` / ``env`` merge exactly as before, independent of the
+    pair.
 
     ``_visiting`` carries the chain of in-progress resolves so cycles
-    raise ``ConfigError`` instead of ``RecursionError``. The framework's
-    cycle pass at build_registry time is the canonical check; this guard
-    is the safety net for callers that resolve without going through
-    build_registry.
+    raise ``InheritanceCycleError`` instead of ``RecursionError``. The
+    framework's cycle pass at build_registry time is the canonical check;
+    this guard is the safety net for callers that resolve without going
+    through build_registry, and :func:`effective_template` keys on the
+    type to stay total.
     """
     if name in _visiting:
-        path = " -> ".join((*_visiting, name))
-        raise ConfigError(f"session_templates inheritance cycle detected: {path}")
+        raise inheritance_cycle_error("session-template", (*_visiting, name))
 
     if name not in templates:
-        return ResolvedSessionTemplate(name=name), None, {}
+        return EffectiveSessionTemplate(
+            resolved=ResolvedSessionTemplate(name=name),
+            harness_integration=None,
+            harness_integration_config={},
+        )
 
     tmpl = templates[name]
     result = ResolvedSessionTemplate(name=name)
@@ -125,13 +175,13 @@ def _resolve_walk(
     next_visiting = (*_visiting, name)
 
     for parent_name in tmpl.inherits:
-        parent, parent_harness_integration, parent_config = _resolve_walk(templates, parent_name, next_visiting)
-        _merge(result, parent)
+        parent = _resolve_walk(templates, parent_name, next_visiting)
+        _merge(result, parent.resolved)
         harness_integration, harness_integration_config = _merge_pair(
             harness_integration,
             harness_integration_config,
-            parent_harness_integration,
-            parent_config,
+            parent.harness_integration,
+            parent.harness_integration_config,
         )
 
     _merge_template(result, tmpl)
@@ -142,7 +192,11 @@ def _resolve_walk(
         tmpl.harness_integration_config,
     )
     result.name = name
-    return result, harness_integration, harness_integration_config
+    return EffectiveSessionTemplate(
+        resolved=result,
+        harness_integration=harness_integration,
+        harness_integration_config=harness_integration_config,
+    )
 
 
 def _merge_pair(
@@ -162,14 +216,17 @@ def _merge_pair(
     - a child naming the SAME harness integration merges via that integration's
       ``merge_config`` (child-wins per key; ``shell`` unions
       ``required_commands``).
+
+    Reaches the merge by NAME (``merged_config``), which is what keeps
+    this total for the finalize walk: an unregistered name is a dangling
+    edge the miss policy reports, not a reason for the merge to raise.
     """
     if child_harness_integration is None:
         return acc_harness_integration, acc_config
-    from agentworks.capabilities.harness_integration import harness_integration_for
+    from agentworks.capabilities.harness_integration import merged_config
 
     base = acc_config if child_harness_integration == acc_harness_integration else {}
-    merged = harness_integration_for(child_harness_integration).merge_config(base, child_config or {})
-    return child_harness_integration, merged
+    return child_harness_integration, merged_config(child_harness_integration, base, child_config or {})
 
 
 def _validate_merged(resolved: ResolvedSessionTemplate) -> None:
@@ -178,8 +235,8 @@ def _validate_merged(resolved: ResolvedSessionTemplate) -> None:
     A declared blob on an inheriting surface may be legitimately partial,
     so this is where a required field is actually required. It runs at
     resolve, which is where it has always run; FR12 moves it to finalize,
-    and that move needs the merge to run over registry rows plus a
-    per-key provenance channel, which is its own body of work.
+    and that move needs a per-key provenance channel so an error can name
+    the template a bad key came from, which is its own body of work.
 
     ``harness_integration_for`` raises a typed ``ConfigError`` on an
     unknown name (defense in depth; typos are normally caught by the
@@ -187,6 +244,7 @@ def _validate_merged(resolved: ResolvedSessionTemplate) -> None:
     model that integration declares."""
     from agentworks.capabilities.config import validate_capability_config
     from agentworks.capabilities.harness_integration import harness_integration_for
+    from agentworks.schema import RefOwner
 
     harness_integration_for(resolved.harness_integration)
     validate_capability_config(

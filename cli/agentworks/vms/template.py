@@ -30,10 +30,10 @@ def tailscale_secret_reference(
     template_name: str,
 ) -> SecretReference:
     """Build the ``SecretReference`` a VMTemplate publishes for its
-    Tailscale auth key. Used by both ``VMTemplate.dependencies``
-    (raw, in this module) and ``ResolvedVMTemplate.dependencies``
-    (resolved, in ``agentworks.vms.templates``) so the reference shape
-    is single-sourced.
+    Tailscale auth key. Used by both ``VMTemplate.dependencies`` (the
+    finalize edge) and ``VMTemplateNode.config_secret_refs`` (the
+    preflight sweep's prediction input) so the reference shape is
+    single-sourced.
     """
     from agentworks.resources.reference import SecretReference
 
@@ -83,15 +83,28 @@ class VMTemplate(DeclaredResource):
     tailscale_auth_key: str | None = None
 
     def dependencies(self, context: BuildContext) -> list[ResourceReference]:
+        """This template's outbound edges: its ``inherits`` edges as
+        declared, and every runtime need of its EFFECTIVE declaration.
+
+        The two halves read different blobs on purpose (FR17). Inheritance
+        is a fact about THIS declaration, so it comes off ``self``; a
+        runtime need is a fact about the merged result, so it comes off the
+        chain. A child that overrides ``tailscale_auth_key`` therefore
+        depends on its override alone, while still inheriting the parent's
+        env secrets as edges of its own rather than through a transitive
+        walk that could not tell an override from an addition.
+        """
         from agentworks.resources.reference import (
             ResourceReference as _ResourceReq,
         )
         from agentworks.resources.reference import (
             inherits_reference,
         )
+        from agentworks.vms.templates import effective_template
 
         source = ("vm-template", self.name)
-        refs: list[ResourceReference] = list(env_references(self.env, source))
+        effective = effective_template({**context.rows_of("vm-template"), self.name: self}, self.name)
+        refs: list[ResourceReference] = list(env_references(effective.env, source))
         # Inherits: each parent template name in ``inherits = [...]`` is an
         # INHERITS edge (source composition, not a runtime need; FR17). The
         # framework's VMTemplateKind miss policy auto-declares "default"
@@ -103,7 +116,7 @@ class VMTemplate(DeclaredResource):
         # system_install_commands resolves to a declared Resource via
         # the framework's miss policy (error on typo, citing this
         # template's source).
-        for pkg in self.apt_packages or []:
+        for pkg in effective.apt_packages:
             refs.append(
                 _ResourceReq(
                     name=pkg,
@@ -112,7 +125,7 @@ class VMTemplate(DeclaredResource):
                     source=source,
                 )
             )
-        for cmd in self.system_install_commands or []:
+        for cmd in effective.system_install_commands:
             refs.append(
                 _ResourceReq(
                     name=cmd,
@@ -121,11 +134,7 @@ class VMTemplate(DeclaredResource):
                     source=source,
                 )
             )
-        # When the raw template doesn't set tailscale_auth_key, emit the
-        # default secret name's reference so the registry finalizes
-        # cleanly even before any inheritance walk. ResolvedVMTemplate's
-        # dependencies emits the inherited value at manager-entry
-        # call time.
-        ts_name = self.tailscale_auth_key or "tailscale-auth-key"
-        refs.append(tailscale_secret_reference(ts_name, self.name))
+        # The effective auth key: the kind's default when nothing in the
+        # lineage sets one, the nearest declaration otherwise.
+        refs.append(tailscale_secret_reference(effective.tailscale_auth_key, self.name))
         return refs

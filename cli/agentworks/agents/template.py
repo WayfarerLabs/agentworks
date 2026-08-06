@@ -46,6 +46,10 @@ class AgentTemplate(DeclaredResource):
     env: dict[str, EnvEntry] = field(default_factory=dict)
 
     def dependencies(self, context: BuildContext) -> list[ResourceReference]:
+        """The ``inherits`` edges as declared, plus the runtime needs of
+        the EFFECTIVE declaration (FR17; see ``VMTemplate.dependencies``
+        for the rule the four inheriting kinds share)."""
+        from agentworks.agents.templates import effective_template
         from agentworks.resources.reference import (
             ResourceReference as _ResourceReq,
         )
@@ -54,11 +58,12 @@ class AgentTemplate(DeclaredResource):
         )
 
         source = ("agent-template", self.name)
-        refs: list[ResourceReference] = list(env_references(self.env, source))
-        refs.extend(credential_references(self.git_credentials, source))
+        effective = effective_template({**context.rows_of("agent-template"), self.name: self}, self.name)
+        refs: list[ResourceReference] = list(env_references(effective.env, source))
+        refs.extend(credential_references(effective.git_credentials, source))
         refs.extend(inherits_reference(parent, source) for parent in self.inherits)
         # Install-command references for user_install_commands.
-        for cmd in self.user_install_commands or []:
+        for cmd in effective.user_install_commands:
             refs.append(
                 _ResourceReq(
                     name=cmd,

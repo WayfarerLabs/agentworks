@@ -36,7 +36,7 @@ from dataclasses import dataclass
 from enum import Enum
 from functools import cache
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -274,18 +274,48 @@ class BuildContext:
     :meth:`~agentworks.declared_resource.DeclaredResource.dependencies` during
     the finalize walk.
 
-    Today its one load-bearing field is ``available_backends``: the present
-    ``secret-backend`` nodes (name + impl), which a ``secret`` reads to decide
-    (via each backend's pure ``would_attempt``) which ``secret -> secret-backend``
-    edges to emit. Every other resource ignores the context. This is a BUILDER
-    INPUT supplied during the build, not a consumer reaching into a live
-    registry, so the R11 guard whitelists the builder's own call (LLD b). A
-    default-empty context (tests pass one) yields no
-    present backends, so a secret under it emits only its explicit mapping-key
-    edges.
+    Two load-bearing fields, both BUILDER INPUTS supplied during the build
+    rather than a consumer reaching into a live registry, which is why the
+    R11 guard whitelists the builder's own call (LLD b):
+
+    - ``available_backends``: the present ``secret-backend`` nodes (name +
+      impl), which a ``secret`` reads to decide (via each backend's pure
+      ``would_attempt``) which ``secret -> secret-backend`` edges to emit.
+    - ``rows``: every published resource, by kind and name, which an
+      INHERITING resource reads to resolve its own ``inherits`` chain
+      before emitting edges (FR17: a resource's runtime dependencies come
+      from its EFFECTIVE declaration, so a child that overrides a parent's
+      secret name depends on the override alone).
+
+    A default-empty context (tests pass one) yields no present backends,
+    so a secret under it emits only its explicit mapping-key edges, and no
+    rows, so an inheriting resource under it resolves to its own
+    declaration alone. See :meth:`rows_of` for why that degradation is the
+    honest one.
     """
 
     available_backends: tuple[tuple[str, SecretBackend], ...] = ()
+    # The builder's live row map, read-only by contract (hence the
+    # ``Mapping`` annotation): the rows do not change between the build
+    # walk and the late-materialization walk that shares this context, and
+    # the resources it holds are heterogeneous by kind, which is what the
+    # ``Any`` value type says honestly.
+    rows: Mapping[str, Mapping[str, Any]] = MappingProxyType({})
+
+    def rows_of(self, kind: str) -> Mapping[str, Any]:
+        """Every published resource of ``kind``, by name; empty when the
+        kind has none.
+
+        The seam an inheriting resource resolves its chain over. A caller
+        merges ITSELF into the result before resolving
+        (``{**context.rows_of(kind), self.name: self}``), which is a no-op
+        during the real walk (the registry already holds it) and is what
+        makes a bare ``BuildContext()`` degrade to "this declaration
+        alone" rather than to "nothing at all": an empty answer for a
+        template that declares an env secret would be a wrong answer, not
+        an obviously-missing one.
+        """
+        return self.rows.get(kind, {})
 
 
 def build_context(resources: Mapping[str, Mapping[str, object]]) -> BuildContext:
@@ -298,11 +328,18 @@ def build_context(resources: Mapping[str, Mapping[str, object]]) -> BuildContext
     registry probe. The backend nodes are published before finalize and never
     materialize later, so the context is assembled once at the start of the
     build.
+
+    ``resources`` is carried through as ``rows`` rather than snapshotted:
+    the late-materialization pass walks new nodes against this same
+    context, and a snapshot would hand them a row map from before pass 0.
+    Only inheriting kinds read it, and no template is ever materialized
+    late (reserved defaults are seeded in pass 0), so the two views agree
+    either way; carrying the live map means they cannot stop agreeing.
     """
     backends = tuple(
         (name, cast("SecretBackend", _impl_for("secret-backend", name))) for name in resources.get("secret-backend", {})
     )
-    return BuildContext(available_backends=backends)
+    return BuildContext(available_backends=backends, rows=resources)
 
 
 def build_graph(

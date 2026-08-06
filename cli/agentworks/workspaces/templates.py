@@ -9,9 +9,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from agentworks.errors import ConfigError, NotFoundError, unknown_template_error
+from agentworks.errors import ConfigError, NotFoundError, inheritance_cycle_error, unknown_template_error
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from agentworks.env import EnvEntry
     from agentworks.resources.registry import Registry
     from agentworks.workspaces.template import WorkspaceTemplate
@@ -88,22 +90,34 @@ def resolve_ws_template_env_or_empty(
         return {}
 
 
+def effective_template(templates: Mapping[str, WorkspaceTemplate], name: str) -> ResolvedTemplate:
+    """The effective (merged) declaration of ``name``, for the finalize
+    passes. TOTAL; see ``vms/templates.effective_template`` for why the
+    degradation on a cyclic chain is never observed."""
+    from agentworks.errors import InheritanceCycleError
+
+    try:
+        return _resolve(templates, name)
+    except InheritanceCycleError:
+        return ResolvedTemplate(name=name)
+
+
 def _resolve(
-    templates: dict[str, WorkspaceTemplate],
+    templates: Mapping[str, WorkspaceTemplate],
     name: str,
     _visiting: tuple[str, ...] = (),
 ) -> ResolvedTemplate:
     """Depth-first, left-to-right resolution of a template.
 
     ``_visiting`` carries the chain of in-progress resolves so cycles
-    raise ``ConfigError`` instead of ``RecursionError``. The framework's
-    cycle pass at build_registry time is the canonical check; this guard
-    is the safety net for callers that resolve without going through
-    build_registry.
+    raise ``InheritanceCycleError`` instead of ``RecursionError``. The
+    framework's cycle pass at build_registry time is the canonical check;
+    this guard is the safety net for callers that resolve without going
+    through build_registry, and :func:`effective_template` keys on the
+    type to stay total.
     """
     if name in _visiting:
-        path = " -> ".join((*_visiting, name))
-        raise ConfigError(f"workspace_templates inheritance cycle detected: {path}")
+        raise inheritance_cycle_error("workspace-template", (*_visiting, name))
 
     if name not in templates:
         return ResolvedTemplate(name=name)
