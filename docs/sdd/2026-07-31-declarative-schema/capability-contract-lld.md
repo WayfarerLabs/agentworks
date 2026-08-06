@@ -951,6 +951,17 @@ Details worth having in one place:
   head of the line. It fires when the CHILD's row is the one the validate pass reaches first; the
   parent's own row reports the same key on its own account, which is what makes the tail necessary
   rather than redundant.
+- **Of FR17's three named traversals, only one reads the graph, and the other two were already
+  right.** The secret resolve union comes off a plan's NODES (`orchestration.secrets.secret_union`),
+  which hold already-resolved templates, and preflight's resolvability prediction runs over each
+  node's own `config_secret_refs`; neither crosses an edge at all, so neither needed changing and
+  both are asserted in the regression test so that stays true. The graph-reading one is
+  `collect_secrets_for`, whose live caller is the `secret` kind's per-session `instances` projection
+  (`agw secret describe`'s "Used by"), not the eager-resolve path its docstring claimed.
+  **Dependency LISTINGS were deliberately left crossing**: `describe`'s "Referenced by:" and the
+  REFS count read `dependents_of`, which is inbound and one hop, and a parent template genuinely IS
+  referenced by its children ("a parent template" is the usage prose an operator wants before
+  deleting it). Excluding it there would hide a true structural fact rather than fix an attribution.
 - **`_validate_merged` retired**, and `_resolve` now validates nothing at all: finalize checks the
   shape and construction re-validates the blob it binds, so the resolve-time call was the third copy
   and the one at the wrong time.
