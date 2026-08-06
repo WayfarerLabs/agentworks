@@ -9,7 +9,7 @@ imports neither ``sessions`` nor ``orchestration``.
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated, ClassVar, Literal
 
 import pytest
 
@@ -17,7 +17,8 @@ from agentworks.capabilities.base import OperationScope, RunContext, ScopeLevel
 from agentworks.capabilities.config import capability_config_references, validate_capability_config
 from agentworks.capabilities.harness_integration import ShellIntegration
 from agentworks.errors import ConfigError, StateError
-from agentworks.schema import RefOwner
+from agentworks.schema import AgwModel, NonEmptyStr, RefOwner, SecretRef
+from tests.plugins._fixtures import ConformingHarnessIntegration
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -75,6 +76,48 @@ def _session_scope(
         agent=agent,
         admin=admin,
     )
+
+
+# -- The interim inheritance constraint ---------------------------------------
+
+
+def test_a_required_config_field_is_refused_while_declared_blobs_validate() -> None:
+    """A session template that INHERITS its config declares a partial
+    blob, and the finalize pass validates each declared blob, so a
+    required field would fail an inheriting child at ``build_registry``
+    with nothing in the error naming inheritance as the cause. The trap
+    is silent from the author's side, so the base refuses the model at
+    class definition rather than trusting a comment. Deleted by step
+    2.3b, which validates the merged blob instead.
+    """
+
+    class _Needy(AgwModel):
+        name: Literal["needy"]
+        must_have: str
+
+    with pytest.raises(StateError, match="must_have"):
+
+        class _NeedyIntegration(ConformingHarnessIntegration):
+            name: ClassVar[str] = "needy"
+            description: ClassVar[str] = "declares a required field"
+            config_model: ClassVar[type[AgwModel]] = _Needy
+
+
+def test_a_tag_and_an_owner_templated_reference_are_not_required_fields() -> None:
+    """Both are statically required and neither is something a template
+    can fail to supply: the tag is on every arm by construction, and the
+    model layer fills a templated reference from the owner."""
+
+    class _Tagged(AgwModel):
+        name: Literal["tagged"]
+        token: Annotated[NonEmptyStr, SecretRef(usage="a token", default_template="tok-{owner_name}")]
+
+    class _TaggedIntegration(ConformingHarnessIntegration):
+        name: ClassVar[str] = "tagged"
+        description: ClassVar[str] = "declares a tag and a templated reference"
+        config_model: ClassVar[type[AgwModel]] = _Tagged
+
+    assert _TaggedIntegration.config_for() is _Tagged
 
 
 # -- config vocabulary: extraction + validation -------------------------------

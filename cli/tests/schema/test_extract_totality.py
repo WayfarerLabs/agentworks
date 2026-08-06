@@ -199,6 +199,7 @@ _EDGELESS_BY_DESIGN = {
     "StringOrTableRoot": "an undiscriminated root union addresses no arm",
     "AccountRefLike": "nothing in an account reference names a Resource",
     "UndiscriminatedSite": "no discriminator, so no arm is addressable",
+    "OneArmSite": "its one arm is the arm that names nothing",
     "NumericallyTaggedSite": "tagged by something other than a name",
     "NeverResolved": "the model cannot be built",
     "ResolvesToUnbuildable": "the model cannot be built",

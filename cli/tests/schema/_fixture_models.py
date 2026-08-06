@@ -165,6 +165,19 @@ class OptionalUnionSite(AgwModel):
     platform: Annotated[LimaArm | ProxmoxArm, Discriminator("name")] | None = None
 
 
+class OneArmSite(AgwModel):
+    """A discriminated union with a SINGLE arm.
+
+    ``Union[(X,)]`` is ``X``, so the annotation collapses to a bare model
+    while pydantic still dispatches on the tag. A classifier that read the
+    collapsed form as an ordinary nested block would lose the tag, which
+    is exactly what a capability kind with one registered implementation
+    produces.
+    """
+
+    platform: Annotated[LimaArm, Discriminator("name")]
+
+
 class UndiscriminatedSite(AgwModel):
     """A union with no discriminator at all: no arm is addressable."""
 
@@ -308,6 +321,7 @@ ALL_FIXTURES = (
     RenamedArmSite,
     NumericallyTaggedSite,
     UndiscriminatedSite,
+    OneArmSite,
     MultiArmMarked,
     SelfReferential,
     UnmarkedLike,

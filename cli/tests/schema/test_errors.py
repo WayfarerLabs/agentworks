@@ -37,6 +37,7 @@ from agentworks.source_location import SourceLocation
 
 from ._fixture_models import (
     CatalogLike,
+    OneArmSite,
     PrincipalLike,
     SiteLike,
     StringOrTableRoot,
@@ -318,6 +319,20 @@ def test_a_root_model_addresses_the_fields_of_what_it_wraps() -> None:
 
     assert _lines(Wrapper, {"platform": {"name": "lima", "vm_host": 8}}) == [
         "vm-site/lab.platform.vm_host: must be a string"
+    ]
+
+
+def test_a_single_arm_unions_tag_is_dropped_like_any_other() -> None:
+    """``Union[(X,)]`` is ``X``, so a one-arm discriminated union collapses
+    to a bare model while pydantic goes on dispatching on the tag. Read as
+    an ordinary nested block it would render the tag as a field the
+    operator never wrote, and lose the arm's field list with it. Live the
+    moment a capability kind has a single registered implementation."""
+    assert _lines(OneArmSite, {"platform": {"name": "lima", "vm_host": 8}}) == [
+        "vm-site/lab.platform.vm_host: must be a string"
+    ]
+    assert _lines(OneArmSite, {"platform": {"name": "lima", "bogus": 1}}) == [
+        "vm-site/lab.platform.bogus: unknown field; expected one of: name, vm_host"
     ]
 
 

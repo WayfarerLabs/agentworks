@@ -172,12 +172,20 @@ def shape_of(field: FieldInfo) -> FieldShape:
         element, element_meta = _split_annotated(element)
         item_marker = _first_marker(element_meta)
         item_model = element if _is_model(element) else None
-    elif _is_model(inner):
-        nested_model = inner
-    elif _is_union(inner):
+    elif _is_model(inner) or _is_union(inner):
         discriminator = _discriminator_of(field)
         if discriminator is not None:
+            # A discriminated union of ONE arm is not a union at all:
+            # ``Union[(X,)]`` is ``X``. Pydantic still dispatches on the
+            # tag (it answers ``union_tag_invalid`` for a wrong one), so
+            # reading the collapsed form as "a nested block" would lose
+            # the tag: a failure's loc still leads with it, and a walker
+            # that does not know it is a tag renders it as a field the
+            # operator never wrote. Live the moment a capability kind has
+            # a single registered implementation.
             arms = _arms_of(inner, discriminator)
+        elif _is_model(inner):
+            nested_model = inner
         else:
             union_members = tuple(_split_annotated(arg)[0] for arg in get_args(inner))
 
@@ -360,7 +368,10 @@ def _arms_of(annotation: object, discriminator: str) -> tuple[UnionArmType, ...]
     is skipped: nothing could address it from a raw blob.
     """
     arms: list[UnionArmType] = []
-    for arg in get_args(annotation):
+    # ``get_args`` is empty for the collapsed one-arm form, which IS the
+    # annotation itself.
+    members = get_args(annotation) or (annotation,)
+    for arg in members:
         arm, _metadata = _split_annotated(arg)
         if _is_model(arm):
             arms.extend(UnionArmType(tag=tag, model=arm) for tag in _tags_of(arm, discriminator))
