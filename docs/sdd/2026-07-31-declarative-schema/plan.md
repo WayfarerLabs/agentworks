@@ -649,7 +649,11 @@ red-underlining valid configuration: `GitHubConfig.token` emitted as required (p
 been flagged); a bare `spec:` that the envelope reads as an empty mapping; and `expires` emitted as
 `format: date-time` alone when the before-validator also accepts a plain date.
 
-**The one-arm union is the SHIPPED case, not a hypothetical**, for `harness-integration`/shell and
+**The one-arm union mechanism is verified, but my note that it was "the SHIPPED case" was WRONG**
+(corrected 2026-08-06 by the 2.7 review; I recorded the implementer's claim without checking the
+registries). Live counts are vm-platform 5, harness-integration 3, git-credential-provider 2, and
+`plugins/__init__.py:84` registers every shipped module unconditionally, so enablement never removes
+an arm. **No host sees a one-arm union today.** The mechanism and its pin stand and are right, for
 `git-credential-provider`/github. `Union[(X,)]` collapses, but pydantic keeps the tagged-union core
 schema through the collapse, so a one-arm kind emits the same `discriminator` plus `oneOf` shape a
 multi-arm one does. Emission classifies on `descriptor.config_schema.discriminator is not None`,
@@ -668,8 +672,16 @@ descriptor table has no record of where a map-keyed capability is hosted (`secre
 `manifest_section` is `None`), so emission would have to hard-code `secret` / `backend_mappings`,
 reintroducing exactly the switchboard the descriptor exists to have killed. Building it properly
 needs a descriptor-contract change, and that contract is the ROADMAP's artifact, not this SDD's.
-Today's emission there is under-constrained but never wrong. Trigger for revisiting: the first
-backend whose mapping is a real table (1Password). Raised to the operator 2026-08-06.
+Today's emission there is under-constrained but never wrong, which the review confirmed by execution
+rather than accepting. **The trigger has ALREADY FIRED, which I also got wrong** (corrected
+2026-08-06): I wrote that it was "the first backend whose mapping is a real table (1Password)", but
+`onepassword` already ships in-tree as a system plugin with a fully modeled mapping
+(`OnePasswordMapping = OpUri | OnePasswordAccountRef`, with the `op://` reference validated), and
+three backends are registered rather than two. So this is a QUEUED COST, not a hypothetical: an
+operator writing `backend_mappings.onepassword` today gets no completion on `account` / `reference`,
+no `op://` shape check, and no key checking, all declared on a model the descriptor can already
+reach through `offered_model`. The only missing fact is where the map lives. Raised to the operator
+2026-08-06 with that correction.
 
 ### 2.8 Live-rendered samples and describe
 
