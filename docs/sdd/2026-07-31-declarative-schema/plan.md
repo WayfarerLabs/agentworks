@@ -507,13 +507,24 @@ until someone decides.
   `88fe4c85 feat(cli)!: complete 0.14 compatibility removal`), rather than becoming permanent
   infrastructure by default. The two halves have DIFFERENT expiries and can retire independently:
   the TOML half serves configs from before the phase-1 hard error and is the larger, older, more
-  duplicative one; the manifest-upgrade half serves the pre-2.4 sibling shape. Setting the expiry
-  needs input this effort does not have, namely how many operators are actually on old configs.
-  Raised 2026-08-06; not decided. The descriptor's `migration_participation` field stays deferred
-  and uncreated. Deriving the migrator from live wiring would defeat the independence phase 1 built
-  deliberately, which is the whole reason the TOML loaders were relocated into `migrate/` rather
-  than deleted. Rationale also carried in `manifest_upgrade.py:25-30` so it survives this SDD's
-  deletion.
+  duplicative one; the manifest-upgrade half serves the pre-2.4 sibling shape.
+
+  **DECIDED 2026-08-06 (operator): keep it for a release or two, and make sure it is ENTIRELY
+  SEPARABLE by then.** Separability is now enforced rather than hoped for.
+  `cli/tests/test_migrate_separability.py` asserts nothing outside `agentworks/migrate/` imports it
+  except the one CLI command that fronts it, with that consumer NAMED so adding a second is a
+  deliberate edit a reviewer sees. The arrow points one way on purpose: the migrator may reach into
+  core freely because it is the thing going away, and core may not reach into the migrator because
+  every such import is a line someone unpicks under time pressure on removal day. The guard carries
+  a non-vacuity twin, so deleting or renaming the command cannot leave it passing over an allow-list
+  that describes nothing (the failure mode step 2.3's review found in the graph guard). Verified
+  clean as written: the only external consumer is `cli/commands/resource.py`, via two function-local
+  imports kept lazy to keep ruamel off the startup path. Removal is then a deletion of
+  `agentworks/migrate/`, its CLI command, its tests, and the relocated `toml_resources.py` oracle
+  with them. The descriptor's `migration_participation` field stays deferred and uncreated. Deriving
+  the migrator from live wiring would defeat the independence phase 1 built deliberately, which is
+  the whole reason the TOML loaders were relocated into `migrate/` rather than deleted. Rationale
+  also carried in `manifest_upgrade.py:25-30` so it survives this SDD's deletion.
 
 - **Selector asymmetry, deliberate:** selectors scope TOML units only; the manifest-upgrade half is
   always whole-tree, because a leftover legacy document makes the post-registry verification load
