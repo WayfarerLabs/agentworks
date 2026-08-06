@@ -68,11 +68,25 @@ class FieldShape:
     a discriminated union of models."""
 
 
+def marker_of(field: FieldInfo) -> RefMarker | None:
+    """The reference marker on the field ITSELF, if any.
+
+    Both spellings are found: ``Annotated[str | None, SecretRef(...)]``,
+    where pydantic lifts the marker into ``field.metadata``, and
+    ``Annotated[str, SecretRef(...)] | None``, where it stays inside the
+    annotation. Cheaper than a whole :func:`shape_of` for the callers
+    that only want the marker.
+    """
+    inner, _optional = unwrap_optional(field.annotation)
+    _inner, inner_metadata = _split_annotated(inner)
+    return _first_marker([*field.metadata, *inner_metadata])
+
+
 def shape_of(field: FieldInfo) -> FieldShape:
     """Classify ``field``. Reads annotations only; runs no user code."""
     inner, optional = unwrap_optional(field.annotation)
-    inner, inner_metadata = _split_annotated(inner)
-    marker = _first_marker([*field.metadata, *inner_metadata])
+    inner, _inner_metadata = _split_annotated(inner)
+    marker = marker_of(field)
 
     item_marker: RefMarker | None = None
     nested_model: type[BaseModel] | None = None

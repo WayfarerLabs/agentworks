@@ -35,7 +35,7 @@ from typing import TYPE_CHECKING, Any, Final
 from pydantic import BaseModel, ConfigDict, RootModel, model_validator
 
 from agentworks.errors import StateError
-from agentworks.resources.schema._shape import shape_of
+from agentworks.resources.schema._shape import marker_of
 from agentworks.resources.schema.markers import RefOwner
 
 if TYPE_CHECKING:
@@ -154,7 +154,7 @@ def _owner_templated_fields(model_cls: type[BaseModel]) -> tuple[tuple[str, RefM
     """
     templated: list[tuple[str, RefMarker]] = []
     for name, field in model_cls.model_fields.items():
-        marker = shape_of(field).marker
+        marker = marker_of(field)
         if marker is not None and marker.default_template is not None:
             templated.append((name, marker))
     return tuple(templated)
