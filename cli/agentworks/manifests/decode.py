@@ -41,7 +41,7 @@ from agentworks.schema import RefOwner, config_error_from, extract_references, v
 from agentworks.schema._shape import Collection, shape_of
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Iterable, Mapping
 
     from agentworks.capabilities.descriptor import CapabilityKindDescriptor, HostSurface
     from agentworks.env import EnvEntry
@@ -145,31 +145,14 @@ a command that leaves their file alone.
 """
 
 
-def _tagged_rewrite(field: str, name: str, sibling: object, present: bool) -> str | None:
-    """The exact canonical spelling that replaces a legacy sibling pair,
-    or ``None`` when no honest one can be printed.
+def _tagged_rewrite(field: str, name: str, keys: Iterable[str]) -> str:
+    """The exact canonical spelling that replaces a legacy sibling pair.
 
     Built from what the document actually says (the capability's name and
     the config keys it carries) rather than a generic template, so the
     error shows the operator their own resource in the shape it now needs.
-
-    ``None`` for the two shapes a mechanical fold cannot produce, and
-    printing a rewrite for either would be worse than printing none:
-
-    - a sibling table carrying its own ``name``, where the fold would emit
-      ``{name: a, name: b}``, which is not valid YAML and hides that two
-      keys claim to select the capability;
-    - a sibling that is not a table at all, where there are no keys to
-      fold and printing the tag alone would quietly discard what the
-      operator wrote.
     """
-    if not present:
-        return f"{field}: {{name: {name}}}"
-    if not isinstance(sibling, dict):
-        return None
-    if "name" in sibling:
-        return None
-    inner = ", ".join([f"name: {name}", *(f"{key}: ..." for key in sibling)])
+    inner = ", ".join([f"name: {name}", *(f"{key}: ..." for key in keys)])
     return f"{field}: {{{inner}}}"
 
 
@@ -182,6 +165,15 @@ def _reject_legacy_shape(surface: HostSurface, spec: Mapping[str, object], where
     this function exists to beat, so it runs before validation and names
     the fold.
 
+    Two shapes get no printed rewrite, because no honest one exists and a
+    rewrite that looks authoritative and is quietly wrong is worse than
+    none: a sibling table carrying its OWN ``name`` (the fold would emit
+    ``{name: a, name: b}``, which is not valid YAML and hides that two
+    keys claim to select the capability), and a sibling that is not a
+    table at all (there are no keys to fold, and printing the tag alone
+    would discard what the operator wrote). Neither carries the migrate
+    hint either, because the migrator refuses both documents too.
+
     This is the one compatibility surface the model swap leaves behind,
     and it goes together with ``HostSurface.config_field``, whose only
     remaining job is to let this name the retired field. Delete both when
@@ -192,23 +184,25 @@ def _reject_legacy_shape(surface: HostSurface, spec: Mapping[str, object], where
     value = spec.get(field)
     if not isinstance(value, str):
         return
-    present = config_field in spec
-    sibling = spec.get(config_field)
-    rewrite = _tagged_rewrite(field, value or "<capability>", sibling, present)
+    name = value or "<capability>"
     head = f"{where}: spec.{field} names the capability as a string, which is no longer supported"
-    if rewrite is not None:
-        raise ConfigError(f"{head}; write one tagged table instead: {rewrite}", hint=MIGRATE_HINT)
-    # No rewrite to print, and no migrate hint with it: the migrator
-    # refuses these two documents too, so naming it would send the
-    # operator to a command that leaves their file alone.
-    if isinstance(sibling, dict):
+    if config_field not in spec:
+        raise ConfigError(
+            f"{head}; write one tagged table instead: {_tagged_rewrite(field, name, ())}", hint=MIGRATE_HINT
+        )
+    sibling = spec[config_field]
+    if not isinstance(sibling, dict):
+        raise ConfigError(
+            f"{head}, and spec.{config_field} is {sibling!r} rather than a table, so there are no keys to fold; "
+            f"write spec.{field} as one tagged table and put that value where it belongs, or remove it"
+        )
+    if "name" in sibling:
         raise ConfigError(
             f"{head}, and spec.{config_field} carries its own 'name' ({sibling['name']!r}), so which one "
             f"selects the capability is your call; merge them by hand into one spec.{field} table"
         )
     raise ConfigError(
-        f"{head}, and spec.{config_field} is {sibling!r} rather than a table, so there are no keys to fold; "
-        f"write spec.{field} as one tagged table and put that value where it belongs, or remove it"
+        f"{head}; write one tagged table instead: {_tagged_rewrite(field, name, sibling)}", hint=MIGRATE_HINT
     )
 
 
