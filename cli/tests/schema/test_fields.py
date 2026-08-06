@@ -16,7 +16,6 @@ from pydantic import Field
 from agentworks.errors import StateError
 from agentworks.schema import (
     MAPPING_KEY,
-    REF_SCHEMA_KEY,
     SEQUENCE_ELEMENT,
     UNSET,
     AgwModel,
@@ -26,6 +25,7 @@ from agentworks.schema import (
     model_doc,
     render_type,
 )
+from tests._emitted_schema import ref_extension
 
 from ._fixture_models import (
     AzureLike,
@@ -392,13 +392,13 @@ def test_the_stream_and_the_emitted_schema_report_the_same_marker() -> None:
     # sample renderer and an operator's editor tooling can disagree.
     stream = docs(GithubLike)[("token",)]
     assert stream.ref is not None
-    assert stream.ref.schema_extension() == GithubLike.model_json_schema()["properties"]["token"][REF_SCHEMA_KEY]
+    assert stream.ref.schema_extension() == ref_extension(GithubLike.model_json_schema()["properties"]["token"])
 
 
 def test_the_stream_and_the_emitted_schema_agree_inside_a_nested_block() -> None:
     stream = docs(AzureLike)[("service_principal", "secret")]
     assert stream.ref is not None
-    emitted = AzureLike.model_json_schema()["$defs"]["PrincipalLike"]["properties"]["secret"][REF_SCHEMA_KEY]
+    emitted = ref_extension(AzureLike.model_json_schema()["$defs"]["PrincipalLike"]["properties"]["secret"])
     assert stream.ref.schema_extension() == emitted
 
 

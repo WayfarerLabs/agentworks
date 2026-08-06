@@ -139,34 +139,44 @@ class AgwModel(BaseModel):
         core_schema: CoreSchema,
         handler: GetJsonSchemaHandler,
     ) -> JsonSchemaValue:
-        """A field this model FILLS is not a field an operator must write.
+        """An owner-templated field is neither required nor non-nullable.
 
-        Pydantic computes ``required`` from the declared field, which
-        knows nothing about the before-validator above, so an
-        owner-templated field emits as required and an editor would
-        red-underline the very omission the framework exists to resolve
-        (``provider: {name: github}`` with no ``token``, which is what
-        every unscoped credential writes).
+        The before-validator above resolves such a field from its marker,
+        and it treats an omitted value and an explicit ``null`` alike, on
+        purpose: reference extraction makes the same call, so the two
+        paths cannot come to name different secrets. Emitted schema has to
+        state BOTH halves of that, and pydantic can state neither, because
+        it computes ``required`` and nullability from the declared field
+        and knows nothing about the validator:
+
+        - not required, or an editor red-underlines the very omission the
+          mechanism exists to resolve (``provider: {name: github}`` with
+          no ``token``, which is what every unscoped credential writes);
+        - nullable, or it red-underlines ``token: null``, which is that
+          same instruction spelled out, and which loads today.
 
         Stated here, on the class that does the filling, rather than in
         the emitter: the rule is a property of this model's validation
         behavior, and a consumer correcting for it downstream would be a
-        second place to keep in sync. The field's own ``x-agw-ref``
-        already carries the template, so a hover still shows what the
-        omission resolves to.
+        second place to keep in sync. The field keeps its ``x-agw-ref``,
+        so a hover still shows what the omission resolves to.
         """
         json_schema = handler(core_schema)
         templated = {name for name, _marker in _owner_templated_fields(cls)}
         if not templated:
             return json_schema
         # The model's schema may arrive as a ``$ref`` into ``$defs``; the
-        # required list lives on the definition it points at.
+        # required list and the properties live on the definition it
+        # points at.
         resolved = handler.resolve_ref_schema(json_schema)
         required = [name for name in resolved.get("required", ()) if name not in templated]
         if required:
             resolved["required"] = required
         else:
             resolved.pop("required", None)
+        properties = resolved.get("properties", {})
+        for name in templated & set(properties):
+            properties[name] = _nullable(properties[name])
         return json_schema
 
 
@@ -198,6 +208,38 @@ PositiveInt = Annotated[int, Field(gt=0)]
 Carries the bool-is-an-int concern for free: strict mode rejects ``True``
 for an ``int`` field, which is what the hand-rolled
 ``isinstance(value, bool)`` guards did by hand."""
+
+
+#: JSON Schema keywords that DESCRIBE a property rather than constrain
+#: it. When a property gains a null arm they belong on the outside, where
+#: an editor reads them, not buried in one branch. The split is JSON
+#: Schema 2020-12's own (its "meta-data" vocabulary), and the result is
+#: byte for byte what pydantic emits for a natively optional field.
+_ANNOTATION_KEYWORDS: Final = frozenset(
+    {"title", "description", "default", "deprecated", "readOnly", "writeOnly", "examples"}
+)
+
+
+def _nullable(prop: JsonSchemaValue) -> JsonSchemaValue:
+    """``prop`` widened to accept ``null``, or unchanged if it already
+    does."""
+    if _accepts_null(prop):
+        return prop
+    outer = {key: value for key, value in prop.items() if key in _ANNOTATION_KEYWORDS}
+    inner = {key: value for key, value in prop.items() if key not in _ANNOTATION_KEYWORDS}
+    return {"anyOf": [inner, {"type": "null"}], **outer}
+
+
+def _accepts_null(prop: JsonSchemaValue) -> bool:
+    """Whether ``prop`` already permits ``null``.
+
+    Two shapes, which are the two this layer could be handed twice: a bare
+    null type, and a combinator carrying a null branch.
+    """
+    if prop.get("type") == "null":
+        return True
+    branches = prop.get("anyOf") or prop.get("oneOf") or ()
+    return any(branch.get("type") == "null" for branch in branches)
 
 
 def validation_context(owner: RefOwner) -> dict[str, object]:

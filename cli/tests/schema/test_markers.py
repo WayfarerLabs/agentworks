@@ -22,6 +22,7 @@ from agentworks.schema import (
     SecretRef,
 )
 from agentworks.schema.reference import RefRelationship
+from tests._emitted_schema import ref_extension
 
 OWNER = RefOwner(kind="git-credential", name="prod")
 
@@ -132,13 +133,15 @@ def test_a_marker_with_no_template_still_emits_the_key() -> None:
 
 def test_a_scalar_marker_reaches_emitted_json_schema() -> None:
     schema = Marked.model_json_schema()
-    assert schema["properties"]["token"][REF_SCHEMA_KEY] == {
+    assert ref_extension(schema["properties"]["token"]) == {
         "kind": "secret",
         "usage": "the auth token",
         "default_template": "git-token-{owner_name}",
         "relationship": "uses",
     }
-    assert schema["properties"]["template"][REF_SCHEMA_KEY]["kind"] == "vm-template"
+    template = ref_extension(schema["properties"]["template"])
+    assert template is not None
+    assert template["kind"] == "vm-template"
 
 
 def test_a_list_marker_reaches_the_item_schema() -> None:
@@ -148,13 +151,29 @@ def test_a_list_marker_reaches_the_item_schema() -> None:
 
 def test_a_nested_model_carries_its_marker_in_defs() -> None:
     defs = Marked.model_json_schema()["$defs"]
-    assert defs["Principal"]["properties"]["secret"][REF_SCHEMA_KEY]["default_template"] == "azure-client-secret"
+    secret = ref_extension(defs["Principal"]["properties"]["secret"])
+    assert secret is not None
+    assert secret["default_template"] == "azure-client-secret"
 
 
 def test_each_union_arm_carries_its_own_markers() -> None:
     defs = Marked.model_json_schema()["$defs"]
-    assert REF_SCHEMA_KEY not in defs["LimaArm"]["properties"]["vm_host"]
-    assert defs["ProxmoxArm"]["properties"]["token_secret"][REF_SCHEMA_KEY]["default_template"] == "proxmox-token"
+    assert ref_extension(defs["LimaArm"]["properties"]["vm_host"]) is None
+    token_secret = ref_extension(defs["ProxmoxArm"]["properties"]["token_secret"])
+    assert token_secret is not None
+    assert token_secret["default_template"] == "proxmox-token"
+
+
+def test_a_marker_is_found_wherever_the_annotation_put_it() -> None:
+    """A natively optional marked field nests its marker in the branch the
+    ``Annotated`` sits on, which is pydantic's doing and predates the
+    owner-template widening that produces the same shape. A reader that
+    only looked at the property's top level would report "no reference
+    here" for a field that declares one, so the readers search."""
+    schema = Marked.model_json_schema()
+    assert "anyOf" in schema["properties"]["token"], "token is widened, so its marker is one level down"
+    assert REF_SCHEMA_KEY not in schema["properties"]["token"]
+    assert ref_extension(schema["properties"]["token"]) is not None
 
 
 def test_the_extension_key_is_ignored_by_conforming_validators() -> None:

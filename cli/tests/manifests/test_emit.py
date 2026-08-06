@@ -41,6 +41,7 @@ from agentworks.manifests.samples import SAMPLE_KINDS, sample_text
 from agentworks.plugins import Plugin, seated_plugin
 from agentworks.resources import KIND_REGISTRY
 from agentworks.schema import AgwModel
+from tests._emitted_schema import ref_extension
 from tests.plugins._fixtures import ConformingVMPlatform
 
 if TYPE_CHECKING:
@@ -106,12 +107,41 @@ def test_every_declarable_kind_is_emittable_and_no_capability_kind_is() -> None:
 
 def test_every_emitted_schema_meta_validates_as_2020_12() -> None:
     """The reference implementation checking our output against the
-    2020-12 metaschema: this is what catches a malformed ``$defs`` graph
-    or a ``$ref`` pointing at nothing, neither of which any assertion we
-    could write by hand would notice."""
+    2020-12 metaschema: what a hand-written assertion would not notice is
+    a keyword misused or misspelled anywhere in the tree."""
     for filename, schema in schema_set().items():
         assert schema["$schema"] == "https://json-schema.org/draft/2020-12/schema", filename
         Draft202012Validator.check_schema(schema)
+
+
+def test_every_ref_is_local_and_resolves() -> None:
+    """The check ``check_schema`` does NOT make, verified: a dangling
+    ``$ref`` passes meta-validation (``check_schema({"$ref":
+    "#/$defs/nope"})`` raises nothing), and ``iter_errors`` only catches
+    one on a branch some document happens to exercise.
+
+    A ``$defs`` graph nobody writes by hand is exactly where a dangling
+    pointer would go unseen, so it gets its own walk. Locality matters
+    too: an emitted file that reached outside itself would make an
+    editor's view depend on network or filesystem resolution.
+    """
+    for filename, schema in schema_set().items():
+        defs = schema.get("$defs", {})
+        for ref in _every_ref(schema):
+            assert ref.startswith("#/$defs/"), f"{filename}: non-local $ref {ref}"
+            assert ref.removeprefix("#/$defs/") in defs, f"{filename}: dangling $ref {ref}"
+
+
+def _every_ref(node: object) -> Iterator[str]:
+    if isinstance(node, dict):
+        ref = node.get("$ref")
+        if isinstance(ref, str):
+            yield ref
+        for value in node.values():
+            yield from _every_ref(value)
+    elif isinstance(node, list):
+        for item in node:
+            yield from _every_ref(item)
 
 
 def test_unknown_and_capability_kinds_are_clean_domain_errors() -> None:
@@ -323,10 +353,11 @@ def test_the_shapes_the_envelope_tolerates_are_not_schema_errors() -> None:
         assert _errors(schema, _a_document("admin-template", {}, expires=spelling)) == [], spelling
 
 
-def test_a_field_the_model_fills_is_not_required() -> None:
+def test_a_field_the_model_fills_is_neither_required_nor_non_nullable() -> None:
     """An unscoped github credential writes nothing but the tag, because
-    the marker's owner template supplies the token. Emitting ``token`` as
-    required would red-underline the shipped sample.
+    the marker's owner template supplies the token, and writing
+    ``token: null`` says the same thing out loud. Both load, so both have
+    to validate.
 
     ``AgwModel`` owns the correction; this is the end-to-end proof that it
     survives the splice into a hosting kind's document.
@@ -334,12 +365,43 @@ def test_a_field_the_model_fills_is_not_required() -> None:
     schema = document_schema("git-credential")
     assert "token" not in schema["$defs"]["GitHubConfig"]["required"]
     assert _errors(schema, _a_document("git-credential", {"provider": {"name": "github"}})) == []
+    assert _errors(schema, _a_document("git-credential", {"provider": {"name": "github", "token": None}})) == []
 
 
-def test_emitted_schemas_accept_every_bundled_sample_document() -> None:
-    """The automated half of the editor-association check: the documents
-    the real loader accepts also validate against what an editor would be
-    handed, against BOTH the per-kind schema and the any-kind one.
+def test_the_splice_keeps_an_optional_blocks_null_arm() -> None:
+    """``session-template``'s ``harness_integration`` is
+    ``CapabilityBlock | None = None``, and the splice replaces the field's
+    MODEL, not the rest of what the row declares about it.
+
+    Dropping the null arm would reject ``harness_integration: null``,
+    which loads, and would leave the property carrying ``default: null``
+    against a subschema that refuses null, so an editor's insert-default
+    would produce config the same schema flags.
+    """
+    schema = document_schema("session-template")
+    block = schema["$defs"]["SessionTemplateSpec"]["properties"]["harness_integration"]
+    assert block["default"] is None
+    assert {"type": "null"} in block["anyOf"]
+    assert _errors(schema, _a_document("session-template", {"harness_integration": None})) == []
+
+    # The non-optional sibling keeps its bare $ref: the null arm follows
+    # the row's declaration, it is not added to every spliced field.
+    platform = document_schema("vm-site")["$defs"]["VmSiteSpec"]["properties"]["platform"]
+    assert "anyOf" not in platform
+    assert platform["$ref"].startswith("#/$defs/")
+
+
+def test_emitted_schemas_accept_every_document_the_full_load_path_accepts(tmp_path: Path) -> None:
+    """The soundness contract, over the whole bundled sample set, checked
+    against the FULL load path rather than against decode.
+
+    ``load_manifests`` alone would not settle it: capability config is
+    checked at finalize, not at decode, so a document with an unknown key
+    inside a capability block passes the loader and is refused by
+    ``build_registry``. Running the registry build is what makes "the
+    loader accepts these" mean what the contract needs it to mean, and it
+    is why the two halves are ONE test over ONE set of documents rather
+    than two that could drift onto different inputs.
 
     The shipped plugins' platforms have to be seated, because the vm-site
     sample declares azure, aws, and proxmox sites and the emitted union
@@ -348,45 +410,64 @@ def test_emitted_schemas_accept_every_bundled_sample_document() -> None:
     every shipped plugin), which this module's own imports already did;
     the assert makes that dependency visible rather than lucky.
     """
+    from agentworks.bootstrap import build_registry
+    from agentworks.config import load_config
+
     assert {"azure-vm", "aws-ec2", "proxmox"} <= _platform_names()
-    envelope = envelope_schema()
-    for kind in SAMPLE_KINDS:
-        text = _uncomment(sample_text(kind))
-        documents = _documents(text)
-        per_kind = document_schema(kind)
-        for document in documents:
-            assert _errors(per_kind, document) == [], (kind, document.get("metadata"))
-            assert _errors(envelope, document) == [], (kind, document.get("metadata"))
 
-
-def test_the_sample_set_still_loads_through_the_real_loader(tmp_path: Path) -> None:
-    """The other half of the pairing above: what the schemas were just
-    asked to accept is what the loader accepts, so "sound
-    under-approximation" is a claim about the same documents."""
     resources = tmp_path / "resources"
     resources.mkdir()
     for kind in SAMPLE_KINDS:
         (resources / f"{kind}.yaml").write_text(_uncomment(sample_text(kind)))
-    manifests = load_manifests(resources)
-    assert not manifests.issues, manifests.issues
+    build_registry(load_config(_a_config(tmp_path), warn_issues=False))
+
+    envelope = envelope_schema()
+    for kind in SAMPLE_KINDS:
+        per_kind = document_schema(kind)
+        for document in _documents((resources / f"{kind}.yaml").read_text()):
+            assert _errors(per_kind, document) == [], (kind, document.get("metadata"))
+            assert _errors(envelope, document) == [], (kind, document.get("metadata"))
+
+
+def _a_config(root: Path) -> Path:
+    """A config whose plugins are enabled, so the sample's azure, aws, and
+    proxmox sites reach their platform's own model at finalize rather than
+    sitting disabled and unchecked."""
+    (root / "id.pub").write_text("ssh-ed25519 AAAA...")
+    (root / "id").write_text("-----BEGIN OPENSSH PRIVATE KEY-----")
+    cfg = root / "config.toml"
+    cfg.write_text(
+        f"""\
+[operator]
+ssh_public_key = "{(root / "id.pub").as_posix()}"
+ssh_private_key = "{(root / "id").as_posix()}"
+
+[plugins]
+system = ["azure", "aws", "proxmox"]
+"""
+    )
+    return cfg
 
 
 def test_reference_markers_reach_emitted_schema() -> None:
     """Emission and the field-reference stream are SIBLING derivations
     from the models, and the marker's own schema hook is the seam. A
     marked field's ``x-agw-ref`` arriving in an emitted document is what
-    says the two still read the same authored fact."""
-    from agentworks.schema import REF_SCHEMA_KEY
+    says the two still read the same authored fact.
 
+    Searched recursively rather than at the property's top level: a
+    templated field is widened with a null arm, and the marker rides the
+    constrained arm, exactly as it does for a natively optional one.
+    """
     schema = document_schema("git-credential")
     marked = [
-        prop
+        extension
         for definition in schema["$defs"].values()
         for prop in definition.get("properties", {}).values()
-        if REF_SCHEMA_KEY in prop
+        if (extension := ref_extension(prop)) is not None
     ]
     assert marked, "no x-agw-ref survived into the git-credential schema"
-    assert all(set(prop[REF_SCHEMA_KEY]) == {"kind", "usage", "default_template", "relationship"} for prop in marked)
+    assert all(set(extension) == {"kind", "usage", "default_template", "relationship"} for extension in marked)
 
 
 # -- Writing, and the modeline ---------------------------------------------

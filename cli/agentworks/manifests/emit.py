@@ -42,6 +42,7 @@ from agentworks.errors import ValidationError
 from agentworks.manifests.envelope import API_VERSION
 from agentworks.resources import KIND_REGISTRY
 from agentworks.schema import AgwModel, AgwRootModel
+from agentworks.schema._shape import unwrap_optional
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -302,6 +303,14 @@ def _spec_model(kind: str, row: type[DeclaredResource]) -> type[BaseModel]:
     generation call, so pydantic owns ``$defs`` naming, collisions, and
     reference integrity. A mis-merge would be a ``$ref`` resolving to the
     wrong model, which is a silent wrong answer rather than a crash.
+
+    The splice replaces the field's MODEL and nothing else about it. A row
+    whose capability block is optional (``session-template``'s
+    ``harness_integration: CapabilityBlock | None = None``) keeps its null
+    arm, because ``harness_integration: null`` loads: dropping it would
+    reject a document the loader accepts, and would leave the property
+    carrying ``default: null`` against a subschema that refuses null, so
+    an editor's insert-default would produce config the same schema flags.
     """
     descriptor = _hosted_capability(kind)
     if descriptor is None or descriptor.manifest_section is None:
@@ -310,14 +319,18 @@ def _spec_model(kind: str, row: type[DeclaredResource]) -> type[BaseModel]:
     from agentworks.capabilities.config import capability_config_union
 
     field_name = descriptor.manifest_section.naming_field
-    union = capability_config_union(descriptor.kind)
+    field = row.model_fields[field_name]
+    union: Any = capability_config_union(descriptor.kind)
+    _declared, optional = unwrap_optional(field.annotation)
+    if optional:
+        union = union | None
     return _built_model(
         f"{_class_name(kind)}Spec",
         base=row,
         doc=row.__doc__,
-        # The row's own FieldInfo, so the authored description survives
-        # onto the spliced property.
-        fields={field_name: (union, row.model_fields[field_name])},
+        # The row's own FieldInfo, so the authored description and default
+        # survive onto the spliced property.
+        fields={field_name: (union, field)},
     )
 
 

@@ -13,6 +13,7 @@ from pydantic import ValidationError
 
 from agentworks.errors import StateError
 from agentworks.schema import RefOwner, extract_references, validation_context
+from tests._emitted_schema import accepts_null, ref_extension
 
 from ._fixture_models import AzureLike, CredsLike, GithubLike, SiteLike, UnmarkedLike
 
@@ -104,11 +105,49 @@ def test_a_templated_field_is_not_required_in_emitted_schema() -> None:
     assert "token_secret" not in arm.get("required", ())
 
 
+def test_a_templated_field_is_nullable_in_emitted_schema() -> None:
+    """The other half of the same rule, and the half that was missing.
+
+    ``_fill_owner_templated_defaults`` treats an omission and an explicit
+    ``null`` alike, deliberately, so a schema that drops the field from
+    ``required`` and leaves it non-nullable still red-underlines
+    ``token: null``: the same instruction spelled out, and one the loader
+    accepts. Nested models and union arms too.
+    """
+    assert accepts_null(GithubLike.model_json_schema()["properties"]["token"])
+
+    principal = AzureLike.model_json_schema()["$defs"]["PrincipalLike"]
+    assert accepts_null(principal["properties"]["secret"])
+    assert not accepts_null(principal["properties"]["client_id"])
+
+    arm = SiteLike.model_json_schema()["$defs"]["ProxmoxArm"]
+    assert accepts_null(arm["properties"]["token_secret"])
+
+
+def test_a_widened_field_keeps_its_hover_text_and_its_marker() -> None:
+    """The null arm must not bury what an editor shows. Describing
+    keywords ride outside the ``anyOf`` and the constraints ride inside,
+    which is byte for byte what pydantic emits for a natively optional
+    field, so a widened property is indistinguishable from a declared
+    one.
+    """
+    token = GithubLike.model_json_schema()["properties"]["token"]
+    assert token["title"] == "Token"
+    constrained, null = token["anyOf"]
+    assert null == {"type": "null"}
+    assert constrained["type"] == "string"
+    marker = ref_extension(token)
+    assert marker is not None
+    assert marker["default_template"] == "git-token-{owner_name}"
+
+
 def test_an_untemplated_reference_field_stays_required_in_emitted_schema() -> None:
     """The correction is per MARKER, exactly like the filling: a
     reference field with nothing to default to is still the operator's to
-    write."""
-    assert CredsLike.model_json_schema()["required"] == ["secret"]
+    write, and still not nullable."""
+    schema = CredsLike.model_json_schema()
+    assert schema["required"] == ["secret"]
+    assert not accepts_null(schema["properties"]["secret"])
 
 
 def test_validation_and_extraction_derive_the_same_name() -> None:
