@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, ClassVar, Literal
 
+from pydantic import Field
+
 from agentworks.capabilities.harness_integration.base import HarnessIntegration, require_commands
 from agentworks.schema import AgwModel
 
@@ -35,20 +37,25 @@ class ShellConfig(AgwModel):
     remedy available to them. Pinned by
     ``tests/test_shell_integration.py``; any other integration is free to
     require what it likes, because a template has to opt into it.
+
+    Optional means DEFAULTED, not nullable (FR15): each field declares
+    the concrete value an omitted declaration means, so the integration
+    reads a string or a list rather than re-inventing "absent means
+    empty" at every read.
     """
 
     name: Literal["shell"]
     """The harness integration this config is for."""
 
-    command: str | None = None
-    """The command the session's pane runs. Omit for a bare login
-    shell."""
+    command: str = ""
+    """The command the session's pane runs. Empty (the default) is a bare
+    login shell."""
 
-    resume_command: str | None = None
-    """The command a resumed session's pane runs. Omit to rerun
-    ``command``."""
+    resume_command: str = ""
+    """The command a resumed session's pane runs. Empty (the default)
+    reruns ``command``."""
 
-    required_commands: list[str] | None = None
+    required_commands: list[str] = Field(default_factory=list)
     """Commands that must exist on the session's target before it starts.
     Inherited templates UNION this list rather than replacing it, so a
     child adding one never silently drops the parent's."""
@@ -124,18 +131,23 @@ class ShellIntegration(HarnessIntegration):
         return merged
 
     def start(self, ctx: RunContext) -> str:
-        """The pane command for ``session create``: ``command`` verbatim,
-        empty string when undeclared (a bare login shell)."""
-        return self.config.command or ""
+        """The pane command for ``session create``: ``command`` verbatim
+        (empty = a bare login shell)."""
+        return self.config.command
 
     def resume(self, ctx: RunContext) -> str:
         """The pane command for ``session resume``: ``resume_command``
-        when declared, else ``command`` (empty = login shell)."""
-        return self.config.resume_command or self.config.command or ""
+        when declared, else ``command`` (empty = login shell).
+
+        The remaining ``or`` is the cross-field derivation the model's
+        own description states, not a fallback to a literal: an empty
+        ``resume_command`` means "rerun ``command``", and ``command`` is
+        already resolved by the time it is read."""
+        return self.config.resume_command or self.config.command
 
     def _probe_target(self, transport: Transport) -> None:
         require_commands(
-            tuple(self.config.required_commands or ()),
+            tuple(self.config.required_commands),
             transport,
             harness_integration_name=self.name,
             template_name=self.owner_name,

@@ -25,6 +25,8 @@ import shlex
 import uuid
 from typing import TYPE_CHECKING, ClassVar, Literal
 
+from pydantic import Field
+
 from agentworks.capabilities.harness_integration.base import HarnessIntegration, require_commands
 from agentworks.errors import StateError
 from agentworks.schema import AgwModel
@@ -52,7 +54,7 @@ class ClaudeCodeConfig(AgwModel):
     model: str | None = None
     """Forwarded as ``--model``."""
 
-    extra_args: list[str] | None = None
+    extra_args: list[str] = Field(default_factory=list)
     """Appended to the command verbatim, last, so it can carry any flag
     this integration does not model."""
 
@@ -193,7 +195,7 @@ class ClaudeCodeIntegration(HarnessIntegration):
             tokens += ["--permission-mode", self.config.permission_mode]
         if self.config.model is not None:
             tokens += ["--model", self.config.model]
-        tokens += self.config.extra_args or []
+        tokens += self.config.extra_args
         return tokens
 
     def _transcript_exists(self, transport: Transport, sid: str) -> bool:

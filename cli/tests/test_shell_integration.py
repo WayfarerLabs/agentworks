@@ -158,6 +158,21 @@ def test_validation_accepts_the_known_fields_and_empty_config() -> None:
     _validate({})
 
 
+def test_omitted_fields_arrive_defaulted_not_none() -> None:
+    """FR15 on the most-omitted config there is: every field beyond the
+    tag is optional, and optional means the model hands the integration a
+    concrete value, never a ``None`` for it to fold to a literal."""
+    config = _harness_integration({}).config
+    assert (config.command, config.resume_command, config.required_commands) == ("", "", [])
+
+
+def test_validation_rejects_an_explicit_null() -> None:
+    """The corollary of a defaulted field: ``null`` is no longer a
+    spelling of "omitted". Omit the key instead."""
+    with pytest.raises(ConfigError, match="command: must be a string"):
+        _validate({"command": None})
+
+
 def test_shell_launch_note_is_silent() -> None:
     # shell has no resume-vs-new notion, so it adds no op-output note.
     assert _harness_integration().launch_note() is None

@@ -99,6 +99,8 @@ import re
 import shlex
 from typing import TYPE_CHECKING, ClassVar, Literal, NamedTuple
 
+from pydantic import Field
+
 from agentworks.capabilities.harness_integration.base import HarnessIntegration, require_commands
 from agentworks.errors import StateError
 from agentworks.plugins.codex.recorder import home_word, notify_value_word, provision_fragment, thread_tail
@@ -144,7 +146,7 @@ class CodexConfig(AgwModel):
     approvals_reviewer: str | None = None
     """Forwarded as a codex config override, TOML-encoded."""
 
-    writable_dirs: list[str] | None = None
+    writable_dirs: list[str] = Field(default_factory=list)
     """Extra directories the sandbox may write, each forwarded as
     ``--add-dir``. Inherited templates UNION this list rather than
     replacing it: it is an additive grant."""
@@ -156,7 +158,7 @@ class CodexConfig(AgwModel):
     """Turn OFF ``--strict-config``, for a target whose own
     ``config.toml`` a newer codex wrote."""
 
-    extra_args: list[str] | None = None
+    extra_args: list[str] = Field(default_factory=list)
     """Appended to the command verbatim, last, so it can carry (or
     override) any flag this integration does not model."""
 
@@ -754,7 +756,7 @@ class CodexIntegration(HarnessIntegration):
             # Encoded as a TOML basic string: see _toml_basic_string for
             # why raw interpolation would be a silent-injection hole.
             tokens += ["-c", f"{_APPROVALS_REVIEWER_KEY}={_toml_basic_string(self.config.approvals_reviewer)}"]
-        for item in self.config.writable_dirs or ():
+        for item in self.config.writable_dirs:
             tokens += ["--add-dir", item]
         if self.config.web_search is True:
             tokens.append("--search")
@@ -763,7 +765,7 @@ class CodexIntegration(HarnessIntegration):
     def _extra_arg_tokens(self) -> list[str]:
         """``extra_args`` as argv tokens, appended verbatim last so it can
         carry (or override) any flag the harness integration does not model."""
-        return list(self.config.extra_args or ())
+        return list(self.config.extra_args)
 
     def _recorded_thread_id(self, transport: Transport) -> str | None:
         """The uuid the notify recorder last wrote for this session, or

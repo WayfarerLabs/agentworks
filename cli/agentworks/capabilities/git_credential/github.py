@@ -50,18 +50,20 @@ class GitHubConfig(TokenSourcedConfig):
     name: Literal["github"]
     """The provider this config is for."""
 
-    repos: list[GitHubRepo] | None = None
+    repos: list[GitHubRepo] = Field(default_factory=list)
     """The repositories a fine-grained PAT covers, as "owner/name". A
     list even for one repository, because a fine-grained PAT may select
-    several."""
+    several. Empty (the default) is unscoped."""
 
     owner: GitHubName | None = None
     """The user or organization an owner-scoped PAT covers, including
-    repositories cloned ad hoc that no workspace declared."""
+    repositories cloned ad hoc that no workspace declared. ``None`` is
+    the one field here with nothing to default to: there is no owner
+    that means "no owner scope"."""
 
     @model_validator(mode="after")
     def _scope_is_repos_or_owner(self) -> GitHubConfig:
-        if self.repos is not None and self.owner is not None:
+        if self.repos and self.owner is not None:
             raise ValueError(
                 "repos and owner are mutually exclusive (a fine-grained PAT is scoped to one or the other)"
             )
@@ -172,6 +174,6 @@ class GitHubCredentialProvider(GitCredentialProvider):
         return HelperEntry(
             host="github.com",
             username=self.store_username,
-            repos=tuple(dict.fromkeys(self.config.repos or ())),
+            repos=tuple(dict.fromkeys(self.config.repos)),
             owner=self.config.owner,
         )
