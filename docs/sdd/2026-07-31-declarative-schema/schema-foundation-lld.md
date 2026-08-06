@@ -47,6 +47,18 @@ types it produces) and `resources/kind.py`. It has no import dependency on `capa
 `manifests/`, or `plugins/`, which is what lets those import it without touching the cycle
 discipline the descriptor table lives under (`capabilities/descriptor.py` module docstring).
 
+**The one edge that matters is the one this design creates**, and it runs in a single direction:
+`resources/schema/` imports `resources/reference.py`, never the reverse. `reference.py` is a leaf
+today (stdlib plus a `TYPE_CHECKING` block, `resources/reference.py:49-55`) and it stays one. That
+constraint is why `RefRelationship` is defined in `reference.py` rather than in the schema package
+(section 3.1): it is a DEFAULT on `ConfigReference`, so it is needed at runtime, and importing it
+from `resources/schema/markers.py` would make `reference.py` import the schema package whose
+`extract` module imports `ConfigReference` back. Anything reaching `reference` first would then die
+on a partially-initialized module, and it would only appear to work when the schema package happened
+to import first, which is the worst kind of cycle: order-dependent and invisible until it is not.
+The rule for this package is therefore stated positively: **`resources/schema/` may import
+`resources/reference.py`; nothing under `resources/schema/` may be imported by it.**
+
 ## 2. The base model
 
 ### 2.1 Spelling
@@ -55,14 +67,16 @@ discipline the descriptor table lives under (`capabilities/descriptor.py` module
 # resources/schema/base.py
 from pydantic import BaseModel, ConfigDict, RootModel
 
-_AGW_MODEL_CONFIG = ConfigDict(
-    extra="forbid",             # FR12: closed world, everywhere, no exceptions
-    frozen=True,                # FRD "frozen/immutable declaration objects remain the norm"
-    strict=True,                # no silent coercion; "8" is not 8, 1 is not True
-    validate_default=True,      # a declared default that violates its own field is a build error
-    use_attribute_docstrings=True,   # the authored description lives under the field (section 2.3)
-    revalidate_instances="always",   # a nested model instance is re-checked, never trusted
-)
+_SHARED = {
+    "frozen": True,                  # FRD "frozen/immutable declaration objects remain the norm"
+    "strict": True,                  # no silent coercion; "8" is not 8, 1 is not True
+    "validate_default": True,        # a declared default is checked, not trusted (section 2.2)
+    "use_attribute_docstrings": True,   # the authored description lives under the field (2.3)
+    "revalidate_instances": "always",   # a nested model instance is re-checked, never trusted
+}
+
+_AGW_MODEL_CONFIG = ConfigDict(extra="forbid", **_SHARED)   # FR12: closed world
+_AGW_ROOT_MODEL_CONFIG = ConfigDict(**_SHARED)              # no extra: see below
 
 
 class AgwModel(BaseModel):
@@ -75,38 +89,80 @@ class AgwModel(BaseModel):
 class AgwRootModel[T](RootModel[T]):
     """Base for a modeled surface whose value is NOT a mapping."""
 
-    model_config = _AGW_MODEL_CONFIG
+    model_config = _AGW_ROOT_MODEL_CONFIG
 ```
 
+**The two configs must be separate, and this is not a style preference.** `RootModel` refuses
+`extra` outright: its `__init_subclass__` raises `PydanticUserError` with code `root-model-extra`
+("RootModel does not support setting model_config['extra']"), so a shared config carrying
+`extra="forbid"` fails at class definition and `base.py` does not import. Splitting is the only
+spelling that runs. **Verified by execution against pydantic 2.13.4** (lead, 2026-08-06): defining a
+`RootModel[str]` subclass with a config carrying `extra="forbid"` raises exactly that
+`PydanticUserError`. The same run settled the strict-conversion question below: `int` IS accepted
+for a `float` field under `strict=True` (`M(x=1).x` yields `1.0`).
+
+Closed-world is not weakened by the split, because a root model has no keys to be unknown: FR12's
+"unknown keys are hard errors" is a property of MAPPING-shaped surfaces, and every mapping-shaped
+surface extends `AgwModel`. A root model's strictness is its root type, which `strict=True` already
+enforces: `AgwRootModel[str]` rejects a table, and a root model whose root is itself a nested
+`AgwModel` inherits that model's `extra="forbid"` for the mapping it wraps. So the closed-world
+guarantee reaches every key an operator can write, which is what FR12 needs.
+
 `AgwRootModel` is not speculative generality: it is required at 2.3 by the secret-backend kind.
-`MappingValue = str | dict[str, object] | Literal[False]` (`secrets/base.py:23`), so env-var's
+`MappingValue` is `str | dict[str, object] | Literal[False]` (`secrets/base.py:23`), so env-var's
 mapping is a bare string and onepassword's is a string OR a table
 (`plugins/onepassword/backend.py:281-300`). A `BaseModel` cannot be a bare string, so those two
-`mapping_model` registrations are root models or they are nothing. Recording the base here (rather
-than letting 2.3 invent one) is what keeps a single `model_config` in the codebase.
+`mapping_model` registrations are root models or they are nothing. (The `Literal[False]` arm is NOT
+part of what a backend model has to express: the generic opt-out is filtered by the caller before
+any backend sees its mapping, `secrets/base.py:133-134`. 2.3 should model `str` and `str | table`
+respectively, and leave `False` where it is handled.) Recording the base here rather than letting
+2.3 invent one is what keeps ONE set of shared settings, with the single documented divergence
+above.
 
 ### 2.2 What each setting buys, and the one carve-out
 
-- **`extra="forbid"`** is FR12 in one line, and it is universal: kind specs, capability config,
-  nested models, and root models all forbid. This retires `_warn_unexpected_keys`
-  (`config/loaders_core.py:52`), whose warn-and-load-anyway behavior is the footgun FR12 names. The
-  retirement itself happens kind by kind in 2.5; 2.1 only makes the replacement exist.
-- **`frozen=True`** matches the frozen-dataclass discipline the registry already relies on, and it
-  makes models hashable, which the union caches in 2.3 will want.
-- **`strict=True`** is the significant call. The manifest frontend is YAML through pyyaml's safe
-  loader, which already yields real `int` / `float` / `bool` / `str` / `None` / `list` / `dict`, so
-  there is nothing legitimate to coerce: a quoted `"8"` where an integer belongs is an operator
-  mistake, and lax mode would silently accept it. Today's hand-rolled validators are all strict in
-  exactly this sense (`isinstance(value, str)`, `isinstance(value, bool)`, see
-  `plugins/codex/harness_integration.py:361-381`), so strict mode preserves shipped behavior rather
-  than tightening it.
-  - **Carve-out, and its rule.** Strict mode's exact `int` acceptance for `float` fields is a
-    pydantic conversion-table detail to VERIFY at implementation, not to assume. Wherever a field
-    genuinely needs a lenient rule, the opt-in is per field
+- **`extra="forbid"`** is FR12 in one line, and it reaches every surface that HAS keys: kind specs,
+  capability config, and nested models (root models carry it through whatever `AgwModel` their root
+  wraps, section 2.1). This retires `_warn_unexpected_keys` (`config/loaders_core.py:52`), whose
+  warn-and-load-anyway behavior is the footgun FR12 names. The retirement itself happens kind by
+  kind in 2.5; 2.1 only makes the replacement exist.
+- **`frozen=True`** matches the frozen-dataclass discipline the registry already relies on, which is
+  the FRD's stated constraint and the whole justification. (Not a hashability argument: pydantic
+  generates `__hash__` from field values, so any model with a `list` field raises `TypeError` when
+  hashed, and half the 2.3 inventory has one, `extra_args`, `required_commands`, `writable_dirs`,
+  `instance_types`. 2.3's union cache keys on a TYPE, which needs no instance hashability.)
+- **`strict=True` is a deliberate TIGHTENING, taken knowingly.** The manifest frontend is YAML
+  through pyyaml's safe loader, which already yields real `int` / `float` / `bool` / `str` / `None`
+  / `list` / `dict`, so there is nothing legitimate left to coerce: a quoted `"8"` where an integer
+  belongs is an operator mistake and lax mode would silently accept it.
+  - For most of the inventory this preserves shipped behavior exactly, because today's hand-rolled
+    validators are already `isinstance`-strict in the same sense: codex, claude-code, shell, lima,
+    github, azdo, env-var, and onepassword all type-check with `isinstance`
+    (`plugins/codex/harness_integration.py:361-381` is representative), and aws and azure even
+    exclude `bool` from `int`, which is pydantic's strict semantics.
+  - **It is a real break for proxmox, and the doc says so rather than claiming otherwise.**
+    `plugins/proxmox/platform.py:93-94` validates `template_vmid` with
+    `int(str(config["template_vmid"]))`, so `template_vmid: "9000"` loads today and becomes an error
+    against a strict `int` field. And `api_url`, `node`, `token_id`, `storage`, `bridge`, `pool`,
+    and `verify_ssl` get NO type check at all today (`_REQUIRED_KEYS` is a presence check,
+    `platform.py:90-92`), with `verify_ssl` consumed as `bool(self._cfg("verify_ssl", True))`
+    (`platform.py:131`), so `verify_ssl: "no"` currently means TRUE and becomes an error. Both are
+    breaks worth taking rather than papering over with a `Field(strict=False)` carve-out: the second
+    one is a config that silently does the opposite of what the operator wrote, which is exactly
+    FR12's stated target. **This needs an operator-facing breaking-change note** when the proxmox
+    model lands in 2.3 (quote your numbers, spell your booleans), and 2.3's commit carries the
+    marker, exactly as phases 1 and 2.4 do for their breaks. The plan now carries this as its own
+    2.3 box (added by the lead, 2026-08-06).
+  - **The float question resolves cleanly:** `int` IS accepted for a `float` field in strict mode,
+    so `memory: 8` validates against `memory: float` with no carve-out needed. Where a field
+    genuinely wants a lenient rule anyway, the opt-in is per field
     (`Annotated[float, Field(strict=False)]`) with a comment saying why, never a relaxation of
-    `_AGW_MODEL_CONFIG`. One global posture, local exceptions that a reader can see.
-- **`validate_default=True`** turns a wrong declared default into a model-definition error instead
-  of a runtime surprise. Cheap, and FR15 makes defaults load-bearing.
+    `_AGW_MODEL_CONFIG`. One global posture, local exceptions a reader can see.
+- **`validate_default=True`** means a declared default is validated rather than trusted. Note what
+  it does NOT do: it does not fire at class definition, it fires when a model is validated with the
+  field omitted, so a wrong default surfaces the first time a document leaves that field out (which,
+  for a defaulted field, is the common case and usually the first test). FR15 makes defaults
+  load-bearing, so having them checked at all is what matters.
 - **`revalidate_instances="always"`** exists so that binding a validated model instance at construct
   (Component 2) cannot smuggle an unvalidated nested instance past the boundary. It costs a re-walk
   of a few small documents.
@@ -180,12 +236,16 @@ Checked at authoring time (2026-08-06, PyPI): **latest stable is pydantic 2.13.4
 Two spellings over one record, as `Annotated` metadata:
 
 ```python
-# resources/schema/markers.py
+# resources/reference.py, beside ResourceReference and ConfigReference (see section 1)
 class RefRelationship(Enum):
     """What the referring model MEANS by pointing at the target."""
 
     USES = "uses"          # a runtime need: the target must resolve for the referrer to work
     INHERITS = "inherits"  # source composition: the target's declaration is merged in (FR17)
+
+
+# resources/schema/markers.py
+from agentworks.resources.reference import RefRelationship
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -223,13 +283,17 @@ non-default-after-default ordering problem; the repo already uses `kw_only` froz
 
 Settled details:
 
+- **`RefRelationship` is defined in `resources/reference.py`, not in the schema package.** It is the
+  reference vocabulary's word, both the marker and `ConfigReference` need it, and only this
+  direction avoids the cycle section 1 describes. `markers.py` imports it; `reference.py` imports
+  nothing of ours.
 - **`usage` is required on both markers**, with no default. It is the prose that ends up on the
   target's `ReferenceEntry` and in `agw resource describe`'s "Referenced by:" section
   (`resources/reference.py:71-77`), so a marker without it degrades an operator-visible surface.
   Every producer today supplies one ("the auth token", "the Azure service-principal client secret",
   "the Proxmox API token"), so requiring it preserves shipped output.
 - **`relationship` is carried, not consumed, at 2.1.** The plan's 2.3 requirement is explicit that
-  FR17 must key on the RELATIONSHIP and not on the target kind (`plan.md:268-274`:
+  FR17 must key on the RELATIONSHIP and not on the target kind (`plan.md:289-295`:
   `isinstance(ref, TemplateReference)` really means "points at a template" and would misclassify a
   future uses-a-template edge). The marker is the only layer that can express the distinction, so it
   expresses it here; which traversals filter on it is 2.3's and 2.5's call. Carrying one defaulted
@@ -361,10 +425,23 @@ Enforced by construction, not by a blanket guard:
   substitution over a pre-validated placeholder set (section 5.2). It parses nothing, imports
   nothing lazily, and invokes NO user code: it reads `model_fields` metadata and raw values, never a
   validator, never `model_validate`, never a capability method.
-- Recursion into nested models carries a visited-set of model classes, so a self-referential model
-  definition terminates instead of overflowing.
+- **Recursion carries a PATH-SCOPED visited set: push the model class on descent, pop on return.**
+  Not an accumulating set. An accumulating set terminates self-reference just as well but silently
+  drops diamonds: a model with `primary: CredsModel` and `fallback: CredsModel` would walk the first
+  and skip the second, so `fallback`'s secret would never become an edge. That is precisely the
+  silent-missing-edge outcome this section argues is worse than a crash, and it would defeat FR18
+  one indirection down. Path scoping cuts only a genuine cycle (a model reachable from itself),
+  which is the only case that cannot terminate.
 - Every value read from the blob is checked before use; an edge whose NAME cannot be derived (the
   field is present but is not a non-empty string) is omitted, exactly as today.
+- **An incomplete model contributes nothing rather than raising.** `model_fields` raises on a model
+  with an unresolved forward reference, and the walker recurses into nested classes it discovers
+  from annotations, so it can reach a model it did not build. It therefore checks
+  `__pydantic_complete__` first, attempts `model_rebuild(raise_errors=False)` once, and contributes
+  nothing if the model is still incomplete. That branch should be unreachable in practice, and 2.3's
+  registration conformance is what makes it so: a registered config model with an unresolved forward
+  reference is refused at registration, where the author can see it, rather than degrading a graph
+  edge at runtime. Recorded here as a requirement ON 2.3, not as a hope.
 
 **Deliberately NOT a blanket `except Exception`.** A catch-all would convert a bug in the walker
 into silently missing graph edges, which is a worse failure than a crash: the graph would build,
@@ -387,6 +464,15 @@ Per field of `model_cls.model_fields`, in declaration order:
 - **Discriminated union field**: read the raw tag; when it names an arm, recurse into that arm's
   model; an absent or unknown tag contributes nothing.
 - **Unmarked field**: nothing, at any depth.
+- **A root model** (`model_cls` is an `AgwRootModel`, so its only `model_fields` entry is `root`):
+  **contributes no references, by construction.** The signature was widened to `type[BaseModel]` so
+  root models pass rather than trip an assertion, and this is the honest answer for what happens
+  next: no shipped backend mapping implies an agentworks resource (env-var's mapping is an env var
+  name and onepassword's is an external `op://` reference, both returning `()` today at
+  `secrets/env_var.py:65-69` and `plugins/onepassword/backend.py:303-307`), so there is nothing to
+  extract and nothing to invent. If a future backend's mapping does name a resource, the answer is
+  to mark the field inside a root model whose root IS a nested `AgwModel`, which the nested-model
+  rule above already walks; the bare-scalar root carries no references.
 
 Two notes. The discriminated-union arm is selected from the RAW tag value, never from the capability
 registry: the union type carries its own arms, so the walk stays a pure function of the model
@@ -406,7 +492,7 @@ Two consequences worth stating so a later step does not erode them:
 
 - **The two-stage extraction 2.3 needs is a CALLER concern, not a walker parameter.** The HLA has
   structural refs extracted per declared blob (feeding the graph the merge walks) and secret refs
-  read off the effective blob (`hla.md:219-222`). Both are the same function called with a different
+  read off the effective blob (`hla.md:229-231`). Both are the same function called with a different
   blob. If someone proposes an `effective: bool` parameter, that is door (a) closing; the answer is
   two call sites.
 - **The layer-stack merge (FR21 door b) is likewise not here.** Merging is 2.3's, over blobs, and
@@ -444,12 +530,24 @@ box for #311.
 ### 5.2 The owner template: vocabulary, validation, and where it is applied
 
 **Placeholder vocabulary, closed:** `{owner_name}` and `{owner_kind}`. That is the whole set. A
-template is checked when the MARKER is constructed (`RefMarker.__post_init__`), by parsing its
-replacement fields with `string.Formatter().parse` and rejecting anything outside the set with a
-`StateError` naming the offending placeholder. Two things follow: an author's typo fails at import
-of the module that declares the model (loud, immediate, before any registration), and rendering at
-extraction time cannot raise, which is what lets section 4.2 promise totality without a guard. This
-is the invariant-in-code rule: the vocabulary is enforced, not documented.
+template is checked when the MARKER is constructed (`RefMarker.__post_init__`), by parsing it with
+`string.Formatter().parse` and raising `StateError` on anything it cannot render. `parse` yields
+`(literal, field_name, format_spec, conversion)` per replacement, and **all three of the last fields
+are checked, not just the name**:
+
+- `field_name` outside `{owner_name, owner_kind}` is rejected, naming the offending placeholder.
+- a non-empty `format_spec` is rejected: `"git-token-{owner_name:d}"` has a legal field name and
+  raises `ValueError` at `str.format` time, which is the one thing section 4.2 promises cannot
+  happen inside the extractor.
+- a non-`None` `conversion` (`{owner_name!r}`) is rejected for the same reason, and because a
+  quote-wrapped secret name is never what an author meant.
+- an empty or positional `field_name` (`"{}"`, `"{0}"`) is rejected: it is `IndexError` at render
+  time under the keyword-only substitution the extractor uses.
+
+Two things follow: an author's mistake fails at import of the module that declares the model (loud,
+immediate, before any registration), and rendering at extraction time cannot raise, which is what
+lets section 4.2 promise totality without a guard. This is the invariant-in-code rule: the
+vocabulary is enforced, not documented.
 
 **Where the template is applied: at every point that needs the name, from one declaration.**
 
@@ -476,9 +574,10 @@ provider's `secret_name` is a plain field read off the validated model. The
 (`capabilities/git_credential/base.py:151-158`) is deleted, not ported, because the model layer has
 already resolved the name (FR15: "consumers error on unset rather than defaulting locally").
 
-**Not doing this, and why.** No `{owner_display}` placeholder: a secret name containing `/` is
-invalid (`resources/reference.py:87` addresses are `kind/name` pairs and names cannot contain `/`),
-so offering the placeholder would only let an author write a name that can never resolve.
+**Not doing this, and why.** No `{owner_display}` placeholder: resource names cannot contain `/`
+(`capabilities/git_credential/base.py:53-55` states it outright, which is what makes its
+owner-string split exact), so a template rendering `git-credential/prod` into a secret name could
+only produce a name that never resolves.
 
 ## 6. `iter_field_docs`
 
@@ -497,24 +596,58 @@ class FieldDoc:
     default: object                # _UNSET when there is none
     default_template: str | None   # the owner-templated default, unrendered (no owner here)
     description: str | None
+    choices: tuple[object, ...]    # Literal / Enum members, in declaration order; () when open
+    constraints: Mapping[str, object]   # normalized: {"min_length": 1, "ge": 0, "pattern": "..."}
     ref: RefMarker | None          # the field's reference semantics, verbatim
     nested_model: type[BaseModel] | None    # set when this field opens a nested block
     union_arms: tuple[UnionArm, ...]        # empty unless the field is a discriminated union
 
 
 @dataclass(frozen=True, kw_only=True)
+class ModelDoc:
+    """A model's own identity, for the heading above its fields."""
+
+    model: type[BaseModel]
+    title: str                     # the model's schema title
+    description: str | None        # first paragraph of the class docstring
+
+
+@dataclass(frozen=True, kw_only=True)
 class UnionArm:
     tag: str                       # the discriminator value ("lima", "azure-vm", ...)
-    model: type[BaseModel]
+    doc: ModelDoc                  # the arm's own identity, so a list of arms reads as prose
 
 
 def iter_field_docs(model_cls: type[BaseModel]) -> Iterator[FieldDoc]: ...
+
+
+def model_doc(model_cls: type[BaseModel]) -> ModelDoc: ...
 
 
 def render_type(annotation: object) -> str:
     """The operator-facing type rendering ("string", "list of string",
     "integer"). Separate so a presenter may use it or ignore it."""
 ```
+
+`choices`, `constraints`, and `ModelDoc` are here because this record is a cross-SDD coordination
+point (section 6.2), and widening it later means renegotiating with the onboarding child SDD rather
+than editing a file. All three have concrete day-one consumers:
+
+- **`choices`**: `Literal` and `Enum` fields are already all over the 2.3 inventory (aws `arch`,
+  claude-code `permission_mode`, and every union discriminator is itself a `Literal`). Without this
+  field, each of the three presenters calls `typing.get_args` on the annotation itself, three
+  implementations of one thing, or `render_type` bakes the alternatives into a string the guide
+  cannot re-lay-out. Both outcomes are the drift FR13 exists to prevent.
+- **`constraints`**: normalized to plain keys and plain values (`min_length`, `max_length`, `ge`,
+  `gt`, `le`, `lt`, `pattern`, `multiple_of`), so a presenter never has to know that pydantic stores
+  them as `annotated_types.Ge` objects. The bridge's `string_too_short` normalization (section 7.4)
+  implies models will carry these, and an operator reading a field reference that omits "at least 1
+  character" is reading an incomplete reference.
+- **`ModelDoc`**: describe and the guide both want a heading with the model's own prose, and an arm
+  handle carrying only `(tag, model)` forces every presenter to dig the docstring out itself. Making
+  `UnionArm` carry a `ModelDoc` rather than a bare class means "one arm rendered, alternatives
+  listed" (FR10) can list the alternatives WITH their one-line descriptions, which is the actual
+  operator need.
 
 ### 6.2 Settled behavior
 
@@ -526,18 +659,26 @@ def render_type(annotation: object) -> str:
   rather than a bare name.
 - **Union arms do NOT expand inline.** The field yields its arms as handles, and the presenter
   decides: FR10 wants one arm rendered with the alternatives listed, describe may want all of them,
-  the guide may want a table. Recursion is `iter_field_docs(arm.model)`. Keeping the choice out of
-  the walker is the seam that lets four presentations differ without four walkers.
+  the guide may want a table. Recursion is `iter_field_docs(arm.doc.model)`. Keeping the choice out
+  of the walker is the seam that lets four presentations differ without four walkers.
 - **The record is presentation-free.** It carries the annotation, not a rendered string;
   `render_type` is a separate exported helper so a presenter may adopt or replace our rendering. No
   markdown, no ANSI, no CLI vocabulary anywhere in the record. This is a hard rule, because of the
   next point.
 - **The guide is an EXTERNAL consumer.** The roadmap's onboarding child SDD composes `agw guide`
-  topic pages from these same sources (`hla.md:292-302`, `plan.md:406-415`). So `FieldDoc` is a
+  topic pages from these same sources (`hla.md:301-311`, `plan.md:444-452`). So `FieldDoc` is a
   shared source, not a CLI-layer detail: it lives in `resources/schema/`, and any change to its
   shape is a cross-SDD coordination point, not a local refactor. That is also why `ref` carries the
   marker itself rather than a flattened copy of its fields: one vocabulary for both consumers.
-- Same visited-set recursion guard as the extractor, for the same reason.
+- **Same PATH-SCOPED recursion guard as the extractor** (push on descent, pop on return), and it
+  matters here for the same reason in a different costume: an accumulating visited set would render
+  a nested block for `primary: CredsModel` and then emit NOTHING for `fallback: CredsModel`, so the
+  generated sample would be missing a whole section of the config an operator has to write.
+- **An incomplete model raises `StateError` here**, unlike the extractor, which contributes nothing
+  (section 4.2). The asymmetry is deliberate: extraction is total by contract and its caller cannot
+  handle an exception, while `iter_field_docs` is a developer-facing walker whose caller is a
+  renderer, and a silently truncated field reference is worse than a loud failure at the moment
+  someone tries to render a model that cannot be built.
 
 ### 6.3 Three presentations, plus emission as a sibling
 
@@ -556,7 +697,7 @@ appear in BOTH the stream and the emitted schema. See section 11 for the HLA wor
 
 ### 7.1 The call: FOLD it into this LLD
 
-The plan permits it if small (`plan.md:236`). It is small, and more importantly it is not separable
+The plan permits it if small (`plan.md:247`). It is small, and more importantly it is not separable
 from this document. Reasons, in order of weight:
 
 1. **The bridge's input is defined here.** Its whole job is translating the `ValidationError` that
@@ -598,9 +739,11 @@ def config_error_from(
     *,
     model_cls: type[BaseModel],
     owner: RefOwner,
+    location: SourceLocation | None = None,
     hint: str | None = None,
 ) -> ConfigError:
-    """The same rendering, aggregated into the ConfigError the caller raises."""
+    """The same rendering, framed by ``location`` and aggregated into the
+    ConfigError the caller raises (section 7.4)."""
 ```
 
 **The collision, flagged because it will bite otherwise:** `agentworks.errors.ValidationError`
@@ -627,9 +770,10 @@ discriminated union inserting the selected arm's tag as a segment. Rendering rul
   the tag only when it really is one.
 - Prefix with the owner: the final line is `<owner.display>.<path>: <message>`, e.g.
   `vm-site/lab.platform.vm_host: must be a string`. That is FR12's "owner-scoped framing
-  (`<owner>.<field>: ...`)" and it is within a word of today's shape
-  (`f"{owner}.{key} must be a non-empty string"`, `plugins/aws/platform.py:346`). We adopt the FRD's
-  colon form uniformly rather than preserving each validator's private phrasing.
+  (`<owner>.<field>: ...`)" and it is a punctuation mark away from today's shape
+  (`f"{owner}.{key} is required for the aws-ec2 platform and must be a non-empty string"`,
+  `plugins/aws/platform.py:348`). We adopt the FRD's colon form uniformly rather than preserving
+  each validator's private phrasing.
 - A root-model error has an empty loc, so the line is `<owner.display>: <message>`.
 
 ### 7.4 Message normalization, and framing by SourceLocation
@@ -650,25 +794,62 @@ correct one. Day-one entries, chosen to match shipped phrasing:
 
 The last entry is the capability-name case; it is listed here because the bridge owns the rendering,
 but the registered-options text only becomes real in 2.3 when unions are assembled, and R9.2's hard
-finalize error for an unregistered name is unchanged either way (`frd.md:152-155`).
+finalize error for an unregistered name is unchanged either way (`frd.md:153-157`).
 
-**Aggregation.** Pydantic reports every error in one exception; today's validators raise on the
-first. The bridge renders ALL of them, one per line, in `loc` order, capped at **10** lines with a
-trailing `... and N more` (a wholesale-wrong document should not produce a wall of text). This is a
-strict improvement over first-error-only and matches phase 1's aggregated-error style.
+**Aggregation, and why the bridge must own the location framing.** Pydantic reports every error in
+one exception; today's validators raise on the first. Rendering all of them is a strict improvement
+and matches phase 1's aggregated-error style, but it cannot be combined with leaving
+`SourceLocation` framing at the call sites, because **both existing framings assume a single-line
+message**:
 
-**`SourceLocation` framing stays at the call sites, unchanged.** There are TWO framings on main and
-the bridge unifies neither:
+- Decode frames as a PREFIX on the string it is handed: `f"{location.file}:{location.line}: {msg}"`
+  (`manifests/envelope.py:52-53`). Given a 5-line body, lines 2 to 5 come out unlocated.
+- The finalize validate pass stringifies the whole exception and appends the origin:
+  `f"{exc} ({format_origin_location(origin)})"` (`resources/registry.py:513-521`). Given a 5-line
+  body, the location is glued to the LAST line.
 
-- Decode-time frames as a PREFIX: `f"{location.file}:{location.line}: {message}"`
-  (`manifests/envelope.py:52-53`).
-- The finalize validate pass re-attaches location as a SUFFIX from the resource's origin:
-  `f"{exc} ({format_origin_location(origin)})"` (`resources/registry.py:513-521`).
+So an unqualified "the bridge aggregates, the call sites frame" would regress FR12's "file/position
+context at least as good as today's" as a direct consequence of an improvement, which is not a trade
+worth making. **Settled: the bridge frames the batch itself**, which is also what the HLA already
+specifies ("the manifest document's `SourceLocation` (file, line) frames the whole batch",
+`hla.md:270-274`). `config_error_from` takes the location:
 
-The bridge produces the owner-framed BODY and each site frames it as it frames errors today, so 2.3
-and 2.5 cannot regress the file/position context FR12 requires ("at least as good as today's").
-Field-level line numbers within a document are explicitly not promised, matching the HLA
-(`hla.md:262-265`).
+```python
+def config_error_from(exc, *, model_cls, owner, location: SourceLocation | None = None,
+                      hint: str | None = None) -> ConfigError: ...
+```
+
+and renders:
+
+- **One error, with a location:** `<file>:<line>: <owner>.<path>: <message>`. Byte-identical in
+  shape to what decode produces today, so the common case changes nothing.
+- **One error, no location:** `<owner>.<path>: <message>`.
+- **Several errors:** a located header naming the count, then one indented line per error:
+
+  ```text
+  ~/.config/agentworks/resources/sites.yaml:12: vm-site/lab: 3 problems
+    platform.vm_host: must be a string
+    platform.cpus: is required
+    platform.regions: unknown field; expected one of: cpus, memory, region, vm_host
+  ```
+
+  Every line is under one location header, which is exactly what neither call-site framing can do.
+
+The cap is **10 rendered lines** with a trailing `... and N more`, and the header always states the
+TRUE count, so a capped batch never hides how bad the document is.
+
+**What this asks of 2.3 and 2.5, named so it is not missed.** Bridge-produced errors must not also
+pass through the finalize pass's suffix wrapper (`resources/registry.py:513-521`), or they get
+framed twice. That wrapper still has to exist during the transition, because hand-rolled
+`ConfigError`s from unmigrated validators still arrive unframed. So 2.3 calls the bridge with the
+location it already has, inside a branch that does not re-wrap, and **that branch is deleted when
+the last hand-rolled validator dies in 2.5**, leaving one framing for everything. This is a bounded
+fork with a stated deletion trigger, which is the price of not regressing the multi-error case; the
+alternative (keeping two divergent framings forever) is the half-migrated state that costs more.
+
+Field-level line numbers within a document remain explicitly out of scope, matching the HLA
+(`hla.md:271-274`): the header carries document-level `file:line`, each line carries the full field
+path.
 
 ### 7.5 Severity: there is nothing to plumb
 
@@ -713,15 +894,26 @@ and its guide-shared status (into a `resources/schema/README.md` or the package 
 onboarding child SDD will cite it), and the totality contract for `extract_references` (into its own
 docstring, where it already belongs).
 
+**One of those is not just a promotion candidate, it is a guardrail that must survive in code:**
+section 4.4's rule that two-stage extraction is a CALLER concern and that an `effective: bool`
+parameter would close FR21 door (a). It goes into `extract_references`'s own docstring at 2.9, in
+those terms, because the next person to want declared-versus-effective behavior will be reading that
+signature and not this file, and this file will be gone.
+
 ## 9. Test plan
 
 `tests/resources/schema/`, unit-level throughout: 2.1 wires nothing, so there is no integration
 surface to exercise yet.
 
-**Base model.** Unknown key rejected on a model, a nested model, and a root model. Frozen: mutation
-raises. Strict: `"8"` is not accepted for `int`, `1` is not accepted for `bool`, `None` is not
-accepted for a non-optional field. `validate_default`: a model declaring a default that violates its
-own field fails at class definition. Attribute docstrings surface as descriptions, and an explicit
+**Base model.** Unknown key rejected on a model and on a nested model. For root models the assertion
+is the positive one (section 2.1), not an unknown-key one, since a `RootModel[str]` has no keys:
+`AgwRootModel[str]` rejects a table, and an `AgwRootModel` wrapping a nested `AgwModel` rejects an
+unknown key INSIDE that mapping, which is what makes closed-world reach every key an operator can
+write. Frozen: mutation raises. Strict: `"8"` is not accepted for `int`, `1` is not accepted for
+`bool`, `None` is not accepted for a non-optional field, and `8` IS accepted for `float` (pinning
+the resolved question in section 2.2 so nobody re-opens it). `validate_default`: a model whose
+declared default violates its own field raises on `model_validate({})`, the omission case, NOT at
+class definition. Attribute docstrings surface as descriptions, and an explicit
 `Field(description=...)` wins over a docstring.
 
 **Markers and the JSON Schema round trip.** For a fixture model with a scalar `SecretRef`, a
@@ -745,6 +937,13 @@ construction, naming the placeholder.
   this step's scope and a seeded generator is reproducible and sufficient. Recorded as a deliberate
   choice, not an oversight.
 
+**The diamond regression (the path-scoped guard, section 4.2).** A fixture model with two sibling
+fields of the SAME nested model type (`primary: CredsModel`, `fallback: CredsModel`), each with a
+`SecretRef`, extracts BOTH secrets. This is the test that fails under an accumulating visited set,
+and it is written as a named regression rather than folded into the walk tests, because the failure
+it guards is silent. Its `iter_field_docs` twin asserts both nested blocks are yielded, in order,
+with distinct paths.
+
 **`extract_references` parity with today.** One test per shipped derivation, asserting the new
 walker returns what the old classmethod returns for the same blob: github token (absent, overridden,
 malformed), azure `service_principal.secret` (absent table, absent key, malformed key), aws
@@ -758,19 +957,26 @@ second `SecretRef` field yields a second reference; both with no edit outside th
 is the test that would fail if anyone reintroduced string-scraping.
 
 **`iter_field_docs`.** Declaration order preserved; nested paths correct and depth-first; union arms
-yielded as handles and NOT expanded inline; `required` / `default` / `_UNSET` reported correctly
-including a field whose declared default is `None`; `render_type` output for scalar, optional, list,
-and union annotations; a self-referential model terminates.
+yielded as handles and NOT expanded inline, each carrying its arm's `ModelDoc` title and
+description; `required` / `default` / `_UNSET` reported correctly including a field whose declared
+default is `None`; `choices` populated for a `Literal` field, an `Enum` field, and a discriminator,
+and empty for an open `str`; `constraints` normalized to plain keys for `min_length`, `ge`, and
+`pattern` (asserting no `annotated_types` object leaks into the record); `render_type` output for
+scalar, optional, list, and union annotations; a self-referential model terminates; an incomplete
+model raises `StateError`.
 
 **The bridge (this is step 2.2's box, listed here because the design is here).** The FRD's
 representative-mistakes corpus as a pinned test: unknown key (asserting the valid-field list
-appears), wrong type, missing required field. Each asserts owner framing (`<owner>.<path>: ...`) and
-that the caller's file/position framing composes without doubling. Plus: the union-arm tag segment
-is dropped from the rendered path; an unmapped pydantic error type falls through verbatim; the
-10-line cap emits `... and N more`; `render_validation_error` raises nothing and returns the same
-text the exception carries. The bad-capability-name entry lands in 2.3 (it needs assembled unions)
-and the old-sibling-shape entry in 2.4, exactly as the plan sequences them (`plan.md:242-243`,
-`plan.md:334-336`).
+appears), wrong type, missing required field. Each asserts owner framing (`<owner>.<path>: ...`).
+Framing is tested at BOTH cardinalities, since that is where the design nearly broke (section 7.4):
+a single error with a location renders as one line whose prefix matches decode's shipped shape, and
+a MULTI-error batch renders a located header plus indented lines with **every** line reachable from
+one location (the assertion is that no error line is unlocated, not merely that nothing is doubled).
+Plus: the header states the true count when the 10-line cap trims the body; the union-arm tag
+segment is dropped from the rendered path; an unmapped pydantic error type falls through verbatim;
+`render_validation_error` raises nothing and returns the same lines the exception carries. The
+bad-capability-name entry lands in 2.3 (it needs assembled unions) and the old-sibling-shape entry
+in 2.4, exactly as the plan sequences them (`plan.md:261-264`, `plan.md:371-373`).
 
 **Gate.** `mypy .` strict green with the pydantic plugin enabled is itself a test of the base
 model's typing behavior, and it is the one that catches a model shape that cannot be expressed under
@@ -784,56 +990,64 @@ window and no ordering hazard.
 1. **Dependency and tooling.** Pin pydantic (re-check latest stable first), enable the mypy plugin,
    promote `pydantic` to the root cspell dictionary. Gate green with no code change.
 2. **`base.py` plus tests.** `AgwModel`, `AgwRootModel`, the shared `ConfigDict`.
-3. **`markers.py` plus tests.** Markers, template-vocabulary validation, the JSON Schema hook and
-   its round-trip test.
+3. **`markers.py` plus tests.** `RefRelationship` into `resources/reference.py` (section 1's
+   direction rule), the markers, template-vocabulary validation including the format-spec and
+   conversion rejections, the JSON Schema hook and its round-trip test.
 4. **`extract.py` plus tests.** `RefOwner`, `extract_references`, the `ConfigReference.relationship`
-   field, the totality and parity suites, the FR18 structural test. The templated-default validator
-   on the base model lands here too (it and the extractor are the two readers of `default_template`,
-   and splitting them would land half a mechanism).
+   field, the totality / diamond / parity suites, the FR18 structural test. The templated-default
+   validator on the base model lands here too (it and the extractor are the two readers of
+   `default_template`, and splitting them would land half a mechanism).
 5. **`fields.py` plus tests.** `iter_field_docs`, `FieldDoc`, `render_type`.
 6. **`errors.py` plus tests.** The bridge and the representative-mistakes corpus (step 2.2's
    implementation box).
 
 ## 11. Contradictions and residual decisions for the lead
 
-**Contradictions found against HEAD or the upstream artifacts.**
+**Contradictions found against HEAD or the upstream artifacts.** The first two were folded into
+`hla.md` by the lead on 2026-08-06 (commit `4421cee4`) and are kept here as the record of why.
 
-1. **The HLA has emission consuming `iter_field_docs`; Component 6 has it using
-   `model_json_schema`.** `hla.md:141-144` lists "schema emission" as one of the stream's three
-   presentations, while `hla.md:270-271` specifies emission as `model_json_schema` over the models.
-   Both cannot be the mechanism. Settled in section 6.3: emission is a SIBLING derivation from the
-   same authored models, not a consumer of the stream, because deriving JSON Schema from `FieldDoc`
-   means writing a second schema generator. The marker's schema hook plus the round-trip test are
-   what keep the two honest. The HLA sentence should be corrected to "the sample renderer, the
-   describe surface, and (externally) the guide", with emission named as a sibling.
-2. **The HLA says the secret template "derives the default from the owner at decode time"**
-   (`hla.md:127-129`). Capability blobs are explicitly NOT validated at decode: decode passes them
-   through raw and finalize owns their validation (`manifests/decode.py:20-25`, and the HLA's own
-   Component 3 timing table at `hla.md:238-244`). Settled: the template is applied at VALIDATION
-   time, wherever that is for the surface (decode for kind-owned fields in 2.5, finalize for
-   capability config in 2.3), plus in extraction, which runs before and independently of both.
-3. **`owner` cannot stay a bare display string** if FR18 is to be structural. The HLA and the plan
-   both write `extract_references(model_cls, blob, owner)` with `owner` implicitly the `"kind/name"`
-   string capability code passes today, and the git-credential layer already has to split it apart
-   (`capabilities/git_credential/base.py:52-56`). Settled in section 4.1: `owner` is a typed
-   `RefOwner(kind, name)` with a `display` property that reproduces today's string exactly. This is
-   a deviation from the artifacts' wording, taken because the alternative is re-splitting a string
-   we joined ourselves.
-4. **The plan's "severity plumbing" for the bridge describes machinery that already exists.**
+1. **The HLA had emission consuming `iter_field_docs` while Component 6 derived it from
+   `model_json_schema`.** Both cannot be the mechanism. Settled in section 6.3: emission is a
+   SIBLING derivation from the same authored models, not a consumer of the stream, because deriving
+   JSON Schema from `FieldDoc` means writing a second schema generator. The marker's schema hook
+   plus the round-trip test are what keep the two honest. **Corrected upstream** (`hla.md:144-153`).
+2. **The HLA said the secret template "derives the default from the owner at decode time".**
+   Capability blobs are explicitly NOT validated at decode: decode passes them through raw and
+   finalize owns their validation (`manifests/decode.py:18-23`, and the HLA's own Component 3 timing
+   table). Settled: the template is applied at VALIDATION time, wherever that is for the surface
+   (decode for kind-owned fields in 2.5, finalize for capability config in 2.3), plus in extraction,
+   which runs before and independently of both. **Corrected upstream** (`hla.md:129-134`).
+3. **The plan's "severity plumbing" for the bridge describes machinery that already exists.**
    `Registry.finalize` pass 7 already gates the throwing check on READY and ENABLED
    (`resources/registry.py:466-521`). Section 7.5 settles that 2.2 adds no severity mechanism; the
    real requirement behind that phrase (rendering reusable as diagnostic text) is met by the pure
    `render_validation_error` entry point. Worth correcting in the plan's 2.2 wording so nobody
    builds a mechanism to satisfy a sentence.
-5. **`agentworks.errors.ValidationError` collides with pydantic's** (`errors.py:62`). Not a design
+4. **`agentworks.errors.ValidationError` collides with pydantic's** (`errors.py:62`). Not a design
    problem, but it is a trap for every file that touches both; section 7.2 fixes the import
    spelling. No rename proposed.
-6. **A secret-backend config model cannot be a `BaseModel`.** `MappingValue` is
-   `str | dict[str, object] | Literal[False]` (`secrets/base.py:23`), and onepassword's mapping is
-   itself a string-or-table union (`plugins/onepassword/backend.py:281-300`). The plan's 2.3
-   inventory says "the secret-backend `mapping_model` registers as that kind's config model" without
-   noting that its root is not a mapping. `AgwRootModel` is the answer and it lands here, in the
-   foundation, rather than being improvised in 2.3.
+5. **The plan and the FRD still spelled the template placeholder `{owner}`** after section 5.2
+   closed the vocabulary to `{owner_name}` / `{owner_kind}`. The plan's line is the exact
+   instruction a 2.3 implementer follows when authoring the github model, so it mattered more than
+   the wording usually would. **Corrected upstream** (`frd.md:74`, `plan.md:318`, commit
+   `5d4c06e4`).
+
+**Gaps this LLD fills** (gaps rather than contradictions: the artifacts do not state a wrong thing,
+they leave a thing unstated).
+
+- **`owner`'s type.** The HLA and the plan write `extract_references(model_cls, blob, owner)` with
+  no type on `owner`, and today's capability code passes a `"kind/name"` display string that the
+  git-credential layer then splits apart (`capabilities/git_credential/base.py:52-56`). Section 4.1
+  decides: `owner` is a typed `RefOwner(kind, name)` with a `display` property reproducing today's
+  string exactly, because a template needs the NAME and re-splitting a string we joined ourselves is
+  the string surgery FR18 exists to delete. Nothing upstream needs correcting.
+- **The modeling consequence of onepassword's union mapping.** `plan.md:322` does record the shape
+  ("mapping is itself a union: `op://` string or account/reference table"); what it leaves unstated
+  is that a union of string-or-table cannot be a `BaseModel` at all, and neither can env-var's bare
+  string. So the two `mapping_model` registrations at `plan.md:310` are root models or they are
+  nothing. `AgwRootModel` lands here, in the foundation, rather than being improvised in 2.3, and
+  section 2.1 also records that `Literal[False]` is NOT part of what those models express (the
+  generic opt-out is filtered at `secrets/base.py:133-134` before any backend sees a mapping).
 
 **Residual decisions for the lead.**
 
@@ -848,6 +1062,19 @@ window and no ordering hazard.
   updates the docstring and leaves the name.
 - **The 10-line aggregation cap** (section 7.4) is a judgment call with no precedent in the codebase
   to copy. Easy to change; flagged so it is a decision rather than a default.
+- **The strict-mode proxmox break** (section 2.2) is the one place this foundation changes what an
+  operator's existing config does: `template_vmid: "9000"` stops loading, and `verify_ssl: "no"`
+  stops silently meaning true. Taken as a break rather than a carve-out, consistent with the
+  standing "if we need to break the schema, now is the time", but it is an operator-facing change
+  and it needs the breaking-change marker plus an upgrade note when the proxmox model lands in 2.3.
+  Flagged because it is the kind of thing that should be a decision, not a discovery in a release.
+  Now tracked as its own 2.3 plan box (commit `5d4c06e4`), which also asks whether the migrator
+  emits quoted scalars; that check belongs with the model, not here.
+- **The framing fork in the finalize pass** (section 7.4): bridge-produced errors bypass
+  `resources/registry.py:513-521`'s suffix wrapper while unmigrated hand-rolled validators still use
+  it. The fork is what buys located multi-error output without waiting for 2.5, and it is deleted
+  when the last hand-rolled validator goes. If the lead would rather have a single-line joined
+  message and no fork, that is the tradeoff to overturn here, not in 2.3.
 - **Requiring descriptions on registered models** (section 2.3). A registration-time conformance
   check could refuse a model with an undocumented field, which would make FR10's "complete generated
   skeleton" promise structural. It belongs to 2.3's conformance pass if we want it; not decided

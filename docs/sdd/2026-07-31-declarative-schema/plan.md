@@ -224,11 +224,20 @@ the derivation sequence are not started.
 
 ### 2.1 Schema foundation
 
-- [ ] `schema-foundation-lld.md` written and reviewed: base model config (strict, frozen,
-      `extra="forbid"`), the `SecretRef` / `ResourceRef` `Annotated` markers and their
-      `json_schema_extra` (`x-agw-*`) encoding, `extract_references` (total, never raising, reads
-      raw blobs, applies owner templates) and `iter_field_docs` signatures, and the pydantic pin
-      policy (latest stable v2 at implementation time, checked then, not from memory).
+- [x] `schema-foundation-lld.md` written and reviewed (2026-08-06; reviewer found four BLOCKING
+      defects, all fixed: `extra="forbid"` on a `RootModel` raises at class definition, so the
+      configs split; `RefRelationship` moved to `resources/reference.py` to kill an import cycle the
+      design itself created; the extraction visited-set is path-scoped, not accumulating, so sibling
+      fields of one nested model type cannot silently drop edges; and the error bridge owns
+      framed-batch rendering, since multi-line aggregation would otherwise leave lines unlocated and
+      regress FR12. `FieldDoc` gained `choices`/`constraints` and a `ModelDoc`, because it is a
+      cross-SDD coordination point and widening it later means renegotiating with the onboarding
+      child. The two load-bearing pydantic claims were verified by execution against 2.13.4 by the
+      lead, not read from docs): base model config (strict, frozen, `extra="forbid"`), the
+      `SecretRef` / `ResourceRef` `Annotated` markers and their `json_schema_extra` (`x-agw-*`)
+      encoding, `extract_references` (total, never raising, reads raw blobs, applies owner
+      templates) and `iter_field_docs` signatures, and the pydantic pin policy (latest stable v2 at
+      implementation time, checked then, not from memory).
 - [ ] `resources/schema/` package implemented with unit tests, including totality tests for
       `extract_references` over malformed blobs (property-style: no input raises) and marker
       round-trip into emitted JSON Schema.
@@ -244,7 +253,7 @@ the derivation sequence are not started.
 
 ### 2.2 Error bridge
 
-- [ ] `error-bridge-lld.md` (may fold into 2.1's LLD if small): `ValidationError.loc` to
+- [x] `error-bridge-lld.md` (may fold into 2.1's LLD if small): `ValidationError.loc` to
       owner-framed message mapping, message normalization rules, `SourceLocation` framing, and the
       severity plumbing for fold-gated validation (FR12: the bridge raises for READY+ENABLED
       resources; the same rendering is reusable as diagnostic text elsewhere). **FOLDED into
