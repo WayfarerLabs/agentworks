@@ -688,12 +688,14 @@ def _decode_vm_site(doc: Document, spec: dict[str, Any], issues: list[str]) -> A
             "platform-specific configuration goes inside the spec.platform table"
         )
     # The platform_config blob's shape is validated by the finalize
-    # ``validate`` pass (VMSiteDecl.validate), not here: capability
-    # validation is decoupled from decode (R3). The shadow check below is
-    # kind-owned decode structure and stays at load. Unknown platform
-    # names are tolerated: the site registers and self-disables
-    # ("platform 'x' is not installed"); a plugin's platform may simply
-    # not be here.
+    # ``validate`` pass (VMSiteDecl.validate), not here: the core validates
+    # it against the platform's declared model, decoupled from decode (R3).
+    # The shadow check below is kind-owned decode structure and stays at
+    # load. An unknown platform NAME is not decode's business either: the
+    # site emits its platform edge unconditionally and the dangling edge is
+    # a hard finalize miss (R9.2). (It is not tolerated-and-self-disabled;
+    # that was the pre-registry-readiness behavior, and this comment
+    # described it long after it stopped being true.)
     from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
 
     # A site named after a known platform must declare that
