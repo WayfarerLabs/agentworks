@@ -7,13 +7,23 @@ sibling capability pair (``platform: lima`` plus ``platform_config:``,
 and likewise ``provider``/``provider_config``), into the tagged table
 (``platform: {name: lima, ...}``) that decode now requires.
 
-Two properties shape everything here.
+Three properties shape everything here.
 
 **Comments survive.** These are files the operator wrote and keeps
 editing, so the rewrite round-trips through ``ruamel.yaml`` rather than
 re-emitting from parsed values: comments, quote style, key order,
 document separators, and unrelated keys all stay put. Only the affected
-document's capability keys move.
+document's capability keys move. (One known normalization: an explicit
+``key: ~`` comes back as ``key:``. Both spell the same null to every
+reader, and ruamel's emitter offers no way to keep the tilde.)
+
+**ruamel emits; it never reads anything that gets compared.** The
+round-trip loader reads YAML 1.2 and the manifest loader reads YAML 1.1,
+so they disagree about plain scalars: ``verify_ssl: no`` is the string
+``"no"`` to one and ``False`` to the other. Every value this module
+DECIDES on or COMPARES therefore comes from ``_documents_in``, the
+loader's own parser. Round-tripping preserves each scalar's spelling, so
+the emitted file reads back the same way the original did.
 
 **The upgrade is whole-tree, not selector-scoped.** The old shape does
 not load at all now, so there is no valid partially-upgraded tree: one
@@ -21,6 +31,14 @@ document left behind leaves every command failing, and it would also
 break this run's own verification, which rebuilds the registry from the
 whole resources directory. So every run upgrades every legacy document it
 finds, and selectors go on scoping the TOML units only.
+
+That last property is also why this module fails LOUDLY during planning,
+rather than skipping what it cannot handle: a file that will not parse,
+or a capability config carrying a ``name`` key that cannot fold, makes
+the whole run impossible, since verification loads the entire directory.
+Refusing before anything is written leaves the operator one hand fix and
+an untouched tree; carrying on would rewrite other files first and die
+afterwards, having converted one problem into two.
 
 The shape table below is hand-maintained rather than derived from the
 capability-kind descriptors, matching ``migrate/toml_resources.py``: the
@@ -41,6 +59,8 @@ from agentworks.errors import ConfigError
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from agentworks.source_location import SourceLocation
 
 _LEGACY_SIBLING_SHAPES: dict[str, tuple[str, str]] = {
     "vm-site": ("platform", "platform_config"),
@@ -99,19 +119,25 @@ def spec_is_legacy(kind: str, spec: object) -> bool:
 def discover_legacy_documents(resources_dir: Path) -> list[LegacyDocument]:
     """Every manifest document still on the retired sibling shape.
 
-    Reads raw YAML rather than going through ``load_manifests``, which is
-    load-bearing: the documents this looks for are exactly the ones that
-    no longer decode, so the loader would raise on the first one instead
-    of reporting all of them. Unparseable files are skipped for the same
-    reason ``locate_document`` skips them: this is a best-effort scan
-    whose failure mode must be "found nothing here", never "the whole
-    remediation command is unavailable".
+    Reads raw documents rather than going through ``load_manifests``,
+    which is load-bearing: the documents this looks for are exactly the
+    ones that no longer DECODE, so the loader would raise on the first one
+    instead of reporting them all. It uses the loader's own PARSER
+    (``_iter_documents``) all the same, so a scalar means here what it
+    will mean when the upgraded file is loaded back.
+
+    A file that does not parse raises, during planning, before anything is
+    written. That is not a scan that gave up: the run's verification
+    rebuilds the registry from this whole directory, so an unparseable
+    file makes the run impossible no matter what the upgrade does. Failing
+    here reports it with its position and leaves the tree untouched;
+    skipping it would rewrite other files first and die later.
     """
     from agentworks.manifests.loader import _iter_manifest_files
 
     found: list[LegacyDocument] = []
     for path in _iter_manifest_files(resources_dir):
-        for value in _load_documents(path):
+        for value, _location in _documents_in(path):
             if not isinstance(value, dict):
                 continue
             kind = value.get("kind")
@@ -161,14 +187,22 @@ def legacy_pre_rows(documents: list[LegacyDocument]) -> dict[tuple[str, str], An
     the old shape outright now; this module is where knowledge of that
     shape lives.
 
-    Not a tautology against the post-side: this reads parsed VALUES, while
-    the post-side decodes the text ``ruamel`` emitted. A rewrite that
-    dropped a key or changed a scalar shows up as a row difference.
+    Not a tautology against the post-side: this reads the ORIGINAL text,
+    while the post-side reads the text ruamel emitted, so a rewrite that
+    dropped a key or changed a value is a row difference.
+
+    Both sides read through the LOADER'S parser, and that is the whole of
+    the independence. Reading this side with ruamel instead (YAML 1.2)
+    while the post-side reads PyYAML (YAML 1.1) put a parser disagreement
+    inside the comparison: ``verify_ssl: no`` is the string ``"no"`` to
+    one and ``False`` to the other, so a byte-faithful rewrite failed
+    verification and the command blamed itself for a config it had
+    reproduced exactly. Independence must come from the SOURCE TEXT
+    differing, never from the parsers differing.
     """
     from agentworks.manifests.decode import decode_document
     from agentworks.manifests.envelope import validate_envelope
     from agentworks.migrate.verify import strip_source_fields
-    from agentworks.source_location import SourceLocation
 
     wanted: dict[Path, set[str]] = {}
     for legacy in documents:
@@ -176,12 +210,7 @@ def legacy_pre_rows(documents: list[LegacyDocument]) -> dict[tuple[str, str], An
 
     rows: dict[tuple[str, str], Any] = {}
     for path, names in wanted.items():
-        # Line 0, like the emitted-key-set guard's: these rows exist only
-        # to be compared, and ``strip_source_fields`` drops the source
-        # location, so carrying a made-up line number would be a fiction
-        # nothing reads.
-        location = SourceLocation(file=path, line=0)
-        for value in _load_documents(path):
+        for value, location in _documents_in(path):
             if not isinstance(value, dict):
                 continue
             metadata = value.get("metadata")
@@ -194,13 +223,20 @@ def legacy_pre_rows(documents: list[LegacyDocument]) -> dict[tuple[str, str], An
 
 
 def _round_trip() -> Any:
-    """The one configured round-trip YAML for this module.
+    """The configured round-trip YAML. The EMITTER only, never a reader
+    whose values are compared against anything (see ``legacy_pre_rows``).
 
     ``preserve_quotes`` is not cosmetic here. An operator writing
     ``subscription_id: "0000"`` means the string; re-emitting it bare
     would make it the integer 0 on the next load. Verification would
     catch that, but only after the operator's file had been rewritten
     wrong, so the emitter is configured not to do it in the first place.
+
+    Round-tripping preserves each scalar's SPELLING, which is what makes
+    the rewrite safe despite ruamel reading YAML 1.2 and the loader
+    reading YAML 1.1: ``verify_ssl: no`` is a string to ruamel and comes
+    back out as ``no``, so the loader reads the same ``False`` from the
+    rewritten file that it read from the original.
     """
     from ruamel.yaml import YAML
 
@@ -209,15 +245,18 @@ def _round_trip() -> Any:
     return yaml
 
 
-def _load_documents(path: Path) -> list[Any]:
-    """Every YAML document in ``path``, or none if it does not parse."""
-    from ruamel.yaml.error import YAMLError
+def _documents_in(path: Path) -> list[tuple[Any, SourceLocation]]:
+    """Every document in ``path`` with its location, via the LOADER'S
+    parser.
 
-    try:
-        text = path.read_text(encoding="utf-8")
-        return list(_round_trip().load_all(text))
-    except (OSError, UnicodeDecodeError, YAMLError):
-        return []
+    The one reader for everything this module compares or decides on, so
+    a scalar means here exactly what it will mean when the upgraded file
+    is loaded back. Raises ``ConfigError`` (with a position) on a file
+    that does not parse.
+    """
+    from agentworks.manifests.loader import _iter_documents
+
+    return list(_iter_documents(path))
 
 
 def _folded_document(value: dict[str, Any]) -> dict[str, Any]:

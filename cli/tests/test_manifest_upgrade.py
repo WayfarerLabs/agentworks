@@ -171,6 +171,45 @@ def test_quoting_that_carries_a_type_survives_the_rewrite(tmp_path: Path) -> Non
     assert entry.resource.platform_config["subscription_id"] == "0000"
 
 
+def test_a_yaml_1_1_boolean_spelling_survives_verification(tmp_path: Path) -> None:
+    """A faithful rewrite must not fail verification over YAML dialects.
+
+    ``verify_ssl: no`` is the string ``"no"`` under YAML 1.2 (ruamel) and
+    ``False`` under YAML 1.1 (the manifest loader). While the pre-side
+    read the original with ruamel and the post-side read the rewrite with
+    the loader, this exact document produced correct output and then
+    aborted with "content differs after migration", blaming the migrator
+    for a config it had reproduced byte for byte, and rolled back, leaving
+    the operator an unloadable config and a remediation that refused to
+    run. ``on``/``off``/``y``/``n`` and leading-zero integers are the same
+    class; ``verify_ssl`` is a real proxmox field.
+    """
+    cfg = _write_config(tmp_path)
+    resources = _resources(
+        tmp_path,
+        sites=dedent("""\
+            apiVersion: agentworks/v1
+            kind: vm-site
+            metadata:
+              name: proxmox
+            spec:
+              platform: proxmox
+              platform_config:
+                api_url: https://pve:8006
+                node: pve1
+                token_id: agw@pam!agw
+                template_vmid: 9000
+                verify_ssl: no
+            """),
+    )
+
+    _run(cfg)
+
+    assert "    verify_ssl: no\n" in (resources / "sites.yaml").read_text()
+    (entry,) = load_manifests(resources).entries
+    assert entry.resource.platform_config["verify_ssl"] is False
+
+
 def test_rerunning_the_upgrade_is_a_no_op(tmp_path: Path) -> None:
     cfg = _write_config(tmp_path)
     resources = _resources(tmp_path, sites=_COMMENTED_LEGACY)
@@ -362,19 +401,10 @@ def test_multi_document_markers_and_unrelated_documents_survive(tmp_path: Path) 
     assert not load_manifests(resources).issues
 
 
-def test_discovery_skips_an_unparseable_file(tmp_path: Path) -> None:
-    """Discovery reads raw YAML rather than going through the loader,
-    which is the point: the documents it looks for are exactly the ones
-    that no longer decode. A file that does not even parse is skipped, so
-    the scan reports the retired documents it CAN see rather than raising
-    on the first bad one.
-
-    (A run still fails later, at verification, which rebuilds the whole
-    registry. Unparseable YAML is not something the upgrade can fix.)
-    """
+def test_discovery_finds_every_retired_document_across_the_tree(tmp_path: Path) -> None:
     from agentworks.migrate.manifest_upgrade import discover_legacy_documents
 
-    resources = _resources(tmp_path, sites=_COMMENTED_LEGACY, broken="{{{ not yaml")
+    resources = _resources(tmp_path, sites=_COMMENTED_LEGACY, fine=_CANONICAL)
 
     found = discover_legacy_documents(resources)
 
@@ -382,6 +412,26 @@ def test_discovery_skips_an_unparseable_file(tmp_path: Path) -> None:
         ("sites.yaml", "vm-site/gpu-box"),
         ("sites.yaml", "git-credential/ado"),
     ]
+
+
+def test_an_unparseable_manifest_stops_the_run_during_planning(tmp_path: Path) -> None:
+    """A file that does not parse is reported with its position, before
+    anything is written.
+
+    Not a scan giving up quietly: verification rebuilds the registry from
+    the whole directory, so an unparseable file makes the run impossible
+    whatever the upgrade does. Failing here leaves the operator one fix
+    and an untouched tree, where skipping it would rewrite the other files
+    first and die afterwards.
+    """
+    cfg = _write_config(tmp_path)
+    resources = _resources(tmp_path, sites=_COMMENTED_LEGACY, broken="{{{ not yaml")
+    before = (resources / "sites.yaml").read_bytes()
+
+    config = load_config(cfg, warn_issues=False, resources=False)
+    with pytest.raises(ConfigError, match=r"broken.yaml:1: invalid YAML"):
+        plan_migration(config, [], all_resources=True)
+    assert (resources / "sites.yaml").read_bytes() == before
 
 
 def test_the_upgrade_verifies_against_the_pre_rewrite_rows(tmp_path: Path) -> None:
