@@ -381,7 +381,15 @@ the derivation sequence are not started.
       accepts and silently DROPS `username` and `git_force_safe_directory` today (both are in
       `_AGENT_TEMPLATE_KEYS` but neither is a field), so modeling the kind turns two
       silently-ignored keys into hard errors. An operator who has been setting either has never had
-      it take effect, which makes the error a fix, but their config still stops loading.
+      it take effect, which makes the error a fix, but their config still stops loading. **Fifth
+      through eighth, all from step 2.5's kind modeling (2026-08-06):** an install command's
+      `test_exec: ""` beside a `test_file` used to be legal, because the empty string normalized to
+      `None` before the at-most-one count, and now errors; apt-source, apt-package, and
+      admin-template lose their `str()` / `bool()` coercions, so a value that used to be coerced now
+      fails; the four apt and install-command kinds gain closed-world validation with NO prior
+      warning channel, unlike the kinds that got one; and `{value: x}` becomes an accepted env
+      spelling, which is additive but changes what a config can say. None is large on its own, but
+      together they are the difference between an upgrade that loads and one that does not.
 - [x] Core-driven validation and extraction wired: registry name-to-model maps per capability kind;
       `Capability.validate` / `Capability.dependencies` classmethods and
       `SecretBackend.validate_mapping` retired; per-capability hand-rolled validate code deleted;
