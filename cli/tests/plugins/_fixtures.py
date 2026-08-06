@@ -58,11 +58,30 @@ def config_model_for(kind: str, name: str) -> type[BaseModel]:
     return model
 
 
+def _declare_fixture_config(cls: type, kind: str) -> None:
+    """Give a fixture impl a config model matching its own name.
+
+    Every capability declares one, and a fixture's has to carry ITS tag,
+    so it cannot be inherited from a shared base. Done in
+    ``__init_subclass__`` rather than spelled per fixture because a
+    fixture that names itself has said everything the model needs, and
+    thirty restatements would be thirty chances to get the tag wrong. A
+    fixture that declares its own ``config_model`` (one with real fields)
+    keeps it.
+    """
+    if "name" in cls.__dict__ and "config_model" not in cls.__dict__:
+        cls.config_model = config_model_for(kind, cls.name)  # type: ignore[attr-defined]
+
+
 class ConformingVMPlatform(VMPlatform):
     """A concrete ``VMPlatform``: the six abstract power ops implemented so
     the class is seatable. Subclasses add ``name`` / ``description``."""
 
     contract_version = 1
+
+    def __init_subclass__(cls, **kwargs: object) -> None:
+        super().__init_subclass__(**kwargs)
+        _declare_fixture_config(cls, "vm-platform")
 
     def create(self, request: ProvisionRequest, ctx: RunContext) -> ProvisionResult:
         raise NotImplementedError
@@ -89,6 +108,10 @@ class ConformingHarnessIntegration(HarnessIntegration):
 
     contract_version = 1
 
+    def __init_subclass__(cls, **kwargs: object) -> None:
+        super().__init_subclass__(**kwargs)
+        _declare_fixture_config(cls, "harness-integration")
+
     def start(self, ctx: RunContext) -> str:
         raise NotImplementedError
 
@@ -104,6 +127,10 @@ class ConformingGitCredentialProvider(GitCredentialProvider):
     ``description``."""
 
     contract_version = 1
+
+    def __init_subclass__(cls, **kwargs: object) -> None:
+        super().__init_subclass__(**kwargs)
+        _declare_fixture_config(cls, "git-credential-provider")
 
     def _verify_token(self, token: str) -> None:
         raise NotImplementedError
@@ -145,19 +172,16 @@ class ConformingSecretBackend:
 class FixtureVMPlatform(ConformingVMPlatform):
     name = "fixture-vm"
     description = "Fixture VM platform"
-    config_model = config_model_for("vm-platform", "fixture-vm")
 
 
 class FixtureHarnessIntegration(ConformingHarnessIntegration):
     name = "fixture-harness"
     description = "Fixture harness"
-    config_model = config_model_for("harness-integration", "fixture-harness")
 
 
 class FixtureProvider(ConformingGitCredentialProvider):
     name = "fixture-provider"
     description = "Fixture git credential provider"
-    config_model = config_model_for("git-credential-provider", "fixture-provider")
 
 
 class FixtureBackend(ConformingSecretBackend):
@@ -192,7 +216,4 @@ def conforming_impl(kind: str, name: str, description: str = "a conforming fixtu
         "git-credential-provider": ConformingGitCredentialProvider,
         "secret-backend": ConformingSecretBackend,
     }[kind]
-    members: dict[str, Any] = {"name": name, "description": description}
-    if kind != "secret-backend":
-        members["config_model"] = config_model_for(kind, name)
-    return type(name.replace("-", "_"), (base,), members)
+    return type(name.replace("-", "_"), (base,), {"name": name, "description": description})

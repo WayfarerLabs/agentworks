@@ -100,28 +100,66 @@ import shlex
 from typing import TYPE_CHECKING, ClassVar, Literal, NamedTuple
 
 from agentworks.capabilities.harness_integration.base import HarnessIntegration, require_commands
-from agentworks.errors import ConfigError, StateError
+from agentworks.errors import StateError
 from agentworks.plugins.codex.recorder import home_word, notify_value_word, provision_fragment, thread_tail
+from agentworks.schema import AgwModel
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from agentworks.capabilities.base import RunContext
-    from agentworks.resources.reference import ConfigReference
     from agentworks.transports import Transport
 
-_CODEX_FIELDS = {
-    "model",
-    "sandbox",
-    "approval_policy",
-    "profile",
-    "network",
-    "approvals_reviewer",
-    "writable_dirs",
-    "web_search",
-    "disable_strict_config",
-    "extra_args",
-}
+
+class CodexConfig(AgwModel):
+    """What a session template tells the ``codex`` integration.
+
+    The flag VALUES (sandbox modes, approval policies, model names) are
+    codex-owned choice sets that drift between releases, so they forward
+    unvalidated: an invalid one surfaces as codex's own startup error in
+    the pane, which is why this integration emits ``--strict-config`` by
+    default.
+    """
+
+    name: Literal["codex"]
+    """The harness integration this config is for."""
+
+    model: str | None = None
+    """Forwarded as ``-m``."""
+
+    sandbox: str | None = None
+    """Forwarded as ``-s``."""
+
+    approval_policy: str | None = None
+    """Forwarded as ``-a``."""
+
+    profile: str | None = None
+    """Forwarded as ``-p``."""
+
+    network: bool | None = None
+    """Whether the workspace-write sandbox may reach the network. Both
+    directions forward explicitly, so ``false`` overrides a profile or a
+    ``config.toml`` that enabled it."""
+
+    approvals_reviewer: str | None = None
+    """Forwarded as a codex config override, TOML-encoded."""
+
+    writable_dirs: list[str] | None = None
+    """Extra directories the sandbox may write, each forwarded as
+    ``--add-dir``. Inherited templates UNION this list rather than
+    replacing it: it is an additive grant."""
+
+    web_search: bool | None = None
+    """Whether to pass ``--search``."""
+
+    disable_strict_config: bool | None = None
+    """Turn OFF ``--strict-config``, for a target whose own
+    ``config.toml`` a newer codex wrote."""
+
+    extra_args: list[str] | None = None
+    """Appended to the command verbatim, last, so it can carry (or
+    override) any flag this integration does not model."""
+
 
 # Config field -> the codex flag it forwards to, in emission order. The
 # choice sets (sandbox modes, approval policies, model names) are
@@ -141,10 +179,6 @@ _FLAG_FIELDS: tuple[tuple[str, str], ...] = (
 # codex's own unknown-field startup error in the pane instead of a
 # session that silently has no network. Re-verify on codex major bumps.
 _NETWORK_KEY = "sandbox_workspace_write.network_access"
-
-# Every string-typed field: the flag-mapped four plus the -c-forwarded
-# approvals_reviewer (validate type-checks them through one loop).
-_STR_FIELDS: tuple[str, ...] = (*(name for name, _flag in _FLAG_FIELDS), "approvals_reviewer")
 
 
 def _toml_basic_string(value: str) -> str:
@@ -312,6 +346,7 @@ class CodexIntegration(HarnessIntegration):
     contract_version: ClassVar[int] = 1
     name: ClassVar[str] = "codex"
     description: ClassVar[str] = "Run Codex, resuming its session when one exists"
+    config_model: ClassVar[type[CodexConfig]] = CodexConfig
 
     # Set by start / _resume_or_launch on each op; drives launch_note().
     # None until the op runs (nothing decided yet).
@@ -328,11 +363,10 @@ class CodexIntegration(HarnessIntegration):
     # conversation than last time.
     _dropped_stale: bool = False
 
-    @classmethod
-    def dependencies(cls, owner: str, config: Mapping[str, object]) -> tuple[ConfigReference, ...]:
-        """``codex`` implies no resource reference, so its edge set is
-        empty (total, non-throwing per the ``dependencies`` contract)."""
-        return ()
+    @property
+    def config(self) -> CodexConfig:
+        """This session's validated codex config."""
+        return self._config_as(CodexConfig)
 
     @classmethod
     def merge_config(cls, base: Mapping[str, object], child: Mapping[str, object]) -> dict[str, object]:
@@ -356,29 +390,6 @@ class CodexIntegration(HarnessIntegration):
             if union:
                 merged["writable_dirs"] = union
         return merged
-
-    @classmethod
-    def validate(cls, owner: str, config: Mapping[str, object]) -> None:
-        """Shape-and-vocabulary only: unknown fields raise; each present
-        field is type-checked. The flag VALUES are codex-owned choice sets
-        and forward unvalidated (an invalid one surfaces as codex's own
-        startup error in the pane).
-        """
-        unknown = sorted(set(config) - _CODEX_FIELDS)
-        if unknown:
-            raise ConfigError(f"{owner}: unknown codex harness integration field(s): {', '.join(unknown)}")
-        for field_name in _STR_FIELDS:
-            value = config.get(field_name)
-            if value is not None and not isinstance(value, str):
-                raise ConfigError(f"{owner}.{field_name} must be a string")
-        for field_name in ("network", "web_search", "disable_strict_config"):
-            value = config.get(field_name)
-            if value is not None and not isinstance(value, bool):
-                raise ConfigError(f"{owner}.{field_name} must be a boolean")
-        for field_name in ("writable_dirs", "extra_args"):
-            value = config.get(field_name)
-            if value is not None and (not isinstance(value, list) or not all(isinstance(item, str) for item in value)):
-                raise ConfigError(f"{owner}.{field_name} must be a list of strings")
 
     def start(self, ctx: RunContext) -> str:
         """The pane command for ``session create``: ALWAYS a fresh launch.
@@ -729,38 +740,30 @@ class CodexIntegration(HarnessIntegration):
         (e.g. one written by a newer codex than the target runs).
         """
         tokens: list[str] = []
-        if self.config.get("disable_strict_config") is not True:
+        if self.config.disable_strict_config is not True:
             tokens.append("--strict-config")
         for field_name, flag in _FLAG_FIELDS:
-            value = self.config.get(field_name)
-            if isinstance(value, str):
+            value = getattr(self.config, field_name)
+            if value is not None:
                 tokens += [flag, value]
-        network = self.config.get("network")
-        if isinstance(network, bool):
+        if self.config.network is not None:
             # Both directions forward explicitly: `false` overrides a
             # profile or config.toml that enabled network access.
-            tokens += ["-c", f"{_NETWORK_KEY}={'true' if network else 'false'}"]
-        approvals_reviewer = self.config.get("approvals_reviewer")
-        if isinstance(approvals_reviewer, str):
+            tokens += ["-c", f"{_NETWORK_KEY}={'true' if self.config.network else 'false'}"]
+        if self.config.approvals_reviewer is not None:
             # Encoded as a TOML basic string: see _toml_basic_string for
             # why raw interpolation would be a silent-injection hole.
-            tokens += ["-c", f"{_APPROVALS_REVIEWER_KEY}={_toml_basic_string(approvals_reviewer)}"]
-        writable_dirs = self.config.get("writable_dirs")
-        if isinstance(writable_dirs, list):
-            for item in writable_dirs:
-                if isinstance(item, str):
-                    tokens += ["--add-dir", item]
-        if self.config.get("web_search") is True:
+            tokens += ["-c", f"{_APPROVALS_REVIEWER_KEY}={_toml_basic_string(self.config.approvals_reviewer)}"]
+        for item in self.config.writable_dirs or ():
+            tokens += ["--add-dir", item]
+        if self.config.web_search is True:
             tokens.append("--search")
         return tokens
 
     def _extra_arg_tokens(self) -> list[str]:
         """``extra_args`` as argv tokens, appended verbatim last so it can
         carry (or override) any flag the harness integration does not model."""
-        extra_args = self.config.get("extra_args")
-        if not isinstance(extra_args, list):
-            return []
-        return [item for item in extra_args if isinstance(item, str)]
+        return list(self.config.extra_args or ())
 
     def _recorded_thread_id(self, transport: Transport) -> str | None:
         """The uuid the notify recorder last wrote for this session, or

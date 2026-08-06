@@ -693,7 +693,7 @@ def test_session_template_required_commands_must_be_list(tmp_path: Path) -> None
             )
         ],
     )
-    with pytest.raises(ConfigError, match="required_commands must be a list"):
+    with pytest.raises(ConfigError, match="required_commands: must be a list"):
         _load(cfg_file)
 
 
@@ -712,7 +712,7 @@ def test_session_template_required_commands_must_be_strings(tmp_path: Path) -> N
             )
         ],
     )
-    with pytest.raises(ConfigError, match="required_commands must be a list of strings"):
+    with pytest.raises(ConfigError, match=r"required_commands\[0\]: must be a string"):
         _load(cfg_file)
 
 

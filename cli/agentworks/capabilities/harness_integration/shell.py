@@ -11,19 +11,36 @@ PATH). All optional.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, ClassVar, Literal
 
 from agentworks.capabilities.harness_integration.base import HarnessIntegration, require_commands
-from agentworks.errors import ConfigError
+from agentworks.schema import AgwModel
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from agentworks.capabilities.base import RunContext
-    from agentworks.resources.reference import ConfigReference
     from agentworks.transports import Transport
 
-_SHELL_FIELDS = {"command", "resume_command", "required_commands"}
+
+class ShellConfig(AgwModel):
+    """What a session template tells the ``shell`` integration to run."""
+
+    name: Literal["shell"]
+    """The harness integration this config is for."""
+
+    command: str | None = None
+    """The command the session's pane runs. Omit for a bare login
+    shell."""
+
+    resume_command: str | None = None
+    """The command a resumed session's pane runs. Omit to rerun
+    ``command``."""
+
+    required_commands: list[str] | None = None
+    """Commands that must exist on the session's target before it starts.
+    Inherited templates UNION this list rather than replacing it, so a
+    child adding one never silently drops the parent's."""
 
 
 def _as_str_list(value: object) -> list[str] | None:
@@ -40,15 +57,6 @@ def _as_str_list(value: object) -> list[str] | None:
     if isinstance(value, list) and all(isinstance(item, str) for item in value):
         return list(value)
     return None
-
-
-def _run_str_list(value: object) -> list[str]:
-    """Narrow an op-time list field best-effort: by op time the merged
-    blob has passed ``validate``, so a non-conforming value cannot occur;
-    degrade to empty rather than raising if one somehow does."""
-    if isinstance(value, list):
-        return [item for item in value if isinstance(item, str)]
-    return []
 
 
 def _append_dedupe(target: list[str], source: list[str]) -> list[str]:
@@ -76,31 +84,12 @@ class ShellIntegration(HarnessIntegration):
     name: ClassVar[str] = "shell"
     description: ClassVar[str] = "Run an operator command or a login shell"
 
-    @classmethod
-    def dependencies(cls, owner: str, config: Mapping[str, object]) -> tuple[ConfigReference, ...]:
-        """``shell`` implies no resource reference, so its edge set is
-        empty (total, non-throwing per the ``dependencies`` contract)."""
-        return ()
+    config_model: ClassVar[type[ShellConfig]] = ShellConfig
 
-    @classmethod
-    def validate(cls, owner: str, config: Mapping[str, object]) -> None:
-        """Shape-and-vocabulary only (FRD R2/R4): unknown fields raise;
-        each present field is type-checked. Completeness (there is none
-        for ``shell``) would run on the merged blob at resolve; this call
-        fires per declared blob, where a restating child may be partial.
-        """
-        unknown = sorted(set(config) - _SHELL_FIELDS)
-        if unknown:
-            raise ConfigError(f"{owner}: unknown shell harness integration field(s): {', '.join(unknown)}")
-        for field_name in ("command", "resume_command"):
-            value = config.get(field_name)
-            if value is not None and not isinstance(value, str):
-                raise ConfigError(f"{owner}.{field_name} must be a string")
-        required = config.get("required_commands")
-        if required is not None and (
-            not isinstance(required, list) or not all(isinstance(item, str) for item in required)
-        ):
-            raise ConfigError(f"{owner}.required_commands must be a list of strings")
+    @property
+    def config(self) -> ShellConfig:
+        """This session's validated shell config."""
+        return self._config_as(ShellConfig)
 
     @classmethod
     def merge_config(cls, base: Mapping[str, object], child: Mapping[str, object]) -> dict[str, object]:
@@ -126,21 +115,16 @@ class ShellIntegration(HarnessIntegration):
     def start(self, ctx: RunContext) -> str:
         """The pane command for ``session create``: ``command`` verbatim,
         empty string when undeclared (a bare login shell)."""
-        return self._command_field("command")
+        return self.config.command or ""
 
     def resume(self, ctx: RunContext) -> str:
         """The pane command for ``session resume``: ``resume_command``
         when declared, else ``command`` (empty = login shell)."""
-        resume_command = self._command_field("resume_command")
-        return resume_command or self._command_field("command")
-
-    def _command_field(self, field_name: str) -> str:
-        value = self.config.get(field_name, "")
-        return value if isinstance(value, str) else ""
+        return self.config.resume_command or self.config.command or ""
 
     def _probe_target(self, transport: Transport) -> None:
         require_commands(
-            tuple(_run_str_list(self.config.get("required_commands"))),
+            tuple(self.config.required_commands or ()),
             transport,
             harness_integration_name=self.name,
             template_name=self.owner_name,

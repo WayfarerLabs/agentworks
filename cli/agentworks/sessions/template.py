@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 
 from agentworks.declared_resource import DeclaredResource
 from agentworks.env.entry import env_references
+from agentworks.schema import RefOwner
 from agentworks.sessions.layouts import AW_SESSION_VERTICAL_LAYOUT
 
 if TYPE_CHECKING:
@@ -96,34 +97,49 @@ class SessionTemplate(DeclaredResource):
                     source=source,
                 )
             )
-            # Plus whatever the selected harness_integration's config block implies
-            # (a future secret-declaring harness_integration gets auto-declaration
-            # and reachability for free; both built-ins imply nothing).
-            # Unknown names skip: the miss policy reports them.
-            from agentworks.capabilities.harness_integration import HARNESS_INTEGRATION_REGISTRY
+            # Plus whatever the selected harness integration's config block
+            # implies, read structurally off its DECLARED model by the core
+            # (a future secret-declaring integration gets auto-declaration
+            # and reachability for free; every built-in implies nothing).
+            # Total and non-throwing; an unknown name contributes nothing
+            # and the miss policy reports it.
+            from agentworks.capabilities.config import capability_config_references
 
-            capability = HARNESS_INTEGRATION_REGISTRY.get(self.harness_integration)
-            if capability is not None:
-                refs.extend(
-                    sourced_references(
-                        capability.dependencies(f"session-template/{self.name}", self.harness_integration_config or {}),
-                        source,
-                    )
+            refs.extend(
+                sourced_references(
+                    capability_config_references(
+                        kind="harness-integration",
+                        name=self.harness_integration,
+                        blob=self.harness_integration_config or {},
+                        owner=RefOwner(kind="session-template", name=self.name),
+                    ),
+                    source,
                 )
+            )
         return refs
 
     def validate(self, enabled_backends: frozenset[str]) -> None:
         """Throwing shape check for the ``harness_integration_config`` blob, run by
         the finalize ``validate`` pass (``enabled_backends`` is the
         secret-only R9.9 input, ignored here). Mirrors ``dependencies``:
-        only a declared harness_integration has a blob to validate, and its named
-        capability validates it. An undeclared harness_integration (``None``) or an
-        unknown name is a no-op here (the miss policy reports the latter).
+        the CORE validates the blob against the named integration's declared
+        model, and no integration code runs. An undeclared harness
+        integration (``None``) or an unknown name is a no-op here (the miss
+        policy reports the latter).
+
+        This validates the DECLARED blob, which on an inheriting surface
+        may legitimately be partial; the merged blob's own check runs at
+        resolve (``sessions/templates``). Moving that one here is the
+        effective-config work, which is not this step's.
         """
         if self.harness_integration is None:
             return
-        from agentworks.capabilities.harness_integration import HARNESS_INTEGRATION_REGISTRY
+        from agentworks.capabilities.config import validate_capability_config
 
-        capability = HARNESS_INTEGRATION_REGISTRY.get(self.harness_integration)
-        if capability is not None:
-            capability.validate(f"session-template/{self.name}", self.harness_integration_config or {})
+        validate_capability_config(
+            kind="harness-integration",
+            name=self.harness_integration,
+            blob=self.harness_integration_config or {},
+            owner=RefOwner(kind="session-template", name=self.name),
+            location=self.declared_at,
+        )

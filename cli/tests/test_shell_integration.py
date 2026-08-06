@@ -14,8 +14,10 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.capabilities.base import OperationScope, RunContext, ScopeLevel
+from agentworks.capabilities.config import validate_capability_config
 from agentworks.capabilities.harness_integration import ShellIntegration
 from agentworks.errors import ConfigError, StateError
+from agentworks.schema import RefOwner
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -96,19 +98,24 @@ def test_dependencies_imply_no_reference() -> None:
     assert ShellIntegration.dependencies("session-template/claude", {"commnad": "typo", "command": 3}) == ()
 
 
-def test_validate_accepts_the_known_fields_and_empty_config() -> None:
-    assert (
-        ShellIntegration.validate(
-            "session-template/claude",
-            {
-                "command": "claude",
-                "resume_command": "claude --resume",
-                "required_commands": ["claude", "rg"],
-            },
-        )
-        is None
+def _validate(blob: dict[str, object]) -> None:
+    validate_capability_config(
+        kind="harness-integration",
+        name="shell",
+        blob=blob,
+        owner=RefOwner(kind="session-template", name="claude"),
     )
-    assert ShellIntegration.validate("session-template/claude", {}) is None
+
+
+def test_validation_accepts_the_known_fields_and_empty_config() -> None:
+    _validate(
+        {
+            "command": "claude",
+            "resume_command": "claude --resume",
+            "required_commands": ["claude", "rg"],
+        }
+    )
+    _validate({})
 
 
 def test_shell_launch_note_is_silent() -> None:
@@ -116,30 +123,30 @@ def test_shell_launch_note_is_silent() -> None:
     assert _harness_integration().launch_note() is None
 
 
-def test_validate_rejects_unknown_field() -> None:
-    with pytest.raises(ConfigError, match="unknown shell harness integration field"):
-        ShellIntegration.validate("session-template/claude", {"commnad": "typo"})
+def test_validation_rejects_unknown_field() -> None:
+    with pytest.raises(ConfigError, match="commnad: unknown field; expected one of:"):
+        _validate({"commnad": "typo"})
 
 
-def test_validate_rejects_deprecated_runtime_field() -> None:
-    with pytest.raises(ConfigError, match="unknown shell harness integration field.*restart_command"):
-        ShellIntegration.validate("session-template/claude", {"restart_command": "old"})
+def test_validation_rejects_deprecated_runtime_field() -> None:
+    with pytest.raises(ConfigError, match="restart_command: unknown field"):
+        _validate({"restart_command": "old"})
 
 
-def test_validate_rejects_non_string_command() -> None:
-    with pytest.raises(ConfigError, match="command must be a string"):
-        ShellIntegration.validate("session-template/claude", {"command": 3})
+def test_validation_rejects_non_string_command() -> None:
+    with pytest.raises(ConfigError, match="command: must be a string"):
+        _validate({"command": 3})
 
 
-def test_validate_rejects_non_string_required_commands() -> None:
-    with pytest.raises(ConfigError, match="required_commands must be a list"):
-        ShellIntegration.validate("session-template/claude", {"required_commands": [1, 2]})
+def test_validation_rejects_non_string_required_commands() -> None:
+    with pytest.raises(ConfigError, match=r"required_commands\[0\]: must be a string"):
+        _validate({"required_commands": [1, 2]})
 
 
 def test_construct_revalidates_config() -> None:
-    """A shape error dies at construction (the base re-runs
-    validate)."""
-    with pytest.raises(ConfigError, match="unknown shell harness integration field"):
+    """A shape error dies at construction: the base validates the blob
+    into the declared model and binds the result."""
+    with pytest.raises(ConfigError, match="nope: unknown field"):
         _harness_integration({"nope": 1})
 
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from textwrap import dedent
+from typing import Literal
 
 import pytest
 
@@ -19,10 +20,19 @@ from agentworks.errors import ConfigError
 from agentworks.manifests import load_manifests
 from agentworks.resources.graph import BuildContext
 from agentworks.resources.inspect import describe_resource
+from agentworks.schema import AgwModel
 from agentworks.sessions.template import SessionTemplate
 from agentworks.sessions.templates import resolve_from_dict
 
 # -- a second registered harness integration, for the cross-integration R5 case --
+
+
+class _FakeConfig(AgwModel):
+    """The fake integration's config: its tag plus one field the
+    inheritance tests can put a recognizable value in."""
+
+    name: Literal["fake"]
+    marker: str | None = None
 
 
 class _FakeHarnessIntegration(HarnessIntegration):
@@ -32,14 +42,8 @@ class _FakeHarnessIntegration(HarnessIntegration):
 
     name = "fake"
     description = "test double harness"
-
-    @classmethod
-    def dependencies(cls, owner, config):  # type: ignore[no-untyped-def]
-        return ()
-
-    @classmethod
-    def validate(cls, owner, config):  # type: ignore[no-untyped-def]
-        return None
+    contract_version = 1
+    config_model = _FakeConfig
 
     def start(self, ctx):  # type: ignore[no-untyped-def]
         return ""
@@ -282,7 +286,7 @@ def test_unknown_shell_field_errors_at_build(tmp_path: Path) -> None:
         """,
     )
     config = _config(tmp_path, "")
-    with pytest.raises(ConfigError, match="unknown shell harness integration field") as exc:
+    with pytest.raises(ConfigError, match="nope: unknown field; expected one of:") as exc:
         build_registry(config, load_manifests(root))
     assert "res.yaml" in str(exc.value)
 
@@ -392,7 +396,7 @@ def test_yaml_restart_command_is_rejected(tmp_path: Path) -> None:
             restart_command: old-resume
         """,
     )
-    with pytest.raises(ConfigError, match="unknown shell harness integration field.*restart_command"):
+    with pytest.raises(ConfigError, match="restart_command: unknown field"):
         build_registry(_config(tmp_path, ""), load_manifests(root))
 
 
@@ -407,12 +411,12 @@ def test_child_different_harness_integration_starts_fresh(fake_harness_integrati
             name="child",
             inherits=["base"],
             harness_integration="fake",
-            harness_integration_config={"k": "v"},
+            harness_integration_config={"marker": "child"},
         ),
     }
     resolved = resolve_from_dict(templates, "child")
     assert resolved.harness_integration == "fake"
-    assert resolved.harness_integration_config == {"k": "v"}  # no leak of the shell blob
+    assert resolved.harness_integration_config == {"marker": "child"}  # no leak of the shell blob
 
 
 def test_multi_parent_silent_parent_does_not_wipe(tmp_path: Path) -> None:

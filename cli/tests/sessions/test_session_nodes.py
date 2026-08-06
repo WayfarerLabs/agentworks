@@ -6,13 +6,14 @@ graph, and the relocated ephemeral teardown bodies.
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Annotated, Literal, cast
 
 import pytest
 
 from agentworks.capabilities.base import OperationScope, RunContext, ScopeLevel
 from agentworks.capabilities.harness_integration import HarnessIntegration
 from agentworks.errors import ConfigError, StateError
+from agentworks.schema import AgwModel, NonEmptyStr, SecretRef
 from agentworks.sessions.nodes import pending_session_node
 from agentworks.sessions.templates import ResolvedSessionTemplate
 from agentworks.vms.nodes import LiveVMNode, VMSiteNode
@@ -303,6 +304,16 @@ def test_session_create_graph_shares_one_vm_node(db: Database) -> None:
 # -- the harness_integration_config secret references (#305) -----------------
 
 
+class _ScannerConfig(AgwModel):
+    """A harness config that NAMES a secret, with a constant default."""
+
+    name: Literal["scanner"]
+    api_key: Annotated[
+        NonEmptyStr,
+        SecretRef(usage="the scanner API key", default_template="scanner-api-key"),
+    ]
+
+
 class _SecretHarnessIntegration(HarnessIntegration):
     """A registered secret-declaring harness integration double: both built-ins
     declare no secrets, so pinning the reference derivation and the
@@ -310,16 +321,8 @@ class _SecretHarnessIntegration(HarnessIntegration):
 
     name = "scanner"
     description = "test double harness that declares a config secret"
-
-    @classmethod
-    def dependencies(cls, owner, config):  # type: ignore[no-untyped-def]
-        from agentworks.resources.reference import ConfigReference
-
-        return (ConfigReference(kind="secret", name="scanner-api-key", usage="the scanner API key"),)
-
-    @classmethod
-    def validate(cls, owner, config):  # type: ignore[no-untyped-def]
-        return None
+    contract_version = 1
+    config_model = _ScannerConfig
 
     def start(self, ctx):  # type: ignore[no-untyped-def]
         return ""

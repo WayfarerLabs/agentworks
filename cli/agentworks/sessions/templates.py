@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from agentworks.errors import ConfigError, unknown_template_error
+from agentworks.schema import RefOwner
 
 if TYPE_CHECKING:
     from agentworks.env import EnvEntry
@@ -172,16 +173,27 @@ def _merge_pair(
 
 
 def _validate_merged(resolved: ResolvedSessionTemplate) -> None:
-    """Run the selected harness integration's completeness validation on the merged
-    blob. The shipped integrations are shape-only, but
-    the slot is where a future integration's required-field / cross-field
-    rules belong. ``harness_integration_for`` raises a typed ``ConfigError`` on an
+    """Validate the MERGED blob against the selected integration's model.
+
+    A declared blob on an inheriting surface may be legitimately partial,
+    so this is where a required field is actually required. It runs at
+    resolve, which is where it has always run; FR12 moves it to finalize,
+    and that move needs the merge to run over registry rows plus a
+    per-key provenance channel, which is its own body of work.
+
+    ``harness_integration_for`` raises a typed ``ConfigError`` on an
     unknown name (defense in depth; typos are normally caught by the
-    kind's miss policy at finalize)."""
+    kind's miss policy at finalize), and the core validates against the
+    model that integration declares."""
+    from agentworks.capabilities.config import validate_capability_config
     from agentworks.capabilities.harness_integration import harness_integration_for
 
-    harness_integration_for(resolved.harness_integration).validate(
-        f"session-template/{resolved.name}", resolved.harness_integration_config
+    harness_integration_for(resolved.harness_integration)
+    validate_capability_config(
+        kind="harness-integration",
+        name=str(resolved.harness_integration),
+        blob=resolved.harness_integration_config,
+        owner=RefOwner(kind="session-template", name=resolved.name),
     )
 
 

@@ -40,8 +40,10 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.capabilities.base import OperationScope, RunContext, ScopeLevel
+from agentworks.capabilities.config import validate_capability_config
 from agentworks.errors import ConfigError, StateError
 from agentworks.plugins.codex.harness_integration import CodexIntegration
+from agentworks.schema import RefOwner
 from tests.conftest import _FakeResult, _FakeTarget
 
 if TYPE_CHECKING:
@@ -170,46 +172,53 @@ def test_dependencies_imply_no_reference() -> None:
     assert CodexIntegration.dependencies("session-template/codex", {"model": 3, "sandbx": "typo"}) == ()
 
 
-def test_validate_accepts_the_ten_fields_and_empty_config() -> None:
-    assert (
-        CodexIntegration.validate(
-            "session-template/codex",
-            {
-                "model": "gpt-5",
-                "sandbox": "workspace-write",
-                "approval_policy": "on-request",
-                "profile": "work",
-                "network": True,
-                "approvals_reviewer": "auto_review",
-                "writable_dirs": ["/srv/cache"],
-                "web_search": False,
-                "disable_strict_config": False,
-                "extra_args": ["--foo"],
-            },
-        )
-        is None
+def _validate(blob: dict[str, object]) -> None:
+    """Validation is the CORE's now: it reads the model this integration
+    declares, and no integration code runs."""
+    validate_capability_config(
+        kind="harness-integration",
+        name="codex",
+        blob=blob,
+        owner=RefOwner(kind="session-template", name="codex"),
     )
-    assert CodexIntegration.validate("session-template/codex", {}) is None
 
 
-def test_validate_rejects_unknown_field() -> None:
-    with pytest.raises(ConfigError, match="unknown codex harness integration field"):
-        CodexIntegration.validate("session-template/codex", {"sandbx": "typo"})
+def test_validation_accepts_the_ten_fields_and_empty_config() -> None:
+    _validate(
+        {
+            "model": "gpt-5",
+            "sandbox": "workspace-write",
+            "approval_policy": "on-request",
+            "profile": "work",
+            "network": True,
+            "approvals_reviewer": "auto_review",
+            "writable_dirs": ["/srv/cache"],
+            "web_search": False,
+            "disable_strict_config": False,
+            "extra_args": ["--foo"],
+        }
+    )
+    _validate({})
+
+
+def test_validation_rejects_unknown_field() -> None:
+    with pytest.raises(ConfigError, match="sandbx: unknown field; expected one of:"):
+        _validate({"sandbx": "typo"})
 
 
 @pytest.mark.parametrize("field_name", ["model", "sandbox", "approval_policy", "profile"])
-def test_validate_rejects_non_string_flag_fields(field_name: str) -> None:
-    with pytest.raises(ConfigError, match=f"{field_name} must be a string"):
-        CodexIntegration.validate("session-template/codex", {field_name: 3})
+def test_validation_rejects_non_string_flag_fields(field_name: str) -> None:
+    with pytest.raises(ConfigError, match=f"{field_name}: must be a string"):
+        _validate({field_name: 3})
 
 
-def test_validate_rejects_non_list_extra_args() -> None:
-    with pytest.raises(ConfigError, match="extra_args must be a list of strings"):
-        CodexIntegration.validate("session-template/codex", {"extra_args": "just-a-string"})
+def test_validation_rejects_non_list_extra_args() -> None:
+    with pytest.raises(ConfigError, match="extra_args: must be a list"):
+        _validate({"extra_args": "just-a-string"})
 
 
 def test_construct_revalidates_config() -> None:
-    with pytest.raises(ConfigError, match="unknown codex harness integration field"):
+    with pytest.raises(ConfigError, match="nope: unknown field"):
         _harness_integration({"nope": 1})
 
 
@@ -843,7 +852,7 @@ def test_new_fields_reject_wrong_types() -> None:
         ("writable_dirs", [1, 2]),
     ):
         with pytest.raises(ConfigError, match=field):
-            CodexIntegration.validate("session-template/t", {field: bad})
+            _validate({field: bad})
 
 
 def test_merge_config_unions_writable_dirs_and_child_wins_the_rest() -> None:
@@ -867,7 +876,7 @@ def test_merge_config_never_launders_an_invalid_writable_dirs_entry() -> None:
     merged = CodexIntegration.merge_config({}, {"writable_dirs": ["/srv/a", 5]})
     assert merged["writable_dirs"] == ["/srv/a", 5]
     with pytest.raises(ConfigError, match="writable_dirs"):
-        CodexIntegration.validate("session-template/t", merged)
+        _validate(merged)
 
 
 def test_extra_args_appended_verbatim_last_and_quoted() -> None:

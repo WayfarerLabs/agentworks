@@ -597,21 +597,24 @@ def _emit_document(doc: tomlkit.TOMLDocument, unit: MigrationUnit) -> str:
             )
         rebuilt_session.update(spec)  # env and any remaining kind-owned keys
         if isinstance(integration, str) and integration_config is not None:
-            from agentworks.capabilities.harness_integration import HARNESS_INTEGRATION_REGISTRY
+            from agentworks.capabilities.config import validate_capability_config
 
-            integration_capability = HARNESS_INTEGRATION_REGISTRY.get(integration)
-            if integration_capability is not None:
-                try:
-                    integration_capability.validate(f"session-template/{unit.name}", integration_config)
-                except ConfigError as exc:
-                    raise ConfigError(
-                        f"cannot migrate session-template/{unit.name}: {exc}",
-                        hint=(
-                            "The flat TOML section carries key(s) its harness integration "
-                            "does not accept (silently ignored by the TOML "
-                            "loader). Remove them from config.toml, then re-run."
-                        ),
-                    ) from exc
+            try:
+                validate_capability_config(
+                    kind="harness-integration",
+                    name=integration,
+                    blob=integration_config,
+                    owner=RefOwner(kind="session-template", name=unit.name),
+                )
+            except ConfigError as exc:
+                raise ConfigError(
+                    f"cannot migrate session-template/{unit.name}: {exc}",
+                    hint=(
+                        "The flat TOML section carries key(s) its harness integration "
+                        "does not accept (silently ignored by the TOML "
+                        "loader). Remove them from config.toml, then re-run."
+                    ),
+                ) from exc
         spec = rebuilt_session
 
     envelope: dict[str, Any] = {

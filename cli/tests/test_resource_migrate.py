@@ -426,7 +426,7 @@ command = "tool"
 restart_command = "tool --resume"
 """,
     )
-    with pytest.raises(ConfigError, match="unknown shell harness integration field.*restart_command"):
+    with pytest.raises(ConfigError, match="restart_command: unknown field"):
         _plan(cfg, ["session-template/shell"])
 
     assert not (tmp_path / "resources").exists()
@@ -446,7 +446,7 @@ restart_command = "old"
     )
     original = cfg.read_text()
 
-    with pytest.raises(ConfigError, match="unknown shell harness integration field.*restart_command"):
+    with pytest.raises(ConfigError, match="restart_command: unknown field"):
         _plan(cfg, ["session-template/shell"])
 
     assert cfg.read_text() == original

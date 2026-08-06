@@ -57,7 +57,6 @@ from tests.plugins._fixtures import (
     ConformingHarnessIntegration,
     ConformingSecretBackend,
     ConformingVMPlatform,
-    config_model_for,
 )
 
 if TYPE_CHECKING:
@@ -112,10 +111,9 @@ class _FixtureHarnessIntegration(ConformingHarnessIntegration):
 class _FixtureProvider(ConformingGitCredentialProvider):
     name = "fixture-provider"
     description = "Fixture git credential provider (test plugin)"
-    # A config model with no reference-marked field, so this provider
-    # declares no token secret and the fixture credential's edge set stays
-    # just the provider edge.
-    config_model = config_model_for("git-credential-provider", "fixture-provider")
+    # Its generated config model has no reference-marked field, so this
+    # provider declares no token secret and the fixture credential's edge
+    # set stays just the provider edge.
 
 
 class _FixtureBackend(ConformingSecretBackend):
