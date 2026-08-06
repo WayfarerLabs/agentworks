@@ -91,11 +91,14 @@ picked off whenever bandwidth allows, on its own merits and its own schedule.
 
 ## Release mapping
 
-- **0.14.0:** waves 0 and 1. One breaking-cleanup story: single declaration frontend, expired
-  compatibility removed, SDD ledger clean.
-- **0.15.x:** wave 2, likely with the generic-discriminator hard error as its headline breaking
-  change, plus whichever of waves 3 and 5 complete.
-- **Later:** waves 4, 6, 7, 8 map to releases as they prove out; no need to pin numbers now.
+- **0.14.0 (held; operator ruling, 2026-08-06):** the breaking cleanup does not ship alone. The cut
+  waits for the guide first slice (guide command core, `concept-onboarding`, the README bootstrap),
+  so the release that rejects old inputs also ships the CLI that teaches the new ones; newcomers
+  ride the forgiving 0.13.0 until then. The 0.13.0 warnings stay true because the version number
+  attaches to the breaking content, not the date. If wave 2's generic-discriminator hard error lands
+  in the same window, it folds in: one well-cushioned breaking release instead of two. While `main`
+  holds unreleased breaking changes, urgent operator fixes ship from a `0.13.x` backport branch.
+- **Later:** remaining waves map to releases as they prove out; no need to pin numbers now.
 
 ## Open ordering decisions
 
