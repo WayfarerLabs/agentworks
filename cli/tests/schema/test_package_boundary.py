@@ -28,8 +28,18 @@ _PERMITTED = ("agentworks.errors", "agentworks.source_location", "agentworks.sch
 
 
 def _agentworks_imports(source: str) -> set[str]:
+    """Every ``agentworks`` module ``source`` imports, at any indentation.
+
+    A function-local import counts: the subprocess check below would catch
+    one that closed a cycle, but only if something calls that function, and
+    a lazy import inside a rarely-taken branch is exactly the one nothing
+    calls. Reading indented lines too keeps the two directions covering the
+    same ground.
+    """
     return {
-        line.split()[1] for line in source.splitlines() if line.startswith(("import agentworks", "from agentworks"))
+        stripped.split()[1]
+        for line in source.splitlines()
+        if (stripped := line.strip()).startswith(("import agentworks", "from agentworks"))
     }
 
 

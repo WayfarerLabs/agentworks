@@ -13,17 +13,20 @@ from __future__ import annotations
 
 from pathlib import Path
 from textwrap import dedent
-from typing import Annotated, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 import pytest
 
 from agentworks.bootstrap import build_registry
-from agentworks.capabilities.git_credential import GIT_CREDENTIAL_PROVIDER_REGISTRY
 from agentworks.capabilities.git_credential.base import GitCredentialProvider, HelperEntry
 from agentworks.config import load_config
 from agentworks.errors import ConfigError
+from agentworks.plugins import SYSTEM_PLUGINS, Plugin, seated_plugin
 from agentworks.schema import AgwModel, NonEmptyStr, SecretRef
 from tests.conftest import ManifestDoc, write_manifests
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 
 def _config(tmp_path: Path, settings: str = "", *, enabled: bool = False) -> Any:
@@ -280,9 +283,32 @@ class _SigningCredentialProvider(GitCredentialProvider):
         return HelperEntry(host="example.test", username="signer")
 
 
+SIGNING_ENABLED = """
+[plugins]
+system = ["signing"]
+"""
+
+
+SIGNING_PLUGIN = Plugin(
+    name="signing",
+    description="a test-only plugin shipping the signing provider",
+    capabilities={"git-credential-provider": (_SigningCredentialProvider,)},
+)
+
+
 @pytest.fixture
-def signing_provider(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setitem(GIT_CREDENTIAL_PROVIDER_REGISTRY, "test-signing", _SigningCredentialProvider)
+def signing_provider(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """The fixture provider, seated and published the way a real plugin
+    is: ``seated_plugin`` puts it through ``register_plugin`` (which is
+    where registration conformance runs) and the patched index is what
+    publishes its capability row. Writing it straight into the registry
+    would skip conformance entirely, and this provider is the only thing
+    in this file declaring a marked field, so it is the one most worth
+    holding to the same bar as a shipped one.
+    """
+    monkeypatch.setitem(SYSTEM_PLUGINS, "signing", SIGNING_PLUGIN)
+    with seated_plugin(SIGNING_PLUGIN):
+        yield
 
 
 def test_capability_refs_attributed_to_consuming_resource(tmp_path: Path, signing_provider: None) -> None:
@@ -291,7 +317,7 @@ def test_capability_refs_attributed_to_consuming_resource(tmp_path: Path, signin
     as source; the framework
     auto-declares the secret with a per-consumer description."""
     _manifest(tmp_path, ManifestDoc("git-credential", "signer", {"provider": {"name": "test-signing"}}))
-    config = _config(tmp_path)
+    config = _config(tmp_path, SIGNING_ENABLED)
     registry = build_registry(config)
     # Defaulted secret name: auto-declared, attributed to THIS credential.
     decl = registry.lookup("secret", "code-signing-key")
@@ -316,7 +342,7 @@ def test_capability_ref_default_is_operator_overridable(tmp_path: Path, signing_
             {"provider": {"name": "test-signing", "signing_key": "corp-signing-key"}},
         ),
     )
-    config = _config(tmp_path)
+    config = _config(tmp_path, SIGNING_ENABLED)
     registry = build_registry(config)
     registry.lookup("secret", "corp-signing-key")
     sources = {entry.source for entry in registry.graph.dependents_of("secret", "corp-signing-key")}

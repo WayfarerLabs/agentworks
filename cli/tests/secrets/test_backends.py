@@ -11,13 +11,15 @@ from __future__ import annotations
 
 from pathlib import Path
 from textwrap import dedent
-from typing import Any
+from typing import Annotated, Any
 
 import pytest
 
 from agentworks.bootstrap import build_registry
+from agentworks.capabilities.config import capability_config_references
 from agentworks.config import load_config
 from agentworks.errors import ConfigError
+from agentworks.schema import AgwModel, AgwRootModel, NonEmptyStr, RefOwner, SecretRef, extract_references
 from agentworks.secrets import SECRET_BACKEND_REGISTRY, active_backends, resolve_secrets
 from agentworks.secrets.base import SecretDecl
 
@@ -45,6 +47,14 @@ def _manifest(tmp_path: Path, text: str, rel: str = "res.yaml") -> None:
     (resources / rel).write_text(dedent(text))
 
 
+class MarkedMapping(AgwModel):
+    """A hypothetical backend mapping that NAMES an agentworks secret,
+    which no shipped backend does. It exists so the empty answers above
+    are provably the walker's."""
+
+    vault_secret: Annotated[NonEmptyStr, SecretRef(usage="the vault's own credential")]
+
+
 class _TestOnlyBackend:
     """A store-flavored capability registered only in tests: exercises
     the SecretBackend API end to end (structured mappings, soft-skip
@@ -61,17 +71,6 @@ class _TestOnlyBackend:
         from agentworks.resources.graph import Readiness
 
         return Readiness.ready()
-
-    def validate_mapping(self, owner: str, mapping: Any) -> None:
-        # Store semantics: string or structured addressing accepted.
-        if not isinstance(mapping, (str, dict)):
-            from agentworks.errors import ConfigError
-
-            raise ConfigError(f"{owner}: test-only mapping must be str or dict")
-
-    def dependencies(self, mapping: Any) -> tuple[Any, ...]:
-        # A store address implies no agentworks resource.
-        return ()
 
     def would_attempt(self, secret: Any, mapping: Any) -> bool:
         # Store semantics: only attempts explicitly-mapped secrets
@@ -93,6 +92,50 @@ def test_only_backend(monkeypatch: pytest.MonkeyPatch) -> Any:
     backend = _TestOnlyBackend()
     monkeypatch.setitem(SECRET_BACKEND_REGISTRY, "test-only", backend)  # type: ignore[misc]
     return backend
+
+
+@pytest.mark.parametrize(
+    ("backend", "mapping"),
+    [
+        pytest.param("env-var", "NPM_TOKEN", id="env-var"),
+        pytest.param("onepassword", "op://Work/npm/token", id="onepassword-uri"),
+        pytest.param("onepassword", {"account": "acct", "reference": "op://Work/npm/token"}, id="onepassword-table"),
+    ],
+)
+def test_a_shipped_mapping_implies_no_agentworks_resource(backend: str, mapping: object) -> None:
+    """Extraction over a backend mapping is core-driven like every other
+    kind's, and every shipped mapping is an EXTERNAL identifier (an env
+    var name, an ``op://`` reference into a vault), so none of them names
+    an agentworks resource.
+
+    Worth pinning rather than assuming: the wiring exists so
+    secret-backend is not the one kind whose config references are
+    structurally underivable, and an empty answer from a walker that was
+    never called looks exactly like an empty answer from one that was.
+    """
+    assert (
+        capability_config_references(
+            kind="secret-backend",
+            name=backend,
+            blob=mapping,  # type: ignore[arg-type]
+            owner=RefOwner(kind="secret", name="npm-token"),
+        )
+        == ()
+    )
+
+
+def test_extraction_over_a_backend_mapping_is_reached_at_all() -> None:
+    """Non-vacuity for the pin above: a mapping model that DOES mark a
+    field yields the reference, so the empty answers there are the
+    walker's answer rather than a walk that never happened."""
+
+    class _Marked(AgwRootModel[MarkedMapping]):
+        pass
+
+    assert [
+        ref.name
+        for ref in extract_references(_Marked, {"vault_secret": "shared-key"}, RefOwner(kind="secret", name="s"))
+    ] == ["shared-key"]
 
 
 def test_builtin_backends_registered() -> None:

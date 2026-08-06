@@ -34,7 +34,6 @@ from agentworks.schema import AgwRootModel
 if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
     from agentworks.db import VMRow, VMStatus
-    from agentworks.resources.reference import ConfigReference
     from agentworks.secrets.base import MappingValue, SecretDecl
     from agentworks.transports import Transport
 
@@ -156,12 +155,6 @@ class ConformingSecretBackend:
 
     def not_ready(self) -> Readiness:
         return Readiness.ready()
-
-    def validate_mapping(self, owner: str, mapping: MappingValue) -> None:
-        raise NotImplementedError
-
-    def dependencies(self, mapping: MappingValue) -> tuple[ConfigReference, ...]:
-        return ()
 
     def would_attempt(self, secret: SecretDecl, mapping: MappingValue | None) -> bool:
         return False
