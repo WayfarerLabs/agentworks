@@ -81,6 +81,23 @@ def _session_scope(
 # -- What a config model may declare ------------------------------------------
 
 
+def test_shells_config_is_entirely_optional_beyond_its_tag() -> None:
+    """``shell`` is the only integration that may not require anything.
+
+    It is the DEFAULT workload: a session template naming no integration
+    resolves to it, and finalize validates that template's effective
+    config against this model. That includes the reserved auto-declared
+    ``default`` row, which has no declaration to put a value in, so a
+    required field here would make every operator's config fail to load
+    with nothing they could write to fix it. Every OTHER integration may
+    require what it likes, because a template has to name it first.
+    """
+    from agentworks.capabilities.harness_integration.shell import ShellConfig
+
+    required = [name for name, field in ShellConfig.model_fields.items() if field.is_required()]
+    assert required == ["name"]  # the discriminator, which no template writes
+
+
 def test_a_tag_and_an_owner_templated_reference_need_nothing_from_a_template() -> None:
     """Both are statically required and neither is something a template
     writes: the tag is on every arm by construction, and the model layer

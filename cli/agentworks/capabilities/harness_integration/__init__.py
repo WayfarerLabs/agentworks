@@ -94,6 +94,14 @@ def merged_config(name: str, base: Mapping[str, object], child: Mapping[str, obj
     Distinct from :func:`harness_integration_for`, which is the lookup for
     callers that need the CLASS and for whom an unknown name is a genuine
     (defense-in-depth) error.
+
+    What this does NOT do is contain an implementation that misbehaves.
+    ``merge_config`` is contractually pure and non-raising (see this
+    package's ``README.md``), and neither property is checkable at
+    registration, so an implementation that raises here takes
+    ``build_registry`` down with its own traceback. Catching it would be
+    worse: the merge feeds edge extraction, so a swallowed exception means
+    a graph that builds while quietly missing a secret.
     """
     integration = HARNESS_INTEGRATION_REGISTRY.get(name, HarnessIntegration)
     return integration.merge_config(base, child)

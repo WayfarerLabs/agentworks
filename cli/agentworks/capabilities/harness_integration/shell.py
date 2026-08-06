@@ -24,7 +24,18 @@ if TYPE_CHECKING:
 
 
 class ShellConfig(AgwModel):
-    """What a session template tells the ``shell`` integration to run."""
+    """What a session template tells the ``shell`` integration to run.
+
+    **Every field beyond the tag must stay optional**, and this one model
+    is the only place that is true of by obligation rather than by
+    accident. ``shell`` is the DEFAULT workload: a session template that
+    names no integration at all resolves to it, including the reserved
+    auto-declared ``default`` row, which has no config to give. A required
+    field here would make every operator's config fail to load with no
+    remedy available to them. Pinned by
+    ``tests/test_shell_integration.py``; any other integration is free to
+    require what it likes, because a template has to opt into it.
+    """
 
     name: Literal["shell"]
     """The harness integration this config is for."""

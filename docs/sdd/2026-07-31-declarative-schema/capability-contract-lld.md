@@ -965,17 +965,51 @@ Details worth having in one place:
 - **`_validate_merged` retired**, and `_resolve` now validates nothing at all: finalize checks the
   shape and construction re-validates the blob it binds, so the resolve-time call was the third copy
   and the one at the wrong time.
+- **The producing half moved reference ATTRIBUTION onto the inheritor, and that had to be paid for**
+  (found by review, 2026-08-06). Three places answered "who wants this target?" with the edge's
+  `source`: the miss-policy error, an auto-declared row's `Origin`, and its synthesized description.
+  A child now publishes the runtime needs of its merged declaration, so `source` is the child even
+  when an ancestor wrote the name, and an operator told
+  `vm-template 'kid' references unknown apt-package 'nope'` opens a file with no `apt_packages` in
+  it. Worse, the parent emits the same edge, so which row got blamed depended on the order the build
+  walk reached them in, and a file rename could move it. Fixed by carrying `declared_by` on
+  `ResourceReference` and `ReferenceEntry`, read through a `declarer` property that falls back to
+  `source`, so a non-inheriting producer says and means nothing different. Per-key declarers come
+  from `resources/inheritance.py`, which holds the chain's SHAPE (its merge ORDER, and which layer
+  last declared a key) once for all four kinds even though none of them share a merge rule; the
+  order is a contract, so it is pinned by folding the layers and getting each resolver's own merged
+  result. The harness block is attributed at BLOCK granularity, to the layer that selected the
+  integration, because a `ConfigReference` carries no field to be finer with; that is exact for
+  every shape a template can currently write, since a config block without a selector beside it does
+  not load, and closing the remaining case would need `extract_references` to carry its field path.
+  **The tests publish the CHILD first**, which is the ordering that exposes it: with the parent
+  first the answer comes out right by accident.
 
 **The policy call, made explicitly (FR17 left it to this LLD).** ENABLEMENT propagates across an
 inheritance edge; READINESS does not. Enablement, because a template resolver compiles the parent's
 declaration into the recipe the use-gate is about to act on, so a disabled parent is not a runtime
-need the child happens to have, it is source the child is made of. That is what
-`ensure_recipe_enabled` already did by walking the full closure, and the split is precisely why it
-now has to be stated: it is the one caller that must NOT switch to the runtime closure, and it is
-pinned both behaviorally and by the graph guard. Readiness, because no template kind implements
-`not_ready`, so every template row folds to a ready verdict and an inheritance edge changes nothing;
-a future inheriting kind that grows a hook is handed every out-edge's state and decides for itself,
-which is R4's rule and not a traversal's to decide in advance.
+need the child happens to have, it is source the child is made of. Readiness, because no template
+kind implements `not_ready`, so every template row folds to a ready verdict and an inheritance edge
+changes nothing; a future inheriting kind that grows a hook is handed every out-edge's state and
+decides for itself, which is R4's rule and not a traversal's to decide in advance.
+
+**The gate is a UNION of two closures, not the full one** (corrected by review, 2026-08-06). The
+first pass kept `ensure_recipe_enabled` on the crosses-everything closure, reasoning that it was
+already right to cross inheritance. It was, before the producing half landed; afterwards it also
+reached an ancestor's own leaves, including ones the child OVERRODE, so disabling
+`secret/tailscale-auth-key` refused a child that had renamed it. Reproduced. The recipe is
+`composed_from` (the INHERITS closure: the ancestor rows the resolver compiles in, which is what
+carries the enablement policy) plus `runtime_reachable_from` (what the row needs, which since the
+producing half already includes everything it inherited AND still uses). What the union deliberately
+omits is an ancestor's standalone needs. It failed SAFE, which is why it took a review to find and
+why the LLD had recorded the old behavior as settled: worth remembering that "fails safe" and
+"nobody will notice" are the same sentence.
+
+`reachable_from` was deleted with that change rather than left with no caller. Its only property was
+crossing everything, which after the split is not a question anyone asks, and a query with that
+shape is what a future consumer reaches for without deciding. Both closures now name the
+relationships they CROSS, so a third `RefRelationship` joins neither until someone decides, and
+`test_every_relationship_has_a_closure` fails until they do.
 
 **One operator-visible semantic this creates, flagged for the lead.** Validation is per ROW over
 that row's own chain, so a base template whose blob only a CHILD completes is now a load error in

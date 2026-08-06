@@ -98,6 +98,16 @@ def test_session_template_child_inherits_the_harness_selector_it_never_declared(
     assert _targets(silent, context) == set()
 
 
+def test_a_kind_nobody_registered_is_refused_rather_than_answered_empty() -> None:
+    """The one degradation the context will NOT perform silently: an
+    emitter that misspells its own kind would otherwise stop merging its
+    chain and go on publishing plausible edges off its declaration."""
+    from agentworks.errors import StateError
+
+    with pytest.raises(StateError, match="no resource kind 'vm-tempalte' is registered"):
+        FinalizeContext().rows_of("vm-tempalte")
+
+
 def test_a_bare_context_degrades_to_the_declaration_itself_not_to_nothing() -> None:
     """``FinalizeContext()`` carries no rows, so there are no ancestors to
     merge; the row's OWN declaration still has to come through, or a
@@ -124,8 +134,12 @@ def test_the_effective_resolve_is_total_over_a_cyclic_chain() -> None:
 def test_a_cyclic_chain_still_reports_the_cycle_rather_than_a_degraded_graph(tmp_path: Path) -> None:
     """What makes the degradation above safe: the rows whose edges came
     out degraded are never read, because the cycle pass raises first.
-    Asserted on ``vm-template`` specifically, whose degraded edge set
-    silently loses the auth-key secret."""
+
+    What degradation costs is the merged view: every inherited env secret,
+    and any override of a defaulted field (the auth-key edge survives, at
+    the kind's default name rather than at the declared one). Wrong
+    answers, all of them, which is why the claim they are unobservable is
+    worth a test rather than a comment."""
     cfg = _write_cfg(
         tmp_path,
         "",

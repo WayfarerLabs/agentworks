@@ -372,7 +372,24 @@ class FinalizeContext:
         alone" rather than to "nothing at all": an empty answer for a
         template that declares an env secret would be a wrong answer, not
         an obviously-missing one.
+
+        An unregistered ``kind`` is REFUSED rather than answered with an
+        empty mapping, because that degradation is indistinguishable from
+        the legitimate one above: a typo in a future emitter would quietly
+        stop merging its own chain, and the row would go on publishing
+        plausible edges off its declaration alone. The values stay ``Any``
+        because the rows genuinely are heterogeneous (the registry holds
+        every kind's own dataclass) and the caller narrows; the KEY is the
+        part that can be wrong with nothing noticing.
         """
+        from agentworks.errors import StateError
+        from agentworks.resources.kind import KIND_REGISTRY
+
+        if kind not in KIND_REGISTRY:
+            raise StateError(
+                f"no resource kind {kind!r} is registered, so there are no rows to resolve a chain over "
+                f"(known kinds: {', '.join(sorted(KIND_REGISTRY))})"
+            )
         return self.rows.get(kind, {})
 
 

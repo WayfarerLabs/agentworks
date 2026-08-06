@@ -261,9 +261,17 @@ The resolver calls `merge_config` on every declared-blob fold, with `base={}` wh
 starts (a template with no parents included) or when a child switches to a different integration.
 Every implementation must therefore accept an empty base. A different integration's blob never lands
 in `base`: the resolver discards accumulated config on an integration switch, so a parent's config
-cannot leak across it. The fold also runs during the finalize build walk, where nothing may raise
-and no name has been checked yet, so `merge_config` must be a pure function of its two arguments; an
-unregistered name gets the base contract's own child-wins default rather than an error.
+cannot leak across it.
+
+**`merge_config` runs inside the finalize build walk, which may not raise.** It must be a pure
+function of its two arguments: no I/O, no registry, no config, and no exception on a shape it does
+not like (the blob it is handed has not been validated yet, because the graph is built before
+anything is). This is deliberately NOT a registration conformance check, because neither purity nor
+non-raising is a property a check can establish, so what happens when an implementation breaks it is
+worth stating plainly instead: a raising `merge_config` takes `build_registry` down with that
+plugin's own traceback, and every command fails showing a stack trace rather than a config error. An
+unregistered name never reaches an implementation at all: it gets the base contract's own child-wins
+default, and the kind's miss policy reports the name.
 
 #### Construction: Cheap, No I/O
 
