@@ -382,12 +382,17 @@ def _contextual_message(detail: ErrorDetails, container: type[BaseModel] | None)
             # A constrained STRING shape. Rendered from the pattern rather
             # than paraphrased, because only the field knows what its
             # pattern MEANS and this module never invents phrasing: what
-            # it can do is spell the rule in the house's ``/.../`` form
-            # instead of pydantic's "String should match pattern '...'".
-            # The intent belongs in the field's description, which the
-            # sample and describe surfaces render beside it.
+            # it can do is spell the rule plainly instead of pydantic's
+            # "String should match pattern '...'". The intent belongs in
+            # the field's description, which the sample and describe
+            # surfaces render beside it.
+            #
+            # Backticks rather than the ``/.../`` a regex usually wears:
+            # one shipped pattern (a github ``repos`` entry) contains a
+            # slash, so slash delimiters would leave an operator unable to
+            # see where the rule ends.
             pattern = ctx.get("pattern")
-            return f"must match /{pattern}/" if isinstance(pattern, str) else None
+            return f"must match `{pattern}`" if isinstance(pattern, str) else None
         case "literal_error":
             expected = ctx.get("expected")
             # Pydantic pre-formats the alternatives ("'a', 'b' or 'c'"),

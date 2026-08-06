@@ -56,10 +56,13 @@ def test_a_missing_required_field_says_it_is_required() -> None:
     """``apt-source`` is the kind with genuinely required fields: its
     loader read all four through ``_require_field``, which raises on an
     absent key."""
-    assert (
-        rejection("apt-source", "example", {})
-        == "res.yaml:7: apt-source/example: 4 problems\n  key_url: is required\n  key_path: is required\n  source: is required\n  source_file: is required"
-    )
+    assert rejection("apt-source", "example", {}).splitlines() == [
+        "res.yaml:7: apt-source/example: 4 problems",
+        "  key_url: is required",
+        "  key_path: is required",
+        "  source: is required",
+        "  source_file: is required",
+    ]
 
 
 def test_a_bare_string_where_a_list_belongs_is_refused() -> None:
@@ -75,7 +78,7 @@ def test_a_source_file_with_a_path_separator_is_refused() -> None:
     metacharacters") rides the field's description, which is what the
     sample and describe surfaces show."""
     assert rejection("apt-source", "example", {**_SOURCE, "source_file": "../etc/passwd"}) == (
-        r"res.yaml:7: apt-source/example.source_file: must match /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/"
+        r"res.yaml:7: apt-source/example.source_file: must match `^[a-zA-Z0-9][a-zA-Z0-9._-]*$`"
     )
 
 

@@ -476,8 +476,21 @@ def test_a_constrained_string_shape_reads_as_the_rule_it_must_match() -> None:
         source_file: str = Field(default="ok.list", pattern=r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
 
     assert _lines(Filed, {"source_file": "../etc/passwd"}) == [
-        r"vm-site/lab.source_file: must match /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/"
+        r"vm-site/lab.source_file: must match `^[a-zA-Z0-9][a-zA-Z0-9._-]*$`"
     ]
+
+
+def test_a_pattern_containing_a_slash_is_still_readable() -> None:
+    """Why the rule is not wrapped in ``/.../``: a github ``repos`` entry's
+    pattern contains a slash, and slash delimiters would leave an operator
+    unable to see where the rule ends."""
+
+    class Scoped(AgwModel):
+        """A model whose pattern contains the delimiter a regex usually wears."""
+
+        repo: str = Field(default="a/b", pattern=r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$")
+
+    assert _lines(Scoped, {"repo": "nope"}) == [r"vm-site/lab.repo: must match `^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$`"]
 
 
 def test_a_length_floor_above_one_keeps_pydantics_exact_wording() -> None:

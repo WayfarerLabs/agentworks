@@ -126,13 +126,13 @@ def test_extraction_total_on_malformed_config() -> None:
     ("blob", "match"),
     [
         ({"repos": ["acme/widgets"], "owner": "acme"}, "mutually exclusive"),
-        ({"repos": ["no-slash"]}, "String should match pattern"),
+        ({"repos": ["no-slash"]}, "must match `"),
         ({"repos": "acme/widgets"}, "repos: must be a list"),
         ({"repo": "acme/widgets"}, "unknown field; expected one of: name, owner, repos, token"),
-        ({"repos": ["a/b/c"]}, "String should match pattern"),
-        ({"repos": ["/leading"]}, "String should match pattern"),
-        ({"owner": "acme/"}, "String should match pattern"),
-        ({"owner": ""}, "String should match pattern"),
+        ({"repos": ["a/b/c"]}, "must match `"),
+        ({"repos": ["/leading"]}, "must match `"),
+        ({"owner": "acme/"}, "must match `"),
+        ({"owner": ""}, "must match `"),
         ({"org": "acme"}, "unknown field; expected one of: name, owner, repos, token"),
         ({"repos": [123]}, r"repos\[0\]: must be a string"),
         ({"owner": 123}, "owner: must be a string"),
@@ -402,7 +402,7 @@ def test_manifest_scope_validation_has_file_line(tmp_path: Path) -> None:
             repos: [not-a-repo]
         """)
     )
-    with pytest.raises(ConfigError, match="String should match pattern") as exc:
+    with pytest.raises(ConfigError, match="must match `") as exc:
         build_registry(load_config(cfg, warn_issues=False))
     assert "creds.yaml" in str(exc.value)
 
@@ -830,7 +830,7 @@ def test_unsafe_scope_values_rejected_at_build() -> None:
 
 
 def test_azdo_org_charset_validated() -> None:
-    with pytest.raises(ConfigError, match="String should match pattern"):
+    with pytest.raises(ConfigError, match="must match `"):
         _validate({"org": "my org"}, name="azdo")
 
 
