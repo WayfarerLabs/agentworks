@@ -37,6 +37,15 @@ The framework's ``Origin`` is distinct from the Config layer's
 ``Origin`` (rendered as e.g., ``"operator-declared (config.toml:42)"`` or
 ``"auto-declared by vm-template:azure-prod"``) in ``agw doctor``,
 ``agw secret list``, and ``agw secret describe``.
+
+This type BELONGS to the resource layer and is re-exported by
+``agentworks.resources``, but it LIVES at top level, next to
+``declared_resource`` and ``source_location`` and for the same reason
+they do: the declared-row base carries ``origin`` as a MODEL FIELD, which
+a model resolves at class-definition time, and importing anything under
+``agentworks.resources`` runs that package's ``__init__``, which loads
+every kind module, which loads the very rows that inherit the base. It
+imports nothing of ours, so nothing about it needed the deeper home.
 """
 
 from __future__ import annotations

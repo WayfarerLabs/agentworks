@@ -40,9 +40,9 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from agentworks.db import Database
+    from agentworks.origin import Origin
     from agentworks.resources import Registry
     from agentworks.resources.kind import InstanceRef
-    from agentworks.resources.origin import Origin
     from agentworks.resources.reference import ReferenceEntry
 
 

@@ -29,6 +29,7 @@ from agentworks.resources.kind import KIND_REGISTRY
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping, Sequence
 
+    from agentworks.origin import Origin
     from agentworks.resources.graph import (
         DependencyGraph,
         DisabledMark,
@@ -37,7 +38,6 @@ if TYPE_CHECKING:
         FinalizeContext,
         Readiness,
     )
-    from agentworks.resources.origin import Origin
     from agentworks.resources.reference import ReferenceEntry, ResourceReference
 
 

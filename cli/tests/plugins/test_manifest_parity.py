@@ -21,11 +21,11 @@ from agentworks.agents.template import AgentTemplate
 from agentworks.capabilities.harness_integration import ensure_harness_integration_enabled
 from agentworks.errors import ConfigError, StateError
 from agentworks.install_commands import UserInstallCommandEntry
+from agentworks.origin import Origin
 from agentworks.plugins import Plugin, plugin_enablement_source, publish_plugins, seated_plugin
 from agentworks.resources.access import ensure_recipe_enabled, ensure_reference_enabled
 from agentworks.resources.graph import Enablement
 from agentworks.resources.inspect import describe_resource, list_resources
-from agentworks.resources.origin import Origin
 from agentworks.resources.registry import Registry
 from agentworks.sessions.template import SessionTemplate
 from tests.plugins._fixtures import ConformingHarnessIntegration

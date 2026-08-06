@@ -30,12 +30,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
+from agentworks.origin import Origin
 from agentworks.resources.kind import (
     ALWAYS_MATERIALIZE_SOURCE,
     KIND_REGISTRY,
     InstanceRef,
 )
-from agentworks.resources.origin import Origin
 from agentworks.vms.admin import AdminConfig
 from agentworks.vms.template import VMTemplate
 

@@ -23,9 +23,9 @@ from agentworks.secrets.kinds import SECRET_KIND_NAME
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database
+    from agentworks.origin import Origin
     from agentworks.resources import Registry
     from agentworks.resources.kind import InstanceRef
-    from agentworks.resources.origin import Origin
     from agentworks.resources.reference import ReferenceEntry
 
 

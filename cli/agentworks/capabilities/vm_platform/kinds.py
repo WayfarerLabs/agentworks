@@ -38,7 +38,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from agentworks.capabilities.vm_platform import VMPlatformEntry
-    from agentworks.resources.origin import Origin
+    from agentworks.origin import Origin
     from agentworks.resources.reference import ResourceReference
 
 

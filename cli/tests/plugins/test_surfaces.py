@@ -20,6 +20,7 @@ import pytest
 
 from agentworks.capabilities.base import ScopeLevel
 from agentworks.doctor import Status, _check_plugins
+from agentworks.origin import Origin
 from agentworks.plugins import Plugin, PluginCommand, plugin_enablement_source, publish_plugins, seated_plugin
 from agentworks.resources.graph import Enablement
 from agentworks.resources.inspect import (
@@ -28,7 +29,6 @@ from agentworks.resources.inspect import (
     render_resource_description,
     render_resource_table,
 )
-from agentworks.resources.origin import Origin
 from agentworks.resources.registry import Registry
 from agentworks.vms.sites import VMSiteDecl
 from tests.plugins._fixtures import ConformingVMPlatform

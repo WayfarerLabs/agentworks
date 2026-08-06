@@ -34,8 +34,8 @@ from agentworks.errors import StateError
 from agentworks.source_location import SourceLocation, synthesized
 
 if TYPE_CHECKING:
+    from agentworks.origin import Origin
     from agentworks.resources.graph import FinalizeContext
-    from agentworks.resources.origin import Origin
     from agentworks.resources.reference import ResourceReference
 
 

@@ -34,12 +34,12 @@ from agentworks.capabilities.descriptor import (
     ConfigContract,
     RegistryPolicy,
 )
+from agentworks.origin import Origin
 from agentworks.resources.kind import (
     KIND_REGISTRY,
     InstanceRef,
     NoUnreferencedDefaultError,
 )
-from agentworks.resources.origin import Origin
 from agentworks.resources.walk import collect_secrets_for
 from agentworks.schema import AgwRootModel
 from agentworks.secrets.backends import SecretBackend

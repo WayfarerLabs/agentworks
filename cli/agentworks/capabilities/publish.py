@@ -41,8 +41,8 @@ def publish_capability_rows(registry: Registry, descriptor: CapabilityKindDescri
     publishing it here too would collide (built-in vs system-plugin) at
     ``Registry.add``.
     """
+    from agentworks.origin import Origin
     from agentworks.plugins.registration import plugin_seated_names
-    from agentworks.resources.origin import Origin
 
     seated_by_plugin = plugin_seated_names(descriptor.kind)
     origin = Origin.built_in(source=descriptor.publisher_source)

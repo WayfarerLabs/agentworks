@@ -49,7 +49,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from agentworks.capabilities.descriptor import CapabilityKindDescriptor
-    from agentworks.resources.origin import Origin
+    from agentworks.origin import Origin
 
 
 class CapabilityAdapter(Protocol):

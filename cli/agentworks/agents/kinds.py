@@ -25,12 +25,12 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
 from agentworks.agents.template import AgentTemplate
+from agentworks.origin import Origin
 from agentworks.resources.kind import (
     ALWAYS_MATERIALIZE_SOURCE,
     KIND_REGISTRY,
     InstanceRef,
 )
-from agentworks.resources.origin import Origin
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence

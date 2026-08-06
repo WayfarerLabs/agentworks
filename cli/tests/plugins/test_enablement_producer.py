@@ -36,6 +36,7 @@ from agentworks.capabilities.harness_integration import ensure_harness_integrati
 from agentworks.errors import ConfigError, StateError
 from agentworks.git_credentials import remote_advisories
 from agentworks.git_credentials.credential import GitCredentialConfig
+from agentworks.origin import Origin
 from agentworks.plugins import Plugin, capability_adapters, seated_plugin
 from agentworks.plugins.enablement import plugin_enablement_source
 from agentworks.resources.graph import (
@@ -44,7 +45,6 @@ from agentworks.resources.graph import (
     Enablement,
     compose_enablement,
 )
-from agentworks.resources.origin import Origin
 from agentworks.resources.registry import Registry
 from agentworks.schema import AgwModel, AgwRootModel, NonEmptyStr, SecretRef
 from agentworks.secrets.base import SecretDecl

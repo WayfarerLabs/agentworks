@@ -28,7 +28,7 @@ from agentworks.resources.kind import KIND_REGISTRY
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from agentworks.resources.origin import Origin
+    from agentworks.origin import Origin
     from agentworks.resources.registry import Registry
 
 

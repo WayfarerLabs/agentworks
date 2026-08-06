@@ -28,10 +28,10 @@ import pytest
 from agentworks.capabilities.harness_integration import ensure_harness_integration_enabled, harness_integration_for
 from agentworks.errors import ConfigError, StateError
 from agentworks.manifests.package import publish_manifest_package
+from agentworks.origin import Origin
 from agentworks.plugins import Plugin, plugin_enablement_source, publish_plugins, seated_plugin
 from agentworks.plugins.registration import _capability_registries
 from agentworks.resources.graph import Enablement
-from agentworks.resources.origin import Origin
 from agentworks.resources.registry import Registry
 from agentworks.sessions.manager._env import _resolve_template
 from agentworks.sessions.template import SessionTemplate

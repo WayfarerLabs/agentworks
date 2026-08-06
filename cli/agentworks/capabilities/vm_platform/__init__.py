@@ -30,7 +30,7 @@ from agentworks.capabilities.vm_platform.lima import LimaPlatform
 from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
 
 if TYPE_CHECKING:
-    from agentworks.resources.origin import Origin
+    from agentworks.origin import Origin
 
 __all__ = [
     "VM_PLATFORM_REGISTRY",

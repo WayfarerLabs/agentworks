@@ -51,9 +51,9 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
+    from agentworks.origin import Origin
     from agentworks.resources.graph import Readiness
     from agentworks.resources.kind import ResourceKind
-    from agentworks.resources.origin import Origin
 
 
 class RegistryPolicy(Enum):

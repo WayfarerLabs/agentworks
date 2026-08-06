@@ -26,6 +26,7 @@ from agentworks.capabilities.descriptor import capability_descriptors
 from agentworks.capabilities.vm_platform.base import VMPlatform
 from agentworks.errors import StateError
 from agentworks.manifests.decode import _host_surfaces
+from agentworks.origin import Origin
 from agentworks.plugins import (
     SYSTEM_PLUGINS,
     Plugin,
@@ -42,7 +43,6 @@ from agentworks.resources.graph import (
     _capability_registry_loaders,
 )
 from agentworks.resources.kind import KIND_REGISTRY
-from agentworks.resources.origin import Origin
 from agentworks.schema import AgwModel, AgwRootModel
 from tests.plugins._fixtures import (
     ConformingSecretBackend,

@@ -24,8 +24,8 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.errors import ConfigError
+from agentworks.origin import Origin
 from agentworks.resources.graph import DependencyState, DisabledMark, Enablement, Readiness
-from agentworks.resources.origin import Origin
 from agentworks.resources.registry import Registry
 from agentworks.vms.sites import VMSiteDecl
 
