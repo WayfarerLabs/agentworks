@@ -147,6 +147,27 @@ restores that baseline by clearing every expired surface, and each later breakin
 own runway on schedule so the target state carries no expired compatibility. The generic deprecation
 framework survives every cleanup.
 
+### Cross-cutting: anchored projections (all destinations)
+
+A recurring principle, now named (operator agreement, 2026-08-05), that child SDDs should test
+designs against: contributions declare rather than do, and access arrives as an anchored, typed
+projection rather than ambient authority. Instances already settled across this roadmap: facet
+grants, the `me` anchored template projection, per-integration state namespacing, declared secret
+references resolved at the operation boundary, artifact materialization plans validated against
+grants, core performing tmux and PTY operations on integrations' behalf, and the universal event
+representation. The review question for any new contribution surface: what does the contribution
+see, and where is that view enforced?
+
+The template projection is expected to be the resource graph itself in a gated access mode, not a
+second structure kept in lockstep: powers (secret readers, run targets, capability API objects) sit
+behind callables a mode can gate, while universal facts are plain data on the nodes. Gated modes
+expose only already-materialized data; nothing lazily computes through a power while wearing
+attribute syntax. Gating by permission check or by leaving powers unwired are both legitimate
+mechanisms, chosen per surface and done properly. Authored content still carries the teaching; the
+graph carries the dynamic truth, and no effort should over-index on pushing everything into the
+graph. Where a projection is impossible (the workstation agent sits outside the platform), the
+principle inverts to disclosure, per the onboarding security disclosure.
+
 ## Explicitly out of scope
 
 These are not part of this roadmap's target state. They are recorded so their triggers are not lost,

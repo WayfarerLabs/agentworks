@@ -35,6 +35,11 @@ design:
    your renderers plug in as dynamic blocks over shared sources rather than defining their own data
    access. If your sample/describe prose goes through any templating, aligning on the same
    locked-down vocabulary avoids two template dialects.
+5. **Graph access modes.** The template projection is expected to be the resource graph itself
+   running in a gated read-side access mode: powers behind callables a mode can gate, universal
+   facts as plain node data, gated modes exposing only already-materialized data. Your
+   descriptor-adoption and registry work should not preclude read-side access modes; nothing about
+   this changes the graph's post-finalize immutability property.
 
 Nothing here changes your plan's sequencing or your ownership of `agw resource schema` and describe
 naming. The coordination is at the source layer. The onboarding child's FRD carries the matching
