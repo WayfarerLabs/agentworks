@@ -478,15 +478,35 @@ the derivation sequence are not started.
 
 ### 2.8 Live-rendered samples and describe
 
-> **GATE, operator instruction 2026-08-06: do not start 2.8 until the onboarding effort's
-> topic-content-contract message has arrived.** The onboarding-and-discovery child SDD has kicked
-> off, and it owns the `agw guide` teaching surface that consumes this step's blurbs and rendering
-> sources. Before starting 2.8, check this feature directory on `origin/main` for a
-> topic-content-contract message from that effort (new-file message passing, as the four roadmap
-> notes arrived). If none has arrived, TELL THE OPERATOR and pause 2.8 specifically; every other
-> step may continue. The reason the gate is here and not earlier: 2.8 is where the blurb shape and
-> the describe-surface naming get fixed, and both are cross-SDD coordination points, so guessing at
-> the contract and renegotiating later is the expensive order.
+> **Coordination SETTLED, 2026-08-06.** The onboarding effort's topic-content-contract message
+> arrived on `main` (`9db60238`), so the gate that stood here is discharged. Wave 2 confirms all
+> five requested alignments, with two scope clarifications, and 2.8 adopts the contract's prose
+> portion as its blurb source instead of inventing a blurb registry.
+>
+> **Confirmed:** (1) `summary` plus `Overview` are the sole authored prose source for BOTH describe
+> and guide, replacing this plan's earlier separate-blurb framing; (2) `FieldDoc`, emitted schemas,
+> and sample inputs stay presentation-free, which they already are, since `render_type` was
+> deliberately split out of `FieldDoc` in 2.1 for exactly this; (3) 2.8 exposes reusable SERVICE
+> functions for field reference and samples, not just CLI commands, because guide must call APIs and
+> never scrape rendered CLI output; (4) disabled implementations render from registered models
+> without being constructed, which this plan already required and 2.0's side-effect-free
+> constructibility discipline already enforces; (5) no standalone blurb registry and no
+> rendered-output adapter.
+>
+> **Scope clarification 1 (matches their own wording, "use the prose portion").** Wave 2 authors
+> ONLY the prose fields (`title`, `summary`, `Overview`) and the colocation convention. The envelope
+> is onboarding's: topic slugs, `anchor`, the block vocabulary, `related_topics`, the core topic
+> catalog, and duplicate-slug validation. Wave 2 building the catalog would balloon 2.8 and make it
+> depend on an HLA that has not settled its own root vocabulary yet.
+>
+> **Scope clarification 2.** Topic data does NOT go on the capability-kind descriptor in wave 2.
+> Their contract says the descriptor "may transport" it but does not own it, and wave 2 has no
+> reader for it, so per the descriptor's minimal-by-rule discipline it stays a deferred field with a
+> trigger. Colocation beside the implementation is enough for onboarding's catalog to collect.
+>
+> **Still open, and NOT settled by their message:** the describe surface's NAME. This plan flagged
+> it as needing coordination with the onboarding child, and the contract does not name it. 2.8
+> cannot close without it; raised to the operator.
 
 - [ ] `emission-and-renderer-lld.md` (shared with 2.7 if the seams overlap) written and reviewed:
       renderer output contract, blurb registration surface, and the describe surface's naming. Per
