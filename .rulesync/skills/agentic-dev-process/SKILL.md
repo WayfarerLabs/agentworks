@@ -28,7 +28,10 @@ Before touching anything, decide how big this is, because the size picks the tra
   (section 3).
 - **Small, simple changes** (localized, well-patterned, low-risk): skip SDD and implement directly.
   They still get reviewed (section 5), committed regularly (section 6), and escalated if they turn
-  out bigger than they looked.
+  out bigger than they looked. Implementing directly changes who writes the code, not the bar it is
+  held to: the lead holds every standard the `agentworks-dev` philosophy sets out. That philosophy
+  is the project's, merely packaged as a persona so it can be handed to a subagent; skipping the
+  delegation does not waive it.
 - When it is genuinely ambiguous which track fits, lean heavier for anything that reshapes a
   contract or is hard to undo, lighter for a localized change that follows an existing pattern. If
   still unsure, ask (the `ask-questions` rule).
@@ -89,6 +92,14 @@ names change; match the current equivalent of each tier:
 - **A reviewer must be at least as capable as the dev whose work it reviews.** Never review
   standard-tier work with a lighter-tier reviewer; match or exceed it.
 
+**Pass the tier explicitly on every launch.** The subagent definitions ship `model: inherit`, so a
+launch that names no model runs the subagent at whatever tier the lead happens to be on. That is how
+the reviewer >= dev rule breaks in practice: not by anyone choosing a weaker reviewer, but by nobody
+choosing at all. Launch a dev at the top tier for a tricky step, leave the reviewer's model unset,
+and the reviewer quietly runs at the lead's tier instead, which may be lower. Nothing in the output
+says which tier ran, so the mismatch never announces itself. Name the model on each launch, dev and
+reviewer alike, and inherit only when inheriting is the deliberate choice.
+
 ## 5. Review every step
 
 Every development step gets reviewed by the `agentworks-reviewer` subagent before you consider it
@@ -107,6 +118,22 @@ Who applies the fixes follows ownership: findings on **code** loop back to the i
 subagent (it keeps the context and the authorship, and the review-then-revise loop stays intact),
 while findings on a lead-owned artifact (the plan, an LLD the lead is finalizing) are the lead's to
 apply directly.
+
+### Periodically review the process docs as a whole
+
+Every review above is incremental: it validates one change against the tree as it stood. That is
+precisely how contradictions _between_ process documents accumulate invisibly, because each change
+can be locally correct and still quietly disagree with a document nobody reread. So periodically,
+after a burst of process changes, before locking a roadmap-level effort, or whenever the operator
+asks, run one comprehensive consistency review over the whole process tree: skills, rules, and
+subagent definitions together, in a single pass.
+
+That pass needs a fresh context reading the tree cold, never the context that authored the changes.
+It hunts pairwise contradictions, rules that silently override one another, gaps where one document
+assumes something another never establishes, and cross-references gone stale. Porting the process
+docs into a separate context and having independent reviewers read them as outsiders is a proven
+technique here: it surfaced four live contradictions that per-change reviews had passed. Findings
+route like any other review; triage them, push back on the wrong ones, and fix the valid ones.
 
 ## 6. Commit, push, and PR
 
