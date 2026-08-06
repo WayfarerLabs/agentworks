@@ -34,7 +34,7 @@
 - [x] HLA and plan reviewed by `agentworks-reviewer`; every valid finding resolved.
 - [x] Artifact files lint clean with vocabulary scoped in this SDD's `.cspell.json`.
 - [x] Artifact-only commit pushed and draft PR opened for roadmap-lead pre-implementation review.
-- [ ] Draft PR feedback resolved and explicit approval received before implementation starts.
+- [x] Draft PR feedback resolved and explicit approval received before implementation starts.
 
 Definition of done: the draft PR makes every design choice needed for the conflict-free first slice,
 identifies all wave 2 gates, and has no unresolved review finding.
