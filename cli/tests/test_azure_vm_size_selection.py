@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.capabilities.base import RunContext
+from agentworks.capabilities.config import capability_config_references, validate_capability_config
 from agentworks.capabilities.vm_platform import ProvisionRequest
 from agentworks.errors import ConfigError
 from agentworks.plugins.azure.platform import (
@@ -19,10 +20,12 @@ from agentworks.plugins.azure.platform import (
     IMAGE_PUBLISHER,
     IMAGE_SKU,
     IMAGE_VERSION,
+    AzureVMConfig,
     AzureVMPlatform,
-    _parse_size_catalog,
     _select_vm_size,
+    _size_catalog,
 )
+from agentworks.schema import RefOwner
 
 if TYPE_CHECKING:
     from tests.conftest import CapturedOutput
@@ -72,20 +75,26 @@ class TestSelectVMSize:
         assert _select_vm_size(unsorted, cpus=2, memory_gib=8).name == "small"
 
 
-class TestParseSizeCatalog:
+class TestSizeCatalog:
+    """The catalog RESOLVER: the shape is the model's business now, so
+    what is left here is the default (domain knowledge) and the mapping
+    onto the selection tuple. The shape rejections move with the shape,
+    to the config-contract suite, but they are still asserted here
+    through the core so this file keeps proving that a bad catalog never
+    reaches selection."""
+
     def test_no_override_returns_builtin(self) -> None:
-        assert _parse_size_catalog({}, "vm-site/az") is _DEFAULT_VM_SIZES
+        assert _size_catalog(_config({})) is _DEFAULT_VM_SIZES
 
     def test_valid_override_parses(self) -> None:
-        cfg = {"vm_sizes": [{"cpus": 4, "memory": 16, "size": "Standard_D4s_v5"}]}
-        catalog = _parse_size_catalog(cfg, "vm-site/az")
+        catalog = _size_catalog(_config({"vm_sizes": [{"cpus": 4, "memory": 16, "size": "Standard_D4s_v5"}]}))
         assert catalog == ((4, 16, "Standard_D4s_v5"),)
 
     @pytest.mark.parametrize(
         "bad",
         [
             {"vm_sizes": "Standard_B2s"},  # not a list
-            {"vm_sizes": []},  # empty
+            {"vm_sizes": []},  # empty: a site on which no VM can be created
             {"vm_sizes": [{"cpus": 4, "memory": 16}]},  # missing size
             {"vm_sizes": [{"cpus": 0, "memory": 16, "size": "x"}]},  # non-positive
             {"vm_sizes": [{"cpus": True, "memory": 16, "size": "x"}]},  # bool cpus
@@ -96,36 +105,31 @@ class TestParseSizeCatalog:
     )
     def test_malformed_override_raises(self, bad: dict[str, object]) -> None:
         with pytest.raises(ConfigError):
-            _parse_size_catalog(bad, "vm-site/az")
+            _config(bad)
 
 
 class TestValidateConfig:
-    _BASE = {
-        "subscription_id": "sub",
-        "resource_group": "rg",
-        "region": "eastus",
-    }
+    """The catalog's shape as an operator writes it, through the core."""
 
     def test_accepts_without_vm_sizes(self) -> None:
-        assert AzureVMPlatform.validate("vm-site/az", dict(self._BASE)) is None
-        assert AzureVMPlatform.dependencies("vm-site/az", dict(self._BASE)) == ()
+        _config({})
+        assert (
+            capability_config_references(
+                kind="vm-platform", name="azure-vm", blob=_BASE, owner=RefOwner(kind="vm-site", name="az")
+            )
+            == ()
+        )
 
     def test_accepts_valid_vm_sizes(self) -> None:
-        cfg = {
-            **self._BASE,
-            "vm_sizes": [{"cpus": 2, "memory": 4, "size": "Standard_B2s"}],
-        }
-        assert AzureVMPlatform.validate("vm-site/az", cfg) is None
+        _config({"vm_sizes": [{"cpus": 2, "memory": 4, "size": "Standard_B2s"}]})
 
     def test_rejects_malformed_vm_sizes_at_load(self) -> None:
-        cfg = {**self._BASE, "vm_sizes": [{"cpus": 2, "size": "Standard_B2s"}]}
-        with pytest.raises(ConfigError, match="memory"):
-            AzureVMPlatform.validate("vm-site/az", cfg)
+        with pytest.raises(ConfigError, match=r"vm_sizes\[0\].memory: is required"):
+            _config({"vm_sizes": [{"cpus": 2, "size": "Standard_B2s"}]})
 
     def test_still_rejects_unknown_field(self) -> None:
-        cfg = {**self._BASE, "bogus": "x"}
-        with pytest.raises(ConfigError, match="unknown"):
-            AzureVMPlatform.validate("vm-site/az", cfg)
+        with pytest.raises(ConfigError, match="bogus: unknown field"):
+            _config({"bogus": "x"})
 
 
 class TestCreateProvisioningOutput:
@@ -337,3 +341,20 @@ class TestImageOSDiskFloorConstant:
             "latest",
         )
         assert IMAGE_OS_DISK_FLOOR_GIB == 30
+
+
+#: The three keys every azure-vm site needs, so the tests below can talk
+#: about the catalog alone.
+_BASE = {"subscription_id": "sub", "resource_group": "rg", "region": "eastus"}
+
+
+def _config(blob: dict[str, object]) -> AzureVMConfig:
+    """``blob`` validated as an azure-vm site's config, through the core."""
+    validated = validate_capability_config(
+        kind="vm-platform",
+        name="azure-vm",
+        blob={**_BASE, **blob},
+        owner=RefOwner(kind="vm-site", name="az"),
+    )
+    assert isinstance(validated, AzureVMConfig)
+    return validated

@@ -15,7 +15,7 @@ from __future__ import annotations
 from abc import abstractmethod
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, ClassVar, cast
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from agentworks.capabilities.base import Capability, idempotent_op
 
@@ -81,7 +81,8 @@ class VMPlatform(Capability):
     Registered in ``VM_PLATFORM_REGISTRY`` and published as a read-only
     ``vm-platform`` capability resource; invoked only through site
     resolution (``agentworks.vms.sites``). Instances are constructed by
-    the site layer as ``cls(site_name, platform_config)``: the platform
+    the site layer as ``cls(site_name, platform_config)``, which the
+    base validates into this platform's declared model: the platform
     bound to one declared site, never resolved secret values (see the
     ``Capability`` lifecycle). The declared config secrets join an
     operation's boundary union through the holding node's
@@ -147,18 +148,6 @@ class VMPlatform(Capability):
         """The bound site's name (the capability-generic ``owner_name``,
         under the domain's vocabulary)."""
         return self.owner_name
-
-    @property
-    def platform_config(self) -> Mapping[str, object]:
-        """The bound site's raw config blob, under the domain's
-        vocabulary.
-
-        INTERIM, and it goes when this kind's platforms read typed fields
-        off their models instead: ``Capability.config`` is the validated
-        model where one is declared, so a platform that has migrated
-        reads that and never this.
-        """
-        return cast("Mapping[str, object]", self.config)
 
     @classmethod
     def legacy_platform_metadata(cls, row: Mapping[str, Any], legacy: Mapping[str, Any]) -> dict[str, str]:

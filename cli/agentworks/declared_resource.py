@@ -53,6 +53,25 @@ class DeclaredResource:
     declared_at: SourceLocation = field(default_factory=synthesized)
     origin: Origin | None = None
 
+    @property
+    def error_location(self) -> SourceLocation | None:
+        """Where an operator can go to fix a problem with this resource,
+        or ``None`` when there is no such place.
+
+        The ORIGIN answers first, because it is the provenance every other
+        operator surface renders (``describe``, ``doctor``, and the
+        finalize pass's own framing) and it is stamped at publish, by the
+        publisher that knows where the row really came from. A row built
+        outside that path (a synthesize hook, a test) falls back to its
+        own ``declared_at``, and a built-in or auto-declared row has
+        neither a file nor a line, so it frames nothing rather than
+        pointing at a place that does not exist.
+        """
+        origin = self.origin
+        if origin is not None and origin.file is not None and origin.line:
+            return SourceLocation(file=origin.file, line=origin.line)
+        return self.declared_at
+
     def dependencies(self, context: BuildContext) -> list[ResourceReference]:
         """The resource's outbound reference edges: the graph-node
         edge-extraction method the finalize build walk calls per present row.

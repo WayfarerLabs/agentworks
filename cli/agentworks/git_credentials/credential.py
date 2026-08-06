@@ -156,5 +156,5 @@ class GitCredentialConfig(DeclaredResource):
             name=self.provider,
             blob=self.provider_config,
             owner=RefOwner(kind="git-credential", name=self.name),
-            location=self.declared_at,
+            location=self.error_location,
         )

@@ -141,5 +141,5 @@ class SessionTemplate(DeclaredResource):
             name=self.harness_integration,
             blob=self.harness_integration_config or {},
             owner=RefOwner(kind="session-template", name=self.name),
-            location=self.declared_at,
+            location=self.error_location,
         )

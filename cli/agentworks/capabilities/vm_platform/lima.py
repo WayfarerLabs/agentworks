@@ -9,7 +9,7 @@ import shlex
 import tempfile
 import textwrap
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from agentworks import output
 from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
@@ -20,7 +20,8 @@ from agentworks.capabilities.vm_platform.bootstrap_script import (
 )
 from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
 from agentworks.db import VMStatus
-from agentworks.errors import ConfigError, StateError
+from agentworks.errors import StateError
+from agentworks.schema import AgwModel, NonEmptyStr
 from agentworks.ssh import SSHError, SSHTarget, copy_to
 from agentworks.ssh import run as ssh_run
 from agentworks.transports import LimaTransport, RemoteLimaTransport, SSHTransport
@@ -32,7 +33,6 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import VMRow
     from agentworks.resources.graph import Readiness
-    from agentworks.resources.reference import ConfigReference
     from agentworks.ssh import SSHLogger
     from agentworks.transports import Transport
 
@@ -90,12 +90,25 @@ provision:
 """
 
 
+class LimaConfig(AgwModel):
+    """Where a Lima site's ``limactl`` runs."""
+
+    name: Literal["lima"]
+    """The platform this config is for."""
+
+    vm_host: NonEmptyStr | None = None
+    """The SSH host running ``limactl`` for a REMOTE-Lima site (e.g.
+    ``user@host``). Omit for a local site, which needs ``limactl``
+    installed here."""
+
+
 class LimaPlatform(VMPlatform):
     """Runs VMs via limactl, locally or on a remote host over SSH."""
 
     contract_version: ClassVar[int] = 1
     name: ClassVar[str] = "lima"
     description: ClassVar[str] = "Lima VMs (local, or on a remote host via SSH)"
+    config_model: ClassVar[type[LimaConfig]] = LimaConfig
     # No unsupported_reason override: the platform is supported on
     # every host, because remote-Lima sites run limactl on the vm_host
     # over SSH and need nothing locally.
@@ -121,22 +134,10 @@ class LimaPlatform(VMPlatform):
             return Readiness.blocked("limactl not installed")
         return Readiness.ready()
 
-    @classmethod
-    def dependencies(cls, owner: str, config: Mapping[str, object]) -> tuple[ConfigReference, ...]:
-        """``lima`` implies no resource reference, so its edge set is empty
-        (total, non-throwing per the ``dependencies`` contract)."""
-        return ()
-
-    @classmethod
-    def validate(cls, owner: str, config: Mapping[str, object]) -> None:
-        vm_host = config.get("vm_host")
-        if vm_host is not None and (not isinstance(vm_host, str) or not vm_host):
-            raise ConfigError(
-                f"{owner}.vm_host must be a non-empty SSH host string (e.g. 'user@host'), got {vm_host!r}"
-            )
-        unknown = sorted(set(config) - {"vm_host"})
-        if unknown:
-            raise ConfigError(f"{owner}: unknown lima platform field(s): {', '.join(unknown)}")
+    @property
+    def config(self) -> LimaConfig:
+        """This site's validated lima config."""
+        return self._config_as(LimaConfig)
 
     @classmethod
     def legacy_platform_metadata(cls, row: Mapping[str, Any], legacy: Mapping[str, Any]) -> dict[str, str]:
@@ -146,8 +147,7 @@ class LimaPlatform(VMPlatform):
 
     @property
     def _vm_host_ssh(self) -> str | None:
-        vm_host = self.platform_config.get("vm_host")
-        return str(vm_host) if vm_host else None
+        return self.config.vm_host
 
     @property
     def is_remote(self) -> bool:

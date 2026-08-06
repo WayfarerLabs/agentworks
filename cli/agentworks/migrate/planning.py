@@ -504,15 +504,21 @@ def _emit_document(doc: tomlkit.TOMLDocument, unit: MigrationUnit) -> str:
         # TOML vocabulary, mirroring the git-credential branch: an
         # unvalidated emission would only fail the post-run verification
         # after files were written.
-        from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
+        from agentworks.capabilities.config import validate_capability_config
         from agentworks.migrate.toml_resources import _LEGACY_SITE_SECTIONS
 
         platform = _LEGACY_SITE_SECTIONS[unit.section][0]
         platform_config = dict(spec)
-        platform_cls = VM_PLATFORM_REGISTRY.get(platform)
-        if platform_cls is not None and platform_config:
+        if platform_config:
             try:
-                platform_cls.validate(f"[{unit.section}]", platform_config)
+                validate_capability_config(
+                    kind="vm-platform",
+                    name=platform,
+                    blob=platform_config,
+                    # Framed in the operator's TOML vocabulary: this command
+                    # is talking about a file it has not rewritten yet.
+                    owner=RefOwner(kind="vm-site", name=unit.name, label=f"[{unit.section}]"),
+                )
             except ConfigError as exc:
                 raise ConfigError(
                     f"cannot migrate vm-site/{unit.name}: {exc}",

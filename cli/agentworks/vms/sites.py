@@ -33,6 +33,7 @@ from typing import TYPE_CHECKING
 
 from agentworks.declared_resource import DeclaredResource
 from agentworks.errors import ConfigError
+from agentworks.schema import RefOwner
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -72,7 +73,7 @@ class VMSiteDecl(DeclaredResource):
         # Whether this site can run on the host is READINESS (the fold), and
         # readiness gates whether its config-implied secrets materialize (R12),
         # so the edges are emitted unconditionally here and gated downstream.
-        from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
+        from agentworks.capabilities.config import capability_config_references
 
         refs: list[ResourceReference] = [
             _ResourceRef(
@@ -82,17 +83,25 @@ class VMSiteDecl(DeclaredResource):
                 source=source,
             )
         ]
-        capability = VM_PLATFORM_REGISTRY.get(self.platform)
-        if capability is not None:
-            # Capability-implied references: the platform derives the
-            # references its config block implies (dependencies, total and
-            # non-throwing); this resource (the config block's owner)
-            # attributes them to itself via the shared sourced-conversion. An
-            # unknown platform emits only the (dangling) platform edge above,
-            # which the resolve pass turns into the R9.2 hard error.
-            refs.extend(
-                sourced_references(capability.dependencies(f"vm-site/{self.name}", self.platform_config), source)
+        # Config-implied references, read structurally off the platform's
+        # DECLARED model by the core: no platform code runs. Total and
+        # non-throwing, so a malformed blob contributes no edges rather than
+        # sinking the walk. This resource (the config block's owner)
+        # attributes them to itself via the shared sourced-conversion. An
+        # unknown platform contributes nothing here and emits only the
+        # (dangling) platform edge above, which the resolve pass turns into
+        # the R9.2 hard error.
+        refs.extend(
+            sourced_references(
+                capability_config_references(
+                    kind="vm-platform",
+                    name=self.platform,
+                    blob=self.platform_config,
+                    owner=RefOwner(kind="vm-site", name=self.name),
+                ),
+                source,
             )
+        )
         return refs
 
     def not_ready(self, deps: Mapping[tuple[str, str], DependencyState]) -> Readiness:
@@ -137,19 +146,28 @@ class VMSiteDecl(DeclaredResource):
         """Throwing shape check for the ``platform_config`` blob, run by
         the finalize ``validate`` pass (``enabled_backends`` is the
         secret-only R9.9 input, ignored here). Mirrors ``dependencies``:
-        the named platform capability validates the blob it owns. An
-        unknown platform is a no-op HERE (the platform capability is absent,
-        so there is no blob owner to validate against); the site's dangling
-        platform edge is what makes the unknown platform a hard finalize miss
-        (R9.2). The blob is validated whenever the platform's implementation
-        is seated, regardless of host support (an unsupported platform still
-        validates an empty or well-formed blob for a ready+enabled site).
-        """
-        from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
+        the CORE validates the blob against the named platform's declared
+        model, and no platform code runs. An unknown platform is a no-op
+        HERE (there is no declared model to validate against); the site's
+        dangling platform edge is what makes the unknown platform a hard
+        finalize miss (R9.2). The blob is validated whenever the platform's
+        implementation is seated, regardless of host support (an unsupported
+        platform still validates an empty or well-formed blob for a
+        ready+enabled site).
 
-        capability = VM_PLATFORM_REGISTRY.get(self.platform)
-        if capability is not None:
-            capability.validate(f"vm-site/{self.name}", self.platform_config)
+        The error this raises already carries its own file/line framing
+        (the schema error bridge), so the finalize pass leaves it alone
+        rather than appending an origin a second time.
+        """
+        from agentworks.capabilities.config import validate_capability_config
+
+        validate_capability_config(
+            kind="vm-platform",
+            name=self.platform,
+            blob=self.platform_config,
+            owner=RefOwner(kind="vm-site", name=self.name),
+            location=self.error_location,
+        )
 
 
 def site_manifest_hint(name: str, *, vm_host: str | None = None) -> str:

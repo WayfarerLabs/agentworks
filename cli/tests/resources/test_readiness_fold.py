@@ -314,7 +314,7 @@ def test_fold_does_not_throw_on_malformed_platform_config() -> None:
     # vm_host as an int: lima.not_ready sees it truthy -> ready (no throw, no
     # construction); validate then rejects the non-string.
     site = VMSiteDecl(name="bad", platform="lima", platform_config={"vm_host": 123})
-    with pytest.raises(ConfigError, match="vm_host must be a non-empty SSH host") as exc:
+    with pytest.raises(ConfigError, match="vm_host: must be a string") as exc:
         _finalized(site)
     # The validate pass re-attaches the resource origin; construction would not.
     assert "sites.yaml" in str(exc.value)
@@ -325,7 +325,7 @@ def test_r5_ready_site_with_unknown_field_fails_validation() -> None:
     everywhere; no vm_host but we make it ready) with an unknown config field
     still fails the validate pass."""
     site = VMSiteDecl(name="bad", platform="lima", platform_config={"vm_host": "me@box", "bogus": "x"})
-    with pytest.raises(ConfigError, match="unknown lima platform field"):
+    with pytest.raises(ConfigError, match="bogus: unknown field"):
         _finalized(site)
 
 

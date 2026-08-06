@@ -528,25 +528,25 @@ _PROXMOX_TEST_CASES: list[dict[str, Any]] = [
     {
         "id": "missing_api_url",
         "platform_config": {"node": "pve", "token_id": "u@p!t", "template_vmid": 9000},
-        "expect_error": r"vm-site/proxmox\.api_url is required",
+        "expect_error": r"vm-site/proxmox\.api_url: is required",
         "check": None,
     },
     {
         "id": "missing_node",
         "platform_config": {"api_url": "https://pve:8006", "token_id": "u@p!t", "template_vmid": 9000},
-        "expect_error": r"vm-site/proxmox\.node is required",
+        "expect_error": r"vm-site/proxmox\.node: is required",
         "check": None,
     },
     {
         "id": "missing_token_id",
         "platform_config": {"api_url": "https://pve:8006", "node": "pve", "template_vmid": 9000},
-        "expect_error": r"vm-site/proxmox\.token_id is required",
+        "expect_error": r"vm-site/proxmox\.token_id: is required",
         "check": None,
     },
     {
         "id": "missing_template_vmid",
         "platform_config": {"api_url": "https://pve:8006", "node": "pve", "token_id": "u@p!t"},
-        "expect_error": r"vm-site/proxmox\.template_vmid is required",
+        "expect_error": r"vm-site/proxmox\.template_vmid: is required",
         "check": None,
     },
 ]

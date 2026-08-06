@@ -28,7 +28,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Annotated, Literal, cast
 
 import pytest
 
@@ -46,6 +46,7 @@ from agentworks.resources.graph import (
 )
 from agentworks.resources.origin import Origin
 from agentworks.resources.registry import Registry
+from agentworks.schema import AgwModel, NonEmptyStr, SecretRef
 from agentworks.secrets.base import SecretDecl
 from agentworks.secrets.resolve import active_backends
 from agentworks.sessions.manager._env import _display_harness_integration
@@ -64,7 +65,6 @@ if TYPE_CHECKING:
 
     from agentworks.config import Config
     from agentworks.resources.graph import EnablementSource
-    from agentworks.resources.reference import ConfigReference
     from agentworks.secrets.base import MappingValue
 
 PLUGIN = "cap-plugin"
@@ -77,30 +77,23 @@ PLUGIN = "cap-plugin"
 #    classmethods only). ---------------------------------------------------
 
 
+class _FixturePlatformConfig(AgwModel):
+    """A config with a secret-naming field (like proxmox's
+    ``token_secret``), so the real producer can be shown to WITHHOLD the
+    implied secret when the platform is disabled: the site that names it
+    goes not-ready, and ``has_ready_referrer`` excludes a not-ready
+    referrer."""
+
+    name: Literal["fixture-platform"]
+    token_secret: Annotated[NonEmptyStr, SecretRef(usage="the fixture API token")] | None = None
+
+
 class _FixtureVMPlatform(ConformingVMPlatform):
     name = "fixture-platform"
     description = "Fixture VM platform (test plugin)"
+    config_model = _FixturePlatformConfig
     # The power ops come from the conforming base, which raises on each: the
-    # fold uses only the classmethods below, never an instance.
-
-    @classmethod
-    def dependencies(cls, owner: str, config: Mapping[str, object]) -> tuple[ConfigReference, ...]:
-        """A config-implied secret edge (like proxmox's ``token_secret``), so the
-        real producer can be shown to WITHHOLD it when the platform is disabled
-        (the site that names it goes not-ready, and ``has_ready_referrer``
-        excludes a not-ready referrer)."""
-        from agentworks.resources.reference import ConfigReference
-
-        token = config.get("token_secret")
-        if not isinstance(token, str) or not token:
-            return ()
-        return (ConfigReference(kind="secret", name=token, usage="the fixture API token"),)
-
-    @classmethod
-    def validate(cls, owner: str, config: Mapping[str, object]) -> None:
-        # Accept the fixture's config blob (the inherited default rejects any
-        # non-empty config); the fixture platform validates nothing else.
-        return None
+    # fold never builds an instance.
 
 
 class _FixtureHarnessIntegration(ConformingHarnessIntegration):

@@ -10,12 +10,13 @@ import subprocess
 import sys
 import urllib.request
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from agentworks import output
 from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
 from agentworks.db import VMStatus
 from agentworks.errors import StateError
+from agentworks.schema import AgwModel
 from agentworks.transports import WSL2Transport
 
 if TYPE_CHECKING:
@@ -474,12 +475,27 @@ def _keepalive(distro_name: str) -> Iterator[None]:
         output.detail("Idle-shutdown prevention stopped.")
 
 
+class Wsl2Config(AgwModel):
+    """WSL2 takes no configuration: a WSL distribution is created from the
+    host's own WSL install, so there is nothing per-site to point it at.
+    The model carries only the tag that selects it, which is what makes an
+    unknown key a hard error rather than a silently ignored one."""
+
+    name: Literal["wsl2"]
+
+
 class WSL2Platform(VMPlatform):
     """Runs VMs as WSL2 Debian distributions on Windows."""
 
     contract_version: ClassVar[int] = 1
     name: ClassVar[str] = "wsl2"
     description: ClassVar[str] = "WSL2 Debian distributions on Windows"
+    config_model: ClassVar[type[Wsl2Config]] = Wsl2Config
+
+    @property
+    def config(self) -> Wsl2Config:
+        """This site's validated wsl2 config: the tag and nothing else."""
+        return self._config_as(Wsl2Config)
 
     @classmethod
     def unsupported_reason(cls) -> str | None:
