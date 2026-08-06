@@ -51,7 +51,7 @@ def console_create(
         bool,
         typer.Option(
             "--add-admin-shell",
-            help="Include a top-level admin-shell window (legacy vm-console behavior)",
+            help="Include a top-level admin-shell window",
         ),
     ] = False,
 ) -> None:

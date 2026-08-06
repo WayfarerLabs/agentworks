@@ -71,24 +71,22 @@ _LEGACY_SINGLETON_HINTS = {
 }
 
 
-def _warn_unexpected_top_level_keys(data: dict[str, object], issues: list[str]) -> None:
-    """Record unexpected top-level keys.
+def _raise_unexpected_top_level_keys(data: dict[str, object]) -> None:
+    """Reject unexpected top-level keys.
 
     This catches a common TOML pitfall: uncommenting a key without its section
     header causes the key to land in the wrong (or top-level) section. Known
-    legacy singleton spellings get a targeted migration hint instead of the
-    generic message.
+    legacy singleton spellings retain their targeted migration errors instead
+    of receiving the generic message.
     """
     unexpected = sorted(set(data.keys()) - EXPECTED_TOP_LEVEL_KEYS)
     if not unexpected:
         return
-    for key in unexpected:
-        hint = _LEGACY_SINGLETON_HINTS.get(key)
-        if hint is not None:
-            issues.append(hint)
+    messages = [_LEGACY_SINGLETON_HINTS[key] for key in unexpected if key in _LEGACY_SINGLETON_HINTS]
     generic = [key for key in unexpected if key not in _LEGACY_SINGLETON_HINTS]
     if generic:
-        issues.append(f"unexpected top-level keys in config: {', '.join(generic)}")
+        messages.append(f"unexpected top-level keys in config: {', '.join(generic)}")
+    raise ConfigError(" ".join(messages))
 
 
 def _raise_for_resource_sections(data: dict[str, object]) -> None:
@@ -204,13 +202,13 @@ def load_config(
 
     issues: list[str] = []
 
-    _warn_unexpected_top_level_keys(data, issues)
-
     if "dotfiles" in data:
         raise ConfigError(
             "[dotfiles] section has been removed. Move dotfiles settings into "
             "[admin.config] (dotfiles_source, dotfiles_destination, dotfiles_install_cmd)."
         )
+
+    _raise_unexpected_top_level_keys(data)
 
     # config.toml is settings only: reject resource-declaring sections before
     # the settings loaders run, unless the caller is the remediation itself
@@ -228,7 +226,7 @@ def load_config(
     config = Config(
         operator=_load_operator(data, issues),
         paths=_load_paths(data),
-        defaults=_load_defaults(data, issues, deprecations),
+        defaults=_load_defaults(data),
         source_path=config_path,
         session=session_config,
         secret_config_data=secret_config_data,

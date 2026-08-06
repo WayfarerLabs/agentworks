@@ -205,9 +205,6 @@ def vm_shell(
         bool,
         typer.Option(
             "--platform",
-            # Legacy alias for one release. Visible in help: click has
-            # no per-alias hiding.
-            "--provisioner",
             help=(
                 "Use the platform-native transport (limactl shell, wsl.exe, "
                 "Azure public-IP SSH) instead of Tailscale SSH. Useful when "
@@ -290,33 +287,3 @@ def vm_logs(
         output.info(log_name)
         output.info(Path(log_path).read_text().rstrip("\n"))
         output.info("")
-
-
-@vm_app.command("console")
-def vm_console(
-    name: Annotated[str, typer.Argument(help="VM name")],
-    recreate: Annotated[bool, typer.Option("--recreate", help="Kill and rebuild the console")] = False,
-    allow_nesting: Annotated[bool, typer.Option("--allow-nesting", help="Allow running inside tmux")] = False,
-) -> None:
-    """[Deprecated] Attach to the VM console (creates it if needed).
-
-    Prefer 'agw console' for curated session lists and per-window shell panes.
-    """
-    from agentworks import output
-    from agentworks.config import load_config
-    from agentworks.sessions.console import attach_console
-
-    output.warn(
-        "'agw vm console' is deprecated; use 'agw console' "
-        "(see 'agw console --help'). This command will be removed in a future release."
-    )
-
-    raise typer.Exit(
-        attach_console(
-            get_db(),
-            load_config(),
-            vm_name=name,
-            recreate=recreate,
-            allow_nesting=allow_nesting,
-        )
-    )

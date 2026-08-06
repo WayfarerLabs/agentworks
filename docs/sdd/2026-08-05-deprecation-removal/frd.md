@@ -1,6 +1,6 @@
 # FRD: 0.14 Deprecation Removal
 
-- Status: Draft
+- Status: Approved
 - Start date: 2026-08-05
 - Target release: 0.14.0
 - Roadmap: `docs/sdd/2026-08-04-next-steps` (this effort is wave 1 of that roadmap; its
@@ -35,9 +35,9 @@ gate exists to avoid.
   only by that normalization, inheritance conflict rules whose only purpose is distinguishing the
   two spellings, migration rewrites, and fixtures that exist only for the alias. A declared
   `restart_command` MUST fail as an unknown or unsupported field at the existing validation
-  boundary, and the failure MUST be loud everywhere the field can appear, including nested inside
-  `harness_integration_config` tables in YAML manifests; it MUST NOT degrade to warn-mode
-  unknown-key handling. `resume_command` behavior MUST be unchanged.
+  boundary, and the failure MUST be loud everywhere the field can appear, including inside a YAML
+  manifest's tagged `harness_integration` table and the migrator's legacy TOML reader; it MUST NOT
+  degrade to warn-mode unknown-key handling. `resume_command` behavior MUST be unchanged.
 - **R3 (harness selectors).** The pre-0.13 session-template selectors `harness` and `harness_config`
   MUST be removed from manifest loading: old-selector normalization, mixed old-and-new conflict
   branches, aggregated old-selector facts and request warnings, doctor reporting specific to the old
@@ -50,9 +50,9 @@ gate exists to avoid.
   `[operator]`), `[paths].code_workspaces` (canonical: `vscode_workspaces`), and
   `agw vm shell --provisioner` (canonical: `--platform`). Retired settings MUST fail clearly rather
   than silently falling back to defaults; in particular, an old `code_workspaces` key MUST NOT be
-  ignored in a way that writes VS Code workspace files to the default directory. Where the loader
-  can do so cheaply, the failure SHOULD name the canonical replacement. Canonical settings MUST keep
-  their current behavior and defaults.
+  ignored in a way that writes VS Code workspace files to the default directory. The failure MAY be
+  the loader's ordinary unknown-key or required-section error; no retired-name hint or compatibility
+  table is required. Canonical settings MUST keep their current behavior and defaults.
 - **R5 (vm console).** `agw vm console` MUST be removed together with its dedicated legacy
   implementation and its completion-tree entries. It shares no code with the canonical `agw console`
   family: it is a standalone VM-wide console module. One canonical caller feeds it today: session
@@ -147,19 +147,27 @@ gate exists to avoid.
 - **D3 (no warn-first for old aliases).** The never-warned aliases (`code_workspaces`,
   `--provisioner`) are removed directly rather than given a warning release first. They predate the
   0.13 transition by long enough that a further compatibility release buys little; the mitigation is
-  clear failure messages and explicit release notes (R4, R9).
+  ordinary validation failures and explicit release notes (R4, R9).
 - **D4 (rejection over migration).** 0.14.0 rejects retired inputs rather than auto-migrating them.
   The supported jump path for stale configurations is through 0.13.0's warnings and tooling.
 - **D5 (fixture budget).** The plan MUST budget fixture conversion as first-class work rather than
   discovering it, and SHOULD prefer shared fixture helpers over per-file edits. This is phase 1's
   chief lesson.
+- **D6 (ordinary validation, no tombstones).** Retired commands, options, selectors, and settings
+  fail through ordinary command or schema validation. This effort does not add or retain hint tables
+  or bespoke compatibility errors for its in-scope retired names. Unrelated existing targeted
+  validation, such as `_LEGACY_SINGLETON_HINTS` for old VM and agent top-level shapes, is out of
+  scope and remains intact. Where current warn-mode or defaulting behavior would silently accept a
+  removed input, the owning validation boundary becomes strict for unknown keys instead.
+- **D7 (harness vocabulary boundary).** The `harness` resource-kind slug is canonical and was never
+  an alias. No broad vocabulary cleanup applies to it; only text that teaches the retired
+  session-template selector is removed or updated.
+- **D8 (mise reconciliation).** Small implementation, validation, test, or documentation gaps found
+  while reconciling the mise SDD ride this effort. Substantial feature work is split and escalated.
+  The absent `install_mise` toggle is recorded as a deviation rather than introduced during
+  closeout.
 
 ## Open questions
 
-- Exact error mechanism for retired TOML keys: does the config loader gain a small retired-key table
-  that names replacements (nicer errors), or is generic unknown-key rejection acceptable everywhere
-  the canonical validation boundary already fires? (HLA's call; R4 sets the floor.)
-- Does the harness-integration SDD's residual `harness` resource-kind vocabulary need any doc-only
-  cleanup beyond R8, given the kind slug itself was never an alias?
-- Whether the mise-integration reconciliation (R10) surfaces gaps that convert closeout work into
-  small follow-up fixes, and if so whether they ride this effort or the roadmap ledger.
+None. Implementation discoveries that materially change scope or architecture are escalated through
+the plan rather than silently resolved.

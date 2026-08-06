@@ -102,7 +102,6 @@ class ManifestSet:
     issues: tuple[str, ...]
     deprecation_issues: tuple[str, ...] = ()
     deprecated_shape_resources: tuple[str, ...] = ()
-    deprecated_harness_selectors: tuple[str, ...] = ()
 
     @classmethod
     def empty(cls) -> ManifestSet:
@@ -233,8 +232,6 @@ def load_manifests(resources_dir: Path) -> ManifestSet:
     entries: list[ManifestEntry] = []
     issues: list[str] = []
     deprecated_shapes: list[str] = []
-    deprecated_harness_selectors: list[str] = []
-    deprecated_restart_commands: list[str] = []
     seen: dict[tuple[str, str], SourceLocation] = {}
 
     for path in _iter_manifest_files(resources_dir):
@@ -252,8 +249,6 @@ def load_manifests(resources_dir: Path) -> ManifestSet:
                 doc,
                 issues,
                 deprecated_shapes,
-                deprecated_harness_selectors,
-                deprecated_restart_commands,
             )
             entries.append(
                 ManifestEntry(
@@ -272,17 +267,10 @@ def load_manifests(resources_dir: Path) -> ManifestSet:
         from agentworks.manifests.decode import capability_shape_deprecation
 
         deprecation_messages.append(capability_shape_deprecation(deprecated_shapes))
-    if deprecated_restart_commands:
-        names = ", ".join(sorted(deprecated_restart_commands))
-        deprecation_messages.append(
-            "restart_command is deprecated; use resume_command instead. It will be removed in 0.14.0. "
-            f"Silence this warning with --no-deprecations. Affected resources: {names}"
-        )
 
     return ManifestSet(
         entries=tuple(entries),
         issues=tuple(issues),
         deprecation_issues=tuple(deprecation_messages),
         deprecated_shape_resources=tuple(deprecated_shapes),
-        deprecated_harness_selectors=tuple(deprecated_harness_selectors),
     )

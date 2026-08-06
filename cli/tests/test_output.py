@@ -252,10 +252,9 @@ def test_default_handler_warn_indents_with_level(
     assert capsys.readouterr().err == "  Warning: careful\n"
 
 
-def test_default_handler_phase_header_byte_identical(
+def test_default_handler_top_level_header(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    # phase() today == blank line then "=== t ===".
     output._DefaultHandler().emit(Role.HEADER, "Preflight", 0)
     assert capsys.readouterr().out == "\n=== Preflight ===\n"
 

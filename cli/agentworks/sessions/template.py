@@ -29,8 +29,7 @@ if TYPE_CHECKING:
 class NamedConsoleConfig(DeclaredResource):
     """Settings for the `console` subcommand group (named multi-session
     consoles). Section is `[named_console]` in the TOML to disambiguate from
-    the legacy `vm console` and the workspace console template. Only named
-    consoles read these values today.
+    the workspace console template. Only named consoles read these values.
 
     Inheriting ``DeclaredResource`` gives this the uniform metadata every
     declared resource carries, including ``name``. The console surface is a
@@ -52,19 +51,16 @@ class SessionTemplate(DeclaredResource):
     means "not declared here" (distinct from a declared-empty blob),
     so inheritance can tell a restating child from a silent one (FRD
     R5). An undeclared harness_integration resolves to the ``shell`` built-in (a
-    plain login shell), preserving the behavior from before harness integrations. The legacy
+    plain login shell), preserving the behavior from before harness integrations. The
     flat ``command`` / ``resume_command`` / ``required_commands``
     fields are gone: they are ``shell``'s config vocabulary and live
     under ``harness_integration_config`` now; the TOML loader hoists them for
-    backward compatibility, manifests reject them (FRD R2/R6). The
-    ``restart_command_compat`` bit records old-input provenance long enough
-    to reject mixed-spelling inheritance and never reaches runtime config.
+    backward compatibility, manifests reject them (FRD R2/R6).
     """
 
     inherits: list[str] = field(default_factory=list)
     harness_integration: str | None = None
     harness_integration_config: dict[str, object] | None = None
-    restart_command_compat: bool = False
     env: dict[str, EnvEntry] | None = None
 
     def dependencies(self, context: BuildContext) -> list[ResourceReference]:

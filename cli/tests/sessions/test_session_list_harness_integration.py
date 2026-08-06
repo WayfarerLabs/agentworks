@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 CLAUDE_TEMPLATE = ManifestDoc(
     "session-template",
     "claude",
-    {"harness": "claude-code"},
+    {"harness_integration": {"name": "claude-code"}},
     description="Claude Code session",
 )
 

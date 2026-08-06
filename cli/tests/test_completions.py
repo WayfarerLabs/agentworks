@@ -67,17 +67,19 @@ class TestTopLevelGroups:
 
 
 class TestRetiredCommandsAbsent:
-    """The deprecated ``workspace shell`` / ``workspace console`` pair
-    was retired by deletion (replaced by ``vm shell --workspace`` /
-    ``agent shell --workspace`` and the named consoles). Pin their
-    absence so a stray re-registration surfaces as a failure instead of
-    silently resurrecting a retired surface."""
+    """Pin deleted commands so completion introspection cannot resurrect them."""
 
     def test_workspace_group_carries_no_shell_or_console(self) -> None:
         spec = build_spec(app)
         workspace = spec.subcommands["workspace"]
         assert "shell" not in workspace.subcommands
         assert "console" not in workspace.subcommands
+
+    def test_vm_group_carries_no_console(self) -> None:
+        spec = build_spec(app)
+        vm = spec.subcommands["vm"]
+        assert "console" not in vm.subcommands
+        assert ("vm.console", "name") not in DYNAMIC_COMPLETIONS
 
 
 class TestDynamicCompletionsMapping:
@@ -159,18 +161,14 @@ class TestOptionFlagsInSpec:
         opts = [opt for param in resource_list.params for opt in param.opts]
         assert "--include-disabled" in opts
 
-    def test_session_resume_and_deprecated_restart_are_discoverable(self) -> None:
+    def test_session_resume_is_discoverable_and_restart_is_absent(self) -> None:
         spec = build_spec(app)
         session = _walk_commands(spec)["agentworks.session"]
         assert "resume" in session.subcommands
-        assert "restart" in session.subcommands
-        assert "Deprecated" in session.subcommands["restart"].help
-
+        assert "restart" not in session.subcommands
         for parameter in ("name", "vm", "workspace", "agent"):
-            assert (
-                DYNAMIC_COMPLETIONS[("session.resume", parameter)]
-                == DYNAMIC_COMPLETIONS[("session.restart", parameter)]
-            )
+            assert ("session.resume", parameter) in DYNAMIC_COMPLETIONS
+            assert ("session.restart", parameter) not in DYNAMIC_COMPLETIONS
 
 
 class TestGeneration:

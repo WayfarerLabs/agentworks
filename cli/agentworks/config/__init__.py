@@ -46,7 +46,7 @@ from __future__ import annotations
 
 from agentworks.config.load import (
     EXPECTED_TOP_LEVEL_KEYS,
-    _warn_unexpected_top_level_keys,
+    _raise_unexpected_top_level_keys,
     load_config,
 )
 from agentworks.config.loaders_core import (
@@ -72,7 +72,6 @@ from agentworks.config.models import (
     OperatorConfig,
     PathsConfig,
     SessionConfig,
-    UserConfig,
     _SectionLineMap,
 )
 from agentworks.config.validation import (
@@ -120,7 +119,6 @@ __all__ = [
     "OperatorConfig",
     "PathsConfig",
     "SessionConfig",
-    "UserConfig",
     "_SectionLineMap",
     "_load_defaults",
     "_load_operator",
@@ -133,7 +131,7 @@ __all__ = [
     "_require",
     "_require_string_list",
     "_warn_unexpected_keys",
-    "_warn_unexpected_top_level_keys",
+    "_raise_unexpected_top_level_keys",
     "load_config",
     "validate_admin_username",
     "validate_name",

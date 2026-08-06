@@ -155,7 +155,6 @@ Three integrations ship today and serve as references:
 
 - **`shell`** (`shell.py`): the core built-in and default. Operator-authored `command` /
   `resume_command` / `required_commands`. The minimal member: no state, no tool conventions.
-  `restart_command` remains a deprecated 0.13.0 input only.
 - **`claude-code`** (`agentworks/plugins/claude/harness_integration.py`): the first tool
   integration, shipped as the opt-in `claude` system plugin. The reference for everything stateful:
   durable session identity, resume-vs-launch detection, tool flag mapping, and the plugin packaging.

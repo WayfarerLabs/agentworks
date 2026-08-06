@@ -200,10 +200,6 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("session.stop", "vm"): "vms",
     ("session.stop", "workspace"): "workspaces",
     ("session.stop", "agent"): "agents",
-    ("session.restart", "name"): "sessions",
-    ("session.restart", "vm"): "vms",
-    ("session.restart", "workspace"): "workspaces",
-    ("session.restart", "agent"): "agents",
     ("session.resume", "name"): "sessions",
     ("session.resume", "vm"): "vms",
     ("session.resume", "workspace"): "workspaces",
@@ -211,8 +207,6 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("session.attach", "name"): "sessions",
     ("session.delete", "name"): "sessions",
     ("session.logs", "name"): "sessions",
-    # VM console
-    ("vm.console", "name"): "vms",
     # Env inspection
     ("env.show", "vm"): "vms",
     ("env.show", "workspace"): "workspaces",

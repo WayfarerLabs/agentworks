@@ -178,6 +178,36 @@ def test_unknown_kind_gets_kebab_hint(tmp_path: Path) -> None:
     assert "vm-template" in exc.value.hint
 
 
+@pytest.mark.parametrize(
+    ("kind", "field", "value", "match"),
+    [
+        ("admin-template", "mise_packages", "[terraform]", "name@version"),
+        ("admin-template", "mise_packages", '["bad\\"name@1"]', "name@version"),
+        ("agent-template", "mise_lockfile", "git::http://example.com/lock.git", "mise_lockfile is invalid"),
+        ("admin-template", "mise_lockfile", "{path: lock}", "mise_lockfile must be a string"),
+        ("agent-template", "mise_install_before", "yesterday", "mise_install_before"),
+        ("agent-template", "mise_install_before", "7", "mise_install_before must be a string"),
+    ],
+)
+def test_mise_inputs_fail_at_manifest_decode(tmp_path: Path, kind: str, field: str, value: str, match: str) -> None:
+    root = tmp_path / "resources"
+    _write(
+        root,
+        "mise.yaml",
+        f"""
+        apiVersion: agentworks/v1
+        kind: {kind}
+        metadata:
+          name: default
+        spec:
+          {field}: {value}
+        """,
+    )
+
+    with pytest.raises(ConfigError, match=match):
+        load_manifests(root)
+
+
 def test_secret_backend_kind_rejected(tmp_path: Path) -> None:
     """Post-collapse (2026-07-07): secret-backend is a capability
     descriptor kind; declaring it gets the permanent R3 envelope

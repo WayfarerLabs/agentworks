@@ -273,17 +273,18 @@ third.
 
 ## 7. 0.14.0 removal checklist
 
-- [ ] Delete all recognition of `harness` and `harness_config` as session-template input, including
+- [x] Delete all recognition of `harness` and `harness_config` as session-template input, including
       TOML discriminator support and old YAML tagged/sibling normalization.
-- [ ] Delete the old-selector aggregation data, pure request-warning helper, and exact deprecation
+- [x] Delete the old-selector aggregation data, pure request-warning helper, and exact deprecation
       warning; old input now fails with a clear canonical-selector error. Keep the request
       boundary's unrelated manifest-warning handling and `build_registry` purity.
-- [ ] Remove YAML rewrite discovery and rewrite paths that exist solely for the old selector. Keep
+- [x] Remove YAML rewrite discovery and rewrite paths that exist solely for the old selector. Keep
       the general TOML-to-YAML migration facility. Remove the `ruamel.yaml` direct dependency if it
       has no remaining use.
-- [ ] Remove old-only migration tests and replace them with clear-rejection tests; retain canonical
+- [x] Remove old-only migration tests and replace them with clear-rejection tests; retain canonical
       YAML/TOML migration and inheritance coverage.
-- [ ] Confirm `harness_integration` / `harness_integration_config` canonical behavior is unchanged
+- [x] Confirm `harness_integration` / `harness_integration_config` canonical behavior is unchanged
       and the renamed DB column remains the only column.
-- [ ] Add the removal to the changelog, complete the full gate, perform the residual sweep with no
-      compatibility-code exception, then leave the SDD open only for Phase 3 closeout.
+- [x] Hand the generated 0.14.0 release record to the release-spanning deprecation-removal effort,
+      complete the full gate, perform the residual sweep with no compatibility-code exception, then
+      leave the SDD open only for Phase 3 closeout.

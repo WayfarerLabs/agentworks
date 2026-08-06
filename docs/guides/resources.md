@@ -122,12 +122,9 @@ hatch), so you can migrate on either side of the upgrade. Once every resource se
 hard error is gone. Any section you have not moved stays a hard error until you migrate or delete
 it.
 
-The migrator handles two paths. TOML-declared resources become new YAML documents, appended without
+The migrator handles TOML-declared resources, which become new YAML documents appended without
 rewriting existing YAML content; migrated TOML sections are commented out in place with a
-`# migrated to ...` marker (or removed with `--toml delete`). It also canonicalizes selected
-existing `session-template` YAML documents that use the legacy `harness` selector, folding it and an
-optional `harness_config` sibling into `harness_integration` while preserving the document stream
-and YAML comments. The same kind or `kind/name` selectors scope both paths.
+`# migrated to ...` marker (or removed with `--toml delete`).
 
 Every real run backs up `config.toml`; a run that modifies an existing YAML file also stores its
 original as a recovery copy under `paths.backups`. Digest guards refuse to replace files changed
@@ -212,24 +209,18 @@ spec:
 - `spec.harness_integration` is one table: its `name` key names a `harness-integration` capability
   row, and the remaining keys are the config block that integration owns and validates (unknown keys
   are errors). A template that names no integration resolves to the built-in `shell` integration (a
-  plain login shell, or an operator command), which is the built-in `default` template. The old
-  `harness` / `harness_config` inputs still load in 0.13.0 and contribute to one aggregated
-  deprecation warning per command/request; run `agw resource migrate` to rewrite them.
+  plain login shell, or an operator command), which is the built-in `default` template.
 - The `shell` integration's config vocabulary is `command` (the pane command; empty is a login
   shell), `resume_command` (used by `session resume`, falling back to `command`), and
   `required_commands` (executables checked on the launch target before any state mutation).
   `command` / `resume_command` support the `{{session_name}}` and `{{workspace_name}}` variables.
-  `restart_command` is accepted with a suppressible deprecation warning in 0.13.0 only; replace it
-  with `resume_command` before upgrading to 0.14.0.
 - The integration-plus-config pair inherits as a unit: a child restating the same integration merges
   its config keys into the parent's (child wins per key; `shell` unions `required_commands`), while
   a child naming a _different_ integration starts fresh. `env`, `inherits`, and the description
   merge as usual.
 - YAML manifests spell `command` / `resume_command` / `required_commands` inside the
-  `harness_integration` table. `restart_command` is a deprecated input, replaced by
-  `resume_command`; `agw resource migrate` rewrites it.
-  `agw resource describe harness-integration/shell` shows the integration row and the templates that
-  reference it.
+  `harness_integration` table. `agw resource describe harness-integration/shell` shows the
+  integration row and the templates that reference it.
 
 The `claude-code` integration runs Claude Code as the session. It ships as the opt-in `claude`
 system plugin (see "System plugins" below), so a `session-template` naming it still lists ready, but

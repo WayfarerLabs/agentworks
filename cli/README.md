@@ -189,7 +189,6 @@ just a vm-site.
 | `agw vm rekey <name>`                               | Assign a new Tailscale auth key to a VM (logout + rejoin)     |
 | `agw vm port-forward <name> <ports...>`             | Forward local port(s) to a VM (like kubectl port-forward)     |
 | `agw vm logs <name>`                                | Show SSH logs for a VM                                        |
-| `agw vm console <name>`                             | _Deprecated_: use `agw console`                               |
 | `agw vm add-git-credential <name> <cred>`           | Add or update a git credential                                |
 
 **Power-state semantics:** a VM that stopped on its own (idle timeout, host reboot) is started
@@ -244,20 +243,19 @@ workspace's template env and the `AGENTWORKS_WORKSPACE` identity vars are not de
 platform-native transports (`limactl shell`, `wsl.exe`) drop the `env=` kwarg by design. Treat
 `--platform` as a transport-repair escape hatch, not a routine combination.
 
-`agw vm shell --platform` (legacy alias `--provisioner`, one release) opens the same shell over the
-platform-native transport (`limactl shell` for Lima, `wsl.exe` for WSL2, SSH via the VM's public IP
-for Azure) instead of Tailscale. Useful when Tailscale itself is the thing you need to reach the VM
-to fix (the issue #117 latched DNS state is the canonical case: its heal involves restarting
-tailscaled, which would terminate a Tailscale-SSH session mid-sequence). On Azure, the VM's firewall
-denies all inbound traffic at baseline; for the duration of the session an ephemeral SSH allow rule
-scoped to your detected public IP is created (one per session, so concurrent sessions never tear
-down each other's access), and removed again on exit (the public IP itself is permanent). If your
-SSH traffic egresses through a different address than the detection sees (VPN split tunnel, proxy,
-CGNAT), set `ssh_allow_cidrs` in the config's `[operator]` section to a list of IPv4 addresses
-and/or CIDRs to allow additionally; if detection fails entirely, those entries are used alone.
-Proxmox isn't supported by this flag because the QEMU guest agent's exec interface is one-shot and
-non-interactive; use the Proxmox web UI's serial console (`VM > Console` in the Proxmox VE web UI)
-as the equivalent escape hatch.
+`agw vm shell --platform` opens the same shell over the platform-native transport (`limactl shell`
+for Lima, `wsl.exe` for WSL2, SSH via the VM's public IP for Azure) instead of Tailscale. Useful
+when Tailscale itself is the thing you need to reach the VM to fix (the issue #117 latched DNS state
+is the canonical case: its heal involves restarting tailscaled, which would terminate a
+Tailscale-SSH session mid-sequence). On Azure, the VM's firewall denies all inbound traffic at
+baseline; for the duration of the session an ephemeral SSH allow rule scoped to your detected public
+IP is created (one per session, so concurrent sessions never tear down each other's access), and
+removed again on exit (the public IP itself is permanent). If your SSH traffic egresses through a
+different address than the detection sees (VPN split tunnel, proxy, CGNAT), set `ssh_allow_cidrs` in
+the config's `[operator]` section to a list of IPv4 addresses and/or CIDRs to allow additionally; if
+detection fails entirely, those entries are used alone. Proxmox isn't supported by this flag because
+the QEMU guest agent's exec interface is one-shot and non-interactive; use the Proxmox web UI's
+serial console (`VM > Console` in the Proxmox VE web UI) as the equivalent escape hatch.
 
 ### Workspaces
 
@@ -370,7 +368,6 @@ Manage sessions (persistent tmux sessions running in workspaces). Session names 
 | `agw session attach <name>`   | Attach to a running session    |
 | `agw session stop <name>`     | Stop a running session         |
 | `agw session resume <name>`   | Resume a session               |
-| `agw session restart <name>`  | Deprecated alias for `resume`  |
 | `agw session delete <name>`   | Stop and delete a session      |
 | `agw session logs <name>`     | Dump session scrollback buffer |
 | `agw console attach <name>`   | Attach to a named console      |
@@ -390,9 +387,9 @@ together, and an unknown name in a filter is an error, not an empty result. `--a
 agent-mode sessions only; `--admin` matches admin-mode sessions only (the two are mutually
 exclusive). Pass `--force` to stop/resume broken sessions via PID kill.
 
-`agw session restart` remains a deprecated compatibility alias in 0.13.0. It has the same arguments
-and behavior as `resume`, but warns once per invocation unless you pass `--no-deprecations`. Update
-scripts to `session resume` before 0.14.0, when the alias is removed.
+Maintainers: [Session status internals](../docs/guides/session-status.md) documents the persisted
+PID and boot-ID model, live status derivation, automatic repair, and the safety boundary for
+`--force`.
 
 `session create <name>` takes the session name as a required positional. Optional flags:
 `--workspace`, `--template`, `--admin`, and `--agent`. If `--workspace` / `--new-workspace` is
@@ -446,8 +443,7 @@ panes you want preloaded into a session's window.
 - `--all-running` -- like `--all` but restricted to sessions whose live tmux state on the VM is OK
   (one SSH round-trip; same probe `agw session list` uses). Mutually exclusive with `--all`.
   Requires the VM to be reachable.
-- `--add-admin-shell` -- include a top-level admin-shell window as window 0, matching the legacy
-  `vm console` behavior.
+- `--add-admin-shell`: include a top-level admin-shell window as window 0.
 
 `console list` accepts `--vm`, `--workspace`, and `--agent` to narrow the result set. Each filter
 takes a single value or a comma-separated list (`--workspace ws1,ws2`); commas within a filter are
@@ -506,11 +502,10 @@ removed sessions themselves are untouched; only their membership in the console 
 Each session runs in its own locked-down tmux session on the VM. There are several ways to interact
 with sessions, at different scopes:
 
-| Method                    | Scope                            | tmux session name   | Entry point        |
-| ------------------------- | -------------------------------- | ------------------- | ------------------ |
-| `session attach`          | One session                      | `<session-name>`    | Operator's machine |
-| `console`                 | Curated subset across workspaces | `aw-console-<name>` | Operator's machine |
-| `vm console` (deprecated) | All sessions on the VM           | `vm-console`        | Operator's machine |
+| Method           | Scope                            | tmux session name   | Entry point        |
+| ---------------- | -------------------------------- | ------------------- | ------------------ |
+| `session attach` | One session                      | `<session-name>`    | Operator's machine |
+| `console`        | Curated subset across workspaces | `aw-console-<name>` | Operator's machine |
 
 #### Session tmux Sessions
 
@@ -529,9 +524,9 @@ pane PTY, and each socket path is persisted in the database.
 #### Named Console
 
 `console attach <name>` creates or attaches to the `aw-console-<name>` tmux session. Each member
-session becomes a window running the same wrapper used by the VM console, plus a configurable number
-of extra shell panes (default user = session's agent user, default cwd = workspace root; override
-per pane with `--cwd` / `--admin` on `console add-shell`).
+session becomes a window running an attachment wrapper, plus a configurable number of extra shell
+panes (default user = session's agent user, default cwd = workspace root; override per pane with
+`--cwd` / `--admin` on `console add-shell`).
 
 ```text
 aw-console-backend
@@ -555,13 +550,6 @@ regenerated whenever sessions change. The `agw workspace console` command that a
 removed (superseded by named consoles); the config remains usable directly on the VM via
 `tmuxinator start ws-<name>-console` (e.g. inside VS Code's integrated terminal).
 
-#### VM Console (Deprecated)
-
-`vm console` creates or attaches to the `vm-console` session, which spans all sessions on the VM.
-Built dynamically (not via tmuxinator). Superseded by named consoles, which let you curate which
-sessions are in scope at any moment instead of seeing every session on the VM. Will be removed in a
-future release.
-
 #### Shells
 
 `vm shell` and `agent shell` open plain login shells with no tmux (optionally rooted in a workspace
@@ -571,10 +559,9 @@ via `--workspace <ws>`). Use these when you just need a terminal without the con
 
 - **Direct attach** (`session attach`): the user's prefix key, detach, copy mode, and scroll all
   work normally. Status bar is hidden since there is only one pane.
-- **Consoles** (`console`, `vm console`): the console's prefix key eclipses the inner session's
-  prefix, so window switching, detach, etc. all operate at the console level. Session windows use a
-  wrapper that re-attaches if the inner session disconnects and shows a message when the session
-  ends.
+- **Consoles** (`console`): the console's prefix key eclipses the inner session's prefix, so window
+  switching, detach, etc. all operate at the console level. Session windows use a wrapper that
+  re-attaches if the inner session disconnects and shows a message when the session ends.
 - **Nesting protection**: the console commands refuse to run inside an existing tmux session to
   avoid prefix key conflicts. Pass `--allow-nesting` to override.
 - **Console lifecycle**: consoles are independent of sessions. Killing or detaching a console does
@@ -605,11 +592,10 @@ A session template selects the **harness integration** that runs the session's w
 integration is a [capability](../docs/guides/resources.md#harness-integrations) that owns
 starting/resuming the harness or shell and checking its required executables; the template's
 `spec.harness_integration` is one tagged table whose `name` key selects the integration and whose
-remaining keys are the config block that integration validates. The old `harness` / `harness_config`
-inputs still load with one aggregated deprecation warning per command/request in 0.13.0 and can be
-rewritten with `agw resource migrate`. A template that names no integration runs the built-in
-`shell` integration (a login shell, `$SHELL --login`, or an operator-supplied command), which is the
-built-in `default` template's behavior. Define custom templates as `session-template` resources:
+remaining keys are the config block that integration validates. A template that names no integration
+runs the built-in `shell` integration (a login shell, `$SHELL --login`, or an operator-supplied
+command), which is the built-in `default` template's behavior. Define custom templates as
+`session-template` resources:
 
 ```yaml
 apiVersion: agentworks/v1
@@ -630,9 +616,8 @@ level:
 - `command`: the pane command (empty/omitted is a plain login shell). Supports `{{session_name}}`
   and `{{workspace_name}}` variable substitution (double-brace syntax).
 - `resume_command`: used by `session resume`, for a tool that needs a different invocation on
-  resume. If omitted, `command` is used. `restart_command` remains an old, warning-producing input
-  through 0.13.0 only. (To run Claude Code, prefer the dedicated `claude-code` integration below,
-  which resumes the previous conversation on its own.)
+  resume. If omitted, `command` is used. (To run Claude Code, prefer the dedicated `claude-code`
+  integration below, which resumes the previous conversation on its own.)
 - `required_commands`: executables the command needs, checked on the session's launch target (the
   agent, or the VM admin for admin sessions) before any state mutation, so launching a session whose
   tool is not installed fails fast with a clear error instead of a cryptic downstream tmux failure.
@@ -640,10 +625,8 @@ level:
 
 In a YAML manifest these three keys live only inside the `harness_integration` table; spelling any
 of them at the `spec` top level is a load error that points you at the nested shape. That check is
-one instance of a general deprecated-field notice: any resource kind can flag retired or relocated
-spec fields with an actionable message (a hard load error when ignoring the field would change
-behavior, otherwise a warning that `agw doctor` also surfaces). It is separate from the TOML
-flat-field handling below, which is a permanent supported spelling, not a deprecation.
+an explicit session-template validation boundary. It is separate from the TOML flat-field handling
+below, which is a permanent supported spelling, not a deprecation.
 
 The `claude-code` integration runs Claude Code as the session: `session create` starts a new Claude
 session and `session resume` resumes the same conversation when its transcript still exists on disk
@@ -727,12 +710,9 @@ fresh config (the parent's block was addressed to a different tool). `env`, `inh
 description merge as usual.
 
 **TOML session-template sections are removed.** `config.toml` is settings only, so
-`[session_templates.<name>]` (and the legacy flat `command` / `restart_command` /
-`required_commands` keys it used to accept) no longer load: any resource-declaring section is now a
-hard error at config load. Declare session templates as YAML manifests
-(`agw resource sample session-template`), and run `agw resource migrate session-template` to move
-any that still live in `config.toml`. The `restart_command` deprecation described above applies to
-the YAML input as well; `agw resource migrate` rewrites it to `resume_command`.
+`[session_templates.<name>]` no longer loads: any resource-declaring section is now a hard error at
+config load. Declare session templates as YAML manifests (`agw resource sample session-template`),
+and run `agw resource migrate session-template` to move any that still live in `config.toml`.
 
 ### Config
 
@@ -760,7 +740,7 @@ mappings, template inheritance chains, resolution previews), reach for the per-k
 | `agw resource kinds`                 | List every kind: category (declarable/capability), counts, purpose   |
 | `agw resource describe KIND/NAME`    | Show the per-resource detail view (header + Referenced by + Used by) |
 | `agw resource edit KIND/NAME`        | Open the declaring YAML manifest in $EDITOR                          |
-| `agw resource migrate [SELECTOR]...` | Move TOML resources and canonicalize legacy session-template YAML    |
+| `agw resource migrate [SELECTOR]...` | Move TOML resources to YAML manifests                                |
 | `agw resource sample KIND [--write]` | Print (or save) a kind's commented sample manifest (--all for all)   |
 
 `resource list` accepts `--kind <csv>` (e.g. `--kind secret,vm-template`) and `--origin <variant>`
@@ -772,21 +752,18 @@ split is unambiguous). The `kind/name` token is the one grammar across the resou
 `resource describe secret/npm-token` and `resource migrate vm-template/dev` take the same shape.
 
 `resource migrate` is a recurring, incremental migration command. It moves resources (or a subset)
-from TOML to YAML manifests and rewrites selected existing `session-template` YAML documents that
-still use the legacy `harness` selector to canonical `harness_integration`. Selectors scope both
-paths: `KIND` selects one kind, `KIND/NAME` one resource (overlaps union), and `--all` selects
-everything migratable; a bare invocation errors rather than migrating the whole config by accident.
-`--layout per-kind|single|per-resource` picks the file mapping for TOML-derived documents (default
-one multi-document file per kind, e.g. `resources/vm-templates.yaml`).
+from TOML to YAML manifests. Selectors scope the TOML path: `KIND` selects one kind, `KIND/NAME` one
+resource (overlaps union), and `--all` selects everything migratable; a bare invocation errors
+rather than migrating the whole config by accident. `--layout per-kind|single|per-resource` picks
+the file mapping for TOML-derived documents (default one multi-document file per kind, e.g.
+`resources/vm-templates.yaml`).
 
 TOML-derived documents append after a `---` separator without rewriting the existing YAML content.
-The legacy session-template exception is a guarded, in-place YAML rewrite: it preserves the document
-stream and YAML comments while folding `harness` plus an optional `harness_config` into the
-canonical tagged table. Before any write, the command backs up `config.toml` and stores recovery
-copies of existing YAML files it will append to or rewrite under `paths.backups`. Digest checks
-refuse to replace a TOML or YAML file changed since planning. Writes are atomic, and rollback
-restores only files that still match this run's output digest, so a concurrent operator edit is
-never overwritten; an incomplete rollback reports the recovery copy for manual repair.
+Before any write, the command backs up `config.toml` and stores recovery copies of existing YAML
+files it will append to under `paths.backups`. Digest checks refuse to replace a TOML or YAML file
+changed since planning. Writes are atomic, and rollback restores only files that still match this
+run's output digest, so a concurrent operator edit is never overwritten; an incomplete rollback
+reports the recovery copy for manual repair.
 
 Migrated TOML sections are commented out in place with a `# migrated to resources/<file>` marker
 (default) or removed with `--toml delete`. Deprecated `[secret_backends.*]` sections are dropped
@@ -821,7 +798,7 @@ Settings sections (`config.toml`, permanent):
 
 - `[operator]` -- SSH keys (required), additional authorized keys, SSH config management
 - `[paths]` -- VM workspace, VS Code workspace file, and backup directories
-- `[defaults]`: `site`, the default vm-site for `vm create` (`platform` is the deprecated alias)
+- `[defaults]`: `site`, the default vm-site for `vm create`
 - `[session.config]` -- session defaults (history limit)
 - `[secret_config]` -- active secret backend chain (`[secret_backends.*]` sections are deprecated
   no-ops; see Secret Backends below)

@@ -456,8 +456,7 @@ def test_manifest_load_failure_keeps_other_rows(tmp_path: Path, monkeypatch) -> 
     """A broken manifest FILE (parse error) gets a fail row without
     short-circuiting the rest of the report: TOML issue rows still
     render, and only the registry-dependent tail is skipped."""
-    # A settings-side warning (an unexpected top-level key, which must precede
-    # [operator]) stands in for the TOML issue row: the old [named_console]
+    # A settings-side warning (an unexpected [operator] key) stands in for the TOML issue row: the old [named_console]
     # unknown-key warn is impossible now, since [named_console] is a resource
     # section that hard-errors rather than soft-warning.
     pub = tmp_path / "id.pub"
@@ -467,11 +466,10 @@ def test_manifest_load_failure_keeps_other_rows(tmp_path: Path, monkeypatch) -> 
     cfg = tmp_path / "config.toml"
     cfg.write_text(
         dedent(f"""\
-        oops = true
-
         [operator]
         ssh_public_key = "{pub.as_posix()}"
         ssh_private_key = "{priv.as_posix()}"
+        oops = true
         """)
     )
     write_manifests(tmp_path, "kind: [unclosed\n", filename="broken.yaml")

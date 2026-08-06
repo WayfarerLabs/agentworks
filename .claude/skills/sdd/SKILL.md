@@ -86,6 +86,25 @@ editing it yourself. If you also have a working communication channel to that SD
 child SDD, the roadmap lead), flag it there too; until such channels exist, the operator is the
 reliable route.
 
+One sanctioned channel does exist: new-file message passing. Adding a NEW file to another SDD's
+feature directory as a message is fine (a roadmap delivering seed notes into an adopted child's
+directory is the standing example); the restriction is on modifying another effort's existing
+artifacts. A delivered message file belongs to the receiving effort once read: integrate it into
+your own artifacts, then keep or delete it as you see fit.
+
+Delivery semantics: messages deliver via `main`, never by committing to another effort's live
+branch. A branch is mutable state under its owner's control (a rebase or force-push can silently
+drop a foreign commit, so branch delivery can lose messages while looking delivered), and the
+PR-to-main hop is the operator's review gate on inter-agent instructions. A running effort only sees
+messages that existed at its branch point, so a sender whose message lands after the recipient's
+branch was cut must tell the operator so the recipient gets nudged. Pickup is cheap and needs no
+branch changes: `git show origin/main:<path>` reads the message as delivered. To bring it in-tree,
+cherry-pick the message commit or merge `main` in. To keep cherry-picking clean, a sender delivers
+each message as a single commit touching only the message file (other changes ride separate commits,
+even in the same PR), and the nudge carries that commit's sha. Recipients on long-running branches
+should also glance at their feature directory on `origin/main` at natural checkpoints for messages
+that arrived mid-flight.
+
 ## Lockfile
 
 When work on the SDD is done, a `locked.md` file should be created in the feature directory. This

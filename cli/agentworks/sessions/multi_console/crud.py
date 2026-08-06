@@ -60,9 +60,8 @@ def create_console(
 
     Explicit *session_specs* keep their argument order. *fill_all* appends
     every other session on the VM in alphabetical order with zero shells.
-    *add_admin_shell* adds a window 0 login shell as the VM admin (legacy
-    vm-console behavior) -- useful when you want a top-level shell alongside
-    the curated session windows. All inserts run in one transaction; the
+    *add_admin_shell* adds a window 0 login shell as the VM admin, useful when
+    you want a top-level shell alongside the curated session windows. All inserts run in one transaction; the
     console is not created if any step fails.
 
     Note: this function is DB-only. Live filtering (e.g. --all-running) is

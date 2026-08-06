@@ -109,11 +109,11 @@ def test_build_registry_with_explicit_manifest_set_does_not_render_warnings(tmp_
     resources.mkdir()
     (resources / "old.yaml").write_text(
         """apiVersion: agentworks/v1
-kind: session-template
+kind: vm-site
 metadata:
-  name: shell-old
+  name: local-old
 spec:
-  harness: shell
+  platform: lima
 """
     )
     warnings: list[str] = []
@@ -123,5 +123,5 @@ spec:
     manifests = load_manifests(resources)
     build_registry(config, manifests)
 
-    assert manifests.deprecated_harness_selectors == ("session-template/shell-old",)
+    assert manifests.deprecated_shape_resources == ("vm-site/local-old",)
     assert warnings == []

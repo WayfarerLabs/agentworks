@@ -93,17 +93,18 @@ This phase is blocked until 0.13.0 has shipped. It is not part of the 0.13.0 imp
 discriminator-pattern support" here means only the harness selector/config compatibility introduced
 for this rename; removing generic compatibility used by unrelated capabilities is out of scope.
 
-- [ ] Remove acceptance of the old `harness` selector, `harness_config` sibling, and TOML
+- [x] Remove acceptance of the old `harness` selector, `harness_config` sibling, and TOML
       discriminator pair together with the old discriminator-pattern support. Remove their warning
-      and migration-only compatibility paths where no longer needed; record the removal in the
-      changelog. DoD: old inputs fail clearly, canonical 0.13.0 inputs remain unchanged, the full
-      gate passes, and the residual sweep has no compatibility-code exceptions.
+      and migration-only compatibility paths where no longer needed; hand the generated release
+      record to the release-spanning deprecation-removal effort. DoD: old inputs fail clearly,
+      canonical 0.13.0 inputs remain unchanged, the full gate passes, and the residual sweep has no
+      compatibility-code exceptions.
 
 ## Phase 3: Closeout
 
-- [ ] Promote any load-bearing naming/decision content out of this SDD into the permanent capability
+- [x] Promote any load-bearing naming/decision content out of this SDD into the permanent capability
       README so the SDD stays deletable (SDD-not-permanent rule).
-- [ ] Write `locked.md` summarizing the final state; land it with the last edits.
+- [x] Write `locked.md` summarizing the final state; land it with the last edits.
 - DoD: full gate green; `locked.md` present; permanent docs reflect reality at HEAD.
 
 ## Deferred to a separate SDD (not this effort)

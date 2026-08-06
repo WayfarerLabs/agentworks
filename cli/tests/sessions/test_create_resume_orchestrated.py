@@ -636,7 +636,6 @@ def _stop_the_vm(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> None:
 
 
 def _patch_session_ops(monkeypatch: pytest.MonkeyPatch, events: list[str], captured_env: dict[str, str]) -> None:
-    from agentworks.sessions import console as console_mod
     from agentworks.sessions import manager as session_manager
     from agentworks.sessions import tmux as tmux_mod
 
@@ -651,7 +650,6 @@ def _patch_session_ops(monkeypatch: pytest.MonkeyPatch, events: list[str], captu
     monkeypatch.setattr(tmux_mod, "create_session", _capture_create)
     monkeypatch.setattr(session_manager, "_get_boot_id", lambda *a, **k: "boot-x")
     monkeypatch.setattr(session_manager, "_regenerate_tmuxinator", lambda *a, **k: None)
-    monkeypatch.setattr(console_mod, "add_session_to_console", lambda *a, **k: None)
 
 
 def test_create_stopped_vm_gate_resolves_once_and_seeds_the_boundary(

@@ -1,7 +1,6 @@
-"""The console attach paths through the orchestrated model: the VM
-console (``sessions.console.attach_console``) and the named-console
-attach helper (``sessions.multi_console._prepare_vm_target_for_attach``
-via ``attach_console``). Pins the lazily-decided console-node ruling
+"""The named-console attach path through the orchestrated model.
+
+Pins the lazily-decided console-node ruling
 (there is NO console node: attach provisions nothing, so the graph is
 the live VM alone), the gate-prompt parity carries, the gate's
 held-active span covering the interactive attach (keep-active parity
@@ -24,12 +23,10 @@ import pytest
 from agentworks.db import VMStatus
 from agentworks.errors import StateError
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
-from agentworks.sessions import console as vm_console
 from agentworks.sessions import multi_console
 from agentworks.vms import manager as vm_manager
 
 if TYPE_CHECKING:
-    from agentworks.capabilities.base import OperationScope, RunContext
     from agentworks.db import Database
 
 
@@ -111,110 +108,6 @@ def test_attach_graph_is_the_live_vm_alone(
 
     assert [n.key for n in nodes] == ["vm-site/proxmox", "vm/box"]
     assert secret_union(nodes) == ("proxmox-token",)
-
-
-# -- the VM console (sessions.console) ----------------------------------------
-
-
-def test_vm_console_reachable_vm_is_one_boundary_burst(
-    db: Database,
-    make_config,  # noqa: ANN001
-    resolve_counter: list[list[str]],
-    target: _FakeTarget,
-    monkeypatch: pytest.MonkeyPatch,
-    captured_output,  # noqa: ANN001
-) -> None:
-    config = make_config()
-    _seed_vm(db)
-    _reachable(monkeypatch, True)
-
-    # attach_console returns the interactive exit code; the CLI owns process exit.
-    assert vm_console.attach_console(db, config, vm_name="box") == 0
-
-    assert resolve_counter == [["proxmox-token"]]
-    assert target.interactive_calls == ["tmux attach -t vm-console"]
-
-
-def test_vm_console_stopped_vm_gate_burst_seeds_the_boundary(
-    db: Database,
-    make_config,  # noqa: ANN001
-    resolve_counter: list[list[str]],
-    target: _FakeTarget,
-    monkeypatch: pytest.MonkeyPatch,
-    captured_output,  # noqa: ANN001
-) -> None:
-    """No env-chain target registers on an attach, so the gate's
-    just-in-time token resolve fully seeds the union and the boundary
-    contributes NO pass of its own: one backend pass total, nothing
-    twice, nothing after."""
-    config = make_config()
-    _seed_vm(db)
-    events: list[str] = []
-    _stop_the_vm(monkeypatch, events)
-
-    assert vm_console.attach_console(db, config, vm_name="box") == 0
-
-    assert events == ["status", "start", "tailscale"]  # the gate ran
-    assert resolve_counter == [["proxmox-token"]]
-    assert target.interactive_calls == ["tmux attach -t vm-console"]
-
-
-def test_vm_console_no_tailscale_fails_with_zero_resolves_and_zero_gate(
-    db: Database,
-    make_config,  # noqa: ANN001
-    resolve_counter: list[list[str]],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The pre-gate bail: a VM with no Tailscale address can never be
-    attached to, so it fails before any prompt and before any VM
-    start (the imperative body checked this after its gate; the hoist
-    removes the wasted start)."""
-    config = make_config()
-    db.insert_vm("box", site="proxmox", hostname="box")  # no tailscale host
-    _reachable(monkeypatch, False)
-
-    def _no_status(self: ProxmoxPlatform, row: object) -> VMStatus:
-        raise AssertionError("the gate ran for an unattachable VM")
-
-    monkeypatch.setattr(ProxmoxPlatform, "status", _no_status)
-
-    with pytest.raises(StateError, match="no Tailscale address"):
-        vm_console.attach_console(db, config, vm_name="box")
-
-    assert resolve_counter == []
-
-
-def test_vm_scope_reaches_node_readiness(
-    db: Database,
-    make_config,  # noqa: ANN001
-    target: _FakeTarget,
-    monkeypatch: pytest.MonkeyPatch,
-    captured_output,  # noqa: ANN001
-) -> None:
-    from agentworks.capabilities.base import ScopeLevel
-
-    config = make_config()
-    _seed_vm(db)
-    _reachable(monkeypatch, True)
-    scopes: list[OperationScope | None] = []
-    real = ProxmoxPlatform.preflight
-
-    def _recording(self: ProxmoxPlatform, ctx: RunContext) -> None:
-        scopes.append(ctx.operation_scope)
-        real(self, ctx)
-
-    monkeypatch.setattr(ProxmoxPlatform, "preflight", _recording)
-
-    assert vm_console.attach_console(db, config, vm_name="box") == 0
-
-    (scope,) = scopes
-    assert scope is not None
-    assert scope.level is ScopeLevel.VM
-    assert scope.vm == "box"
-    assert scope.workspace is None and scope.agent is None and scope.session is None
-
-
-# -- the named console (sessions.multi_console) -------------------------------
 
 
 def test_named_console_attach_holds_across_the_interactive_attach(
