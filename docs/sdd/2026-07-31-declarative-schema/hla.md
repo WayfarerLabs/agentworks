@@ -125,7 +125,8 @@ A new `resources/schema/` package owning the framework-wide model vocabulary:
   - `iter_field_docs(model_cls)`: the ordered field-reference stream (name, type rendering,
     required/default, description, ref semantics, union arms) consumed by the sample renderer, the
     describe surface, and schema emission. One walker, three presentations, so the surfaces cannot
-    disagree.
+    disagree. The roadmap's teaching surface (`agw guide`, owned by the onboarding child SDD) is a
+    fourth, external presenter over the same stream; Component 7 records the coordination.
 
 ### Component 2: capability schema registration
 
@@ -266,8 +267,18 @@ One renderer over `iter_field_docs`:
   every field with its type, required/default, and description, one union arm rendered and the
   alternatives listed. Merged with an optional hand-authored prose blurb registered alongside the
   model (kind-level and capability-level). `agw resource sample` keeps its interface, rendering live
-  from the registry (plugins included); the bundled sample files are deleted. Blurbs live as
-  registered text (package data or string constants; LLD detail), never containing field lists.
+  from the registry (plugins included); the bundled sample files are deleted.
+- **Blurbs are structured data, not presentation** (roadmap guide-surface coordination, 2026-08-05):
+  a blurb registers as structured markdown (identity, level, title, body), colocated beside the kind
+  or capability it documents (plugin blurbs ride plugin registration), never pre-rendered CLI text
+  and never containing field lists. The onboarding child's `agw guide` composes the same sources
+  (schema fragments, field references, sample skeletons, blurbs) into topic pages, so the authored
+  layer is shared rather than forked; the blurb shape must not preclude a topic-content contract,
+  but committing to the guide's actual contract waits for that effort's LLD. Blurbs are inert prose
+  with no templating; if they ever grow dynamic placeholders, they adopt the guide's locked-down
+  template vocabulary rather than inventing a second dialect. This SDD's renderers are
+  registry-anchored and side-effect-free (schema facts only, no instance state), which is what lets
+  the guide reuse them as dynamic blocks without new data-access paths.
 - **Describe rendering** (FR11): the same stream rendered for the terminal under
   `agw resource describe <kind>` / capability, replacing the "read the source" answer.
 - FR16's pointer sweep repoints guides, command help, and remediation text at these two surfaces.

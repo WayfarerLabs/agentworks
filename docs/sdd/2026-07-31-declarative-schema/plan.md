@@ -344,7 +344,15 @@ policy is recorded as an explicit descriptor-carried interim exception (wave 3 r
 ### 2.8 Live-rendered samples and describe
 
 - [ ] `emission-and-renderer-lld.md` (shared with 2.7 if the seams overlap) written and reviewed:
-      renderer output contract, blurb registration surface, and the describe surface's naming.
+      renderer output contract, blurb registration surface, and the describe surface's naming. Per
+      the roadmap's guide-surface note (2026-08-05), the LLD must (a) shape blurbs as structured
+      markdown data (identity, level, title, body; never pre-rendered CLI text) so the onboarding
+      child's `agw guide` can compose them into topic pages without forking the authored layer, (b)
+      name the colocation convention explicitly (built-in blurbs live beside the kind they document;
+      plugin blurbs ride plugin registration) since the guide effort inherits that convention rather
+      than inventing a second home, and (c) record the templating guardrail: blurbs are inert prose
+      today, and any future dynamic placeholders adopt the guide's locked-down template vocabulary,
+      never a second dialect.
 - [ ] Renderer over `iter_field_docs`: commented-YAML skeleton per kind and capability arm (one
       union arm rendered, alternatives listed), merged with registered prose blurbs (kind-level and
       capability-level; blurbs carry no field lists). Disabled capabilities render too (rendering

@@ -423,6 +423,15 @@ That is the whole reconciliation: docstring pointers, no assertion changes.
 - **Latent Entry inconsistency** (two rows carry `description`, two do not, section 8): recorded as
   a deferred follow-up, not fixed here, because fixing it changes row content and breaks
   always-green.
+- **Graph read-side access modes are an explicitly held door (roadmap guide-surface note,
+  2026-08-05).** The roadmap's guide surface renders against the resource graph in a gated read-only
+  access mode whose rule ("gated modes expose only already-materialized data") leans on
+  post-finalize immutability staying a registry/fold property (FR21 door c). Nothing here narrows
+  that: the descriptor table is a static core-owned enumeration, `registry` is a lazy callable on
+  the descriptor (not a power wired onto graph nodes), and readiness dispatch is a fold-time
+  concern. Future descriptor edits must not attach lazily-computing powers to graph nodes. If
+  per-kind guide topic content ever wants a typed registration point, a slot mapping beside
+  `config_slots` is the natural home; noted only, decided no earlier than wave 4's facet work.
 - No hard contradiction between the contract and HEAD was found. The kind names in the contract's
   illustrative record (`vm-platform`, `harness-integration`) match HEAD; the host/capability naming
   split (vm-site hosts vm-platform, git-credential hosts git-credential-provider, session-template

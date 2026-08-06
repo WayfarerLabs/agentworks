@@ -191,7 +191,10 @@ Wave 2 additions (folded in from the roadmap seed, 2026-08-05; the roadmap is
   not a model-layer assumption, so a future living-graph effort can relax it without touching the
   models; (d) nothing precludes one shared instance-state store (instance specs, facet
   applied-state, artifact-ownership records). FR15 and FR17 already realize parts of (a) and (b);
-  FR21 records the whole set as an explicit non-regression constraint the design honors.
+  FR21 records the whole set as an explicit non-regression constraint the design honors. Door (c)
+  gained its first external consumer (roadmap ruling, 2026-08-05): the guide surface's gated
+  read-side graph access modes expose only already-materialized data, which assumes exactly that
+  immutability stays a registry/fold property.
 
 Stretch (in scope only if phase 2 lands cleanly; may be descoped to a follow-up without
 renegotiating this FRD):
