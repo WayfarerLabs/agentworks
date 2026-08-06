@@ -27,7 +27,6 @@ _NOT_YET_MODELED = {
     "session-template",
     "vm-site",
     "vm-template",
-    "workspace-template",
 }
 
 

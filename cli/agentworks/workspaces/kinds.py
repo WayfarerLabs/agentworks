@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
     from agentworks.db import Database
+    from agentworks.declared_resource import DeclaredResource
     from agentworks.resources.reference import ResourceReference
     from agentworks.resources.registry import Registry
 
@@ -33,6 +34,7 @@ class _WorkspaceTemplateKind:
     """Implementation of ``ResourceKind`` for ``"workspace-template"``."""
 
     kind: str = "workspace-template"
+    model: type[DeclaredResource] = WorkspaceTemplate
     description: str = "Workspace configuration (repo, env, ...)"
     miss_policy: Literal["auto-declare", "error"] = "auto-declare"
     auto_declare_names: frozenset[str] | None = frozenset({"default"})

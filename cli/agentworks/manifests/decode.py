@@ -44,6 +44,7 @@ from agentworks.declared_resource import DeclaredResource
 from agentworks.errors import AgentworksError, ConfigError
 from agentworks.resources import KIND_REGISTRY
 from agentworks.schema import RefOwner, config_error_from, extract_references, validation_context
+from agentworks.schema._shape import Collection, shape_of
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -59,6 +60,11 @@ if TYPE_CHECKING:
 #: the base rather than listed, so a fourth metadata field cannot be
 #: rejected by one layer and accepted by the other.
 _ROW_METADATA_FIELDS = frozenset(DeclaredResource.model_fields)
+
+#: The prefix the runtime prelude owns: an operator's value for such a
+#: key is silently overridden at command time, so setting one is a
+#: mistake worth a warning.
+_AGENTWORKS_ENV_PREFIX = "AGENTWORKS_"
 
 #: Where an operator goes to see the shape they got wrong. One hint for
 #: every kind, because the sample surface renders the fields live and a
@@ -287,7 +293,47 @@ def advisory_issues(resource: DeclaredResource, doc: Document) -> list[str]:
     refs = [*extract_references(type(resource), doc.spec, owner), *_hosted_capability_references(resource, doc, owner)]
     return [
         _nonconforming_secret(owner, ref) for ref in refs if ref.kind == "secret" and not _conforming_secret(ref.name)
-    ]
+    ] + _env_hygiene_issues(owner, resource)
+
+
+def _env_hygiene_issues(owner: RefOwner, resource: DeclaredResource) -> list[str]:
+    """Two warnings an env table earns, on every kind that has one.
+
+    Found by ANNOTATION (a mapping of ``EnvEntry``), not by a list of
+    env-bearing kinds, which is the list the sixth such kind would not be
+    on. Neither check can live on the model: a model validator has no
+    channel but an exception, and neither of these is fatal.
+    """
+    from agentworks.env.entry import EnvEntry
+
+    issues: list[str] = []
+    for name, field in type(resource).model_fields.items():
+        shape = shape_of(field)
+        if shape.collection is not Collection.MAPPING or shape.item_model is not EnvEntry:
+            continue
+        table: Mapping[str, EnvEntry] = getattr(resource, name, None) or {}
+        for key, entry in table.items():
+            issues.extend(_env_entry_issues(owner, name, key, entry))
+    return issues
+
+
+def _env_entry_issues(owner: RefOwner, field: str, key: str, entry: EnvEntry) -> list[str]:
+    issues: list[str] = []
+    if key.startswith(_AGENTWORKS_ENV_PREFIX):
+        issues.append(
+            f"{owner.display}.{field} sets agentworks-managed identity variable "
+            f"{key!r}; identity values win at the runtime prelude, so your value "
+            "will be ignored at command time. Remove the entry."
+        )
+    if entry.value is not None and ("\n" in entry.value or "\r" in entry.value):
+        # ADR 0014: a newline would corrupt the SSH ``-o SetEnv=KEY=VALUE``
+        # argument shape. The resolve loop applies the same check
+        # defensively to secret-resolved values.
+        issues.append(
+            f"{owner.display}.{field}.{key}: value contains a newline; SSH SetEnv "
+            "cannot transport it cleanly. Strip the newline at the source."
+        )
+    return issues
 
 
 def _hosted_capability_references(
@@ -556,36 +602,6 @@ def _decode_agent_template(doc: Document, spec: dict[str, Any], issues: list[str
     )
 
 
-_WORKSPACE_TEMPLATE_KEYS = {
-    "inherits",
-    "description",
-    "repo",
-    "tmuxinator",
-    "git_user_name",
-    "git_user_email",
-    "env",
-}
-
-
-def _decode_workspace_template(doc: Document, spec: dict[str, Any], issues: list[str]) -> Any:
-    from agentworks.config.loaders_core import _parse_env_table, _warn_unexpected_keys
-    from agentworks.workspaces.template import WorkspaceTemplate
-
-    name = doc.name
-    _warn_unexpected_keys(spec, _WORKSPACE_TEMPLATE_KEYS, f"workspace_templates.{name}", issues)
-    return WorkspaceTemplate(
-        name=name,
-        inherits=list(spec.get("inherits", [])),
-        description=str(spec["description"]) if "description" in spec else None,
-        repo=str(spec["repo"]) if "repo" in spec else None,
-        tmuxinator=bool(spec["tmuxinator"]) if "tmuxinator" in spec else None,
-        git_user_name=(str(spec["git_user_name"]) if "git_user_name" in spec else None),
-        git_user_email=(str(spec["git_user_email"]) if "git_user_email" in spec else None),
-        env=_parse_env_table(spec.get("env"), context=f"workspace_templates.{name}", issues=issues),
-        declared_at=doc.location,
-    )
-
-
 _SESSION_TEMPLATE_KEYS = {
     "inherits",
     "description",
@@ -848,7 +864,6 @@ _DECODERS: dict[str, Callable[[Document, dict[str, Any], list[str]], Any]] = {
     "secret": _decode_secret,
     "vm-template": _decode_vm_template,
     "agent-template": _decode_agent_template,
-    "workspace-template": _decode_workspace_template,
     "session-template": _decode_session_template,
     "git-credential": _decode_git_credential,
     "vm-site": _decode_vm_site,

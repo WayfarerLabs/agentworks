@@ -117,7 +117,7 @@ def _substitute_template_vars_in_env(
         if new_val == entry.value:
             result[key] = entry
         else:
-            result[key] = _EnvEntry(key=key, value=new_val)
+            result[key] = _EnvEntry(value=new_val)
     return result
 
 

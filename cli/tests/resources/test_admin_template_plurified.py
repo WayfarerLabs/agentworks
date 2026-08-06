@@ -85,7 +85,7 @@ def test_admin_dependencies_sources_from_self_name() -> None:
     """
     custom = AdminConfig(
         name="work",
-        env={"API_KEY": EnvEntry(key="API_KEY", secret="api-key")},
+        env={"API_KEY": EnvEntry(secret="api-key")},
     )
     reqs = custom.dependencies(FinalizeContext())
     assert reqs  # at least the API_KEY secret requirement

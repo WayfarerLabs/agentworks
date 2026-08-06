@@ -566,7 +566,7 @@ def test_secret_mapped_only_to_disabled_onepassword_fails_with_enable_hint(tmp_p
 
     config = _config(tmp_path, _op_only_settings(enabled=False), manifests=[_OP_ONLY_SECRET])
     registry = build_registry(config)
-    target = SecretTarget(vm={"TOKEN": EnvEntry(key="TOKEN", secret="op-only")})
+    target = SecretTarget(vm={"TOKEN": EnvEntry(secret="op-only")})
     with pytest.raises(SecretUnavailableError) as exc:
         resolve_for_command([target], config, registry)
     assert "enable plugin `onepassword`" in (exc.value.hint or "")
@@ -583,7 +583,7 @@ def test_enabling_the_plugin_resolves_the_onepassword_secret(tmp_path: Path, mon
     config = _config(tmp_path, _op_only_settings(enabled=True), manifests=[_OP_ONLY_SECRET])
     registry = build_registry(config)
     _install_runner(monkeypatch, _fake_op(values={"op://Vault/item/field": "the-token"}))
-    target = SecretTarget(vm={"TOKEN": EnvEntry(key="TOKEN", secret="op-only")})
+    target = SecretTarget(vm={"TOKEN": EnvEntry(secret="op-only")})
     values = resolve_for_command([target], config, registry)
     assert values["op-only"] == "the-token"
 
@@ -606,7 +606,7 @@ def test_non_plugin_secret_failure_message_is_unchanged(tmp_path: Path, monkeypa
         manifests=[ManifestDoc("secret", "plain", description="reachable via env-var's default convention, but unset")],
     )
     registry = build_registry(config)
-    target = SecretTarget(vm={"TOKEN": EnvEntry(key="TOKEN", secret="plain")})
+    target = SecretTarget(vm={"TOKEN": EnvEntry(secret="plain")})
     with pytest.raises(SecretUnavailableError) as exc:
         resolve_for_command([target], config, registry)
     assert "plain: tried env-var" in (exc.value.hint or "")
@@ -658,7 +658,7 @@ def test_explicit_false_opt_out_of_onepassword_gets_no_enable_hint(
         ],
     )
     registry = build_registry(config)
-    target = SecretTarget(vm={"TOKEN": EnvEntry(key="TOKEN", secret="opted-out")})
+    target = SecretTarget(vm={"TOKEN": EnvEntry(secret="opted-out")})
     with pytest.raises(SecretUnavailableError) as exc:
         resolve_for_command([target], config, registry)
     assert "enable plugin" not in (exc.value.hint or "")

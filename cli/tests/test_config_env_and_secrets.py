@@ -595,7 +595,7 @@ def test_unknown_backend_kind_in_secret_backends_errors(
         ),
         (
             ManifestDoc("workspace-template", "ws", {"env": {"AGENTWORKS_WORKSPACE": "override"}}),
-            "workspace_templates.ws.env",
+            "workspace-template/ws.env",
         ),
         (
             ManifestDoc("session-template", "shell", {"env": {"AGENTWORKS_SESSION": "override"}}),

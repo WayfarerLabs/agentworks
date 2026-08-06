@@ -1,21 +1,21 @@
-"""``WorkspaceTemplate``: the operator-declared workspace-template row.
+"""``WorkspaceTemplate``: the operator-declared workspace-template row,
+which is also the ``workspace-template`` kind's spec model.
 
-Moved out of ``agentworks.config`` so the ``workspaces`` domain owns its
-declared-resource type next to the resolver
+Homed in the ``workspaces`` domain so the row sits next to the resolver
 (``agentworks.workspaces.templates``) and the kind
-(``agentworks.workspaces.kinds``). The ``agentworks.config`` package
-keeps only the legacy TOML loader that constructs it.
+(``agentworks.workspaces.kinds``).
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated
 
 from pydantic import Field
 
 from agentworks.declared_resource import DeclaredResource
-from agentworks.env import EnvEntry
-from agentworks.env.entry import env_references
+from agentworks.env.entry import EnvTable, env_references
+from agentworks.schema import ResourceRef
+from agentworks.schema.reference import RefRelationship
 
 if TYPE_CHECKING:
     from agentworks.resources.graph import FinalizeContext
@@ -23,12 +23,37 @@ if TYPE_CHECKING:
 
 
 class WorkspaceTemplate(DeclaredResource):
-    inherits: list[str] = Field(default_factory=list)
+    """Workspace template definition. Every field is optional, and ``None``
+    means "not set here, inherit it" rather than "off"."""
+
+    inherits: list[
+        Annotated[
+            str,
+            ResourceRef(
+                kind="workspace-template",
+                usage="a parent template",
+                relationship=RefRelationship.INHERITS,
+            ),
+        ]
+    ] = Field(default_factory=list)
+    """Parent templates this one composes, nearest last."""
+
     repo: str | None = None
-    tmuxinator: bool | None = None  # None = not explicitly set (inherit/default to True)
-    git_user_name: str | None = None  # git user.name for commits in this workspace's repo
-    git_user_email: str | None = None  # git user.email for commits in this workspace's repo
-    env: dict[str, EnvEntry] = Field(default_factory=dict)
+    """The git repository cloned into workspaces built from this template."""
+
+    tmuxinator: bool | None = None
+    """Whether to write a tmuxinator project for the workspace. ``None``
+    inherits, and defaults to true when nothing in the chain sets it."""
+
+    git_user_name: str | None = None
+    """``user.name`` for commits made in this workspace's checkout."""
+
+    git_user_email: str | None = None
+    """``user.email`` for commits made in this workspace's checkout."""
+
+    env: EnvTable = Field(default_factory=dict)
+    """Environment variables exported in this workspace, as a plaintext
+    value or a ``{secret: <name>}`` reference per key."""
 
     def dependencies(self, context: FinalizeContext) -> list[ResourceReference]:
         """The ``inherits`` edges as declared, plus the runtime needs of

@@ -56,7 +56,7 @@ def test_a_miss_on_an_inherited_name_blames_the_template_that_wrote_it() -> None
 def test_an_auto_declared_row_records_the_declaring_template_as_its_origin() -> None:
     from agentworks.env.entry import EnvEntry
 
-    parent = VMTemplate(name="base", env={"BASE": EnvEntry(key="BASE", secret="base-secret")})
+    parent = VMTemplate(name="base", env={"BASE": EnvEntry(secret="base-secret")})
     child = VMTemplate(name="kid", inherits=["base"])
     registry = _child_first(parent, child)
 
@@ -70,7 +70,7 @@ def test_two_descendants_of_one_declarer_do_not_read_as_two_declarations() -> No
     inherited twice is one declaration, not three."""
     from agentworks.env.entry import EnvEntry
 
-    parent = VMTemplate(name="base", env={"BASE": EnvEntry(key="BASE", secret="base-secret")})
+    parent = VMTemplate(name="base", env={"BASE": EnvEntry(secret="base-secret")})
     registry = Registry.empty()
     for name in ("kid-a", "kid-b"):
         registry.add("vm-template", name, VMTemplate(name=name, inherits=["base"]), _origin(name))
@@ -85,7 +85,7 @@ def test_describe_says_an_inherited_reference_was_inherited() -> None:
     operator to the wrong file."""
     from agentworks.env.entry import EnvEntry
 
-    parent = VMTemplate(name="base", env={"BASE": EnvEntry(key="BASE", secret="base-secret")})
+    parent = VMTemplate(name="base", env={"BASE": EnvEntry(secret="base-secret")})
     child = VMTemplate(name="kid", inherits=["base"])
     registry = _child_first(parent, child)
 

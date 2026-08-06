@@ -200,7 +200,7 @@ def _parse_env_table(
                     "SSH SetEnv cannot transport it cleanly. Strip the "
                     "newline at the source."
                 )
-            result[key_str] = EnvEntry(key=key_str, value=val)
+            result[key_str] = EnvEntry(value=val)
         elif isinstance(val, dict):
             extra = set(val.keys()) - {"secret"}
             if extra:
@@ -215,7 +215,7 @@ def _parse_env_table(
                     "'secret = \"<name>\"' (or use a bare string for plaintext)"
                 )
             _warn_nonconforming_secret_name(secret_name, location=f"{context}.env.{key_str}", issues=issues)
-            result[key_str] = EnvEntry(key=key_str, secret=secret_name)
+            result[key_str] = EnvEntry(secret=secret_name)
         else:
             raise ConfigError(
                 f"{context}.env.{key_str}: must be a string (plaintext) or "

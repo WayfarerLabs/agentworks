@@ -96,7 +96,7 @@ def test_unions_single_target_env_chain(
         manifests=[ManifestDoc("secret", "api-key", description="shared API key")],
     )
     config = load_config(cfg, warn_issues=False)
-    vm_env = {"API_KEY": EnvEntry(key="API_KEY", secret="api-key")}
+    vm_env = {"API_KEY": EnvEntry(secret="api-key")}
 
     decls = compute_needed_secrets([SecretTarget(vm=vm_env)], build_registry(config))
     assert [d.name for d in decls] == ["api-key"]
@@ -113,7 +113,7 @@ def test_unknown_reference_raises_instead_of_dropping(tmp_path: Path) -> None:
 
     cfg = _write_config(tmp_path)
     config = load_config(cfg, warn_issues=False)
-    vm_env = {"API_KEY": EnvEntry(key="API_KEY", secret="ghost-secret")}
+    vm_env = {"API_KEY": EnvEntry(secret="ghost-secret")}
 
     with pytest.raises(StateError, match="ghost-secret"):
         compute_needed_secrets(
@@ -138,13 +138,13 @@ def test_unions_across_multiple_targets_dedup_by_name(tmp_path: Path) -> None:
 
     t_a = SecretTarget(
         vm={
-            "KEY1": EnvEntry(key="KEY1", secret="shared"),
-            "KEY2": EnvEntry(key="KEY2", secret="unique-a"),
+            "KEY1": EnvEntry(secret="shared"),
+            "KEY2": EnvEntry(secret="unique-a"),
         }
     )
     t_b = SecretTarget(
         vm={
-            "KEY3": EnvEntry(key="KEY3", secret="shared"),
+            "KEY3": EnvEntry(secret="shared"),
         }
     )
 
@@ -176,10 +176,10 @@ def test_walks_all_scopes_in_target(tmp_path: Path) -> None:
     config = load_config(cfg, warn_issues=False)
 
     target = SecretTarget(
-        vm={"V": EnvEntry(key="V", secret="vm-secret")},
-        workspace={"W": EnvEntry(key="W", secret="ws-secret")},
-        admin={"A": EnvEntry(key="A", secret="admin-secret")},
-        session={"S": EnvEntry(key="S", secret="session-secret")},
+        vm={"V": EnvEntry(secret="vm-secret")},
+        workspace={"W": EnvEntry(secret="ws-secret")},
+        admin={"A": EnvEntry(secret="admin-secret")},
+        session={"S": EnvEntry(secret="session-secret")},
     )
     decls = compute_needed_secrets([target], build_registry(config))
     assert sorted(d.name for d in decls) == [
@@ -207,7 +207,7 @@ def test_extra_decls_extend_union(tmp_path: Path) -> None:
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
 
-    target = SecretTarget(vm={"K": EnvEntry(key="K", secret="from-env")})
+    target = SecretTarget(vm={"K": EnvEntry(secret="from-env")})
     external_decl = registry.lookup("secret", "external")
     decls = compute_needed_secrets([target], registry, extra_decls=[external_decl])
     assert sorted(d.name for d in decls) == ["external", "from-env"]
@@ -233,12 +233,12 @@ def test_secret_references_invariant_under_value_substitution(
     config = load_config(cfg, warn_issues=False)
 
     pre_subst = {
-        "API": EnvEntry(key="API", secret="api"),
-        "GREETING": EnvEntry(key="GREETING", value="hello {{session_name}}"),
+        "API": EnvEntry(secret="api"),
+        "GREETING": EnvEntry(value="hello {{session_name}}"),
     }
     post_subst = {
-        "API": EnvEntry(key="API", secret="api"),
-        "GREETING": EnvEntry(key="GREETING", value="hello mysession"),
+        "API": EnvEntry(secret="api"),
+        "GREETING": EnvEntry(value="hello mysession"),
     }
     registry = build_registry(config)
     pre = compute_needed_secrets([SecretTarget(vm=pre_subst)], registry)
@@ -257,8 +257,8 @@ def test_admin_and_agent_in_same_target_raises(tmp_path: Path) -> None:
 
     target = SecretTarget(
         vm={},
-        admin={"A": EnvEntry(key="A", value="x")},
-        agent={"B": EnvEntry(key="B", value="y")},
+        admin={"A": EnvEntry(value="x")},
+        agent={"B": EnvEntry(value="y")},
     )
     with pytest.raises(ValueError, match="admin.*agent|agent.*admin"):
         compute_needed_secrets([target], build_registry(config))
@@ -281,8 +281,8 @@ def test_cross_target_first_encounter_ordering(tmp_path: Path) -> None:
     )
     config = load_config(cfg, warn_issues=False)
 
-    target_b = SecretTarget(vm={"B": EnvEntry(key="B", secret="b-secret")})
-    target_a = SecretTarget(vm={"A": EnvEntry(key="A", secret="a-secret")})
+    target_b = SecretTarget(vm={"B": EnvEntry(secret="b-secret")})
+    target_a = SecretTarget(vm={"A": EnvEntry(secret="a-secret")})
 
     decls = compute_needed_secrets([target_b, target_a], build_registry(config))
     # b-secret encountered first (target_b is first in the list), so
@@ -304,7 +304,7 @@ def test_extra_decls_dedupe_against_target_decls(tmp_path: Path) -> None:
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
 
-    target = SecretTarget(vm={"K": EnvEntry(key="K", secret="shared")})
+    target = SecretTarget(vm={"K": EnvEntry(secret="shared")})
     shared = registry.lookup("secret", "shared")
     decls = compute_needed_secrets([target], registry, extra_decls=[shared])
     assert [d.name for d in decls] == ["shared"]
@@ -331,7 +331,7 @@ def test_resolve_for_command_returns_resolved_values(
         manifests=[ManifestDoc("secret", "api-key", description="api")],
     )
     config = load_config(cfg, warn_issues=False)
-    target = SecretTarget(vm={"K": EnvEntry(key="K", secret="api-key")})
+    target = SecretTarget(vm={"K": EnvEntry(secret="api-key")})
     resolved = resolve_for_command([target], config, build_registry(config))
     assert resolved == {"api-key": "from-env"}
 
@@ -354,7 +354,7 @@ def test_resolved_values_are_plain_data(
     )
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
-    target = SecretTarget(vm={"K": EnvEntry(key="K", secret="api-key")})
+    target = SecretTarget(vm={"K": EnvEntry(secret="api-key")})
     values = resolve_for_command([target], config, registry)
     assert values == {"api-key": "first"}
 
@@ -365,7 +365,7 @@ def test_resolved_values_are_plain_data(
     env = compose_env(
         values=values,
         ctx=ResourceContext(vm_name="v", platform="lima", site="lima", user="u"),
-        vm={"K": EnvEntry(key="K", secret="api-key")},
+        vm={"K": EnvEntry(secret="api-key")},
     )
     assert env["K"] == "first"
 
@@ -392,7 +392,7 @@ def test_resolve_for_command_skips_loop_when_no_secrets(
     resolve_for_command([], config, registry)
     assert called["count"] == 0
 
-    plaintext_target = SecretTarget(vm={"K": EnvEntry(key="K", value="plain")})
+    plaintext_target = SecretTarget(vm={"K": EnvEntry(value="plain")})
     resolve_for_command([plaintext_target], config, registry)
     assert called["count"] == 0
 
@@ -438,7 +438,7 @@ def test_label_excluded_from_equality() -> None:
     """label is diagnostic-only; targets with the same envs but
     different labels are equal. Hashing is not supported (env fields
     are mutable dicts), so set-based dedup is not part of the contract."""
-    env = {"K": EnvEntry(key="K", value="v")}
+    env = {"K": EnvEntry(value="v")}
     a = SecretTarget(vm=env, label="provisioning")
     b = SecretTarget(vm=env, label="session-create")
     assert a == b
@@ -448,14 +448,14 @@ def test_secret_target_is_not_hashable() -> None:
     """The dataclass is frozen but its env fields are mutable dicts.
     Hash attempts must fail loudly rather than half-work. Pinned so a
     future hashing change is a deliberate decision, not silent drift."""
-    target = SecretTarget(vm={"K": EnvEntry(key="K", value="v")})
+    target = SecretTarget(vm={"K": EnvEntry(value="v")})
     with pytest.raises(TypeError):
         hash(target)
 
 
 def test_label_round_trips() -> None:
     target = SecretTarget(
-        vm={"K": EnvEntry(key="K", value="v")},
+        vm={"K": EnvEntry(value="v")},
         label="agent-bootstrap",
     )
     assert target.label == "agent-bootstrap"
