@@ -22,8 +22,10 @@ kinds self-register into ``KIND_REGISTRY`` at load.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, TypedDict
+
+from pydantic import Field
 
 from agentworks.declared_resource import DeclaredResource
 from agentworks.errors import ConfigError
@@ -41,26 +43,24 @@ if TYPE_CHECKING:
     from agentworks.resources.reference import ResourceReference
 
 
-# -- Data classes --------------------------------------------------------------
+# -- Rows --------------------------------------------------------------
 
 
-@dataclass(frozen=True, kw_only=True)
 class SystemInstallCommandEntry(DeclaredResource):
     # System-declared entry; uniform metadata from ``DeclaredResource``.
-    description: str = field()  # required (see AptSourceEntry field() note)
+    description: str  # required, an override of the base's optional field
     command: str
-    path: list[str] = field(default_factory=list)
+    path: list[str] = Field(default_factory=list)
     test_exec: str | None = None
     test_file: str | None = None
     test_dir: str | None = None
 
 
-@dataclass(frozen=True, kw_only=True)
 class UserInstallCommandEntry(DeclaredResource):
     # System-declared entry; uniform metadata from ``DeclaredResource``.
-    description: str = field()  # required (see AptSourceEntry field() note)
+    description: str  # required, an override of the base's optional field
     command: str
-    path: list[str] = field(default_factory=list)
+    path: list[str] = Field(default_factory=list)
     test_exec: str | None = None
     test_file: str | None = None
     test_dir: str | None = None

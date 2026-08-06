@@ -78,6 +78,18 @@ select = [
     "TCH", # flake8-type-checking
 ]
 
+[tool.ruff.lint.flake8-type-checking]
+# A pydantic model resolves its FIELD annotations at class-definition time,
+# so a type named by one has to be a runtime import even though it appears
+# only in an annotation. Declared by base class rather than per file, so a
+# new model gets the rule without anyone remembering it. Method annotations
+# on those same classes are still checked normally.
+runtime-evaluated-base-classes = [
+    "pydantic.BaseModel",
+    "agentworks.schema.AgwModel",
+    "agentworks.declared_resource.DeclaredResource",
+]
+
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["TCH"]
 # Import order in this file is meaningful: it controls the order command

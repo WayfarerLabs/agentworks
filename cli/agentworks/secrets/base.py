@@ -13,6 +13,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
+from pydantic import Field
+
 from agentworks.declared_resource import DeclaredResource
 from agentworks.schema import RefOwner
 from agentworks.source_location import SourceLocation, synthesized
@@ -26,7 +28,6 @@ MappingValue = str | dict[str, object] | Literal[False]
 (string or structured), or ``False`` for an explicit opt-out."""
 
 
-@dataclass(frozen=True, kw_only=True)
 class SecretDecl(DeclaredResource):
     """A declared secret. Values are never stored here; only the existence,
     description, and per-backend identifier overrides.
@@ -47,14 +48,9 @@ class SecretDecl(DeclaredResource):
 
     # Override the base's optional ``description``: a secret must carry one
     # (it is the operator-facing prompt/hint text), so it is required here.
-    # ``= field()`` is load-bearing, NOT decoration: a bare ``description:
-    # str`` would inherit the base's ``description = None`` class attribute as
-    # its default (dataclass reads the default via ``getattr`` up the MRO), so
-    # the field would silently stay optional. ``field()`` with no default
-    # forces MISSING, making the argument required as intended.
-    description: str = field()
+    description: str
     hint: str | None = None
-    backend_mappings: dict[str, MappingValue] = field(default_factory=dict)
+    backend_mappings: dict[str, MappingValue] = Field(default_factory=dict)
 
     def dependencies(self, context: FinalizeContext) -> list[ResourceReference]:
         """The secret's ``secret -> secret-backend`` edges: the candidate
@@ -136,7 +132,7 @@ class SecretDecl(DeclaredResource):
             emit(backend_name)
         return refs
 
-    def validate(self, enabled_backends: frozenset[str], context: FinalizeContext) -> None:
+    def validate_config(self, enabled_backends: frozenset[str], context: FinalizeContext) -> None:
         """Throwing per-mapping spec check, run by the finalize ``validate``
         pass: every declared ``backend_mappings`` entry addressed to a PRESENT
         AND ENABLED backend is validated by the CORE against that backend's

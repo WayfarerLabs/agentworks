@@ -1,20 +1,23 @@
 """``DeclaredResource``: the shared metadata base every declared-resource
-dataclass inherits.
+row inherits.
 
 Two guarantees are pinned here. First, the base itself carries the four
 metadata fields with the right defaults and an empty ``dependencies``,
 and a plain subclass inherits that override-free. Second, every concrete
-declared-resource dataclass (the operator-declared templates plus the
+declared-resource row (the operator-declared templates plus the
 apt / install-command entries) actually descends from the base, so the
 "metadata (including ``description``) exists by construction" promise cannot
 silently regress for any one kind.
+
+A third is pinned as a consequence of the rows being MODELS: the two
+framework fields are not operator surface, so neither the emitted schema
+nor the field-reference stream carries them.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 import pytest
+from pydantic import ValidationError as PydanticValidationError
 
 from agentworks.agents.template import AgentTemplate
 from agentworks.apt import AptPackageEntry, AptSourceEntry
@@ -44,14 +47,28 @@ def test_base_carries_metadata_fields_with_defaults() -> None:
 
 
 def test_plain_subclass_inherits_empty_dependencies() -> None:
-    @dataclass(frozen=True, kw_only=True)
     class _NoOverride(DeclaredResource):
-        pass
+        """A row that adds nothing to the base."""
 
     assert _NoOverride(name="x").dependencies(FinalizeContext()) == []
 
 
-# Every concrete declared-resource dataclass (all carrying name + description +
+def test_the_framework_fields_are_not_operator_surface() -> None:
+    """The row IS the kind's spec model, so neither emitted schema nor the
+    field-reference stream may offer ``declared_at`` or ``origin`` as
+    something an operator fills in."""
+    from agentworks.schema import iter_field_docs
+
+    class _Spec(DeclaredResource):
+        """A row with one spec field beside the base's metadata."""
+
+        cpus: int | None = None
+
+    assert set(_Spec.model_json_schema()["properties"]) == {"name", "description", "cpus"}
+    assert {doc.path[0] for doc in iter_field_docs(_Spec)} == {"name", "description", "cpus"}
+
+
+# Every concrete declared-resource row (all carrying name + description +
 # declared_at + origin via the base). Pinning the subclass relationship is what
 # keeps a kind from silently dropping a metadata field again. The last four are
 # the apt / install-command entries.
@@ -87,7 +104,7 @@ def test_secret_decl_description_is_required() -> None:
     override uses ``field()`` to force MISSING. Without the guard, secrets
     could be declared with no description.
     """
-    with pytest.raises(TypeError):
+    with pytest.raises(PydanticValidationError):
         SecretDecl(name="x")  # type: ignore[call-arg]
     assert SecretDecl(name="x", description="d").description == "d"
 
@@ -105,13 +122,12 @@ def test_apt_and_install_entry_description_is_required(
     cls: type[DeclaredResource], kind_kwargs: dict[str, object]
 ) -> None:
     """All four apt / install-command entries carry the same
-    required-``description`` override as ``SecretDecl`` (same ``field()``
-    trap): omitting description is a construction error, providing it
-    round-trips, and the entry gains the base's ``declared_at``.
-    Parametrized so a future edit that reverts any one entry to a bare
-    ``description: str`` (which would silently make it optional) is
+    required-``description`` override as ``SecretDecl``: omitting
+    description is a construction error, providing it round-trips, and the
+    entry gains the base's ``declared_at``. Parametrized so a future edit
+    that drops any one entry's override (leaving it optional) is
     caught."""
-    with pytest.raises(TypeError):
+    with pytest.raises(PydanticValidationError):
         cls(name="x", **kind_kwargs)  # type: ignore[call-arg]
     entry = cls(name="x", description="d", **kind_kwargs)
     assert entry.description == "d"

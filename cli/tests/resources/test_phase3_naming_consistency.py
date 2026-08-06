@@ -123,6 +123,7 @@ def test_resource_kinds_carry_no_inbound_reference_field() -> None:
     """
     from agentworks.agents.template import AgentTemplate
     from agentworks.apt import AptPackageEntry, AptSourceEntry
+    from agentworks.declared_resource import DeclaredResource
     from agentworks.git_credentials.credential import GitCredentialConfig
     from agentworks.install_commands import (
         SystemInstallCommandEntry,
@@ -134,7 +135,7 @@ def test_resource_kinds_carry_no_inbound_reference_field() -> None:
     from agentworks.vms.template import VMTemplate
     from agentworks.workspaces.template import WorkspaceTemplate
 
-    resource_types = [
+    resource_types: list[type[DeclaredResource]] = [
         AptSourceEntry,
         AptPackageEntry,
         SystemInstallCommandEntry,
@@ -148,10 +149,8 @@ def test_resource_kinds_carry_no_inbound_reference_field() -> None:
         WorkspaceTemplate,
         SecretDecl,
     ]
-    import dataclasses
-
     for cls in resource_types:
-        fields = {f.name for f in dataclasses.fields(cls)}
+        fields = set(cls.model_fields)
         assert "references" not in fields, (
             f"{cls.__name__} still carries an inbound `references` field; "
             f"inbound references live on the dependency graph now"

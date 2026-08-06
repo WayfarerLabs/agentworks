@@ -1,7 +1,7 @@
-"""``VMTemplate``: the operator-declared VM-template dataclass plus the
+"""``VMTemplate``: the operator-declared VM-template row plus the
 Tailscale secret-reference helper.
 
-The ``vms`` domain owns this dataclass (moved out of ``agentworks.config``)
+The ``vms`` domain owns this row (moved out of ``agentworks.config``)
 so the declared-resource type lives next to the resolver
 (``agentworks.vms.templates``) and the kind (``agentworks.vms.kinds``).
 The ``agentworks.config`` package keeps only the legacy TOML loader that
@@ -10,14 +10,15 @@ constructs it.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from pydantic import Field
+
 from agentworks.declared_resource import DeclaredResource
+from agentworks.env import EnvEntry
 from agentworks.env.entry import env_references
 
 if TYPE_CHECKING:
-    from agentworks.env import EnvEntry
     from agentworks.resources.graph import FinalizeContext
     from agentworks.resources.reference import (
         ResourceReference,
@@ -50,7 +51,6 @@ def tailscale_secret_reference(
     )
 
 
-@dataclass(frozen=True, kw_only=True)
 class VMTemplate(DeclaredResource):
     """VM template definition. All optional fields use ``None = inherit``
     semantics except ``tailscale_auth_key``, which is a non-optional
@@ -60,7 +60,7 @@ class VMTemplate(DeclaredResource):
     template set it on the specific template.
     """
 
-    inherits: list[str] = field(default_factory=list)
+    inherits: list[str] = Field(default_factory=list)
     # Provisioning. Deliberately NO site field: a template describes
     # WHAT a VM is; placement (--site, defaults.site, or the
     # infer/prompt model) is host/operator-scoped, and a shared
@@ -77,7 +77,7 @@ class VMTemplate(DeclaredResource):
     system_install_commands: list[str] | None = None
     # Env (declared per-template; merged child-overrides-parent at resolution).
     # Plaintext or secret references; the loader produces EnvEntry instances.
-    env: dict[str, EnvEntry] = field(default_factory=dict)
+    env: dict[str, EnvEntry] = Field(default_factory=dict)
     # Secret name for the Tailscale auth key. ``None = inherit`` per the
     # convention used by VMTemplate's other optional fields; the loader
     # sets it to the operator's string when explicit, to ``None`` when

@@ -23,8 +23,10 @@ kinds self-register into ``KIND_REGISTRY`` at load.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
+
+from pydantic import Field
 
 from agentworks.declared_resource import DeclaredResource
 from agentworks.errors import ConfigError
@@ -43,10 +45,9 @@ if TYPE_CHECKING:
     from agentworks.resources.reference import ResourceReference
 
 
-# -- Data classes --------------------------------------------------------------
+# -- Rows --------------------------------------------------------------
 
 
-@dataclass(frozen=True, kw_only=True)
 class AptSourceEntry(DeclaredResource):
     """One apt repository source. Referenced by ``AptPackageEntry.apt_sources``
     when a package requires a source's key + list stanza before it can be
@@ -57,8 +58,8 @@ class AptSourceEntry(DeclaredResource):
     pass from the apt_packages that name it).
     """
 
-    # Required (the base makes it optional); see SecretDecl for why field().
-    description: str = field()
+    # Required, an override of the base's optional field.
+    description: str
     key_url: str
     key_path: str
     source: str
@@ -66,15 +67,14 @@ class AptSourceEntry(DeclaredResource):
     key_dearmor: bool = False
 
 
-@dataclass(frozen=True, kw_only=True)
 class AptPackageEntry(DeclaredResource):
     # First-class, system-declared Registry citizen; the uniform metadata
     # (name, origin, references, ...) comes from ``DeclaredResource``.
-    # ``description`` is required here (see field() note on
-    # ``AptSourceEntry``).
-    description: str = field()
+    # ``description`` is required here, an override of the base's
+    # optional field.
+    description: str
     apt: list[str]
-    apt_sources: list[str] = field(default_factory=list)
+    apt_sources: list[str] = Field(default_factory=list)
 
     def dependencies(self, context: FinalizeContext) -> list[ResourceReference]:
         """Emit one ``ResourceReference`` per name in ``apt_sources``. The

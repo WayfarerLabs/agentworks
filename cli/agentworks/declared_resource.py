@@ -1,61 +1,77 @@
-"""``DeclaredResource``: the shared base for every declared-resource dataclass.
+"""``DeclaredResource``: the shared base every declared-resource row extends.
 
 Every declarable kind carries the same metadata (its ``name``, an optional
 operator ``description``, the ``declared_at`` source location, and the
-framework's ``origin`` provenance). Concrete resource dataclasses
+framework's ``origin`` provenance). Concrete resource rows
 (``VMTemplate``, ``SecretDecl``, ``VMSiteDecl``, ...) inherit this
 base and add only their kind-specific fields, so the metadata exists by
 construction rather than being hand-copied per kind. Single-sourcing the
 fields here is what keeps a kind from silently lacking one of them (the gap
 that let five kinds ship without ``description``).
 
-This base lives in its own top-level module, next to ``source_location`` and
-for the same reason it does: the domain resource dataclasses inherit it AT
-CLASS-DEFINITION TIME (a runtime dependency, unlike the ``Origin`` type
-reference, which ``from __future__ import annotations`` keeps as a string). It
-cannot live under ``agentworks.resources``
+**The row IS the kind's spec model, and the metadata / spec split is what
+lets one class be both.** A row's operator-writable fields are what a
+manifest's ``spec`` may say; the two framework fields below carry
+``SkipJsonSchema``, which takes them out of emitted JSON Schema (pydantic's
+own behavior) and out of the field-reference stream every human
+presentation reads. So the emission surface is ``model_json_schema(row)``
+and the render surface is ``iter_field_docs(row)``, both with no filtering
+at the call site. The metadata fields are still FIELDS, which is why decode
+refuses one written inside ``spec``: it would be accepted and would
+silently override the envelope.
+
+This base lives in its own top-level module, next to ``source_location``
+and ``origin`` and for the same reason they do: the domain rows inherit it
+AT CLASS-DEFINITION TIME, and a model resolves its field annotations then
+too. It cannot live under ``agentworks.resources``
 because importing any submodule of that package runs its ``__init__``, which
 eagerly imports every domain kind module (to populate ``KIND_REGISTRY`` via
-import side effects), and those kind modules import the very domain dataclasses
-that would be inheriting this base, closing a circular import. Homed here, the
-base depends only on ``agentworks.source_location`` at runtime and stays lower
-than every package that inherits it.
+import side effects), and those kind modules import the very domain rows
+that would be inheriting this base, closing a circular import. Homed here,
+the base depends only on ``agentworks.source_location``,
+``agentworks.origin``, and ``agentworks.schema`` at runtime, and stays
+lower than every package that inherits it.
 """
 
 from __future__ import annotations
 
 import dataclasses
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Annotated, Any
 
-from pydantic import AfterValidator, BaseModel
+from pydantic import AfterValidator, BaseModel, Field
+from pydantic.json_schema import SkipJsonSchema
 
 from agentworks.errors import StateError
+from agentworks.origin import Origin
+from agentworks.schema import AgwModel
 from agentworks.source_location import SourceLocation, synthesized
 
 if TYPE_CHECKING:
-    from agentworks.origin import Origin
     from agentworks.resources.graph import FinalizeContext
     from agentworks.resources.reference import ResourceReference
 
 
-@dataclass(frozen=True, kw_only=True)
-class DeclaredResource:
+class DeclaredResource(AgwModel):
     """Common metadata every declared resource carries. Concrete resource
-    dataclasses inherit this and add only their kind-specific fields.
+    rows inherit this and add only their kind-specific fields.
 
     The ``origin`` field defaults to "not yet attached": the framework stamps
     it at publish, and direct-construction call sites (tests, kinds'
     ``synthesize`` paths) get the sentinel for free. ``declared_at`` defaults
     to a synthesized location for the same reason. Inbound references live on
     the dependency graph (``Registry.graph.dependents_of``), not on the
-    resource dataclass.
+    resource row.
+
+    ``declared_at`` and ``origin`` keep their frozen-dataclass types rather
+    than becoming nested models: a strict model accepts an already-built
+    frozen dataclass for such a field and REFUSES a mapping, which is
+    exactly the right answer for a field only the framework sets.
     """
 
     name: str
     description: str | None = None
-    declared_at: SourceLocation = field(default_factory=synthesized)
-    origin: Origin | None = None
+    declared_at: SkipJsonSchema[SourceLocation] = Field(default_factory=synthesized)
+    origin: SkipJsonSchema[Origin | None] = None
 
     @property
     def error_location(self) -> SourceLocation | None:
@@ -89,19 +105,27 @@ class DeclaredResource:
         """
         return []
 
-    def validate(self, enabled_backends: frozenset[str], context: FinalizeContext) -> None:
+    def validate_config(self, enabled_backends: frozenset[str], context: FinalizeContext) -> None:
         """Throwing correctness check for the resource's own capability
         config sub-block(s): the resource-level counterpart of
         ``dependencies`` (the edge-extraction half). Mirrors that
-        method's shape, reading ``self``'s fields and delegating to the
-        named capability's ``validate``. The finalize ``validate`` pass
-        (``Registry.finalize``) invokes it per present node.
+        method's shape, reading ``self``'s fields and handing the blob to
+        the core's ``validate_capability_config``. The finalize validate
+        pass (``Registry.finalize``) invokes it per present node.
+
+        Named ``validate_config`` rather than ``validate``, which is what
+        it was called while the rows were dataclasses: ``BaseModel`` already
+        has a (deprecated) ``validate`` classmethod meaning something else
+        entirely, so the old name would resolve on EVERY row rather than on
+        the three that define this, and the finalize pass's
+        ``getattr(resource, ...)`` lookup would call pydantic's with this
+        method's arguments.
 
         ``enabled_backends`` is the set of enabled ``secret-backend`` names,
         threaded from the finalize pass (which reads the enablement axis off the
         graph) so a ``secret`` validates only mappings addressed to a present
         AND enabled backend (R9.9). Every non-secret resource ignores it; the
-        param is uniform so the pass can call ``validate`` without per-kind
+        param is uniform so the pass can call it without per-kind
         dispatch.
 
         ``context`` is the same :class:`~agentworks.resources.graph.FinalizeContext`

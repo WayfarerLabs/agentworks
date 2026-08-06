@@ -594,7 +594,7 @@ def test_vms_sites_exempt_reads_are_function_scoped() -> None:
     reg_offenders = [
         f"{func}:{lineno}"
         for func, lineno in _enclosing_functions(source, lambda node: _is_registry_read(node, aliases))
-        if func not in {"dependencies", "validate", "resolve_site"}
+        if func not in {"dependencies", "validate_config", "resolve_site"}
     ]
     not_ready_offenders = [
         f"{func}:{lineno}"

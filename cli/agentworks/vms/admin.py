@@ -9,20 +9,20 @@ ownership follows who provisions and consumes it.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from pydantic import Field
+
 from agentworks.declared_resource import DeclaredResource
+from agentworks.env import EnvEntry
 from agentworks.env.entry import env_references
 from agentworks.git_credentials.credential import credential_references
 
 if TYPE_CHECKING:
-    from agentworks.env import EnvEntry
     from agentworks.resources.graph import FinalizeContext
     from agentworks.resources.reference import ResourceReference
 
 
-@dataclass(frozen=True, kw_only=True)
 class AdminConfig(DeclaredResource):
     """Per-user config for the admin user on VMs.
 
@@ -42,23 +42,23 @@ class AdminConfig(DeclaredResource):
     name: str = "default"
     username: str = "agentworks"
     shell: str = "bash"
-    git_credentials: list[str] = field(default_factory=list)
-    user_install_commands: list[str] = field(default_factory=list)
+    git_credentials: list[str] = Field(default_factory=list)
+    user_install_commands: list[str] = Field(default_factory=list)
     dotfiles_source: str | None = None
     dotfiles_destination: str = "~/.dotfiles"
     dotfiles_install_cmd: str = "./install.sh"
     mise_activate: bool = True
-    mise_packages: list[str] = field(default_factory=list)
+    mise_packages: list[str] = Field(default_factory=list)
     mise_lockfile: str | None = None
     mise_allow_unlocked: bool = False
     mise_install_before: str = "7d"
     mise_prune_on_reinit: bool = True
     git_force_safe_directory: bool = True
     # Claude Code
-    claude_marketplaces: list[str] = field(default_factory=list)
-    claude_plugins: list[str] = field(default_factory=list)
+    claude_marketplaces: list[str] = Field(default_factory=list)
+    claude_plugins: list[str] = Field(default_factory=list)
     # Env that applies whenever a shell is opened as the admin user.
-    env: dict[str, EnvEntry] = field(default_factory=dict)
+    env: dict[str, EnvEntry] = Field(default_factory=dict)
 
     def dependencies(self, context: FinalizeContext) -> list[ResourceReference]:
         from agentworks.resources.reference import (

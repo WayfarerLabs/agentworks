@@ -1,5 +1,5 @@
 """``SessionTemplate`` and ``NamedConsoleConfig``: the operator-declared
-session/console template dataclasses.
+session/console template rows.
 
 Moved out of ``agentworks.config`` so the ``sessions`` domain owns its
 declared-resource types next to the resolver
@@ -12,21 +12,21 @@ construct these.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from pydantic import Field
+
 from agentworks.declared_resource import DeclaredResource
+from agentworks.env import EnvEntry
 from agentworks.env.entry import env_references
 from agentworks.schema import RefOwner
 from agentworks.sessions.layouts import AW_SESSION_VERTICAL_LAYOUT
 
 if TYPE_CHECKING:
-    from agentworks.env import EnvEntry
     from agentworks.resources.graph import FinalizeContext
     from agentworks.resources.reference import ResourceReference
 
 
-@dataclass(frozen=True, kw_only=True)
 class NamedConsoleConfig(DeclaredResource):
     """Settings for the `console` subcommand group (named multi-session
     consoles). Section is `[named_console]` in the TOML to disambiguate from
@@ -41,7 +41,6 @@ class NamedConsoleConfig(DeclaredResource):
     tmux_layout: str = AW_SESSION_VERTICAL_LAYOUT
 
 
-@dataclass(frozen=True, kw_only=True)
 class SessionTemplate(DeclaredResource):
     """Session template definition. All fields optional (None = inherit/default).
 
@@ -59,7 +58,7 @@ class SessionTemplate(DeclaredResource):
     backward compatibility, manifests reject them (FRD R2/R6).
     """
 
-    inherits: list[str] = field(default_factory=list)
+    inherits: list[str] = Field(default_factory=list)
     harness_integration: str | None = None
     harness_integration_config: dict[str, object] | None = None
     env: dict[str, EnvEntry] | None = None
@@ -140,7 +139,7 @@ class SessionTemplate(DeclaredResource):
             )
         return refs
 
-    def validate(self, enabled_backends: frozenset[str], context: FinalizeContext) -> None:
+    def validate_config(self, enabled_backends: frozenset[str], context: FinalizeContext) -> None:
         """Throwing shape check for the EFFECTIVE ``harness_integration_config``
         blob, run by the finalize ``validate`` pass (``enabled_backends`` is the
         secret-only R9.9 input, ignored here). Mirrors ``dependencies``:

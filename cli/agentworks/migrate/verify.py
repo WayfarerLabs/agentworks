@@ -12,8 +12,9 @@ the same normalization the decode-parity tests use.
 
 from __future__ import annotations
 
-import dataclasses
 from typing import TYPE_CHECKING, Any
+
+from agentworks.declared_resource import replace_fields
 
 if TYPE_CHECKING:
     from agentworks.resources.registry import Registry
@@ -59,9 +60,13 @@ def first_difference(pre: dict[tuple[str, str], Any], post: dict[tuple[str, str]
 def strip_source_fields(resource: Any) -> Any:
     """Drop the source-dependent fields so TOML- and manifest-sourced
     rows compare equal. Shared with the decode-parity tests, which
-    import it from here so the two normalizations cannot drift."""
-    if not dataclasses.is_dataclass(resource) or isinstance(resource, type):
-        return resource
+    import it from here so the two normalizations cannot drift.
+
+    ``replace_fields`` rather than ``dataclasses.replace``, because the
+    declared rows are models and the capability marker rows beside them
+    are still frozen dataclasses. The field probing stays ``hasattr``,
+    which answers for both; a row carrying none of the three fields (a
+    capability marker row) is returned as it came."""
     kwargs: dict[str, Any] = {}
     for field in ("origin", "declared_at"):
         if hasattr(resource, field):
@@ -70,4 +75,4 @@ def strip_source_fields(resource: Any) -> Any:
         kwargs["references"] = ()
     if not kwargs:
         return resource
-    return dataclasses.replace(resource, **kwargs)
+    return replace_fields(resource, **kwargs)

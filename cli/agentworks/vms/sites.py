@@ -28,8 +28,9 @@ stored verdict rather than recomputing it.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
+
+from pydantic import Field
 
 from agentworks.declared_resource import DeclaredResource
 from agentworks.errors import ConfigError
@@ -45,7 +46,6 @@ if TYPE_CHECKING:
     from agentworks.resources.registry import Registry
 
 
-@dataclass(frozen=True, kw_only=True)
 class VMSiteDecl(DeclaredResource):
     """The declared ``vm-site`` resource.
 
@@ -57,7 +57,7 @@ class VMSiteDecl(DeclaredResource):
     """
 
     platform: str
-    platform_config: dict[str, object] = field(default_factory=dict)
+    platform_config: dict[str, object] = Field(default_factory=dict)
 
     def dependencies(self, context: FinalizeContext) -> list[ResourceReference]:
         from agentworks.resources.reference import (
@@ -142,7 +142,7 @@ class VMSiteDecl(DeclaredResource):
         # a construction.
         return cast("type[VMPlatform]", platform.impl).not_ready(self.platform_config)
 
-    def validate(self, enabled_backends: frozenset[str], context: FinalizeContext) -> None:
+    def validate_config(self, enabled_backends: frozenset[str], context: FinalizeContext) -> None:
         """Throwing shape check for the ``platform_config`` blob, run by
         the finalize ``validate`` pass (``enabled_backends`` is the
         secret-only R9.9 input, ignored here). Mirrors ``dependencies``:

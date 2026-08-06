@@ -1,4 +1,4 @@
-"""``GitCredentialConfig``: the operator-declared git-credential dataclass,
+"""``GitCredentialConfig``: the operator-declared git-credential row,
 plus the ``credential_references`` helper.
 
 Moved out of ``agentworks.config`` so the ``git_credentials`` domain owns
@@ -11,8 +11,9 @@ loader that constructs it.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
+
+from pydantic import Field
 
 from agentworks.declared_resource import DeclaredResource
 from agentworks.schema import RefOwner
@@ -55,7 +56,6 @@ def credential_references(
     ]
 
 
-@dataclass(frozen=True, kw_only=True)
 class GitCredentialConfig(DeclaredResource):
     # The internal representation follows the YAML manifest shape (ADR
     # 0016): field name ``provider``, matching ``spec.provider``. Only
@@ -75,7 +75,7 @@ class GitCredentialConfig(DeclaredResource):
     # The flat TOML section is the ONLY place these live at the top
     # level; the loader nests them here so the internal representation
     # matches the YAML manifest shape.
-    provider_config: dict[str, object] = field(default_factory=dict)
+    provider_config: dict[str, object] = Field(default_factory=dict)
 
     def dependencies(self, context: FinalizeContext) -> list[ResourceReference]:
         from agentworks.resources.reference import (
@@ -141,7 +141,7 @@ class GitCredentialConfig(DeclaredResource):
             return Readiness.blocked(f"depends on git-credential-provider '{self.provider}', which is disabled; {tail}")
         return Readiness.ready()
 
-    def validate(self, enabled_backends: frozenset[str], context: FinalizeContext) -> None:
+    def validate_config(self, enabled_backends: frozenset[str], context: FinalizeContext) -> None:
         """Throwing shape check for the ``provider_config`` blob, run by
         the finalize ``validate`` pass (``enabled_backends`` is the
         secret-only R9.9 input, ignored here). Mirrors ``dependencies``:

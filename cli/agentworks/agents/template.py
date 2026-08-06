@@ -1,4 +1,4 @@
-"""``AgentTemplate``: the operator-declared agent-template dataclass.
+"""``AgentTemplate``: the operator-declared agent-template row.
 
 Moved out of ``agentworks.config`` so the ``agents`` domain owns its
 declared-resource type next to the resolver
@@ -11,24 +11,24 @@ TOML loader that constructs this.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from pydantic import Field
+
 from agentworks.declared_resource import DeclaredResource
+from agentworks.env import EnvEntry
 from agentworks.env.entry import env_references
 from agentworks.git_credentials.credential import credential_references
 
 if TYPE_CHECKING:
-    from agentworks.env import EnvEntry
     from agentworks.resources.graph import FinalizeContext
     from agentworks.resources.reference import ResourceReference
 
 
-@dataclass(frozen=True, kw_only=True)
 class AgentTemplate(DeclaredResource):
     """Agent template definition. All fields are optional (None = inherit/default)."""
 
-    inherits: list[str] = field(default_factory=list)
+    inherits: list[str] = Field(default_factory=list)
     shell: str | None = None
     git_credentials: list[str] | None = None
     user_install_commands: list[str] | None = None
@@ -43,7 +43,7 @@ class AgentTemplate(DeclaredResource):
     mise_prune_on_reinit: bool | None = None
     claude_marketplaces: list[str] | None = None
     claude_plugins: list[str] | None = None
-    env: dict[str, EnvEntry] = field(default_factory=dict)
+    env: dict[str, EnvEntry] = Field(default_factory=dict)
 
     def dependencies(self, context: FinalizeContext) -> list[ResourceReference]:
         """The ``inherits`` edges as declared, plus the runtime needs of

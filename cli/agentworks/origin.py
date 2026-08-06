@@ -51,10 +51,14 @@ imports nothing of ours, so nothing about it needed the deeper home.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
 
-if TYPE_CHECKING:
-    from pathlib import Path
+# A RUNTIME import, though ``file`` is the only thing that names it: the
+# declared-row base carries ``origin`` as a model field, so pydantic builds
+# a validator for this dataclass and resolves its annotations in THIS
+# module's namespace. Under a type-checking-only import the rows would
+# raise "``VMTemplate`` is not fully defined" at their first validation.
+from pathlib import Path  # noqa: TC003
+from typing import Literal
 
 
 @dataclass(frozen=True)

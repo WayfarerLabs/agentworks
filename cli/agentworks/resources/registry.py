@@ -19,10 +19,10 @@ which publishers exist; that's application-level knowledge.
 
 from __future__ import annotations
 
-import dataclasses
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
+from agentworks.declared_resource import replace_fields
 from agentworks.errors import ConfigError, StateError
 from agentworks.resources.kind import KIND_REGISTRY
 
@@ -112,7 +112,7 @@ class Registry:
         """Add a Resource from any publisher. The publisher constructs
         the appropriate ``Origin`` variant (``operator_declared`` /
         ``built_in`` / future variants) and passes it in; the
-        Registry attaches it to the Resource via ``dataclasses.replace``
+        Registry attaches it to the Resource via ``replace_fields``
         and stores the result keyed by ``(kind, name)``.
 
         Raises ``RuntimeError`` if the Registry has been finalized.
@@ -186,7 +186,7 @@ class Registry:
         elif weak:
             # Weak row landing in a free slot: record the key as weak-held.
             self._weak.add(key)
-        stamped = dataclasses.replace(resource, origin=origin)
+        stamped = replace_fields(resource, origin=origin)
         self._resources.setdefault(kind, {})[name] = stamped
 
     @staticmethod
@@ -488,13 +488,13 @@ class Registry:
         ``describe`` / ``doctor``, rendered location-only for the inline
         message).
 
-        The ``getattr(resource, "validate", None)`` guard skips the
+        The ``getattr(resource, "validate_config", None)`` guard skips the
         capability marker rows (``VMPlatformEntry`` and friends), which
-        carry no ``validate`` attribute; a ``DeclaredResource`` subclass
+        carry no such attribute; a ``DeclaredResource`` subclass
         with no capability config (a secret, an apt entry) validates via
-        the no-op base ``validate`` and passes.
+        the no-op base ``validate_config`` and passes.
 
-        Each ``validate`` is handed the enabled ``secret-backend`` name set so a
+        Each ``validate_config`` is handed the enabled ``secret-backend`` name set so a
         ``secret`` validates only mappings addressed to a present AND enabled
         backend (R9.9); a mapping to a disabled backend stays inert until
         enabled. Every non-secret resource ignores the set.
@@ -520,11 +520,11 @@ class Registry:
                 if not self._graph.is_ready(kind, name):
                     continue
                 resource = self._resources[kind][name]
-                validate = getattr(resource, "validate", None)
-                if validate is None:
+                validate_config = getattr(resource, "validate_config", None)
+                if validate_config is None:
                     continue
                 try:
-                    validate(enabled_backends, context)
+                    validate_config(enabled_backends, context)
                 except FramedConfigError:
                     # Already located by the schema error bridge, which frames
                     # its own batch because pydantic reports every problem at
@@ -849,7 +849,7 @@ def _polish_auto_declared_description(
         distinct_other = {entry.declarer for entry in references} - {first.declarer}
         suffix = f" (and {len(distinct_other)} more)" if distinct_other else ""
         description = f"(auto) {first.usage} for {first.declarer[0]}/{first.declarer[1]}{suffix}"
-    return dataclasses.replace(resource, description=description)
+    return replace_fields(resource, description=description)
 
 
 def _detect_cycles(
