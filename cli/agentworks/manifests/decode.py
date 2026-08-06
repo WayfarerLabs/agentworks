@@ -111,7 +111,13 @@ def _host_surfaces() -> Mapping[str, HostSurface]:
 
 
 MIGRATE_HINT = "`agw resource migrate --all` rewrites your manifests in place."
-"""The one remediation for a document still spelling the legacy shape."""
+"""Remediation for the legacy shape the migrator can MECHANICALLY fold.
+
+Only that one: a naming string, with or without its sibling table. The
+migrator deliberately refuses to guess at a document that mixes the two
+shapes (which half wins is the operator's call), so pointing that error
+here would send them to a command that leaves their file alone.
+"""
 
 
 def _tagged_rewrite(field: str, name: str, config: object) -> str:
@@ -158,9 +164,11 @@ def _fold_capability_table(surface: HostSurface, spec: dict[str, object]) -> Non
             hint=MIGRATE_HINT,
         )
     if config_field in spec:
+        # No migrate hint: this is either a tagged table beside a stray
+        # sibling (which half wins is a judgement call, so the migrator
+        # refuses to guess) or an ownerless blob. Both are hand fixes.
         raise ConfigError(
-            f"spec.{config_field} is not a supported YAML field; fold its keys into the spec.{field} tagged table",
-            hint=MIGRATE_HINT,
+            f"spec.{config_field} is not a supported YAML field; fold its keys into the spec.{field} tagged table"
         )
     if not isinstance(value, dict):
         raise ConfigError(f"spec.{field} must be a tagged table with a string 'name' key")

@@ -315,12 +315,20 @@ def test_session_template_without_selector_remains_a_valid_default_or_inheriting
         ),
     ],
 )
-def test_mixed_shape_is_a_hard_error(tmp_path: Path, doc: str, field: str) -> None:
+def test_mixed_shape_is_a_hard_error_with_no_migrate_hint(tmp_path: Path, doc: str, field: str) -> None:
     """A tagged table beside a sibling ``*_config``: the message names the
     field that is not supported, so the operator's next move is to fold
-    those keys in rather than to guess which half won."""
-    with pytest.raises(ConfigError, match=f"spec.{field}_config is not a supported YAML field"):
+    those keys in rather than to guess which half won.
+
+    And it carries NO migrate hint. The migrator will not guess which half
+    of a mixed document wins either, so it leaves this file alone;
+    naming it here would send the operator to a command that does nothing
+    for them.
+    """
+    with pytest.raises(ConfigError) as excinfo:
         _load_one(tmp_path, "mixed", doc)
+    assert f"spec.{field}_config is not a supported YAML field" in str(excinfo.value)
+    assert excinfo.value.hint is None
 
 
 @pytest.mark.parametrize(
