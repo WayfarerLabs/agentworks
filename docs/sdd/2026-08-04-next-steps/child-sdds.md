@@ -13,16 +13,21 @@ is locked.
 
 - [x] Seeded (FRD, PR #401, reviewed with findings applied)
 - [x] FRD merged to `main` (2026-08-05)
-- [ ] Picked up by an effort lead (HLA, plan; effort lead launched 2026-08-05)
-- [ ] Implementation complete, pre-roadmap SDD closeouts done (see `current-state.md` ledger)
-- [ ] Ships in 0.14.0 with phase 1
-- [ ] Locked
+- [x] Picked up by an effort lead (HLA, plan, residual inventory; PR #406)
+- [x] Implementation complete, pre-roadmap SDD closeouts done (PR #406, 2026-08-05: all five
+      pre-roadmap SDDs locked, plan 46/46, docs promoted including ADR 0020)
+- [ ] Ships in 0.14.0 with phase 1 (release pending)
+- [x] Locked (`locked.md` on `main` via PR #406)
 
 ### Wave 2 (adopted child): 2026-07-31-declarative-schema
 
 - [x] Phase 1 (TOML sunset) merged to `main` (PR #316, 2026-08-05)
-- [ ] Phase 2 released from its hold (requires descriptor contract from the design track and wave 1
-      removals)
+- [x] Seed notes published for the effort lead (delivered as
+      `docs/sdd/2026-07-31-declarative-schema/roadmap-seed-notes.md` via new-file message passing;
+      the adopted-child analog of a seed FRD)
+- [x] Effort lead launched (2026-08-05, seed notes merged via PR #411)
+- [ ] Phase 2 released from its hold (prerequisites landed via PRs #405 and #406; the effort lead's
+      first commit records the release in that SDD's plan)
 - [ ] Phase 2 implementation complete (absorbs generic-discriminator removal and the migrator's
       fate)
 - [ ] Locked
@@ -30,20 +35,33 @@ is locked.
 ### Design track: capability-kind descriptor contract
 
 - [x] Contract artifact drafted (`capability-descriptor-contract.md`, 2026-08-05)
+- [x] Reviewed and merged to `main` (PR #405, 2026-08-05)
+- [x] Consumed by wave 2 seeding (seed notes delivered via PR #411; effort lead launched 2026-08-05)
+
+### Design track: scope participation (formerly facet-model boundary)
+
+- [x] Contract artifact drafted (`facet-boundary-contract.md`, 2026-08-05; gates the wave 4 and wave
+      5 seeds)
+- [x] Recast as `scope-participation-contract.md` per operator simplification (2026-08-05): setup
+      pipeline, per-scope init methods, trust-based scope discipline, grants dropped, facet
+      vocabulary retired
 - [ ] Reviewed and merged to `main`
-- [ ] Consumed by wave 2 seeding
+
+### Onboarding and discovery (destination 1): 2026-08-05-onboarding-and-discovery
+
+- [x] Seeded (FRD, PR #413, 2026-08-05; runs parallel to wave 2 per `phasing.md`)
+- [ ] FRD merged to `main`
+- [ ] Picked up by an effort lead (HLA, plan)
+- [ ] First-slice implementation (plugin, skills, output contract); schema-derived depth adopts wave
+      2 surfaces as they land
+- [ ] Locked
 
 ### Not yet spawned
 
 Planned children, seeded when their prerequisites land (see `phasing.md`):
 
-- Onboarding and discovery (destination 1): seeds at wave 1 completion and runs parallel to wave 2.
-  First slice needs no schema emission (onboarding harness plugin and skills, consent-first probing,
-  the machine-readable output contract); the schema-derived depth follows wave 2's emission as it
-  lands. Slotted this early deliberately: it teaches the post-cleanup 0.14 surface, so nothing it
-  ships gets reworked by wave 1, and waiting longer just delays destination 1.
 - Wave 3: secret-source instances
-- Wave 4: harness facet framework
+- Wave 4: harness scope framework
 - Wave 5: session observability phase 1
 - Wave 6: agentic artifacts and distillation
 - Wave 7: structured control
@@ -59,21 +77,21 @@ A sweep of the open issue tracker pulled the following issues into the roadmap. 
 received a comment pointing back here so it is not worked out-of-band (posted 2026-08-05); issues
 not listed stay standalone.
 
-| Issue      | Lands in                                                                           |
-| ---------- | ---------------------------------------------------------------------------------- |
-| #76        | Wave 1 SDD closeouts (stale lockfile half only; the derive audit stays standalone) |
-| #165       | Not rolled in: its own pre-roadmap SDD proceeds standalone (out of roadmap scope)  |
-| #170       | Wave 2 rider (expires metadata belongs in the envelope/metadata modeling)          |
-| #205, #212 | Design track: instance-state store and per-instance specs; future living-graph SDD |
-| #214       | Wave 2 (live samples, uniform validation; unknown keys go hard-error there)        |
-| #242       | Waves 4 and 5 (harness-owned adoption plus resume re-pointing)                     |
-| #257       | Onboarding-and-discovery child (machine-readable output contract)                  |
-| #311       | Wave 2 (structural reference extraction from annotated models)                     |
-| #370       | Wave 3 (resolution-API evolution owns the batching question)                       |
-| #373       | Wave 4 (environment-appropriate defaults belong to facet config)                   |
-| #374       | Design track descriptor plus wave 3 (capability mandate; see `target-state.md`)    |
-| #387       | Waves 4 and 6 (workspace facets and features own post-clone setup)                 |
-| #390, #391 | Onboarding-and-discovery child (samples and plan A onboarding)                     |
+| Issue      | Lands in                                                                            |
+| ---------- | ----------------------------------------------------------------------------------- |
+| #76        | Wave 1 SDD closeouts (stale lockfile half only; the derive audit stays standalone)  |
+| #165       | Not rolled in: its own pre-roadmap SDD proceeds standalone (out of roadmap scope)   |
+| #170       | Wave 2 rider (expires metadata belongs in the envelope/metadata modeling)           |
+| #205, #212 | Design track: instance-state store and per-instance specs; future living-graph SDD  |
+| #214       | Wave 2 (live samples, uniform validation; unknown keys go hard-error there)         |
+| #242       | Waves 4 and 5 (harness-owned adoption plus resume re-pointing)                      |
+| #257       | Onboarding-and-discovery child (machine-readable output contract)                   |
+| #311       | Wave 2 (structural reference extraction from annotated models)                      |
+| #370       | Wave 3 (resolution-API evolution owns the batching question)                        |
+| #373       | Wave 4 (environment-appropriate defaults belong to per-scope integration config)    |
+| #374       | Design track descriptor plus wave 3 (capability mandate; see `target-state.md`)     |
+| #387       | Waves 4 and 6 (workspace-scope integration hooks and features own post-clone setup) |
+| #390, #391 | Onboarding-and-discovery child (samples and plan A onboarding)                      |
 
 Notes: #242 also picks up the 0.14 rename (it lands as `session resume --update-template`); the
 capability-contract sibling cluster #368 through #374 splits, with #370/#373/#374 rolled in and the
@@ -86,7 +104,12 @@ open-ended research placeholder.
 2. Done (2026-08-05): roadmap PR #400 and wave 1 seed #401 merged; harvested
    `feat/harness-transcripts-sdd` branch deleted.
 3. Done (2026-08-05): issue-intake comments posted.
-4. Merge the descriptor contract (PR #405, review findings applied), then seed wave 2.
-5. Wave 1 in flight with its effort lead; roadmap lead reviews its PRs.
-6. Design track continues: facet-model boundary with session/run identity, the instance-state store,
-   and the event vocabulary's first slice.
+4. Done (2026-08-05): descriptor contract merged (PR #405).
+5. Done (2026-08-05): wave 1 implementation, closeouts, and lock merged (PR #406). The 0.14.0
+   release ships when cut.
+6. Done (2026-08-05): wave 2 seed notes merged (PR #411) and effort lead launched.
+7. Done (2026-08-05): onboarding-and-discovery seeded (FRD, PR #413).
+8. Merge the onboarding seed (PR #413, reviewer pass in flight), then launch its effort lead.
+9. Roadmap lead reviews wave 2 and onboarding PRs as they arrive.
+10. Design track: scope participation contract in review (PR #407); then the instance-state store
+    schema and the event vocabulary's first slice.
