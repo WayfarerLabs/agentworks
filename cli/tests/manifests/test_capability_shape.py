@@ -166,6 +166,60 @@ def test_session_template_canonical_selector_is_not_a_capability_shape_deprecati
     assert not manifests.deprecation_issues
 
 
+def test_session_template_selector_rejects_the_legacy_string_shape(tmp_path: Path) -> None:
+    """session-template REJECTS ``harness_integration: <string>``.
+
+    Its sibling surfaces (vm-site, git-credential) still accept that shape
+    with a deprecation warning; session-template hardened to the tagged table
+    in wave 1 and takes it as a hard error instead. That asymmetry is the
+    whole content of the harness-integration descriptor's
+    ``legacy_string_shape = "reject"``, which is now one token in a data
+    record rather than a decode branch, so the OPERATOR-facing consequence
+    is pinned here rather than only in the table's shape.
+    """
+    with pytest.raises(ConfigError, match="must be a tagged table with a string 'name' key"):
+        _load_one(
+            tmp_path,
+            "string-selector",
+            """
+            apiVersion: agentworks/v1
+            kind: session-template
+            metadata:
+              name: htop
+            spec:
+              harness_integration: shell
+            """,
+        )
+
+
+def test_session_template_selector_rejects_a_sibling_config_table(tmp_path: Path) -> None:
+    """The tagged selector plus a sibling ``harness_integration_config``
+    names the unsupported FIELD, rather than falling back to the sibling
+    surfaces' generic ambiguous-keys wording.
+
+    The two folds still raise different sentences at 2.0 (unifying them
+    belongs to step 2.4, which reworks the accept-warn messages anyway), so
+    the distinct sentence is what proves session-template kept its own
+    rejecting fold and was not routed through the accept-warn one.
+    """
+    with pytest.raises(ConfigError, match="not a supported YAML field"):
+        _load_one(
+            tmp_path,
+            "sibling-config",
+            """
+            apiVersion: agentworks/v1
+            kind: session-template
+            metadata:
+              name: htop
+            spec:
+              harness_integration:
+                name: shell
+              harness_integration_config:
+                command: htop
+            """,
+        )
+
+
 def test_legacy_session_harness_config_without_selector_is_rejected(tmp_path: Path) -> None:
     with pytest.raises(
         ConfigError,
