@@ -25,12 +25,14 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from agentworks.capabilities.descriptor import (
     CapabilityKindDescriptor,
+    ConfigContract,
     HostSurface,
     RegistryPolicy,
 )
 from agentworks.capabilities.vm_platform.base import VMPlatform
 from agentworks.resources.graph import Readiness
 from agentworks.resources.kind import KIND_REGISTRY
+from agentworks.resources.schema import AgwModel
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -115,6 +117,10 @@ VM_PLATFORM_DESCRIPTOR = CapabilityKindDescriptor(
     kind_strategy=KIND_REGISTRY["vm-platform"],
     readiness=_readiness,
     publisher_source="agentworks.capabilities.vm_platform",
+    # A vm-site writes one tagged table (``platform: {name: lima, ...}``),
+    # so every platform's config is mapping-shaped and carries its own
+    # name as the tag that selects it.
+    config_schema=ConfigContract(base=AgwModel, discriminator="name"),
     manifest_section=HostSurface(
         host_kind="vm-site",
         naming_field="platform",

@@ -49,6 +49,8 @@ from agentworks.errors import StateError
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from pydantic import BaseModel
+
     from agentworks.resources.graph import Readiness
     from agentworks.resources.kind import ResourceKind
     from agentworks.resources.origin import Origin
@@ -68,6 +70,30 @@ class RegistryPolicy(Enum):
     choosing a construction point and touching the resolve machinery. Wave 3
     owns that flip; until then this field is where the asymmetry lives, so
     nothing else has to special-case ``secret-backend``."""
+
+
+@dataclass(frozen=True)
+class ConfigContract:
+    """What a config model offered for this kind must BE.
+
+    The kind states the contract; IMPLEMENTATIONS declare the models. This
+    is the thing registration conformance checks a declared model against,
+    so a model that could never be reached from a manifest is refused where
+    its author can see it rather than going quietly unaddressable.
+    """
+
+    base: type[BaseModel]
+    """The base every offered model extends. ``AgwModel`` where the config
+    is mapping-shaped, ``AgwRootModel`` where it is not: a secret backend's
+    per-secret mapping may be a bare string, which no ``BaseModel`` can
+    be."""
+
+    discriminator: str | None
+    """The field carrying the capability's own name, for a kind whose
+    config is dispatched by a DISCRIMINATED UNION (``"name"``: a vm-site
+    writes ``platform: {name: lima, ...}``). ``None`` for a kind dispatched
+    by a MAP KEY, whose models carry no tag because the key already is one
+    (``secret-backend``, keyed by ``backend_mappings``)."""
 
 
 @dataclass(frozen=True)
@@ -181,27 +207,19 @@ class CapabilityKindDescriptor:
     when no declarable kind hosts it (``secret-backend``, whose
     ``backend_mappings`` map key already names the capability)."""
 
+    config_schema: ConfigContract
+    """What a config model offered for this kind must be.
+
+    The framework never asks an implementation for "its schema"; it asks
+    for the config it offers at a FACET (``Capability.config_for``), and
+    every model that comes back has to satisfy this contract. Wave 4's
+    harness-integration, whose methods run at several levels with
+    different config, is then a per-capability declaration rather than a
+    framework change."""
+
     # Deferred fields, recorded with the trigger that creates each so wave 2
     # neither builds them early nor reinvents them later:
     #
-    #   config_schema           -> step 2.3, when the first config model
-    #                              registers. It carries the kind's model
-    #                              CONTRACT (the base every implementation's
-    #                              model extends), which step 2.1 defines, so
-    #                              it cannot be typed before then.
-    #                              IMPLEMENTATIONS declare the model; the
-    #                              descriptor only says what a model must be.
-    #                              Resolution is keyed by CONSUMING RESOURCE
-    #                              KIND from day one: the framework never asks
-    #                              an implementation for "its schema", it asks
-    #                              for "your schema for <consuming resource
-    #                              kind>". Wave 4's harness-integration, which
-    #                              varies its schema by hosting surface, is
-    #                              then a local override rather than a
-    #                              framework change. Conformance check five
-    #                              arrives with the field: every registered
-    #                              config model conforms to the kind's model
-    #                              contract.
     #   consumer_gating         -> the first NEW consuming surface that
     #                              consolidates gating derivation (waves 3
     #                              and 4). Wave 2 changes no gating

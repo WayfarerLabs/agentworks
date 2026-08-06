@@ -28,6 +28,7 @@ imports ``resources/reference.py``, never the reverse.
 
 from __future__ import annotations
 
+from agentworks.resources.schema._shape import model_is_complete
 from agentworks.resources.schema.base import (
     AgwModel,
     AgwRootModel,
@@ -83,6 +84,7 @@ __all__ = [
     "extract_references",
     "iter_field_docs",
     "model_doc",
+    "model_is_complete",
     "render_type",
     "render_validation_error",
     "validation_context",

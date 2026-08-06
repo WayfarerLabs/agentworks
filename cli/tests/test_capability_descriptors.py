@@ -38,6 +38,7 @@ from agentworks.manifests.decode import capability_fields
 from agentworks.resources.graph import Readiness, _capability_node_readiness
 from agentworks.resources.kind import KIND_REGISTRY
 from agentworks.resources.registry import Registry
+from agentworks.resources.schema import AgwModel, AgwRootModel
 from agentworks.secrets.kinds import SecretBackendEntry
 from tests.plugins._fixtures import ConformingVMPlatform
 
@@ -320,6 +321,43 @@ def test_manifest_sections_match_the_decoders_host_surfaces() -> None:
     assert hardened["harness-integration"].host_kind == "session-template"
     assert hardened["harness-integration"].legacy_string_shape == "reject"
     assert descriptor_for("secret-backend").manifest_section is None
+
+
+# -- The kind's config contract ---------------------------------------------
+
+
+def test_each_kinds_config_contract_matches_how_its_config_is_dispatched() -> None:
+    """The contract's two halves are one fact each, and both are visible in
+    a manifest: whether the config is mapping-shaped, and whether it is
+    selected by a tag inside the value or by the key it hangs under.
+
+    Spelled out rather than derived from the records, so a record that
+    changes shape has to change this expectation too.
+    """
+    contracts = {d.kind: d.config_schema for d in _descriptors()}
+
+    for tagged in ("vm-platform", "harness-integration", "git-credential-provider"):
+        assert contracts[tagged].base is AgwModel, tagged
+        assert contracts[tagged].discriminator == "name", tagged
+
+    # The one kind whose config need not be a mapping at all (env-var's is a
+    # bare env var name) and whose dispatch is the ``backend_mappings`` key.
+    assert contracts["secret-backend"].base is AgwRootModel
+    assert contracts["secret-backend"].discriminator is None
+
+
+@pytest.mark.parametrize("descriptor", _descriptors(), ids=lambda d: d.kind)
+def test_a_kinds_config_contract_admits_the_models_that_kind_registers(
+    descriptor: CapabilityKindDescriptor,
+) -> None:
+    """Every model a seated implementation offers satisfies its kind's
+    contract. Vacuous only while a kind has no models yet, which the
+    conformance suite below covers from the other side."""
+    for name, seated in descriptor.registry().items():
+        model = getattr(_impl_class(seated), "config_model", None)
+        if model is None:
+            continue
+        assert issubclass(model, descriptor.config_schema.base), f"{descriptor.kind} {name!r}"
 
 
 # -- Conformance of everything this build ships -----------------------------

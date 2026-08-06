@@ -16,7 +16,7 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 from types import MappingProxyType
-from typing import cast
+from typing import Literal, cast
 
 import pytest
 
@@ -43,6 +43,7 @@ from agentworks.resources.graph import (
 )
 from agentworks.resources.kind import KIND_REGISTRY
 from agentworks.resources.origin import Origin
+from agentworks.resources.schema import AgwModel
 from tests.plugins._fixtures import (
     ConformingSecretBackend,
     ConformingVMPlatform,
@@ -227,6 +228,46 @@ class _PlatformOnAnOldContract(ConformingVMPlatform):
     contract_version = 0
 
 
+class _NotAModel:
+    """Whatever this is, it is not a model, so nothing could validate a
+    blob against it."""
+
+
+class _UntaggedConfig(AgwModel):
+    """A vm-platform config with no ``name`` field: no manifest could ever
+    select it, because the union dispatches on that tag."""
+
+    vm_host: str | None = None
+
+
+class _MistaggedConfig(AgwModel):
+    """A config tagging itself as some OTHER capability, which is the
+    silent version of the same failure: the arm exists and answers to a
+    name its implementation does not have."""
+
+    name: Literal["some-other-platform"]
+
+
+class _PlatformWithoutAModel(ConformingVMPlatform):
+    """The config model is not a model at all."""
+
+    name = "no-model-platform"
+    description = "declares something that is not a model"
+    config_model = _NotAModel
+
+
+class _PlatformWithAnUntaggedModel(ConformingVMPlatform):
+    name = "untagged-model-platform"
+    description = "declares a model carrying no name tag"
+    config_model = _UntaggedConfig
+
+
+class _PlatformWithAMistaggedModel(ConformingVMPlatform):
+    name = "mistagged-model-platform"
+    description = "declares a model tagged as another capability"
+    config_model = _MistaggedConfig
+
+
 @pytest.mark.parametrize(
     ("kind", "impl", "expected"),
     [
@@ -236,6 +277,9 @@ class _PlatformOnAnOldContract(ConformingVMPlatform):
         ("secret-backend", _BackendMissingItsOperations, "does not implement the required"),
         ("secret-backend", _BackendWithoutInteractive, "missing the required secret-backend attributes"),
         ("vm-platform", _PlatformOnAnOldContract, "declares contract_version 0"),
+        ("vm-platform", _PlatformWithoutAModel, "not a AgwModel subclass"),
+        ("vm-platform", _PlatformWithAnUntaggedModel, "does not tag itself"),
+        ("vm-platform", _PlatformWithAMistaggedModel, "does not tag itself"),
     ],
     ids=[
         "wrong-base",
@@ -244,6 +288,9 @@ class _PlatformOnAnOldContract(ConformingVMPlatform):
         "missing-operations",
         "missing-attribute",
         "unsupported-version",
+        "config-model-is-not-a-model",
+        "config-model-carries-no-tag",
+        "config-model-tagged-as-another-capability",
     ],
 )
 def test_rejects_a_non_conforming_impl_naming_the_plugin(kind: str, impl: type, expected: str) -> None:

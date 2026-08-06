@@ -22,12 +22,14 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from agentworks.capabilities.descriptor import (
     CapabilityKindDescriptor,
+    ConfigContract,
     HostSurface,
     RegistryPolicy,
 )
 from agentworks.capabilities.harness_integration.base import HarnessIntegration
 from agentworks.resources.graph import Readiness
 from agentworks.resources.kind import KIND_REGISTRY, NoUnreferencedDefaultError
+from agentworks.resources.schema import AgwModel
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -111,6 +113,7 @@ HARNESS_INTEGRATION_DESCRIPTOR = CapabilityKindDescriptor(
     kind_strategy=KIND_REGISTRY["harness-integration"],
     readiness=_readiness,
     publisher_source="agentworks.capabilities.harness_integration",
+    config_schema=ConfigContract(base=AgwModel, discriminator="name"),
     # session-template hardened to the tagged shape in wave 1, so its
     # decoder REJECTS the legacy sibling string rather than warning. That
     # difference is exactly what this field carries.

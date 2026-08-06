@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 
 from agentworks.capabilities.descriptor import (
     CapabilityKindDescriptor,
+    ConfigContract,
     RegistryPolicy,
 )
 from agentworks.resources.kind import (
@@ -39,6 +40,7 @@ from agentworks.resources.kind import (
     NoUnreferencedDefaultError,
 )
 from agentworks.resources.origin import Origin
+from agentworks.resources.schema import AgwRootModel
 from agentworks.resources.walk import collect_secrets_for
 from agentworks.secrets.backends import SecretBackend
 from agentworks.secrets.base import SecretDecl
@@ -279,6 +281,13 @@ SECRET_BACKEND_DESCRIPTOR = CapabilityKindDescriptor(
     # ``backend_mappings`` map key already names the capability, so there is
     # no naming/config sibling pair to fold.
     manifest_section=None,
+    # The one kind whose config is NOT mapping-shaped: a per-secret mapping
+    # may be a bare string (env-var's is an env var name) or a
+    # string-or-table union (onepassword's), neither of which a
+    # ``BaseModel`` can be. And no discriminator: ``backend_mappings``'s map
+    # key already names the backend, so a tag inside the value would say the
+    # same thing twice and could disagree.
+    config_schema=ConfigContract(base=AgwRootModel, discriminator=None),
 )
 """The secret-backend record in the capability-kind descriptor table
 (``agentworks.capabilities.descriptor``)."""

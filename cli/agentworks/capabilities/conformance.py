@@ -21,11 +21,14 @@ already-fallible-and-caught concern.)
 from __future__ import annotations
 
 import inspect
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal, get_args, get_origin
 
 from agentworks.errors import StateError
+from agentworks.resources.schema import model_is_complete
 
 if TYPE_CHECKING:
+    from pydantic import BaseModel
+
     from agentworks.capabilities.descriptor import CapabilityKindDescriptor
 
 _MISSING = object()
@@ -50,11 +53,8 @@ def conformance_error(descriptor: CapabilityKindDescriptor, impl: type) -> str |
         or _attributes_error(descriptor, impl)
         or _constructibility_error(impl)
         or _operations_error(descriptor, impl)
+        or _config_model_error(descriptor, impl)
         or _version_error(descriptor, impl)
-        # Check five, config-model conformance (every registered config
-        # model conforms to its kind's model contract), is absent rather than
-        # vacuous: no kind carries a model contract until step 2.3 adds the
-        # descriptor's ``config_schema`` field, and the check lands with it.
     )
 
 
@@ -156,6 +156,69 @@ def _operations_error(descriptor: CapabilityKindDescriptor, impl: type) -> str |
     if missing:
         return f"it does not implement the required {descriptor.kind} operations: {', '.join(missing)}"
     return None
+
+
+def _config_model_error(descriptor: CapabilityKindDescriptor, impl: type) -> str | None:
+    """Check 5: the config model the impl declares satisfies its kind's
+    model contract.
+
+    Read off ``config_model`` directly rather than through
+    ``Capability.config_for``, and deliberately: conformance must not
+    invoke implementation code. A capability whose methods run at several
+    levels therefore declares its offered models as DATA this can read,
+    which is the second reason the offered set is a mapping rather than a
+    computation.
+
+    The declaration is still OPTIONAL here, which is a bounded interim
+    with one trigger: no shipped capability declares a model until its
+    kind's commit lands, and the final commit of step 2.3 (the one that
+    deletes the invoked ``validate`` contract) makes it required, because
+    only then is a capability without a model genuinely unusable.
+    """
+    contract = descriptor.config_schema
+    model = getattr(impl, "config_model", None)
+    if model is None:
+        return None
+    if not isinstance(model, type) or not issubclass(model, contract.base):
+        return (
+            f"its config_model is {model!r}, which is not a {contract.base.__name__} subclass "
+            f"(the {descriptor.kind} config contract)"
+        )
+    if not model_is_complete(model):
+        return (
+            f"its config_model {model.__name__} cannot be built (an unresolved annotation?), "
+            f"so nothing could validate or extract references against it"
+        )
+    return _config_tag_error(descriptor, impl, model)
+
+
+def _config_tag_error(descriptor: CapabilityKindDescriptor, impl: type, model: type[BaseModel]) -> str | None:
+    """The tag half of check 5, for a kind whose config is dispatched by a
+    discriminated union.
+
+    An arm whose tag does not include the implementation's own name is
+    UNADDRESSABLE from a manifest while everything else about it looks
+    fine, which is exactly the class of silent failure registration
+    conformance exists for.
+    """
+    discriminator = descriptor.config_schema.discriminator
+    if discriminator is None:
+        return None
+    field = model.model_fields.get(discriminator)
+    tags = _literal_values(field.annotation) if field is not None else ()
+    name = getattr(impl, "name", None)
+    if name not in tags:
+        return (
+            f"its config_model {model.__name__} does not tag itself {name!r}: the {descriptor.kind} "
+            f"config is selected by a {discriminator!r} field typed "
+            f"Literal[{name!r}], and this model declares {list(tags) or 'no such field'}"
+        )
+    return None
+
+
+def _literal_values(annotation: object) -> tuple[object, ...]:
+    """The members of a ``Literal[...]`` annotation, or nothing."""
+    return get_args(annotation) if get_origin(annotation) is Literal else ()
 
 
 def _version_error(descriptor: CapabilityKindDescriptor, impl: type) -> str | None:

@@ -32,12 +32,14 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from agentworks.capabilities.descriptor import (
     CapabilityKindDescriptor,
+    ConfigContract,
     HostSurface,
     RegistryPolicy,
 )
 from agentworks.capabilities.git_credential.base import GitCredentialProvider
 from agentworks.resources.graph import Readiness
 from agentworks.resources.kind import KIND_REGISTRY, NoUnreferencedDefaultError
+from agentworks.resources.schema import AgwModel
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -152,6 +154,7 @@ GIT_CREDENTIAL_PROVIDER_DESCRIPTOR = CapabilityKindDescriptor(
     kind_strategy=KIND_REGISTRY["git-credential-provider"],
     readiness=_readiness,
     publisher_source="agentworks.capabilities.git_credential",
+    config_schema=ConfigContract(base=AgwModel, discriminator="name"),
     manifest_section=HostSurface(
         host_kind="git-credential",
         naming_field="provider",

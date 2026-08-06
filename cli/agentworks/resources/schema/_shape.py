@@ -195,6 +195,19 @@ def shape_of(field: FieldInfo) -> FieldShape:
     )
 
 
+def model_is_complete(model_cls: type[BaseModel]) -> bool:
+    """Whether ``model_cls``'s fields resolve, so something can validate,
+    extract, or render against it.
+
+    The public form of :func:`model_fields_of`'s ``None`` answer, for the
+    one caller outside this package that needs it: registration
+    conformance refuses a config model with an unresolved annotation,
+    which is what keeps the extractor's "an incomplete model contributes
+    nothing" branch unreachable in practice.
+    """
+    return model_fields_of(model_cls) is not None
+
+
 def is_model(annotation: object) -> TypeGuard[type[BaseModel]]:
     """Whether ``annotation`` is a model class. Shared so the bridge asks
     the same question this module does."""
