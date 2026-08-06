@@ -125,17 +125,17 @@ enumerated by 1.2f (operator-approved bounded window, see the preamble). The ste
 > roadmap ledger); inconsistencies found in roadmap or sibling SDDs are flagged, not edited.
 >
 > Two structural changes the roadmap seed folds into this plan, integrated below. (1) Phase 2
-> executes THROUGH the descriptor: a new **step 2.0** adopts it before the schema foundation. (2)
-> Each capability implementation registers exactly one config model, resolved by **consuming
-> resource kind** (`config_model_for(consuming_kind)`), and registration carries `contract_version`
-> and registration-time conformance from day one. (The seed's intermediate schema-slot mechanism was
-> rescinded by the operator on 2026-08-05, before any model registered through it; 2.1/2.3/2.5
-> proceed as originally planned.) The removals having landed first discharges the
-> harness-selector-shim and `restart_command` coordination notes in 2.5 (confirmed in code at
-> seeding); the 2.4-before-2.5 hardening order stands (the generic sibling-shape deprecation is
-> still live on main, so 2.4 is real work). The four open doors from the roadmap's `target-state.md`
-> (source-agnostic extraction, layer-stack merge, graph immutability as a registry/fold property,
-> one instance-state store) are honored, not closed; see FR21.
+> executes THROUGH the descriptor: a new **step 2.0** adopts it before the schema foundation. (2) A
+> capability declares the config it **OFFERS** as a fixed set, exactly as it declares its fixed set
+> of API methods, and consumers choose which offering they use; registration carries
+> `contract_version` and registration-time conformance from day one. (Two superseded designs, both
+> rescinded before any model registered through them: the seed's schema slots on 2026-08-05, and
+> consuming-kind keying on 2026-08-06. 2.1/2.3/2.5 proceed as originally planned.) The removals
+> having landed first discharges the harness-selector-shim and `restart_command` coordination notes
+> in 2.5 (confirmed in code at seeding); the 2.4-before-2.5 hardening order stands (the generic
+> sibling-shape deprecation is still live on main, so 2.4 is real work). The four open doors from
+> the roadmap's `target-state.md` (source-agnostic extraction, layer-stack merge, graph immutability
+> as a registry/fold property, one instance-state store) are honored, not closed; see FR21.
 
 ### 2.0 Descriptor adoption (step zero)
 
@@ -312,18 +312,25 @@ the derivation sequence are not started.
     really means "points at a template" and would silently misclassify any future uses-a-template
     edge as inheritance, reintroducing the same conflation one level down. The LLD names the
     explicit relationship marker instead.
-- [ ] Per-capability models registered as `config_model` on the implementation, exactly one per
-      implementation (schema slots were rescinded by the operator on 2026-08-05 before any model
-      registered through them). The core reads a model only via `config_model_for(consuming_kind)`,
-      whose base default returns the single model for the kind's own consuming kind and RAISES on
-      any other (operator, 2026-08-05: without the check the parameter is decorative for three of
-      four kinds and a wrong-kind bug silently returns the wrong model). Authors still write only
-      `config_model = X`, and every framework consumer passes the consuming kind it already has;
-      wave 4's harness integrations override that one classmethod instead of changing a framework
-      signature. Pinned by a test that asking a capability for a foreign consuming kind raises. The
+- [ ] Per-capability config declared as a producer-side OFFERING (operator, 2026-08-06). The common
+      case spells nothing extra: `config_model = X` on the implementation, one unnamed offering,
+      which covers every capability today. A capability serving several surfaces additionally
+      declares NAMED offerings using the scope vocabulary that already names its API methods (`vm`,
+      `user`, `workspace`, `session`), and the CONSUMING resource kind declares which offering it
+      uses, exactly as it chooses which method to call. Asking for an offering a capability does not
+      have is a hard error naming what it does offer; pin it with a test. **Offering presence is NOT
+      the support claim** and must not become one, or this is the rescinded slot mechanism under a
+      new name: per the roadmap's scope-participation contract, support is carried by the
+      implementation (no-op base defaults, an integration implements what it supports) and accepting
+      no config at a surface just means emitting no schema there. Two superseded designs, both
+      rescinded before any model registered through them: schema slots (2026-08-05) and
+      `config_model_for(consuming_kind)` (2026-08-06, because it made every producer enumerate its
+      consumers, was more dynamic than the fixed API it parallels, and forced each integration to
+      encode that vm-template-hosting-admin and agent-template mean the same thing). The
       descriptor's deferred `config_schema` field (the kind's model contract) is created here, and
-      union assembly is per `(kind, consuming kind)` pair. Registration carries `contract_version`
-      (day-one, operator ruling) and passes the registration-time conformance checks from 2.0
+      union assembly is per `(kind, offering)`, which reduces to today's per-kind union while every
+      capability has one unnamed offering. Registration carries `contract_version` (day-one,
+      operator ruling) and passes the registration-time conformance checks from 2.0
       (implementation-contract, metadata, constructibility, required ops, plus config model
       conformance added here) that replace the retired type-and-cast seam. The secret-backend
       `mapping_model` registers as that kind's config model; its constructed-singleton instance
@@ -507,15 +514,15 @@ the derivation sequence are not started.
       (narrative-necessary ones may stay).
 - [ ] Permanent-doc promotion: `capabilities/README.md` rewritten for the declare-schema contract
       AND the capability-kind descriptor (the single kind-enumeration table, config schemas keyed by
-      consuming kind, registration-time conformance, `contract_version`) so the contract has a
-      permanent home once the roadmap SDD is gone; the invoked-validation sections and their
-      standing deprecation notes retire; `capabilities/harness_integration/README.md` (the harness
-      developer guide, added 2026-08-02 and renamed with the kind, whose `validate`/`dependencies`
-      sections document the retired contract) updated the same way;
-      `cli/agentworks/plugins/README.md` documents `config_model` registration and
-      `config_model_for` for plugin capability authors; `docs/guides/resources.md` updated; the
-      superseding ADR extended or a sibling ADR added for the schema model and the descriptor if the
-      phase 1 ADR (0022) did not already cover it.
+      producer-side config offerings, registration-time conformance, `contract_version`) so the
+      contract has a permanent home once the roadmap SDD is gone; the invoked-validation sections
+      and their standing deprecation notes retire; `capabilities/harness_integration/README.md` (the
+      harness developer guide, added 2026-08-02 and renamed with the kind, whose
+      `validate`/`dependencies` sections document the retired contract) updated the same way;
+      `cli/agentworks/plugins/README.md` documents `config_model` registration and the offering
+      declaration for plugin capability authors; `docs/guides/resources.md` updated; the superseding
+      ADR extended or a sibling ADR added for the schema model and the descriptor if the phase 1 ADR
+      (0022) did not already cover it.
 - [ ] Dated lockfile entries: resource-manifests (Phase 5.7 invoked-validation contract retired;
       sample machinery replaced) and vm-sites (its "schema-registration is future work" deferral
       resolved).

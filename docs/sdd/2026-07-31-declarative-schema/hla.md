@@ -64,13 +64,13 @@ Small architecture, mostly deletion. Components:
 > `capability-descriptor-contract.md` (the authority; this HLA does not restate it, it adopts it).
 > The descriptor is the execution vehicle: Component 0 below adopts it before any schema modeling,
 > and the per-implementation config models of Components 2 and 4 register as `config_model`
-> attributes, resolved by consuming kind. (An intermediate schema-slot mechanism was specified and
-> then rescinded by the operator on 2026-08-05; the contract on `main` and Component 0 below record
-> the settled shape.) The reconciliation with this HLA's original framing is recorded in the
-> contract: keep the plan's 2.4-before-2.5 ordering (the HLA had folded hardening into the
-> kind-model swap; the split stands so the old-shape error survives the decoder swap), union
-> assembly stays at the existing post-registration boundary, and the lazier-plugin-load risk
-> transfers to the roadmap's wave 8 unchanged.
+> attributes offered to consumers. (Two intermediate designs, schema slots and consuming-kind
+> keying, were specified and then rescinded by the operator on 2026-08-05; the contract on `main`
+> and Component 0 below record the settled shape.) The reconciliation with this HLA's original
+> framing is recorded in the contract: keep the plan's 2.4-before-2.5 ordering (the HLA had folded
+> hardening into the kind-model swap; the split stands so the old-shape error survives the decoder
+> swap), union assembly stays at the existing post-registration boundary, and the lazier-plugin-load
+> risk transfers to the roadmap's wave 8 unchanged.
 
 ### Component 0: capability-kind descriptor adoption
 
@@ -94,26 +94,38 @@ plugin promise (that stays gated on the roadmap's wave 8). Secret-backend's cons
 registry policy is a descriptor-carried interim exception that wave 3 removes; `_VMPlatformKind`
 moves in from `vms/kinds.py` for symmetry during adoption.
 
-**Config schemas, keyed by consuming kind.** Each capability IMPLEMENTATION registers exactly one
-config model, as Components 2 and 4 always specified. (A schema-slot mechanism was introduced by the
-roadmap seed and rescinded by the operator on 2026-08-05, before any model registered through it;
-the premise was verified against HEAD first, and no implementation needs more than one model today.)
-The one shape decision that survives from that episode: the framework never asks an implementation
-for "its schema", it asks for **"your schema for `<consuming kind>`"**. The capability base's
-default `config_model_for(consuming_kind)` returns the single declared model for the kind's own
-consuming kind and RAISES on any other, so a wrong-kind lookup fails loudly instead of returning a
-plausible-but-wrong model. Simple capability authors still write only `config_model = X`, while
-every framework consumer (validation, assembly, emission, rendering) passes the consuming kind it
-already has. Union assembly is per `(kind, consuming kind)` pair, which reduces to today's per-kind
-union while each kind has one consumer.
+**Config is a producer-side OFFERING, not a lookup keyed by consumer** (operator, 2026-08-06,
+superseding the consuming-kind keying it replaced). A capability declares the config it OFFERS as a
+fixed set, exactly as it declares its fixed set of API methods, and CONSUMERS choose which offering
+they use, exactly as they choose which method they call.
 
-That keying is what makes the roadmap's wave-4 harness work a local change: a harness integration
-serves several hosting surfaces (vm-template including the admin attachment, agent-template,
-workspace-template, session-template) with a schema per surface, and it becomes an override of
-`config_model_for` in the harness package rather than a signature change rippling through four
-framework sites, one of which the onboarding child's guide surface will be consuming by then.
-Support for a scope is carried by the integration's implementation, never by schema presence. The
-descriptor carries no config field until step 2.3 registers the first model.
+- **The common case spells nothing extra.** A capability with one config writes `config_model = X`.
+  That covers vm-platform, git-credential-provider, secret-backend, and harness-integration today.
+- **A capability serving several surfaces declares NAMED offerings**, using the scope vocabulary
+  that already names its API methods (`vm`, `user`, `workspace`, `session`), so config names and
+  method names are one vocabulary rather than two that must be kept in step.
+- **The consuming resource kind declares which offering it uses.** A vm-template's admin attachment
+  and an agent-template both ask for `user`, exactly as both call `user_init`.
+- Asking for an offering a capability does not have is a hard error naming what it does offer, which
+  replaces the wrong-kind rejection the earlier design needed.
+
+Why this and not `config_model_for(consuming_kind)`: that made every producer enumerate its
+consumers, so adding a hosting surface meant editing every capability that should serve it, and it
+was strictly more dynamic than the API it parallels (which has fixed methods at fixed levels). It
+also forced each harness integration to know that vm-template-hosting-admin and agent-template mean
+the same thing. Under offerings that duplication disappears, and union assembly happens once per
+`(kind, offering)` rather than once per consuming kind.
+
+**Offering presence is NOT the support claim, and must not become one.** That is the line between
+this and the rescinded slot mechanism. The roadmap's scope-participation contract is explicit: scope
+support is carried by the integration's implementation (the base class provides no-op defaults and
+an integration implements what it supports), and "accepting no config at a surface means emitting no
+schema for it". So a capability may support a scope while offering no config there, and the two
+facts stay independent. Wiring them together would reinvent slots under a new name.
+
+Union assembly is per `(kind, offering)`, which reduces to today's per-kind union while every
+capability has exactly one unnamed offering. The descriptor carries no config field until step 2.3
+registers the first model.
 
 ### Component 1: the schema foundation
 
@@ -159,12 +171,12 @@ The capability contract changes from invoked validation to declared schema:
 - Each capability class declares `config_model` (a model class) at registration; capabilities with
   no config declare the shared empty model. Secret backends declare `mapping_model` the same way,
   dissolving `validate_mapping` and the classmethod-vs-instance inconsistency.
-- The core reaches a model only through `config_model_for(consuming_kind)`, never by reading
-  `config_model` directly (Component 0). The base default ignores the argument, so the declaration
-  above is all a simple capability author writes; the indirection exists so a capability serving
-  several consuming kinds (wave 4's harness integrations) overrides one classmethod instead of
-  changing a framework signature. Registration-time conformance checks whichever models an
-  implementation declares against the kind's model contract.
+- The core reaches a model by asking the capability for a named OFFERING, defaulting to the unnamed
+  one (Component 0), never by assuming a capability has exactly one. The declaration above is all a
+  simple capability author writes; the indirection exists so a capability serving several surfaces
+  (wave 4's harness integrations) adds offerings without any framework change, and so consuming
+  kinds pick an offering the way they pick an API method. Registration-time conformance checks every
+  model an implementation offers against the kind's model contract.
 - The base `Capability.validate` / `Capability.dependencies` classmethods are retired. The core
   performs both: validation is `model_validate` on the registered model (owner-framed by the error
   bridge), extraction is `extract_references`. Capability code is never invoked for either, which is

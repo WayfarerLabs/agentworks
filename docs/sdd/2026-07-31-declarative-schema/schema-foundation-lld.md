@@ -5,9 +5,8 @@ Date: 2026-08-06
 Status: DRAFT, awaiting review. Companion to [frd.md](frd.md), [hla.md](hla.md) (Components 1 and
 5), [plan.md](plan.md) (steps 2.1 and 2.2). Builds on
 [descriptor-adoption-lld.md](descriptor-adoption-lld.md) section 7, which settled the config-schema
-contract (`config_model_for(consuming_kind)`) this foundation supplies models to. Contradictions
-found against HEAD or against the upstream artifacts are in section 11, not designed around
-silently.
+contract (producer-side config offerings) this foundation supplies models to. Contradictions found
+against HEAD or against the upstream artifacts are in section 11, not designed around silently.
 
 Step 2.1 builds `resources/schema/`: the framework-wide model vocabulary every later step derives
 from. Nothing in this step is wired into decode, finalize, or the registry; steps 2.3 and 2.5 do the
