@@ -917,8 +917,8 @@ ordered so no window under-reports:
    declared `INHERITS` edge. The traversals still crossed at this point, so the graph over-reported
    exactly as before rather than losing anything.
 2. **The traversal split.** `DependencyGraph.runtime_reachable_from` is the closure over `USES`
-   edges only and `collect_secrets_for` reads it; `reachable_from` keeps the full closure for its
-   one caller.
+   edges only and `collect_secrets_for` reads it; the recipe use-gate takes the other closure (see
+   the gate paragraph below, which corrects what this step first shipped).
 
 Details worth having in one place:
 
