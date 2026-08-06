@@ -72,11 +72,13 @@ to the consuming resource (the vm, agent, workspace, or session template that se
 integration) and is validated the way all capability config is validated, today by calling into the
 capability and after wave 2 by core against capability-provided schema, one blob at a time as the
 graph walk reaches each resource. The one specialty is that the harness-integration capability emits
-a config schema per hosting surface (the user schema serves both the admin attachment on the
-vm-template and agent attachments on agent-templates), with schema selection keyed on the hosting
-surface. That is capability-specific, not a framework mechanism, and the harness integration is the
-odd one out at first and possibly forever; no schema mapping is ever assembled or consumed whole.
-Accepting no config at a surface means emitting no schema for it.
+a config schema per consuming resource kind (the user schema serves both the admin attachment on the
+vm-template and agent attachments on agent-templates), resolved via the defaulted hook settled with
+wave 2: `config_model_for(consuming_kind)`, where the base default returns the single declared model
+and only the harness integration overrides with a kind-keyed mapping. That is capability-specific,
+not a framework mechanism, and the harness integration is the odd one out at first and possibly
+forever; no schema mapping is ever assembled or consumed whole. Accepting no config for a consuming
+kind means emitting no schema for it.
 
 ### Trust, not enforcement
 
