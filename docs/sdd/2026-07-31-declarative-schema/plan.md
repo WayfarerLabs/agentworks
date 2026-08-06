@@ -156,8 +156,15 @@ policy is recorded as an explicit descriptor-carried interim exception (wave 3 r
       questions carried to the seed: the constructibility check shape, slot-vocabulary naming (and
       whether the default slot is spelled in single-slot kinds), and whether the four entry
       dataclasses unify behind a generic entry or stay per-kind behind `entry_factory`.
+- [ ] `_VMPlatformKind` relocated into `capabilities/vm_platform/kinds.py` (LLD section 9); pure
+      relocation, full gate green.
 - [ ] Descriptor table introduced, populated from existing wiring; full gate green (no site derives
       yet, table is additive).
+- [ ] Registration-time conformance wired into `register_plugin`'s pass 1 (LLD section 4: contract
+      shape, required metadata and attributes, side-effect-free constructibility, required
+      operations, `contract_version`), replacing the type-and-cast seam. Rejection happens before
+      any registry mutation, so atomic seating is preserved; negative tests cover every defect
+      class. Behavior-additive: all shipped built-ins and the onepassword plugin conform.
 - [ ] Each switchboard site derived from the descriptor, one commit per site, full gate green after
       each: the adapter table (`plugins/adapters.py` `CAPABILITY_ADAPTERS`), the graph kind set and
       readiness dispatch (`resources/graph.py` `_CAPABILITY_KINDS`, `_capability_node_readiness`),

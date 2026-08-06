@@ -2,10 +2,11 @@
 
 Date: 2026-08-05
 
-Status: DRAFT. Companion to [frd.md](frd.md), [hla.md](hla.md) (Component 0), [plan.md](plan.md)
-(step 2.0). Authority: `../2026-08-04-next-steps/capability-descriptor-contract.md` (the design
-decision record; where it says "settled" this LLD builds, where it lists open questions for the wave
-2 seed this LLD settles them). Design only; no implementation in this task.
+Status: REVIEWED, UNDER IMPLEMENTATION (section 10 steps 1-3 landed 2026-08-05). Companion to
+[frd.md](frd.md), [hla.md](hla.md) (Component 0), [plan.md](plan.md) (step 2.0). Authority:
+`../2026-08-04-next-steps/capability-descriptor-contract.md` (the design decision record; where it
+says "settled" this LLD builds, where it lists open questions for the wave 2 seed this LLD settles
+them). Deviations found during implementation are recorded inline against the section they revise.
 
 Step 2.0 collapses the capability-kind switchboard onto a single descriptor table. Seven sites today
 independently enumerate the four capability kinds (`vm-platform`, `harness-integration`,
@@ -78,6 +79,17 @@ read. Each capability package contributes its own record (mirroring today's per-
 is resolved LAZILY, exactly as `_CAPABILITY_REGISTRY_LOADERS` (`resources/graph.py:586`) already
 does: the `registry` field is a callable, and consumers read the table inside their functions, not
 at module import. This inherits the existing cycle discipline rather than inventing a new one.
+
+> **Spelling, as implemented (2026-08-05).** The table is reached through a `@cache`d accessor
+> `capability_descriptors()` (plus `descriptor_for(kind)`) in `capabilities/descriptor.py`, not a
+> module-level `CAPABILITY_DESCRIPTORS` constant: a constant cannot satisfy this section's own lazy
+> requirement without importing the four capability packages at module load, which is the dependency
+> inversion the lazy discipline exists to prevent. The four package imports live inside the accessor
+> body, mirroring `_CAPABILITY_REGISTRY_LOADERS`. The accessor returns a tuple in today's registry
+> order (vm-platform, harness-integration, git-credential-provider, secret-backend), which is the
+> order step 4's snapshot tuple wants. Where sections 3, 10, and 12 write `CAPABILITY_DESCRIPTORS`,
+> read `capability_descriptors()`. The lazy discipline buys CYCLE SAFETY, not import deferral:
+> anything importing `resources.kinds` now transitively loads the capability packages.
 
 `KIND_REGISTRY` stays the all-kinds runtime map; the descriptor is the capability-kind SWITCHBOARD
 enumeration. Their relationship is pinned, not merged: the guard (section 12) asserts
