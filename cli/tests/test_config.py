@@ -724,7 +724,7 @@ def test_claude_marketplaces_rejects_string(tmp_path: Path) -> None:
         tmp_path,
         ManifestDoc("admin-template", "default", {"claude_marketplaces": "https://github.com/example/tools"}),
     )
-    with pytest.raises(ConfigError, match="must be a list of strings"):
+    with pytest.raises(ConfigError, match=r"claude_marketplaces: must be a list"):
         build_registry(load_config(config_file, warn_issues=False))
 
 
@@ -790,16 +790,18 @@ def test_named_console_tmux_layout_rejects_unknown(tmp_path: Path) -> None:
     (the decoder's spec-level error surfaces as ConfigError at build_registry)."""
     config_file = _minimal_config(tmp_path)
     write_manifests(tmp_path, ManifestDoc("named-console-template", "default", {"tmux_layout": "tabbed"}))
-    with pytest.raises(ConfigError, match="named_console.tmux_layout must be one of"):
+    with pytest.raises(ConfigError, match="tmux_layout: must be one of"):
         build_registry(load_config(config_file))
 
 
-def test_named_console_section_unexpected_keys_warn(tmp_path: Path) -> None:
-    """Unknown keys on the named-console-template manifest surface as
-    warnings on the manifest issues channel, not silent ignores."""
+def test_named_console_section_unexpected_keys_are_refused(tmp_path: Path) -> None:
+    """FR12's warn-to-error flip: an unknown key on the
+    named-console-template surface is a hard error naming the fields that
+    ARE valid, not a warning beside a config that loaded anyway."""
     config_file = _minimal_config(tmp_path)
     write_manifests(
         tmp_path,
         ManifestDoc("named-console-template", "default", {"tmux_layout": "tiled", "unknown_key": "x"}),
     )
-    assert any("unknown_key" in issue for issue in _manifest_issues(config_file))
+    with pytest.raises(ConfigError, match="unknown_key: unknown field; expected one of: tmux_layout"):
+        _manifest_issues(config_file)

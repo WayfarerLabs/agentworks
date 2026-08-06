@@ -203,7 +203,28 @@ def _has_unsafe_mise_component_char(value: str) -> bool:
 
 
 def validate_mise_settings(packages: list[str], lockfile: str | None, install_before: str, *, context: str) -> None:
-    """Validate mise inputs before they reach config rendering or provisioning."""
+    """:func:`check_mise_settings`, framed by the caller's section label.
+
+    The migrator's frozen TOML oracle reports against the section an
+    operator is looking at (``[agent_templates.claude]``), so it keeps
+    this form; a kind spec model calls the unframed check and lets the
+    error bridge frame the batch.
+    """
+    try:
+        check_mise_settings(packages, lockfile, install_before)
+    except ValueError as exc:
+        raise ConfigError(f"{context}.{exc}") from exc
+
+
+def check_mise_settings(packages: list[str], lockfile: str | None, install_before: str) -> None:
+    """Validate mise inputs before they reach config rendering or
+    provisioning, raising ``ValueError`` with a FIELD-relative message.
+
+    ``ValueError`` rather than ``ConfigError`` because this is what a
+    model validator raises: pydantic re-raises anything that is neither a
+    ``ValueError`` nor an ``AssertionError``, so a ``ConfigError`` here
+    would escape ``model_validate`` and bypass the error bridge.
+    """
     from agentworks.sources import SourceRefError, parse_source_ref
 
     for package in packages:
@@ -216,19 +237,17 @@ def validate_mise_settings(packages: list[str], lockfile: str | None, install_be
             or _has_unsafe_mise_component_char(name)
             or _has_unsafe_mise_component_char(version)
         ):
-            raise ConfigError(f"{context}.mise_packages entries must use non-empty name@version syntax")
+            raise ValueError("mise_packages entries must use non-empty name@version syntax")
 
     if lockfile is not None:
         try:
             parse_source_ref(lockfile, default_filename="mise.lock")
         except SourceRefError as exc:
-            raise ConfigError(f"{context}.mise_lockfile is invalid: {exc}") from exc
+            raise ValueError(f"mise_lockfile is invalid: {exc}") from exc
 
     if _MISE_DURATION_RE.fullmatch(install_before):
         return
     try:
         date.fromisoformat(install_before)
     except ValueError as exc:
-        raise ConfigError(
-            f"{context}.mise_install_before must be a positive duration such as '7d' or an ISO date"
-        ) from exc
+        raise ValueError("mise_install_before must be a positive duration such as '7d' or an ISO date") from exc

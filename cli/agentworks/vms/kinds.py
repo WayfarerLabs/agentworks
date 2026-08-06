@@ -43,6 +43,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
     from agentworks.db import Database
+    from agentworks.declared_resource import DeclaredResource
     from agentworks.resources.reference import ResourceReference
     from agentworks.resources.registry import Registry
 
@@ -102,6 +103,7 @@ class _AdminTemplateKind:
     """Implementation of ``ResourceKind`` for ``"admin-template"``."""
 
     kind: str = "admin-template"
+    model: type[DeclaredResource] = AdminConfig
     description: str = "VM admin user environment configuration (shell, tools, dotfiles, mise, ...)"
     miss_policy: Literal["auto-declare", "error"] = "auto-declare"
     auto_declare_names: frozenset[str] | None = frozenset({"default"})

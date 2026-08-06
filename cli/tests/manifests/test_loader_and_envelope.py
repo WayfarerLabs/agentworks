@@ -184,7 +184,7 @@ def test_unknown_kind_gets_kebab_hint(tmp_path: Path) -> None:
         ("admin-template", "mise_packages", "[terraform]", "name@version"),
         ("admin-template", "mise_packages", '["bad\\"name@1"]', "name@version"),
         ("agent-template", "mise_lockfile", "git::http://example.com/lock.git", "mise_lockfile is invalid"),
-        ("admin-template", "mise_lockfile", "{path: lock}", "mise_lockfile must be a string"),
+        ("admin-template", "mise_lockfile", "{path: lock}", "mise_lockfile: must be a string"),
         ("agent-template", "mise_install_before", "yesterday", "mise_install_before"),
         ("agent-template", "mise_install_before", "7", "mise_install_before must be a string"),
     ],

@@ -23,7 +23,7 @@ now) shares its measuring stick and stays narrow.
 from __future__ import annotations
 
 import tomllib
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from agentworks.agents.template import AgentTemplate
 from agentworks.config.loaders_core import (
@@ -39,7 +39,7 @@ from agentworks.config.validation import MAX_SECRET_NAME_LENGTH, validate_name
 from agentworks.errors import ConfigError
 from agentworks.git_credentials.credential import GitCredentialConfig
 from agentworks.secrets import SecretDecl
-from agentworks.sessions.layouts import AW_SESSION_VERTICAL_LAYOUT, VALID_TMUX_LAYOUTS
+from agentworks.sessions.layouts import AW_SESSION_VERTICAL_LAYOUT, VALID_TMUX_LAYOUTS, TmuxLayout
 from agentworks.sessions.template import NamedConsoleConfig, SessionTemplate
 from agentworks.source_location import scan_section_lines
 from agentworks.vms.admin import AdminConfig
@@ -74,7 +74,10 @@ def _load_named_console(
 
     return NamedConsoleConfig(
         name="default",
-        tmux_layout=str(layout),
+        # The membership check above is what proves the cast; the oracle
+        # validates by tuple because it is written independently of the row's
+        # own model, which is the whole point of it (descriptor LLD 11).
+        tmux_layout=cast("TmuxLayout", layout),
         description=str(raw["description"]) if "description" in raw else None,
         declared_at=decls.lookup("named_console"),
     )

@@ -281,10 +281,24 @@ def test_env_inline_table_unknown_key_rejected(tmp_path: Path) -> None:
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
-        manifests=[ManifestDoc("admin-template", "default", {"env": {"BAD": {"value": "x"}}})],
+        manifests=[ManifestDoc("admin-template", "default", {"env": {"BAD": {"secrit": "x"}}})],
     )
-    with pytest.raises(ConfigError, match="unexpected keys"):
+    with pytest.raises(ConfigError, match="env.BAD.secrit: unknown field; expected one of: secret, value"):
         _load(cfg_file)
+
+
+def test_env_inline_table_may_spell_the_plaintext_value(tmp_path: Path) -> None:
+    """A widening the model brings: ``{value: x}`` is the same entry as the
+    bare string ``x``, and the entry type genuinely has both fields, so
+    refusing the explicit spelling would be an arbitrary rule rather than
+    a shape check."""
+    cfg_file = tmp_path / "config.toml"
+    _write_base(
+        cfg_file,
+        manifests=[ManifestDoc("admin-template", "default", {"env": {"OK": {"value": "x"}}})],
+    )
+
+    assert _load(cfg_file).lookup("admin-template", "default").env["OK"].value == "x"
 
 
 def test_env_secret_must_be_string(tmp_path: Path) -> None:
@@ -588,7 +602,10 @@ def test_unknown_backend_kind_in_secret_backends_errors(
     ("manifest", "context_label"),
     [
         (ManifestDoc("vm-template", "default", {"env": {"AGENTWORKS_VM": "override"}}), "vm_templates.default.env"),
-        (ManifestDoc("admin-template", "default", {"env": {"AGENTWORKS_PLATFORM": "override"}}), "admin.env"),
+        (
+            ManifestDoc("admin-template", "default", {"env": {"AGENTWORKS_PLATFORM": "override"}}),
+            "admin-template/default.env",
+        ),
         (
             ManifestDoc("agent-template", "claude", {"env": {"AGENTWORKS_AGENT": "override"}}),
             "agent_templates.claude.env",
@@ -815,7 +832,7 @@ def test_env_secret_ref_nonconforming_warns_but_loads(tmp_path: Path) -> None:
     registry = _load(cfg_file)
     assert registry.lookup("admin-template", "default").env["FOO"].secret == "Bad_Name"
     issues = _manifest_issues(cfg_file)
-    assert any("Bad_Name" in issue and "admin.env.FOO" in issue for issue in issues), issues
+    assert any("Bad_Name" in issue and "admin-template/default" in issue for issue in issues), issues
 
 
 def test_git_credential_token_nonconforming_warns_but_loads(tmp_path: Path) -> None:

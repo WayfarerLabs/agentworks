@@ -33,6 +33,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
     from agentworks.db import Database
+    from agentworks.declared_resource import DeclaredResource
     from agentworks.resources.reference import ResourceReference
     from agentworks.resources.registry import Registry
 
@@ -77,6 +78,7 @@ class _NamedConsoleTemplateKind:
     """Implementation of ``ResourceKind`` for ``"named-console-template"``."""
 
     kind: str = "named-console-template"
+    model: type[DeclaredResource] = NamedConsoleConfig
     description: str = "Named console configuration (layout, ...)"
     miss_policy: Literal["auto-declare", "error"] = "auto-declare"
     auto_declare_names: frozenset[str] | None = frozenset({"default"})

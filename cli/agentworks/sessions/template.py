@@ -20,7 +20,7 @@ from agentworks.declared_resource import DeclaredResource
 from agentworks.env import EnvEntry
 from agentworks.env.entry import env_references
 from agentworks.schema import RefOwner
-from agentworks.sessions.layouts import AW_SESSION_VERTICAL_LAYOUT
+from agentworks.sessions.layouts import AW_SESSION_VERTICAL_LAYOUT, TmuxLayout
 
 if TYPE_CHECKING:
     from agentworks.resources.graph import FinalizeContext
@@ -29,8 +29,7 @@ if TYPE_CHECKING:
 
 class NamedConsoleConfig(DeclaredResource):
     """Settings for the `console` subcommand group (named multi-session
-    consoles). Section is `[named_console]` in the TOML to disambiguate from
-    the workspace console template. Only named consoles read these values.
+    consoles). Only named consoles read these values.
 
     Inheriting ``DeclaredResource`` gives this the uniform metadata every
     declared resource carries, including ``name``. The console surface is a
@@ -38,7 +37,10 @@ class NamedConsoleConfig(DeclaredResource):
     this is metadata uniformity, not a per-console template selector.
     """
 
-    tmux_layout: str = AW_SESSION_VERTICAL_LAYOUT
+    tmux_layout: TmuxLayout = AW_SESSION_VERTICAL_LAYOUT
+    """How panes are arranged in a named console's session window. Every
+    value but ``aw-session-vertical`` is a tmux built-in an operator can
+    also apply on the fly with ``tmux select-layout``."""
 
 
 class SessionTemplate(DeclaredResource):

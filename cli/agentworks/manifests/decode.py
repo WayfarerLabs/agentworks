@@ -798,68 +798,6 @@ def _decode_vm_site(doc: Document, spec: dict[str, Any], issues: list[str]) -> A
     )
 
 
-def _decode_admin_template(doc: Document, spec: dict[str, Any], issues: list[str]) -> Any:
-    from agentworks.config.loaders_core import _parse_env_table, _require_string_list, _warn_unexpected_keys
-    from agentworks.vms.admin import AdminConfig
-
-    raw = dict(spec)
-    env = raw.pop("env", None)
-    _warn_unexpected_keys(raw, _USER_CONFIG_KEYS, "admin.config", issues)
-
-    packages = _require_string_list(raw, "mise_packages", "admin.config")
-    lockfile_value = raw.get("mise_lockfile")
-    if lockfile_value is not None and not isinstance(lockfile_value, str):
-        raise ConfigError("admin.config.mise_lockfile must be a string")
-    lockfile = lockfile_value
-    install_before_value = raw.get("mise_install_before", "7d")
-    if not isinstance(install_before_value, str):
-        raise ConfigError("admin.config.mise_install_before must be a string")
-    install_before = install_before_value
-    from agentworks.config.validation import validate_mise_settings
-
-    validate_mise_settings(packages, lockfile, install_before, context="admin.config")
-
-    return AdminConfig(
-        name=doc.name,
-        description=str(raw["description"]) if "description" in raw else None,
-        username=str(raw.get("username", "agentworks")),
-        shell=str(raw.get("shell", "bash")),
-        git_credentials=list(raw.get("git_credentials", [])),
-        user_install_commands=list(raw.get("user_install_commands", [])),
-        dotfiles_source=str(raw["dotfiles_source"]) if "dotfiles_source" in raw else None,
-        dotfiles_destination=str(raw.get("dotfiles_destination", "~/.dotfiles")),
-        dotfiles_install_cmd=str(raw.get("dotfiles_install_cmd", "./install.sh")),
-        mise_activate=bool(raw.get("mise_activate", True)),
-        mise_packages=packages,
-        mise_lockfile=lockfile,
-        mise_allow_unlocked=bool(raw.get("mise_allow_unlocked", False)),
-        mise_install_before=install_before,
-        mise_prune_on_reinit=bool(raw.get("mise_prune_on_reinit", True)),
-        git_force_safe_directory=bool(raw.get("git_force_safe_directory", True)),
-        claude_marketplaces=_require_string_list(raw, "claude_marketplaces", "admin.config"),
-        claude_plugins=_require_string_list(raw, "claude_plugins", "admin.config"),
-        env=_parse_env_table(env, context="admin", issues=issues),
-        declared_at=doc.location,
-    )
-
-
-def _decode_named_console_template(doc: Document, spec: dict[str, Any], issues: list[str]) -> Any:
-    from agentworks.config.loaders_core import _warn_unexpected_keys
-    from agentworks.sessions.layouts import AW_SESSION_VERTICAL_LAYOUT, VALID_TMUX_LAYOUTS
-    from agentworks.sessions.template import NamedConsoleConfig
-
-    _warn_unexpected_keys(spec, {"description", "tmux_layout"}, "named_console", issues)
-    layout = spec.get("tmux_layout", AW_SESSION_VERTICAL_LAYOUT)
-    if layout not in VALID_TMUX_LAYOUTS:
-        raise ConfigError(f"named_console.tmux_layout must be one of {VALID_TMUX_LAYOUTS}, got: {layout}")
-    return NamedConsoleConfig(
-        name="default",
-        tmux_layout=str(layout),
-        description=str(spec["description"]) if "description" in spec else None,
-        declared_at=doc.location,
-    )
-
-
 _DECODERS: dict[str, Callable[[Document, dict[str, Any], list[str]], Any]] = {
     "secret": _decode_secret,
     "vm-template": _decode_vm_template,
@@ -867,6 +805,4 @@ _DECODERS: dict[str, Callable[[Document, dict[str, Any], list[str]], Any]] = {
     "session-template": _decode_session_template,
     "git-credential": _decode_git_credential,
     "vm-site": _decode_vm_site,
-    "admin-template": _decode_admin_template,
-    "named-console-template": _decode_named_console_template,
 }
