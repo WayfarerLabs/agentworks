@@ -119,11 +119,20 @@ surfaces, dynamic content) adopts wave 2's surfaces as they land rather than blo
   there are no empty stubs. The contract's shape (and whether it becomes a descriptor concern) is
   the HLA's call, designed with wave 2 so schema walkers, samples, and blurbs are shared sources
   rendered differently by describe (reference) and guide (teaching).
-- **R15 (safe templating).** Contributed content that needs dynamic material (concept docs, kind
-  overviews, anything that lists) uses a locked-down template mechanism: declarative placeholders
-  and core-provided dynamic blocks (live instance lists, enablement state, schema fragments), not a
-  general-purpose template engine with expression evaluation. Contributed guide content MUST be
-  data, never code, and rendering MUST NOT execute anything a contribution supplies. This holds for
+- **R15 (safe templating over a me-anchored graph projection).** Contributed content that needs
+  dynamic material (concept docs, kind overviews, anything that lists) uses a locked-down template
+  mechanism: declarative placeholders and core-provided dynamic blocks (live instance lists,
+  enablement state, schema fragments), not a general-purpose template engine with expression
+  evaluation. The data those blocks draw on is a pared-down, read-only projection of the resource
+  graph, anchored with shorthand: `me` is the kind, implementation, or resource the topic documents,
+  and the vocabulary is traversals from `me` (its instances, its kind, resources it references or
+  that reference it) plus a small set of named roots for concept topics. Anchoring on `me` makes
+  templates position-independent, so a shared kind-overview template serves every kind. The
+  projection carries identity, descriptions, enablement and readiness, and relationships; secrets
+  and secret-bearing config are excluded at the projection boundary, not by per-template discipline.
+  Rendering is side-effect-free: it never resolves secrets, probes targets, or mutates state (probes
+  belong to onboarding actions, not to displaying a page). Contributed guide content MUST be data,
+  never code, and rendering MUST NOT execute anything a contribution supplies. This holds for
   curated system plugins now precisely so the content channel is already safe when external plugins
   arrive (wave 8).
 
@@ -214,8 +223,9 @@ surfaces, dynamic content) adopts wave 2's surfaces as they land rather than blo
 - The R14 contribution contract's shape, including whether it becomes a descriptor concern, and the
   exact split with wave 2 (shared sources, two presentations); being negotiated with the wave 2
   effort lead via the roadmap's note.
-- The R15 template vocabulary: which core-provided dynamic blocks exist first, and how a
-  contribution declares which blocks it uses (HLA's call).
+- The R15 template vocabulary: which core-provided dynamic blocks exist first, how a contribution
+  declares which blocks it uses, the projection's traversal set from `me`, and how concept topics
+  anchor (named roots versus anchoring at the contributor) (HLA's call).
 - Topic taxonomy details: precedence if a future topic name ever collides with a kind slug, and the
   behavior of multiple topics in one invocation.
 - Bootstrap release engineering: how the thin bootstraps declare which CLI versions they bootstrap
