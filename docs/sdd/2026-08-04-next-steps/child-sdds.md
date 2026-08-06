@@ -70,6 +70,7 @@ Planned children, seeded when their prerequisites land (see `phasing.md`):
 - Wave 6: agentic artifacts and distillation
 - Wave 7: structured control
 - Wave 8: external plugin API
+- Closeout wave: comprehensive security, test-consolidation, and cleanup review (gates the lock)
 
 Not children of this roadmap (explicitly out of scope, see `target-state.md`): the
 named-console-template selector SDD, the herdr effort, and the companion-shell and resilient-attach

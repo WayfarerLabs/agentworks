@@ -69,6 +69,15 @@ Two things this graph deliberately does not serialize:
   real event stream. This closes the memory-learning loop.
 - **Wave 7: structured control.** Observability phase 2 (validated intents, ACP projection,
   stale-decision rejection).
+- **Closeout wave (gates the roadmap lock; operator ruling, 2026-08-06):** after the waves complete
+  and before the roadmap locks, one comprehensive review of everything the roadmap changed, in
+  strict priority order: (1) security above all, reviewing the accumulated whole as one attack
+  surface (the trust-based integration discipline, the gated graph projection and guide content
+  channel, secret-source resolution, the event stream) rather than per-change; (2) test
+  consolidation and removal, with the working assumption that the accreted unit-test estate can be
+  cut in half, maybe more, without sacrificing any coverage or quality; (3) code cleanup: file-size
+  limits, vestigial code removal, package renaming and refactoring left behind by the waves' moves.
+  Findings are fixed before the roadmap locks.
 - **Wave 8: external plugin API.** Registration conformance, discovery, namespacing, versioning, and
   the distribution-trust model, promised publicly only once the internal contracts survive
   first-party use.
