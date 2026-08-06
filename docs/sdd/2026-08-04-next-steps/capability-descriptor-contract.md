@@ -49,9 +49,10 @@ CapabilityKindDescriptor
     registry_policy          classes or factories, registered by name; constructed instances only
                              as a descriptor-carried interim exception (secret-backend, until
                              wave 3)
-    config_schema            schema slots (see below); each slot names a Pydantic model contract
-    union_assembly           framework-built discriminated union per slot at the registration
-                             boundary, cached on the kind's registry entry
+    config_schema            the kind's config model contract (see below)
+    union_assembly           framework-built discriminated union per kind at the registration
+                             boundary, cached on the kind's registry entry (per hosting surface
+                             where a kind keys its schemas by surface)
     entry_factory            builds the kind's read-only resource row
     kind_strategy            the ResourceKind strategy object for KIND_REGISTRY
     readiness                uniform classmethod contract over config; instance-scoped readiness
@@ -78,20 +79,18 @@ each, so wave 2 neither builds them early nor reinvents them later:
                              derive from live wiring
 ```
 
-### Schema slots
+### Config schemas
 
-The descriptor's config contract is a set of named schema slots rather than exactly one model per
-kind. Every current kind declares a single default slot, so wave 2's per-kind modeling proceeds
-exactly as its plan specifies. The slot mechanism exists for the multi-model case: the
-harness-integration kind registers a config model per scope it accepts configuration for (wave 4),
-and a slot is simply an entry in that named-model mapping. Scope support is carried by the
-integration's implementation, not by slot presence (operator simplification, 2026-08-05): a scope
-may be supported with no config model at all. Wave 4 then adds its per-scope models without
-reshaping the descriptor.
-
-This is the one deliberate deviation from phase 2's single-model framing, chosen because the cost
-now is a naming layer, while retrofitting multi-model kinds after wave 2 would be a second migration
-of every registration site.
+Each capability implementation registers exactly one config model, precisely as phase 2's plan
+specifies; there is no slot vocabulary and nothing extra to spell for the common case (operator
+ruling, 2026-08-05, rescinding the earlier slot framing). Validation is one blob at a time: the
+graph walk reaches each consuming resource and validates its blob against the schema for that
+hosting surface, so no schema mapping is ever assembled or consumed whole. The multi-schema case is
+capability-specific, with the harness-integration kind the odd one out at first and possibly
+forever: in wave 4 it keys its config schema by hosting surface (vm-template including the admin
+attachment, agent-template, workspace-template, session-template). The descriptor's config contract
+only has to avoid preventing a kind from exposing more than one model; it provides no mechanism
+around that. Scope support is carried by the integration's implementation, never by schema presence.
 
 ## What derives from the descriptor
 
@@ -116,12 +115,12 @@ the framework; it does not absorb what makes each kind itself.
 
 The descriptor makes "trust but verify" enforceable at registration, replacing the current
 `type`-and-cast seam: conformance to `implementation_contract`, required metadata present, a
-side-effect-free constructibility check, required operations implemented, every provided slot model
-conforming to the slot's model contract, and `contract_version` compatibility (declared from day
-one, so the check is initially trivial and the discipline is established before it matters). Atomic
-seating (prepare everything, then mutate registries) is preserved. This strengthens the internal
-extension framework; it does not create a public plugin promise, which stays gated on wave 8's
-distribution-trust model.
+side-effect-free constructibility check, required operations implemented, every registered config
+model conforming to the kind's model contract, and `contract_version` compatibility (declared from
+day one, so the check is initially trivial and the discipline is established before it matters).
+Atomic seating (prepare everything, then mutate registries) is preserved. This strengthens the
+internal extension framework; it does not create a public plugin promise, which stays gated on wave
+8's distribution-trust model.
 
 ## Secret backends under the descriptor
 
@@ -170,8 +169,6 @@ each step. Phase 2's per-kind modeling then proceeds on top, registering models 
 ## Open questions for the wave 2 seed
 
 - The exact shape of the side-effect-free constructibility check.
-- Naming for the slot vocabulary and whether the default slot is spelled at all in single-slot
-  kinds.
 - Whether the four entry dataclasses unify behind a generic entry or stay per-kind behind the
   `entry_factory`.
 - How much of the phase-1 interim per-kind decode fork the descriptor adoption absorbs versus leaves

@@ -39,7 +39,9 @@ At every setup scope, one pipeline runs in one order:
    declaration order. A feature operates at its scope only: it receives env-to-date (everything
    emitted before it, including env inherited from higher scopes, which core assembles and delivers)
    and may emit env and agent artifacts alongside its own side effects. Declared cross-feature
-   dependencies are deferred until a real case demands more than declaration order.
+   dependencies are deferred until a real case demands more than declaration order. Features are
+   harness-agnostic by definition; anything harness-specific is harness-integration config, never a
+   feature (the Claude marketplace and plugin settings are the standing example).
 3. **Enabled harness integrations run last**, receiving all env and agent artifacts for the scope.
 
 Reinit (vm, agent) reruns the same pipeline idempotently. Env and agent artifacts are the two
@@ -65,12 +67,16 @@ session-bound. The Claude-specific template fields (`claude_marketplaces`, `clau
 into the Claude integration's user-scope config as wave 4 work (they already carry the same shape on
 admin config and agent templates today).
 
-Config is simply part of the stuff. A template that selects an integration may attach a config blob
-at that spot, and like every other blob in the declarative world it is validated by a model the
-integration registers for that spot (vm, user, workspace, session; the user model serves both the
-admin attachment on the vm-template and agent attachments on agent-templates). The same model may
-serve several spots, and accepting no config at a spot means registering no model. That is the
-entirety of "per-scope config models": ordinary blob validation, not a mechanism.
+Integration config is ordinary capability config, no different from vm-platform config: it belongs
+to the consuming resource (the vm, agent, workspace, or session template that selects the
+integration) and is validated the way all capability config is validated, today by calling into the
+capability and after wave 2 by core against capability-provided schema, one blob at a time as the
+graph walk reaches each resource. The one specialty is that the harness-integration capability emits
+a config schema per hosting surface (the user schema serves both the admin attachment on the
+vm-template and agent attachments on agent-templates), with schema selection keyed on the hosting
+surface. That is capability-specific, not a framework mechanism, and the harness integration is the
+odd one out at first and possibly forever; no schema mapping is ever assembled or consumed whole.
+Accepting no config at a surface means emitting no schema for it.
 
 ### Trust, not enforcement
 
