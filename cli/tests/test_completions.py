@@ -633,6 +633,20 @@ class TestStaticChoiceCompletion:
         assert not kind.choices
         assert kind.dynamic_completer == "resource_kinds"
 
+    def test_schema_kind_completes_dynamically(self) -> None:
+        # `resource schema` takes its kind the same way `resource sample`
+        # does, and for the same reason: a plain string, so a capability
+        # kind or a typo reaches the service layer and gets a clean domain
+        # error instead of a click.Choice parse failure.
+        from agentworks.cli import app
+        from agentworks.completions.spec import build_spec
+
+        schema = build_spec(app).subcommands["resource"].subcommands["schema"]
+        (kind,) = [p for p in schema.params if p.name == "kind"]
+        assert not kind.choices
+        assert kind.dynamic_completer == "resource_kinds"
+        assert [opt for param in schema.params for opt in param.opts] == ["--write"]
+
     def test_all_shells_emit_toml_choices(self) -> None:
         from agentworks.cli import app
         from agentworks.completions.bash import generate_bash

@@ -742,6 +742,7 @@ mappings, template inheritance chains, resolution previews), reach for the per-k
 | `agw resource edit KIND/NAME`        | Open the declaring YAML manifest in $EDITOR                           |
 | `agw resource migrate [SELECTOR]...` | Move TOML resources to YAML, and upgrade manifests on a retired shape |
 | `agw resource sample KIND [--write]` | Print (or save) a kind's commented sample manifest (--all for all)    |
+| `agw resource schema [KIND]`         | Print the manifest JSON Schema (`--write` saves the whole set)        |
 
 `resource list` accepts `--kind <csv>` (e.g. `--kind secret,vm-template`) and `--origin <variant>`
 where variant is `operator`, `auto`, `builtin`, or `plugin`. Disabled rows (a not-enabled system
@@ -750,6 +751,13 @@ reveal them (combine with `--origin plugin` to see just a not-enabled plugin's r
 emits `kind/name` per line and backs shell completion (`/` cannot appear in resource names, so the
 split is unambiguous). The `kind/name` token is the one grammar across the resource group:
 `resource describe secret/npm-token` and `resource migrate vm-template/dev` take the same shape.
+
+`resource schema` emits JSON Schema (draft 2020-12) for manifests: one document schema per kind plus
+an any-kind one, derived from the same models the loader validates against, so it cannot describe a
+shape the loader would refuse. A bare invocation prints the any-kind schema; naming a kind prints
+that kind's. `--write` saves the whole set under `resources/.schema/`, which is the path the
+`# yaml-language-server: $schema=...` line in written manifests refers to. See
+[the resources guide](../docs/guides/resources.md) for the editor setup.
 
 `resource migrate` is a recurring, incremental migration command. It moves resources (or a subset)
 from TOML to YAML manifests. Selectors scope the TOML path: `KIND` selects one kind, `KIND/NAME` one

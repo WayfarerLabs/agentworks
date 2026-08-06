@@ -245,6 +245,11 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     # --kind` uses. Capability kinds complete too, then fail with a
     # kind-aware domain error (they have no bundled sample).
     ("resource.sample", "kind"): "resource_kinds",
+    # `resource schema`'s kind argument completes from the same config-free
+    # kinds completer for the same reason `resource sample`'s does: it is a
+    # plain string, so any typed kind reaches the service layer and gets a
+    # clean domain error rather than a click.Choice parse failure.
+    ("resource.schema", "kind"): "resource_kinds",
     ("resource.migrate", "selectors"): "migrate_selectors",
 }
 

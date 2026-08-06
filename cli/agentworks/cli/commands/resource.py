@@ -490,3 +490,76 @@ def resource_sample(
     verb = "Appended sample to" if appended else "Wrote sample to"
     output.info(f"{verb} {path}")
     output.info("Uncomment the document lines (delete one leading '#') to activate.")
+
+
+@resource_app.command("schema")
+def resource_schema(
+    kind: Annotated[
+        str | None,
+        typer.Argument(
+            help=(
+                "Kind to print the schema for (e.g. secret, vm-template). "
+                "Omit for the any-kind schema, which describes a manifest "
+                "document of every kind at once."
+            ),
+        ),
+    ] = None,
+    write: Annotated[
+        bool,
+        typer.Option(
+            "--write",
+            help=(
+                "Write the whole set (the any-kind schema plus one per kind) "
+                "under the resources directory instead of printing. The "
+                "destination is fixed, because the modeline written into "
+                "manifests refers to it by that path."
+            ),
+        ),
+    ] = False,
+) -> None:
+    """Print (or write) the JSON Schema for resource manifests.
+
+    Point a schema-aware editor at these and manifests get completions,
+    hover docs, and diagnostics as you type. Files written by
+    `agw resource sample --write` and `agw resource migrate` already
+    carry the association, as a `# yaml-language-server: $schema=...`
+    line; add that line to a hand-written manifest to get the same.
+
+    The schema describes THIS host: a capability contributed by a plugin
+    appears in it once that plugin is installed, so re-run --write after
+    installing one.
+    """
+    from agentworks import output
+    from agentworks.errors import ValidationError
+    from agentworks.manifests.emit import (
+        SCHEMA_DIRNAME,
+        document_schema,
+        envelope_schema,
+        schema_json,
+        write_schema_set,
+    )
+
+    if not write:
+        schema = envelope_schema() if kind is None else document_schema(kind)
+        output.info(schema_json(schema).rstrip("\n"))
+        return
+
+    if kind is not None:
+        raise ValidationError(
+            "--write writes the whole schema set, so it takes no kind",
+            hint=(
+                "A partial set would leave some manifest's modeline pointing "
+                "at a file that is not there. Drop the kind, or print one "
+                "kind's schema without --write."
+            ),
+        )
+
+    from agentworks.config import load_config
+    from agentworks.manifests.loader import RESOURCES_DIRNAME
+
+    # Settings-only, like `sample --write`: locating the resources
+    # directory needs `source_path` and nothing else.
+    config = load_config(resources=False)
+    schema_dir = config.source_path.parent / RESOURCES_DIRNAME / SCHEMA_DIRNAME
+    written = write_schema_set(schema_dir)
+    output.info(f"Wrote {len(written)} schemas to {schema_dir}")
