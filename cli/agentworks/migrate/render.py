@@ -22,6 +22,11 @@ def render_preview(plan: MigrationPlan) -> list[str]:
             lines.append(f"  {action} {write.path} ({len(write.documents)} document(s))")
         verb = "commented out in" if plan.toml_mode == "comment" else "deleted from"
         lines.append(f"  migrated sections will be {verb} {plan.config_path}")
+    if plan.rewrites:
+        count = len(plan.rewritten_resources)
+        lines.append(f"Upgrading {count} manifest resource(s) off the retired capability shape:")
+        for rewrite in plan.rewrites:
+            lines.append(f"  rewrite {rewrite.path}: {', '.join(rewrite.resources)}")
     if plan.drops_secret_backends:
         lines.append(
             "  deprecated [secret_backends.*] sections will be dropped "
@@ -48,6 +53,18 @@ def render_dry_run(plan: MigrationPlan, *, full: bool = False) -> list[str]:
             if index or write.exists:
                 lines.append("---")
             lines.extend(document.rstrip("\n").splitlines())
+    for rewrite in plan.rewrites:
+        lines.append("")
+        lines.append(f"Manifest changes: {rewrite.path}")
+        lines.extend(
+            difflib.unified_diff(
+                rewrite.old_bytes.decode("utf-8").splitlines(),
+                rewrite.new_text.splitlines(),
+                fromfile=f"{rewrite.path} (current)",
+                tofile=f"{rewrite.path} (after)",
+                lineterm="",
+            )
+        )
     diff = list(
         difflib.unified_diff(
             plan.old_toml_text.splitlines(),

@@ -33,6 +33,13 @@ dependencies = [
     # rather than a drop-in upgrade.
     "pydantic>=2.13.4,<3",
     "pyyaml>=6.0.3",
+    # PyYAML reads manifests; ruamel round-trips the ones the migrator
+    # REWRITES (agentworks/migrate/manifest_upgrade.py), which PyYAML
+    # cannot do without discarding comments, quote style, and key order.
+    # Pinned exactly: its round-trip emitter's whitespace and comment
+    # placement are the observable output of that path, so a patch bump
+    # can change files we hand back to operators.
+    "ruamel-yaml==0.19.1",
     "tomlkit>=0.15.0",
 ]
 

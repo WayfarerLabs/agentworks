@@ -126,6 +126,14 @@ The migrator handles TOML-declared resources, which become new YAML documents ap
 rewriting existing YAML content; migrated TOML sections are commented out in place with a
 `# migrated to ...` marker (or removed with `--toml delete`).
 
+**Manifests on a retired shape.** Every run also upgrades manifests that still name a capability in
+the old sibling shape (`platform: lima` plus a `platform_config:` table, and likewise
+`provider`/`provider_config`) to the tagged table `platform: {name: lima, ...}`. Those files are
+rewritten in place, preserving comments, quoting, key order, and every unrelated document. This half
+is not scoped by the selectors: the old shape no longer loads at all, so leaving one document behind
+would leave the whole resources directory unloadable. A run with nothing else to do (`--all` with no
+TOML resources left) does exactly this and nothing more.
+
 Every real run backs up `config.toml`; a run that modifies an existing YAML file also stores its
 original as a recovery copy under `paths.backups`. Digest guards refuse to replace files changed
 after planning, writes are atomic, and rollback restores only outputs that still match the run's

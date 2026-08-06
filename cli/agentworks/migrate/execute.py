@@ -9,7 +9,10 @@ Ordering is load-bearing (migration-tool LLD):
 3. The TOML rewrite is atomic (write-new-then-rename).
 4. Verification last; a mismatch rolls everything back and raises.
 
-New documents append text-only.
+New documents append text-only. The one exception is an existing
+manifest still on a retired capability shape: it is round-tripped during
+planning and replaced only when its digest still matches the planned
+input.
 """
 
 from __future__ import annotations
@@ -43,6 +46,7 @@ class ExecutionResult:
     config_rewritten: bool = False
     created: list[Path] = field(default_factory=list)
     appended: list[Path] = field(default_factory=list)
+    replaced: list[Path] = field(default_factory=list)
     verified_rows: int = 0
     dropped_secret_backends: bool = False
 
@@ -62,6 +66,7 @@ def execute_plan(plan: MigrationPlan, config: Config) -> ExecutionResult:
     created_dirs: list[Path] = []
     appended: dict[Path, tuple[str, str, Path]] = {}
     created: dict[Path, str] = {}
+    replaced: dict[Path, tuple[Path, str, str]] = {}
     config_replaced = False
     try:
         for write in plan.writes:
@@ -92,10 +97,29 @@ def execute_plan(plan: MigrationPlan, config: Config) -> ExecutionResult:
                 _atomic_write(write.path, new_text, expect_absent=True, operation=f"create {write.path}")
                 result.created.append(write.path)
 
+        for rewrite in plan.rewrites:
+            _require_digest(rewrite.path, rewrite.old_digest, f"rewrite {rewrite.path}")
+            assert yaml_backup_path is not None  # planned rewrites always have recovery copies
+            # Register the intended replacement before os.replace: a platform
+            # can complete replace then interrupt before this call returns.
+            replaced[rewrite.path] = (
+                yaml_backup_path / rewrite.path.relative_to(plan.config_path.parent),
+                rewrite.old_digest,
+                rewrite.new_digest,
+            )
+            _atomic_write(
+                rewrite.path,
+                rewrite.new_text,
+                expected_old_digest=rewrite.old_digest,
+                operation=f"rewrite {rewrite.path}",
+            )
+            result.replaced.append(rewrite.path)
+
         if plan.new_toml_digest != plan.old_toml_digest:
             # A concurrent edit may arrive after the initial guard while
             # manifests are being written. Check again immediately before
-            # replacing the config.
+            # replacing the config, but leave a rewrite-only plan's config
+            # inode intact.
             _require_digest(plan.config_path, plan.old_toml_digest, "rewrite config.toml")
             config_replaced = True
             _atomic_write(
@@ -115,6 +139,7 @@ def execute_plan(plan: MigrationPlan, config: Config) -> ExecutionResult:
             created_dirs,
             appended,
             created,
+            replaced,
             config_replaced,
         )
         if recovery_failures:
@@ -145,7 +170,7 @@ def _take_backup(plan: MigrationPlan, config: Config) -> tuple[Path, Path | None
         backup_path = backup_dir / f"config-{stamp}-{counter}.toml"
         counter += 1
     shutil.copy2(config_path, backup_path)
-    yaml_originals: dict[Path, bytes] = {}
+    yaml_originals: dict[Path, bytes] = {rewrite.path: rewrite.old_bytes for rewrite in plan.rewrites}
     for write in plan.writes:
         if write.exists:
             yaml_originals.setdefault(write.path, write.path.read_bytes())
@@ -320,7 +345,9 @@ def _emitted_unit_keys(plan: MigrationPlan) -> set[tuple[str, str]]:
     """The ``(kind, name)`` set the migrated units' output decodes to.
 
     The TOML units contribute one emitted YAML document each
-    (``plan.emitted_documents``).
+    (``plan.emitted_documents``, captured before coalescing); the
+    upgraded manifests contribute their own ``(kind, name)`` (the rewrite
+    is in place, so no new envelope is emitted for them).
     """
     import yaml
 
@@ -332,6 +359,9 @@ def _emitted_unit_keys(plan: MigrationPlan) -> set[tuple[str, str]]:
     for text in plan.emitted_documents:
         document = validate_envelope(yaml.safe_load(text), location)
         keys.add((document.kind, document.name))
+    for token in plan.rewritten_resources:
+        kind, _, name = token.partition("/")
+        keys.add((kind, name))
     return keys
 
 
@@ -342,6 +372,7 @@ def _rollback(
     created_dirs: list[Path],
     appended: dict[Path, tuple[str, str, Path]],
     created: dict[Path, str],
+    replaced: dict[Path, tuple[Path, str, str]],
     config_replaced: bool,
 ) -> list[str]:
     """Restore only outputs still owned by this run, reporting any gaps."""
@@ -398,6 +429,28 @@ def _rollback(
                 failures.append(_recovery_failure(path, expected, _digest(path), rollback_error, recovery=snapshot))
         elif observed != old_digest:
             failures.append(_recovery_failure(path, expected, observed, recovery=snapshot))
+    for path, (snapshot, old_digest, new_digest) in replaced.items():
+        observed = _digest(path)
+        if observed == new_digest:
+            try:
+                old_bytes = snapshot.read_bytes()
+                if sha256(old_bytes).hexdigest() == old_digest:
+                    _atomic_write_bytes(
+                        path,
+                        old_bytes,
+                        expected_old_digest=new_digest,
+                        operation=f"roll back {path}",
+                    )
+                else:
+                    failures.append(_recovery_failure(snapshot, old_digest, sha256(old_bytes).hexdigest()))
+            except (OSError, StateError) as rollback_error:
+                failures.append(_recovery_failure(path, new_digest, _digest(path), rollback_error, recovery=snapshot))
+        elif observed == old_digest:
+            # The temp write failed before replacement; this target was never
+            # mutated despite its pre-registered rollback intent.
+            continue
+        else:
+            failures.append(_recovery_failure(path, new_digest, observed, recovery=snapshot))
     for directory in reversed(created_dirs):
         with contextlib.suppress(OSError):
             directory.rmdir()

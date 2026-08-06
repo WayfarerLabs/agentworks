@@ -1,0 +1,410 @@
+"""``agw resource migrate``'s manifest-upgrade half.
+
+Rewriting manifests the operator wrote and keeps editing is a different
+promise from emitting new ones: the file must come back with its
+comments, quoting, key order, and unrelated documents intact, and the
+run must be safe to interrupt or re-run. These pin that promise, plus the
+whole-tree property that makes the upgrade correct at all (the retired
+shape does not load, so no run may leave one behind).
+"""
+
+from __future__ import annotations
+
+from hashlib import sha256
+from pathlib import Path
+from textwrap import dedent
+
+import pytest
+import yaml
+
+from agentworks.config import load_config
+from agentworks.errors import ConfigError, StateError
+from agentworks.manifests import load_manifests
+from agentworks.migrate import execute_plan, plan_migration
+
+_COMMENTED_LEGACY = """\
+# The homelab, at the top of the file.
+apiVersion: agentworks/v1
+kind: vm-site
+metadata:
+  name: gpu-box   # the shared box
+spec:
+  # which platform runs here
+  platform: lima   # trailing note on the selector
+  # the ssh target
+  # (over the tailnet)
+  platform_config:
+    vm_host: "me@gpu-box"   # quoted on purpose
+---
+apiVersion: agentworks/v1
+kind: git-credential
+metadata:
+  name: ado
+spec:
+  provider: azdo
+  provider_config:
+    org: my-org
+"""
+
+_CANONICAL = """\
+apiVersion: agentworks/v1
+kind: vm-site
+metadata:
+  name: already-fine
+spec:
+  platform:
+    name: lima
+    vm_host: me@fine   # untouched
+"""
+
+
+def _write_config(tmp_path: Path, *, toml_resources: str = "") -> Path:
+    pub = tmp_path / "id.pub"
+    priv = tmp_path / "id"
+    pub.write_text("ssh-ed25519 AAAA...")
+    priv.write_text("-----BEGIN OPENSSH PRIVATE KEY-----")
+    cfg = tmp_path / "config.toml"
+    cfg.write_text(
+        dedent(f"""\
+        [operator]
+        ssh_public_key = "{pub.as_posix()}"
+        ssh_private_key = "{priv.as_posix()}"
+
+        [paths]
+        backups = "{(tmp_path / "backups").as_posix()}"
+
+        """)
+        + toml_resources
+    )
+    return cfg
+
+
+def _resources(tmp_path: Path, **files: str) -> Path:
+    resources = tmp_path / "resources"
+    resources.mkdir(exist_ok=True)
+    for name, text in files.items():
+        (resources / f"{name}.yaml").write_text(text)
+    return resources
+
+
+def _run(cfg: Path, selectors: list[str] | None = None, **kwargs: object):  # noqa: ANN202 - test helper
+    """Plan and execute one migration, the way the command does."""
+    config = load_config(cfg, warn_issues=False, resources=False)
+    plan = plan_migration(config, selectors or [], all_resources=not selectors, **kwargs)  # type: ignore[arg-type]
+    return plan, execute_plan(plan, config)
+
+
+def test_upgrade_rewrites_the_retired_shape_preserving_comments(tmp_path: Path) -> None:
+    """The whole promise in one file: every comment (file-leading,
+    same-line, own-line, nested) survives, the explicit quoting survives,
+    and the result loads.
+
+    Comments that sat between the two retired keys now sit inside the
+    tagged table, so they are indented a level deeper: left at the spec's
+    indentation they would read as a comment on the spec rather than on
+    the capability.
+    """
+    cfg = _write_config(tmp_path)
+    resources = _resources(tmp_path, sites=_COMMENTED_LEGACY)
+    _run(cfg)
+
+    assert (resources / "sites.yaml").read_text() == dedent("""\
+        # The homelab, at the top of the file.
+        apiVersion: agentworks/v1
+        kind: vm-site
+        metadata:
+          name: gpu-box   # the shared box
+        spec:
+          # which platform runs here
+          platform:        # trailing note on the selector
+            # the ssh target
+            # (over the tailnet)
+            name: lima
+            vm_host: "me@gpu-box"   # quoted on purpose
+        ---
+        apiVersion: agentworks/v1
+        kind: git-credential
+        metadata:
+          name: ado
+        spec:
+          provider:
+            name: azdo
+            org: my-org
+        """)
+
+    manifests = load_manifests(resources)
+    assert not manifests.issues
+    site, credential = manifests.entries
+    assert (site.resource.platform, site.resource.platform_config) == ("lima", {"vm_host": "me@gpu-box"})
+    assert (credential.resource.provider, credential.resource.provider_config) == ("azdo", {"org": "my-org"})
+
+
+def test_quoting_that_carries_a_type_survives_the_rewrite(tmp_path: Path) -> None:
+    """The rewrite must not change a value's TYPE.
+
+    An operator writes ``subscription_id: "0000"`` because they mean the
+    string; re-emitted bare, YAML reads it back as the integer 0. Nothing
+    downstream would report that as a rewrite bug, only as a config that
+    stopped working, so it is pinned on the value that reaches the row.
+    """
+    cfg = _write_config(tmp_path)
+    resources = _resources(
+        tmp_path,
+        sites=dedent("""\
+            apiVersion: agentworks/v1
+            kind: vm-site
+            metadata:
+              name: azure-dev
+            spec:
+              platform: azure-vm
+              platform_config:
+                subscription_id: "0000"
+                resource_group: agw
+                region: eastus
+            """),
+    )
+
+    _run(cfg)
+
+    assert '    subscription_id: "0000"\n' in (resources / "sites.yaml").read_text()
+    (entry,) = load_manifests(resources).entries
+    assert entry.resource.platform_config["subscription_id"] == "0000"
+
+
+def test_rerunning_the_upgrade_is_a_no_op(tmp_path: Path) -> None:
+    cfg = _write_config(tmp_path)
+    resources = _resources(tmp_path, sites=_COMMENTED_LEGACY)
+    _run(cfg)
+    upgraded = (resources / "sites.yaml").read_bytes()
+
+    config = load_config(cfg, warn_issues=False, resources=False)
+    plan = plan_migration(config, [], all_resources=True)
+    assert plan.nothing_to_do
+    assert plan.rewrites == []
+    assert (resources / "sites.yaml").read_bytes() == upgraded
+
+
+def test_canonical_manifests_are_not_rewritten(tmp_path: Path) -> None:
+    """A file with nothing retired in it is not a planned write at all,
+    so its bytes (and its mtime) are never at risk."""
+    cfg = _write_config(tmp_path)
+    resources = _resources(tmp_path, fine=_CANONICAL, legacy=_COMMENTED_LEGACY)
+    before = (resources / "fine.yaml").read_bytes()
+
+    plan, _ = _run(cfg)
+
+    assert [r.path for r in plan.rewrites] == [resources / "legacy.yaml"]
+    assert (resources / "fine.yaml").read_bytes() == before
+
+
+def test_the_upgrade_is_whole_tree_not_selector_scoped(tmp_path: Path) -> None:
+    """A run scoped to one TOML resource still upgrades every retired
+    manifest.
+
+    This is the load-bearing asymmetry. The retired shape does not load,
+    so a partially upgraded tree is not a valid state to leave an operator
+    in; it would also break this run's own verification, which rebuilds
+    the registry from the whole resources directory.
+    """
+    cfg = _write_config(tmp_path, toml_resources="[vm_templates.dev]\ncpus = 8\n")
+    resources = _resources(tmp_path, sites=_COMMENTED_LEGACY)
+
+    plan, result = _run(cfg, ["vm-template/dev"])
+
+    assert [u.name for u in plan.units] == ["dev"]
+    assert plan.rewritten_resources == ("vm-site/gpu-box", "git-credential/ado")
+    assert result.replaced == [resources / "sites.yaml"]
+    assert not load_manifests(resources).issues
+
+
+def test_an_append_targeting_an_upgraded_file_is_one_write(tmp_path: Path) -> None:
+    """A TOML unit whose per-kind target is a file being upgraded folds
+    into that file's single replacement, rather than two writes racing
+    each other's digest guard."""
+    cfg = _write_config(
+        tmp_path, toml_resources='[azure]\nsubscription_id = "0000"\nresource_group = "g"\nregion = "r"\n'
+    )
+    resources = _resources(tmp_path, **{"vm-sites": _COMMENTED_LEGACY})
+
+    plan, result = _run(cfg)
+
+    assert plan.writes == []
+    assert result.appended == []
+    assert result.replaced == [resources / "vm-sites.yaml"]
+    names = {d["metadata"]["name"] for d in yaml.safe_load_all((resources / "vm-sites.yaml").read_text()) if d}
+    assert names == {"gpu-box", "ado", "azure"}
+
+
+def test_dry_run_writes_nothing_and_shows_the_diff(tmp_path: Path) -> None:
+    from agentworks.migrate.render import render_dry_run
+
+    cfg = _write_config(tmp_path)
+    resources = _resources(tmp_path, sites=_COMMENTED_LEGACY)
+    before = (resources / "sites.yaml").read_bytes()
+
+    config = load_config(cfg, warn_issues=False, resources=False)
+    plan = plan_migration(config, [], all_resources=True)
+    lines = render_dry_run(plan, full=True)
+
+    assert (resources / "sites.yaml").read_bytes() == before
+    assert "Upgrading 2 manifest resource(s) off the retired capability shape:" in lines
+    assert "-  platform: lima   # trailing note on the selector" in lines
+    assert "+    name: lima" in lines
+
+
+def test_a_concurrent_edit_refuses_the_rewrite_and_keeps_the_edit(tmp_path: Path) -> None:
+    """The digest guard is what makes a plan safe to sit on: an edit
+    landing between planning and execution stops the write instead of
+    overwriting the operator."""
+    cfg = _write_config(tmp_path)
+    resources = _resources(tmp_path, sites=_COMMENTED_LEGACY)
+
+    config = load_config(cfg, warn_issues=False, resources=False)
+    plan = plan_migration(config, [], all_resources=True)
+    edited = _COMMENTED_LEGACY.replace("me@gpu-box", "me@elsewhere")
+    (resources / "sites.yaml").write_text(edited)
+
+    with pytest.raises(StateError, match="it changed after migration planning"):
+        execute_plan(plan, config)
+    assert (resources / "sites.yaml").read_text() == edited
+
+
+def test_a_verification_failure_rolls_the_manifest_back(tmp_path: Path) -> None:
+    """The rewrite is covered by the same all-or-nothing contract the
+    TOML side has: if the post-run registry does not match, the operator's
+    original file comes back byte for byte."""
+    cfg = _write_config(tmp_path)
+    resources = _resources(tmp_path, sites=_COMMENTED_LEGACY)
+    original = (resources / "sites.yaml").read_bytes()
+
+    config = load_config(cfg, warn_issues=False, resources=False)
+    plan = plan_migration(config, [], all_resources=True)
+    # A pre-row nothing can match: verification must fail AFTER the file
+    # is replaced, which is the case rollback exists for.
+    plan.pre_rows[("vm-site", "ghost")] = object()
+
+    with pytest.raises(StateError, match="migration verification failed"):
+        execute_plan(plan, config)
+    assert (resources / "sites.yaml").read_bytes() == original
+
+
+def test_the_original_is_snapshotted_beside_the_config_backup(tmp_path: Path) -> None:
+    cfg = _write_config(tmp_path)
+    resources = _resources(tmp_path, sites=_COMMENTED_LEGACY)
+    original = (resources / "sites.yaml").read_bytes()
+
+    _plan, result = _run(cfg)
+
+    assert result.yaml_backup_path is not None
+    snapshot = result.yaml_backup_path / "resources" / "sites.yaml"
+    assert snapshot.read_bytes() == original
+
+
+def test_a_name_key_in_the_retired_config_is_refused_before_any_write(tmp_path: Path) -> None:
+    """``name`` is the tagged table's discriminator, so a config key of
+    that name cannot be folded in. Refused during planning, so nothing is
+    written and the operator's file is untouched."""
+    cfg = _write_config(tmp_path)
+    resources = _resources(
+        tmp_path,
+        sites=dedent("""\
+            apiVersion: agentworks/v1
+            kind: vm-site
+            metadata:
+              name: odd
+            spec:
+              platform: future-platform
+              platform_config:
+                name: sneaky
+            """),
+    )
+    before = (resources / "sites.yaml").read_bytes()
+
+    config = load_config(cfg, warn_issues=False, resources=False)
+    with pytest.raises(ConfigError, match="collides with the tagged table's discriminator"):
+        plan_migration(config, [], all_resources=True)
+    assert (resources / "sites.yaml").read_bytes() == before
+
+
+def test_multi_document_markers_and_unrelated_documents_survive(tmp_path: Path) -> None:
+    """Explicit stream markers, a leading `---`, a trailing `...`, and
+    documents of other kinds all come back untouched. ruamel does not
+    round-trip marker spelling itself, so this is the pin on the
+    marker-restoring emit path."""
+    cfg = _write_config(tmp_path)
+    text = dedent("""\
+        --- # first
+        apiVersion: agentworks/v1
+        kind: vm-template
+        metadata:
+          name: dev
+        spec:
+          cpus: 8
+        ---
+        apiVersion: agentworks/v1
+        kind: vm-site
+        metadata:
+          name: gpu-box
+        spec:
+          platform: lima
+          platform_config:
+            vm_host: me@gpu-box
+        ... # done
+        """)
+    resources = _resources(tmp_path, mixed=text)
+
+    _run(cfg)
+
+    rewritten = (resources / "mixed.yaml").read_text()
+    assert rewritten.startswith("--- # first\n")
+    assert rewritten.rstrip().endswith("... # done")
+    assert "  cpus: 8\n" in rewritten
+    assert not load_manifests(resources).issues
+
+
+def test_discovery_skips_an_unparseable_file(tmp_path: Path) -> None:
+    """Discovery reads raw YAML rather than going through the loader,
+    which is the point: the documents it looks for are exactly the ones
+    that no longer decode. A file that does not even parse is skipped, so
+    the scan reports the retired documents it CAN see rather than raising
+    on the first bad one.
+
+    (A run still fails later, at verification, which rebuilds the whole
+    registry. Unparseable YAML is not something the upgrade can fix.)
+    """
+    from agentworks.migrate.manifest_upgrade import discover_legacy_documents
+
+    resources = _resources(tmp_path, sites=_COMMENTED_LEGACY, broken="{{{ not yaml")
+
+    found = discover_legacy_documents(resources)
+
+    assert [(d.path.name, d.token) for d in found] == [
+        ("sites.yaml", "vm-site/gpu-box"),
+        ("sites.yaml", "git-credential/ado"),
+    ]
+
+
+def test_the_upgrade_verifies_against_the_pre_rewrite_rows(tmp_path: Path) -> None:
+    """Verification is real, not a comparison of the rewrite with itself:
+    the pre-side decodes the ORIGINAL document's parsed values, the
+    post-side decodes the text ruamel emitted, so an emission that lost a
+    key fails.
+    """
+    cfg = _write_config(tmp_path)
+    _resources(tmp_path, sites=_COMMENTED_LEGACY)
+
+    config = load_config(cfg, warn_issues=False, resources=False)
+    plan = plan_migration(config, [], all_resources=True)
+
+    assert set(plan.pre_rows) == {("vm-site", "gpu-box"), ("git-credential", "ado")}
+    lossy = plan.rewrites[0].new_text.replace('    vm_host: "me@gpu-box"   # quoted on purpose\n', "")
+    plan.rewrites[0] = type(plan.rewrites[0])(
+        path=plan.rewrites[0].path,
+        old_bytes=plan.rewrites[0].old_bytes,
+        old_digest=plan.rewrites[0].old_digest,
+        new_text=lossy,
+        new_digest=sha256(lossy.encode()).hexdigest(),
+        resources=plan.rewrites[0].resources,
+    )
+    with pytest.raises(StateError, match="migration verification failed"):
+        execute_plan(plan, config)

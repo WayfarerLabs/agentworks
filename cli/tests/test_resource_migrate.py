@@ -1224,7 +1224,7 @@ def test_cli_migrate_all_nothing_to_do_exits_zero(tmp_path: Path, monkeypatch: p
     _write_config(tmp_path, resources="")
     result = _cli(tmp_path, monkeypatch, ["resource", "migrate", "--all", "--yes"])
     assert result.exit_code == 0, result.stdout
-    assert "Nothing to migrate: no migratable TOML-declared resources remain." in result.stdout
+    assert "no TOML-declared resources remain, and every manifest is on the current shape" in result.stdout
 
 
 def test_cli_migrate_help_describes_toml_only_behavior(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

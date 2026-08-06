@@ -354,12 +354,21 @@ def resource_migrate(
     ] = False,
     yes: Annotated[bool, typer.Option("--yes", help="Skip the confirmation prompt.")] = False,
 ) -> None:
-    """Migrate TOML-declared resources to YAML manifests.
+    """Migrate TOML-declared resources to YAML manifests, and upgrade
+    manifests still using a retired shape.
 
     A recurring, incremental mover: run it any time you want to move
     resources (or a subset) from TOML to YAML. New
-    TOML-derived documents append without rewriting existing files. The
-    original config.toml is backed up first, and every real run verifies the
+    TOML-derived documents append without rewriting existing files.
+
+    Every run also upgrades existing manifests still naming a capability
+    in the retired sibling shape (`platform: lima` plus `platform_config:`)
+    to the tagged table, preserving comments. That part is not scoped by
+    the selectors: the old shape does not load, so leaving one document
+    behind would leave the whole resources directory unloadable.
+
+    The original config.toml is backed up first, every manifest this run
+    replaces is snapshotted beside it, and every real run verifies the
     resulting registry is identical before it counts as done.
     """
     from agentworks import output
@@ -389,7 +398,9 @@ def resource_migrate(
     )
 
     if plan.nothing_to_do:
-        output.info("Nothing to migrate: no migratable TOML-declared resources remain.")
+        output.info(
+            "Nothing to migrate: no TOML-declared resources remain, and every manifest is on the current shape."
+        )
         return
 
     if dry_run:
@@ -410,6 +421,8 @@ def resource_migrate(
         output.detail(f"Created {path}")
     for path in result.appended:
         output.detail(f"Appended to {path}")
+    for path in result.replaced:
+        output.detail(f"Upgraded {path}")
     if result.config_rewritten:
         output.detail(f"Rewrote {plan.config_path} (backup: {result.backup_path})")
     else:

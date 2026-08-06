@@ -11,7 +11,7 @@ is therefore just "plan and print".
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from hashlib import sha256
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -23,6 +23,12 @@ from tomlkit import items as toml_items
 from agentworks.errors import ConfigError, ValidationError
 from agentworks.manifests.decode import KIND_SECTIONS
 from agentworks.manifests.loader import RESOURCES_DIRNAME
+from agentworks.migrate.manifest_upgrade import (
+    ManifestRewrite,
+    discover_legacy_documents,
+    legacy_pre_rows,
+    plan_rewrites,
+)
 from agentworks.migrate.toml_edit import apply_toml_edits, key_name
 from agentworks.migrate.toml_resources import toml_resource_rows
 from agentworks.migrate.verify import strip_source_fields
@@ -89,6 +95,11 @@ class MigrationPlan:
     resources_dir: Path
     units: list[MigrationUnit]
     writes: list[FileWrite]
+    # Existing manifests to replace in place, upgrading a retired shape.
+    # Whole-tree rather than selector-scoped (see ``manifest_upgrade``):
+    # a document left behind would leave the tree unloadable AND fail
+    # this run's own post-registry verification.
+    rewrites: list[ManifestRewrite]
     toml_mode: str  # validated: "comment" | "delete"
     old_toml_text: str
     old_toml_digest: str
@@ -114,7 +125,12 @@ class MigrationPlan:
 
     @property
     def nothing_to_do(self) -> bool:
-        return not self.units and not self.drops_secret_backends
+        return not self.units and not self.rewrites and not self.drops_secret_backends
+
+    @property
+    def rewritten_resources(self) -> tuple[str, ...]:
+        """Every ``kind/name`` an in-place rewrite touches, in plan order."""
+        return tuple(token for rewrite in self.rewrites for token in rewrite.resources)
 
 
 def plan_migration(
@@ -180,12 +196,17 @@ def plan_migration(
     selected = _resolve_selectors(selectors, available)
     toml_selected = selected
     _check_declaration_shapes(doc, toml_selected, old_text, config_path)
-    pre_rows = _build_pre_rows(config_path, selected)
+    # Existing manifests on a retired shape are upgraded on every run,
+    # whatever the selectors say, so no run can leave the tree unloadable.
+    legacy = discover_legacy_documents(resources_dir)
+    rewrites = plan_rewrites(legacy)
+    pre_rows = {**_build_pre_rows(config_path, selected), **legacy_pre_rows(legacy)}
 
     targets = _targets(toml_selected, layout)
     writes = _build_writes(doc, toml_selected, layout, resources_dir)
     # Capture the per-unit emitted documents for the emitted-key-set guard.
     emitted_documents = [text for write in writes for text in write.documents]
+    writes, rewrites = _coalesce_writes_and_rewrites(writes, rewrites)
 
     drops = any(key is not None and key_name(key) == _SECRET_BACKENDS_SECTION for key, _item in doc.body)
     markers = {(u.section, u.name): targets[(u.kind, u.name)] for u in toml_selected}
@@ -211,6 +232,7 @@ def plan_migration(
         resources_dir=resources_dir,
         units=selected,
         writes=writes,
+        rewrites=rewrites,
         toml_mode=toml_mode,
         old_toml_text=old_text,
         old_toml_digest=sha256(old_bytes).hexdigest(),
@@ -239,6 +261,33 @@ def _build_pre_rows(config_path: Path, selected: list[MigrationUnit]) -> dict[tu
             if key in oracle:
                 pre[key] = strip_source_fields(oracle[key])
     return pre
+
+
+def _coalesce_writes_and_rewrites(
+    writes: list[FileWrite], rewrites: list[ManifestRewrite]
+) -> tuple[list[FileWrite], list[ManifestRewrite]]:
+    """Fold an append into the rewrite of the same file.
+
+    A TOML unit can target a file that is also being upgraded in place.
+    Two writes to one path would make the second one's digest guard fail
+    against the first one's output, so they become a single replacement
+    whose new text is the rewritten file plus the appended documents.
+    """
+    pending = {write.path: write for write in writes}
+    merged: list[ManifestRewrite] = []
+    for rewrite in rewrites:
+        write = pending.pop(rewrite.path, None)
+        if write is None:
+            merged.append(rewrite)
+            continue
+        new_text = _appended_yaml_text(rewrite.new_text, write.documents)
+        merged.append(replace(rewrite, new_text=new_text, new_digest=sha256(new_text.encode()).hexdigest()))
+    return list(pending.values()), merged
+
+
+def _appended_yaml_text(existing: str, documents: list[str]) -> str:
+    prefix = "" if existing.endswith("\n") or not existing else "\n"
+    return existing + prefix + "".join(f"---\n{document}" for document in documents)
 
 
 def _discover_units(doc: tomlkit.TOMLDocument) -> list[MigrationUnit]:
