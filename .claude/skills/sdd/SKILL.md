@@ -98,10 +98,12 @@ drop a foreign commit, so branch delivery can lose messages while looking delive
 PR-to-main hop is the operator's review gate on inter-agent instructions. A running effort only sees
 messages that existed at its branch point, so a sender whose message lands after the recipient's
 branch was cut must tell the operator so the recipient gets nudged. Pickup is cheap and needs no
-branch changes: `git show origin/main:<path>` reads the message as delivered; merging `main` in is
-only needed to bring the file in-tree. Recipients on long-running branches should also glance at
-their feature directory on `origin/main` at natural checkpoints for messages that arrived
-mid-flight.
+branch changes: `git show origin/main:<path>` reads the message as delivered. To bring it in-tree,
+cherry-pick the message commit or merge `main` in. To keep cherry-picking clean, a sender delivers
+each message as a single commit touching only the message file (other changes ride separate commits,
+even in the same PR), and the nudge carries that commit's sha. Recipients on long-running branches
+should also glance at their feature directory on `origin/main` at natural checkpoints for messages
+that arrived mid-flight.
 
 ## Lockfile
 
