@@ -441,12 +441,17 @@ until someone decides.
 
 - [ ] `tagged-hardening-lld.md` written and reviewed: the old-shape detection and error text, how
       the old-shape error survives 2.5's decoder-to-model swap, and the manifest-upgrade mode as a
-      GENERALIZATION of the migrator's shipped YAML-rewrite machinery (PR #383's `YamlRewrite`:
-      ruamel round-trip with document-marker text patching, digest/CAS guards, backup-first
-      rollback, YAML-native units), extended from the bespoke session-template selector fold to the
-      platform/provider sibling fold. (The harness-selector and `restart_command` removals already
-      landed in wave 1, so the earlier cross-SDD coordination is discharged; this step is scoped to
-      the still-live `platform`/`platform_config` and `provider`/`provider_config` sibling shapes.)
+      GENERALIZATION of the migrator's YAML-rewrite machinery (**corrected 2026-08-06: NOT
+      shipped.** Wave 1's `6d44a12c` deleted `YamlRewrite` and dropped the ruamel dependency along
+      with the compatibility surfaces it served, so step 2.4 recovered it from that commit's parent
+      and generalized it. The outcome matches this box's intent; the premise that it was standing
+      machinery was stale. The recovery also improved on the original, which never set
+      `preserve_quotes`) (PR #383's `YamlRewrite`: ruamel round-trip with document-marker text
+      patching, digest/CAS guards, backup-first rollback, YAML-native units), extended from the
+      bespoke session-template selector fold to the platform/provider sibling fold. (The
+      harness-selector and `restart_command` removals already landed in wave 1, so the earlier
+      cross-SDD coordination is discharged; this step is scoped to the still-live
+      `platform`/`platform_config` and `provider`/`provider_config` sibling shapes.)
 - [ ] Old sibling shape (`platform` + `platform_config`, `provider` + `provider_config`) becomes a
       hard error naming the exact rewrite; #349's dual-shape normalization, its aggregated warning
       channel (`ManifestSet.deprecation_issues` for shape), and the bundle-gate special case are
@@ -467,6 +472,27 @@ until someone decides.
       `migration_participation` field exists precisely for the "migrate survives and derives from
       the live descriptor" branch, against the counterargument that the migrator is a deliberately
       independent frozen oracle.
+
+**Step 2.4 records, landed 2026-08-06.**
+
+- **The LLD box is ruled WAIVED, not skipped.** No `tagged-hardening-lld.md` was written: the
+  concurrent agent authored the 2.5 LLD instead, and 2.4 turned out to be a flip of a mechanism step
+  2.0 had already designed (`descriptor-adoption-lld.md` section 6's `legacy_string_shape`) rather
+  than new design. The three calls that did need deciding were made by the implementer and reviewed
+  explicitly: deleting `legacy_string_shape` once every surface rejects, upgrading whole-tree rather
+  than selector-scoped, and folding parsed values for the verification pre-side. The reviewer signed
+  off on all three and independently verified the whole-tree premise. Recording the waiver here so
+  the absence is a decision rather than an omission.
+- **`agw resource migrate`'s future, DECIDED:** it survives, and stays a deliberately independent
+  frozen oracle with a hand-maintained kind-participation table. The descriptor's
+  `migration_participation` field stays deferred and uncreated. Deriving the migrator from live
+  wiring would defeat the independence phase 1 built deliberately, which is the whole reason the
+  TOML loaders were relocated into `migrate/` rather than deleted. Rationale also carried in
+  `manifest_upgrade.py:25-30` so it survives this SDD's deletion.
+- **Selector asymmetry, deliberate:** selectors scope TOML units only; the manifest-upgrade half is
+  always whole-tree, because a leftover legacy document makes the post-registry verification load
+  raise, so a scoped run cannot complete. Documented in `cli/README.md` and
+  `docs/guides/resources.md` and previewed before confirmation.
 
 ### 2.5 Kind spec models replace the decoders
 
