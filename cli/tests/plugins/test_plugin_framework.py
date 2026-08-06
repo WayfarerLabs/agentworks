@@ -13,11 +13,14 @@ now derives its enumeration from the descriptor table.
 
 from __future__ import annotations
 
+import ast
+from pathlib import Path
 from types import MappingProxyType
 from typing import cast
 
 import pytest
 
+import agentworks
 import agentworks.plugins as plugins_pkg
 from agentworks.capabilities.descriptor import capability_descriptors
 from agentworks.capabilities.vm_platform.base import VMPlatform
@@ -425,14 +428,20 @@ def test_every_capability_switchboard_site_derives_from_the_descriptor() -> None
 
     This began life as an OMISSION detector, watching the hand-written
     adapter table for a kind someone forgot to add. Each site is now BUILT
-    from the descriptor table, so the assertions below are near-tautological
-    by construction, which is exactly the point: they regression-lock the
-    derivation and fail the moment someone reintroduces an independent
-    enumeration at a site.
+    from the descriptor table, so what is worth guarding is that each site
+    still AGREES with the table: a kind, a registry, a loader, or an adapter
+    that drifts from its record fails here.
 
     Object IDENTITY wherever an object is at stake, so a site that rebuilds
-    an equal-looking registry, loader, or adapter fails here rather than
-    diverging silently later.
+    an equal-looking registry, loader, or adapter fails rather than diverging
+    silently later.
+
+    What this test does NOT prove is that each site still derives. A
+    hand-written enumeration that happens to be correct satisfies set
+    equality, and one holding the same live registry objects satisfies
+    identity too, so agreement and derivation are different claims.
+    :func:`test_each_derived_site_reads_the_descriptor_table_in_its_own_body`
+    is the second half, pinning the derivation at the source level.
 
     Only the sites with static structure to compare appear here. The other
     two (the generic built-in publisher and the graph's readiness dispatch)
@@ -485,13 +494,83 @@ def test_every_capability_switchboard_site_derives_from_the_descriptor() -> None
     # Site: manifest decode's capability fields, ACCEPT-WARN-FILTERED. The
     # filter is load-bearing: session-template is a host surface too, but it
     # rejects the legacy string shape and keeps its own fold, so an
-    # unfiltered derivation would sweep it into the accept-warn fold.
-    assert dict(capability_fields()) == {
-        d.manifest_section.host_kind: (d.manifest_section.naming_field, d.manifest_section.config_field)
-        for d in descriptors
-        if d.manifest_section is not None and d.manifest_section.legacy_string_shape == "accept-warn"
-    }
+    # unfiltered derivation would sweep it into the accept-warn fold. Named
+    # as a literal, not recomputed from the same descriptors: the
+    # comprehension would only prove a comprehension runs.
     assert set(capability_fields()) == {"vm-site", "git-credential"}
+
+
+_DERIVED_SITES = {
+    ("plugins/adapters.py", "capability_adapters"): "capability_descriptors",
+    ("plugins/registration.py", "_capability_registries"): "capability_descriptors",
+    ("resources/graph.py", "_capability_kinds"): "capability_descriptors",
+    ("resources/graph.py", "_capability_registry_loaders"): "capability_descriptors",
+    ("manifests/decode.py", "_host_surfaces"): "capability_descriptors",
+    # Two hops: decode's field map filters the host surfaces, which are
+    # themselves the table's ``manifest_section`` fields.
+    ("manifests/decode.py", "capability_fields"): "_host_surfaces",
+}
+"""Every switchboard site with a derived enumeration, and the symbol its body
+must reach the descriptor table through."""
+
+
+def _function_source(rel: str, name: str) -> str:
+    """The source text of the module-level function ``name`` in
+    ``agentworks/<rel>``."""
+    path = Path(agentworks.__file__).parent / rel
+    source = path.read_text(encoding="utf-8")
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.FunctionDef) and node.name == name:
+            segment = ast.get_source_segment(source, node)
+            assert segment is not None
+            return segment
+    raise AssertionError(f"{rel}: function {name!r} not found (this guard's baseline drifted from HEAD)")
+
+
+def _referenced_names(source: str) -> set[str]:
+    """Every bare name read and every imported alias bound in ``source``.
+
+    AST, not substring: a docstring or comment mentioning the table is a
+    string or trivia rather than a reference, so it cannot satisfy the pin.
+    """
+    names: set[str] = set()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Name):
+            names.add(node.id)
+        elif isinstance(node, ast.ImportFrom):
+            names.update(alias.asname or alias.name for alias in node.names)
+    return names
+
+
+def test_each_derived_site_reads_the_descriptor_table_in_its_own_body() -> None:
+    """Each switchboard site's enumeration is DERIVED, not merely correct.
+
+    The sibling test above compares each site's enumeration against the
+    table, which a hand-written enumeration satisfies just as well as a
+    derived one: re-hardcoding ``_capability_kinds`` as a frozenset literal,
+    or ``capability_fields`` as a dict literal, keeps every set-equality and
+    identity assertion green. That is drift detection, not derivation
+    enforcement, and the collapse this step performed is worth nothing if
+    the switchboard can quietly grow back one correct-looking literal at a
+    time.
+
+    So this pins the derivation structurally: each site's body must reach the
+    descriptor table. It is the technique the graph guard and the recipe gate
+    drift guard already use, and it carries their residual too, that someone
+    determined can satisfy it with a vestigial reference. It stops the
+    accidental regression, which is the one that actually happens.
+    """
+    offenders = [
+        f"{rel}:{function} does not reach the descriptor table (expected a reference to {symbol})"
+        for (rel, function), symbol in _DERIVED_SITES.items()
+        if symbol not in _referenced_names(_function_source(rel, function))
+    ]
+    assert not offenders, (
+        "A capability-switchboard site stopped deriving its enumeration from "
+        "the descriptor table. An enumeration written out by hand is exactly "
+        "what step 2.0 collapsed; build the site from "
+        "capability_descriptors() instead:\n" + "\n".join(offenders)
+    )
 
 
 # -- The installed index (inverted registration) ----------------------------
