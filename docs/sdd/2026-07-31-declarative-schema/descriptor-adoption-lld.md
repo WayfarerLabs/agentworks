@@ -321,34 +321,33 @@ no backend-level config channel at all (`plugins/onepassword/backend.py:11`, cit
 surface today (session-template), because agent recipes carry no harness config. Slots had zero
 exercised cases.
 
-> **PROVISIONAL, 2026-08-06: under discussion with the roadmap lead, do NOT build to this yet.** The
-> operator paused step 2.3 to settle this with the roadmap lead. Two designs have already been
-> rescinded here (the seed's schema slots, then `config_model_for(consuming_kind)`), and the framing
-> below is the third and current one, recorded so the reasoning is not lost. It is not settled.
-> Nothing in the code implements it: step 2.3 was stopped before it wrote anything, so the tree is
-> clean and no rework is owed whichever way this lands.
+**Config is offered per FACET** (operator ruling, 2026-08-06, roadmap note 4; settles this section
+after two superseded designs, the seed's schema slots and `config_model_for(consuming_kind)`).
 
-**Config belongs to the API METHODS, not to the capability object** (operator, 2026-08-06,
-superseding the consuming-kind keying this section first specified). A capability exposes a fixed
-set of methods; each method that takes config has a config TYPE, and that type is the config. There
-is no second table to declare, name, or keep in step with the methods, because the method's contract
-carries it. Choosing the method IS choosing the config.
+A **facet** is the level a capability is driven at: `vm`, `user`, `workspace`, `session`, pairing
+that level's methods with that level's config. A capability offers a fixed set of facet configs the
+same way it offers a fixed set of API methods; consumers choose which facet they drive, so producers
+never know their consumers. Core asks `config_for(facet)` (names indicative).
 
 ```python
 class Capability:
-    config_model: ClassVar[type[BaseModel]]          # today: one config shared by all this
-                                                     # capability's operations
+    config_model: ClassVar[type[BaseModel]]          # today: one config, no facet named
 ```
 
 Every capability today has exactly one config shared by all of its operations, so a vm-platform
-author writes `config_model = LimaConfig` and names nothing. Wave 4's harness integrations have
-methods that run at different levels (`vm_init`, `user_init`, `workspace_init`, session
-`start`/`resume`), so their configs differ per method for the same reason their parameters do; a
-vm-template's admin attachment and an agent-template both carry the config for `user_init`, exactly
-as both call it. Asking for a config a capability does not have is a hard error naming what it does
-have. One implementation requirement: core validates a declared blob at FINALIZE, before any method
-runs, so the method-to-config association must be introspectable rather than living only in a
-signature the framework never reads.
+author writes `config_model = LimaConfig` and names no facet. Only harness-integration declares
+per-facet configs, and only in wave 4, whose methods run at different levels (`vm_init`,
+`user_init`, `workspace_init`, session `start`/`resume`).
+
+**Facets are deliberately NOT scopes, and core owns the mapping.** The roadmap's scopes are `vm`,
+`admin`, `agent`, `workspace`, `session`; the facets are the four levels above. Admin and agent both
+resolve to the `user` facet, and session start and resume share the `session` facet, so a
+vm-template's admin attachment and an agent-template get the same answer by construction rather than
+by each capability encoding that they mean the same thing. A capability only ever sees a facet.
+
+Asking for a facet a capability does not offer is a hard error naming what it does offer. **Readable
+at finalize:** core reads the facet-config association before any method runs, so it must be
+declared data, not merely a signature annotation the framework never reads.
 
 **Why this replaced `config_model_for(consuming_kind)`.** That design made every PRODUCER enumerate
 its CONSUMERS, so adding a hosting surface meant editing every capability that should serve it, and

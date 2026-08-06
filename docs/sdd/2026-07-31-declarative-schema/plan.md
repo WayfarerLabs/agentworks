@@ -311,50 +311,47 @@ the derivation sequence are not started.
     template. FR17 must not be implemented as `isinstance(ref, TemplateReference)`: that filter
     really means "points at a template" and would silently misclassify any future uses-a-template
     edge as inheritance, reintroducing the same conflation one level down. The LLD names the
-    explicit relationship marker instead. **Step 2.3 is PAUSED as of 2026-08-06**: the config
-    contract is under discussion with the roadmap lead. The box below records the current (third)
-    framing, superseding schema slots and `config_model_for(consuming_kind)`, but it is NOT settled
-    and no code implements it. The step was stopped before it wrote anything, so no rework is owed
-    whichever way it lands.
-
-- [ ] Per-capability config declared as a producer-side declaration (operator, 2026-08-06). The
-      common case spells nothing extra: `config_model = X` on the implementation, one unnamed
-      config, which covers every capability today. A capability serving several surfaces
-      additionally declares NAMED configs using the scope vocabulary that already names its API
-      methods (`vm`, `user`, `workspace`, `session`), and the CONSUMING resource kind declares which
-      config it uses, exactly as it chooses which method to call. Asking for a config a capability
-      does not have is a hard error naming what it does have; pin it with a test. **Config presence
-      is NOT the support claim** and must not become one, or this is the rescinded slot mechanism
-      under a new name: per the roadmap's scope-participation contract, support is carried by the
-      implementation (no-op base defaults, an integration implements what it supports) and accepting
-      no config at a surface just means emitting no schema there. Two superseded designs, both
-      rescinded before any model registered through them: schema slots (2026-08-05) and
-      `config_model_for(consuming_kind)` (2026-08-06, because it made every producer enumerate its
-      consumers, was more dynamic than the fixed API it parallels, and forced each integration to
-      encode that vm-template-hosting-admin and agent-template mean the same thing). The
-      descriptor's deferred `config_schema` field (the kind's model contract) is created here, and
-      union assembly is per `(kind, config)`, which reduces to today's per-kind union while every
-      capability has one unnamed config. Registration carries `contract_version` (day-one, operator
-      ruling) and passes the registration-time conformance checks from 2.0 (implementation-contract,
-      metadata, constructibility, required ops, plus config model conformance added here) that
-      replace the retired type-and-cast seam. The secret-backend `mapping_model` registers as that
-      kind's config model; its constructed-singleton instance policy stays the descriptor-carried
-      interim exception (wave 3 re-homes it, not this effort). Empty-config capabilities register
-      the shared empty model. Inventory re-enumerated 2026-08-02, still re-check at implementation:
-      vm-platform lima, wsl2, azure-vm (including the nested `service_principal` model), proxmox,
-      aws-ec2 (new, renamed from ec2 by PR #363; nested `credentials` model with `access_key_secret`
-      as a `SecretRef` defaulting to the well-known name, plus the `instance_types` catalog);
-      git-credential-provider github (scope union: repos/owner mutual exclusion as a model
-      validator; `token` as `SecretRef` with the `git-token-{owner_name}` template), azdo;
-      harness-integration (the kind renamed by PR #383) shell (config: command, resume_command,
-      required_commands; the `restart_command` alias was removed by the session-resume SDD before
-      wave 2, so shell's config is just those three fields), claude-code, codex (`extra_args` list
-      plus flag fields); secret backends env-var, prompt (no mapping), onepassword (mapping is
-      itself a union: `op://` string or account/reference table). **Modeling consequence (2.1
-      LLD):** a mapping whose root is a bare string or a string-or-table union cannot be a
-      `BaseModel` at all, so backend mapping models extend the root-model base, not the mapping
-      base. Do not model the generic `False` opt-out into a backend's model: it is filtered by the
-      loop before any backend sees it (`secrets/base.py:133`).
+    explicit relationship marker instead. - [ ] Per-capability config offered per FACET (operator
+    ruling, 2026-08-06, roadmap note 4; settles the contract after two superseded designs, schema
+    slots and `config_model_for(consuming_kind)`). A facet is the level a capability is driven at
+    (`vm`, `user`, `workspace`, `session`), pairing that level's methods with its config. A
+    capability offers a fixed set of facet configs the way it offers a fixed set of API methods, and
+    consumers choose which facet they drive, so producers never know their consumers; core asks
+    `config_for(facet)` (names indicative). **The ordinary case stays invisible:** every capability
+    today has one config shared by all its operations, so it writes `config_model = X` and names no
+    facet. Only harness-integration declares per-facet configs, in wave 4. **Facets are NOT scopes
+    and core owns the mapping:** admin and agent both resolve to `user`, session start and resume
+    share `session`, so a vm-template admin attachment and an agent-template agree by construction
+    rather than by each capability encoding it. **Readable at finalize:** core reads the
+    facet-config association before any method runs, so it must be declared data, not merely a
+    signature annotation. Asking for a facet a capability does not offer is a hard error naming what
+    it does offer; pin it with a test. **Config presence is NOT the support claim** and must not
+    become one, or this is the rescinded slot mechanism under a new name: support is carried by the
+    implementation, and accepting no config at a facet just means emitting no schema there. "Facet"
+    is a plain noun here; the machinery meaning retired on 2026-08-05 (declaration contracts,
+    support-by-presence, grants) stays dead. The descriptor's deferred `config_schema` field (the
+    kind's model contract) is created here, and union assembly is per `(kind, facet)`, reducing to
+    today's per-kind union while every capability declares one config and no facet. Registration
+    carries `contract_version` (day-one, operator ruling) and passes the registration-time
+    conformance checks from 2.0 (implementation-contract, metadata, constructibility, required ops,
+    plus config model conformance added here) that replace the retired type-and-cast seam. The
+    secret-backend `mapping_model` registers as that kind's config model; its constructed-singleton
+    instance policy stays the descriptor-carried interim exception (wave 3 re-homes it, not this
+    effort). Empty-config capabilities register the shared empty model. Inventory re-enumerated
+    2026-08-02, still re-check at implementation: vm-platform lima, wsl2, azure-vm (including the
+    nested `service_principal` model), proxmox, aws-ec2 (new, renamed from ec2 by PR #363; nested
+    `credentials` model with `access_key_secret` as a `SecretRef` defaulting to the well-known name,
+    plus the `instance_types` catalog); git-credential-provider github (scope union: repos/owner
+    mutual exclusion as a model validator; `token` as `SecretRef` with the `git-token-{owner_name}`
+    template), azdo; harness-integration (the kind renamed by PR #383) shell (config: command,
+    resume_command, required_commands; the `restart_command` alias was removed by the session-resume
+    SDD before wave 2, so shell's config is just those three fields), claude-code, codex
+    (`extra_args` list plus flag fields); secret backends env-var, prompt (no mapping), onepassword
+    (mapping is itself a union: `op://` string or account/reference table). **Modeling consequence
+    (2.1 LLD):** a mapping whose root is a bare string or a string-or-table union cannot be a
+    `BaseModel` at all, so backend mapping models extend the root-model base, not the mapping base.
+    Do not model the generic `False` opt-out into a backend's model: it is filtered by the loop
+    before any backend sees it (`secrets/base.py:133`).
 - [ ] **Strict-mode tightening is a BREAKING change and ships with an operator note.** The 2.1 base
       model is `strict=True`, and while today's hand-rolled validators are almost all
       `isinstance`-strict already, proxmox is not: `plugins/proxmox/platform.py:93` does

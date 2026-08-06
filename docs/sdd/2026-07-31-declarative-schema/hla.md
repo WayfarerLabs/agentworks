@@ -94,21 +94,20 @@ plugin promise (that stays gated on the roadmap's wave 8). Secret-backend's cons
 registry policy is a descriptor-carried interim exception that wave 3 removes; `_VMPlatformKind`
 moves in from `vms/kinds.py` for symmetry during adoption.
 
-> **PROVISIONAL, 2026-08-06: under discussion with the roadmap lead, do NOT build to this yet.** The
-> operator paused step 2.3 to settle this with the roadmap lead. Two designs have already been
-> rescinded here (the seed's schema slots, then `config_model_for(consuming_kind)`), and the framing
-> below is the third and current one, recorded so the reasoning is not lost. It is not settled.
-> Nothing in the code implements it: step 2.3 was stopped before it wrote anything, so the tree is
-> clean and no rework is owed whichever way this lands.
+**Config is offered per FACET** (operator ruling, 2026-08-06, roadmap note 4; settles the contract
+after two superseded designs, the seed's schema slots and `config_model_for(consuming_kind)`).
 
-**Config belongs to the API METHODS, not to the capability object** (operator, 2026-08-06). This is
-the settled framing, and it supersedes two earlier designs in a row: the seed's schema slots, and
-`config_model_for(consuming_kind)`.
+A **facet** is the level a capability is driven at: `vm`, `user`, `workspace`, `session`. It pairs
+that level's methods with that level's config. A capability offers a fixed set of facet configs the
+same way it offers a fixed set of API methods, and consumers choose which facet they drive, so
+producers never know their consumers. Core asks `config_for(facet)`.
 
-A capability exposes a fixed set of methods. Each method that takes config has a config TYPE, and
-that type is the config. There is no second table of config models to declare, name, or keep in step
-with the methods, because the method's own contract carries it. A consumer that drives a capability
-at some level chooses a method, and choosing the method IS choosing the config.
+**Facets are deliberately NOT scopes, and core owns the mapping between them.** The roadmap's scopes
+are `vm`, `admin`, `agent`, `workspace`, `session`; the facets are the four levels above. Admin and
+agent both resolve to the `user` facet, and session start and resume share the `session` facet, so a
+vm-template's admin attachment and an agent-template get the same answer BY CONSTRUCTION rather than
+by each capability encoding that they mean the same thing. Core performs that mapping; a capability
+only ever sees a facet.
 
 - **The common case spells nothing extra.** Every capability today has one config shared by all of
   its operations, so it writes `config_model = X` and nothing else. That covers vm-platform,
@@ -131,11 +130,8 @@ dynamic than the API it parallels, whose methods and levels are settled; and it 
 integration to encode that vm-template-hosting-admin and agent-template mean the same thing. All
 three dissolve once the config is simply part of the method contract.
 
-**One implementation requirement this framing creates.** Core validates a declared config blob at
-FINALIZE, before any method runs, so the association from method to config type has to be
-introspectable rather than living only in a signature annotation the framework never reads. Step 2.3
-keeps that association adjacent to the method contract rather than in a separate registry, precisely
-so the two cannot drift; the drift rule the previous design needed stops existing.
+**Readable at finalize.** Core reads the facet-config association before any method runs, so it must
+be DECLARED DATA, not merely a signature annotation the framework never reads.
 
 **Config presence is NOT the support claim, and must not become one.** That is the line between this
 and the rescinded slot mechanism. The roadmap's scope-participation contract is explicit: scope
@@ -144,8 +140,8 @@ an integration implements what it supports), and "accepting no config at a surfa
 schema for it". So a capability may support a scope while declaring no config there, and a method
 that takes no config is ordinary. Wiring the two together would reinvent slots under a new name.
 
-Union assembly is per `(kind, config)`, which reduces to today's per-kind union while every
-capability has exactly one unnamed config. The descriptor carries no config field until step 2.3
+Union assembly is per `(kind, facet)`, which reduces to today's per-kind union while every
+capability declares one config and no facet. The descriptor carries no config field until step 2.3
 registers the first model.
 
 ### Component 1: the schema foundation
@@ -192,11 +188,11 @@ The capability contract changes from invoked validation to declared schema:
 - Each capability class declares `config_model` (a model class) at registration; capabilities with
   no config declare the shared empty model. Secret backends declare `mapping_model` the same way,
   dissolving `validate_mapping` and the classmethod-vs-instance inconsistency.
-- The core reaches a model by asking the capability for a named config, defaulting to the unnamed
-  one (Component 0), never by assuming a capability has exactly one. The declaration above is all a
-  simple capability author writes; the indirection exists so a capability serving several surfaces
-  (wave 4's harness integrations) adds configs without any framework change, and so consuming kinds
-  pick a config the way they pick an API method. Registration-time conformance checks every model an
+- The core reaches a model by asking the capability `config_for(facet)` (Component 0), never by
+  assuming a capability has exactly one. The declaration above is all a simple capability author
+  writes, since today every capability has one config and names no facet; the indirection exists so
+  wave 4's harness integrations add per-facet configs without any framework change, and so consumers
+  pick a facet the way they pick an API method. Registration-time conformance checks every model an
   implementation offers against the kind's model contract.
 - The base `Capability.validate` / `Capability.dependencies` classmethods are retired. The core
   performs both: validation is `model_validate` on the registered model (owner-framed by the error
