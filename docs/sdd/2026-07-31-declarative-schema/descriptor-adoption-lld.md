@@ -94,6 +94,15 @@ at module import. This inherits the existing cycle discipline rather than invent
 > order step 4's snapshot tuple wants. Where sections 3, 10, and 12 write `CAPABILITY_DESCRIPTORS`,
 > read `capability_descriptors()`. The lazy discipline buys CYCLE SAFETY, not import deferral:
 > anything importing `resources.kinds` now transitively loads the capability packages.
+>
+> **The same constraint applied one level down at every derived site**, so each of these is a cached
+> accessor rather than the module-level constant the LLD writes, for the identical reason (the
+> consuming module loads before the capability packages): `_CAPABILITY_KINDS` reads as
+> `_capability_kinds()`, `_CAPABILITY_REGISTRY_LOADERS` as `_capability_registry_loaders()`,
+> `CAPABILITY_ADAPTERS` as `capability_adapters()`, and `CAPABILITY_FIELDS` as `capability_fields()`
+> (with an internal `_host_surfaces()`). Caching is safe because every cached value derives only
+> from frozen module-level records and caches ACCESSORS rather than registries, so plugin seating
+> and snapshot/restore stay fully visible. Read sections 3, 6, 10, and 12 through these spellings.
 
 `KIND_REGISTRY` stays the all-kinds runtime map; the descriptor is the capability-kind SWITCHBOARD
 enumeration. Their relationship is pinned, not merged: the guard (section 12) asserts

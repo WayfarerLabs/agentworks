@@ -169,7 +169,7 @@ policy is recorded as an explicit descriptor-carried interim exception (wave 3 r
       any registry mutation, so atomic seating is preserved; negative tests cover every defect
       class. Behavior-additive: all shipped built-ins and the onepassword plugin conform. (Commits
       `2d366643`, `98e80831`.)
-- [ ] Each switchboard site derived from the descriptor, one commit per site, full gate green after
+- [x] Each switchboard site derived from the descriptor, one commit per site, full gate green after
       each: the adapter table (`plugins/adapters.py` `CAPABILITY_ADAPTERS`), the graph kind set and
       readiness dispatch (`resources/graph.py` `_CAPABILITY_KINDS`, `_capability_node_readiness`),
       the per-kind registry loaders (`resources/graph.py` `_CAPABILITY_REGISTRY_LOADERS`), bootstrap
@@ -177,11 +177,17 @@ policy is recorded as an explicit descriptor-carried interim exception (wave 3 r
       `_capability_registries`). Manifest decode's per-kind capability branches derive too, except
       the phase-1 interim decode fork the LLD scopes to 2.5. The migrator's kind-participation flags
       stay hand-maintained (deferred `migration_participation` field; the migrator is a deliberately
-      independent frozen oracle).
-- [ ] The guard test (`tests/plugins/test_plugin_framework.py`
+      independent frozen oracle). (Commits `314f5402` snapshot tuple, `de6ee365` bootstrap
+      publication, `c296b74e` registry loaders, `a59ff186` kind set and readiness, `a1892685`
+      adapters, `459ab313` decode host surfaces.)
+- [x] The guard test (`tests/plugins/test_plugin_framework.py`
       `test_capability_adapters_keys_match_the_capability_category_kinds`) flips from "detect an
       omitted site" to "assert every site derives from the descriptor"; the sibling drift guards
       (`test_recipe_gate_drift.py`, `test_harness_integration_gate_drift.py`) are reconciled.
+      (Commit `1a4a9ece`; renamed to
+      `test_every_capability_switchboard_site_derives_from_the_descriptor` since the old name no
+      longer described it, and proven non-vacuous by mutation. Sibling guards got docstring-only
+      changes, no assertion touched.)
 - [ ] Reviewer pass on the whole step; findings fixed. (Roadmap lead reviews the PR before merge.)
 
 **Progress note, 2026-08-05 (paused here for a design revision).** The first batch (the three boxes
@@ -251,6 +257,21 @@ the derivation sequence are not started.
       resolvability prediction, and dependency listings; readiness/enablement propagation across it
       is this LLD's policy call), and the retirement of the session resolver's use-time completeness
       call (`sessions/templates.py::_validate_merged`) in favor of the finalize pass.
+  - **FR17 starting point, surveyed 2026-08-06.** Half the machinery already exists and the LLD must
+    not rebuild it: `ResourceReference` (`resources/reference.py:59`) has typed subclasses
+    `SecretReference` and `TemplateReference`, and all four template kinds emit `TemplateReference`
+    from their `for parent in self.inherits` loop (`agents/template.py:59`, plus the vms,
+    workspaces, and sessions equivalents) with usage "a parent template". The subclass survives into
+    `edges_of`, so the type is available to consumers at runtime. What is missing is only the
+    consuming half: NO traversal distinguishes today, so an inherits edge and a uses edge are
+    treated identically, which is exactly the overload FR17 was raised against.
+  - **Type the RELATIONSHIP, not the target kind (LLD requirement).** `TemplateReference` is
+    documented as "targeting a template-kind Resource", so it types the target, and it coincides
+    with inheritance today only because `inherits` is currently the sole reason to point at a
+    template. FR17 must not be implemented as `isinstance(ref, TemplateReference)`: that filter
+    really means "points at a template" and would silently misclassify any future uses-a-template
+    edge as inheritance, reintroducing the same conflation one level down. The LLD names the
+    explicit relationship marker instead.
 - [ ] Per-capability models registered as `config_model` on the implementation, exactly one per
       implementation (schema slots were rescinded by the operator on 2026-08-05 before any model
       registered through them). The core reads a model only via `config_model_for(consuming_kind)`,
