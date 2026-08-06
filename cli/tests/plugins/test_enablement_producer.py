@@ -36,7 +36,7 @@ from agentworks.capabilities.harness_integration import ensure_harness_integrati
 from agentworks.errors import ConfigError, StateError
 from agentworks.git_credentials import remote_advisories
 from agentworks.git_credentials.credential import GitCredentialConfig
-from agentworks.plugins import CAPABILITY_ADAPTERS, Plugin, seated_plugin
+from agentworks.plugins import Plugin, capability_adapters, seated_plugin
 from agentworks.plugins.enablement import plugin_enablement_source
 from agentworks.resources.graph import (
     DependencyState,
@@ -148,7 +148,7 @@ def _publish_capability(registry: Registry, kind: str, name: str, plugin: str = 
     """Publish a seated fixture impl's capability row with a system-plugin
     origin (the shape ``publish_plugins`` will produce in Phase 5)."""
     origin = Origin.system_plugin(plugin=plugin, source=f"agentworks.plugins.{plugin}")
-    row = CAPABILITY_ADAPTERS[kind].build_row(name, origin)
+    row = capability_adapters()[kind].build_row(name, origin)
     registry.add(kind, name, row, origin)
 
 
@@ -159,7 +159,7 @@ def _publish_builtin_backend(registry: Registry, name: str) -> None:
     fixture backend in under a built-in origin (Phase 5's publisher split, not
     this phase's concern)."""
     origin = Origin.built_in(source="agentworks.secrets.backends")
-    row = CAPABILITY_ADAPTERS["secret-backend"].build_row(name, origin)
+    row = capability_adapters()["secret-backend"].build_row(name, origin)
     registry.add("secret-backend", name, row, origin)
 
 

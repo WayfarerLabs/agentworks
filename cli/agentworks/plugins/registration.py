@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any
 
 from agentworks.capabilities.conformance import conformance_error
 from agentworks.capabilities.descriptor import capability_descriptors, descriptor_for
-from agentworks.plugins.adapters import CAPABILITY_ADAPTERS
+from agentworks.plugins.adapters import capability_adapters
 from agentworks.plugins.base import Plugin, PluginError
 
 if TYPE_CHECKING:
@@ -76,12 +76,13 @@ def _validate_descriptor(plugin: Plugin) -> list[tuple[CapabilityAdapter, str, t
     if not plugin.name or "/" in plugin.name:
         raise PluginError(f"system plugin name {plugin.name!r} must be non-empty and '/'-free")
 
+    adapters = capability_adapters()
     planned: list[tuple[CapabilityAdapter, str, type]] = []
     seen: set[tuple[str, str]] = set()
     for kind, impls in plugin.capabilities.items():
-        adapter = CAPABILITY_ADAPTERS.get(kind)
+        adapter = adapters.get(kind)
         if adapter is None:
-            known = ", ".join(sorted(CAPABILITY_ADAPTERS))
+            known = ", ".join(sorted(adapters))
             raise PluginError(
                 f"system plugin {plugin.name!r} declares capability kind {kind!r}, "
                 f"which has no adapter (known capability kinds: {known})"

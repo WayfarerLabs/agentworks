@@ -42,7 +42,7 @@ from typing import TYPE_CHECKING, Protocol, cast
 
 from agentworks.errors import ConfigError
 from agentworks.manifests.package import publish_manifest_package
-from agentworks.plugins.adapters import CAPABILITY_ADAPTERS
+from agentworks.plugins.adapters import capability_adapters
 from agentworks.resources import Origin
 
 if TYPE_CHECKING:
@@ -114,10 +114,11 @@ def publish_plugins(registry: Registry, config: Config) -> None:
     # enablement source (LLD b) marks a not-opted-in plugin's rows disabled at
     # finalize; a row exists only for an actually-seated impl, since build_row
     # reads the seated occupant.
+    adapters = capability_adapters()
     for plugin in SYSTEM_PLUGINS.values():
         origin = Origin.system_plugin(plugin=plugin.name, source=f"agentworks.plugins.{plugin.name}")
         for kind, impls in plugin.capabilities.items():
-            adapter = CAPABILITY_ADAPTERS[kind]
+            adapter = adapters[kind]
             for impl in impls:
                 name = cast("_NamedImpl", impl).name
                 registry.add(kind, name, adapter.build_row(name, origin), origin)

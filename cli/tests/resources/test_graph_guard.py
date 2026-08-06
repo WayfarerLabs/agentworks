@@ -265,13 +265,14 @@ _REGISTRY_READ_ALLOWLIST = frozenset(
         "capabilities/harness_integration/__init__.py",
         "capabilities/git_credential/__init__.py",
         "secrets/backends.py",
-        # Plugin framework: the per-kind adapters SEAT plugin impls into the
-        # four registries (the plugin analog of the built-in publishers).
-        # ``plugins/registration.py`` is deliberately ABSENT: its
-        # snapshot/restore tuple now derives from the descriptor table
-        # (declarative-schema step 2.0), so it names no registry at all and
-        # exempting it would only excuse a future probe.
-        "plugins/adapters.py",
+        # The whole plugin framework is deliberately ABSENT. Its adapters
+        # still seat plugin impls into the four registries (the plugin analog
+        # of the built-in publishers), but the one generic adapter reaches
+        # them through the descriptor's registry accessor
+        # (declarative-schema step 2.0), exactly as the graph builder does,
+        # so ``plugins/adapters.py`` and ``plugins/registration.py`` name no
+        # registry at all and exempting either would only excuse a future
+        # probe.
         # The four capability-kind descriptors (declarative-schema step 2.0).
         # Each carries the lazy accessor for its own registry, which IS the
         # builder's per-kind loader relocated beside the kind it belongs to:

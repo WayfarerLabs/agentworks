@@ -18,10 +18,10 @@ import agentworks.plugins as plugins_pkg
 from agentworks.capabilities.vm_platform.base import VMPlatform
 from agentworks.errors import StateError
 from agentworks.plugins import (
-    CAPABILITY_ADAPTERS,
     SYSTEM_PLUGINS,
     Plugin,
     PluginError,
+    capability_adapters,
     register_plugin,
     seated_plugin,
 )
@@ -386,7 +386,7 @@ def test_capability_clash_between_two_plugins_names_the_other_plugin() -> None:
     ],
 )
 def test_adapter_seats_and_builds_a_row(kind: str, seated_name: str, expects_description: bool) -> None:
-    adapter = CAPABILITY_ADAPTERS[kind]
+    adapter = capability_adapters()[kind]
     origin = _plugin_origin()
     with seated_plugin(fixture_plugin()):
         assert adapter.peek(seated_name) is not None
@@ -399,14 +399,14 @@ def test_adapter_seats_and_builds_a_row(kind: str, seated_name: str, expects_des
 
 
 def test_build_row_on_an_unseated_name_raises_state_error() -> None:
-    adapter = CAPABILITY_ADAPTERS["vm-platform"]
+    adapter = capability_adapters()["vm-platform"]
     with pytest.raises(StateError):
         adapter.build_row("definitely-not-seated", _plugin_origin())
 
 
 def test_capability_adapters_keys_match_the_capability_category_kinds() -> None:
     capability_kinds = {kind for kind, handler in KIND_REGISTRY.items() if handler.category == "capability"}
-    assert set(CAPABILITY_ADAPTERS) == capability_kinds
+    assert set(capability_adapters()) == capability_kinds
 
 
 # -- The installed index (inverted registration) ----------------------------
