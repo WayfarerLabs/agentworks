@@ -45,6 +45,8 @@ class AdminConfig(DeclaredResource):
     # ``SkipJsonSchema`` rides along because the field is still METADATA:
     # without it the override would re-enter this kind's spec surface.
     name: SkipJsonSchema[str] = "default"
+    """What this admin-template is called. Defaults to `default`, which is
+    the one `vm create` uses when `--admin-template` names none."""
 
     username: str = "agentworks"
     """The Linux user provisioned as the VM's admin."""

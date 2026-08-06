@@ -118,8 +118,18 @@ class EnvelopeMetadata(AgwModel):
     """
 
     name: SkipJsonSchema[str]
+    """What this resource is called: the second half of the `kind/name`
+    address every other resource and every command refers to it by.
+    Lowercase alphanumeric with hyphens or underscores, starting and
+    ending with a letter or digit."""
+
     description: SkipJsonSchema[str | None] = None
+    """One operator-facing line saying what this resource is for, shown by
+    `agw resource list` and `agw resource describe`."""
+
     expires: SkipJsonSchema[Expiry | None] = None
+    """When this resource stops being valid: a date (`2026-01-01`) or an
+    RFC 3339 timestamp. Recorded and validated; nothing acts on it yet."""
 
 
 #: The metadata keys a manifest document may carry, derived from the base

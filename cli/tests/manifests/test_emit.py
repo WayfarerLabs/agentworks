@@ -187,6 +187,27 @@ def test_metadata_follows_the_KIND_not_the_shared_base() -> None:
     assert "required" not in admin
 
 
+def test_every_metadata_field_of_every_kind_carries_hover_text() -> None:
+    """``metadata`` is the one block every document writes, whatever its
+    kind, so a missing description there is a blank hover on the most-read
+    surface the schema has. Per KIND, because a kind that re-declares a
+    metadata field supplies its own docstring or none.
+    """
+    blank = [
+        (kind, field)
+        for kind in emittable_kinds()
+        for field, prop in _metadata_properties(kind).items()
+        if not prop.get("description")
+    ]
+    assert not blank
+
+
+def _metadata_properties(kind: str) -> dict[str, Any]:
+    schema = document_schema(kind)
+    metadata: dict[str, Any] = schema["$defs"][schema["properties"]["metadata"]["$ref"].rsplit("/", 1)[-1]]
+    return metadata["properties"]  # type: ignore[no-any-return]
+
+
 def test_a_name_cap_the_decoder_applies_reaches_the_schema() -> None:
     """``NAME_MAX_LENGTH`` is applied by decode to exactly the names a
     manifest carries, so stating it is faithful. It is also one derived

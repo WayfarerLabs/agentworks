@@ -493,7 +493,10 @@ def resource_sample(
     output.info(f"{verb} {path}")
     output.info("Uncomment the document lines (delete one leading '#') to activate.")
     if not appended:
-        output.detail("The file opens with a schema modeline; a schema-aware editor will check it as you type.")
+        output.detail(
+            "The first line associates a schema, so a schema-aware editor checks the file as you type. Leave it as a "
+            "comment."
+        )
 
 
 @resource_app.command("schema")

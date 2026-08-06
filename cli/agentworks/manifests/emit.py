@@ -31,9 +31,11 @@ design record, including what is deliberately not expressed and why.
 from __future__ import annotations
 
 import json
+import os.path
+from pathlib import PurePath
 from typing import TYPE_CHECKING, Annotated, Any, Final, Literal, Union, cast
 
-from pydantic import Field, create_model
+from pydantic import Field, StringConstraints, create_model
 from pydantic.fields import FieldInfo
 from pydantic.json_schema import GenerateJsonSchema, SkipJsonSchema
 
@@ -175,9 +177,6 @@ def modeline(*, manifest_path: Path, resources_dir: Path, kind: str | None) -> s
     directory stays portable: moving or copying it does not break the
     association.
     """
-    import os.path
-    from pathlib import PurePath
-
     filename = ENVELOPE_SCHEMA_FILENAME if kind is None else schema_filename(kind)
     target = resources_dir / SCHEMA_DIRNAME / filename
     relative = os.path.relpath(target, start=manifest_path.parent)
@@ -267,12 +266,18 @@ def _metadata_field(row: type[DeclaredResource], name: str) -> tuple[Any, FieldI
     exactly the names a manifest carries (operator-written ones), so
     stating it here is faithful rather than an approximation. The
     CHARACTER rule is deliberately not emitted; see the LLD.
+
+    The cap joins the metadata list rather than arriving as a second
+    ``merge_field_infos`` argument, because merging resets every attribute
+    the later ``FieldInfo`` does not set: verified, and it silently took
+    the field's description with it, which is the hover text an operator
+    reads on the one block every document carries.
     """
     field = row.model_fields[name]
     visible = FieldInfo.merge_field_infos(field)
     visible.metadata = [entry for entry in field.metadata if not _is_skip_marker(entry)]
     if name == "name" and row.NAME_MAX_LENGTH is not None:
-        visible = FieldInfo.merge_field_infos(visible, FieldInfo(max_length=row.NAME_MAX_LENGTH))
+        visible.metadata.append(StringConstraints(max_length=row.NAME_MAX_LENGTH))
     return field.annotation, visible
 
 

@@ -63,9 +63,12 @@ spec:
 - Multiple documents per file are separated with `---`.
 
 `agw resource sample vm-template` prints a commented starter for one kind (`--all` for every kind);
-`--write <file>` saves it under the resources directory instead. Samples are fully commented out --
-delete one leading `#` per line to activate. `agw resource edit KIND/NAME` opens the manifest
-declaring a resource in `$EDITOR`.
+`--write <file>` saves it under the resources directory instead. Samples are fully commented out:
+delete one leading `#` from each DOCUMENT line to activate the parts you want. A saved file also
+opens with a `# yaml-language-server:` line, which is an ordinary comment and stays one;
+uncommenting that would turn it into a key the loader rejects.
+
+`agw resource edit KIND/NAME` opens the manifest declaring a resource in `$EDITOR`.
 
 ## Editing manifests with schema support
 

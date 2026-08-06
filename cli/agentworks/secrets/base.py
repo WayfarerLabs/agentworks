@@ -74,6 +74,9 @@ class SecretDecl(DeclaredResource):
     # OPERATOR wrote, which decode checks against this field's
     # requiredness (``_check_declared_description``).
     description: SkipJsonSchema[str]
+    """What this secret is, in one line. Required on a secret where it is
+    optional on every other kind, because this is the text an operator
+    reads when they are being asked to type the value in."""
 
     hint: str | None = None
     """Operator-facing text shown when the secret has to be entered by
