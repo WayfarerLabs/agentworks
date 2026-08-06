@@ -225,9 +225,21 @@ The harness surface is already fully tagged on main: the harness-integration ren
 `spec.harness_integration: {name: ...}` canonical, built a comment-preserving YAML-rewrite mechanism
 in the migrator (ruamel round-trip plus document-marker text patching, digest/CAS guards,
 backup-first rollback, YAML-native migration units), and scheduled the legacy selector's hard cut
-for its own 0.14.0 phase. This effort's manifest-upgrade mode GENERALIZES that shipped machinery to
-the platform/provider sibling fold rather than building anew, and its hardening step leaves the
-harness selector's removal to the owning SDD.
+for its own 0.14.0 phase.
+
+**Correction (step 2.4 implementation, 2026-08-06): that machinery is NOT at HEAD.** Wave 1's
+`6d44a12c feat(cli)!: remove session compatibility surfaces` deleted `YamlRewrite` and dropped the
+ruamel dependency along with the compatibility surfaces it served, so this paragraph's present tense
+was stale by the time step 2.4 reached it. The mechanism was recovered from that commit's parent and
+generalized, so the OUTCOME matches this paragraph's intent, but the premise that it was shipped
+machinery to build on was wrong: it was archaeology. Also learned in the rebuild, and worth
+carrying: quote preservation is load-bearing rather than cosmetic. Without `preserve_quotes` ruamel
+re-emits `subscription_id: "0000"` bare and the next load reads the integer `0`, so verification
+catches it only after the operator's file has already been rewritten wrong.
+
+This effort's manifest-upgrade mode GENERALIZES that (recovered) machinery to the platform/provider
+sibling fold rather than building anew, and its hardening step leaves the harness selector's removal
+to the owning SDD.
 
 Pre-support already shipped ahead of this SDD (PR #349): manifest decode accepts both shapes and
 warns once, aggregated, on the old one, and `agw resource migrate` emits the tagged form (so the
