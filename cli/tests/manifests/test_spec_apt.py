@@ -86,4 +86,4 @@ def test_every_rejection_points_at_the_sample_surface() -> None:
     with pytest.raises(ConfigError) as caught:
         decode("apt-package", "tools", {})
 
-    assert caught.value.hint == "see `agw resource sample <kind>` for this kind's fields"
+    assert caught.value.hint == "`agw resource sample apt-package` prints this kind's fields"

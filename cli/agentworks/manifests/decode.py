@@ -60,10 +60,17 @@ _ROW_METADATA_FIELDS = frozenset(DeclaredResource.model_fields)
 #: mistake worth a warning.
 _AGENTWORKS_ENV_PREFIX = "AGENTWORKS_"
 
-#: Where an operator goes to see the shape they got wrong. One hint for
-#: every kind, because the sample surface renders the fields live and a
-#: hand-kept per-kind steer is exactly the drift FR13 exists to kill.
-_SAMPLE_HINT = "see `agw resource sample <kind>` for this kind's fields"
+
+def _sample_hint(kind: str) -> str:
+    """Where an operator goes to see the shape they got wrong.
+
+    One hint for every kind, built from the kind rather than written per
+    kind: the sample surface renders the fields live, and a hand-kept
+    per-kind steer is exactly the drift FR13 exists to kill. It is what
+    pays for the hand-written steers this step dropped (the vm-site
+    platform enumeration, the git-credential provider list).
+    """
+    return f"`agw resource sample {kind}` prints this kind's fields"
 
 
 # Kind identifier -> legacy TOML section name(s) (the migrator's table).
@@ -232,7 +239,7 @@ def decode_document(doc: Document, issues: list[str]) -> Any:
             model_cls=model,
             owner=owner,
             location=doc.location,
-            hint=_SAMPLE_HINT,
+            hint=_sample_hint(doc.kind),
         ) from exc
     issues.extend(f"{doc.where}: {issue}" for issue in advisory_issues(resource, doc))
     return resource
