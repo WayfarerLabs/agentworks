@@ -10,13 +10,14 @@ constructs it.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated
 
 from pydantic import Field
 
 from agentworks.declared_resource import DeclaredResource
-from agentworks.env import EnvEntry
-from agentworks.env.entry import env_references
+from agentworks.env.entry import EnvTable, env_references
+from agentworks.schema import ResourceRef, SecretRef
+from agentworks.schema.reference import RefRelationship
 
 if TYPE_CHECKING:
     from agentworks.resources.graph import FinalizeContext
@@ -52,40 +53,70 @@ def tailscale_secret_reference(
 
 
 class VMTemplate(DeclaredResource):
-    """VM template definition. All optional fields use ``None = inherit``
-    semantics except ``tailscale_auth_key``, which is a non-optional
-    bare-string secret name (default ``"tailscale-auth-key"``). The
-    tailscale field carries no inherit shape because the secret name is a
-    deployment-wide convention; operators who want a different name per
-    template set it on the specific template.
+    """VM template definition.
+
+    Every optional field uses ``None = inherit`` semantics, including
+    ``tailscale_auth_key``: the merge reads that distinction, so a default
+    applied at this layer would make every child override its parent.
+    ``ResolvedVMTemplate`` (in ``agentworks.vms.templates``) carries the
+    post-inheritance value, and ``"tailscale-auth-key"`` is its default.
     """
 
-    inherits: list[str] = Field(default_factory=list)
+    inherits: list[
+        Annotated[
+            str,
+            ResourceRef(
+                kind="vm-template",
+                usage="a parent template",
+                relationship=RefRelationship.INHERITS,
+            ),
+        ]
+    ] = Field(default_factory=list)
+    """Parent templates this one composes, nearest last."""
+
     # Provisioning. Deliberately NO site field: a template describes
     # WHAT a VM is; placement (--site, defaults.site, or the
     # infer/prompt model) is host/operator-scoped, and a shared
     # template must not smuggle a per-host placement decision,
     # especially with bundled sites publishing per-host.
     cpus: int | None = None
+    """Virtual CPUs to provision."""
+
     memory: int | None = None
+    """Memory to provision, in GiB."""
+
     disk: int | None = None
+    """Root disk size to provision, in GiB."""
+
     swap: int | None = None
-    # System-wide initialization
+    """Swap to configure, in GiB."""
+
     apt: list[str] | None = None
-    apt_packages: list[str] | None = None
+    """Apt packages installed directly, without an ``apt-package`` row."""
+
+    apt_packages: list[Annotated[str, ResourceRef(kind="apt-package", usage="an apt package")]] | None = None
+    """Names of ``apt-package`` resources installed during VM init."""
+
     snap: list[str] | None = None
-    system_install_commands: list[str] | None = None
-    # Env (declared per-template; merged child-overrides-parent at resolution).
-    # Plaintext or secret references; the loader produces EnvEntry instances.
-    env: dict[str, EnvEntry] = Field(default_factory=dict)
-    # Secret name for the Tailscale auth key. ``None = inherit`` per the
-    # convention used by VMTemplate's other optional fields; the loader
-    # sets it to the operator's string when explicit, to ``None`` when
-    # omitted. ResolvedVMTemplate (in agentworks.vms.templates) carries
-    # the post-inheritance resolved string (default ``"tailscale-auth-key"``).
-    # Bare-string only -- no ``{ secret = "..." }`` polymorphism per the
-    # SDD; the field IS the secret reference.
-    tailscale_auth_key: str | None = None
+    """Snap packages installed during VM init."""
+
+    system_install_commands: (
+        list[Annotated[str, ResourceRef(kind="system-install-command", usage="a system install command")]] | None
+    ) = None
+    """Names of ``system-install-command`` resources run during VM init."""
+
+    env: EnvTable = Field(default_factory=dict)
+    """Environment variables exported on this VM, as a plaintext value or
+    a ``{secret: <name>}`` reference per key. Merged child-overrides-parent
+    at resolution."""
+
+    # Bare-string only, no ``{secret: ...}`` polymorphism: the field IS the
+    # secret reference. The marker carries NO default_template, and the row
+    # base enforces that: this kind composes along an ``inherits`` chain, so
+    # filling an absent value would make ``None`` stop meaning "inherit".
+    tailscale_auth_key: Annotated[str, SecretRef(usage="the Tailscale auth key")] | None = None
+    """The secret naming this VM's Tailscale auth key. Omit it to inherit,
+    which falls back to ``tailscale-auth-key`` once the chain resolves."""
 
     def dependencies(self, context: FinalizeContext) -> list[ResourceReference]:
         """This template's outbound edges: its ``inherits`` edges as

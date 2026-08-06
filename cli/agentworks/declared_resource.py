@@ -52,7 +52,7 @@ from pydantic.json_schema import SkipJsonSchema
 
 from agentworks.errors import StateError
 from agentworks.origin import Origin
-from agentworks.schema import AgwModel
+from agentworks.schema import AgwModel, marker_of
 from agentworks.source_location import SourceLocation, synthesized
 
 if TYPE_CHECKING:
@@ -108,6 +108,44 @@ class DeclaredResource(EnvelopeMetadata):
 
     declared_at: SkipJsonSchema[SourceLocation] = Field(default_factory=synthesized)
     origin: SkipJsonSchema[Origin | None] = None
+
+    @classmethod
+    def __pydantic_init_subclass__(cls, **kwargs: Any) -> None:
+        """Refuse an owner-templated default on an INHERITING kind's row.
+
+        ``AgwModel`` fills any field whose marker declares a
+        ``default_template`` and whose value is absent or ``None``. On a
+        capability config model that is exactly right, because the
+        validated blob IS the effective blob. On a row that composes along
+        an ``inherits`` chain it is wrong, and silently so: ``None`` there
+        means "inherit", so filling it would give every template the
+        literal default, a child that inherits its parent's override would
+        stop doing so, and every template in the config would declare an
+        edge to the default resource.
+
+        So a kind spec's reference markers carry ``kind``, ``usage`` and
+        ``relationship``, never ``default_template``; an inheriting kind's
+        default belongs to the RESOLVED layer, which this base does not
+        model. Enforced here rather than written down, because the next
+        author needs to hit it at import of their own module rather than
+        read this docstring. Keyed on the ``inherits`` field, so a kind
+        that GAINS inheritance inherits the rule with it.
+        """
+        super().__pydantic_init_subclass__(**kwargs)
+        if "inherits" not in cls.model_fields:
+            return
+        offenders = sorted(
+            name
+            for name, field in cls.model_fields.items()
+            if (marker := marker_of(field)) is not None and marker.default_template is not None
+        )
+        if offenders:
+            raise StateError(
+                f"{cls.__name__} composes along an `inherits` chain, so its reference markers may not "
+                f"declare a default_template; {', '.join(offenders)} does. Filling an absent field would "
+                f"make `None` stop meaning `inherit`, so a child that overrides its parent's value would "
+                f"silently keep the framework's default instead. Put the default on the resolved layer."
+            )
 
     @property
     def error_location(self) -> SourceLocation | None:

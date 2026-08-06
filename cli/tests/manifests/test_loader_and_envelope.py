@@ -186,7 +186,7 @@ def test_unknown_kind_gets_kebab_hint(tmp_path: Path) -> None:
         ("agent-template", "mise_lockfile", "git::http://example.com/lock.git", "mise_lockfile is invalid"),
         ("admin-template", "mise_lockfile", "{path: lock}", "mise_lockfile: must be a string"),
         ("agent-template", "mise_install_before", "yesterday", "mise_install_before"),
-        ("agent-template", "mise_install_before", "7", "mise_install_before must be a string"),
+        ("agent-template", "mise_install_before", "7", "mise_install_before: must be a string"),
     ],
 )
 def test_mise_inputs_fail_at_manifest_decode(tmp_path: Path, kind: str, field: str, value: str, match: str) -> None:

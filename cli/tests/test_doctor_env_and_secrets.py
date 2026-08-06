@@ -404,12 +404,12 @@ def test_doctor_shows_noop_secret_backend_sections(tmp_path: Path, monkeypatch) 
 
 
 def test_manifest_issues_surface_as_doctor_rows(tmp_path: Path, monkeypatch, capsys) -> None:
-    """A typo'd key on a manifest-declared resource (e.g.
-    ``github_credentials`` for ``git_credentials`` on an agent-template)
-    used to warn ambiently above the report while the Config row said
-    ok. Doctor now renders manifest issues as warn rows, and passing
-    the pre-loaded set into build_registry keeps the ambient print out
-    of doctor's output entirely."""
+    """A load-time advisory on a manifest-declared resource (here an
+    ``AGENTWORKS_*`` env key the runtime prelude will override) used to
+    warn ambiently above the report while the Config row said ok. Doctor
+    now renders manifest issues as warn rows, and passing the pre-loaded
+    set into build_registry keeps the ambient print out of doctor's output
+    entirely."""
     cfg = _write_config(tmp_path)
     write_manifests(
         tmp_path,
@@ -419,7 +419,8 @@ def test_manifest_issues_surface_as_doctor_rows(tmp_path: Path, monkeypatch, cap
         metadata:
           name: other
         spec:
-          github_credentials: ["github"]
+          env:
+            AGENTWORKS_AGENT: override
         """),
         filename="agent.yaml",
     )
@@ -435,7 +436,7 @@ def test_manifest_issues_surface_as_doctor_rows(tmp_path: Path, monkeypatch, cap
     manifest_rows = [c for c in g.checks if c.name == "Manifest"]
     assert manifest_rows, [c.name for c in g.checks]
     assert manifest_rows[0].status == Status.WARN
-    assert "github_credentials" in (manifest_rows[0].message or "")
+    assert "AGENTWORKS_AGENT" in (manifest_rows[0].message or "")
     assert "agent.yaml" in (manifest_rows[0].message or "")
     # The ok row is withheld when any issue exists.
     assert not any(c.name == "Config is valid" for c in g.checks)

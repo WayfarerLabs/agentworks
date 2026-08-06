@@ -19,12 +19,10 @@ from agentworks.schema import iter_field_docs
 #: green after each, and this set empties as it goes. It goes with
 #: ``decode._DECODERS``.
 _NOT_YET_MODELED = {
-    "agent-template",
     "git-credential",
     "secret",
     "session-template",
     "vm-site",
-    "vm-template",
 }
 
 

@@ -601,14 +601,17 @@ def test_unknown_backend_kind_in_secret_backends_errors(
 @pytest.mark.parametrize(
     ("manifest", "context_label"),
     [
-        (ManifestDoc("vm-template", "default", {"env": {"AGENTWORKS_VM": "override"}}), "vm_templates.default.env"),
+        (
+            ManifestDoc("vm-template", "default", {"env": {"AGENTWORKS_VM": "override"}}),
+            "vm-template/default.env",
+        ),
         (
             ManifestDoc("admin-template", "default", {"env": {"AGENTWORKS_PLATFORM": "override"}}),
             "admin-template/default.env",
         ),
         (
             ManifestDoc("agent-template", "claude", {"env": {"AGENTWORKS_AGENT": "override"}}),
-            "agent_templates.claude.env",
+            "agent-template/claude.env",
         ),
         (
             ManifestDoc("workspace-template", "ws", {"env": {"AGENTWORKS_WORKSPACE": "override"}}),
@@ -816,9 +819,8 @@ def test_vm_template_tailscale_auth_key_nonconforming_warns_but_loads(
     # The secret name is preserved exactly, still declared and usable.
     assert registry.lookup("vm-template", "tester").tailscale_auth_key == "GITHUB_TOKEN"
     issues = _manifest_issues(cfg_file)
-    assert any("GITHUB_TOKEN" in issue and "vm_templates.tester.tailscale_auth_key" in issue for issue in issues), (
-        issues
-    )
+    assert any("GITHUB_TOKEN" in issue and "vm-template/tester" in issue for issue in issues), issues
+    assert any("the Tailscale auth key" in issue for issue in issues), issues
 
 
 def test_env_secret_ref_nonconforming_warns_but_loads(tmp_path: Path) -> None:

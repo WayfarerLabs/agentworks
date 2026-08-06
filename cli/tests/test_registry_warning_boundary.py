@@ -107,9 +107,10 @@ def test_build_registry_with_explicit_manifest_set_does_not_render_warnings(tmp_
     config_path.write_text(f'[operator]\nssh_public_key = "{pub}"\nssh_private_key = "{priv}"\n')
     resources = tmp_path / "resources"
     resources.mkdir()
-    # A warn-mode unknown key, so the manifest set carries a real issue for
-    # the boundary to stay quiet about. An issue-free set would pass this
-    # test without proving anything.
+    # An advisory (an AGENTWORKS_* env key the runtime prelude overrides),
+    # so the manifest set carries a real issue for the boundary to stay
+    # quiet about. An issue-free set would pass this test without proving
+    # anything.
     (resources / "warned.yaml").write_text(
         """apiVersion: agentworks/v1
 kind: vm-template
@@ -117,7 +118,8 @@ metadata:
   name: small
 spec:
   cpus: 2
-  nonsense: true
+  env:
+    AGENTWORKS_VM: nonsense
 """
     )
     warnings: list[str] = []
@@ -128,5 +130,5 @@ spec:
     build_registry(config, manifests)
 
     assert len(manifests.issues) == 1
-    assert "nonsense" in manifests.issues[0]
+    assert "AGENTWORKS_VM" in manifests.issues[0]
     assert warnings == []

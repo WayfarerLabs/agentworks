@@ -53,6 +53,7 @@ class _VMTemplateKind:
     """Implementation of ``ResourceKind`` for ``"vm-template"``."""
 
     kind: str = "vm-template"
+    model: type[DeclaredResource] = VMTemplate
     description: str = "VM configuration (sizing, installed tools, ...)"
     miss_policy: Literal["auto-declare", "error"] = "auto-declare"
     auto_declare_names: frozenset[str] | None = frozenset({"default"})

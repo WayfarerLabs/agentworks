@@ -40,7 +40,7 @@ models). It is the same constraint ``declared_resource.py`` and
 
 from __future__ import annotations
 
-from agentworks.schema._shape import model_is_complete
+from agentworks.schema._shape import marker_of, model_is_complete
 from agentworks.schema.base import (
     AgwModel,
     AgwRootModel,
@@ -97,6 +97,7 @@ __all__ = [
     "config_error_from",
     "extract_references",
     "iter_field_docs",
+    "marker_of",
     "model_doc",
     "model_is_complete",
     "render_type",
