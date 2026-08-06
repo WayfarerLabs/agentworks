@@ -129,7 +129,7 @@ def validate_capability_config(
 
     Raises the error bridge's framed ``ConfigError``, which already carries
     ``location``: a caller must NOT wrap the result with a location of its
-    own (see ``FramedConfigError``).
+    own, or the operator reads it twice.
 
     ``provenance`` is for a config a caller ASSEMBLED by merging an
     inheritance chain: it maps each top-level key to the owner that

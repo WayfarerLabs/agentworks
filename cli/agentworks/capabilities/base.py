@@ -426,7 +426,7 @@ class Capability(ABC):
         ready when it can. The config-dependent half of readiness: the
         readiness fold (LLD c) calls this off the capability's graph-carried
         impl to decide a consuming resource's verdict (a local-Lima site
-        without ``limactl``, keyed on the site's ``platform_config``).
+        without ``limactl``, keyed on the site's platform config).
 
         NON-CONSTRUCTING and total by contract: a classmethod that reads
         ``config`` fields best-effort, tolerates malformed ones, and NEVER

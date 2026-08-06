@@ -135,10 +135,10 @@ has a concrete example, it names the platform and file that demonstrates it.
 A VM platform is the code capable of running VMs on a specific VM provider. Each subclasses
 `VMPlatform` (`base.py`), registers in `VM_PLATFORM_REGISTRY` (`__init__.py`), and publishes as a
 read-only `vm-platform` capability resource. Operators never invoke a platform directly: a
-declarable `vm-site` binds a platform to a config blob (`spec.platform` + `spec.platform_config`),
-and all invocation goes through site resolution (`agentworks.vms.sites`). ADR 0016 records the
-capability/declarable split; ADR 0019 records the orchestration layer that now drives the lifecycle
-(below).
+declarable `vm-site` binds a platform to a config blob (one tagged `spec.platform` table whose
+`name` key selects the platform), and all invocation goes through site resolution
+(`agentworks.vms.sites`). ADR 0016 records the capability/declarable split; ADR 0019 records the
+orchestration layer that now drives the lifecycle (below).
 
 ### Host Control and Platform Obligations
 

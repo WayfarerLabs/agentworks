@@ -210,7 +210,10 @@ class LimaPlatform(VMPlatform):
             # than a state mismatch on a managed entity.
             raise ConnectivityError(
                 "'limactl' not found. Lima is not installed on this machine.",
-                hint=("For remote Lima VMs, declare a vm-site with platform_config.vm_host and pass it via --site."),
+                hint=(
+                    "For remote Lima VMs, declare a vm-site whose "
+                    "`platform: {name: lima, vm_host: ...}` names the host, and pass it via --site."
+                ),
             )
 
     def create(self, request: ProvisionRequest, ctx: RunContext) -> ProvisionResult:

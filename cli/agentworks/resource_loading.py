@@ -39,9 +39,10 @@ class _SynthesizedDecls:
     synthesized ``SourceLocation``. Duck-typed stand-in for config's
     ``_SectionLineMap`` (the loaders only call ``lookup``). Used when entries
     are loaded without a section-line map, so ``declared_at`` falls back to the
-    synthesized sentinel. Manifest decoders pass a real fixed-location shim
-    (``manifests.decode._doc_decls``) instead, so their entries carry the
-    document location.
+    synthesized sentinel. The one caller left is the migrator's frozen TOML
+    oracle, which passes a real section-line map; the manifest side builds
+    its rows from the kinds' own spec models and stamps ``declared_at`` from
+    the document.
     """
 
     def lookup(self, *_path: str) -> SourceLocation:

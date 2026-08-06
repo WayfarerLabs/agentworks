@@ -127,7 +127,7 @@ class VMSiteDecl(DeclaredResource):
     def not_ready(self, deps: Mapping[tuple[str, str], DependencyState]) -> Readiness:
         """This site's readiness verdict, self-determined from its single
         platform dependency's :class:`DependencyState` (the fold hands it in
-        ``deps``) plus its own ``platform_config`` (LLD c). Pure, total,
+        ``deps``) plus its own platform config (LLD c). Pure, total,
         NON-CONSTRUCTING: the config-dependent tool check calls the platform's
         ``not_ready`` classmethod off the graph-carried impl, never building an
         instance (which would re-run the throwing validator: the B1 loop).
@@ -163,7 +163,7 @@ class VMSiteDecl(DeclaredResource):
         return cast("type[VMPlatform]", platform.impl).not_ready(self.platform.config)
 
     def validate_config(self, enabled_backends: frozenset[str], context: FinalizeContext) -> None:
-        """Throwing shape check for the ``platform_config`` blob, run by
+        """Throwing shape check for the platform config block, run by
         the finalize ``validate`` pass (``enabled_backends`` is the
         secret-only R9.9 input, ignored here). Mirrors ``dependencies``:
         the CORE validates the blob against the named platform's declared
@@ -297,7 +297,7 @@ def resolve_site(
     """Resolve a site name to its constructed platform instance.
 
     Returns the platform class instantiated with the site's validated
-    ``platform_config`` (construction is cheap and never resolves or
+    platform config (construction is cheap and never resolves or
     prompts; the declared config secrets join the operation's boundary
     union through the holding node's ``secret_refs``). Manager code
     holds the bound platform and never sees ``VM_PLATFORM_REGISTRY``
