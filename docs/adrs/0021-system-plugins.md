@@ -122,9 +122,10 @@ completes with a summary.
   integration + the `claude` install-command), `proxmox` (vm-platform), and `azure` (the `azure-vm`
   platform, the `azdo` git-credential provider, and the `az-cli` install-command). Together they
   exercise all four capability kinds and the bundled-manifest path against their real consumers, and
-  they establish the migration pattern (impl `git mv` into the plugin package; the core `publish_to`
-  skips the plugin-seated name so it is published once with a `system-plugin` origin, not twice).
-  The core keeps only the universal path (`lima`/`wsl2`, `shell`, `env-var`/`prompt`, `github`).
+  they establish the migration pattern (impl `git mv` into the plugin package; the core capability
+  publisher skips the plugin-seated name so it is published once with a `system-plugin` origin, not
+  twice). The core keeps only the universal path (`lima`/`wsl2`, `shell`, `env-var`/`prompt`,
+  `github`).
 
 ### Negative
 
