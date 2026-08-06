@@ -22,7 +22,7 @@
 
 - [x] Topic-content contract completed as the first design deliverable, reviewed, and committed as
       the sole file in PR #420 for delivery to wave 2's directory on `main`.
-- [ ] PR #420 merged so the topic-content contract message is delivered to wave 2 through `main`.
+- [x] PR #420 merged so the topic-content contract message is delivered to wave 2 through `main`.
 - [x] `prior-art-research.md` covers every source named by R13, ties findings to design decisions,
       and records rejected inferences and source quality.
 - [x] `hla.md` resolves every FRD-assigned question: onboarding state, agent mode, JSON contract,
