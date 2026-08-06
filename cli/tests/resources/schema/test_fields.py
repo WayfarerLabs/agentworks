@@ -259,6 +259,18 @@ def test_no_annotated_types_object_leaks_into_the_record() -> None:
 # --- reference semantics ----------------------------------------------
 
 
+def test_a_templated_field_is_required_with_no_default() -> None:
+    # The template is NOT a default: it is a name the model resolves at
+    # validation from the owner, so the field stays required and reports
+    # no default. This pair is what an `after`-mode fill would have
+    # corrupted (it can only fill a field that already carries a
+    # placeholder default), so it pins the mechanism, not just the value.
+    doc = docs(GithubLike)[("token",)]
+    assert doc.required is True
+    assert doc.default is UNSET
+    assert doc.default_template == "git-token-{owner_name}"
+
+
 def test_a_marked_field_carries_its_marker_verbatim() -> None:
     doc = docs(GithubLike)[("token",)]
     assert doc.ref is not None

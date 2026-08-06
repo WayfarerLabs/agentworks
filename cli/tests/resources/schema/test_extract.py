@@ -303,6 +303,43 @@ def test_parity_with_the_proxmox_token_derivation() -> None:
     assert extract_references(ProxmoxLike, {"token_secret": ""}, site) == ()
 
 
+# --- the one deliberate divergence from shipped behavior --------------
+
+
+@pytest.mark.parametrize(
+    ("model_cls", "blob", "expected"),
+    [
+        (AzureLike, {"service_principal": {"secret": None}}, "azure-client-secret"),
+        (AwsLike, {"credentials": {"access_key_secret": None}}, "aws-secret-access-key"),
+        (ProxmoxLike, {"token_secret": None}, "proxmox-token"),
+        (GithubLike, {"token": None}, "git-token-prod"),
+    ],
+)
+def test_an_explicit_null_diverges_from_three_shipped_validators(
+    model_cls: type[AgwModel],
+    blob: dict[str, object],
+    expected: str,
+) -> None:
+    """An explicitly null reference field resolves to the default here.
+
+    This is a DIVERGENCE, not parity, and the only one: azure, aws, and
+    proxmox all read the key with ``config.get(key, DEFAULT)``, so an
+    explicit ``null`` reaches their guard as a malformed value and omits
+    the edge, and azure's validator additionally raises telling the
+    operator to omit the key instead. Git-credential's
+    ``token_dependency`` already treats absent and null alike, which is
+    the behavior adopted here.
+
+    Taken deliberately: extraction and validation have to derive the same
+    name or the graph edge and the validated instance would disagree, and
+    treating null as "I did not set this" is the reading an operator
+    means. It is an operator-visible change and belongs in the step 2.3
+    break note; it is a test rather than only a doc line so the decision
+    is one someone can find and overturn.
+    """
+    assert names(extract_references(model_cls, blob, OWNER)) == [expected]
+
+
 def test_the_usage_prose_is_carried_verbatim() -> None:
     # It ends up on the target's ReferenceEntry and in describe's
     # "Referenced by:" section, so it is operator-visible output.

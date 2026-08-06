@@ -30,7 +30,17 @@ def test_an_operator_written_value_wins() -> None:
 
 def test_an_explicit_null_resolves_like_an_omission() -> None:
     # Same call extraction makes, so the two cannot disagree on the name.
+    # This is the validation half of the deliberate divergence pinned in
+    # test_extract.py: azure's shipped validator RAISES on
+    # ``secret: null``, telling the operator to omit the key, where the
+    # model resolves it to the default instead.
     assert GithubLike.model_validate({"token": None}, context=CONTEXT).token == "git-token-prod"
+    site = AzureLike.model_validate(
+        {"region": "eastus", "service_principal": {"client_id": "c", "tenant_id": "t", "secret": None}},
+        context=validation_context(RefOwner(kind="vm-site", name="lab")),
+    )
+    assert site.service_principal is not None
+    assert site.service_principal.secret == "azure-client-secret"
 
 
 def test_a_nested_models_templated_field_resolves_too() -> None:

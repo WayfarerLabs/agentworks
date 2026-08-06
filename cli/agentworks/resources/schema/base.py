@@ -29,8 +29,8 @@ exceptions a reader can see.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Final
+from weakref import WeakKeyDictionary
 
 from pydantic import BaseModel, ConfigDict, RootModel, model_validator
 
@@ -46,6 +46,11 @@ if TYPE_CHECKING:
 #: The key an owner rides under in pydantic's validation context. Build
 #: the context with :func:`validation_context` rather than spelling it.
 OWNER_CONTEXT_KEY: Final = "owner"
+
+#: Per-class cache for :func:`_owner_templated_fields`.
+_TEMPLATED_FIELD_CACHE: Final[WeakKeyDictionary[type[BaseModel], tuple[tuple[str, RefMarker], ...]]] = (
+    WeakKeyDictionary()
+)
 
 # The settings both bases share. Kept as one literal so the two configs
 # below cannot drift; the ONLY intended difference between them is
@@ -98,13 +103,18 @@ class AgwModel(BaseModel):
         edge and the validated instance would name different secrets.
         """
         templated = _owner_templated_fields(cls)
-        if not templated or not isinstance(data, Mapping):
+        # ``dict``, not ``Mapping``: strict mode accepts a dict or a model
+        # instance and nothing else, so widening here would let some other
+        # mapping type through for exactly the models that happen to have
+        # an unset templated field, which is an invisible local exception
+        # to the global posture.
+        if not templated or not isinstance(data, dict):
             return data
         unset = [(name, marker) for name, marker in templated if data.get(name) is None]
         if not unset:
             return data
 
-        owner = info.context.get(OWNER_CONTEXT_KEY) if isinstance(info.context, Mapping) else None
+        owner = info.context.get(OWNER_CONTEXT_KEY) if isinstance(info.context, dict) else None
         if not isinstance(owner, RefOwner):
             # A framework bug (a call site forgot the context), never an
             # operator mistake, so this is not a ConfigError.
@@ -151,10 +161,20 @@ def _owner_templated_fields(model_cls: type[BaseModel]) -> tuple[tuple[str, RefM
 
     Scalar fields only: a marked list has no single default identity, and
     a nested model fills its own fields when it is validated.
+
+    Cached per class, since it is a pure function of the class and this
+    runs on every validation of every model. The cache is weak so a
+    model class defined inside a function (a test, mostly) is still
+    collectable.
     """
+    cached = _TEMPLATED_FIELD_CACHE.get(model_cls)
+    if cached is not None:
+        return cached
     templated: list[tuple[str, RefMarker]] = []
     for name, field in model_cls.model_fields.items():
         marker = marker_of(field)
         if marker is not None and marker.default_template is not None:
             templated.append((name, marker))
-    return tuple(templated)
+    computed = tuple(templated)
+    _TEMPLATED_FIELD_CACHE[model_cls] = computed
+    return computed
