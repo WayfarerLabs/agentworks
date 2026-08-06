@@ -25,9 +25,9 @@ Destination 1 is the priority; the rest are not strictly ordered.
 3. **A capability framework that scales by kind.** A core-owned capability-kind descriptor replaces
    the per-kind switchboard, so adding a kind is a registration, not a coordinated edit across
    adapter tables, graph stamps, publishers, and snapshot logic.
-4. **Harness integration as one identity with scoped facets.** VM, admin, agent, workspace, and
-   session contributions are explicitly selected at their owning level, applied by their owning
-   lifecycle, and never smuggled through session operations.
+4. **Harness integration as one identity with per-scope contributions.** VM, admin, agent,
+   workspace, and session contributions are explicitly selected at their owning level, applied by
+   their owning lifecycle, and never smuggled through session operations.
 5. **The session event stream as a platform.** Every integration fuses its best available sources
    into one Agentworks-owned, best-effort event vocabulary. Transcripts, live frontends, ACP,
    structured control, audit sinks, the distiller, and the VM auto-suspend idle signal are all
@@ -114,17 +114,23 @@ second branch. The resolution API evolves in the same effort: typed per-secret o
 failure categories, policy-aware interaction requirements, timeouts and cleanup, and bounded-
 lifetime source clients. The simple case must not get more verbose.
 
-### Harness facets (destination 4)
+### Harness scopes (destination 4)
 
-One registered integration identity with independently declared, explicitly selected facets (VM,
-admin, agent, workspace, session), each declaring support, owning scope and lifecycle, config model
-and merge policy, references, grants, readiness and idempotent operations, and versioned applied
-state. Absence of a facet means unsupported. Templates at each owning level select their
-integrations; session operations diagnose upstream gaps but never repair them. Artifacts (rules,
-skills, hooks) are harness-independent logical contributions materialized by integrations, with
-file-level ownership, provenance, drift detection, and an applied-state ledger. The Claude-specific
-template fields (`claude_marketplaces`, `claude_plugins`) migrate into the Claude integration's
-facet config. Rulesync informs the artifact design but is not a runtime dependency.
+One registered integration identity with per-scope participation (operator simplification,
+2026-08-05, superseding the earlier facet framing; see `scope-participation-contract.md`). The
+integration API carries per-scope init methods (vm, agent, workspace) alongside session start and
+resume, called by the per-scope orchestrators at the end of each setup pipeline: core first, then
+features in declaration order receiving env-to-date, then integrations receiving all env and agent
+artifacts for the scope. Templates at each owning level select their integrations and may attach
+per-scope config, validated by per-scope config models. Scope discipline is trust-based: core does
+not enforce harness behavior; code review and testing gate system plugins, and wave 8's
+distribution-trust model gates external ones. Sessions receive all ancestor env and artifacts, and
+the integration owns hoisted representation, deduplication, and double-provisioning avoidance
+(isolation, not security). Session operations diagnose upstream gaps but never repair them. Artifact
+conduct is conventional: smallest ownership unit, no silent overwrite of repository or
+generator-owned content, applied state recorded, drift reported. The Claude-specific template fields
+(`claude_marketplaces`, `claude_plugins`) migrate into the Claude integration's agent-scope config.
+Rulesync informs the artifact design but is not a runtime dependency.
 
 ### Observability (destinations 5 and 6)
 
@@ -151,12 +157,14 @@ framework survives every cleanup.
 
 A recurring principle, now named (operator agreement, 2026-08-05), that child SDDs should test
 designs against: contributions declare rather than do, and access arrives as an anchored, typed
-projection rather than ambient authority. Instances already settled across this roadmap: facet
-grants, the `me` anchored template projection, per-integration state namespacing, declared secret
-references resolved at the operation boundary, artifact materialization plans validated against
-grants, core performing tmux and PTY operations on integrations' behalf, and the universal event
-representation. The review question for any new contribution surface: what does the contribution
-see, and where is that view enforced?
+projection rather than ambient authority. Instances already settled across this roadmap: the `me`
+anchored template projection, per-integration state namespacing, declared secret references resolved
+at the operation boundary, core performing tmux and PTY operations on integrations' behalf, and the
+universal event representation. The principle governs surfaces where enforcement is real; trusted
+in-process integration code is governed by trust, review, and disclosure instead (operator ruling,
+2026-08-05), which is why harness scope discipline is a reviewed convention, not a grant system. The
+review question for any new contribution surface: what does the contribution see, and where is that
+view enforced, and if it cannot be, who reviewed the trust?
 
 The template projection is expected to be the resource graph itself in a gated access mode, not a
 second structure kept in lockstep: powers (secret readers, run targets, capability API objects) sit

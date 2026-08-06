@@ -16,9 +16,9 @@ phase 1 (TOML sunset) ----------> everything touching resource decode
 0.14 removals ------------------> phase 2 harness modeling   (do not model shapes being deleted)
 descriptor design --------------> phase 2 per-kind modeling  (do not bake in the switchboard)
 phase 2 models -----------------> secret-source instances    (per-source config wants models)
-descriptor + phase 2 -----------> harness facet framework    (facets declare model + merge policy)
-facet framework ----------------> artifacts materialization  (facets own placement/applied state)
-facet contract design ----------> observability integration contract (observation is a facet)
+descriptor + phase 2 -----------> harness scope framework    (per-scope config models + pipeline)
+scope framework ----------------> artifacts materialization  (integrations own placement/state)
+scope contract design ----------> observability integration contract (same trust model)
 observability phase 1 ----------> structured control, distillation, vm auto-suspend
 phase 2 surfaces ---------------> schema-derived onboarding and discovery
 internal contracts proven ------> external plugin API
@@ -26,11 +26,11 @@ internal contracts proven ------> external plugin API
 
 Two things this graph deliberately does not serialize:
 
-- **Design versus code.** Removal work is mechanical while descriptor, facet, and event vocabulary
-  design is thinking work. They proceed in parallel without contention.
+- **Design versus code.** Removal work is mechanical while descriptor, scope-contract, and event
+  vocabulary design is thinking work. They proceed in parallel without contention.
 - **Observability implementation versus the capability track.** They touch nearly disjoint code
   (session runtime and tmux versus config, decode, and registries). Once their shared contract (the
-  observation facet's shape) is designed, the two tracks run concurrently as bandwidth allows.
+  observation contract's shape) is designed, the two tracks run concurrently as bandwidth allows.
 
 ## Waves
 
@@ -41,10 +41,10 @@ Two things this graph deliberately does not serialize:
   Budget fixture conversion as first-class work. Fold in the pre-roadmap SDD closeouts listed in
   `current-state.md`. Ships as one breaking-cleanup release with phase 1.
 - **Design track (parallel with wave 1):** settle, in rough order: the capability-kind descriptor
-  contract; the reference-field metadata vocabulary; the facet model boundary shared by harness
-  scopes and observability, including session/run identity semantics; the instance-state store
-  (designed once for instance specs, facet applied-state, and artifact ownership); and the first
-  slice of the universal event vocabulary with its named consumers.
+  contract; the reference-field metadata vocabulary; the scope-participation contract shared by
+  harness scopes and observability, including session/run identity semantics; the instance-state
+  store (designed once for instance specs, integration applied-state, and artifact ownership); and
+  the first slice of the universal event vocabulary with its named consumers.
 - **Wave 2: declarative schema phase 2, through the descriptor.** Release phase 2 from its hold as
   the first consumer of the descriptor design. Absorb the removals deferred to it (generic
   discriminator compatibility, the fate of `agw resource migrate` and its frozen TOML oracle). Honor
@@ -52,10 +52,11 @@ Two things this graph deliberately does not serialize:
 - **Wave 3: secret-source instances.** The two-level model per `target-state.md`'s secrets rulings,
   including the capability mandate, the synthesized-source reference model, and the resolution-API
   evolution.
-- **Wave 4: harness facet framework, one vertical slice.** Attachments at every ownership point, the
-  applied-state ledger, one vertical integration proving create/reinit semantics, workspace
-  create-time materialization, upstream requirement reporting without implicit remediation, and the
-  Claude template-field migration.
+- **Wave 4: harness scope framework, one vertical slice.** The scope-participation contract made
+  real: per-scope init methods and the setup pipeline (core, features, integrations), attachments at
+  every ownership point, applied state, one vertical integration proving create/reinit semantics,
+  workspace create-time materialization, upstream prerequisite reporting without implicit
+  remediation, and the Claude template-field migration.
 - **Wave 5: observability phase 1 (may start alongside waves 2 through 4).** Event vocabulary and
   session/run identity, session-level PTY observation and the input-interception investigation, one
   vertical fusion integration (Claude Code first; generalize the Codex notify channel as the push
@@ -64,8 +65,8 @@ Two things this graph deliberately does not serialize:
   shortly after the stream exists: the distiller (wave 6) and VM auto-suspend (the suspend mechanics
   are vm-platform work designable independently; only the idle signal waits here).
 - **Wave 6: artifacts and the learning loop's write-back path.** First-class agentic contributions
-  through the facet materialization seam; revive distillation from the harvest against the real
-  event stream. This closes the memory-learning loop.
+  through the integration materialization seam; revive distillation from the harvest against the
+  real event stream. This closes the memory-learning loop.
 - **Wave 7: structured control.** Observability phase 2 (validated intents, ACP projection,
   stale-decision rejection).
 - **Wave 8: external plugin API.** Registration conformance, discovery, namespacing, versioning, and

@@ -21,8 +21,8 @@ not an implementation plan: the wave 2 effort owns the plan and the code. Where 
   effective config keyed to the finalize fold.
 - Secret backends are ordinary capabilities on the shared contract (operator mandate, 2026-08-05),
   via the backend/source split.
-- The harness facet model (wave 4) will want one integration kind exposing several configuration
-  surfaces, one per facet.
+- The harness scope model (wave 4) will want one integration kind exposing several configuration
+  surfaces, one per scope.
 - The four open doors from `target-state.md` (source-agnostic extraction, layer-stack merge, graph
   immutability as a registry/fold property, one instance-state store) must not be closed.
 - Capability kinds remain core-owned. Generalizing registration does not let plugins invent kinds.
@@ -82,11 +82,12 @@ each, so wave 2 neither builds them early nor reinvents them later:
 
 The descriptor's config contract is a set of named schema slots rather than exactly one model per
 kind. Every current kind declares a single default slot, so wave 2's per-kind modeling proceeds
-exactly as its plan specifies. The slot mechanism exists for the facet case: the harness-integration
-kind will declare one slot per facet, an implementation's support for a facet is the presence of a
-model in that slot, and absence means unsupported (matching the facet rule that no-op defaults are
-forbidden). Slot presence IS the support claim; there is no separate support flag that could
-disagree with it. Wave 4 then adds facets without reshaping the descriptor.
+exactly as its plan specifies. The slot mechanism exists for the multi-model case: the
+harness-integration kind registers a config model per scope it accepts configuration for (wave 4),
+and a slot is simply an entry in that named-model mapping. Scope support is carried by the
+integration API's methods, not by slot presence (operator simplification, 2026-08-05): a scope may
+be supported with no config model at all. Wave 4 then adds its per-scope models without reshaping
+the descriptor.
 
 This is the one deliberate deviation from phase 2's single-model framing, chosen because the cost
 now is a naming layer, while retrofitting multi-model kinds after wave 2 would be a second migration
@@ -116,11 +117,10 @@ the framework; it does not absorb what makes each kind itself.
 The descriptor makes "trust but verify" enforceable at registration, replacing the current
 `type`-and-cast seam: conformance to `implementation_contract`, required metadata present, a
 side-effect-free constructibility check, required operations implemented, every provided slot model
-conforming to the slot's model contract (presence is the support claim, so there is no
-claimed-but-empty slot to check), and `contract_version` compatibility (declared from day one, so
-the check is initially trivial and the discipline is established before it matters). Atomic seating
-(prepare everything, then mutate registries) is preserved. This strengthens the internal extension
-framework; it does not create a public plugin promise, which stays gated on wave 8's
+conforming to the slot's model contract, and `contract_version` compatibility (declared from day
+one, so the check is initially trivial and the discipline is established before it matters). Atomic
+seating (prepare everything, then mutate registries) is preserved. This strengthens the internal
+extension framework; it does not create a public plugin promise, which stays gated on wave 8's
 distribution-trust model.
 
 ## Secret backends under the descriptor

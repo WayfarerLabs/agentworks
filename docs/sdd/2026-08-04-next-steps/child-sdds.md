@@ -38,10 +38,13 @@ is locked.
 - [x] Reviewed and merged to `main` (PR #405, 2026-08-05)
 - [x] Consumed by wave 2 seeding (seed notes delivered via PR #411; effort lead launched 2026-08-05)
 
-### Design track: facet-model boundary
+### Design track: scope participation (formerly facet-model boundary)
 
 - [x] Contract artifact drafted (`facet-boundary-contract.md`, 2026-08-05; gates the wave 4 and wave
       5 seeds)
+- [x] Recast as `scope-participation-contract.md` per operator simplification (2026-08-05): setup
+      pipeline, per-scope init methods, trust-based scope discipline, grants dropped, facet
+      vocabulary retired
 - [ ] Reviewed and merged to `main`
 
 ### Onboarding and discovery (destination 1): 2026-08-05-onboarding-and-discovery
@@ -58,7 +61,7 @@ is locked.
 Planned children, seeded when their prerequisites land (see `phasing.md`):
 
 - Wave 3: secret-source instances
-- Wave 4: harness facet framework
+- Wave 4: harness scope framework
 - Wave 5: session observability phase 1
 - Wave 6: agentic artifacts and distillation
 - Wave 7: structured control
@@ -74,21 +77,21 @@ A sweep of the open issue tracker pulled the following issues into the roadmap. 
 received a comment pointing back here so it is not worked out-of-band (posted 2026-08-05); issues
 not listed stay standalone.
 
-| Issue      | Lands in                                                                           |
-| ---------- | ---------------------------------------------------------------------------------- |
-| #76        | Wave 1 SDD closeouts (stale lockfile half only; the derive audit stays standalone) |
-| #165       | Not rolled in: its own pre-roadmap SDD proceeds standalone (out of roadmap scope)  |
-| #170       | Wave 2 rider (expires metadata belongs in the envelope/metadata modeling)          |
-| #205, #212 | Design track: instance-state store and per-instance specs; future living-graph SDD |
-| #214       | Wave 2 (live samples, uniform validation; unknown keys go hard-error there)        |
-| #242       | Waves 4 and 5 (harness-owned adoption plus resume re-pointing)                     |
-| #257       | Onboarding-and-discovery child (machine-readable output contract)                  |
-| #311       | Wave 2 (structural reference extraction from annotated models)                     |
-| #370       | Wave 3 (resolution-API evolution owns the batching question)                       |
-| #373       | Wave 4 (environment-appropriate defaults belong to facet config)                   |
-| #374       | Design track descriptor plus wave 3 (capability mandate; see `target-state.md`)    |
-| #387       | Waves 4 and 6 (workspace facets and features own post-clone setup)                 |
-| #390, #391 | Onboarding-and-discovery child (samples and plan A onboarding)                     |
+| Issue      | Lands in                                                                            |
+| ---------- | ----------------------------------------------------------------------------------- |
+| #76        | Wave 1 SDD closeouts (stale lockfile half only; the derive audit stays standalone)  |
+| #165       | Not rolled in: its own pre-roadmap SDD proceeds standalone (out of roadmap scope)   |
+| #170       | Wave 2 rider (expires metadata belongs in the envelope/metadata modeling)           |
+| #205, #212 | Design track: instance-state store and per-instance specs; future living-graph SDD  |
+| #214       | Wave 2 (live samples, uniform validation; unknown keys go hard-error there)         |
+| #242       | Waves 4 and 5 (harness-owned adoption plus resume re-pointing)                      |
+| #257       | Onboarding-and-discovery child (machine-readable output contract)                   |
+| #311       | Wave 2 (structural reference extraction from annotated models)                      |
+| #370       | Wave 3 (resolution-API evolution owns the batching question)                        |
+| #373       | Wave 4 (environment-appropriate defaults belong to per-scope integration config)    |
+| #374       | Design track descriptor plus wave 3 (capability mandate; see `target-state.md`)     |
+| #387       | Waves 4 and 6 (workspace-scope integration hooks and features own post-clone setup) |
+| #390, #391 | Onboarding-and-discovery child (samples and plan A onboarding)                      |
 
 Notes: #242 also picks up the 0.14 rename (it lands as `session resume --update-template`); the
 capability-contract sibling cluster #368 through #374 splits, with #370/#373/#374 rolled in and the
@@ -108,5 +111,5 @@ open-ended research placeholder.
 7. Done (2026-08-05): onboarding-and-discovery seeded (FRD, PR #413).
 8. Merge the onboarding seed (PR #413, reviewer pass in flight), then launch its effort lead.
 9. Roadmap lead reviews wave 2 and onboarding PRs as they arrive.
-10. Design track: facet boundary contract in review (PR #407); then the instance-state store schema
-    and the event vocabulary's first slice.
+10. Design track: scope participation contract in review (PR #407); then the instance-state store
+    schema and the event vocabulary's first slice.
