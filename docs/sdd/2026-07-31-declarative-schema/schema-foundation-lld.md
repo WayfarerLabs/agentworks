@@ -942,6 +942,18 @@ requirement behind "the same rendering is reusable as diagnostic text elsewhere"
 describe want the lines without the exception. Section 11 records this as a plan-wording finding
 rather than a design change.
 
+> **Correction (step 2.3 implementation, 2026-08-06): the package is `agentworks/schema/`, NOT
+> `agentworks/resources/schema/` as this section specifies.** A capability declares its config model
+> at class-definition time, so it must import the schema package at MODULE level; but importing
+> anything under `agentworks.resources` runs `resources/__init__`, which loads every kind and
+> capability package. Verified by the lead at HEAD: importing `agentworks.resources` pulls in 19
+> capability and plugin modules, so the schema package living under it closed a real cycle
+> (`cannot import name 'Capability' from partially initialized module`). Moving it to a top-level
+> leaf breaks the cycle rather than relocating it: the package now imports only `agentworks.errors`
+> and its own submodules, confirmed at HEAD and pinned by a boundary test in both directions.
+> `RefRelationship` and `ConfigReference` moved into it, re-exported from `resources/reference.py`,
+> and `format_file_path` moved to `source_location.py`.
+
 ## 8. Package layout
 
 ```text

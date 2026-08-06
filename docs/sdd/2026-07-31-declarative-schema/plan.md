@@ -368,12 +368,14 @@ the derivation sequence are not started.
       rule is that absent OR `None` emits the owner template, matching git-credential's
       `token_dependency` today, so `null` flips from "no dependency" to "the default-named
       dependency" for those three. Deliberate and tested, and it makes the four capabilities
-      consistent, but it is operator-visible and belongs in the same note. **For azure it flips
-      VALIDATION too, which is the more visible half:** `_parse_service_principal`
-      (`plugins/azure/platform.py:279`) raises a `ConfigError` today on `secret: null` whose message
-      explicitly tells the operator to omit the key instead, and under the model that same input
-      silently resolves to `azure-client-secret`. An operator who followed the old error's advice
-      will not otherwise connect the two, so the note must name it.
+      consistent, but it is operator-visible and belongs in the same note. **It flips VALIDATION on
+      ALL THREE cloud platforms, which is the more visible half** (corrected 2026-08-06; an earlier
+      note here said azure alone, and the 2.3 implementer caught it). Azure's
+      `_parse_service_principal`, aws's `access_key_secret` check, and proxmox's `token_secret`
+      check each raise a `ConfigError` today on an explicit `null` whose message tells the operator
+      to OMIT the key instead, and under the model that same input silently resolves to the
+      default-named secret. Verified against the pre-flip sources. An operator who followed the old
+      error's advice will not otherwise connect the two, so the 2.9 note must name all three.
 - [ ] Core-driven validation and extraction wired: registry name-to-model maps per capability kind;
       `Capability.validate` / `Capability.dependencies` classmethods and
       `SecretBackend.validate_mapping` retired; per-capability hand-rolled validate code deleted;
@@ -391,6 +393,28 @@ the derivation sequence are not started.
       dependency listing) attributes the parent's default secret to the child.
 - [ ] `test_capability_config_contract.py` and `test_capability_base.py` reworked to pin the new
       contract (declare-and-receive: models in, typed instances out).
+
+### 2.3b Effective-config validation at finalize (deferred out of 2.3)
+
+Designed in `capability-contract-lld.md` sections 12 and 14 but deliberately not built there: it
+shares no code with the contract flip and would have doubled that step's review surface. Kept as its
+own step rather than folded into 2.4 or 2.5 so it cannot quietly evaporate, and sequenced next
+because FR17 is an operator-raised requirement and the longer it waits the more consumers assume the
+current traversal.
+
+- [ ] Validation runs on the EFFECTIVE (merged) config, resolved along the graph's inherits chain at
+      finalize, never on a partial declared blob (a child template's blob is legitimately partial,
+      so a model's required fields would wrongly reject it).
+- [ ] Per-key merge provenance tracked for error attribution, so a message names the layer the bad
+      key actually came from.
+- [ ] FR17's traversal split: the inherits edge stays a typed, non-dependency edge, excluded from
+      the secret union, resolvability prediction, and dependency listings. Per the FR17 survey
+      already in this plan, mark the RELATIONSHIP explicitly; do NOT filter on
+      `isinstance(ref, TemplateReference)`, which means "points at a template" and would silently
+      misclassify a future uses-a-template edge.
+- [ ] `sessions/templates.py::_validate_merged` retires in favor of the finalize pass. Step 2.3
+      repointed it at the core entry point (no capability code runs) but left its resolve-time
+      timing, so the timing change lands here.
 
 ### 2.4 Tagged-shape hardening
 
