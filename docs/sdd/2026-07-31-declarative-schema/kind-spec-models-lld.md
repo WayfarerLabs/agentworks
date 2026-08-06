@@ -1,6 +1,7 @@
 # Step 2.5 LLD: kind spec models replace the decoders
 
-> Status: written 2026-08-06, for plan step 2.5. Reviewed by: pending.
+> Status: written 2026-08-06, for plan step 2.5. Reviewed by: pending. IMPLEMENTED 2026-08-06;
+> section 15 records where the design met contact and what it settled differently.
 >
 > Every pydantic claim below was verified by execution against the pinned 2.13.4 in this workspace,
 > not read from documentation or memory. Where a verified result is load-bearing, the observed
@@ -925,3 +926,86 @@ permanent code goes to the root dictionary instead.
 5. **The `agw resource sample` hint text hard-codes a surface name that 2.8 may rename.** The plan
    records the describe surface's name as still open and raised to the operator. This step uses the
    shipped `agw resource sample` spelling; if 2.8 renames, the hint is one constant.
+
+## 15. Where the design met contact
+
+Written during implementation. Everything above stands except where named here.
+
+**Two designs did not survive, and both were caught by shipped tests.**
+
+1. **The per-kind name cap is declared data the decoder reads, not a validator on the `name` field**
+   (against section 5.2). Section 5.2 has `secret` and `vm-site` override `name` with a capped
+   annotation, "matching today exactly". It does not match: a model validates on every construction,
+   while `validate_name` runs only at DECODE today, and three shipped tests pin that `SecretDecl`
+   must accept a non-conforming name outside the manifest path
+   (`test_add_rejects_names_containing_slash`,
+   `test_secretdecl_construction_tolerates_nonconforming_operator_name`,
+   `test_nonconforming_secret_name_still_resolves`). Issue #279's decision was warn at the operator
+   boundary and stay tolerant at runtime, so an auto-declared secret carries whatever name the
+   reference that summoned it used. The row declares `NAME_MAX_LENGTH` and decode applies it to what
+   an operator wrote; `name_check`, the annotation factory section 5.2 proposed, was written and
+   then deleted.
+
+2. **`validate_capability_config` keeps a `name` parameter, for the map-keyed kind only** (against
+   section 4.4). Dropping `name` outright works for the three TAGGED kinds and not for
+   `secret-backend`, which dispatches by an outer map key and whose config is the mapping VALUE (a
+   bare string for env-var). `selected_name(kind, config, name)` is the one place that decides: the
+   tag for a tagged kind (so the caller's copy cannot disagree with it, which would look up one
+   implementation and validate against another's schema), the caller's `name` for a map-keyed one,
+   and a `StateError` when a map-keyed kind is called without one.
+
+**Three things the design did not anticipate.**
+
+1. **`DeclaredResource.validate` had to be renamed `validate_config`.** `BaseModel` already has a
+   (deprecated) `validate` classmethod meaning something else, so the old name resolved on EVERY row
+   rather than on the three that define the hook, and the finalize pass's
+   `getattr(resource, "validate", None)` would have called pydantic's with this method's arguments.
+   A runtime bug, not a typing complaint.
+
+2. **`Origin` and the naming rule both had to be relocated to top-level leaves.** A model resolves
+   its FIELD annotations at class-definition time, so a row carrying `origin: Origin` and a row
+   whose `name` cap comes from `MAX_SECRET_NAME_LENGTH` both need those names without running a
+   package that imports the row back. `agentworks/origin.py` and `agentworks/naming.py` join
+   `declared_resource.py` and `source_location.py` for exactly the reason those two are already
+   there. Both moved whole (no shim); `agentworks.resources` goes on re-exporting `Origin`.
+
+3. **The metadata / spec split needed a structural home, not just `SkipJsonSchema`.** Section 2.2
+   marks `expires`, `declared_at` and `origin` but leaves `name` and `description` visible, and
+   derives `_METADATA_KEYS` as "not `SkipJsonSchema`, plus `expires`", which is a special case
+   admitting there is a third category. There is: a row carries SPEC fields, ENVELOPE fields, and
+   FRAMEWORK fields, and only the first is spec surface. `EnvelopeMetadata` is the base that says
+   which, `METADATA_FIELDS` is its field set, and every one of its fields carries `SkipJsonSchema`.
+   The first kind found the live defect: without it, an operator who mistypes a spec key is answered
+   with "unknown field; expected one of: apt, apt_sources, declared_at, description, name, origin",
+   offering `origin` as something they could have written.
+
+**Two guards the swap made dead, and deleted rather than carried.**
+
+1. **The kind-owned shadow checks** (`_decode_vm_site` and `_decode_git_credential`'s "may not
+   contain kind-owned field(s)"). Their premise was that a `platform` key inside `platform_config`
+   could silently re-pick the capability. Inside ONE tagged table it cannot: `name` is the selector
+   and is a real field of the block, so a stray `platform` key is config the platform does not
+   accept, and the platform's own model says so at finalize. Their tests now pin that refusal.
+
+2. **`tagged_config`'s collision error** went with the function, as section 4.1 predicted, and
+   `validate_own_config` gained a StateError in its place: a construct-time caller passes the
+   capability's OWN config, untagged, and one carrying a tag for a different capability is a
+   framework mistake rather than an operator one.
+
+**Two operator-visible improvements found in passing, beyond the three breaks section 6 records.**
+
+- `inherits: parent` written without the list used to load as `['p','a','r','e','n','t']`, because
+  the decoder spelled `list(...)` around it.
+- `metadata.expires: 12` would have validated to 1970 under a lax datetime; section 2.2 predicted
+  this and the `BeforeValidator` refuses it.
+
+**Two smaller settlements.**
+
+- `EnvEntry` gains a public `CapabilityBlock.of(name, **config)` sibling on the block class, because
+  an open model's extra fields are not in its `__init__` signature and every caller that ASSEMBLES a
+  block (the migrator's oracle, tests) has a name and a mapping in hand.
+- The migrate hint's third surface: `_LEGACY_SIBLING_SHAPES` gained `session-template`. Decode
+  attaches the hint from one generic guard over every host surface, and the migrator covered two, so
+  a hand-typed `harness_integration: shell` was answered with a command that printed "nothing to
+  migrate" for the exact document that had just failed to load. A test pins the invariant (every
+  host surface decode can refuse is one the migrator's upgrade covers) rather than the entry.
