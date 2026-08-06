@@ -248,6 +248,17 @@ the derivation sequence are not started.
       owner-framed message mapping, message normalization rules, `SourceLocation` framing, and the
       severity plumbing for fold-gated validation (FR12: the bridge raises for READY+ENABLED
       resources; the same rendering is reusable as diagnostic text elsewhere).
+      **FOLDED into `schema-foundation-lld.md` (2026-08-06)**, which settles all of the above. The
+      fold is justified there: the bridge's only input is the `ValidationError` that LLD's base model
+      raises, and shipping a strict base model with no rendering would put raw pydantic text on main
+      as a regression against every message it replaces. Only the LLD folds; the implementation box
+      below stays its own step.
+      **Correction to this box's wording:** "severity plumbing" describes machinery that ALREADY
+      exists. `Registry.finalize` pass 7 (`resources/registry.py:466`) already scopes the throwing
+      validate to the READY + ENABLED set, with the R3/R9.4 reasoning in its docstring. Step 2.2
+      builds no severity mechanism; the real requirement behind the phrase is a PURE rendering entry
+      point (`render_validation_error`) beside the throwing one, so the same text is reusable as
+      diagnostic output.
 - [ ] Bridge implemented with the FRD's representative-mistakes corpus as a pinned test: unknown
       key, wrong type, missing required field, bad capability name, each asserting owner framing and
       file/position context at least as good as today's. (The old-sibling-shape corpus entry lands

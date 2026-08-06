@@ -127,7 +127,11 @@ A new `resources/schema/` package owning the framework-wide model vocabulary:
 - **Agentworks field metadata.** `Annotated` markers carrying the semantics JSON Schema does not
   have natively:
   - `SecretRef(default_template=...)`: the field names a secret; the template (e.g.
-    `git-token-{owner}`) derives the default from the owner at decode time.
+    `git-token-{owner_name}`) derives the default from the owner at VALIDATION time, and
+    independently during reference extraction, which runs before and regardless of validation.
+    (Corrected 2026-08-06: this said "at decode time", which is false for capability blobs.
+    `manifests/decode.py:18-23` states outright that capability-owned blobs are not validated at
+    decode; their check is the finalize pass, matching this HLA's own timing table below.)
   - `ResourceRef(kind=...)`: the field names a resource of a fixed kind.
   - Both flow into emitted JSON Schema via `json_schema_extra` (an `x-agw-*` vocabulary) so docs and
     editor hovers can show them without confusing validators.
@@ -138,10 +142,15 @@ A new `resources/schema/` package owning the framework-wide model vocabulary:
     is malformed. This preserves the `dependencies` contract exactly: graph construction never
     depends on a blob being valid.
   - `iter_field_docs(model_cls)`: the ordered field-reference stream (name, type rendering,
-    required/default, description, ref semantics, union arms) consumed by the sample renderer, the
-    describe surface, and schema emission. One walker, three presentations, so the surfaces cannot
-    disagree. The roadmap's teaching surface (`agw guide`, owned by the onboarding child SDD) is a
-    fourth, external presenter over the same stream; Component 7 records the coordination.
+    required/default, description, ref semantics, union arms) consumed by the sample renderer and
+    the describe surface, plus the roadmap's teaching surface (`agw guide`, owned by the onboarding
+    child SDD) as an external third presenter; Component 7 records that coordination. One walker,
+    three presentations, so those surfaces cannot disagree.
+    **Correction (step 2.1 LLD, 2026-08-06):** schema emission is NOT a consumer of this stream.
+    Component 6 derives it from `model_json_schema` over the same models, because deriving JSON
+    Schema from `FieldDoc` would mean writing a second schema generator. Emission and the stream are
+    SIBLING derivations from one authority (the models), not a chain; the marker's schema hook plus
+    a round-trip test is what keeps them from drifting.
 
 ### Component 2: capability schema registration
 
