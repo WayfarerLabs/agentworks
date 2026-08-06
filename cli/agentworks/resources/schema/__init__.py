@@ -13,6 +13,9 @@ hand-validated lives here:
 - :func:`iter_field_docs`, the ordered field-reference stream every human
   presentation of a model derives from, and :func:`render_type` beside
   it for the presenters that want our type rendering.
+- :func:`config_error_from` and :func:`render_validation_error`, the
+  bridge from a pydantic ``ValidationError`` to the owner-framed,
+  located text an operator reads.
 
 This package sits BELOW the domains that use it. It may import
 ``resources/reference.py`` (the reference records it produces) and
@@ -26,6 +29,11 @@ imports ``resources/reference.py``, never the reverse.
 from __future__ import annotations
 
 from agentworks.resources.schema.base import AgwModel, AgwRootModel, validation_context
+from agentworks.resources.schema.errors import (
+    MAX_ERROR_LINES,
+    config_error_from,
+    render_validation_error,
+)
 from agentworks.resources.schema.extract import extract_references
 from agentworks.resources.schema.fields import (
     MAPPING_KEY,
@@ -48,6 +56,7 @@ from agentworks.resources.schema.markers import (
 
 __all__ = [
     "MAPPING_KEY",
+    "MAX_ERROR_LINES",
     "REF_SCHEMA_KEY",
     "SEQUENCE_ELEMENT",
     "UNSET",
@@ -60,9 +69,11 @@ __all__ = [
     "ResourceRef",
     "SecretRef",
     "UnionArm",
+    "config_error_from",
     "extract_references",
     "iter_field_docs",
     "model_doc",
     "render_type",
+    "render_validation_error",
     "validation_context",
 ]
