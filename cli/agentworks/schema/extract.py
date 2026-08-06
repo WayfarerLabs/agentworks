@@ -58,9 +58,10 @@ def extract_references(
     registry, the config, the graph, a source location, or a
     declared-versus-effective flag: a blob validated against the same
     model extracts identically no matter where it came from, because
-    this walker cannot tell the difference. Two-stage extraction
-    (structural edges off the declared blob, secret edges off the
-    effective one) is therefore two CALLS, never a parameter here.
+    this walker cannot tell the difference. An inheriting host reads its
+    two kinds of edge off two different blobs (its ``inherits`` edges off
+    its own declaration, its runtime needs off the merged one, FR17), and
+    that is therefore two CALLS by the caller, never a parameter here.
     """
     found: list[ConfigReference] = []
     _walk(model_cls, blob, owner, found, ())

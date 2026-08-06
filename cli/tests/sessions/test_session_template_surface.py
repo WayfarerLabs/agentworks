@@ -268,10 +268,12 @@ def test_harness_config_without_harness_is_an_error(tmp_path: Path) -> None:
 
 
 def test_unknown_shell_field_errors_at_build(tmp_path: Path) -> None:
-    """The declared blob is shape-validated by the finalize ``validate``
+    """The effective blob is shape-validated by the finalize ``validate``
     pass (R3), so a malformed shell block fails at build_registry, not at
-    load. The error keeps the harness-integration vocabulary and gains the source
-    location (re-attached from the resource origin, the manifest file now)."""
+    load (this template inherits nothing, so effective and declared are the
+    same blob). The error keeps the harness-integration vocabulary and gains
+    the source location (re-attached from the resource origin, the manifest
+    file now)."""
     root = _manifest(
         tmp_path,
         """
