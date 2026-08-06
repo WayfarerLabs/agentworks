@@ -41,13 +41,13 @@ identifies all wave 2 gates, and has no unresolved review finding.
 
 ## Phase 1: guide core and safe projection
 
-- [ ] `guide-contract-lld.md` pins Python records, validation errors, catalog build timing, package
+- [x] `guide-contract-lld.md` pins Python records, validation errors, catalog build timing, package
       data layout, semantic block identity, the deny-by-construction `GuideView` API, and the inert
       onboarding action record (identifier, sanitized precondition, required inputs, consent,
       command, expected state, verification, and refusal alternative). Catalog construction is
       guide-scoped and fail-soft, so invalid contributed content cannot break unrelated commands or
       valid core topics.
-- [ ] The guide LLD inventories documented, unambiguous Claude Code and Codex environment
+- [x] The guide LLD inventories documented, unambiguous Claude Code and Codex environment
       signatures; pins explicit flag, signature, then TTY detection precedence; rejects general
       configuration and secret variables as signatures; and tests `--human` for piped output.
 - [ ] Immutable `TopicContribution`, typed anchors, and closed block records implemented with strict
@@ -71,7 +71,7 @@ identifies all wave 2 gates, and has no unresolved review finding.
 - [ ] Guided and replayable modes consume the same ordered action records; fixture scenarios prove
       equal registry, graph, stored-row, and explicit verification outcomes for equal inputs,
       including equal `unverifiable` outcomes after refusal.
-- [ ] Verification-surface inventory is rechecked against HEAD in the guide LLD: secret describe and
+- [x] Verification-surface inventory is rechecked against HEAD in the guide LLD: secret describe and
       doctor prediction, doctor and readiness tool checks, and lifecycle-only SSH checks are marked
       existing; actual secret proof and a non-mutating named-VM connection check are marked gaps.
 - [ ] A named-secret verification operation resolves through the normal boundary and reports only
