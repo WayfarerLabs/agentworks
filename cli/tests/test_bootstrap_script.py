@@ -44,6 +44,7 @@ def test_generate_bootstrap_script_masks_sve_gated_on_apple() -> None:
         provisioning_packages=["curl"],
         tailscale_auth_key="tskey-auth-test123",
         hostname="lima--myvm",
+        swap=4,
     )
 
     # Self-gated: only Apple Virtualization guests advertising SVE act.
@@ -76,6 +77,7 @@ def test_sve_gate_matches_sve_and_sve2_as_whole_words() -> None:
         provisioning_packages=["curl"],
         tailscale_auth_key="tskey-auth-test123",
         hostname="lima--myvm",
+        swap=4,
     )
 
     match = re.search(r"grep (-\S+) '([^']+)' /proc/cpuinfo", script)
@@ -113,6 +115,7 @@ def test_generate_bootstrap_script_preserves_ssh_host_keys() -> None:
         provisioning_packages=["curl"],
         tailscale_auth_key="tskey-auth-test123",
         hostname="lima--myvm",
+        swap=4,
     )
 
     assert "##STEP## Preserve SSH host keys" in script
@@ -154,6 +157,7 @@ def test_generate_bootstrap_script_writes_shell_rc_seeds() -> None:
         provisioning_packages=["curl"],
         tailscale_auth_key="tskey-auth-test123",
         hostname="lima--myvm",
+        swap=4,
     )
 
     assert "##STEP## Default shell rc seeds" in script
@@ -182,6 +186,7 @@ def test_authorized_keys_install_is_idempotent() -> None:
         provisioning_packages=["curl"],
         tailscale_auth_key="tskey-auth-test123",
         hostname="lima--myvm",
+        swap=4,
     )
 
     # Guarded append: whole-line fixed-string match, then append only if absent.
@@ -207,6 +212,7 @@ def test_ssh_key_install_is_skipped_when_the_key_is_empty() -> None:
         provisioning_packages=["curl"],
         tailscale_auth_key="tskey-auth-test123",
         hostname="lima--myvm",
+        swap=4,
     )
     # The step is present but gated on a non-empty key, and the skip branch runs.
     assert 'if [ -n "$SSH_PUBLIC_KEY" ]; then' in script
@@ -222,6 +228,7 @@ def test_ssh_key_install_is_skipped_when_the_key_is_empty() -> None:
         provisioning_packages=["curl"],
         tailscale_auth_key="tskey-auth-test123",
         hostname="lima--myvm",
+        swap=4,
     )
     assert "ssh-ed25519 AAAA testkey" in with_key
 
@@ -291,6 +298,7 @@ def test_generate_bootstrap_script_no_platform_specific_tailscale_config() -> No
         provisioning_packages=["curl"],
         tailscale_auth_key="tskey-auth-test123",
         hostname="wsl2--myvm",
+        swap=4,
     )
 
     assert "--userspace-networking" not in script

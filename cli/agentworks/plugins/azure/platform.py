@@ -606,8 +606,8 @@ class AzureVMPlatform(VMPlatform):
         # the catalog is the built-in B-series ladder or the site's
         # site's vm_sizes override.
         catalog = _size_catalog(self.config)
-        req_cpus = request.cpus if request.cpus is not None else 4
-        req_memory = request.memory_gib if request.memory_gib is not None else 8
+        req_cpus = request.cpus
+        req_memory = request.memory_gib
         selected = _select_vm_size(catalog, cpus=req_cpus, memory_gib=req_memory)
         azure_vm_size = selected.name
         # The provisioning line always names the selected SKU and its spec. A
@@ -620,14 +620,14 @@ class AzureVMPlatform(VMPlatform):
                 f"({selected.cpus} vCPU / {selected.memory_gib} GiB) "
                 f"for requested {req_cpus} vCPU / {req_memory} GiB."
             )
-        requested_disk = request.disk_gib if request.disk_gib is not None else 50
+        requested_disk = request.disk_gib
         # Clamp the OS disk up to the image's minimum, mirroring the cpu/memory
         # round-up above: Azure rejects a VM whose OS disk is smaller than the
         # disk baked into the image, so a below-floor template disk grows to it.
         disk = max(requested_disk, IMAGE_OS_DISK_FLOOR_GIB)
         if disk != requested_disk:
             output.warn(f"Rounded up to {disk} GiB OS disk (image minimum) for requested {requested_disk} GiB.")
-        swap = request.swap_gib if request.swap_gib is not None else 0
+        swap = request.swap_gib
         admin_username = request.admin_username
         tailscale_auth_key = request.tailscale_auth_key
         ssh_pub_key = request.ssh_public_key

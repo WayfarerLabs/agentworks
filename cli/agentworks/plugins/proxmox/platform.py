@@ -258,11 +258,10 @@ class ProxmoxPlatform(VMPlatform):
                 output.detail("Clone complete")
 
                 # 3. Configure VM resources
-                vm_config: dict[str, object] = {}
-                if request.cpus is not None:
-                    vm_config["cores"] = request.cpus
-                if request.memory_gib is not None:
-                    vm_config["memory"] = request.memory_gib * 1024  # GiB -> MiB
+                vm_config: dict[str, object] = {
+                    "cores": request.cpus,
+                    "memory": request.memory_gib * 1024,  # GiB -> MiB
+                }
 
                 # Cloud-init: user, SSH key, network
                 vm_config["ciuser"] = request.admin_username
@@ -278,10 +277,9 @@ class ProxmoxPlatform(VMPlatform):
                 output.detail("Configuring VM...")
                 self._api(ctx).configure_vm(node, newid, **vm_config)
 
-                # 4. Resize disk if requested
-                if request.disk_gib is not None:
-                    output.detail(f"Resizing disk to {request.disk_gib}G...")
-                    self._api(ctx).resize_disk(node, newid, "scsi0", f"{request.disk_gib}G")
+                # 4. Resize the clone's disk to the template's size
+                output.detail(f"Resizing disk to {request.disk_gib}G...")
+                self._api(ctx).resize_disk(node, newid, "scsi0", f"{request.disk_gib}G")
 
                 # 5. Start VM
                 output.detail("Starting VM...")
@@ -309,7 +307,7 @@ class ProxmoxPlatform(VMPlatform):
                         provisioning_packages=PROVISIONING_PACKAGES,
                         tailscale_auth_key=request.tailscale_auth_key,
                         hostname=request.hostname,
-                        swap=request.swap_gib if request.swap_gib is not None else 0,
+                        swap=request.swap_gib,
                     )
                     tailscale_ip = self._run_bootstrap_via_agent(node, newid, bootstrap, ctx)
                     bootstrap_complete = tailscale_ip is not None

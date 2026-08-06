@@ -428,8 +428,8 @@ class EC2Platform(VMPlatform):
         # catalog is the built-in Graviton ladder or the site's
         # instance_types override.
         catalog = _instance_catalog(self.config)
-        req_cpus = request.cpus if request.cpus is not None else 4
-        req_memory = request.memory_gib if request.memory_gib is not None else 8
+        req_cpus = request.cpus
+        req_memory = request.memory_gib
         selected = _select_instance_type(catalog, cpus=req_cpus, memory_gib=req_memory)
         size_summary = f"{selected.type} ({selected.cpus} vCPU / {selected.memory_gib} GiB)"
         if selected.cpus > req_cpus or selected.memory_gib > req_memory:
@@ -438,12 +438,11 @@ class EC2Platform(VMPlatform):
                 f"({selected.cpus} vCPU / {selected.memory_gib} GiB) "
                 f"for requested {req_cpus} vCPU / {req_memory} GiB."
             )
-        # Root-volume sizing is driven by request.disk_gib. It is None only when
-        # a caller omits it entirely; the orchestrated path always sets it
-        # (ResolvedVMTemplate defaults 50), so the None branch (AMI's own root
-        # size, no DescribeImages call) is the rare direct-API case, not the norm.
+        # Root-volume sizing is driven by request.disk_gib, which the
+        # vm-template layer always resolves (FR15), so the root volume is
+        # always sized explicitly rather than left at the AMI's own.
         disk = request.disk_gib
-        swap = request.swap_gib if request.swap_gib is not None else 0
+        swap = request.swap_gib
 
         # Platform-owned naming with the slug as the namespacing token; the
         # backend name is the tag agentworks stamps on every resource, so a
@@ -977,16 +976,13 @@ class EC2Platform(VMPlatform):
         chosen = min(subnets, key=lambda s: (str(s.get("AvailabilityZone", "")), str(s.get("SubnetId", ""))))
         return str(chosen["SubnetId"]), str(chosen["VpcId"])
 
-    def _disk_block_devices(self, ec2: Any, ami: str, disk_gib: int | None) -> list[dict[str, Any]]:
-        """The BlockDeviceMappings to resize the root volume to ``disk_gib``, or
-        an empty list when no disk was requested (the AMI's own root size stands
-        and no DescribeImages call is made). When a size IS requested, the AMI's
-        real root device name is read from DescribeImages rather than hard-coded:
-        Debian's published root device could change across image releases, and a
-        wrong constant would attach the sized volume to the wrong device and
-        silently drop the operator's request."""
-        if disk_gib is None:
-            return []
+    def _disk_block_devices(self, ec2: Any, ami: str, disk_gib: int) -> list[dict[str, Any]]:
+        """The BlockDeviceMappings to resize the root volume to ``disk_gib``.
+
+        The AMI's real root device name is read from DescribeImages rather
+        than hard-coded: Debian's published root device could change across
+        image releases, and a wrong constant would attach the sized volume
+        to the wrong device and silently drop the operator's request."""
         root_device = self._root_device_name(ec2, ami)
         return [
             {

@@ -247,9 +247,16 @@ def generate_bootstrap_script(
     provisioning_packages: list[str],
     tailscale_auth_key: str,
     hostname: str,
-    swap: int = 0,
+    swap: int,
 ) -> str:
-    """Generate the Phase A bootstrap script with parameters baked in."""
+    """Generate the Phase A bootstrap script with parameters baked in.
+
+    ``swap`` (GiB, 0 to disable) is required rather than defaulted: the
+    vm-template layer resolves it and every caller has the resolved value
+    to hand, so a default here would be a second declaration of the
+    system default, free to disagree with the first. It did: this
+    parameter defaulted to 0 while ``ResolvedVMTemplate.swap`` is 4.
+    """
     return SCRIPT_TEMPLATE.format(
         admin_username=shlex.quote(admin_username),
         ssh_public_key=shlex.quote(ssh_public_key),

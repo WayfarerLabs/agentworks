@@ -576,7 +576,7 @@ class WSL2Platform(VMPlatform):
                 hint=("unregister it first (wsl --unregister) or pick a different VM name"),
             )
         vm_name = distro_name
-        swap = request.swap_gib if request.swap_gib is not None else 0
+        swap = request.swap_gib
         admin_username = request.admin_username
         output.info(f"Provisioning WSL2 VM '{vm_name}'...")
 

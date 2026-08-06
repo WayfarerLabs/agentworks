@@ -37,6 +37,15 @@ class ProvisionRequest:
     it doesn't use. Adding a platform-specific input means adding a
     field here, not changing the protocol. Units match the rest of the
     codebase (GiB), so there is no conversion seam.
+
+    The hardware fields are REQUIRED and non-optional, which is FR15
+    made structural: the vm-template's model layer resolves them (see
+    ``ResolvedVMTemplate``, which declares the defaults exactly once),
+    so by the time a platform reads one it is a number. Nothing here
+    carries a default of its own, because a default here would be a
+    second declaration of the same value, free to drift from the first;
+    the ``swap`` fallbacks this replaced had already drifted, each
+    platform substituting 0 against the template layer's 4.
     """
 
     vm_name: str
@@ -53,10 +62,10 @@ class ProvisionRequest:
     # None: the platform defers Tailscale bootstrap to Phase A (wsl2
     # always; lima/azure/proxmox when no key was resolvable).
     tailscale_auth_key: str | None
-    cpus: int | None = None
-    memory_gib: int | None = None
-    disk_gib: int | None = None
-    swap_gib: int | None = None
+    cpus: int
+    memory_gib: int
+    disk_gib: int
+    swap_gib: int
 
 
 @dataclass

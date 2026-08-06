@@ -223,10 +223,10 @@ class LimaPlatform(VMPlatform):
             # error clear for direct callers.
             self._ensure_limactl()
 
-        cpus = request.cpus if request.cpus is not None else 4
-        memory = request.memory_gib if request.memory_gib is not None else 8
-        disk = request.disk_gib if request.disk_gib is not None else 50
-        swap = request.swap_gib if request.swap_gib is not None else 0
+        cpus = request.cpus
+        memory = request.memory_gib
+        disk = request.disk_gib
+        swap = request.swap_gib
 
         # The platform owns the backend-side name; the slug is
         # the namespacing token. Pre-flight collision check (lima

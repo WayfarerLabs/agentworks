@@ -167,7 +167,7 @@ class TestCreateProvisioningOutput:
         monkeypatch.setattr(AzureVMPlatform, "_vm_exists", lambda self, compute, rg, name: False)
 
     @staticmethod
-    def _request(*, cpus: int, memory: int) -> ProvisionRequest:
+    def _request(*, cpus: int, memory: int, disk: int = 50, swap: int = 4) -> ProvisionRequest:
         # tailscale_auth_key=None keeps create() on the minimal-cloud-init
         # path, so it never waits for a bootstrap that has no VM to reach.
         return ProvisionRequest(
@@ -180,6 +180,8 @@ class TestCreateProvisioningOutput:
             tailscale_auth_key=None,
             cpus=cpus,
             memory_gib=memory,
+            disk_gib=disk,
+            swap_gib=swap,
         )
 
     @staticmethod
@@ -292,6 +294,7 @@ class TestCreateOSDiskClamp:
             cpus=2,
             memory_gib=8,
             disk_gib=disk_gib,
+            swap_gib=4,
         )
         config: dict[str, object] = {
             "subscription_id": "sub",
