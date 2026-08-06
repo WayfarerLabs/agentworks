@@ -377,6 +377,11 @@ the derivation sequence are not started.
       to OMIT the key instead, and under the model that same input silently resolves to the
       default-named secret. Verified against the pre-flip sources. An operator who followed the old
       error's advice will not otherwise connect the two, so the 2.9 note must name all three.
+      **Fourth break for the same note (found by the 2.5 LLD, 2026-08-06):** `agent-template`
+      accepts and silently DROPS `username` and `git_force_safe_directory` today (both are in
+      `_AGENT_TEMPLATE_KEYS` but neither is a field), so modeling the kind turns two
+      silently-ignored keys into hard errors. An operator who has been setting either has never had
+      it take effect, which makes the error a fix, but their config still stops loading.
 - [x] Core-driven validation and extraction wired: registry name-to-model maps per capability kind;
       `Capability.validate` / `Capability.dependencies` classmethods and
       `SecretBackend.validate_mapping` retired; per-capability hand-rolled validate code deleted;
