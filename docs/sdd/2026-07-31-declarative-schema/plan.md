@@ -192,11 +192,18 @@ function-scoped rather than whole-file, commit `32d3b88f`). Two review calls wer
 LLD: `contract_version` no longer defaults on `Capability` (each impl states its own, so a future
 base bump cannot silently re-certify unmigrated impls), and the conformance branch keys on
 protocol-ness rather than `Capability`-ness (so a future plain-ABC contract keeps its nominal
-check). Outstanding review minors, deliberately not yet done: a deterministic stub pinning the
-vm-platform blocked-readiness branch on every host (today it only runs because `wsl2` happens to be
-unsupported on Linux), non-vacuity guards on the two descriptor tests that iterate registry
-contents, and trimming `descriptor.py`'s lazy-collection docstring to claim cycle safety only (it no
-longer buys import deferral). Steps 4-10 of the derivation sequence are not started.
+check). All review minors are now swept in `8b415982`: a deterministic stub pins BOTH vm-platform
+readiness branches and the exact blocked sentence on every host (previously the blocked branch ran
+only because `wsl2` happens to be unsupported on Linux), non-vacuity guards cover the three
+descriptor tests that iterate registry contents (the implementer found a third instance beyond the
+two the review named), and `descriptor.py`'s lazy-collection docstring now claims cycle safety only.
+
+**Design revision, 2026-08-05 (operator, roadmap note 3).** Schema slots were rescinded before any
+model registered through them, and `config_slots` was deleted from the descriptor rather than
+simplified (it had no reader, could not be typed until 2.1, and its only reason to exist early died
+with the mechanism). Config schemas are keyed by CONSUMING RESOURCE KIND from day one; the settled
+shape is recorded in the step 2.0 LLD section 7, HLA Component 0, and step 2.3 below. Steps 4-10 of
+the derivation sequence are not started.
 
 ### 2.1 Schema foundation
 
