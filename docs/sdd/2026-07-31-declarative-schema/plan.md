@@ -394,7 +394,11 @@ the derivation sequence are not started.
       than a synonym for omitting the key, on `shell`'s `command` / `resume_command` /
       `required_commands`, `claude-code` and `codex` `extra_args`, `codex` `writable_dirs`, `github`
       `repos`, and `session-template`'s `env`; and any out-of-tree VM platform must now supply the
-      four `ProvisionRequest` hardware fields rather than re-defaulting them.
+      four `ProvisionRequest` hardware fields rather than re-defaulting them. **Eleventh, from the
+      2.5 fix pass:** a harness integration's declared secret carries usage text that named
+      `harness_integration_config`, a key that can no longer be written; it now reads
+      `harness_integration`. The text reaches `agw resource describe`'s "Referenced by:" and doctor,
+      so an operator sees it even though the key it named is gone.
 - [x] Core-driven validation and extraction wired: registry name-to-model maps per capability kind;
       `Capability.validate` / `Capability.dependencies` classmethods and
       `SecretBackend.validate_mapping` retired; per-capability hand-rolled validate code deleted;
@@ -546,7 +550,7 @@ until someone decides.
 
 ### 2.5 Kind spec models replace the decoders
 
-- [ ] `kind-spec-models-lld.md` written and reviewed: the per-kind model-vs-thin-wrapper calls,
+- [x] `kind-spec-models-lld.md` written and reviewed: the per-kind model-vs-thin-wrapper calls,
       semantic-validator placement (name/length caps, cross-field rules), and the decode entry point
       contract the swap preserves. The session-template model is simpler than earlier drafts
       assumed: the legacy `harness`/`harness_config` selector shim and the `restart_command` alias
@@ -554,37 +558,71 @@ until someone decides.
       shim to absorb. It covers the canonical `harness_integration` tagged surface only. The phase-1
       interim decode fork this step also resolves (how much the 2.0 descriptor adoption already
       absorbed is settled in the 2.0 LLD; the remainder lands here).
-- [ ] Kind-by-kind migration behind the stable decode entry points, smallest first to bed in the
+- [x] Kind-by-kind migration behind the stable decode entry points, smallest first to bed in the
       pattern: apt-package, apt-source, system/user-install-command, workspace-template,
       named-console-template, admin-template, agent-template, vm-template, secret, git-credential,
       vm-site, session-template. Each kind's box covers: model (with semantic validators for
       name/length caps and cross-field rules), decode swap, error parity via the bridge, tests
       updated.
-- [ ] Unknown-key handling flips from warn to hard error for kind specs (FR12): the
+- [x] Unknown-key handling flips from warn to hard error for kind specs (FR12): the
       `_warn_unexpected_keys` machinery retires with the last kind; tests updated accordingly.
-- [ ] `migrate/verify.py` normalization taught the model shape (the dataclass-only
+- [x] `migrate/verify.py` normalization taught the model shape (the dataclass-only
       `strip_source_fields` stops silently no-oping when decl classes become models).
-- [ ] Decl classes are frozen models (or thin wrappers where behavior-rich; per-kind LLD calls),
+- [x] Decl classes are frozen models (or thin wrappers where behavior-rich; per-kind LLD calls),
       with `DeclaredResource`'s hooks preserved for the registry.
-- [ ] `metadata.expires` rider (issue #170): model the optional `expires` field once on the shared
+- [x] `metadata.expires` rider (issue #170): model the optional `expires` field once on the shared
       envelope `metadata` (alongside `name` / `description`), not per kind, so every kind inherits
       it uniformly. Scope is the modeling and validation of the field (a datetime, TOML/YAML native
       or RFC 3339 string); any behavior that acts on expiry is out of scope and left to its own
       effort. Pinned by a test that the field validates on any kind and rejects a malformed value.
 
-- [ ] **Row-shape change forced by `tagged_config`'s deletion** (no box existed for this; added
+- [x] **Row-shape change forced by `tagged_config`'s deletion** (no box existed for this; added
       2026-08-06). Retiring the synthesis means the rows themselves carry the tagged capability
       table, which touches roughly twenty read sites plus three signatures. Scope it explicitly
       rather than discovering it mid-swap.
-- [ ] **`EnvEntry` becomes a model and loses `key`** (forced by the frozen-model box, which does not
+- [x] **`EnvEntry` becomes a model and loses `key`** (forced by the frozen-model box, which does not
       imply it; added 2026-08-06). Fourteen test modules reference it.
-- [ ] **Two error-bridge defects that step 2.5 is the first consumer to hit**, both verified by
+- [x] **Two error-bridge defects that step 2.5 is the first consumer to hit**, both verified by
       execution in the 2.5 LLD: a constrained dict key renders as `env.1BAD.[key]`, and an
       undiscriminated union produces three lines carrying pydantic's member labels where today's
       message is one line. Leaving either ships a worse error than the code being replaced.
-- [ ] **Two PERMANENT files still cite the pre-relocation schema path**: `cli/pyproject.toml`'s
+- [x] **Two PERMANENT files still cite the pre-relocation schema path**: `cli/pyproject.toml`'s
       pydantic comment and `cli/agentworks/schema/reference.py`'s docstring. Permanent docs must
       match HEAD, so these are corrected here rather than at 2.9.
+
+**Step 2.5 records, closed 2026-08-06 at 4798 tests.** Thirteen hand-rolled decoders replaced by
+models; `manifests/decode.py` went from 759 lines to 415.
+
+**Two silent wrong answers found in passing, neither in scope:** `inherits: parent` written without
+a list loaded as `['p','a','r','e','n','t']` (the decoder spelled `list(...)` on a string), and
+`metadata.expires: 12` would have validated to 1970, because pydantic reads a bare int as a unix
+timestamp under a lax datetime.
+
+**Two design corrections shipped tests proved.** The LLD's capped `name` annotation was wrong: a
+model validates on EVERY construction while `validate_name` runs only at decode, and three shipped
+tests pin that a `SecretDecl` accepts a non-conforming name outside the manifest path (issue #279).
+The cap moved to decode. The same trap bit `description`: `NonEmptyStr` on the field is wrong
+because the framework constructs secret rows with `""` on purpose (`synthesize` plus four
+placeholder sites), so the requirement is checked at decode and DERIVED, a kind requiring a
+description exactly when its row makes the field required.
+
+**Review findings, all fixed.** The blocking one was a real silent wrong answer:
+`tailscale_auth_key` lost its non-empty guard, and because the merge tests `is not None` rather than
+truthiness, an empty string replaced the resolved default with the name of no secret at all. Now
+pinned twice, at the field and end to end through `build_registry`, because what made it dangerous
+was a merge three modules away. `apt` becoming required was NOT intentional (transcribed from a
+dataclass whose loader always satisfied it via `get(key, [])`), so it is defaulted, and the new test
+runs BOTH sides, because what has to agree is what each side REQUIRES. `source_file`'s message moved
+to the bridge as `string_pattern_mismatch`, which fixed five pre-existing fields for free and is the
+argument for the bridge over the field. And the advisory regression was not doctor-only:
+`agw resource list` lost the same line, so the fix made the advisory a property of the document
+rather than of import order.
+
+**A pattern worth carrying out of this step:** two error messages regressed and the TESTS WERE
+REWRITTEN to assert the degraded text, with one docstring left claiming something the message no
+longer said. A test edited to match degraded output stops being a guard. FR12 makes error quality a
+non-regression requirement, so the question when output changes is "is this at least as good", and
+if the honest answer is no, the fix is the code.
 
 ### 2.6 Model-layer defaulting (FR15)
 
