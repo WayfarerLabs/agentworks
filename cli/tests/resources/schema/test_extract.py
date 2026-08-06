@@ -17,6 +17,7 @@ from agentworks.resources.schema import AgwModel, RefOwner, SecretRef, extract_r
 from ._fixture_models import (
     AwsLike,
     AzureLike,
+    CatalogLike,
     DiamondLike,
     FieldDiscriminatedSite,
     GithubLike,
@@ -133,6 +134,43 @@ def test_an_omitted_list_has_no_default_identity() -> None:
     assert extract_references(TemplateLike, {}, OWNER) == ()
 
 
+# --- collections of models --------------------------------------------
+
+
+def test_every_element_of_a_list_of_models_is_walked() -> None:
+    blob = {"accounts": [{"secret": "first"}, {"secret": "second"}]}
+    assert names(extract_references(CatalogLike, blob, OWNER)) == ["first", "second"]
+
+
+def test_every_value_of_a_table_of_models_is_walked() -> None:
+    blob = {"accounts_by_name": {"prod": {"secret": "prod-secret"}, "dev": {"secret": "dev-secret"}}}
+    assert names(extract_references(CatalogLike, blob, OWNER)) == ["prod-secret", "dev-secret"]
+
+
+def test_every_value_of_a_table_of_names_becomes_an_edge() -> None:
+    blob = {"extra_secrets": {"one": "first", "two": "second", "bad": 8}}
+    assert names(extract_references(CatalogLike, blob, OWNER)) == ["first", "second"]
+
+
+def test_a_tuple_of_names_is_a_sequence_like_a_list() -> None:
+    assert names(extract_references(CatalogLike, {"templates": ["base", "other"]}, OWNER)) == ["base", "other"]
+
+
+@pytest.mark.parametrize("value", ["not a list", 8, {"a": "table"}, None])
+def test_a_collection_that_is_not_one_contributes_nothing(value: object) -> None:
+    assert extract_references(CatalogLike, {"accounts": value}, OWNER) == ()
+
+
+def test_malformed_elements_are_skipped_and_the_rest_still_extract() -> None:
+    blob = {"accounts": [{"secret": "kept"}, "not a table", None, 8, {"secret": ""}, {"secret": "also-kept"}]}
+    assert names(extract_references(CatalogLike, blob, OWNER)) == ["kept", "also-kept"]
+
+
+def test_a_self_reference_through_a_collection_terminates() -> None:
+    blob = {"secret": "top", "children": [{"secret": "nested", "children": [{"secret": "deeper"}]}]}
+    assert names(extract_references(SelfReferential, blob, OWNER)) == ["top"]
+
+
 # --- discriminated unions ---------------------------------------------
 
 
@@ -194,9 +232,19 @@ def test_a_blob_that_is_not_a_table_contributes_nothing(blob: object) -> None:
     assert extract_references(GithubLike, blob, OWNER) == ()
 
 
-def test_a_root_model_contributes_nothing() -> None:
+def test_a_bare_scalar_root_names_nothing() -> None:
+    # Every shipped backend mapping: an env var name, an ``op://``
+    # reference. Neither is an agentworks Resource.
     assert extract_references(StringRoot, "op://vault/item", OWNER) == ()
-    assert extract_references(MappingRoot, {"token": "t"}, OWNER) == ()
+
+
+def test_a_model_rooted_root_model_carries_its_roots_references() -> None:
+    # The alternative would render the marked field in a generated
+    # sample and never emit its edge, which is the silent-missing-edge
+    # outcome, reached by a different route.
+    assert names(extract_references(MappingRoot, {"token": "t"}, OWNER)) == ["t"]
+    assert names(extract_references(MappingRoot, {}, OWNER)) == ["git-token-prod"]
+    assert extract_references(MappingRoot, "not a table", OWNER) == ()
 
 
 def test_an_unresolvable_model_contributes_nothing_rather_than_raising() -> None:

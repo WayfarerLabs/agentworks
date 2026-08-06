@@ -15,7 +15,9 @@ from pydantic import Field
 
 from agentworks.errors import StateError
 from agentworks.resources.schema import (
+    MAPPING_KEY,
     REF_SCHEMA_KEY,
+    SEQUENCE_ELEMENT,
     UNSET,
     AgwModel,
     FieldDoc,
@@ -27,6 +29,7 @@ from agentworks.resources.schema import (
 
 from ._fixture_models import (
     AzureLike,
+    CatalogLike,
     DiamondLike,
     FieldDiscriminatedSite,
     GithubLike,
@@ -103,7 +106,37 @@ def test_two_sibling_fields_of_one_nested_model_both_expand() -> None:
 
 
 def test_a_self_referential_model_terminates() -> None:
-    assert paths(SelfReferential) == [("secret",), ("child",)]
+    # Both routes back to itself stop expanding: the direct field and the
+    # one through a collection.
+    assert paths(SelfReferential) == [("secret",), ("child",), ("children",)]
+
+
+def test_a_collection_of_models_expands_under_a_placeholder_segment() -> None:
+    # A model says a list holds tables without saying how many, so the
+    # element is streamed once. Leaving it out is what made a catalog
+    # field render as an opaque "list" in a generated sample.
+    assert paths(CatalogLike) == [
+        ("vm_sizes",),
+        ("vm_sizes", SEQUENCE_ELEMENT, "cpus"),
+        ("vm_sizes", SEQUENCE_ELEMENT, "memory"),
+        ("vm_sizes", SEQUENCE_ELEMENT, "size"),
+        ("accounts",),
+        ("accounts", SEQUENCE_ELEMENT, "secret"),
+        ("accounts_by_name",),
+        ("accounts_by_name", MAPPING_KEY, "secret"),
+        ("extra_secrets",),
+        ("templates",),
+    ]
+
+
+def test_a_collection_field_names_the_model_its_elements_hold() -> None:
+    from ._fixture_models import CatalogEntryLike
+
+    assert docs(CatalogLike)[("vm_sizes",)].item_model is CatalogEntryLike
+    assert docs(CatalogLike)[("vm_sizes",)].nested_model is None
+    # A collection of NAMES holds no model, and says so.
+    assert docs(CatalogLike)[("extra_secrets",)].item_model is None
+    assert docs(CatalogLike)[("extra_secrets",)].ref is not None
 
 
 def test_a_root_model_streams_its_one_root_field() -> None:

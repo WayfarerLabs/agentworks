@@ -28,6 +28,8 @@ from __future__ import annotations
 from agentworks.resources.schema.base import AgwModel, AgwRootModel, validation_context
 from agentworks.resources.schema.extract import extract_references
 from agentworks.resources.schema.fields import (
+    MAPPING_KEY,
+    SEQUENCE_ELEMENT,
     UNSET,
     FieldDoc,
     ModelDoc,
@@ -45,7 +47,9 @@ from agentworks.resources.schema.markers import (
 )
 
 __all__ = [
+    "MAPPING_KEY",
     "REF_SCHEMA_KEY",
+    "SEQUENCE_ELEMENT",
     "UNSET",
     "AgwModel",
     "AgwRootModel",

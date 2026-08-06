@@ -15,6 +15,7 @@ from __future__ import annotations
 import types
 import typing
 from dataclasses import dataclass
+from enum import Enum
 from typing import TYPE_CHECKING, Annotated, TypeGuard, Union, get_args, get_origin
 
 from pydantic import BaseModel, Discriminator
@@ -34,13 +35,25 @@ class UnionArmType:
     model: type[BaseModel]
 
 
+class Collection(Enum):
+    """How a field holding MANY values addresses them."""
+
+    SEQUENCE = "sequence"
+    """A list, tuple, or set: elements are addressed by position."""
+
+    MAPPING = "mapping"
+    """A table: values are addressed by an operator-chosen key."""
+
+
 @dataclass(frozen=True, kw_only=True)
 class FieldShape:
     """The classified shape of one declared field.
 
-    At most one of ``marker`` / ``item_marker`` / ``nested_model`` /
-    ``arms`` is meaningful; a field that is none of them is an ordinary
-    scalar, which both walkers treat as carrying no references.
+    A field is exactly one of: a marked scalar (``marker``), a collection
+    of marked scalars or of models (``collection``, with ``item_marker``
+    or ``item_model``), a nested block (``nested_model``), a
+    discriminated union (``arms``), or an ordinary scalar, which both
+    walkers treat as carrying no references.
     """
 
     annotation: object
@@ -54,8 +67,16 @@ class FieldShape:
     marker: RefMarker | None
     """The marker on the field itself: the field names one Resource."""
 
+    collection: Collection | None
+    """Set when the field holds many values, saying how they are
+    addressed. What each value IS is ``item_marker`` or ``item_model``."""
+
     item_marker: RefMarker | None
-    """The marker on a list's elements: the field names many Resources."""
+    """The marker on a collection's elements: the field names many
+    Resources."""
+
+    item_model: type[BaseModel] | None
+    """The model each element of a collection holds."""
 
     nested_model: type[BaseModel] | None
     """The model this field opens a nested block of."""
@@ -104,12 +125,11 @@ def element_metadata(field: FieldInfo) -> list[object]:
     field, or nothing when the field holds a single value."""
     inner, _optional = unwrap_optional(field.annotation)
     inner, _metadata = _split_annotated(inner)
-    if get_origin(inner) is not list:
+    found = _collection_element(inner)
+    if found is None:
         return []
-    args = get_args(inner)
-    if not args:
-        return []
-    _element, metadata = _split_annotated(args[0])
+    _kind, element = found
+    _element, metadata = _split_annotated(element)
     return metadata
 
 
@@ -125,24 +145,33 @@ def shape_of(field: FieldInfo) -> FieldShape:
     inner, _inner_metadata = _split_annotated(inner)
     marker = marker_of(field)
 
-    item_marker: RefMarker | None = _first_marker(element_metadata(field))
+    collection: Collection | None = None
+    item_marker: RefMarker | None = None
+    item_model: type[BaseModel] | None = None
     nested_model: type[BaseModel] | None = None
     discriminator: str | None = None
     arms: tuple[UnionArmType, ...] = ()
 
-    if item_marker is None:
-        if _is_model(inner):
-            nested_model = inner
-        elif _is_union(inner):
-            discriminator = _discriminator_of(field)
-            if discriminator is not None:
-                arms = _arms_of(inner, discriminator)
+    found = _collection_element(inner)
+    if found is not None:
+        collection, element = found
+        element, element_meta = _split_annotated(element)
+        item_marker = _first_marker(element_meta)
+        item_model = element if _is_model(element) else None
+    elif _is_model(inner):
+        nested_model = inner
+    elif _is_union(inner):
+        discriminator = _discriminator_of(field)
+        if discriminator is not None:
+            arms = _arms_of(inner, discriminator)
 
     return FieldShape(
         annotation=strip_markers(field.annotation),
         optional=optional,
         marker=marker,
+        collection=collection,
         item_marker=item_marker,
+        item_model=item_model,
         nested_model=nested_model,
         discriminator=discriminator,
         arms=arms,
@@ -163,6 +192,25 @@ def model_fields_of(model_cls: type[BaseModel]) -> dict[str, FieldInfo] | None:
         if not model_cls.__pydantic_complete__:
             return None
     return dict(model_cls.model_fields)
+
+
+def _collection_element(annotation: object) -> tuple[Collection, object] | None:
+    """What kind of collection ``annotation`` is and what ONE element of
+    it holds, or ``None`` when the field holds a single value.
+
+    A fixed-length heterogeneous tuple (``tuple[str, int]``) is not a
+    collection here: it has no single element type, and it is not a shape
+    an operator writes in YAML.
+    """
+    origin = get_origin(annotation)
+    args = get_args(annotation)
+    if origin is dict:
+        return (Collection.MAPPING, args[1]) if len(args) == 2 else None
+    if origin is tuple:
+        return (Collection.SEQUENCE, args[0]) if len(args) == 2 and args[1] is Ellipsis else None
+    if origin in (list, set, frozenset):
+        return (Collection.SEQUENCE, args[0]) if args else None
+    return None
 
 
 def _first_marker(metadata: list[object]) -> RefMarker | None:

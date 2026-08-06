@@ -187,11 +187,41 @@ class MultiArmMarked(AgwModel):
     secret: Annotated[str, SecretRef(usage="the multi-arm secret", default_template="multi-arm-secret")] | int = 0
 
 
+class CatalogEntryLike(AgwModel):
+    """One entry of a size catalog."""
+
+    cpus: int
+    memory: float
+    size: str
+
+
+class CatalogLike(AgwModel):
+    """A platform carrying collections of tables and of names.
+
+    ``vm_sizes`` is the shipped shape (azure's ``vm_sizes``, aws's
+    ``instance_types``): a list of tables, which a field reference that
+    could not expand it would render as an opaque "list". The credential
+    collections are the same shape with a marked field inside, where a
+    dropped element is a dropped graph edge.
+    """
+
+    vm_sizes: list[CatalogEntryLike] = Field(default_factory=list)
+    accounts: list[CredsLike] = Field(default_factory=list)
+    accounts_by_name: dict[str, CredsLike] = Field(default_factory=dict)
+    extra_secrets: dict[str, Annotated[str, SecretRef(usage="an extra secret")]] = Field(default_factory=dict)
+    templates: tuple[Annotated[str, ResourceRef(kind="vm-template", usage="a tagged template")], ...] = ()
+
+
 class SelfReferential(AgwModel):
-    """A model reachable from itself: the walk must terminate."""
+    """A model reachable from itself: the walk must terminate.
+
+    Reachable both directly and through a collection, since the guard has
+    to hold on both routes.
+    """
 
     secret: Annotated[str, SecretRef(usage="the node secret")] | None = None
     child: SelfReferential | None = None
+    children: list[SelfReferential] = Field(default_factory=list)
 
 
 class UnmarkedLike(AgwModel):
@@ -220,6 +250,8 @@ ALL_FIXTURES = (
     ProxmoxLike,
     CredsLike,
     DiamondLike,
+    CatalogEntryLike,
+    CatalogLike,
     TemplateLike,
     LimaArm,
     ProxmoxArm,

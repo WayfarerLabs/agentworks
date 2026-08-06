@@ -27,9 +27,11 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, RootModel
 
 from agentworks.resources.reference import ConfigReference
-from agentworks.resources.schema._shape import model_fields_of, shape_of
+from agentworks.resources.schema._shape import Collection, model_fields_of, shape_of
 
 if TYPE_CHECKING:
+    from pydantic.fields import FieldInfo
+
     from agentworks.resources.schema._shape import FieldShape
     from agentworks.resources.schema.markers import RefMarker, RefOwner
 
@@ -80,13 +82,7 @@ def _walk(
     of the SAME nested model type both walk, which an accumulating set
     would silently reduce to the first one.
     """
-    # A root model's only field is ``root``, and no shipped non-mapping
-    # surface names an agentworks Resource. A future one would mark a
-    # field inside a nested model, which the nested-model branch below
-    # already walks.
-    if issubclass(model_cls, RootModel) or model_cls in visiting:
-        return
-    if not isinstance(blob, Mapping):
+    if model_cls in visiting:
         return
     fields = model_fields_of(model_cls)
     if fields is None:
@@ -96,17 +92,41 @@ def _walk(
         return
 
     visiting = (*visiting, model_cls)
+    if issubclass(model_cls, RootModel):
+        # A root model has one field, ``root``, whose value IS the blob:
+        # there is no key to read it out of. A bare-scalar root then
+        # names nothing, which is every shipped backend mapping, while a
+        # model-rooted one carries whatever its root model carries.
+        root = fields.get("root")
+        if root is not None:
+            _walk_field(root, present=True, value=blob, owner=owner, found=found, visiting=visiting)
+        return
+
+    if not isinstance(blob, Mapping):
+        return
     for name, field in fields.items():
-        shape = shape_of(field)
-        value = blob.get(name)
-        if shape.marker is not None:
-            _emit_scalar(shape.marker, present=name in blob, value=value, owner=owner, found=found)
-        elif shape.item_marker is not None:
-            _emit_list(shape.item_marker, value=value, found=found)
-        elif shape.nested_model is not None:
-            _walk(shape.nested_model, value, owner, found, visiting)
-        elif shape.arms and shape.discriminator is not None:
-            _walk_union(shape, value, owner, found, visiting)
+        _walk_field(field, present=name in blob, value=blob.get(name), owner=owner, found=found, visiting=visiting)
+
+
+def _walk_field(
+    field: FieldInfo,
+    *,
+    present: bool,
+    value: object,
+    owner: RefOwner,
+    found: list[ConfigReference],
+    visiting: tuple[type[BaseModel], ...],
+) -> None:
+    """Collect one field's references from its raw ``value``."""
+    shape = shape_of(field)
+    if shape.marker is not None:
+        _emit_scalar(shape.marker, present=present, value=value, owner=owner, found=found)
+    elif shape.collection is not None:
+        _walk_collection(shape, value, owner, found, visiting)
+    elif shape.nested_model is not None:
+        _walk(shape.nested_model, value, owner, found, visiting)
+    elif shape.arms and shape.discriminator is not None:
+        _walk_union(shape, value, owner, found, visiting)
 
 
 def _emit_scalar(
@@ -134,16 +154,41 @@ def _emit_scalar(
         found.append(_reference(marker, default))
 
 
-def _emit_list(marker: RefMarker, *, value: object, found: list[ConfigReference]) -> None:
-    """A marked list field: one edge per element that names something.
+def _walk_collection(
+    shape: FieldShape,
+    value: object,
+    owner: RefOwner,
+    found: list[ConfigReference],
+    visiting: tuple[type[BaseModel], ...],
+) -> None:
+    """A field holding many values: every element contributes.
 
-    No template default here: a list has no single default identity.
+    Elements are either marked scalars (one edge per element that names
+    something) or models (walked like a nested block). No template
+    default at any element: a collection has no single default identity,
+    and there is no element to default when the collection is absent.
     """
-    if not isinstance(value, list):
-        return
-    for item in value:
-        if isinstance(item, str) and item:
-            found.append(_reference(marker, item))
+    elements = _elements_of(shape.collection, value)
+    for element in elements:
+        if shape.item_marker is not None:
+            if isinstance(element, str) and element:
+                found.append(_reference(shape.item_marker, element))
+        elif shape.item_model is not None:
+            _walk(shape.item_model, element, owner, found, visiting)
+
+
+def _elements_of(collection: Collection | None, value: object) -> tuple[object, ...]:
+    """``value`` read as the collection the field declares, or nothing.
+
+    A sequence is a list or a tuple (what a YAML or TOML frontend
+    produces), never a bare string, which is iterable and would otherwise
+    decompose into characters.
+    """
+    if collection is Collection.MAPPING and isinstance(value, Mapping):
+        return tuple(value.values())
+    if collection is Collection.SEQUENCE and isinstance(value, list | tuple):
+        return tuple(value)
+    return ()
 
 
 def _walk_union(

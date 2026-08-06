@@ -34,6 +34,7 @@ from pydantic.fields import FieldInfo
 
 from agentworks.errors import StateError
 from agentworks.resources.schema._shape import (
+    Collection,
     element_metadata,
     model_fields_of,
     shape_of,
@@ -51,6 +52,15 @@ if TYPE_CHECKING:
 #: A field with no declared default, distinct from a declared default of
 #: ``None``.
 UNSET: Final = object()
+
+#: The path segment standing for ANY element of a sequence, and the one
+#: standing for any key of a table. A model says a list holds tables; it
+#: cannot say how many or under what names, so the element's fields are
+#: streamed once under a placeholder. These are the only path segments
+#: that are not field names, and they are exported so a presenter can
+#: recognize one rather than pattern-matching a string.
+SEQUENCE_ELEMENT: Final = "[]"
+MAPPING_KEY: Final = "<key>"
 
 #: The constraint keys presenters may rely on, normalized to plain names
 #: and plain values so nobody has to know that pydantic stores them as
@@ -139,6 +149,12 @@ class FieldDoc:
     """Set when this field opens a nested block, whose fields follow this
     one in the stream at a longer path."""
 
+    item_model: type[BaseModel] | None
+    """Set when this field holds MANY blocks (a list of tables, a table
+    of tables). The element's fields follow this one in the stream, once,
+    under a :data:`SEQUENCE_ELEMENT` or :data:`MAPPING_KEY` path
+    segment."""
+
     union_arms: tuple[UnionArm, ...]
     """The alternatives, when this field is a discriminated union. Not
     expanded inline: the presenter decides whether to render one arm, all
@@ -221,9 +237,27 @@ def _walk(
     for name, field in fields.items():
         shape = shape_of(field)
         yield _field_doc((*path, name), field, shape)
-        nested = shape.nested_model
-        if nested is not None and nested not in visiting:
-            yield from _walk(nested, (*path, name), visiting)
+        block, segment = _expandable(shape)
+        if block is not None and block not in visiting:
+            yield from _walk(block, (*path, name, *segment), visiting)
+
+
+def _expandable(shape: FieldShape) -> tuple[type[BaseModel] | None, tuple[str, ...]]:
+    """The model whose fields follow this one in the stream, and the path
+    segment they hang under.
+
+    A nested block hangs directly under its field name. A collection's
+    elements hang under a placeholder, because the model says a list
+    holds tables without saying how many: rendering the element ONCE is
+    what makes a generated sample complete, and leaving it out is what
+    made FR10's "complete skeleton" promise false for a catalog field.
+    """
+    if shape.nested_model is not None:
+        return shape.nested_model, ()
+    if shape.item_model is not None:
+        segment = MAPPING_KEY if shape.collection is Collection.MAPPING else SEQUENCE_ELEMENT
+        return shape.item_model, (segment,)
+    return None, ()
 
 
 def _field_doc(path: tuple[str, ...], field: FieldInfo, shape: FieldShape) -> FieldDoc:
@@ -239,6 +273,7 @@ def _field_doc(path: tuple[str, ...], field: FieldInfo, shape: FieldShape) -> Fi
         constraints=_constraints_of(field),
         ref=marker,
         nested_model=shape.nested_model,
+        item_model=shape.item_model,
         union_arms=tuple(UnionArm(tag=arm.tag, doc=model_doc(arm.model)) for arm in shape.arms),
     )
 
