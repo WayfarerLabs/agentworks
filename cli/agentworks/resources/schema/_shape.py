@@ -68,18 +68,55 @@ class FieldShape:
     a discriminated union of models."""
 
 
-def marker_of(field: FieldInfo) -> RefMarker | None:
-    """The reference marker on the field ITSELF, if any.
+def spine_metadata(field: FieldInfo) -> list[object]:
+    """Every ``Annotated`` metadata item attached to the field's OWN
+    value, wherever the author spelled it.
 
-    Both spellings are found: ``Annotated[str | None, SecretRef(...)]``,
-    where pydantic lifts the marker into ``field.metadata``, and
-    ``Annotated[str, SecretRef(...)] | None``, where it stays inside the
-    annotation. Cheaper than a whole :func:`shape_of` for the callers
-    that only want the marker.
+    There are three places, and a lookup that misses one is a silent
+    wrong answer rather than an error, because pydantic itself accepts
+    all three:
+
+    - ``field.metadata``, where pydantic lifts metadata written outside
+      a union (``Annotated[str | None, SecretRef(...)]``);
+    - the annotation itself, when a union sits inside the ``Annotated``
+      (``Annotated[Lima | Proxmox | None, Discriminator("name")]``);
+    - a union ARM, when the ``Annotated`` sits inside the union
+      (``Annotated[Lima | Proxmox, Discriminator("name")] | None``,
+      ``Annotated[str, SecretRef(...)] | int``).
+
+    Metadata on a COLLECTION's elements is not here; that is
+    :func:`element_metadata`, and the two are kept apart because a
+    marker on the field means one Resource while a marker on its
+    elements means many.
     """
+    items = list(field.metadata)
+    base, metadata = _split_annotated(field.annotation)
+    items.extend(metadata)
+    if _is_union(base):
+        for arg in get_args(base):
+            _arm, arm_metadata = _split_annotated(arg)
+            items.extend(arm_metadata)
+    return items
+
+
+def element_metadata(field: FieldInfo) -> list[object]:
+    """Every ``Annotated`` metadata item on the elements of a collection
+    field, or nothing when the field holds a single value."""
     inner, _optional = unwrap_optional(field.annotation)
-    _inner, inner_metadata = _split_annotated(inner)
-    return _first_marker([*field.metadata, *inner_metadata])
+    inner, _metadata = _split_annotated(inner)
+    if get_origin(inner) is not list:
+        return []
+    args = get_args(inner)
+    if not args:
+        return []
+    _element, metadata = _split_annotated(args[0])
+    return metadata
+
+
+def marker_of(field: FieldInfo) -> RefMarker | None:
+    """The reference marker on the field ITSELF, if any. Cheaper than a
+    whole :func:`shape_of` for the callers that only want the marker."""
+    return _first_marker(spine_metadata(field))
 
 
 def shape_of(field: FieldInfo) -> FieldShape:
@@ -88,22 +125,18 @@ def shape_of(field: FieldInfo) -> FieldShape:
     inner, _inner_metadata = _split_annotated(inner)
     marker = marker_of(field)
 
-    item_marker: RefMarker | None = None
+    item_marker: RefMarker | None = _first_marker(element_metadata(field))
     nested_model: type[BaseModel] | None = None
     discriminator: str | None = None
     arms: tuple[UnionArmType, ...] = ()
 
-    if get_origin(inner) is list:
-        args = get_args(inner)
-        if args:
-            _item, item_metadata = _split_annotated(args[0])
-            item_marker = _first_marker(item_metadata)
-    elif _is_model(inner):
-        nested_model = inner
-    elif _is_union(inner):
-        discriminator = _discriminator_of(field)
-        if discriminator is not None:
-            arms = _arms_of(inner, discriminator)
+    if item_marker is None:
+        if _is_model(inner):
+            nested_model = inner
+        elif _is_union(inner):
+            discriminator = _discriminator_of(field)
+            if discriminator is not None:
+                arms = _arms_of(inner, discriminator)
 
     return FieldShape(
         annotation=strip_markers(field.annotation),
@@ -201,13 +234,13 @@ def _is_model(annotation: object) -> TypeGuard[type[BaseModel]]:
 
 
 def _discriminator_of(field: FieldInfo) -> str | None:
-    """The tag field name, from either spelling: ``Field(discriminator=)``
-    or ``Annotated[A | B, Discriminator("name")]``. A callable
-    discriminator has no tag field to read from a raw blob, so it reads
-    as undiscriminated here."""
+    """The tag field name, from every spelling: ``Field(discriminator=)``
+    or a ``Discriminator`` anywhere on the field's spine
+    (:func:`spine_metadata`). A callable discriminator has no tag field
+    to read from a raw blob, so it reads as undiscriminated here."""
     if isinstance(field.discriminator, str):
         return field.discriminator
-    for candidate in (field.discriminator, *field.metadata):
+    for candidate in (field.discriminator, *spine_metadata(field)):
         if isinstance(candidate, Discriminator) and isinstance(candidate.discriminator, str):
             return candidate.discriminator
     return None
@@ -223,21 +256,30 @@ def _arms_of(annotation: object, discriminator: str) -> tuple[UnionArmType, ...]
     for arg in get_args(annotation):
         arm, _metadata = _split_annotated(arg)
         if _is_model(arm):
-            tag = _tag_of(arm, discriminator)
-            if tag is not None:
-                arms.append(UnionArmType(tag=tag, model=arm))
+            arms.extend(UnionArmType(tag=tag, model=arm) for tag in _tags_of(arm, discriminator))
     return tuple(arms)
 
 
-def _tag_of(arm: type[BaseModel], discriminator: str) -> str | None:
+def _tags_of(arm: type[BaseModel], discriminator: str) -> tuple[str, ...]:
+    """Every tag value that selects ``arm``, in declaration order.
+
+    An arm may answer to SEVERAL, which pydantic accepts and which a
+    renamed capability keeping its old name would use
+    (``Literal["aws-ec2", "ec2"]``). Reading only the first would leave
+    the old name silently unaddressable.
+
+    Non-string tags are out of scope, and that is a boundary rather than
+    an oversight: every discriminator in this framework is a capability
+    or kind NAME. A model tagged otherwise contributes no arms here.
+    """
     fields = model_fields_of(arm)
     if fields is None or discriminator not in fields:
-        return None
+        # Pydantic refuses an arm with no discriminator field when the
+        # union is declared, so this is reachable only for an arm that
+        # cannot be built at all.
+        return ()
     annotation, _optional = unwrap_optional(fields[discriminator].annotation)
     annotation, _metadata = _split_annotated(annotation)
     if get_origin(annotation) is not typing.Literal:
-        return None
-    values = get_args(annotation)
-    if len(values) != 1 or not isinstance(values[0], str):
-        return None
-    return values[0]
+        return ()
+    return tuple(value for value in get_args(annotation) if isinstance(value, str))

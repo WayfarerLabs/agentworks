@@ -112,10 +112,25 @@ class ProxmoxArm(AgwModel):
     token_secret: Annotated[str, SecretRef(usage="the Proxmox API token", default_template="proxmox-token")]
 
 
-class UntaggedArm(AgwModel):
-    """A union arm with no literal tag: unaddressable from a raw blob."""
+class RenamedArm(AgwModel):
+    """An arm answering to two tags, as a renamed capability keeping its
+    old name would."""
 
-    token_secret: Annotated[str, SecretRef(usage="an unreachable secret")]
+    name: Literal["aws-ec2", "ec2"]
+    access_key_secret: Annotated[str, SecretRef(usage="the AWS secret access key")] | None = None
+
+
+class NumericallyTaggedArm(AgwModel):
+    """An arm whose tag is not a string: unaddressable here by design."""
+
+    version: Literal[1]
+    token_secret: Annotated[str, SecretRef(usage="an unreachable secret")] | None = None
+
+
+class OtherNumericallyTaggedArm(AgwModel):
+    """The second arm of the numerically tagged union."""
+
+    version: Literal[2]
 
 
 class SiteLike(AgwModel):
@@ -130,10 +145,46 @@ class FieldDiscriminatedSite(AgwModel):
     platform: LimaArm | ProxmoxArm = Field(discriminator="name", default=LimaArm(name="lima"))
 
 
+class OptionalUnionSite(AgwModel):
+    """The union spelled with the ``Annotated`` INSIDE the optional.
+
+    The third legal spelling, and the one an author reaches for when the
+    whole block is optional (a harness integration on a session
+    template). Pydantic validates it identically to the other two, so a
+    lookup that misses the discriminator here would be a silently wrong
+    graph rather than an error.
+    """
+
+    platform: Annotated[LimaArm | ProxmoxArm, Discriminator("name")] | None = None
+
+
 class UndiscriminatedSite(AgwModel):
     """A union with no discriminator at all: no arm is addressable."""
 
     platform: LimaArm | ProxmoxArm | None = None
+
+
+class RenamedArmSite(AgwModel):
+    """A union one of whose arms answers to two tags."""
+
+    platform: Annotated[LimaArm | RenamedArm, Discriminator("name")]
+
+
+class NumericallyTaggedSite(AgwModel):
+    """A union tagged by something other than a name."""
+
+    thing: Annotated[NumericallyTaggedArm | OtherNumericallyTaggedArm, Discriminator("version")] | None = None
+
+
+class MultiArmMarked(AgwModel):
+    """A marked field whose union has two non-``None`` arms.
+
+    Pydantic keeps the marker inside the arm rather than lifting it onto
+    the field, so this is the same lookup asymmetry as the union
+    spellings above, one layer down.
+    """
+
+    secret: Annotated[str, SecretRef(usage="the multi-arm secret", default_template="multi-arm-secret")] | int = 0
 
 
 class SelfReferential(AgwModel):
@@ -174,7 +225,11 @@ ALL_FIXTURES = (
     ProxmoxArm,
     SiteLike,
     FieldDiscriminatedSite,
+    OptionalUnionSite,
+    RenamedArmSite,
+    NumericallyTaggedSite,
     UndiscriminatedSite,
+    MultiArmMarked,
     SelfReferential,
     UnmarkedLike,
     StringRoot,

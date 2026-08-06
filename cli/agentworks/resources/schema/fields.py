@@ -30,15 +30,21 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Final, Literal, Union, get_args, get_origin
 
 from pydantic import BaseModel
+from pydantic.fields import FieldInfo
 
 from agentworks.errors import StateError
-from agentworks.resources.schema._shape import model_fields_of, shape_of, strip_markers, unwrap_optional
+from agentworks.resources.schema._shape import (
+    element_metadata,
+    model_fields_of,
+    shape_of,
+    spine_metadata,
+    strip_markers,
+    unwrap_optional,
+)
 from agentworks.resources.schema.markers import RefMarker
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
-
-    from pydantic.fields import FieldInfo
 
     from agentworks.resources.schema._shape import FieldShape
 
@@ -260,8 +266,14 @@ def _choices_of(annotation: object) -> tuple[object, ...]:
 
 
 def _constraints_of(field: FieldInfo) -> Mapping[str, object]:
+    """The field's constraints, from wherever the author spelled them.
+
+    For a collection field these are the ELEMENT's constraints, matching
+    how ``ref`` reports the element's marker: both describe what one
+    value has to look like.
+    """
     constraints: dict[str, object] = {}
-    for item in field.metadata:
+    for item in _constraint_carriers(field):
         if isinstance(item, RefMarker):
             continue
         for key in _CONSTRAINT_KEYS:
@@ -269,6 +281,20 @@ def _constraints_of(field: FieldInfo) -> Mapping[str, object]:
             if value is not None:
                 constraints[key] = value
     return MappingProxyType(constraints)
+
+
+def _constraint_carriers(field: FieldInfo) -> Iterator[object]:
+    """Every metadata object that could carry a constraint.
+
+    A ``Field(...)`` written inside an ``Annotated`` (rather than as the
+    assigned default) survives as a nested ``FieldInfo`` holding its own
+    metadata list, so that one level is flattened here.
+    """
+    for item in (*spine_metadata(field), *element_metadata(field)):
+        if isinstance(item, FieldInfo):
+            yield from item.metadata
+        else:
+            yield item
 
 
 def _class_summary(model_cls: type[BaseModel]) -> str | None:

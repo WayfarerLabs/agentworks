@@ -21,7 +21,11 @@ from ._fixture_models import (
     FieldDiscriminatedSite,
     GithubLike,
     MappingRoot,
+    MultiArmMarked,
+    NumericallyTaggedSite,
+    OptionalUnionSite,
     ProxmoxLike,
+    RenamedArmSite,
     SelfReferential,
     SiteLike,
     StringRoot,
@@ -150,9 +154,31 @@ def test_a_tag_naming_no_arm_contributes_nothing(tag: object) -> None:
     assert extract_references(SiteLike, {"platform": {"name": tag}}, OWNER) == ()
 
 
-def test_the_field_discriminator_spelling_walks_the_same_way() -> None:
+@pytest.mark.parametrize("model_cls", [SiteLike, FieldDiscriminatedSite, OptionalUnionSite])
+def test_every_legal_union_spelling_walks_the_same_way(model_cls: type[AgwModel]) -> None:
+    # Pydantic validates all three identically, so a lookup that missed
+    # one would build a silently wrong graph rather than fail.
     blob = {"platform": {"name": "proxmox", "token_secret": "lab-token"}}
-    assert names(extract_references(FieldDiscriminatedSite, blob, OWNER)) == ["lab-token"]
+    assert names(extract_references(model_cls, blob, OWNER)) == ["lab-token"]
+
+
+def test_an_arm_answering_to_two_tags_is_reachable_by_both() -> None:
+    for tag in ("aws-ec2", "ec2"):
+        blob = {"platform": {"name": tag, "access_key_secret": "key"}}
+        assert names(extract_references(RenamedArmSite, blob, OWNER)) == ["key"], tag
+
+
+def test_a_union_tagged_by_a_non_name_has_no_addressable_arm() -> None:
+    # A documented boundary: every discriminator in this framework is a
+    # capability or kind name.
+    blob = {"thing": {"version": 1, "token_secret": "x"}}
+    assert extract_references(NumericallyTaggedSite, blob, OWNER) == ()
+
+
+def test_a_marker_inside_a_multi_arm_union_is_still_found() -> None:
+    assert names(extract_references(MultiArmMarked, {"secret": "named"}, OWNER)) == ["named"]
+    assert names(extract_references(MultiArmMarked, {}, OWNER)) == ["multi-arm-secret"]
+    assert extract_references(MultiArmMarked, {"secret": 8}, OWNER) == ()
 
 
 def test_a_union_with_no_discriminator_has_no_addressable_arm() -> None:

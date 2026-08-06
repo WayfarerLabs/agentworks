@@ -28,8 +28,13 @@ from agentworks.resources.schema import (
 from ._fixture_models import (
     AzureLike,
     DiamondLike,
+    FieldDiscriminatedSite,
     GithubLike,
     LimaArm,
+    MultiArmMarked,
+    NumericallyTaggedSite,
+    OptionalUnionSite,
+    RenamedArmSite,
     SelfReferential,
     SiteLike,
     TemplateLike,
@@ -240,6 +245,47 @@ def test_union_arms_are_handles_rather_than_expanded_fields() -> None:
     # The arms' own fields are NOT in the stream: the presenter decides
     # whether to render one arm, all of them, or a table.
     assert paths(SiteLike) == [("platform",)]
+
+
+@pytest.mark.parametrize("model_cls", [SiteLike, FieldDiscriminatedSite, OptionalUnionSite])
+def test_every_legal_union_spelling_yields_the_same_arms(model_cls: type[AgwModel]) -> None:
+    assert [arm.tag for arm in docs(model_cls)[("platform",)].union_arms] == ["lima", "proxmox"]
+
+
+def test_an_arm_answering_to_two_tags_is_listed_under_both() -> None:
+    arms = docs(RenamedArmSite)[("platform",)].union_arms
+    assert [arm.tag for arm in arms] == ["lima", "aws-ec2", "ec2"]
+    assert arms[1].doc.model is arms[2].doc.model
+
+
+def test_a_union_tagged_by_a_non_name_lists_no_arms() -> None:
+    assert docs(NumericallyTaggedSite)[("thing",)].union_arms == ()
+
+
+def test_a_marker_inside_a_multi_arm_union_is_still_reported() -> None:
+    doc = docs(MultiArmMarked)[("secret",)]
+    assert doc.ref is not None
+    assert doc.default_template == "multi-arm-secret"
+
+
+@pytest.mark.parametrize(
+    ("field_name", "expected"),
+    [
+        ("outside", {"min_length": 2}),
+        ("in_a_list", {"min_length": 3}),
+        ("plain", {"min_length": 4}),
+    ],
+)
+def test_constraints_are_found_in_every_spelling(field_name: str, expected: dict[str, object]) -> None:
+    # Same lookup asymmetry as the union spellings: pydantic accepts all
+    # three, so a presenter must not see a field as unconstrained just
+    # because of where the author put the ``Field``.
+    class Spellings(AgwModel):
+        outside: Annotated[str, Field(min_length=2)] | None = None
+        in_a_list: list[Annotated[str, Field(min_length=3)]] = Field(default_factory=list)
+        plain: str = Field(default="xxxx", min_length=4)
+
+    assert dict(docs(Spellings)[(field_name,)].constraints) == expected
 
 
 def test_each_arm_carries_its_own_identity() -> None:
