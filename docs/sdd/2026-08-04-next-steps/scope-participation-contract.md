@@ -6,8 +6,8 @@
   harness-transcripts harvest, `target-state.md`'s settled rulings,
   `capability-descriptor-contract.md`, and the session-runtime reconnaissance in `starting-state.md`
 - Supersedes: the earlier facet-model framing of this artifact (operator simplification,
-  2026-08-05). "Facet" is retired as vocabulary; operators and devs see scopes, features, and
-  harness integrations.
+  2026-08-05). The machinery meaning of "facet" (declaration contracts, support-by-presence, grants)
+  stays dead; the word returned on 2026-08-06 as a plain noun only, defined below.
 
 ## Purpose
 
@@ -55,28 +55,36 @@ Harness integrations are the only participants that straddle scopes, so the scop
 directly on the one registered integration API as methods (names indicative): `vm_init`,
 `user_init`, `workspace_init`, alongside the existing session `start` and `resume`. `user_init` is
 one surface for user-level setup: it is invoked for the admin user during VM init and for each agent
-during agent init, the invocation context says which user, and one method body serves both. The
-per-scope orchestrators call these at the end of their pipelines for the integrations the owning
-template selects. Env is delivered through the run targets; agent artifacts arrive as inputs. The
-base class provides no-op defaults, and an integration implements what it supports; this
-deliberately supersedes the perspective's absence-means-unsupported rule (review and testing catch a
-mistyped override), and whether a lightweight supported-scopes report exists for doctor and guide
-output is the effort lead's call. A per-scope invocation is constructed for its owning resource; it
-never reuses a session instance's target identity, readiness cache, or state namespace, which stay
-session-bound. The Claude-specific template fields (`claude_marketplaces`, `claude_plugins`) migrate
-into the Claude integration's user-scope config as wave 4 work (they already carry the same shape on
-admin config and agent templates today).
+during agent init, the invocation context says which user, and one method body serves both. These
+levels are the capability's facets (vm, user, workspace, session): a facet names the pairing of one
+level's API methods and its config, nothing more. Facets are deliberately not scopes: core owns the
+scope-to-facet mapping (admin and agent both map to the user facet; session start and resume share
+the session facet), so producers never need to know their consumers. The per-scope orchestrators
+call these at the end of their pipelines for the integrations the owning template selects. Env is
+delivered through the run targets; agent artifacts arrive as inputs. The base class provides no-op
+defaults, and an integration implements what it supports; this deliberately supersedes the
+perspective's absence-means-unsupported rule (review and testing catch a mistyped override), and
+whether a lightweight supported-scopes report exists for doctor and guide output is the effort
+lead's call. A per-scope invocation is constructed for its owning resource; it never reuses a
+session instance's target identity, readiness cache, or state namespace, which stay session-bound.
+The Claude-specific template fields (`claude_marketplaces`, `claude_plugins`) migrate into the
+Claude integration's user-scope config as wave 4 work (they already carry the same shape on admin
+config and agent templates today).
 
 Integration config is ordinary capability config, no different from vm-platform config: it belongs
 to the consuming resource (the vm, agent, workspace, or session template that selects the
 integration) and is validated the way all capability config is validated, today by calling into the
 capability and after wave 2 by core against capability-provided schema, one blob at a time as the
-graph walk reaches each resource. The one specialty is that the harness-integration capability emits
-a config schema per hosting surface (the user schema serves both the admin attachment on the
-vm-template and agent attachments on agent-templates), with schema selection keyed on the hosting
-surface. That is capability-specific, not a framework mechanism, and the harness integration is the
-odd one out at first and possibly forever; no schema mapping is ever assembled or consumed whole.
-Accepting no config at a surface means emitting no schema for it.
+graph walk reaches each resource. The one specialty is that the harness-integration capability
+offers config per facet, producer-oriented: a capability declares a fixed set of facet configs
+exactly as it declares its fixed set of API methods, and consumers choose which facet they drive,
+just as the orchestrators choose which method to call. Core asks `config_for(facet)` (names
+indicative) and owns the scope-to-facet mapping, so admin and agent templates get the same
+user-facet answer by construction. A capability with one config declares it without naming any
+facet, so the ordinary case stays invisible, and the association is introspectable at finalize,
+before any method runs. That is capability-specific, not a framework mechanism, and the harness
+integration is the odd one out at first and possibly forever. Validation still consumes exactly one
+facet's schema per blob; offering no config for a facet means there is nothing to validate there.
 
 ### Trust, not enforcement
 
