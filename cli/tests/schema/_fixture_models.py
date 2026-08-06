@@ -15,8 +15,8 @@ from typing import Annotated, Literal
 
 from pydantic import Discriminator, Field
 
-from agentworks.resources.reference import RefRelationship
-from agentworks.resources.schema import AgwModel, AgwRootModel, NonEmptyStr, ResourceRef, SecretRef
+from agentworks.schema import AgwModel, AgwRootModel, NonEmptyStr, ResourceRef, SecretRef
+from agentworks.schema.reference import RefRelationship
 
 
 class GithubLike(AgwModel):

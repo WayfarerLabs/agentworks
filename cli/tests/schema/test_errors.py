@@ -23,7 +23,7 @@ from pydantic import Field, model_validator
 from pydantic import ValidationError as PydanticValidationError
 
 from agentworks.errors import ConfigError
-from agentworks.resources.schema import (
+from agentworks.schema import (
     MAX_ERROR_LINES,
     AgwModel,
     AgwRootModel,

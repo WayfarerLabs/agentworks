@@ -12,7 +12,7 @@ import pytest
 from pydantic import ValidationError
 
 from agentworks.errors import StateError
-from agentworks.resources.schema import RefOwner, extract_references, validation_context
+from agentworks.schema import RefOwner, extract_references, validation_context
 
 from ._fixture_models import AzureLike, GithubLike, SiteLike, UnmarkedLike
 

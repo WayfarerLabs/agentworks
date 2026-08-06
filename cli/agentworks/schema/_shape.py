@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Annotated, TypeGuard, Union, get_args, get_ori
 from pydantic import BaseModel, Discriminator
 from pydantic.errors import PydanticSchemaGenerationError, PydanticUndefinedAnnotation
 
-from agentworks.resources.schema.markers import RefMarker
+from agentworks.schema.markers import RefMarker
 
 if TYPE_CHECKING:
     from pydantic.fields import FieldInfo

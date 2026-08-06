@@ -15,7 +15,7 @@ from pydantic import BaseModel
 
 from agentworks.capabilities.facets import Facet, facet_config
 from agentworks.errors import StateError
-from agentworks.resources.schema import AgwModel
+from agentworks.schema import AgwModel
 
 
 class UserConfig(AgwModel):

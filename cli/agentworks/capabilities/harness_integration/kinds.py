@@ -29,7 +29,7 @@ from agentworks.capabilities.descriptor import (
 from agentworks.capabilities.harness_integration.base import HarnessIntegration
 from agentworks.resources.graph import Readiness
 from agentworks.resources.kind import KIND_REGISTRY, NoUnreferencedDefaultError
-from agentworks.resources.schema import AgwModel
+from agentworks.schema import AgwModel
 
 if TYPE_CHECKING:
     from collections.abc import Sequence

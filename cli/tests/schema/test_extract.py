@@ -11,8 +11,8 @@ from typing import Annotated
 
 import pytest
 
-from agentworks.resources.reference import ConfigReference, RefRelationship
-from agentworks.resources.schema import AgwModel, RefOwner, SecretRef, extract_references
+from agentworks.schema import AgwModel, RefOwner, SecretRef, extract_references
+from agentworks.schema.reference import ConfigReference, RefRelationship
 
 from ._fixture_models import (
     AwsLike,

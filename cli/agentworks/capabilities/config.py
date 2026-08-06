@@ -30,7 +30,7 @@ from pydantic import ValidationError as PydanticValidationError
 
 from agentworks.capabilities.descriptor import descriptor_for, descriptor_for_impl
 from agentworks.errors import ConfigError, StateError
-from agentworks.resources.schema import (
+from agentworks.schema import (
     AgwRootModel,
     config_error_from,
     extract_references,
@@ -45,7 +45,7 @@ if TYPE_CHECKING:
     from agentworks.capabilities.descriptor import CapabilityKindDescriptor
     from agentworks.capabilities.facets import Facet
     from agentworks.resources.reference import ConfigReference
-    from agentworks.resources.schema import RefOwner
+    from agentworks.schema import RefOwner
     from agentworks.source_location import SourceLocation
 
 #: Assembled unions, keyed by ``(kind, facet)`` PLUS a snapshot of the

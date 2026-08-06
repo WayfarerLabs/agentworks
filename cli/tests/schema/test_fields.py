@@ -14,7 +14,7 @@ import pytest
 from pydantic import Field
 
 from agentworks.errors import StateError
-from agentworks.resources.schema import (
+from agentworks.schema import (
     MAPPING_KEY,
     REF_SCHEMA_KEY,
     SEQUENCE_ELEMENT,

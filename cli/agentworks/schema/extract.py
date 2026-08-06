@@ -26,14 +26,14 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, RootModel
 
-from agentworks.resources.reference import ConfigReference
-from agentworks.resources.schema._shape import Collection, model_fields_of, shape_of
+from agentworks.schema._shape import Collection, model_fields_of, shape_of
+from agentworks.schema.reference import ConfigReference
 
 if TYPE_CHECKING:
     from pydantic.fields import FieldInfo
 
-    from agentworks.resources.schema._shape import FieldShape
-    from agentworks.resources.schema.markers import RefMarker, RefOwner
+    from agentworks.schema._shape import FieldShape
+    from agentworks.schema.markers import RefMarker, RefOwner
 
 
 def extract_references(

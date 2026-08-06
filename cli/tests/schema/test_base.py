@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 from pydantic import Field, ValidationError
 
-from agentworks.resources.schema import AgwModel, AgwRootModel
+from agentworks.schema import AgwModel, AgwRootModel
 
 
 class Nested(AgwModel):

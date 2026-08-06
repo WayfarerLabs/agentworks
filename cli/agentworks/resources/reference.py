@@ -49,34 +49,12 @@ one directly.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
 from typing import TYPE_CHECKING
+
+from agentworks.schema.reference import ConfigReference, RefRelationship
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
-
-
-class RefRelationship(Enum):
-    """What the referring Resource MEANS by pointing at the target.
-
-    - ``USES``: a runtime need. The target must resolve for the referrer
-      to work.
-    - ``INHERITS``: source composition. The target's declaration is
-      merged into the referrer's.
-
-    The distinction is the relationship, never the target's kind: today
-    a template is pointed at only to inherit from it, but a future
-    uses-a-template edge would be misclassified by any filter that reads
-    "points at a template" as "inherits from it".
-
-    Defined here, beside the reference records that carry it, rather than
-    with the field markers that declare it: it is the reference
-    vocabulary's word, and this module is a leaf that
-    ``resources/schema/`` imports, never the reverse.
-    """
-
-    USES = "uses"
-    INHERITS = "inherits"
 
 
 @dataclass(frozen=True)
@@ -112,28 +90,6 @@ class ResourceReference:
     kind: str
     usage: str
     source: tuple[str, str]
-
-
-@dataclass(frozen=True)
-class ConfigReference:
-    """A resource reference implied by a modeled blob: the record
-    ``extract_references`` produces from a model's reference-marked
-    fields, and the record a capability's ``dependencies`` returns while
-    that hand-rolled surface still exists.
-
-    Sourceless by design: the consuming resource that owns the blob
-    attaches itself as the ``source`` when it emits the corresponding
-    ``ResourceReference`` (whoever hosts the config that names the
-    resource emits the reference).
-
-    ``relationship`` says what the referrer MEANS by the edge; it
-    defaults to ``USES``, which is what every producer implies today.
-    """
-
-    kind: str
-    name: str
-    usage: str
-    relationship: RefRelationship = RefRelationship.USES
 
 
 @dataclass(frozen=True)
@@ -222,3 +178,14 @@ def sourced_references(
             )
         )
     return result
+
+
+__all__ = [
+    "ConfigReference",
+    "RefRelationship",
+    "ReferenceEntry",
+    "ResourceReference",
+    "SecretReference",
+    "TemplateReference",
+    "sourced_references",
+]

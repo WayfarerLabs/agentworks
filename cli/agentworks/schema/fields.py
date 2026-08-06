@@ -33,7 +33,7 @@ from pydantic import BaseModel
 from pydantic.fields import FieldInfo
 
 from agentworks.errors import StateError
-from agentworks.resources.schema._shape import (
+from agentworks.schema._shape import (
     Collection,
     element_metadata,
     model_fields_of,
@@ -42,12 +42,12 @@ from agentworks.resources.schema._shape import (
     strip_markers,
     unwrap_optional,
 )
-from agentworks.resources.schema.markers import RefMarker
+from agentworks.schema.markers import RefMarker
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
 
-    from agentworks.resources.schema._shape import FieldShape
+    from agentworks.schema._shape import FieldShape
 
 #: A field with no declared default, distinct from a declared default of
 #: ``None``.

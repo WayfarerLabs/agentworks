@@ -30,7 +30,7 @@ from agentworks.capabilities.facets import Facet, facet_config
 from agentworks.errors import ConfigError, StateError
 from agentworks.plugins import Plugin, seated_plugin
 from agentworks.resources.reference import ConfigReference
-from agentworks.resources.schema import (
+from agentworks.schema import (
     AgwModel,
     FramedConfigError,
     RefOwner,

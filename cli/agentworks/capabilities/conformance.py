@@ -24,7 +24,7 @@ import inspect
 from typing import TYPE_CHECKING, Literal, get_args, get_origin
 
 from agentworks.errors import StateError
-from agentworks.resources.schema import model_is_complete
+from agentworks.schema import model_is_complete
 
 if TYPE_CHECKING:
     from pydantic import BaseModel

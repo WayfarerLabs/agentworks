@@ -869,6 +869,26 @@ red window.
 
 **Contradictions found against HEAD or the upstream artifacts.**
 
+0. **The schema package could not stay under `resources/`, and this step moved it.** The step 2.1
+   LLD places it at `resources/schema/` "beside `resources/reference.py` (the reference types it
+   produces)" and states the direction rule in those terms. That does not survive contact with the
+   first capability config models. Importing ANY module under `agentworks.resources` runs
+   `resources/__init__.py`, which imports `resources.kinds`, which imports all four capability
+   packages; a capability module declares its config model at CLASS-DEFINITION time, so it must
+   import the schema package at module level, and that import closes the cycle. Verified by
+   execution: with `capabilities/base.py` importing `agentworks.resources.schema`,
+   `python -c "import agentworks.capabilities.git_credential.base"` fails with
+   `cannot import name 'Capability' from partially initialized module`. Settled by moving the
+   package to a top-level `agentworks/schema/`, which is the same constraint `declared_resource.py`
+   and `source_location.py` already sit at top level for, and their docstrings already state it. Two
+   pieces moved with it so the package is a real leaf: `RefRelationship` and `ConfigReference` now
+   live in `schema/reference.py` and are re-exported by `resources/reference.py` (the 2.1 LLD's
+   direction rule, one level out, with the same reasoning), and `format_file_path` moved into
+   `source_location.py` so the bridge can render an operator-facing path without importing
+   `resources/render.py`. Pinned by a boundary test that scans the package's imports AND
+   subprocess-imports each capability base on its own, both directions, because a source scan alone
+   would miss the cycle and an import alone would miss a dependency nobody exercises.
+
 1. **The plan under-states break 2: `secret: null` flips VALIDATION for all three cloud platforms,
    not azure alone.** `plan.md:373-376` names azure's `_parse_service_principal` as "the more
    visible half" and implies aws and proxmox only change their edge. At HEAD,

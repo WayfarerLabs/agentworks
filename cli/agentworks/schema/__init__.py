@@ -17,33 +17,43 @@ hand-validated lives here:
   bridge from a pydantic ``ValidationError`` to the owner-framed,
   located text an operator reads.
 
-This package sits BELOW the domains that use it. It may import
-``resources/reference.py`` (the reference records it produces) and
-nothing else of ours; in particular nothing here imports
-``capabilities/``, ``manifests/``, ``plugins/``, or the kind registry,
-which is what lets all of those import this package freely. The one edge
-this package creates runs in a single direction: ``resources/schema/``
-imports ``resources/reference.py``, never the reverse.
+**This package is a LEAF, and that is load-bearing rather than tidy.** It
+imports ``agentworks.errors`` and ``agentworks.source_location``, both
+top-level leaves themselves, and nothing else of ours. In particular it
+imports nothing under ``agentworks.resources``, because importing any
+module of that package runs its ``__init__``, which loads every kind
+module, which loads every capability package. Capability modules declare
+their config models at class-definition time and so must import this
+package at MODULE level; if that import dragged in the kind registry, a
+capability module could not be imported on its own at all.
+
+That is why the model layer's own reference records (``RefRelationship``
+and ``ConfigReference``) live here in ``schema/reference.py`` and are
+re-exported by ``resources/reference.py`` rather than the other way
+round, and why the top-level home replaced the original
+``resources/schema/`` one (step 2.3, on contact with the first capability
+models). It is the same constraint ``declared_resource.py`` and
+``source_location.py`` already sit at top level for.
 """
 
 from __future__ import annotations
 
-from agentworks.resources.schema._shape import model_is_complete
-from agentworks.resources.schema.base import (
+from agentworks.schema._shape import model_is_complete
+from agentworks.schema.base import (
     AgwModel,
     AgwRootModel,
     NonEmptyStr,
     PositiveInt,
     validation_context,
 )
-from agentworks.resources.schema.errors import (
+from agentworks.schema.errors import (
     MAX_ERROR_LINES,
     FramedConfigError,
     config_error_from,
     render_validation_error,
 )
-from agentworks.resources.schema.extract import extract_references
-from agentworks.resources.schema.fields import (
+from agentworks.schema.extract import extract_references
+from agentworks.schema.fields import (
     MAPPING_KEY,
     SEQUENCE_ELEMENT,
     UNSET,
@@ -54,7 +64,7 @@ from agentworks.resources.schema.fields import (
     model_doc,
     render_type,
 )
-from agentworks.resources.schema.markers import (
+from agentworks.schema.markers import (
     REF_SCHEMA_KEY,
     RefMarker,
     RefOwner,

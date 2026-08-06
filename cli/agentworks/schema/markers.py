@@ -30,7 +30,7 @@ from string import Formatter
 from typing import TYPE_CHECKING, Final
 
 from agentworks.errors import StateError
-from agentworks.resources.reference import RefRelationship
+from agentworks.schema.reference import RefRelationship
 
 if TYPE_CHECKING:
     from pydantic import GetJsonSchemaHandler

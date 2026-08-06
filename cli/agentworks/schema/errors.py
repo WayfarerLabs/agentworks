@@ -41,7 +41,7 @@ from typing import TYPE_CHECKING, Final
 from pydantic import RootModel
 
 from agentworks.errors import ConfigError
-from agentworks.resources.schema._shape import is_model, model_fields_of, shape_of
+from agentworks.schema._shape import is_model, model_fields_of, shape_of
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -50,8 +50,8 @@ if TYPE_CHECKING:
     from pydantic import ValidationError as PydanticValidationError
     from pydantic_core import ErrorDetails
 
-    from agentworks.resources.schema._shape import FieldShape, UnionArmType
-    from agentworks.resources.schema.markers import RefOwner
+    from agentworks.schema._shape import FieldShape, UnionArmType
+    from agentworks.schema.markers import RefOwner
     from agentworks.source_location import SourceLocation
 
 #: The most error lines a raised ``ConfigError`` body carries. The header

@@ -43,7 +43,7 @@ from agentworks.resources.graph import (
 )
 from agentworks.resources.kind import KIND_REGISTRY
 from agentworks.resources.origin import Origin
-from agentworks.resources.schema import AgwModel
+from agentworks.schema import AgwModel
 from tests.plugins._fixtures import (
     ConformingSecretBackend,
     ConformingVMPlatform,

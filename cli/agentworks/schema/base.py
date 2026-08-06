@@ -35,13 +35,13 @@ from weakref import WeakKeyDictionary
 from pydantic import BaseModel, ConfigDict, Field, RootModel, model_validator
 
 from agentworks.errors import StateError
-from agentworks.resources.schema._shape import marker_of
-from agentworks.resources.schema.markers import RefOwner
+from agentworks.schema._shape import marker_of
+from agentworks.schema.markers import RefOwner
 
 if TYPE_CHECKING:
     from pydantic import ValidationInfo
 
-    from agentworks.resources.schema.markers import RefMarker
+    from agentworks.schema.markers import RefMarker
 
 #: The key an owner rides under in pydantic's validation context. Build
 #: the context with :func:`validation_context` rather than spelling it.

@@ -1,15 +1,22 @@
 """Framework-layer rendering helpers shared by every kind's CLI describe
-view. ``format_origin_line`` and ``format_file_path`` live here (not in
-any kind module) because the cross-kind ``agw resource describe`` and
-the per-kind commands (``agw secret describe``, future ``agw vm
-describe`` ...) all render the same ``Origin`` shape; defining the
-renderer next to ``Origin`` keeps the layer correct.
+view. ``format_origin_line`` lives here (not in any kind module) because
+the cross-kind ``agw resource describe`` and the per-kind commands
+(``agw secret describe``, future ``agw vm describe`` ...) all render the
+same ``Origin`` shape; defining the renderer next to ``Origin`` keeps the
+layer correct.
+
+``format_file_path`` is re-exported from ``agentworks.source_location``,
+which is where it moved so the schema error bridge can render a path the
+same way without importing this package: importing anything under
+``agentworks.resources`` runs that package's ``__init__``, which loads
+every kind module.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING
+
+from agentworks.source_location import format_file_path
 
 if TYPE_CHECKING:
     from agentworks.resources.origin import Origin
@@ -62,13 +69,4 @@ def format_origin_location(origin: Origin | None) -> str:
     return format_origin_line(origin)
 
 
-def format_file_path(file: Path) -> str:
-    """Render a file path operator-friendly: ``~/path`` when under
-    ``$HOME``, else the bare absolute path. Relative paths render as-is.
-    """
-    if file.is_absolute():
-        try:
-            return f"~/{file.relative_to(Path.home())}"
-        except ValueError:
-            return str(file)
-    return str(file)
+__all__ = ["format_file_path", "format_origin_line", "format_origin_location"]

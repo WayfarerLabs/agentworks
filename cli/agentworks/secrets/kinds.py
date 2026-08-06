@@ -40,8 +40,8 @@ from agentworks.resources.kind import (
     NoUnreferencedDefaultError,
 )
 from agentworks.resources.origin import Origin
-from agentworks.resources.schema import AgwRootModel
 from agentworks.resources.walk import collect_secrets_for
+from agentworks.schema import AgwRootModel
 from agentworks.secrets.backends import SecretBackend
 from agentworks.secrets.base import SecretDecl
 

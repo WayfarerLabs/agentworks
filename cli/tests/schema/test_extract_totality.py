@@ -28,7 +28,7 @@ import pytest
 from pydantic import BaseModel
 from pydantic.errors import PydanticSchemaGenerationError, PydanticUndefinedAnnotation, PydanticUserError
 
-from agentworks.resources.schema import REF_SCHEMA_KEY, RefOwner, extract_references
+from agentworks.schema import REF_SCHEMA_KEY, RefOwner, extract_references
 
 from ._fixture_models import ALL_FIXTURES
 

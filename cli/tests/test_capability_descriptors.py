@@ -38,7 +38,7 @@ from agentworks.manifests.decode import capability_fields
 from agentworks.resources.graph import Readiness, _capability_node_readiness
 from agentworks.resources.kind import KIND_REGISTRY
 from agentworks.resources.registry import Registry
-from agentworks.resources.schema import AgwModel, AgwRootModel
+from agentworks.schema import AgwModel, AgwRootModel
 from agentworks.secrets.kinds import SecretBackendEntry
 from tests.plugins._fixtures import ConformingVMPlatform
 

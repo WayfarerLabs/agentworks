@@ -14,14 +14,14 @@ import pytest
 from pydantic import Discriminator, Field
 
 from agentworks.errors import StateError
-from agentworks.resources.reference import RefRelationship
-from agentworks.resources.schema import (
+from agentworks.schema import (
     REF_SCHEMA_KEY,
     AgwModel,
     RefOwner,
     ResourceRef,
     SecretRef,
 )
+from agentworks.schema.reference import RefRelationship
 
 OWNER = RefOwner(kind="git-credential", name="prod")
 
