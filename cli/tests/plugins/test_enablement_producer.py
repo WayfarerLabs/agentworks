@@ -46,7 +46,7 @@ from agentworks.resources.graph import (
     compose_enablement,
 )
 from agentworks.resources.registry import Registry
-from agentworks.schema import AgwModel, AgwRootModel, NonEmptyStr, SecretRef
+from agentworks.schema import AgwModel, AgwRootModel, CapabilityBlock, NonEmptyStr, SecretRef
 from agentworks.secrets.base import SecretDecl
 from agentworks.secrets.resolve import active_backends
 from agentworks.sessions.manager._env import _display_harness_integration
@@ -196,7 +196,7 @@ def test_no_source_leaves_a_plugin_row_enabled_the_landed_default() -> None:
         registry.add(
             "vm-site",
             "s",
-            VMSiteDecl(name="s", platform="fixture-platform", platform_config={}),
+            VMSiteDecl(name="s", platform=CapabilityBlock.of("fixture-platform", **{})),
             _operator(),
         )
         registry.finalize()  # no sources -> all enabled
@@ -214,7 +214,7 @@ def test_vm_site_on_disabled_plugin_platform_is_not_ready_with_enable_plugin() -
         registry.add(
             "vm-site",
             "s",
-            VMSiteDecl(name="s", platform="fixture-platform", platform_config={}),
+            VMSiteDecl(name="s", platform=CapabilityBlock.of("fixture-platform", **{})),
             _operator(),
         )
         registry.finalize(enablement_sources=[_plugin_source()])
@@ -240,7 +240,10 @@ def test_disabled_plugin_platform_withholds_its_config_implied_secret() -> None:
         registry.add(
             "vm-site",
             "s",
-            VMSiteDecl(name="s", platform="fixture-platform", platform_config={"token_secret": "fixture-token"}),
+            VMSiteDecl(
+                name="s",
+                platform=CapabilityBlock.of("fixture-platform", **{"token_secret": "fixture-token"}),
+            ),
             _operator(),
         )
         registry.finalize(enablement_sources=[_plugin_source(*([PLUGIN] if enabled else []))])
@@ -261,7 +264,7 @@ def test_disabled_plugin_platform_withholds_its_config_implied_secret() -> None:
         registry.add(
             "vm-site",
             "s",
-            VMSiteDecl(name="s", platform="fixture-platform", platform_config={}),
+            VMSiteDecl(name="s", platform=CapabilityBlock.of("fixture-platform", **{})),
             _operator(),
         )
         registry.finalize(enablement_sources=[_plugin_source()])
@@ -317,7 +320,7 @@ def _git_registry() -> Registry:
     registry.add(
         "git-credential",
         "cred",
-        GitCredentialConfig(name="cred", provider="fixture-provider", provider_config={}),
+        GitCredentialConfig(name="cred", provider=CapabilityBlock.of("fixture-provider", **{})),
         _operator(),
     )
     return registry
@@ -338,7 +341,7 @@ def test_git_credential_not_ready_falls_back_when_mark_absent() -> None:
     """The propagate hook's mark-absent fallback (mirrors the vm-site leaf test):
     a disabled provider ``DependencyState`` with no carried reason yields the
     generic "enable its unit" tail. Direct call, no source involved."""
-    cred = GitCredentialConfig(name="c", provider="p", provider_config={})
+    cred = GitCredentialConfig(name="c", provider=CapabilityBlock.of("p", **{}))
     deps = {
         ("git-credential-provider", "p"): DependencyState(
             enablement=Enablement.disabled,
@@ -382,7 +385,7 @@ def _harness_integration_registry() -> Registry:
     registry.add(
         "session-template",
         "tmpl",
-        SessionTemplate(name="tmpl", harness_integration="fixture-harness"),
+        SessionTemplate(name="tmpl", harness_integration=CapabilityBlock(name="fixture-harness")),
         _operator(),
     )
     return registry
@@ -451,7 +454,7 @@ def test_second_stub_source_composes_through_finalize_and_precedence_holds() -> 
         registry.add(
             "vm-site",
             "s",
-            VMSiteDecl(name="s", platform="fixture-platform", platform_config={}),
+            VMSiteDecl(name="s", platform=CapabilityBlock.of("fixture-platform", **{})),
             _operator(),
         )
         # The plugin source disables both plugin rows. A stub ALSO disables the

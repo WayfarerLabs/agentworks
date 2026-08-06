@@ -370,11 +370,11 @@ def _check_vm_sites(config: Config, registry: Registry) -> HealthGroup:
             # operator's next command hits: warn.
             g.warn(
                 name,
-                f"platform {decl.platform}; preflight: {e}",
+                f"platform {decl.platform.name}; preflight: {e}",
                 hint=getattr(e, "hint", None),
             )
             continue
-        g.ok(name, f"platform {decl.platform}")
+        g.ok(name, f"platform {decl.platform.name}")
 
     default_site = config.defaults.site
     if default_site is not None and default_site in not_ready:

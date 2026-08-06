@@ -65,14 +65,18 @@ if TYPE_CHECKING:
 _LEGACY_SIBLING_SHAPES: dict[str, tuple[str, str]] = {
     "vm-site": ("platform", "platform_config"),
     "git-credential": ("provider", "provider_config"),
+    "session-template": ("harness_integration", "harness_integration_config"),
 }
 """Declarable kind -> (naming field, retired sibling config field).
 
-Only the two surfaces that ever ACCEPTED the sibling pair. A session
-template's ``harness_integration`` was born tagged (wave 1 renamed the
-field and rejected the string form in the same release), so no manifest
-on disk can carry ``harness_integration`` beside a
-``harness_integration_config``.
+The first two are the surfaces that ever ACCEPTED the sibling pair. A
+session template's ``harness_integration`` was born tagged (wave 1
+renamed the field and rejected the string form in the same release), so
+no manifest a shipped release EMITTED can carry the pair. It is here
+anyway, because the shape is what an operator TYPES from ``harness:``
+muscle memory, and decode's refusal names ``agw resource migrate`` as the
+remedy: a remedy that did nothing for the document that just failed to
+load would be worse than none.
 """
 
 

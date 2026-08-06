@@ -21,7 +21,7 @@ from agentworks.capabilities.config import (
     capability_config_references,
     capability_config_union,
     offered_model,
-    tagged_config,
+    selected_name,
     validate_capability_config,
     validate_own_config,
 )
@@ -117,8 +117,18 @@ def seated() -> Iterator[None]:
         yield
 
 
+def _tagged(blob: dict[str, object], name: str = "fixture-platform") -> dict[str, object]:
+    """``blob`` in the shape a host row carries it: one tagged table whose
+    ``name`` key is the selector."""
+    return {"name": name, **blob}
+
+
 def _validate(blob: dict[str, object], name: str = "fixture-platform") -> object:
-    return validate_capability_config(kind="vm-platform", name=name, blob=blob, owner=OWNER, location=WHERE)
+    return validate_capability_config(kind="vm-platform", config=_tagged(blob, name), owner=OWNER, location=WHERE)
+
+
+def _refs(blob: dict[str, object], name: str = "fixture-platform") -> tuple[ConfigReference, ...]:
+    return capability_config_references(kind="vm-platform", config=_tagged(blob, name), owner=OWNER)
 
 
 # -- Resolution ---------------------------------------------------------------
@@ -134,7 +144,7 @@ def test_an_unseated_name_answers_none_rather_than_raising(seated: None) -> None
     worse than once."""
     assert capability_config_model("vm-platform", "nope") is None
     assert _validate({}, name="nope") is None
-    assert capability_config_references(kind="vm-platform", name="nope", blob={}, owner=OWNER) == ()
+    assert _refs({}, name="nope") == ()
 
 
 def test_a_single_config_capability_answers_at_every_facet(seated: None) -> None:
@@ -200,12 +210,9 @@ class TripwirePlatform(ConformingVMPlatform):
 
 def test_neither_validation_nor_extraction_invokes_the_capability() -> None:
     with seated_plugin(Plugin(name="tripwire", capabilities={"vm-platform": (TripwirePlatform,)})):
-        validated = validate_capability_config(
-            kind="vm-platform", name="tripwire-platform", blob={"region": "eu"}, owner=OWNER
-        )
-        refs = capability_config_references(
-            kind="vm-platform", name="tripwire-platform", blob={"region": "eu"}, owner=OWNER
-        )
+        tagged = {"name": "tripwire-platform", "region": "eu"}
+        validated = validate_capability_config(kind="vm-platform", config=tagged, owner=OWNER)
+        refs = capability_config_references(kind="vm-platform", config=tagged, owner=OWNER)
         instance = TripwirePlatform("lab", {"region": "eu"})
 
     assert isinstance(validated, TripwireConfig)
@@ -259,43 +266,47 @@ def test_the_arm_is_selected_by_the_capability_name_not_by_the_blob(seated: None
         _validate({"token": "t"}, name="other-platform")
 
 
-# -- The interim tagged synthesis ---------------------------------------------
+# -- Which implementation the config selects ----------------------------------
 
 
-def test_the_synthesis_produces_the_table_decode_will_hand_over_directly() -> None:
-    assert tagged_config("lima", {"vm_host": "h"}, discriminator="name", owner=OWNER) == {
-        "name": "lima",
-        "vm_host": "h",
-    }
+def test_a_tagged_kind_reads_its_selector_off_the_table() -> None:
+    """One source, so there is nothing to disagree with. The synthesis
+    this replaces had to reject a ``name`` key inside the blob, because a
+    blob naming one capability beside a field naming another would have
+    validated against a schema the caller did not think it was using."""
+    assert selected_name("vm-platform", {"name": "lima", "vm_host": "h"}, None) == "lima"
 
 
-def test_a_name_key_inside_the_config_block_is_a_hard_error() -> None:
-    """Neither silent resolution is acceptable: letting the tag win
-    discards a key the operator wrote, and letting the blob win would let
-    the config block select a DIFFERENT capability's schema than the
-    naming field beside it."""
-    with pytest.raises(ConfigError, match="names the capability"):
-        tagged_config("lima", {"name": "proxmox"}, discriminator="name", owner=OWNER)
+@pytest.mark.parametrize("config", [{}, {"name": 7}, {"name": None}, "lima", None])
+def test_a_missing_or_non_string_tag_names_no_implementation(config: object) -> None:
+    """Tolerant rather than throwing: the dangling capability edge is what
+    reports an unnamed capability, as a hard finalize miss (R9.2)."""
+    assert selected_name("vm-platform", config, None) is None
 
 
-def test_a_config_block_naming_another_capability_cannot_smuggle_an_arm(seated: None) -> None:
-    with pytest.raises(ConfigError, match="names the capability"):
-        _validate({"name": "other-platform", "region": "eu"})
+def test_a_map_keyed_kind_takes_its_selector_from_the_caller() -> None:
+    """A secret backend's config is the mapping VALUE, which carries no
+    tag and need not be a mapping at all; the outer map key is the only
+    source there is."""
+    assert selected_name("secret-backend", "NPM_TOKEN", "env-var") == "env-var"
+
+
+def test_a_map_keyed_kind_with_no_name_is_a_framework_bug() -> None:
+    with pytest.raises(StateError, match="dispatches its config by map key"):
+        selected_name("secret-backend", "NPM_TOKEN", None)
 
 
 # -- Extraction ---------------------------------------------------------------
 
 
 def test_references_are_read_off_the_raw_blob_through_the_model(seated: None) -> None:
-    refs = capability_config_references(
-        kind="vm-platform", name="fixture-platform", blob={"token": "mine"}, owner=OWNER
-    )
+    refs = _refs({"token": "mine"})
 
     assert refs == (ConfigReference(kind="secret", name="mine", usage="the fixture token"),)
 
 
 def test_an_omitted_reference_falls_back_to_the_owner_template(seated: None) -> None:
-    refs = capability_config_references(kind="vm-platform", name="fixture-platform", blob={}, owner=OWNER)
+    refs = _refs({})
 
     assert refs == (ConfigReference(kind="secret", name="fixture-lab", usage="the fixture token"),)
 
@@ -304,7 +315,7 @@ def test_an_omitted_reference_falls_back_to_the_owner_template(seated: None) -> 
 def test_extraction_never_raises_on_a_blob_validation_would_reject(seated: None, blob: dict[str, object]) -> None:
     """The graph is built before anything is validated, so a malformed
     blob has to contribute no edges rather than sink the walk."""
-    capability_config_references(kind="vm-platform", name="fixture-platform", blob=blob, owner=OWNER)
+    _refs(blob)
 
 
 # -- The union ----------------------------------------------------------------

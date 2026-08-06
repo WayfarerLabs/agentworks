@@ -11,12 +11,12 @@ loader that constructs it.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from pydantic import Field
+from pydantic import model_validator
 
 from agentworks.declared_resource import DeclaredResource
-from agentworks.schema import RefOwner
+from agentworks.schema import CapabilityBlock, RefOwner
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -57,25 +57,28 @@ def credential_references(
 
 
 class GitCredentialConfig(DeclaredResource):
-    # The internal representation follows the YAML manifest shape (ADR
-    # 0016): field name ``provider``, matching ``spec.provider``. Only
-    # the TOML section still spells ``type`` (with ``provider`` as the
-    # preferred alias); the loader maps at its boundary.
-    provider: str
-    # Provider-owned configuration (azdo's org), nested per the
-    # provider_config pattern (ADR 0016). The flat TOML section is the
-    # ONLY place org lives at the top level; this loader nests it at
-    # the boundary, so the internal representation matches the YAML
-    # manifest shape.
-    # Provider-owned configuration (azdo's org; github's repos/owner;
-    # and the ``token`` secret name that every current provider sources
-    # its PAT from, default ``git-token-<name>``, owned by the
-    # provider's ``dependencies`` since sourcing is provider-specific
-    # (a future minting provider declares a bootstrap secret, or none).
-    # The flat TOML section is the ONLY place these live at the top
-    # level; the loader nests them here so the internal representation
-    # matches the YAML manifest shape.
-    provider_config: dict[str, object] = Field(default_factory=dict)
+    """A declared git credential: which provider fronts it, and that
+    provider's own configuration."""
+
+    provider: CapabilityBlock
+    """The git-credential-provider fronting this credential: one table
+    whose ``name`` selects the provider and whose remaining keys are that
+    provider's own config (azdo's ``org``; github's ``repos`` / ``owner``;
+    the ``token`` secret each provider sources its PAT from, defaulting to
+    ``git-token-<name>``)."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _steer_a_top_level_token(cls, data: Any) -> Any:
+        """``token`` is the mistake operators make coming from the flat
+        TOML shape. As a plain unknown key it would name the valid field
+        without saying where the token goes."""
+        if isinstance(data, dict) and "token" in data:
+            raise ValueError(
+                "'token' is provider config now: move it into the spec.provider table "
+                "(its 'name' key selects the provider)"
+            )
+        return data
 
     def dependencies(self, context: FinalizeContext) -> list[ResourceReference]:
         from agentworks.resources.reference import (
@@ -88,7 +91,7 @@ class GitCredentialConfig(DeclaredResource):
         # kind; framework miss policy catches typos.
         refs: list[ResourceReference] = [
             _ResourceReq(
-                name=self.provider,
+                name=self.provider.name,
                 kind="git-credential-provider",
                 usage="the provider",
                 source=source,
@@ -107,8 +110,7 @@ class GitCredentialConfig(DeclaredResource):
             sourced_references(
                 capability_config_references(
                     kind="git-credential-provider",
-                    name=self.provider,
-                    blob=self.provider_config,
+                    config=self.provider.tagged,
                     owner=RefOwner(kind="git-credential", name=self.name),
                 ),
                 source,
@@ -135,14 +137,16 @@ class GitCredentialConfig(DeclaredResource):
         """
         from agentworks.resources.graph import Enablement, Readiness
 
-        provider = deps[("git-credential-provider", self.provider)]
+        provider = deps[("git-credential-provider", self.provider.name)]
         if provider.enablement is Enablement.disabled:
             tail = provider.disabled_reason or "enable its unit"
-            return Readiness.blocked(f"depends on git-credential-provider '{self.provider}', which is disabled; {tail}")
+            return Readiness.blocked(
+                f"depends on git-credential-provider '{self.provider.name}', which is disabled; {tail}"
+            )
         return Readiness.ready()
 
     def validate_config(self, enabled_backends: frozenset[str], context: FinalizeContext) -> None:
-        """Throwing shape check for the ``provider_config`` blob, run by
+        """Throwing shape check for the provider config block, run by
         the finalize ``validate`` pass (``enabled_backends`` is the
         secret-only R9.9 input, ignored here). Mirrors ``dependencies``:
         the CORE validates the blob against the named provider's declared
@@ -158,8 +162,7 @@ class GitCredentialConfig(DeclaredResource):
 
         validate_capability_config(
             kind="git-credential-provider",
-            name=self.provider,
-            blob=self.provider_config,
+            config=self.provider.tagged,
             owner=RefOwner(kind="git-credential", name=self.name),
             location=self.error_location,
         )

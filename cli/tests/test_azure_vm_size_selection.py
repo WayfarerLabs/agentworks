@@ -115,7 +115,7 @@ class TestValidateConfig:
         _config({})
         assert (
             capability_config_references(
-                kind="vm-platform", name="azure-vm", blob=_BASE, owner=RefOwner(kind="vm-site", name="az")
+                kind="vm-platform", config={"name": "azure-vm", **_BASE}, owner=RefOwner(kind="vm-site", name="az")
             )
             == ()
         )
@@ -352,8 +352,7 @@ def _config(blob: dict[str, object]) -> AzureVMConfig:
     """``blob`` validated as an azure-vm site's config, through the core."""
     validated = validate_capability_config(
         kind="vm-platform",
-        name="azure-vm",
-        blob={**_BASE, **blob},
+        config={"name": "azure-vm", **_BASE, **blob},
         owner=RefOwner(kind="vm-site", name="az"),
     )
     assert isinstance(validated, AzureVMConfig)

@@ -28,13 +28,14 @@ stored verdict rather than recomputing it.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
-from pydantic import Field
+from pydantic import model_validator
 
 from agentworks.declared_resource import DeclaredResource
 from agentworks.errors import ConfigError
-from agentworks.schema import RefOwner
+from agentworks.naming import MAX_FREEFORM_NAME_LENGTH
+from agentworks.schema import CapabilityBlock, RefOwner
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -47,17 +48,37 @@ if TYPE_CHECKING:
 
 
 class VMSiteDecl(DeclaredResource):
-    """The declared ``vm-site`` resource.
+    """The declared ``vm-site`` resource: a configured place to create
+    VMs."""
 
-    The internal representation follows the YAML manifest shape (ADR
-    0016): ``platform`` names the capability; ``platform_config`` is
-    the nested platform-owned blob. The flat legacy TOML sections
-    (``[azure]`` / ``[proxmox]``) are the only place platform-owned
-    fields sit at a top level; their loader nests at the boundary.
-    """
+    # Site names hit no OS-level identifier limit: they are a registry key
+    # and a display surface only, never derived into a hostname or an SSH
+    # host alias (VM names, not site names, feed {slug}-{vm} hostnames). So
+    # they take the freeform cap, not the tighter VM-name cap.
+    NAME_MAX_LENGTH: ClassVar[int | None] = MAX_FREEFORM_NAME_LENGTH
 
-    platform: str
-    platform_config: dict[str, object] = Field(default_factory=dict)
+    platform: CapabilityBlock
+    """The vm-platform backing this site: one table whose ``name`` selects
+    the platform and whose remaining keys are that platform's own config
+    (``{name: lima, vm_host: me@box}``)."""
+
+    @model_validator(mode="after")
+    def _no_shadowed_platform(self) -> VMSiteDecl:
+        """A site named after a known platform must declare THAT platform.
+
+        A ``vm-site/azure-vm`` backed by lima would make every
+        ``--site azure-vm`` mean something other than it says. A
+        cross-field rule over ``name`` and ``platform.name``, and it reads
+        the platform registry at exactly the moment decode used to.
+        """
+        from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
+
+        if self.name in VM_PLATFORM_REGISTRY and self.platform.name != self.name:
+            raise ValueError(
+                f"a vm-site named '{self.name}' must declare platform "
+                f"'{self.name}' (it shadows a platform name), not '{self.platform.name}'"
+            )
+        return self
 
     def dependencies(self, context: FinalizeContext) -> list[ResourceReference]:
         from agentworks.resources.reference import (
@@ -77,7 +98,7 @@ class VMSiteDecl(DeclaredResource):
 
         refs: list[ResourceReference] = [
             _ResourceRef(
-                name=self.platform,
+                name=self.platform.name,
                 kind="vm-platform",
                 usage="the VM platform",
                 source=source,
@@ -95,8 +116,7 @@ class VMSiteDecl(DeclaredResource):
             sourced_references(
                 capability_config_references(
                     kind="vm-platform",
-                    name=self.platform,
-                    blob=self.platform_config,
+                    config=self.platform.tagged,
                     owner=RefOwner(kind="vm-site", name=self.name),
                 ),
                 source,
@@ -129,10 +149,10 @@ class VMSiteDecl(DeclaredResource):
 
         from agentworks.resources.graph import Enablement, Readiness
 
-        platform = deps[("vm-platform", self.platform)]
+        platform = deps[("vm-platform", self.platform.name)]
         if platform.enablement is Enablement.disabled:
             tail = platform.disabled_reason or "enable its unit"
-            return Readiness.blocked(f"depends on vm-platform '{self.platform}', which is disabled; {tail}")
+            return Readiness.blocked(f"depends on vm-platform '{self.platform.name}', which is disabled; {tail}")
         if platform.readiness is not None and not platform.readiness.is_ready:
             return platform.readiness
         if platform.impl is None:
@@ -140,7 +160,7 @@ class VMSiteDecl(DeclaredResource):
         # The impl is the platform CLASS the graph stamped (``_impl_for`` fails
         # fast on a missing impl), so ``not_ready`` is a classmethod call, never
         # a construction.
-        return cast("type[VMPlatform]", platform.impl).not_ready(self.platform_config)
+        return cast("type[VMPlatform]", platform.impl).not_ready(self.platform.config)
 
     def validate_config(self, enabled_backends: frozenset[str], context: FinalizeContext) -> None:
         """Throwing shape check for the ``platform_config`` blob, run by
@@ -163,8 +183,7 @@ class VMSiteDecl(DeclaredResource):
 
         validate_capability_config(
             kind="vm-platform",
-            name=self.platform,
-            blob=self.platform_config,
+            config=self.platform.tagged,
             owner=RefOwner(kind="vm-site", name=self.name),
             location=self.error_location,
         )
@@ -268,7 +287,7 @@ def site_platform_name(site: str, registry: Registry) -> str:
     it (``AGENTWORKS_PLATFORM``, ``vm describe``). Same stranded-site
     ``ConfigError`` as :func:`lookup_site` on an undeclared site.
     """
-    return lookup_site(site, registry).platform
+    return lookup_site(site, registry).platform.name
 
 
 def resolve_site(
@@ -293,8 +312,8 @@ def resolve_site(
     decl = lookup_site(name, registry)
     ensure_site_ready(decl, registry)
     # Ready implies the platform is installed and supported here.
-    platform_cls = VM_PLATFORM_REGISTRY[decl.platform]
-    return platform_cls(decl.name, decl.platform_config)
+    platform_cls = VM_PLATFORM_REGISTRY[decl.platform.name]
+    return platform_cls(decl.name, decl.platform.config)
 
 
 def ensure_site_ready(decl: VMSiteDecl, registry: Registry) -> None:

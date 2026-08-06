@@ -37,6 +37,7 @@ from agentworks.resources.kind import (
     InstanceRef,
 )
 from agentworks.vms.admin import AdminConfig
+from agentworks.vms.sites import VMSiteDecl
 from agentworks.vms.template import VMTemplate
 
 if TYPE_CHECKING:
@@ -147,6 +148,7 @@ class _VMSiteKind:
     """Implementation of ``ResourceKind`` for ``"vm-site"``."""
 
     kind: str = "vm-site"
+    model: type[DeclaredResource] = VMSiteDecl
     description: str = "Configured places to create VMs (a platform plus its settings)"
     # Error, never auto-declare: a typo'd site reference must not
     # synthesize a site.

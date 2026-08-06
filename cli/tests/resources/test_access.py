@@ -55,7 +55,7 @@ def test_git_credential_hit_returns_entry(tmp_path: Path) -> None:
     )
     cred = git_credential(registry, "github")
     assert cred is not None
-    assert cred.provider == "github"
+    assert cred.provider.name == "github"
 
 
 def test_singleton_accessors_always_present(tmp_path: Path) -> None:

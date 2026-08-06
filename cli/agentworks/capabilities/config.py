@@ -17,19 +17,36 @@ Three things live here, and every consuming resource needs all three:
 
 **The union is a root model, built per** ``(kind, facet)`` **and cached on
 the registry's contents.** See :func:`capability_config_union` for why the
-cache is keyed that way rather than invalidated, and
-:func:`tagged_config` for the interim step 2.5 deletes.
+cache is keyed that way rather than invalidated.
+
+**What a caller passes as ``config`` is what the capability's own model
+validates**, and its shape follows the kind's dispatch:
+
+- a TAGGED kind (vm-platform, git-credential-provider,
+  harness-integration) is selected by a ``name`` key INSIDE its table, so
+  ``config`` is that whole table, tag included, exactly as the operator
+  wrote it and exactly as the host row carries it
+  (:class:`~agentworks.schema.CapabilityBlock`);
+- a MAP-KEYED kind (secret-backend) is selected by the key its value sits
+  under, so ``config`` is that value, which need not be a mapping at all
+  (env-var's is a bare string).
+
+So a TAGGED kind needs no ``name`` argument at all: the tag inside the
+table is what selects the implementation, and reading it here rather than
+taking the caller's copy is what makes the two unable to disagree. A
+map-keyed kind passes ``name``, because its config carries no tag.
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Annotated, Any, Union, cast
 
 from pydantic import Field
 from pydantic import ValidationError as PydanticValidationError
 
 from agentworks.capabilities.descriptor import descriptor_for, descriptor_for_impl
-from agentworks.errors import ConfigError, StateError
+from agentworks.errors import StateError
 from agentworks.schema import (
     AgwRootModel,
     config_error_from,
@@ -38,8 +55,6 @@ from agentworks.schema import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
-
     from pydantic import BaseModel
 
     from agentworks.capabilities.descriptor import CapabilityKindDescriptor
@@ -52,6 +67,33 @@ if TYPE_CHECKING:
 #: would be built from. Never evicts; see :func:`capability_config_union`
 #: for both choices and what bounds the size.
 _UNION_CACHE: dict[tuple[str, Facet | None, frozenset[tuple[str, type[BaseModel]]]], type[BaseModel]] = {}
+
+
+def selected_name(kind: str, config: object, name: str | None) -> str | None:
+    """Which implementation of ``kind`` this config selects.
+
+    For a TAGGED kind that is the tag inside the table, never the
+    caller's ``name``: two sources for one fact is two sources that can
+    disagree, and a disagreement here would look up one implementation
+    and validate against another's schema, which is a silent wrong
+    answer. Tolerant by design: a missing or non-string tag names no
+    implementation, which is what the dangling capability edge already
+    reports (R9.2).
+
+    For a MAP-KEYED kind (secret-backend) the config carries no tag and
+    the outer map key is the only source, so ``name`` is required; its
+    absence is a framework bug, not an operator mistake.
+    """
+    discriminator = descriptor_for(kind).config_schema.discriminator
+    if discriminator is None:
+        if name is None:
+            raise StateError(
+                f"the {kind} capability kind dispatches its config by map key, so a caller must say which "
+                f"implementation the config belongs to"
+            )
+        return name
+    tag = config.get(discriminator) if isinstance(config, Mapping) else None
+    return tag if isinstance(tag, str) else None
 
 
 def capability_config_model(kind: str, name: str, facet: Facet | None = None) -> type[BaseModel] | None:
@@ -70,37 +112,41 @@ def capability_config_model(kind: str, name: str, facet: Facet | None = None) ->
 def validate_capability_config(
     *,
     kind: str,
-    name: str,
-    blob: Mapping[str, object],
+    config: object,
     owner: RefOwner,
+    name: str | None = None,
     facet: Facet | None = None,
     location: SourceLocation | None = None,
     provenance: Mapping[str, RefOwner] | None = None,
 ) -> BaseModel | None:
-    """Validate ``blob`` as ``kind``/``name``'s config; return the validated
-    instance, or ``None`` when no such implementation is seated.
+    """Validate ``config`` as one ``kind`` implementation's config; return
+    the validated instance, or ``None`` when no such implementation is
+    seated.
+
+    See the module docstring for what ``config`` is and when ``name`` is
+    needed: for a tagged kind it is the whole table the operator wrote,
+    tag included, and the tag is the selector.
 
     Raises the error bridge's framed ``ConfigError``, which already carries
     ``location``: a caller must NOT wrap the result with a location of its
     own (see ``FramedConfigError``).
 
-    ``provenance`` is for a blob a caller ASSEMBLED by merging an
+    ``provenance`` is for a config a caller ASSEMBLED by merging an
     inheritance chain: it maps each top-level key to the owner that
     declared it, so an error on an inherited key names that owner instead
-    of blaming the leaf. Every non-inheriting surface omits it, its blob
+    of blaming the leaf. Every non-inheriting surface omits it, its config
     being its own declaration.
     """
     descriptor = descriptor_for(kind)
-    impl = _seated_impl(descriptor, name)
+    selected = selected_name(kind, config, name)
+    impl = None if selected is None else _seated_impl(descriptor, selected)
     if impl is None:
         return None
-    contract = descriptor.config_schema
-    if contract.discriminator is None:
+    if descriptor.config_schema.discriminator is None:
         model = offered_model(impl, facet)
-        return _validated(model, blob, owner=owner, location=location, provenance=provenance)
+        return _validated(model, config, owner=owner, location=location, provenance=provenance)
     union = capability_config_union(kind, facet)
-    tagged = tagged_config(name, blob, discriminator=contract.discriminator, owner=owner)
-    validated = _validated(union, tagged, owner=owner, location=location, provenance=provenance)
+    validated = _validated(union, config, owner=owner, location=location, provenance=provenance)
     # The union is a root model, so the thing the capability was written
     # against is what it wraps, never the wrapper.
     return cast("BaseModel", validated.root)  # type: ignore[attr-defined]
@@ -108,52 +154,69 @@ def validate_capability_config(
 
 def validate_own_config(
     impl: type,
-    blob: Mapping[str, object],
+    config: Mapping[str, object],
     *,
     owner: RefOwner,
     facet: Facet | None = None,
 ) -> BaseModel:
-    """Validate ``blob`` against the config ``impl`` itself offers.
+    """Validate ``config`` against the config ``impl`` itself offers.
 
     The construct-time path, where the implementation CLASS is already in
     hand: there is no name to look up and no arm to select, so this skips
-    the registry and the union entirely. The tagged synthesis still runs
-    for a kind whose models carry a tag, because the model's own tag field
-    is required either way; a class of no registered kind has no such
-    contract and validates its blob as written.
+    the registry and the union entirely. ``config`` is the capability's
+    OWN config, untagged, because a constructor that already knows its
+    class has no use for a selector; the tag an arm model declares is
+    supplied from ``impl.name``, which is the same fact the class is.
+
+    A ``config`` that carries the tag anyway must agree with the class.
+    Neither silent resolution is acceptable: letting the class win
+    discards a key a caller wrote, and letting the config win would
+    validate against a schema the caller did not think it was using. That
+    can only be a framework mistake (a call site handing over a table
+    where a config belongs), so it is a ``StateError``.
     """
     descriptor = descriptor_for_impl(impl)
-    model = offered_model(impl, facet)
     discriminator = descriptor.config_schema.discriminator if descriptor is not None else None
-    payload: object = blob
+    payload: Mapping[str, object] = config
     if discriminator is not None:
-        payload = tagged_config(str(impl.name), blob, discriminator=discriminator, owner=owner)  # type: ignore[attr-defined]
-    return _validated(model, payload, owner=owner, location=None)
+        own = str(impl.name)  # type: ignore[attr-defined]
+        declared = config.get(discriminator)
+        if declared is not None and declared != own:
+            raise StateError(
+                f"{impl.__name__} was handed a config tagged {declared!r}, which is not the capability it is; "
+                f"pass the capability's own config here, not the host's tagged table"
+            )
+        payload = {**config, discriminator: own}
+    return _validated(offered_model(impl, facet), payload, owner=owner, location=None)
 
 
 def capability_config_references(
     *,
     kind: str,
-    name: str,
-    blob: Mapping[str, object],
+    config: object,
     owner: RefOwner,
+    name: str | None = None,
     facet: Facet | None = None,
 ) -> tuple[ConfigReference, ...]:
-    """Every Resource reference ``blob`` implies as ``kind``/``name``'s
-    config.
+    """Every Resource reference ``config`` implies as one ``kind``
+    implementation's config.
 
     Total and never raising, for any inputs whatsoever: the graph is built
-    before anything is validated, so a blob nobody can make sense of has to
-    contribute no edges rather than sink the walk.
+    before anything is validated, so a config nobody can make sense of has
+    to contribute no edges rather than sink the walk.
 
-    The RAW blob is what is read, never the tagged synthesis: the tag is a
-    kind-owned selector that no model marks as a reference, and passing the
-    raw blob keeps extraction a pure function of ``(model, blob, owner)``.
+    What is read is exactly what would be VALIDATED, tag and all. That is
+    not a change of substance from the raw-blob rule this used to state:
+    the rule existed because the tagged form was a synthesis the caller
+    did not have, and now it is the table the operator wrote. An arm
+    model's tag field carries no reference marker, so it contributes
+    nothing either way.
     """
-    model = capability_config_model(kind, name, facet)
+    selected = selected_name(kind, config, name)
+    model = None if selected is None else capability_config_model(kind, selected, facet)
     if model is None:
         return ()
-    return extract_references(model, blob, owner)
+    return extract_references(model, config, owner)
 
 
 def capability_config_union(kind: str, facet: Facet | None = None) -> type[BaseModel]:
@@ -207,42 +270,6 @@ def capability_config_union(kind: str, facet: Facet | None = None) -> type[BaseM
     union = _build_union(descriptor, tuple(arms.values()), discriminator)
     _UNION_CACHE[key] = union
     return union
-
-
-def tagged_config(
-    name: str,
-    blob: Mapping[str, object],
-    *,
-    discriminator: str,
-    owner: RefOwner,
-) -> dict[str, object]:
-    """The one tagged table this config WILL BE once decode produces it
-    directly (``platform: {name: lima, vm_host: ...}``).
-
-    INTERIM, with one deletion trigger: decode still hands a consuming
-    resource a naming field and a sibling config blob, and step 2.5's kind
-    spec models make it hand over the tagged table instead. Then the
-    callers pass that table and this function goes.
-
-    A ``name`` key already in the blob is a hard error rather than an
-    override in either direction, because both silent resolutions are
-    wrong and one is dangerous: letting the tag win DISCARDS a key the
-    operator wrote (today a loud unknown-field error), and letting the blob
-    win lets ``platform_config.name`` select a different capability's
-    schema than ``platform`` names, which is a silent wrong answer produced
-    by a compatibility shim. Under the tagged shape the collision cannot be
-    expressed at all, which is why this error is as interim as the
-    function.
-    """
-    if discriminator in blob:
-        raise ConfigError(
-            f"{owner.display}: {discriminator!r} is the field that names the capability, so it cannot also "
-            f"appear inside its config block (got {blob[discriminator]!r})",
-            entity_kind=owner.kind,
-            entity_name=owner.name,
-            hint=f"remove {discriminator!r} from the config block; the capability is already named beside it",
-        )
-    return {discriminator: name, **blob}
 
 
 def offered_model(impl: type, facet: Facet | None = None) -> type[BaseModel]:

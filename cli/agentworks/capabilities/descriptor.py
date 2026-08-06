@@ -103,10 +103,9 @@ class HostSurface:
     The manifest shape is one tagged table on the naming field
     (``platform: {name: lima, vm_host: ...}``), and it is the only shape:
     the legacy sibling pair (``platform: lima`` plus
-    ``platform_config: {...}``) is a hard error on every surface, as of
-    step 2.4. Decode reads the two field names off this record to fold the
-    tagged table into the internal pair the decoders consume, so there is
-    one fold rather than one per host.
+    ``platform_config: {...}``) is a hard error on every surface. Decode
+    reads the two field names off this record, so there is one refusal
+    rather than one per host, and the row carries the table as written.
 
     The record carried a ``legacy_string_shape`` field while the two folds
     differed (session-template hardened in wave 1, ahead of its siblings).
@@ -122,9 +121,14 @@ class HostSurface:
     """The spec field naming the capability (``"platform"``)."""
 
     config_field: str
-    """The internal sibling field holding the capability's config blob
-    (``"platform_config"``). Internal: operators write one tagged table,
-    and decode splits it into this pair."""
+    """The RETIRED sibling field that used to hold the capability's config
+    blob (``"platform_config"``).
+
+    There is no such field any more: the row carries one tagged block, so
+    this exists for exactly one reader, ``decode._reject_legacy_shape``,
+    which names the retired field in the error that tells an operator how
+    to rewrite the 0.14 shape. It goes when that guard does, and the
+    guard's own docstring says when."""
 
 
 @dataclass(frozen=True)

@@ -619,7 +619,7 @@ def test_unknown_backend_kind_in_secret_backends_errors(
         ),
         (
             ManifestDoc("session-template", "shell", {"env": {"AGENTWORKS_SESSION": "override"}}),
-            "session_templates.shell.env",
+            "session-template/shell.env",
         ),
     ],
 )
@@ -692,8 +692,8 @@ def test_session_template_required_commands_parsed(tmp_path: Path) -> None:
     )
     registry = _load(cfg_file)
     tmpl = registry.lookup("session-template", "claude")
-    assert tmpl.harness_integration == "shell"
-    assert tmpl.harness_integration_config == {
+    assert tmpl.harness_integration.name == "shell"
+    assert tmpl.harness_integration.config == {
         "command": "claude --name {{session_name}}",
         "required_commands": ["claude"],
     }
@@ -846,9 +846,9 @@ def test_git_credential_token_nonconforming_warns_but_loads(tmp_path: Path) -> N
         manifests=[ManifestDoc("git-credential", "gh", {"provider": {"name": "github", "token": "GITHUB_TOKEN"}})],
     )
     registry = _load(cfg_file)
-    assert registry.lookup("git-credential", "gh").provider_config["token"] == "GITHUB_TOKEN"
+    assert registry.lookup("git-credential", "gh").provider.config["token"] == "GITHUB_TOKEN"
     issues = _manifest_issues(cfg_file)
-    assert any("GITHUB_TOKEN" in issue and "git_credentials.gh.token" in issue for issue in issues), issues
+    assert any("GITHUB_TOKEN" in issue and "git-credential/gh" in issue for issue in issues), issues
 
 
 def test_conforming_secret_ref_names_emit_no_warning(tmp_path: Path) -> None:

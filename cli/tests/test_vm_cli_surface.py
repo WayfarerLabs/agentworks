@@ -12,6 +12,7 @@ import pytest
 from typer.testing import CliRunner
 
 from agentworks.cli import app
+from agentworks.schema import CapabilityBlock
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -318,7 +319,7 @@ def test_doctor_vm_sites_not_ready_and_preflight_rows(
     registry.add(
         "vm-site",
         "mybox",
-        VMSiteDecl(name="mybox", platform="lima", platform_config={"vm_host": "me@box"}),
+        VMSiteDecl(name="mybox", platform=CapabilityBlock.of("lima", **{"vm_host": "me@box"})),
         Origin.operator_declared(file=_Path("sites.yaml"), line=1),
     )
     registry.finalize()

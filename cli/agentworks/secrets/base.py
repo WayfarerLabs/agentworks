@@ -139,7 +139,7 @@ class SecretDecl(DeclaredResource):
                     capability_config_references(
                         kind="secret-backend",
                         name=backend_name,
-                        blob=mapping,  # type: ignore[arg-type]
+                        config=mapping,
                         owner=self._mapping_owner(backend_name),
                     ),
                     source,
@@ -182,7 +182,7 @@ class SecretDecl(DeclaredResource):
             validate_capability_config(
                 kind="secret-backend",
                 name=backend_name,
-                blob=mapping,  # type: ignore[arg-type]
+                config=mapping,
                 owner=self._mapping_owner(backend_name),
                 location=self.error_location,
             )

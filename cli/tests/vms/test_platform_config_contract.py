@@ -56,11 +56,13 @@ OWNER = RefOwner(kind="vm-site", name="t")
 
 
 def _validate(platform: str, blob: dict[str, object]) -> None:
-    validate_capability_config(kind="vm-platform", name=platform, blob=blob, owner=OWNER)
+    """The tag is the selector, so a caller assembles the table the host
+    row carries rather than naming the platform beside its config."""
+    validate_capability_config(kind="vm-platform", config={"name": platform, **blob}, owner=OWNER)
 
 
 def _refs(platform: str, blob: dict[str, object]) -> tuple[ConfigReference, ...]:
-    return capability_config_references(kind="vm-platform", name=platform, blob=blob, owner=OWNER)
+    return capability_config_references(kind="vm-platform", config={"name": platform, **blob}, owner=OWNER)
 
 
 def test_registry_names_match_classes() -> None:

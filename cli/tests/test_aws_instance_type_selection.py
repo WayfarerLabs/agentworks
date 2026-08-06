@@ -111,8 +111,7 @@ def _config(blob: dict[str, object]) -> AwsEC2Config:
     """``blob`` validated as an aws-ec2 site's config, through the core."""
     validated = validate_capability_config(
         kind="vm-platform",
-        name="aws-ec2",
-        blob={"region": "us-east-1", **blob},
+        config={"name": "aws-ec2", "region": "us-east-1", **blob},
         owner=RefOwner(kind="vm-site", name="aws"),
     )
     assert isinstance(validated, AwsEC2Config)

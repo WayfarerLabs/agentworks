@@ -30,6 +30,7 @@ from agentworks.resources.inspect import (
     render_resource_table,
 )
 from agentworks.resources.registry import Registry
+from agentworks.schema import CapabilityBlock
 from agentworks.vms.sites import VMSiteDecl
 from tests.plugins._fixtures import ConformingVMPlatform
 
@@ -125,7 +126,7 @@ def _seat_and_publish(monkeypatch: pytest.MonkeyPatch, config: Config) -> Regist
         registry.add(
             "vm-site",
             "alpha-site",
-            VMSiteDecl(name="alpha-site", platform="alpha-platform", platform_config={}),
+            VMSiteDecl(name="alpha-site", platform=CapabilityBlock.of("alpha-platform", **{})),
             _operator(),
         )
         registry.finalize(enablement_sources=[plugin_enablement_source(config)])

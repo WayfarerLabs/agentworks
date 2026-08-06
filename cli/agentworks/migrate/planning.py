@@ -576,8 +576,7 @@ def _emit_document(doc: tomlkit.TOMLDocument, unit: MigrationUnit) -> str:
             try:
                 validate_capability_config(
                     kind="vm-platform",
-                    name=platform,
-                    blob=platform_config,
+                    config={"name": platform, **platform_config},
                     # Framed in the operator's TOML vocabulary: this command
                     # is talking about a file it has not rewritten yet.
                     owner=RefOwner(kind="vm-site", name=unit.name, label=f"[{unit.section}]"),
@@ -620,8 +619,7 @@ def _emit_document(doc: tomlkit.TOMLDocument, unit: MigrationUnit) -> str:
             try:
                 validate_capability_config(
                     kind="git-credential-provider",
-                    name=str(provider),
-                    blob=provider_config,
+                    config={"name": str(provider), **provider_config},
                     # Framed in the operator's TOML vocabulary, like the
                     # vm-site branch above: this command is talking about a
                     # file it has not rewritten yet, and the outer "cannot
@@ -681,8 +679,7 @@ def _emit_document(doc: tomlkit.TOMLDocument, unit: MigrationUnit) -> str:
             try:
                 validate_capability_config(
                     kind="harness-integration",
-                    name=integration,
-                    blob=integration_config,
+                    config={"name": integration, **integration_config},
                     owner=RefOwner(
                         kind="session-template",
                         name=unit.name,

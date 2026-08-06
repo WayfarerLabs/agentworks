@@ -22,7 +22,7 @@ import pytest
 from agentworks.errors import ConfigError
 from agentworks.plugins import Plugin, capability_adapters, seated_plugin
 from agentworks.resources import Origin, Registry
-from agentworks.schema import AgwModel
+from agentworks.schema import AgwModel, CapabilityBlock
 from agentworks.sessions.template import SessionTemplate
 from tests.plugins._fixtures import ConformingHarnessIntegration
 
@@ -81,13 +81,13 @@ def test_a_child_completed_by_its_parent_validates(seated: None) -> None:
     """The case the interim guard existed to keep impossible: the child's
     own blob is missing a required field and is still valid, because the
     chain is what has to be complete."""
-    parent = SessionTemplate(name="base", harness_integration="needy", harness_integration_config={"command": "top"})
-    child = SessionTemplate(name="kid", inherits=["base"], harness_integration_config=None)
+    parent = SessionTemplate(name="base", harness_integration=CapabilityBlock.of("needy", **{"command": "top"}))
+    child = SessionTemplate(name="kid", inherits=["base"])
     _registry(parent, child)  # no raise
 
 
 def test_a_lineage_that_supplies_the_required_field_nowhere_is_a_load_error(seated: None) -> None:
-    parent = SessionTemplate(name="base", harness_integration="needy", harness_integration_config={"timeout": 5})
+    parent = SessionTemplate(name="base", harness_integration=CapabilityBlock.of("needy", **{"timeout": 5}))
     child = SessionTemplate(name="kid", inherits=["base"])
     with pytest.raises(ConfigError, match="command: is required"):
         _registry(parent, child)
@@ -99,8 +99,12 @@ def test_a_parent_that_cannot_stand_alone_is_itself_a_load_error(seated: None) -
     an abstract base that only children complete. That is the honest rule,
     because any template can be named directly at ``session create``, and
     it is what moving the check from first use to load means."""
-    parent = SessionTemplate(name="base", harness_integration="needy", harness_integration_config={"timeout": 5})
-    child = SessionTemplate(name="kid", inherits=["base"], harness_integration_config={"command": "top"})
+    parent = SessionTemplate(name="base", harness_integration=CapabilityBlock.of("needy", **{"timeout": 5}))
+    child = SessionTemplate(
+        name="kid",
+        inherits=["base"],
+        harness_integration=CapabilityBlock.model_validate({"name": "needy", "command": "top"}),
+    )
     with pytest.raises(ConfigError, match="session-template/base.command: is required"):
         _registry(parent, child)
 
@@ -119,8 +123,7 @@ def test_an_error_on_an_inherited_key_names_the_template_that_declared_it(seated
     child = SessionTemplate(name="kid", inherits=["base"])
     parent = SessionTemplate(
         name="base",
-        harness_integration="needy",
-        harness_integration_config={"command": "top", "timeout": "soon"},
+        harness_integration=CapabilityBlock.of("needy", **{"command": "top", "timeout": "soon"}),
     )
     with pytest.raises(ConfigError) as exc:
         _registry(child, parent)
@@ -141,13 +144,11 @@ def test_a_key_the_child_overrode_is_not_attributed_to_the_parent(seated: None) 
     child = SessionTemplate(
         name="kid",
         inherits=["base"],
-        harness_integration="needy",
-        harness_integration_config={"timeout": "soon"},
+        harness_integration=CapabilityBlock.of("needy", **{"timeout": "soon"}),
     )
     parent = SessionTemplate(
         name="base",
-        harness_integration="needy",
-        harness_integration_config={"command": "top", "timeout": 5},
+        harness_integration=CapabilityBlock.of("needy", **{"command": "top", "timeout": 5}),
     )
     with pytest.raises(ConfigError) as exc:
         _registry(child, parent)

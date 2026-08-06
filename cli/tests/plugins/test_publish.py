@@ -33,6 +33,7 @@ from agentworks.plugins import Plugin, plugin_enablement_source, publish_plugins
 from agentworks.plugins.registration import _capability_registries
 from agentworks.resources.graph import Enablement
 from agentworks.resources.registry import Registry
+from agentworks.schema import CapabilityBlock
 from agentworks.sessions.manager._env import _resolve_template
 from agentworks.sessions.template import SessionTemplate
 from agentworks.vms.sites import VMSiteDecl
@@ -116,7 +117,7 @@ def test_enabled_plugin_publishes_capability_and_manifest(monkeypatch: pytest.Mo
         registry.add(
             "vm-site",
             "s",
-            VMSiteDecl(name="s", platform="fixture-platform", platform_config={}),
+            VMSiteDecl(name="s", platform=CapabilityBlock.of("fixture-platform", **{})),
             _operator(),
         )
         registry.finalize(enablement_sources=[plugin_enablement_source(config)])
@@ -152,7 +153,7 @@ def test_not_enabled_plugin_row_and_manifest_present_but_disabled(monkeypatch: p
         registry.add(
             "vm-site",
             "s",
-            VMSiteDecl(name="s", platform="fixture-platform", platform_config={}),
+            VMSiteDecl(name="s", platform=CapabilityBlock.of("fixture-platform", **{})),
             _operator(),
         )
         registry.finalize(enablement_sources=[plugin_enablement_source(config)])
@@ -347,7 +348,7 @@ def test_disabled_plugin_harness_integration_reaches_use_gate_not_unknown(monkey
         registry.add(
             "session-template",
             "tmpl",
-            SessionTemplate(name="tmpl", harness_integration="fixture-harness"),
+            SessionTemplate(name="tmpl", harness_integration=CapabilityBlock(name="fixture-harness")),
             _operator(),
         )
         registry.finalize(enablement_sources=[plugin_enablement_source(config)])

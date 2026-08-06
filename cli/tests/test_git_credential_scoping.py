@@ -74,19 +74,17 @@ def _azdo(
 def _validate(blob: dict[str, object], name: str = "github", owner_name: str = "t") -> None:
     validate_capability_config(
         kind="git-credential-provider",
-        name=name,
-        blob=blob,
+        config={"name": name, **blob},
         owner=RefOwner(kind="git-credential", name=owner_name),
     )
 
 
-def _refs(blob: dict[str, object], owner_name: str = "t") -> list[tuple[str, str]]:
+def _refs(blob: dict[str, object], owner_name: str = "t", name: str = "github") -> list[tuple[str, str]]:
     return [
         (ref.kind, ref.name)
         for ref in capability_config_references(
             kind="git-credential-provider",
-            name="github",
-            blob=blob,
+            config={"name": name, **blob},
             owner=RefOwner(kind="git-credential", name=owner_name),
         )
     ]

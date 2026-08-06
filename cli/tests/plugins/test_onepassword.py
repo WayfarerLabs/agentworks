@@ -176,7 +176,7 @@ def _validate(mapping: object) -> None:
     validate_capability_config(
         kind="secret-backend",
         name="onepassword",
-        blob=mapping,  # type: ignore[arg-type]
+        config=mapping,  # type: ignore[arg-type]
         owner=RefOwner(kind="secret", name="s", label="secret/s.backend_mappings.onepassword"),
     )
 

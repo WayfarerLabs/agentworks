@@ -13,6 +13,7 @@ from agentworks.errors import ConfigError, StateError
 from agentworks.manifests import builtin as builtin_manifests
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.resources import Origin, Registry
+from agentworks.schema import CapabilityBlock
 from agentworks.vms.sites import (
     VMSiteDecl,
     resolve_site,
@@ -48,8 +49,7 @@ def test_resolve_site_binds_the_platform_config() -> None:
     registry = _registry(
         VMSiteDecl(
             name="gpu-box",
-            platform="lima",
-            platform_config={"vm_host": "me@box"},
+            platform=CapabilityBlock.of("lima", **{"vm_host": "me@box"}),
         )
     )
     platform = resolve_site("gpu-box", registry)
@@ -87,13 +87,17 @@ def _px_registry() -> Registry:
     return _registry(
         VMSiteDecl(
             name="px",
-            platform="proxmox",
-            platform_config={
-                "api_url": "https://pve:8006",
-                "node": "pve1",
-                "token_id": "t",
-                "template_vmid": 9000,
-            },
+            platform=CapabilityBlock.model_validate(
+                {
+                    "name": "proxmox",
+                    **{
+                        "api_url": "https://pve:8006",
+                        "node": "pve1",
+                        "token_id": "t",
+                        "template_vmid": 9000,
+                    },
+                }
+            ),
         )
     )
 
@@ -169,7 +173,7 @@ def test_select_site_infers_the_single_declared_site(
     registry.add(
         "vm-site",
         "only-one",
-        VMSiteDecl(name="only-one", platform="lima"),
+        VMSiteDecl(name="only-one", platform=CapabilityBlock(name="lima")),
         Origin.built_in(source="test"),
     )
     registry.finalize()
@@ -240,7 +244,7 @@ def test_resolving_a_not_ready_site_names_the_requirement(
     )
     registry = _registry()
 
-    assert lookup_site("lima-local", registry).platform == "lima"
+    assert lookup_site("lima-local", registry).platform.name == "lima"
     with pytest.raises(StateError, match="not ready on this host") as exc:
         resolve_site("lima-local", registry)
     assert "limactl" in str(exc.value)

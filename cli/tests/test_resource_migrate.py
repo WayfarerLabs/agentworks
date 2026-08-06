@@ -288,7 +288,7 @@ def test_vm_site_sections_migrate_flat_to_nested(tmp_path: Path) -> None:
     # The rewritten config reloads and the sites resolve as manifests.
     reloaded = load_config(cfg, warn_issues=False, resources=False)
     registry = build_registry(reloaded)
-    assert registry.lookup("vm-site", "azure").platform == "azure-vm"
+    assert registry.lookup("vm-site", "azure").platform.name == "azure-vm"
 
 
 def test_vm_site_selector_by_name(tmp_path: Path) -> None:

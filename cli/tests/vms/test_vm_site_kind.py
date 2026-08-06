@@ -13,6 +13,7 @@ from agentworks.errors import ConfigError
 from agentworks.manifests.loader import load_manifests
 from agentworks.resources import Origin, Registry
 from agentworks.resources.graph import FinalizeContext
+from agentworks.schema import CapabilityBlock
 from agentworks.vms.sites import VMSiteDecl
 
 SITE_DOC = """\
@@ -53,8 +54,8 @@ def _load_one(tmp_path: Path, text: str) -> VMSiteDecl:
 def test_decode_nests_platform_config(tmp_path: Path) -> None:
     site = _load_one(tmp_path, SITE_DOC)
     assert site.name == "azure-dev"
-    assert site.platform == "azure-vm"
-    assert site.platform_config == {
+    assert site.platform.name == "azure-vm"
+    assert site.platform.config == {
         "subscription_id": "0000",
         "resource_group": "agw-dev",
         "region": "eastus",
@@ -119,21 +120,42 @@ def test_platform_named_site_must_declare_that_platform(tmp_path: Path) -> None:
 
 def test_decode_requires_platform(tmp_path: Path) -> None:
     (tmp_path / "site.yaml").write_text(_NO_PLATFORM_DOC)
-    with pytest.raises(ConfigError, match="spec.platform"):
+    with pytest.raises(ConfigError, match="platform: is required"):
         load_manifests(tmp_path)
 
 
-def test_decode_rejects_blob_shadowing(tmp_path: Path) -> None:
-    doc = SITE_DOC + "    platform: lima\n"
-    (tmp_path / "site.yaml").write_text(doc)
-    with pytest.raises(ConfigError, match="kind-owned field"):
-        load_manifests(tmp_path)
+def test_a_kind_owned_key_inside_the_block_is_the_platforms_to_refuse(tmp_path: Path) -> None:
+    """decode used to guard this itself, because under the sibling shape a
+    ``platform`` key inside ``platform_config`` could silently re-pick the
+    capability. It cannot under one tagged table: ``name`` is the selector
+    and it is a real field of the block, so a stray ``platform`` key is
+    just config the platform does not accept, and the platform's own model
+    is what says so at finalize.
+    """
+    from agentworks.bootstrap import build_registry
+    from agentworks.config import load_config
+
+    pub = tmp_path / "k.pub"
+    priv = tmp_path / "k"
+    pub.write_text("ssh-ed25519 AAAA test")
+    priv.write_text("key")
+    cfg = tmp_path / "config.toml"
+    cfg.write_text(
+        f'[operator]\nssh_public_key = "{pub.as_posix()}"\nssh_private_key = "{priv.as_posix()}"\n'
+        '[plugins]\nsystem = ["azure"]\n'
+    )
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    (resources / "site.yaml").write_text(SITE_DOC + "    platform: lima\n")
+
+    with pytest.raises(ConfigError, match="platform: unknown field"):
+        build_registry(load_config(cfg, warn_issues=False))
 
 
 def test_decode_rejects_stray_spec_keys(tmp_path: Path) -> None:
     doc = SITE_DOC + "  region: eastus\n"
     (tmp_path / "site.yaml").write_text(doc)
-    with pytest.raises(ConfigError, match="unknown vm-site spec field"):
+    with pytest.raises(ConfigError, match="region: unknown field; expected one of: platform"):
         load_manifests(tmp_path)
 
 
@@ -172,7 +194,7 @@ def test_unknown_platform_site_hard_errors_at_finalize(tmp_path: Path) -> None:
     policy's unknown-reference. A typo no longer silently self-disables."""
     doc = "apiVersion: agentworks/v1\nkind: vm-site\nmetadata:\n  name: mystery\nspec:\n  platform:\n    name: nope\n"
     site = _load_one(tmp_path, doc)
-    assert site.platform == "nope"
+    assert site.platform.name == "nope"
     # The platform edge is always emitted now (suppression removed).
     assert [(r.kind, r.name) for r in site.dependencies(FinalizeContext())] == [("vm-platform", "nope")]
 
@@ -192,13 +214,17 @@ def test_reference_emission(tmp_path: Path) -> None:
 def test_proxmox_site_emits_the_token_secret_reference() -> None:
     site = VMSiteDecl(
         name="px",
-        platform="proxmox",
-        platform_config={
-            "api_url": "https://pve:8006",
-            "node": "pve1",
-            "token_id": "t",
-            "template_vmid": 9000,
-        },
+        platform=CapabilityBlock.model_validate(
+            {
+                "name": "proxmox",
+                **{
+                    "api_url": "https://pve:8006",
+                    "node": "pve1",
+                    "token_id": "t",
+                    "template_vmid": 9000,
+                },
+            }
+        ),
     )
     refs = site.dependencies(FinalizeContext())
     assert [(r.kind, r.name) for r in refs] == [
@@ -305,13 +331,17 @@ def test_host_unsupported_site_still_emits_its_edges(
     monkeypatch.setattr(ProxmoxPlatform, "unsupported_reason", classmethod(lambda cls: "no cluster os"))
     site = VMSiteDecl(
         name="px",
-        platform="proxmox",
-        platform_config={
-            "api_url": "https://pve:8006",
-            "node": "pve1",
-            "token_id": "t",
-            "template_vmid": 9000,
-        },
+        platform=CapabilityBlock.model_validate(
+            {
+                "name": "proxmox",
+                **{
+                    "api_url": "https://pve:8006",
+                    "node": "pve1",
+                    "token_id": "t",
+                    "template_vmid": 9000,
+                },
+            }
+        ),
     )
     assert [(r.kind, r.name) for r in site.dependencies(FinalizeContext())] == [
         ("vm-platform", "proxmox"),
@@ -347,8 +377,8 @@ def test_bundled_sites_finalize_against_the_platform_rows(
     builtin_manifests.publish_to(registry)
     publish_capability_rows(registry, descriptor_for("vm-platform"))
     registry.finalize()
-    assert registry.lookup("vm-site", "lima-local").platform == "lima"
-    assert registry.lookup("vm-site", "wsl2").platform == "wsl2"
+    assert registry.lookup("vm-site", "lima-local").platform.name == "lima"
+    assert registry.lookup("vm-site", "wsl2").platform.name == "wsl2"
     # ``azure-vm`` is no longer a core built-in row; it publishes from the
     # ``azure`` system plugin (Phase 11), so the core publisher above does not
     # emit it. Its platform row is exercised in tests/plugins/test_azure.py.

@@ -18,6 +18,7 @@ from agentworks.db import Database
 from agentworks.manifests.envelope import API_VERSION
 from agentworks.manifests.loader import RESOURCES_DIRNAME
 from agentworks.output import Role, StatusStyle, _render_header
+from agentworks.schema import CapabilityBlock
 
 # The orchestrated-command suites' shared fixture trio (proxmox
 # section, make_config, resolve_counter) lives in its own module so it
@@ -591,7 +592,7 @@ class _StubRegistry:
 
             if name not in VM_PLATFORM_REGISTRY:
                 raise KeyError(name)
-            return VMSiteDecl(name=name, platform=name)
+            return VMSiteDecl(name=name, platform=CapabilityBlock(name=name))
         if kind not in self._KIND_ATTRS:
             raise KeyError(kind)
         return self._kind_dict(kind)[name]

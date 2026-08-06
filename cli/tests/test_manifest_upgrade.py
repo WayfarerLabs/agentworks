@@ -136,8 +136,8 @@ def test_upgrade_rewrites_the_retired_shape_preserving_comments(tmp_path: Path) 
     manifests = load_manifests(resources)
     assert not manifests.issues
     site, credential = manifests.entries
-    assert (site.resource.platform, site.resource.platform_config) == ("lima", {"vm_host": "me@gpu-box"})
-    assert (credential.resource.provider, credential.resource.provider_config) == ("azdo", {"org": "my-org"})
+    assert site.resource.platform.tagged == {"name": "lima", "vm_host": "me@gpu-box"}
+    assert credential.resource.provider.tagged == {"name": "azdo", "org": "my-org"}
 
 
 def test_quoting_that_carries_a_type_survives_the_rewrite(tmp_path: Path) -> None:
@@ -169,7 +169,7 @@ def test_quoting_that_carries_a_type_survives_the_rewrite(tmp_path: Path) -> Non
 
     assert '    subscription_id: "0000"\n' in (resources / "sites.yaml").read_text()
     (entry,) = load_manifests(resources).entries
-    assert entry.resource.platform_config["subscription_id"] == "0000"
+    assert entry.resource.platform.config["subscription_id"] == "0000"
 
 
 def test_a_yaml_1_1_boolean_spelling_survives_verification(tmp_path: Path) -> None:
@@ -208,7 +208,7 @@ def test_a_yaml_1_1_boolean_spelling_survives_verification(tmp_path: Path) -> No
 
     assert "    verify_ssl: no\n" in (resources / "sites.yaml").read_text()
     (entry,) = load_manifests(resources).entries
-    assert entry.resource.platform_config["verify_ssl"] is False
+    assert entry.resource.platform.config["verify_ssl"] is False
 
 
 def test_rerunning_the_upgrade_is_a_no_op(tmp_path: Path) -> None:

@@ -43,6 +43,7 @@ class _SessionTemplateKind:
     """Implementation of ``ResourceKind`` for ``"session-template"``."""
 
     kind: str = "session-template"
+    model: type[DeclaredResource] = SessionTemplate
     description: str = "Session configuration (command, resume, env)"
     miss_policy: Literal["auto-declare", "error"] = "auto-declare"
     auto_declare_names: frozenset[str] | None = frozenset({"default"})

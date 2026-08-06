@@ -38,6 +38,7 @@ from agentworks.config.models import _SectionLineMap
 from agentworks.errors import ConfigError
 from agentworks.git_credentials.credential import GitCredentialConfig
 from agentworks.naming import MAX_SECRET_NAME_LENGTH, validate_name
+from agentworks.schema import CapabilityBlock
 from agentworks.secrets import SecretDecl
 from agentworks.sessions.layouts import AW_SESSION_VERTICAL_LAYOUT, VALID_TMUX_LAYOUTS, TmuxLayout
 from agentworks.sessions.template import NamedConsoleConfig, SessionTemplate
@@ -430,8 +431,7 @@ def _load_vm_sites_legacy(
             _warn_nonconforming_secret_name(token_secret, location=f"{section}.token_secret", issues=issues)
         sites[section] = VMSiteDecl(
             name=section,
-            platform=platform_name,
-            platform_config=platform_config,
+            platform=CapabilityBlock.of(platform_name, **platform_config),
             declared_at=decls.lookup(section),
         )
     return sites
@@ -538,8 +538,11 @@ def _load_session_templates(
             name=name,
             inherits=list(tdata.get("inherits", [])),
             description=str(tdata["description"]) if "description" in tdata else None,
-            harness_integration=harness_integration,
-            harness_integration_config=harness_integration_config,
+            harness_integration=(
+                None
+                if harness_integration is None
+                else CapabilityBlock.of(harness_integration, **(harness_integration_config or {}))
+            ),
             env=env,
             declared_at=decls.lookup("session_templates", name),
         )
@@ -679,8 +682,7 @@ def _load_git_credentials(
             provider_config["org"] = str(cdata["org"])
         creds[name] = GitCredentialConfig(
             name=name,
-            provider=cred_type,
-            provider_config=provider_config,
+            provider=CapabilityBlock.of(cred_type, **provider_config),
             description=str(cdata["description"]) if "description" in cdata else None,
             declared_at=decls.lookup("git_credentials", name),
         )

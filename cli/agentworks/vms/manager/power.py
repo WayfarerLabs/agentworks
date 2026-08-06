@@ -125,7 +125,7 @@ def describe_vm(db: Database, config: Config, name: str) -> None:
         site_decl = lookup_site(vm.site, registry)
         # Known as soon as the declaration resolves: keep it alive even
         # if the boundary below degrades.
-        site_platform = site_decl.platform
+        site_platform = site_decl.platform.name
         vm_node, ops_ctx = _live_vm_boundary(db, config, vm, registry=registry)
         platform = vm_node.site.platform
     except UserAbort:

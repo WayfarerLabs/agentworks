@@ -23,6 +23,7 @@ from agentworks.config import load_config
 from agentworks.env.entry import EnvEntry
 from agentworks.errors import ConfigError, InheritanceCycleError
 from agentworks.resources.graph import FinalizeContext
+from agentworks.schema import CapabilityBlock
 from agentworks.sessions.template import SessionTemplate
 from agentworks.vms.template import VMTemplate
 from agentworks.vms.templates import effective_template
@@ -89,7 +90,7 @@ def test_session_template_child_inherits_the_harness_selector_it_never_declared(
     the integration its parent selected. Collapsing the undeclared case to
     ``shell`` earlier would instead have every session template in the
     registry pointing at the shell row."""
-    parent = SessionTemplate(name="base", harness_integration="shell", harness_integration_config={"command": "top"})
+    parent = SessionTemplate(name="base", harness_integration=CapabilityBlock.of("shell", **{"command": "top"}))
     child = SessionTemplate(name="kid", inherits=["base"])
     silent = SessionTemplate(name="lonely")
     context = _context("session-template", parent, child, silent)

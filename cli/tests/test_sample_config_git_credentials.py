@@ -57,7 +57,7 @@ def test_default_token_secret_auto_declares(tmp_path: Path, ssh_keys: tuple[Path
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
     # No token in provider_config -> the provider defaults the secret.
-    assert "token" not in registry.lookup("git-credential", "github").provider_config
+    assert "token" not in registry.lookup("git-credential", "github").provider.config
 
     decl = registry.lookup("secret", "git-token-github")
     assert decl.origin is not None
@@ -76,7 +76,7 @@ def test_custom_token_secret_auto_declares(tmp_path: Path, ssh_keys: tuple[Path,
     )
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
-    assert registry.lookup("git-credential", "github").provider_config["token"] == "custom-tok"
+    assert registry.lookup("git-credential", "github").provider.config["token"] == "custom-tok"
 
     decl = registry.lookup("secret", "custom-tok")
     assert decl.origin is not None
@@ -96,7 +96,7 @@ def test_empty_token_string_rejected(tmp_path: Path, ssh_keys: tuple[Path, Path]
         ManifestDoc("git-credential", "github", {"provider": {"name": "github", "token": ""}}),
     )
     config = load_config(cfg, warn_issues=False)
-    with pytest.raises(ConfigError, match="token must not be empty"):
+    with pytest.raises(ConfigError, match="token: must not be empty"):
         build_registry(config)
 
 
@@ -112,5 +112,5 @@ def test_non_string_token_rejected(tmp_path: Path, ssh_keys: tuple[Path, Path]) 
         ManifestDoc("git-credential", "github", {"provider": {"name": "github", "token": {"secret": "x"}}}),
     )
     config = load_config(cfg, warn_issues=False)
-    with pytest.raises(ConfigError, match="must be a bare secret"):
+    with pytest.raises(ConfigError, match="token: must be a string"):
         build_registry(config)

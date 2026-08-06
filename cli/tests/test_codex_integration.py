@@ -161,8 +161,7 @@ def _echo(command: str) -> str:
 def _refs(blob: dict[str, object]) -> tuple[object, ...]:
     return capability_config_references(
         kind="harness-integration",
-        name="codex",
-        blob=blob,
+        config={"name": "codex", **blob},
         owner=RefOwner(kind="session-template", name="codex"),
     )
 
@@ -180,8 +179,7 @@ def _validate(blob: dict[str, object]) -> None:
     declares, and no integration code runs."""
     validate_capability_config(
         kind="harness-integration",
-        name="codex",
-        blob=blob,
+        config={"name": "codex", **blob},
         owner=RefOwner(kind="session-template", name="codex"),
     )
 

@@ -37,6 +37,7 @@ from agentworks.capabilities.descriptor import (
     RegistryPolicy,
 )
 from agentworks.capabilities.git_credential.base import GitCredentialProvider
+from agentworks.git_credentials.credential import GitCredentialConfig
 from agentworks.resources.graph import Readiness
 from agentworks.resources.kind import KIND_REGISTRY, NoUnreferencedDefaultError
 from agentworks.schema import AgwModel
@@ -44,6 +45,7 @@ from agentworks.schema import AgwModel
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from agentworks.declared_resource import DeclaredResource
     from agentworks.origin import Origin
     from agentworks.resources.reference import ResourceReference
 
@@ -72,6 +74,7 @@ class _GitCredentialKind:
     """Implementation of ``ResourceKind`` for ``"git-credential"``."""
 
     kind: str = "git-credential"
+    model: type[DeclaredResource] = GitCredentialConfig
     description: str = "Declared git credentials"
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None  # ignored under "error"

@@ -12,14 +12,14 @@ construct these.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated
 
 from pydantic import Field
 
 from agentworks.declared_resource import DeclaredResource
-from agentworks.env import EnvEntry
-from agentworks.env.entry import env_references
-from agentworks.schema import RefOwner
+from agentworks.env.entry import EnvTable, env_references
+from agentworks.schema import CapabilityBlock, RefOwner, ResourceRef
+from agentworks.schema.reference import RefRelationship
 from agentworks.sessions.layouts import AW_SESSION_VERTICAL_LAYOUT, TmuxLayout
 
 if TYPE_CHECKING:
@@ -44,26 +44,41 @@ class NamedConsoleConfig(DeclaredResource):
 
 
 class SessionTemplate(DeclaredResource):
-    """Session template definition. All fields optional (None = inherit/default).
+    """Session template definition. Every field is optional and ``None``
+    means "not declared here", never "off".
 
-    The workload the session runs is selected by the ``harness_integration`` /
-    ``harness_integration_config`` pair (the inline capability reference, ADR
-    0016): ``harness_integration`` names the capability and ``harness_integration_config`` is
-    the blob whose shape that capability declares and the core validates. ``None`` on either
-    means "not declared here" (distinct from a declared-empty blob),
-    so inheritance can tell a restating child from a silent one (FRD
-    R5). An undeclared harness_integration resolves to the ``shell`` built-in (a
-    plain login shell), preserving the behavior from before harness integrations. The
-    flat ``command`` / ``resume_command`` / ``required_commands``
-    fields are gone: they are ``shell``'s config vocabulary and live
-    under ``harness_integration_config`` now; the TOML loader hoists them for
-    backward compatibility, manifests reject them (FRD R2/R6).
+    The workload the session runs is selected by one tagged
+    ``harness_integration`` table: its ``name`` names the capability and
+    its remaining keys are the config whose shape that capability declares
+    and the core validates. ``None`` means "not declared here", distinct
+    from a table with no config keys, so inheritance can tell a restating
+    child from a silent one (FRD R5). An undeclared harness_integration
+    resolves to the ``shell`` built-in (a plain login shell), preserving
+    the behavior from before harness integrations. The flat ``command`` /
+    ``resume_command`` / ``required_commands`` fields are ``shell``'s
+    config vocabulary and live inside the table (FRD R2/R6).
     """
 
-    inherits: list[str] = Field(default_factory=list)
-    harness_integration: str | None = None
-    harness_integration_config: dict[str, object] | None = None
-    env: dict[str, EnvEntry] | None = None
+    inherits: list[
+        Annotated[
+            str,
+            ResourceRef(
+                kind="session-template",
+                usage="a parent template",
+                relationship=RefRelationship.INHERITS,
+            ),
+        ]
+    ] = Field(default_factory=list)
+    """Parent templates this one composes, nearest last."""
+
+    harness_integration: CapabilityBlock | None = None
+    """The workload this session runs: one table whose ``name`` selects the
+    harness integration and whose remaining keys are that integration's own
+    config (``{name: shell, command: htop}``)."""
+
+    env: EnvTable | None = None
+    """Environment variables exported in this session, as a plaintext value
+    or a ``{secret: <name>}`` reference per key."""
 
     def dependencies(self, context: FinalizeContext) -> list[ResourceReference]:
         """The ``inherits`` edges as declared, plus the runtime needs of
@@ -131,8 +146,7 @@ class SessionTemplate(DeclaredResource):
                 sourced_references(
                     capability_config_references(
                         kind="harness-integration",
-                        name=integration,
-                        blob=effective.harness.config,
+                        config={"name": integration, **effective.harness.config},
                         owner=RefOwner(kind="session-template", name=self.name),
                     ),
                     source,
@@ -142,8 +156,8 @@ class SessionTemplate(DeclaredResource):
         return refs
 
     def validate_config(self, enabled_backends: frozenset[str], context: FinalizeContext) -> None:
-        """Throwing shape check for the EFFECTIVE ``harness_integration_config``
-        blob, run by the finalize ``validate`` pass (``enabled_backends`` is the
+        """Throwing shape check for the EFFECTIVE harness config block,
+        run by the finalize validate pass (``enabled_backends`` is the
         secret-only R9.9 input, ignored here). Mirrors ``dependencies``:
         the CORE validates the blob against the named integration's declared
         model, and no integration code runs. An unknown integration name is
@@ -165,10 +179,10 @@ class SessionTemplate(DeclaredResource):
         from agentworks.sessions.templates import DEFAULT_HARNESS_INTEGRATION, effective_template
 
         effective = effective_template({**context.rows_of("session-template"), self.name: self}, self.name)
+        name = effective.harness.name or DEFAULT_HARNESS_INTEGRATION
         validate_capability_config(
             kind="harness-integration",
-            name=effective.harness.name or DEFAULT_HARNESS_INTEGRATION,
-            blob=effective.harness.config,
+            config={"name": name, **effective.harness.config},
             owner=RefOwner(kind="session-template", name=self.name),
             location=self.error_location,
             provenance=effective.harness.provenance,

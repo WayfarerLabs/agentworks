@@ -70,8 +70,8 @@ def test_load_valid_config(config_dir: Path) -> None:
     assert registry.lookup("workspace-template", "gruntweave").repo == "https://example.com/org/repo.git"
     assert registry.lookup("workspace-template", "child").inherits == ["gruntweave"]
     assert registry.lookup("workspace-template", "child").tmuxinator is False
-    assert registry.lookup("git-credential", "github").provider == "github"
-    assert registry.lookup("git-credential", "azdo").provider_config == {"org": "my-org"}
+    assert registry.lookup("git-credential", "github").provider.name == "github"
+    assert registry.lookup("git-credential", "azdo").provider.config == {"org": "my-org"}
     assert admin.git_credentials == ["github"]
 
 
@@ -173,7 +173,7 @@ def test_git_credential_provider_key(tmp_path: Path) -> None:
         ManifestDoc("git-credential", "gh", {"provider": {"name": "github"}}),
     )
     registry = build_registry(load_config(config_file))
-    assert registry.lookup("git-credential", "gh").provider == "github"
+    assert registry.lookup("git-credential", "gh").provider.name == "github"
 
 
 def test_git_credential_nonconforming_name_warns_and_loads(tmp_path: Path) -> None:
@@ -187,9 +187,9 @@ def test_git_credential_nonconforming_name_warns_and_loads(tmp_path: Path) -> No
     )
     # Warn-only, non-breaking: the credential is present and unchanged.
     registry = build_registry(load_config(config_file, warn_issues=False))
-    assert registry.lookup("git-credential", "GITHUB").provider == "github"
+    assert registry.lookup("git-credential", "GITHUB").provider.name == "github"
     issues = _manifest_issues(config_file)
-    assert any("git_credentials.GITHUB" in issue and "git-token-GITHUB" in issue for issue in issues), issues
+    assert any("git-credential/GITHUB" in issue and "git-token-GITHUB" in issue for issue in issues), issues
 
 
 def test_git_credential_conforming_name_no_warning(tmp_path: Path) -> None:
@@ -213,8 +213,8 @@ def test_git_credential_nonconforming_name_with_explicit_token_no_derived_warnin
     )
     registry = build_registry(load_config(config_file, warn_issues=False))
     cred = registry.lookup("git-credential", "GITHUB")
-    assert cred.provider == "github"
-    assert cred.provider_config["token"] == "git-token-github"
+    assert cred.provider.name == "github"
+    assert cred.provider.config["token"] == "git-token-github"
     assert not any("does not follow the naming rules" in issue for issue in _manifest_issues(config_file))
 
 
@@ -252,7 +252,7 @@ def test_git_credential_name_conforming_but_derived_over_cap_warns(tmp_path: Pat
     )
     issues = _manifest_issues(config_file)
     assert any(
-        f"git_credentials.{name}" in issue and "does not follow the naming rules" in issue for issue in issues
+        f"git-credential/{name}" in issue and "does not follow the secret naming rules" in issue for issue in issues
     ), issues
 
 
@@ -494,8 +494,8 @@ _PROXMOX_TEST_CASES: list[dict[str, Any]] = [
         },
         "expect_error": None,
         "check": lambda registry: (
-            registry.lookup("vm-site", "proxmox").platform == "proxmox"
-            and registry.lookup("vm-site", "proxmox").platform_config
+            registry.lookup("vm-site", "proxmox").platform.name == "proxmox"
+            and registry.lookup("vm-site", "proxmox").platform.config
             == {
                 "api_url": "https://pve.example.com:8006",
                 "node": "pve",
@@ -520,9 +520,9 @@ _PROXMOX_TEST_CASES: list[dict[str, Any]] = [
         # platform applies its own defaults (storage local-lvm, bridge
         # vmbr0, verify_ssl True) at use.
         "check": lambda registry: (
-            "storage" not in registry.lookup("vm-site", "proxmox").platform_config
-            and "bridge" not in registry.lookup("vm-site", "proxmox").platform_config
-            and "verify_ssl" not in registry.lookup("vm-site", "proxmox").platform_config
+            "storage" not in registry.lookup("vm-site", "proxmox").platform.config
+            and "bridge" not in registry.lookup("vm-site", "proxmox").platform.config
+            and "verify_ssl" not in registry.lookup("vm-site", "proxmox").platform.config
         ),
     },
     {

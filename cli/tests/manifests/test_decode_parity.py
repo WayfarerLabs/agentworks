@@ -332,17 +332,22 @@ def test_git_credential_type_key_rejected(tmp_path: Path) -> None:
           type: github
         """,
     )
-    with pytest.raises(ConfigError, match='use "provider", not "type"'):
+    # The hand-written "use provider, not type" steer is gone: the
+    # unknown-key message names the one field this kind has, which says
+    # the same thing without a second place to keep it.
+    with pytest.raises(ConfigError, match="type: unknown field; expected one of: provider"):
         load_manifests(tmp_path / "resources")
 
 
-def test_git_credential_provider_config_rejects_kind_owned_fields(
+def test_a_kind_owned_key_inside_the_provider_block_is_the_providers_to_refuse(
     tmp_path: Path,
 ) -> None:
-    """The blob may not shadow the kind-owned surface (type/provider/
-    description). token is NOT kind-owned any more; it is provider
-    config, so it is tested separately (test_git_credential_token_in
-    _provider_config)."""
+    """decode used to guard this, because under the sibling shape a
+    ``provider`` key inside ``provider_config`` could silently re-pick the
+    capability. It cannot under one tagged table: ``name`` is the selector
+    and it is a real field of the block, so a stray ``provider`` key is
+    just config the provider does not accept, and the provider's own model
+    is what says so at finalize."""
     _manifest(
         tmp_path,
         """
@@ -356,8 +361,9 @@ def test_git_credential_provider_config_rejects_kind_owned_fields(
             provider: sneaky
         """,
     )
-    with pytest.raises(ConfigError, match="may not contain kind-owned field"):
-        load_manifests(tmp_path / "resources")
+    manifests = load_manifests(tmp_path / "resources")
+    with pytest.raises(ConfigError, match="provider: unknown field"):
+        build_registry(_config(tmp_path), manifests)
 
 
 def test_git_credential_token_in_provider_config(tmp_path: Path) -> None:
@@ -394,13 +400,14 @@ def test_provider_must_be_a_tagged_table(tmp_path: Path) -> None:
           provider: 42
         """,
     )
-    with pytest.raises(ConfigError, match="spec.provider must be a tagged table"):
+    with pytest.raises(ConfigError, match="provider: must be a table"):
         load_manifests(tmp_path / "resources")
 
 
 def test_git_credential_org_must_nest_under_provider_config(tmp_path: Path) -> None:
-    """Provider-owned fields do not ride the spec top level in YAML:
-    a stray `org` errors with a pointer at the nesting rule."""
+    """Provider-owned fields do not ride the spec top level in YAML: a
+    stray ``org`` is an unknown key on a kind whose only field is
+    ``provider``, which is the pointer."""
     _manifest(
         tmp_path,
         """
@@ -414,7 +421,7 @@ def test_git_credential_org_must_nest_under_provider_config(tmp_path: Path) -> N
           org: my-org
         """,
     )
-    with pytest.raises(ConfigError, match="goes inside\\s+the spec.provider table"):
+    with pytest.raises(ConfigError, match="org: unknown field; expected one of: provider"):
         load_manifests(tmp_path / "resources")
 
 

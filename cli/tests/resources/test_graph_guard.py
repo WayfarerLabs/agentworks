@@ -360,8 +360,6 @@ _REGISTRY_READ_ALLOWLIST = frozenset(
         # of them would be the probe this pattern bans:
         #   git_credentials/credential.py, sessions/template.py,
         #   secrets/base.py, migrate/planning.py
-        # Decode-time shadow check (code-registry membership).
-        "manifests/decode.py",
         # Load-time validation of the deprecated [secret_backends] section.
         "config/loaders_secrets.py",
     }
@@ -585,16 +583,18 @@ def test_vms_sites_exempt_reads_are_function_scoped() -> None:
     ``vms/kinds.py`` zero-read pin) so a stray read in any new function trips.
 
     Registry reads belong to edge production (``dependencies``), the finalize
-    ``validate`` pass, and op-time construction (``resolve_site``). The only
-    ``not_ready`` call is ``VMSite.not_ready`` delegating to the graph-stamped
-    platform impl.
+    ``validate_config`` pass, op-time construction (``resolve_site``), and the
+    platform-shadow rule (``_no_shadowed_platform``), which asks whether a
+    site's NAME collides with a platform's and reads the registry at exactly
+    the moment decode used to. The only ``not_ready`` call is
+    ``VMSite.not_ready`` delegating to the graph-stamped platform impl.
     """
     source = _read("vms/sites.py")
     aliases = _registry_aliases(ast.parse(source))
     reg_offenders = [
         f"{func}:{lineno}"
         for func, lineno in _enclosing_functions(source, lambda node: _is_registry_read(node, aliases))
-        if func not in {"dependencies", "validate_config", "resolve_site"}
+        if func not in {"dependencies", "validate_config", "resolve_site", "_no_shadowed_platform"}
     ]
     not_ready_offenders = [
         f"{func}:{lineno}"

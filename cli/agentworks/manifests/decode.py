@@ -7,12 +7,6 @@ comes back. Everything a kind used to say about itself now lives on its
 model, which is the same class the row IS (see
 ``agentworks.declared_resource``).
 
-INTERIM, for the length of step 2.5 only: kinds whose model has not
-absorbed its decoder yet still route through ``_DECODERS`` below. That
-fork is what lets the swap land one kind at a time with the suite green
-after each; it goes when the last kind moves, and ``_model_for`` is the
-one place that decides.
-
 **Advisory checks are derived from a declared type or a declared marker,
 never from an enumeration of kinds.** ``ManifestSet.issues`` is the
 load-time warning channel, and a check wired per kind is a check the sixth
@@ -41,13 +35,13 @@ from typing import TYPE_CHECKING, Any
 from pydantic import ValidationError as PydanticValidationError
 
 from agentworks.declared_resource import DeclaredResource
-from agentworks.errors import AgentworksError, ConfigError
+from agentworks.errors import ConfigError, StateError
 from agentworks.resources import KIND_REGISTRY
 from agentworks.schema import RefOwner, config_error_from, extract_references, validation_context
 from agentworks.schema._shape import Collection, shape_of
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Mapping
 
     from agentworks.capabilities.descriptor import CapabilityKindDescriptor, HostSurface
     from agentworks.env import EnvEntry
@@ -143,72 +137,79 @@ def _hosting_descriptors() -> Mapping[str, CapabilityKindDescriptor]:
 MIGRATE_HINT = "`agw resource migrate --all` rewrites your manifests in place."
 """Remediation for the legacy shape the migrator can MECHANICALLY fold.
 
-Only that one: a naming string, with or without its sibling table. The
-migrator deliberately refuses to guess at a document that mixes the two
-shapes (which half wins is the operator's call), so pointing that error
-here would send them to a command that leaves their file alone.
+Only that one: a naming string, with or without a foldable sibling table.
+The migrator refuses to guess at a document that mixes the two shapes, or
+at one whose sibling would collide with the tag (which half wins is the
+operator's call), so pointing those errors here would send an operator to
+a command that leaves their file alone.
 """
 
 
-def _tagged_rewrite(field: str, name: str, config: object) -> str:
-    """The exact canonical spelling that replaces a legacy sibling pair.
+def _tagged_rewrite(field: str, name: str, sibling: object, present: bool) -> str | None:
+    """The exact canonical spelling that replaces a legacy sibling pair,
+    or ``None`` when no honest one can be printed.
 
     Built from what the document actually says (the capability's name and
     the config keys it carries) rather than a generic template, so the
     error shows the operator their own resource in the shape it now needs.
+
+    ``None`` for the two shapes a mechanical fold cannot produce, and
+    printing a rewrite for either would be worse than printing none:
+
+    - a sibling table carrying its own ``name``, where the fold would emit
+      ``{name: a, name: b}``, which is not valid YAML and hides that two
+      keys claim to select the capability;
+    - a sibling that is not a table at all, where there are no keys to
+      fold and printing the tag alone would quietly discard what the
+      operator wrote.
     """
-    keys = list(config) if isinstance(config, dict) else []
-    inner = ", ".join([f"name: {name}", *(f"{key}: ..." for key in keys)])
+    if not present:
+        return f"{field}: {{name: {name}}}"
+    if not isinstance(sibling, dict):
+        return None
+    if "name" in sibling:
+        return None
+    inner = ", ".join([f"name: {name}", *(f"{key}: ..." for key in sibling)])
     return f"{field}: {{{inner}}}"
 
 
-def _fold_capability_table(surface: HostSurface, spec: dict[str, object]) -> None:
-    """Fold the tagged capability table into the internal sibling pair.
+def _reject_legacy_shape(surface: HostSurface, spec: Mapping[str, object], where: str) -> None:
+    """The 0.14 sibling pair, refused BY NAME with its rewrite.
 
-    The manifest shape is one tagged table on the naming field
-    (``platform: {name: lima, vm_host: ...}``): ``name`` selects the
-    capability and the remaining keys are its config. The decoders and the
-    shared TOML loaders underneath them consume a naming STRING plus a
-    ``*_config`` mapping, so this splits the table back into that internal
-    pair. Every host surface folds the same way; the field names come from
-    the kind's descriptor record.
+    Under the kind spec models this document is two problems the model
+    layer has no reason to connect: an unknown ``platform_config`` key and
+    a ``platform`` that is not a table. That generic pair is exactly what
+    this function exists to beat, so it runs before validation and names
+    the fold.
 
-    A host that names no capability at all passes through untouched: a
-    session template legitimately inherits its selector or stays the
-    default login shell, and the kinds that REQUIRE one raise their own
-    required-field error in their decoder, where the kind's vocabulary is.
-
-    Every other spelling is a hard error, including the legacy sibling
-    pair (a naming string beside a ``*_config`` table) that decode accepted
-    with a deprecation warning through 0.14.
+    This is the one compatibility surface the model swap leaves behind,
+    and it goes together with ``HostSurface.config_field``, whose only
+    remaining job is to let this name the retired field. Delete both when
+    the shape is far enough in the past that a generic unknown key is a
+    good enough answer.
     """
     field, config_field = surface.naming_field, surface.config_field
-    if field not in spec and config_field not in spec:
+    value = spec.get(field)
+    if not isinstance(value, str):
         return
-    value = spec.pop(field, None)
-    if isinstance(value, str):
-        rewrite = _tagged_rewrite(field, value or "<capability>", spec.get(config_field))
+    present = config_field in spec
+    sibling = spec.get(config_field)
+    rewrite = _tagged_rewrite(field, value or "<capability>", sibling, present)
+    head = f"{where}: spec.{field} names the capability as a string, which is no longer supported"
+    if rewrite is not None:
+        raise ConfigError(f"{head}; write one tagged table instead: {rewrite}", hint=MIGRATE_HINT)
+    # No rewrite to print, and no migrate hint with it: the migrator
+    # refuses these two documents too, so naming it would send the
+    # operator to a command that leaves their file alone.
+    if isinstance(sibling, dict):
         raise ConfigError(
-            f"spec.{field} names the capability as a string, which is no longer "
-            f"supported; write one tagged table instead: {rewrite}",
-            hint=MIGRATE_HINT,
+            f"{head}, and spec.{config_field} carries its own 'name' ({sibling['name']!r}), so which one "
+            f"selects the capability is your call; merge them by hand into one spec.{field} table"
         )
-    if config_field in spec:
-        # No migrate hint: this is either a tagged table beside a stray
-        # sibling (which half wins is a judgement call, so the migrator
-        # refuses to guess) or an ownerless blob. Both are hand fixes.
-        raise ConfigError(
-            f"spec.{config_field} is not a supported YAML field; fold its keys into the spec.{field} tagged table"
-        )
-    if not isinstance(value, dict):
-        raise ConfigError(f"spec.{field} must be a tagged table with a string 'name' key")
-    name = value.get("name")
-    if not isinstance(name, str) or not name:
-        raise ConfigError(f"spec.{field} (table form) requires a 'name' key naming the capability")
-    config = {key: item for key, item in value.items() if key != "name"}
-    spec[field] = name
-    if config:
-        spec[config_field] = config
+    raise ConfigError(
+        f"{head}, and spec.{config_field} is {sibling!r} rather than a table, so there are no keys to fold; "
+        f"write spec.{field} as one tagged table and put that value where it belongs, or remove it"
+    )
 
 
 def decode_document(doc: Document, issues: list[str]) -> Any:
@@ -221,9 +222,10 @@ def decode_document(doc: Document, issues: list[str]) -> Any:
     """
     spec = dict(doc.spec)
     _reject_spec_metadata(doc, spec)
+    descriptor = _hosting_descriptors().get(doc.kind)
+    if descriptor is not None and descriptor.manifest_section is not None:
+        _reject_legacy_shape(descriptor.manifest_section, spec, doc.where)
     model = _model_for(doc.kind)
-    if model is None:
-        return _legacy_decode(doc, spec, issues)
 
     owner = RefOwner(kind=doc.kind, name=doc.name)
     _check_declared_name(doc, owner, model)
@@ -242,15 +244,19 @@ def decode_document(doc: Document, issues: list[str]) -> Any:
     return resource
 
 
-def _model_for(kind: str) -> type[DeclaredResource] | None:
-    """The kind's row model, or ``None`` while it is still decoded by
-    hand.
+def _model_for(kind: str) -> type[DeclaredResource]:
+    """The kind's spec model, which is its declared-resource row class.
 
-    INTERIM: the ``None`` answer, ``_legacy_decode``, and the
-    ``_DECODERS`` table go together when the last kind gains a model.
+    Read off the kind strategy rather than out of a table here, so the
+    switchboard is derived: a new declarable kind cannot be added without
+    one, and nothing in the manifest layer enumerates the kinds.
+    ``tests/manifests/test_kind_models.py`` pins the split (every
+    declarable kind declares one, no capability kind does).
     """
     model = getattr(KIND_REGISTRY[kind], "model", None)
-    return model if isinstance(model, type) and issubclass(model, DeclaredResource) else None
+    if not (isinstance(model, type) and issubclass(model, DeclaredResource)):
+        raise StateError(f"the {kind} kind declares no spec model, so a manifest document has nothing to validate")
+    return model
 
 
 def _metadata_payload(doc: Document) -> dict[str, object]:
@@ -380,12 +386,7 @@ def _hosted_capability_references(
     block = getattr(resource, descriptor.manifest_section.naming_field, None)
     if not isinstance(block, CapabilityBlock):
         return ()
-    return capability_config_references(
-        kind=descriptor.kind,
-        name=block.name,
-        blob=block.config,
-        owner=owner,
-    )
+    return capability_config_references(kind=descriptor.kind, config=block.tagged, owner=owner)
 
 
 def _conforming_secret(name: str) -> bool:
@@ -416,225 +417,3 @@ def _nonconforming_secret(owner: RefOwner, ref: ConfigReference) -> str:
         f"or digit, at most {MAX_SECRET_NAME_LENGTH} characters). It still resolves as declared; rename "
         f"it to conform."
     )
-
-
-def _legacy_decode(doc: Document, spec: dict[str, Any], issues: list[str]) -> Any:
-    """The pre-model decode path, for the kinds whose model has not
-    absorbed its decoder yet. INTERIM; see :func:`_model_for`."""
-    decoder = _DECODERS[doc.kind]
-    if doc.description is not None:
-        spec["description"] = doc.description
-
-    local_issues: list[str] = []
-    try:
-        descriptor = _hosting_descriptors().get(doc.kind)
-        if descriptor is not None and descriptor.manifest_section is not None:
-            _fold_capability_table(descriptor.manifest_section, spec)
-        resource = decoder(doc, spec, local_issues)
-    except AgentworksError as exc:
-        raise ConfigError(f"{doc.where}: {exc}", hint=exc.hint) from exc
-    issues.extend(f"{doc.where}: {issue}" for issue in local_issues)
-    return resource
-
-
-_SESSION_TEMPLATE_KEYS = {
-    "inherits",
-    "description",
-    "harness_integration",
-    "harness_integration_config",
-    "env",
-}
-
-
-def _decode_session_template(doc: Document, spec: dict[str, Any], issues: list[str]) -> Any:
-    from agentworks.config.loaders_core import _parse_env_table, _raise_unexpected_keys
-    from agentworks.sessions.template import SessionTemplate
-
-    # The capability fold (tagged harness_integration table -> the internal
-    # ``harness_integration`` name plus ``harness_integration_config`` blob)
-    # already ran in ``decode_document`` before this decoder, so the spec here
-    # carries the canonical internal pair: a non-empty string selector, and a
-    # mapping blob only where there is a selector to own it. Shell
-    # configuration lives only under harness_integration_config. This kind is
-    # strict at its own boundary so misspelled or removed fields do not degrade
-    # into warn-mode handling.
-    name = doc.name
-    _raise_unexpected_keys(spec, _SESSION_TEMPLATE_KEYS, f"session_templates.{name}")
-    harness_integration = spec.get("harness_integration")
-    if harness_integration is not None and not isinstance(harness_integration, str):
-        raise ConfigError(f"session_templates.{name}.harness_integration must be a string")
-    raw_config = spec.get("harness_integration_config")
-    config_blob = dict(raw_config) if isinstance(raw_config, dict) else None
-    env: dict[str, EnvEntry] | None = None
-    if "env" in spec:
-        env = _parse_env_table(spec["env"], context=f"session_templates.{name}", issues=issues)
-    return SessionTemplate(
-        name=name,
-        inherits=list(spec.get("inherits", [])),
-        description=str(spec["description"]) if "description" in spec else None,
-        harness_integration=harness_integration,
-        harness_integration_config=config_blob,
-        env=env,
-        declared_at=doc.location,
-    )
-
-
-def _decode_git_credential(doc: Document, spec: dict[str, Any], issues: list[str]) -> Any:
-    from agentworks.config.loaders_core import _warn_nonconforming_derived_secret, _warn_nonconforming_secret_name
-    from agentworks.git_credentials.credential import GitCredentialConfig
-
-    name = doc.name
-    if "type" in spec:
-        raise ConfigError(
-            'git-credential manifests use "provider", not "type"',
-        )
-    # By this point ``_fold_capability_table`` has already split the tagged
-    # ``spec.provider: {name: ..., ...}`` table into the internal pair (a
-    # ``provider`` string plus a ``provider_config`` mapping), so this decoder
-    # always sees the normalized form: absent, or a non-empty string beside a
-    # mapping. Only absence is left to check here.
-    provider = spec.pop("provider", None)
-    if not isinstance(provider, str) or not provider:
-        raise ConfigError(
-            "git-credential requires spec.provider (github or azdo)",
-        )
-    # Provider-owned configuration (azdo's org, the token secret name) rides
-    # the provider table operators write and lands in this mapping.
-    raw_config = spec.pop("provider_config", {})
-    # The blob may not shadow kind-owned surface. ``token`` is NOT reserved:
-    # it is provider-owned config (the secret the provider sources its PAT
-    # from) and lives under provider_config.
-    reserved = {"type", "provider", "description"} & set(raw_config)
-    if reserved:
-        names = ", ".join(sorted(reserved))
-        raise ConfigError(
-            f"the provider config may not contain kind-owned field(s): {names}; they belong at the spec top level"
-        )
-    if "token" in spec:
-        raise ConfigError(
-            "git-credential 'token' is provider config now: move it into "
-            "the spec.provider table (its 'name' key selects the provider)"
-        )
-    description = spec.pop("description", None)
-    if spec:
-        extras = ", ".join(sorted(spec))
-        raise ConfigError(
-            f"unknown git-credential spec field(s): {extras}; "
-            "provider-specific configuration (e.g. azdo's org) goes inside "
-            "the spec.provider table"
-        )
-    # Warning parity with the migrator oracle (finding 8): the token secret's
-    # conformance is warned the same way the flat TOML reader does, and the
-    # same empty/non-string token guard applies. When the blob sets ``token``
-    # explicitly, warn on that name; otherwise warn if the derived
-    # ``git-token-<name>`` default is non-conforming.
-    if "token" in raw_config:
-        token = raw_config["token"]
-        if not isinstance(token, str):
-            raise ConfigError(
-                f"git_credentials.{name}.token must be a bare secret name (string), got {type(token).__name__}"
-            )
-        if not token:
-            raise ConfigError(
-                f"git_credentials.{name}.token must not be empty; "
-                f"omit the key to inherit the default secret name "
-                f'"git-token-{name}"'
-            )
-        _warn_nonconforming_secret_name(token, location=f"git_credentials.{name}.token", issues=issues)
-    else:
-        _warn_nonconforming_derived_secret(name, issues)
-    # The TRUE blob's shape is validated by the finalize ``validate`` pass
-    # (GitCredentialConfig.validate), not here (R3). The full blob is attached
-    # so the finalize pass and reference derivation see every capability field.
-    return GitCredentialConfig(
-        name=name,
-        provider=provider,
-        provider_config=dict(raw_config),
-        description=str(description) if description is not None else None,
-        declared_at=doc.location,
-    )
-
-
-def _decode_vm_site(doc: Document, spec: dict[str, Any], issues: list[str]) -> Any:
-    from agentworks.naming import MAX_FREEFORM_NAME_LENGTH, validate_name
-    from agentworks.vms.sites import VMSiteDecl
-
-    # Site names hit no OS-level identifier limit: they are a registry key and
-    # display/config surface only, never derived into a hostname or SSH host
-    # alias (VM names, not site names, feed {slug}-{vm} hostnames). So they take
-    # the freeform cap, not the tighter VM-name cap.
-    validate_name(doc.name, max_length=MAX_FREEFORM_NAME_LENGTH)
-    # ``_fold_capability_table`` has already split the tagged
-    # ``spec.platform: {name: ..., ...}`` table into the internal pair, so the
-    # platform arrives absent or as a non-empty string beside a mapping. Only
-    # absence is left to check here.
-    platform = spec.pop("platform", None)
-    if not isinstance(platform, str) or not platform:
-        raise ConfigError(
-            "vm-site requires spec.platform (a vm-platform capability name, "
-            "e.g. lima, wsl2, azure-vm, aws-ec2, proxmox)",
-        )
-    raw_config = spec.pop("platform_config", {})
-    # ``token_secret`` (proxmox) is a bare operator-supplied secret name; warn
-    # (only) when it is present and non-conforming, matching the other
-    # reference sites. The location is kept relative; the decode layer prefixes
-    # ``doc.where``. A non-string / empty shape is left to the finalize
-    # ``validate`` pass (ProxmoxPlatform.validate), not re-checked here. The
-    # check is not platform-gated (unlike the legacy TOML loader, whose
-    # per-section known_keys naturally scope it): a stray ``token_secret`` on a
-    # non-proxmox site would also warn, which is harmless because that site's
-    # ``validate`` rejects the unknown field at finalize regardless.
-    from agentworks.config.loaders_core import _warn_nonconforming_secret_name
-
-    token_secret = raw_config.get("token_secret")
-    if isinstance(token_secret, str) and token_secret:
-        _warn_nonconforming_secret_name(token_secret, location="token_secret (platform config)", issues=issues)
-    # The blob may not shadow kind-owned surface (the git-credential
-    # precedent): platform/description in the blob would silently
-    # re-pick the capability or override metadata.
-    reserved = {"platform", "description"} & set(raw_config)
-    if reserved:
-        names = ", ".join(sorted(reserved))
-        raise ConfigError(
-            f"the platform config may not contain kind-owned field(s): {names}; they belong at the spec top level"
-        )
-    description = spec.pop("description", None)
-    if spec:
-        extras = ", ".join(sorted(spec))
-        raise ConfigError(
-            f"unknown vm-site spec field(s): {extras}; "
-            "platform-specific configuration goes inside the spec.platform table"
-        )
-    # The platform_config blob's shape is validated by the finalize
-    # ``validate`` pass (VMSiteDecl.validate), not here: the core validates
-    # it against the platform's declared model, decoupled from decode (R3).
-    # The shadow check below is kind-owned decode structure and stays at
-    # load. An unknown platform NAME is not decode's business either: the
-    # site emits its platform edge unconditionally and the dangling edge is
-    # a hard finalize miss (R9.2). (It is not tolerated-and-self-disabled;
-    # that was the pre-registry-readiness behavior, and this comment
-    # described it long after it stopped being true.)
-    from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
-
-    # A site named after a known platform must declare that
-    # platform; `vm-site/azure-vm` backed by lima would make every
-    # `--site azure-vm` mean something other than it says.
-    if doc.name in VM_PLATFORM_REGISTRY and platform != doc.name:
-        raise ConfigError(
-            f"a vm-site named '{doc.name}' must declare platform "
-            f"'{doc.name}' (it shadows a platform name), not '{platform}'"
-        )
-    return VMSiteDecl(
-        name=doc.name,
-        platform=platform,
-        platform_config=dict(raw_config),
-        description=str(description) if description is not None else None,
-        declared_at=doc.location,
-    )
-
-
-_DECODERS: dict[str, Callable[[Document, dict[str, Any], list[str]], Any]] = {
-    "session-template": _decode_session_template,
-    "git-credential": _decode_git_credential,
-    "vm-site": _decode_vm_site,
-}

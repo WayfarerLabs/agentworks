@@ -124,11 +124,9 @@ def test_manifest_token_secret_nonconforming_warns(tmp_path: Path) -> None:
     manifest_dir = tmp_path / "resources"
     _write_site_manifest(manifest_dir, "GITHUB_TOKEN")
     manifests = load_manifests(manifest_dir)
-    assert any("GITHUB_TOKEN" in issue and "token_secret (platform config)" in issue for issue in manifests.issues), (
-        manifests.issues
-    )
+    assert any("GITHUB_TOKEN" in issue and "vm-site/proxmox" in issue for issue in manifests.issues), manifests.issues
     (entry,) = manifests.entries
-    assert entry.resource.platform_config["token_secret"] == "GITHUB_TOKEN"
+    assert entry.resource.platform.config["token_secret"] == "GITHUB_TOKEN"
 
 
 def test_manifest_token_secret_conforming_emits_no_warning(tmp_path: Path) -> None:

@@ -126,8 +126,7 @@ def test_a_tag_and_an_owner_templated_reference_need_nothing_from_a_template() -
 def _refs(blob: dict[str, object]) -> tuple[object, ...]:
     return capability_config_references(
         kind="harness-integration",
-        name="shell",
-        blob=blob,
+        config={"name": "shell", **blob},
         owner=RefOwner(kind="session-template", name="claude"),
     )
 
@@ -143,8 +142,7 @@ def test_it_implies_no_reference() -> None:
 def _validate(blob: dict[str, object]) -> None:
     validate_capability_config(
         kind="harness-integration",
-        name="shell",
-        blob=blob,
+        config={"name": "shell", **blob},
         owner=RefOwner(kind="session-template", name="claude"),
     )
 

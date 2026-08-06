@@ -18,6 +18,8 @@ import pytest
 
 from agentworks.errors import ConfigError
 from agentworks.manifests import load_manifests
+from agentworks.manifests.decode import MIGRATE_HINT
+from agentworks.migrate.manifest_upgrade import _LEGACY_SIBLING_SHAPES
 
 _SURFACES = [
     (
@@ -131,13 +133,13 @@ def test_bare_naming_string_is_rejected_with_a_one_key_rewrite(tmp_path: Path) -
 def test_sibling_config_alone_names_the_unsupported_field(
     tmp_path: Path, kind: str, field: str, old_doc: str, rewrite: str
 ) -> None:
-    """A ``*_config`` table with no naming field beside it: the message
-    names the field that is not supported rather than reporting the
-    capability as missing, which is what the kind's own required-field
-    error would say."""
+    """A ``*_config`` table with no naming field beside it. The
+    hand-written "fold its keys into the tagged table" steer is gone with
+    the fold, and the unknown-key message says the same thing by naming
+    the field that IS valid."""
     config_field = f"{field}_config"
     document = "\n".join(line for line in dedent(old_doc).splitlines() if not line.strip().startswith(f"{field}:"))
-    with pytest.raises(ConfigError, match=f"spec.{config_field} is not a supported YAML field"):
+    with pytest.raises(ConfigError, match=f"{config_field}: unknown field; expected one of: .*{field}"):
         _load_one(tmp_path, "ownerless", document)
 
 
@@ -157,15 +159,15 @@ def test_session_template_canonical_selector_decodes_to_the_internal_pair(tmp_pa
         """,
     )
     (entry,) = manifests.entries
-    assert entry.resource.harness_integration == "shell"
-    assert entry.resource.harness_integration_config == {"command": "htop"}
+    assert entry.resource.harness_integration.name == "shell"
+    assert entry.resource.harness_integration.config == {"command": "htop"}
     assert not manifests.issues
 
 
 def test_legacy_session_harness_config_without_selector_is_rejected(tmp_path: Path) -> None:
     with pytest.raises(
         ConfigError,
-        match=r"unexpected keys in \[session_templates.htop\]: harness_config",
+        match="harness_config: unknown field; expected one of: ",
     ):
         _load_one(
             tmp_path,
@@ -183,7 +185,7 @@ def test_legacy_session_harness_config_without_selector_is_rejected(tmp_path: Pa
 
 
 def test_legacy_session_harness_empty_scalar_is_rejected(tmp_path: Path) -> None:
-    with pytest.raises(ConfigError, match=r"unexpected keys.*harness"):
+    with pytest.raises(ConfigError, match="harness: unknown field; expected one of: "):
         _load_one(
             tmp_path,
             "empty-selector",
@@ -199,7 +201,7 @@ def test_legacy_session_harness_empty_scalar_is_rejected(tmp_path: Path) -> None
 
 
 def test_legacy_session_harness_non_string_scalar_is_rejected(tmp_path: Path) -> None:
-    with pytest.raises(ConfigError, match=r"unexpected keys.*harness"):
+    with pytest.raises(ConfigError, match="harness: unknown field; expected one of: "):
         _load_one(
             tmp_path,
             "non-string-selector",
@@ -217,7 +219,7 @@ def test_legacy_session_harness_non_string_scalar_is_rejected(tmp_path: Path) ->
 def test_legacy_session_harness_is_rejected_with_location(tmp_path: Path) -> None:
     with pytest.raises(
         ConfigError,
-        match=r"res.yaml:2:.*unexpected keys.*harness",
+        match=r"res.yaml:2:.*harness: unknown field; expected one of: ",
     ):
         _load_one(
             tmp_path,
@@ -234,7 +236,7 @@ def test_legacy_session_harness_is_rejected_with_location(tmp_path: Path) -> Non
 
 
 def test_session_template_old_and_canonical_selectors_cannot_mix(tmp_path: Path) -> None:
-    with pytest.raises(ConfigError, match=r"unexpected keys.*harness"):
+    with pytest.raises(ConfigError, match="harness: unknown field; expected one of: "):
         _load_one(
             tmp_path,
             "mixed-selector",
@@ -253,7 +255,7 @@ def test_session_template_old_and_canonical_selectors_cannot_mix(tmp_path: Path)
 
 @pytest.mark.parametrize(
     "spec",
-    ["env:\n    TERM: xterm-256color", "inherits: parent"],
+    ["env:\n    TERM: xterm-256color", "inherits: [parent]"],
 )
 def test_session_template_without_selector_remains_a_valid_default_or_inheriting_template(
     tmp_path: Path, spec: str
@@ -274,7 +276,6 @@ def test_session_template_without_selector_remains_a_valid_default_or_inheriting
     )
     (entry,) = manifests.entries
     assert entry.resource.harness_integration is None
-    assert entry.resource.harness_integration_config is None
 
 
 @pytest.mark.parametrize(
@@ -327,31 +328,36 @@ def test_session_template_without_selector_remains_a_valid_default_or_inheriting
 )
 def test_mixed_shape_is_a_hard_error_with_no_migrate_hint(tmp_path: Path, doc: str, field: str) -> None:
     """A tagged table beside a sibling ``*_config``: the message names the
-    field that is not supported, so the operator's next move is to fold
-    those keys in rather than to guess which half won.
+    unknown field AND the one that is valid, so the operator's next move
+    is to fold those keys in rather than to guess which half won.
 
-    And it carries NO migrate hint. The migrator will not guess which half
-    of a mixed document wins either, so it leaves this file alone;
-    naming it here would send the operator to a command that does nothing
-    for them.
+    And it does NOT carry the migrate hint. The migrator will not guess
+    which half of a mixed document wins either, so it leaves this file
+    alone; naming it here would send the operator to a command that does
+    nothing for them. The uniform sample hint every spec error carries is
+    a different remedy, and a true one: it shows the shape.
     """
     with pytest.raises(ConfigError) as excinfo:
         _load_one(tmp_path, "mixed", doc)
-    assert f"spec.{field}_config is not a supported YAML field" in str(excinfo.value)
-    assert excinfo.value.hint is None
+    assert f"{field}_config: unknown field; expected one of: " in str(excinfo.value)
+    assert field in str(excinfo.value)
+    assert excinfo.value.hint != MIGRATE_HINT
 
 
 @pytest.mark.parametrize(
-    "name_line",
+    ("name_line", "message"),
     [
-        "vm_host: me@gpu-box",  # no name key at all
-        "name: 123",  # non-string name
-        "name: [lima]",  # non-string name (sequence)
-        "name: ''",  # empty-string name
+        ("vm_host: me@gpu-box", "platform.name: is required"),
+        ("name: 123", "platform.name: must be a string"),
+        ("name: [lima]", "platform.name: must be a string"),
+        ("name: ''", "platform.name: must not be empty"),
     ],
 )
-def test_tagged_table_requires_a_string_name_key(tmp_path: Path, name_line: str) -> None:
-    with pytest.raises(ConfigError, match="requires a 'name' key"):
+def test_tagged_table_requires_a_string_name_key(tmp_path: Path, name_line: str, message: str) -> None:
+    """The tag is a field of the block now, so each way of getting it
+    wrong reads as that field's own problem rather than as one
+    hand-written sentence covering four cases."""
+    with pytest.raises(ConfigError, match=message):
         _load_one(
             tmp_path,
             "nameless",
@@ -401,29 +407,40 @@ def test_tagged_shape_reaches_finalize_validation(tmp_path: Path) -> None:
         """,
     )
     (entry,) = manifests.entries
-    assert entry.resource.platform == "lima"
-    assert entry.resource.platform_config == {"vm_host": "me@gpu-box"}
+    assert entry.resource.platform.name == "lima"
+    assert entry.resource.platform.config == {"vm_host": "me@gpu-box"}
 
 
-def test_tagged_table_still_hits_reserved_field_check(tmp_path: Path) -> None:
-    """The vm-site kind-owned shadow check keeps firing for the tagged
-    shape: a `platform` key inside the table would silently re-pick the
-    capability."""
-    with pytest.raises(ConfigError, match="may not contain kind-owned field"):
-        _load_one(
-            tmp_path,
-            "shadow",
-            """
-            apiVersion: agentworks/v1
-            kind: vm-site
-            metadata:
-              name: gpu-box
-            spec:
-              platform:
-                name: lima
-                platform: wsl2
-            """,
-        )
+def test_a_kind_owned_key_inside_the_table_is_the_platforms_to_refuse(tmp_path: Path) -> None:
+    """decode carried a shadow check while the sibling pair existed,
+    because a ``platform`` key inside ``platform_config`` could silently
+    re-pick the capability. It cannot inside ONE tagged table: ``name`` is
+    the selector and it is a real field of the block, so a stray
+    ``platform`` key is config the platform does not accept, and the
+    platform's own model says so at finalize rather than decode
+    duplicating the rule."""
+    from agentworks.bootstrap import build_registry
+    from agentworks.config import load_config
+
+    cfg = _write_config(tmp_path)
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    (resources / "res.yaml").write_text(
+        dedent("""
+        apiVersion: agentworks/v1
+        kind: vm-site
+        metadata:
+          name: gpu-box
+        spec:
+          platform:
+            name: lima
+            vm_host: me@gpu-box
+            platform: wsl2
+        """)
+    )
+
+    with pytest.raises(ConfigError, match="platform: unknown field"):
+        build_registry(load_config(cfg, warn_issues=False))
 
 
 def _write_config(tmp_path: Path) -> Path:
@@ -550,3 +567,74 @@ def test_builtin_bundle_publishes_cleanly() -> None:
         subdir="builtin",
         origin_for=lambda name: Origin.built_in(source=name),
     )
+
+
+# -- The rewrite is only printed when it would be an honest one ---------------
+
+
+def test_a_sibling_carrying_its_own_name_gets_no_rewrite_and_no_migrate_hint(tmp_path: Path) -> None:
+    """Folding this document would emit ``platform: {name: a, name: b}``,
+    which is not valid YAML and hides that two keys claim to select the
+    capability. Which one wins is the operator's call, and the migrator
+    refuses it for the same reason, so pointing at the migrator here would
+    send them to a command that leaves their file alone.
+    """
+    with pytest.raises(ConfigError) as excinfo:
+        _load_one(
+            tmp_path,
+            "collision",
+            """
+            apiVersion: agentworks/v1
+            kind: vm-site
+            metadata:
+              name: gpu-box
+            spec:
+              platform: future-platform
+              platform_config:
+                name: sneaky
+            """,
+        )
+
+    message = str(excinfo.value)
+    assert "carries its own 'name' ('sneaky')" in message
+    assert "merge them by hand" in message
+    assert "{name:" not in message, "an unusable rewrite is worse than none"
+    assert excinfo.value.hint is None
+
+
+def test_a_non_table_sibling_names_the_value_it_cannot_fold(tmp_path: Path) -> None:
+    """There are no keys to fold, so printing the tag alone would quietly
+    discard what the operator wrote."""
+    with pytest.raises(ConfigError) as excinfo:
+        _load_one(
+            tmp_path,
+            "scalar-sibling",
+            """
+            apiVersion: agentworks/v1
+            kind: vm-site
+            metadata:
+              name: gpu-box
+            spec:
+              platform: lima
+              platform_config: oops
+            """,
+        )
+
+    message = str(excinfo.value)
+    assert "spec.platform_config is 'oops' rather than a table" in message
+    assert excinfo.value.hint is None
+
+
+def test_the_migrator_covers_every_surface_whose_error_names_it() -> None:
+    """The invariant behind the hint: a remedy an error names has to do
+    something for the document that just refused to load.
+
+    Decode attaches the migrate hint from ONE generic guard over every
+    host surface, so every host surface has to be one the migrator's
+    upgrade covers. A fourth hosting kind would get the hint for free and
+    would need an entry there for it to be true; session-template already
+    did, and the hint pointed at a command that printed "nothing to
+    migrate" for the exact document that had just failed to load."""
+    from agentworks.manifests.decode import _hosting_descriptors
+
+    assert set(_hosting_descriptors()) == set(_LEGACY_SIBLING_SHAPES)

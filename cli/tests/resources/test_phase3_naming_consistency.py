@@ -31,6 +31,7 @@ from agentworks.resources import inspect as inspect_mod
 from agentworks.resources import reference as reference_mod
 from agentworks.resources import registry as registry_mod
 from agentworks.resources import walk as walk_mod
+from agentworks.schema import CapabilityBlock
 from agentworks.secrets import kinds as secrets_kinds_mod
 from agentworks.sessions import kinds as sessions_kinds_mod
 from agentworks.vms import kinds as vms_kinds_mod
@@ -101,7 +102,7 @@ def test_graph_node_producers_expose_dependencies_not_referenced_resources() -> 
     """
     from agentworks.vms.sites import VMSiteDecl
 
-    site = VMSiteDecl(name="s", platform="lima")
+    site = VMSiteDecl(name="s", platform=CapabilityBlock(name="lima"))
     assert hasattr(site, "dependencies")
     assert not hasattr(site, "referenced_resources")
     assert not hasattr(site, "required_resources")

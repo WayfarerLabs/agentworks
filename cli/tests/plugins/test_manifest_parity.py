@@ -27,6 +27,7 @@ from agentworks.resources.access import ensure_recipe_enabled, ensure_reference_
 from agentworks.resources.graph import Enablement
 from agentworks.resources.inspect import describe_resource, list_resources
 from agentworks.resources.registry import Registry
+from agentworks.schema import CapabilityBlock
 from agentworks.sessions.template import SessionTemplate
 from tests.plugins._fixtures import ConformingHarnessIntegration
 
@@ -182,7 +183,7 @@ def test_ensure_recipe_enabled_excludes_capability_nodes(monkeypatch: pytest.Mon
         registry.add(
             "session-template",
             "op-session",
-            SessionTemplate(name="op-session", harness_integration="fixture-harness"),
+            SessionTemplate(name="op-session", harness_integration=CapabilityBlock(name="fixture-harness")),
             _operator(),
         )
         registry.finalize(enablement_sources=[plugin_enablement_source(config)])

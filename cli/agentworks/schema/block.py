@@ -37,6 +37,17 @@ class CapabilityBlock(BaseModel):
     name: NonEmptyStr
     """The capability's registered name (``lima``, ``github``, ``codex``)."""
 
+    @classmethod
+    def of(cls, name: str, **config: object) -> CapabilityBlock:
+        """A block from a name and the capability's own keys.
+
+        The constructor cannot take the extras as keywords in a way a type
+        checker will accept (an open model's extra fields are not in its
+        signature), and every caller that ASSEMBLES a block rather than
+        validating one an operator wrote has a name and a mapping in hand.
+        """
+        return cls.model_validate({"name": name, **config})
+
     @property
     def config(self) -> dict[str, object]:
         """The capability-owned keys: everything the operator wrote

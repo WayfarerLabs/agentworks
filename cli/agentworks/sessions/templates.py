@@ -206,15 +206,14 @@ def _resolve_walk(
         harness = _merge_pair(harness, parent.harness)
 
     _merge_template(result, tmpl)
+    declared_harness = tmpl.harness_integration
+    declared_config = declared_harness.config if declared_harness is not None else {}
     harness = _merge_pair(
         harness,
         MergedHarness(
-            name=tmpl.harness_integration,
-            config=tmpl.harness_integration_config or {},
-            provenance=dict.fromkeys(
-                tmpl.harness_integration_config or {},
-                RefOwner(kind="session-template", name=name),
-            ),
+            name=declared_harness.name if declared_harness is not None else None,
+            config=declared_config,
+            provenance=dict.fromkeys(declared_config, RefOwner(kind="session-template", name=name)),
             declared_by=("session-template", name),
         ),
     )

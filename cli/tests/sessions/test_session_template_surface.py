@@ -20,7 +20,7 @@ from agentworks.errors import ConfigError
 from agentworks.manifests import load_manifests
 from agentworks.resources.graph import FinalizeContext
 from agentworks.resources.inspect import describe_resource
-from agentworks.schema import AgwModel
+from agentworks.schema import AgwModel, CapabilityBlock
 from agentworks.sessions.template import SessionTemplate
 from agentworks.sessions.templates import resolve_from_dict
 
@@ -153,7 +153,8 @@ def test_flat_toml_resume_command_is_canonical(tmp_path: Path) -> None:
         """,
         "claude",
     )
-    assert tmpl.harness_integration_config == {
+    assert tmpl.harness_integration is not None
+    assert tmpl.harness_integration.config == {
         "command": "claude",
         "resume_command": "claude --resume",
     }
@@ -183,8 +184,9 @@ def test_nested_toml_harness_config_passes_through(tmp_path: Path) -> None:
         """,
         "htop",
     )
-    assert tmpl.harness_integration == "shell"
-    assert tmpl.harness_integration_config == {"command": "htop", "required_commands": ["htop"]}
+    assert tmpl.harness_integration is not None
+    assert tmpl.harness_integration.name == "shell"
+    assert tmpl.harness_integration.config == {"command": "htop", "required_commands": ["htop"]}
 
 
 def test_canonical_toml_harness_integration_pair_normalizes_to_internal_pair(tmp_path: Path) -> None:
@@ -225,7 +227,6 @@ def test_undeclared_template_leaves_the_pair_none(tmp_path: Path) -> None:
         "plain",
     )
     assert tmpl.harness_integration is None
-    assert tmpl.harness_integration_config is None
 
 
 def test_flat_fields_with_non_shell_harness_is_an_error(tmp_path: Path) -> None:
@@ -315,7 +316,7 @@ def test_manifest_flat_field_is_rejected(tmp_path: Path) -> None:
           command: claude
         """,
     )
-    with pytest.raises(ConfigError, match=r"unexpected keys.*command"):
+    with pytest.raises(ConfigError, match=r"command: unknown field; expected one of: "):
         load_manifests(root)
 
 
@@ -353,17 +354,20 @@ def test_child_same_harness_integration_merges_child_wins_and_unions_required() 
     templates = {
         "base": SessionTemplate(
             name="base",
-            harness_integration="shell",
-            harness_integration_config={"command": "claude", "required_commands": ["claude"]},
+            harness_integration=CapabilityBlock.of("shell", **{"command": "claude", "required_commands": ["claude"]}),
         ),
         "child": SessionTemplate(
             name="child",
             inherits=["base"],
-            harness_integration="shell",
-            harness_integration_config={
-                "command": "claude --resume",
-                "required_commands": ["rg"],
-            },
+            harness_integration=CapabilityBlock.model_validate(
+                {
+                    "name": "shell",
+                    **{
+                        "command": "claude --resume",
+                        "required_commands": ["rg"],
+                    },
+                }
+            ),
         ),
     }
     resolved = resolve_from_dict(templates, "child")
@@ -374,9 +378,7 @@ def test_child_same_harness_integration_merges_child_wins_and_unions_required() 
 
 def test_child_silent_inherits_the_pair_unchanged() -> None:
     templates = {
-        "base": SessionTemplate(
-            name="base", harness_integration="shell", harness_integration_config={"command": "claude"}
-        ),
+        "base": SessionTemplate(name="base", harness_integration=CapabilityBlock.of("shell", **{"command": "claude"})),
         "child": SessionTemplate(name="child", inherits=["base"]),
     }
     resolved = resolve_from_dict(templates, "child")
@@ -406,14 +408,11 @@ def test_child_different_harness_integration_starts_fresh(fake_harness_integrati
     """A child naming a DIFFERENT harness integration starts from an empty blob; the
     parent's blob was addressed to the wrong capability and never leaks."""
     templates = {
-        "base": SessionTemplate(
-            name="base", harness_integration="shell", harness_integration_config={"command": "sh-cmd"}
-        ),
+        "base": SessionTemplate(name="base", harness_integration=CapabilityBlock.of("shell", **{"command": "sh-cmd"})),
         "child": SessionTemplate(
             name="child",
             inherits=["base"],
-            harness_integration="fake",
-            harness_integration_config={"marker": "child"},
+            harness_integration=CapabilityBlock.of("fake", **{"marker": "child"}),
         ),
     }
     resolved = resolve_from_dict(templates, "child")
@@ -474,7 +473,7 @@ def test_undeclared_default_resolves_to_shell_empty() -> None:
 
 
 def test_declared_harness_integration_emits_a_reference() -> None:
-    tmpl = SessionTemplate(name="claude", harness_integration="shell", harness_integration_config={"command": "claude"})
+    tmpl = SessionTemplate(name="claude", harness_integration=CapabilityBlock.of("shell", **{"command": "claude"}))
     refs = tmpl.dependencies(FinalizeContext())
     harness_refs = [r for r in refs if r.kind == "harness-integration"]
     assert len(harness_refs) == 1

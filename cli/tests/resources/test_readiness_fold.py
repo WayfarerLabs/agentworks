@@ -27,6 +27,7 @@ from agentworks.errors import ConfigError
 from agentworks.origin import Origin
 from agentworks.resources.graph import DependencyState, DisabledMark, Enablement, Readiness
 from agentworks.resources.registry import Registry
+from agentworks.schema import CapabilityBlock
 from agentworks.vms.sites import VMSiteDecl
 
 if TYPE_CHECKING:
@@ -121,7 +122,7 @@ def test_disabled_platform_dependency_propagates_enable_its_unit() -> None:
     own state. No producer ships a disabled node this effort, so the axis is
     proven by handing ``not_ready`` a disabled ``DependencyState`` directly
     (the fold's job is only to distribute these states)."""
-    site = VMSiteDecl(name="x", platform="lima", platform_config={})
+    site = VMSiteDecl(name="x", platform=CapabilityBlock.of("lima", **{}))
     deps: dict[tuple[str, str], DependencyState] = {
         ("vm-platform", "lima"): DependencyState(
             enablement=Enablement.disabled,
@@ -140,7 +141,7 @@ def test_not_ready_platform_dependency_propagates_its_reason() -> None:
     readiness reason already names it ("platform 'wsl2' is unsupported here:
     ..."), so the site passes it through rather than re-wrapping (which would
     double the naming); the surface adds the "Not ready:" framing (R9.1)."""
-    site = VMSiteDecl(name="x", platform="wsl2", platform_config={})
+    site = VMSiteDecl(name="x", platform=CapabilityBlock.of("wsl2", **{}))
     deps: dict[tuple[str, str], DependencyState] = {
         ("vm-platform", "wsl2"): DependencyState(
             enablement=Enablement.enabled,
@@ -170,7 +171,7 @@ def test_disabled_platform_node_folds_end_to_end_to_enable_its_unit() -> None:
     registry.add(
         "vm-site",
         "s",
-        VMSiteDecl(name="s", platform="lima", platform_config={"vm_host": "me@box"}),
+        VMSiteDecl(name="s", platform=CapabilityBlock.of("lima", **{"vm_host": "me@box"})),
         Origin.operator_declared(file=Path("sites.yaml"), line=1),
     )
     registry.finalize(enablement_sources=[_source_disabling(("vm-platform", "lima"))])
@@ -313,7 +314,7 @@ def test_fold_does_not_throw_on_malformed_platform_config() -> None:
     came from the validate pass, not from a mid-fold construction."""
     # vm_host as an int: lima.not_ready sees it truthy -> ready (no throw, no
     # construction); validate then rejects the non-string.
-    site = VMSiteDecl(name="bad", platform="lima", platform_config={"vm_host": 123})
+    site = VMSiteDecl(name="bad", platform=CapabilityBlock.of("lima", **{"vm_host": 123}))
     with pytest.raises(ConfigError, match="vm_host: must be a string") as exc:
         _finalized(site)
     # The validate pass re-attaches the resource origin; construction would not.
@@ -324,7 +325,7 @@ def test_r5_ready_site_with_unknown_field_fails_validation() -> None:
     """R5: readiness is not validity. A ready site (lima is supported
     everywhere; no vm_host but we make it ready) with an unknown config field
     still fails the validate pass."""
-    site = VMSiteDecl(name="bad", platform="lima", platform_config={"vm_host": "me@box", "bogus": "x"})
+    site = VMSiteDecl(name="bad", platform=CapabilityBlock.of("lima", **{"vm_host": "me@box", "bogus": "x"}))
     with pytest.raises(ConfigError, match="bogus: unknown field"):
         _finalized(site)
 
@@ -336,7 +337,7 @@ def test_r9_4_not_ready_site_malformed_block_is_deferred(monkeypatch: pytest.Mon
     the block were validated: see R5 above). Exercises the real
     non-constructing ``not_ready`` returning blocked."""
     monkeypatch.setattr("shutil.which", lambda name: None)  # no limactl -> not-ready
-    site = VMSiteDecl(name="local", platform="lima", platform_config={"bogus": "x"})
+    site = VMSiteDecl(name="local", platform=CapabilityBlock.of("lima", **{"bogus": "x"}))
     registry = _finalized(site)  # no raise: the block is deferred
     assert registry.graph.readiness_of("vm-site", "local").reason == "limactl not installed"
 
@@ -345,7 +346,7 @@ def test_r5_not_ready_site_with_valid_block_stays_not_ready(monkeypatch: pytest.
     """R5, the other direction: a not-ready site with a perfectly valid block
     is still not-ready (a dependency/host verdict, blind to validity)."""
     monkeypatch.setattr("shutil.which", lambda name: None)
-    site = VMSiteDecl(name="local", platform="lima", platform_config={})  # valid (empty) block
+    site = VMSiteDecl(name="local", platform=CapabilityBlock.of("lima", **{}))  # valid (empty) block
     registry = _finalized(site)
     assert not registry.graph.is_ready("vm-site", "local")
 
@@ -360,14 +361,18 @@ def test_r12_ready_site_materializes_its_secret(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(ProxmoxPlatform, "not_ready", classmethod(lambda cls, config: Readiness.ready()))
     site = VMSiteDecl(
         name="ready-px",
-        platform="proxmox",
-        platform_config={
-            "api_url": "https://pve:8006",
-            "node": "pve1",
-            "token_id": "t",
-            "template_vmid": 9000,
-            "token_secret": "tok-ready",
-        },
+        platform=CapabilityBlock.model_validate(
+            {
+                "name": "proxmox",
+                **{
+                    "api_url": "https://pve:8006",
+                    "node": "pve1",
+                    "token_id": "t",
+                    "template_vmid": 9000,
+                    "token_secret": "tok-ready",
+                },
+            }
+        ),
     )
     registry = _finalized_with_proxmox(site)
     assert _present(registry, "secret", "tok-ready")
@@ -383,14 +388,18 @@ def test_r12_not_ready_site_secret_does_not_materialize(monkeypatch: pytest.Monk
     monkeypatch.setattr(ProxmoxPlatform, "not_ready", classmethod(lambda cls, config: Readiness.blocked("sick")))
     site = VMSiteDecl(
         name="sick-px",
-        platform="proxmox",
-        platform_config={
-            "api_url": "https://pve:8006",
-            "node": "pve1",
-            "token_id": "t",
-            "template_vmid": 9000,
-            "token_secret": "tok-sick",
-        },
+        platform=CapabilityBlock.model_validate(
+            {
+                "name": "proxmox",
+                **{
+                    "api_url": "https://pve:8006",
+                    "node": "pve1",
+                    "token_id": "t",
+                    "template_vmid": 9000,
+                    "token_secret": "tok-sick",
+                },
+            }
+        ),
     )
     registry = _finalized_with_proxmox(site)
     assert not registry.graph.is_ready("vm-site", "sick-px")
@@ -412,8 +421,8 @@ def test_r12_secret_referenced_by_both_ready_and_not_ready_materializes(
 
     monkeypatch.setattr(ProxmoxPlatform, "not_ready", classmethod(_readiness))
     common = {"api_url": "https://pve:8006", "token_id": "t", "template_vmid": 9000, "token_secret": "shared-token"}
-    ready = VMSiteDecl(name="ready-px", platform="proxmox", platform_config={**common, "node": "pve1"})
-    sick = VMSiteDecl(name="sick-px", platform="proxmox", platform_config={**common, "node": "SICK"})
+    ready = VMSiteDecl(name="ready-px", platform=CapabilityBlock.of("proxmox", **{**common, "node": "pve1"}))
+    sick = VMSiteDecl(name="sick-px", platform=CapabilityBlock.of("proxmox", **{**common, "node": "SICK"}))
     registry = _finalized_with_proxmox(ready, sick)
 
     assert _present(registry, "secret", "shared-token")
@@ -437,14 +446,18 @@ def test_r12_disabled_referrer_does_not_materialize_its_secret(monkeypatch: pyte
     registry = _finalized_with_proxmox(
         VMSiteDecl(
             name="off-px",
-            platform="proxmox",
-            platform_config={
-                "api_url": "https://pve:8006",
-                "node": "pve1",
-                "token_id": "t",
-                "template_vmid": 9000,
-                "token_secret": "tok-off",
-            },
+            platform=CapabilityBlock.model_validate(
+                {
+                    "name": "proxmox",
+                    **{
+                        "api_url": "https://pve:8006",
+                        "node": "pve1",
+                        "token_id": "t",
+                        "template_vmid": 9000,
+                        "token_secret": "tok-off",
+                    },
+                }
+            ),
         ),
         extra_disabled=(("vm-site", "off-px"),),
     )

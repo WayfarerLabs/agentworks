@@ -117,7 +117,7 @@ def test_a_shipped_mapping_implies_no_agentworks_resource(backend: str, mapping:
         capability_config_references(
             kind="secret-backend",
             name=backend,
-            blob=mapping,  # type: ignore[arg-type]
+            config=mapping,  # type: ignore[arg-type]
             owner=RefOwner(kind="secret", name="npm-token"),
         )
         == ()

@@ -525,7 +525,7 @@ class TestPlainFailure:
 class TestProvisionResultTransport:
     """The transport a successful ``create`` hands back (#345): every
     guest-facing ``SSHTransport`` construction passes
-    ``force_tty=sys.platform == "win32"`` (the Windows-zsh workaround
+    ``force_tty=sys.platform.name == "win32"`` (the Windows-zsh workaround
     documented on the class); Proxmox's provisioning transport omitted
     it, so interactive use from a Windows host misbehaved."""
 
