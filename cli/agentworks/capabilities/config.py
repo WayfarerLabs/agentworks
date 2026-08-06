@@ -49,8 +49,9 @@ if TYPE_CHECKING:
     from agentworks.source_location import SourceLocation
 
 #: Assembled unions, keyed by ``(kind, facet)`` PLUS the arms the union
-#: would be built from. See :func:`capability_config_union`.
-_UNION_CACHE: dict[tuple[str, Facet | None, frozenset[tuple[str, Any]]], type[BaseModel]] = {}
+#: would be built from. Never evicts; see :func:`capability_config_union`
+#: for both choices and what bounds the size.
+_UNION_CACHE: dict[tuple[str, Facet | None, frozenset[tuple[str, type[BaseModel]]]], type[BaseModel]] = {}
 
 
 def capability_config_model(kind: str, name: str, facet: Facet | None = None) -> type[BaseModel] | None:
