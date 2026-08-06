@@ -16,7 +16,8 @@ is locked.
 - [x] Picked up by an effort lead (HLA, plan, residual inventory; PR #406)
 - [x] Implementation complete, pre-roadmap SDD closeouts done (PR #406, 2026-08-05: all five
       pre-roadmap SDDs locked, plan 46/46, docs promoted including ADR 0020)
-- [ ] Ships in 0.14.0 with phase 1 (release pending)
+- [ ] Ships in 0.14.0 with phase 1 (cut held for the guide first slice per operator ruling,
+      2026-08-06; see `phasing.md` release mapping)
 - [x] Locked (`locked.md` on `main` via PR #406)
 
 ### Wave 2 (adopted child): 2026-07-31-declarative-schema
