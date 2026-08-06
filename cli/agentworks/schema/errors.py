@@ -378,6 +378,16 @@ def _contextual_message(detail: ErrorDetails, container: type[BaseModel] | None)
             # Saying that for ``min_length=3`` would be a paraphrase that
             # is simply false, so pydantic's exact wording wins there.
             return "must not be empty" if ctx.get("min_length") == 1 else None
+        case "string_pattern_mismatch":
+            # A constrained STRING shape. Rendered from the pattern rather
+            # than paraphrased, because only the field knows what its
+            # pattern MEANS and this module never invents phrasing: what
+            # it can do is spell the rule in the house's ``/.../`` form
+            # instead of pydantic's "String should match pattern '...'".
+            # The intent belongs in the field's description, which the
+            # sample and describe surfaces render beside it.
+            pattern = ctx.get("pattern")
+            return f"must match /{pattern}/" if isinstance(pattern, str) else None
         case "literal_error":
             expected = ctx.get("expected")
             # Pydantic pre-formats the alternatives ("'a', 'b' or 'c'"),

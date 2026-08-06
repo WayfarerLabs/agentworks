@@ -70,9 +70,12 @@ def test_a_bare_string_where_a_list_belongs_is_refused() -> None:
 
 def test_a_source_file_with_a_path_separator_is_refused() -> None:
     """It is interpolated into a shell command on the VM, so it has to be
-    a bare filename."""
-    assert "source_file: String should match pattern" in rejection(
-        "apt-source", "example", {**_SOURCE, "source_file": "../etc/passwd"}
+    a bare filename. The rule is spelled rather than paraphrased, and the
+    intent ("a simple filename: no directory separators, no shell
+    metacharacters") rides the field's description, which is what the
+    sample and describe surfaces show."""
+    assert rejection("apt-source", "example", {**_SOURCE, "source_file": "../etc/passwd"}) == (
+        r"res.yaml:7: apt-source/example.source_file: must match /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/"
     )
 
 

@@ -465,6 +465,21 @@ def test_closed_choices_and_emptiness_are_normalized(blob: dict[str, object], ex
     assert _lines(Choosy, blob) == [expected]
 
 
+def test_a_constrained_string_shape_reads_as_the_rule_it_must_match() -> None:
+    """Pydantic says "String should match pattern '...'". The rule is the
+    useful half and the house spells one ``/.../``, as the env-var-name
+    validator's own message already does."""
+
+    class Filed(AgwModel):
+        """A model with a pattern-constrained field."""
+
+        source_file: str = Field(default="ok.list", pattern=r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
+
+    assert _lines(Filed, {"source_file": "../etc/passwd"}) == [
+        r"vm-site/lab.source_file: must match /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/"
+    ]
+
+
 def test_a_length_floor_above_one_keeps_pydantics_exact_wording() -> None:
     """Saying "must not be empty" for a ``min_length`` of 3 would be a
     paraphrase that is simply false, so pydantic's own text wins."""
