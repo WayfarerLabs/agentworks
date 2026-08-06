@@ -267,7 +267,6 @@ SECRET_BACKEND_DESCRIPTOR = CapabilityKindDescriptor(
     # resolve loop reads it on every chain pass, so its presence is checked
     # rather than assumed.
     required_attributes=frozenset({"interactive"}),
-    config_slots={},  # step 2.3 registers the per-secret mapping model here
     entry_factory=_backend_entry,
     kind_strategy=KIND_REGISTRY["secret-backend"],
     readiness=_backend_readiness,

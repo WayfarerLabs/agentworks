@@ -27,9 +27,10 @@ from agentworks.capabilities.descriptor import (
 )
 from agentworks.errors import StateError
 from agentworks.manifests.decode import CAPABILITY_FIELDS
-from agentworks.resources.graph import _capability_node_readiness
+from agentworks.resources.graph import Readiness, _capability_node_readiness
 from agentworks.resources.kind import KIND_REGISTRY
 from agentworks.resources.registry import Registry
+from tests.plugins._fixtures import ConformingVMPlatform
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -133,7 +134,9 @@ def test_registry_policy_matches_what_the_registry_actually_holds(
     contents (secret-backend holds instances, the other three hold
     classes), so check it against the contents."""
     holds_classes = descriptor.registry_policy is RegistryPolicy.CLASS_BY_NAME
-    for name, seated in descriptor.registry().items():
+    seated_impls = list(descriptor.registry().items())
+    assert seated_impls, f"{descriptor.kind} has an empty registry; this test would prove nothing"
+    for name, seated in seated_impls:
         assert isinstance(seated, type) is holds_classes, f"{descriptor.kind} {name!r}"
 
 
@@ -163,7 +166,9 @@ def test_entry_factory_builds_the_kinds_current_row(descriptor: CapabilityKindDe
     two of the four rows carry ``description`` and two do not."""
     registry = Registry.empty()
     _builtin_publisher(descriptor.kind)(registry)
-    for name, published in registry.iter_kind_items(descriptor.kind):
+    rows = list(registry.iter_kind_items(descriptor.kind))
+    assert rows, f"{descriptor.kind} published no built-in rows; this test would prove nothing"
+    for name, published in rows:
         built = descriptor.entry_factory(name, descriptor.registry()[name], None)
         assert type(built) is type(published)
         assert built.name == published.name
@@ -174,8 +179,46 @@ def test_entry_factory_builds_the_kinds_current_row(descriptor: CapabilityKindDe
 def test_readiness_reproduces_the_graphs_per_kind_dispatch(descriptor: CapabilityKindDescriptor) -> None:
     """Same verdict AND same sentence as the graph's capability-node
     readiness branches, which the reason strings are pinned on elsewhere."""
-    for name, seated in descriptor.registry().items():
+    seated_impls = list(descriptor.registry().items())
+    assert seated_impls, f"{descriptor.kind} has an empty registry; this test would prove nothing"
+    for name, seated in seated_impls:
         assert descriptor.readiness(name, seated) == _capability_node_readiness(descriptor.kind, name)
+
+
+class _UnsupportedPlatform(ConformingVMPlatform):
+    """A platform that is never host-supported, anywhere."""
+
+    name = "unsupported-fixture"
+    description = "a platform with a known host-support verdict"
+
+    @classmethod
+    def unsupported_reason(cls) -> str | None:
+        return "the fixture says so"
+
+
+class _SupportedPlatform(ConformingVMPlatform):
+    """A platform that is always host-supported, anywhere."""
+
+    name = "supported-fixture"
+    description = "a platform with a known host-support verdict"
+
+
+def test_vm_platform_readiness_carries_the_host_support_sentence() -> None:
+    """Pin BOTH vm-platform readiness branches, and the blocked branch's exact
+    sentence, on every host.
+
+    The shipped platforms cannot do this: whether `wsl2` is host-supported
+    depends on the machine the suite runs on, so on Linux the blocked branch is
+    exercised by accident and on Windows it would not be exercised at all. The
+    sentence is operator-facing and the vm-site that depends on a platform
+    propagates this same verdict, so it is pinned against stubs with known
+    answers instead.
+    """
+    descriptor = descriptor_for("vm-platform")
+    assert descriptor.readiness("supported-fixture", _SupportedPlatform) == Readiness.ready()
+    assert descriptor.readiness("unsupported-fixture", _UnsupportedPlatform) == Readiness.blocked(
+        "platform 'unsupported-fixture' is unsupported here: the fixture says so"
+    )
 
 
 def test_manifest_sections_match_the_decoders_host_surfaces() -> None:
@@ -195,16 +238,6 @@ def test_manifest_sections_match_the_decoders_host_surfaces() -> None:
     assert hardened["harness-integration"].host_kind == "session-template"
     assert hardened["harness-integration"].legacy_string_shape == "reject"
     assert descriptor_for("secret-backend").manifest_section is None
-
-
-@pytest.mark.parametrize("descriptor", _descriptors(), ids=lambda d: d.kind)
-def test_config_slots_are_empty_and_immutable(descriptor: CapabilityKindDescriptor) -> None:
-    """No kind declares a config model until step 2.3. The field exists now
-    so wave 4's facet slots need no record reshape; ``frozen=True`` alone
-    would not stop the mapping behind it being mutated."""
-    assert dict(descriptor.config_slots) == {}
-    with pytest.raises(TypeError):
-        descriptor.config_slots["default"] = object()  # type: ignore[index]
 
 
 # -- Conformance of everything this build ships -----------------------------

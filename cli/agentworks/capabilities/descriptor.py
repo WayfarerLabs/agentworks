@@ -16,14 +16,17 @@ Two structural rules make the table safe to consume from anywhere:
   ``capabilities/harness_integration/kinds.py``,
   ``capabilities/git_credential/kinds.py``, ``secrets/kinds.py``), mirroring
   the per-package ``publish_to``. Nothing here knows a kind's internals.
-- **Lazy collection.** :func:`capability_descriptors` imports the four
-  contributing modules INSIDE the function, and consumers call it inside
-  their own functions rather than binding the table at module import. Early
-  modules (``resources/graph.py``, ``plugins/adapters.py``,
+- **Lazy collection, for cycle safety.** :func:`capability_descriptors`
+  imports the four contributing modules INSIDE the function, and consumers
+  call it inside their own functions rather than binding the table at module
+  import. Early modules (``resources/graph.py``, ``plugins/adapters.py``,
   ``manifests/decode.py``) load before the capability packages, so this
-  inherits the cycle discipline ``_CAPABILITY_REGISTRY_LOADERS`` already
-  uses rather than inventing a new one. The ``registry`` field is a callable
-  for the same reason.
+  inherits the cycle discipline ``_CAPABILITY_REGISTRY_LOADERS`` already uses
+  rather than inventing a new one. The ``registry`` field is a callable for
+  the same reason. Cycle safety is the whole benefit: it buys no import
+  DEFERRAL, because ``resources/kinds/__init__`` already imports all four
+  contributing modules, so anything reaching the resource machinery has
+  loaded them regardless.
 
 ``KIND_REGISTRY`` stays the all-kinds runtime map and each capability's
 ``KIND_REGISTRY[...] = ...`` line stays co-located with its kind, exactly
@@ -37,13 +40,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 from functools import cache
-from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal
 
 from agentworks.errors import StateError
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Callable
 
     from agentworks.resources.graph import Readiness
     from agentworks.resources.kind import ResourceKind
@@ -149,15 +151,6 @@ class CapabilityKindDescriptor:
     a backend omitting it seats cleanly and raises ``AttributeError`` deep in
     resolution, which is the exact failure this module exists to end."""
 
-    config_slots: Mapping[str, object]
-    """Named schema slots, each naming a config model contract. EMPTY for
-    every kind at step 2.0: no models exist yet, and step 2.3 registers each
-    single-slot kind's model under the reserved default slot. The field is
-    ``Mapping``-shaped from day one so wave 4's harness facets (one slot per
-    facet, slot presence being the support claim) add slots without
-    reshaping this record. Its value type tightens to the schema
-    foundation's ``ConfigSlot`` when step 2.1 lands."""
-
     entry_factory: Callable[[str, Any, Origin | None], Any]
     """Builds the kind's read-only resource row from ``(name, seated impl,
     origin)``. Per-kind rather than one generic row because today's four
@@ -189,6 +182,24 @@ class CapabilityKindDescriptor:
     # Deferred fields, recorded with the trigger that creates each so wave 2
     # neither builds them early nor reinvents them later:
     #
+    #   config_schema           -> step 2.3, when the first config model
+    #                              registers. It carries the kind's model
+    #                              CONTRACT (the base every implementation's
+    #                              model extends), which step 2.1 defines, so
+    #                              it cannot be typed before then.
+    #                              IMPLEMENTATIONS declare the model; the
+    #                              descriptor only says what a model must be.
+    #                              Resolution is keyed by CONSUMING RESOURCE
+    #                              KIND from day one: the framework never asks
+    #                              an implementation for "its schema", it asks
+    #                              for "your schema for <consuming resource
+    #                              kind>". Wave 4's harness-integration, which
+    #                              varies its schema by hosting surface, is
+    #                              then a local override rather than a
+    #                              framework change. Conformance check five
+    #                              arrives with the field: every registered
+    #                              config model conforms to the kind's model
+    #                              contract.
     #   consumer_gating         -> the first NEW consuming surface that
     #                              consolidates gating derivation (waves 3
     #                              and 4). Wave 2 changes no gating
@@ -205,12 +216,6 @@ class CapabilityKindDescriptor:
     #
     # Snapshot/restore needs no field at all: it iterates the table, so
     # participation is membership and a flag could only be wrong.
-
-    def __post_init__(self) -> None:
-        """Make the record's one mapping field immutable in fact, not only
-        by convention: ``frozen=True`` stops rebinding the attribute, not
-        mutating the dict behind it."""
-        object.__setattr__(self, "config_slots", MappingProxyType(dict(self.config_slots)))
 
 
 @cache

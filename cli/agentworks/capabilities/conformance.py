@@ -51,11 +51,10 @@ def conformance_error(descriptor: CapabilityKindDescriptor, impl: type) -> str |
         or _constructibility_error(impl)
         or _operations_error(descriptor, impl)
         or _version_error(descriptor, impl)
-        # Per-slot model conformance (every provided slot model conforms to
-        # its slot's model contract) is check five and is vacuous today: no
-        # kind declares a slot until step 2.3 registers the per-kind config
-        # models. Slot PRESENCE is the support claim, so there is never a
-        # claimed-but-empty slot to check.
+        # Check five, config-model conformance (every registered config
+        # model conforms to its kind's model contract), is absent rather than
+        # vacuous: no kind carries a model contract until step 2.3 adds the
+        # descriptor's ``config_schema`` field, and the check lands with it.
     )
 
 

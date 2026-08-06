@@ -13,7 +13,7 @@ independently enumerate the four capability kinds (`vm-platform`, `harness-integ
 `git-credential-provider`, `secret-backend`); each becomes a derived view of one frozen table. The
 work is mechanical and always-green: no schema modeling here, no behavior change, one site per
 commit with the full gate green after each. Phase 2's per-kind modeling (2.1/2.3/2.5) then registers
-models into the table's slots.
+one config model per capability implementation, resolved by consuming resource kind (section 7).
 
 ## 1. The `CapabilityKindDescriptor` record
 
@@ -41,13 +41,17 @@ class CapabilityKindDescriptor:
     registry_policy: RegistryPolicy
     registry: Callable[[], MutableMapping[str, object]]    # lazy accessor (cycle-safe, see section 2)
     required_operations: frozenset[str]                # domain-op names the framework depends on
-    config_slots: Mapping[str, "ConfigSlot"]           # EMPTY at 2.0; 2.3 registers the default slot (section 7)
+    # (no config field at 2.0; see the deferred list below and section 7)
     entry_factory: Callable[[str, object, "Origin | None"], object]   # builds the read-only row (section 8)
     kind_strategy: "ResourceKind"                      # the SAME object registered in KIND_REGISTRY[kind]
     readiness: Callable[[str, object], "Readiness"]    # capability-NODE host-support readiness (section 5)
     publisher_source: str                              # built-in Origin source label, preserved byte-for-byte
     manifest_section: HostSurface | None               # None for map-keyed secret-backend
     # Deferred fields, recorded as comments with their trigger (contract's minimal-by-rule):
+    #   config_schema            -> step 2.3, when the first config model registers. Holds the kind's model
+    #                               CONTRACT (the base every impl's model must extend), which step 2.1 defines,
+    #                               so it cannot be typed before then. Implementations declare the model, not
+    #                               the descriptor; resolution is keyed by consuming resource kind (section 7).
     #   consumer_gating          -> the first NEW consuming surface that consolidates gating (waves 3, 4).
     #                               Wave 2 changes no gating behavior, so no field yet.
     #   migration_participation  -> only if wave 2 rules `agw resource migrate` survives AND should derive
@@ -58,15 +62,15 @@ class CapabilityKindDescriptor:
 Two adjustments to the contract's illustrative list, settled here:
 
 - `union_assembly` is NOT a stored per-record field. Assembly is uniform across kinds (the framework
-  builds one discriminated union per non-empty slot at the registration boundary and caches it), so
-  it has no per-kind variation to carry. It is a framework operation over `config_slots`, owned by
-  Component 3 (step 2.3), not a descriptor field. The contract's field list is explicitly
+  builds one discriminated union per `(kind, consuming resource kind)` pair at the registration
+  boundary and caches it), so it has no per-kind variation to carry. It is a framework operation
+  owned by Component 3 (step 2.3), not a descriptor field. The contract's field list is explicitly
   "illustrative, not final code," so this is a settlement, not a contradiction.
-- `config_slots` is present in the shape but EMPTY at 2.0 (no models exist yet); step 2.3 fills the
-  default slot. Its value type `ConfigSlot` is defined by the 2.1 schema foundation; at 2.0 the
-  field is typed loosely and tightened when 2.1 lands. Keeping the field in the day-one shape
-  (rather than adding it at 2.3) is the deliberate slot-mechanism deviation the contract chose: wave
-  4 facets add slots without reshaping the record.
+- The config field is ABSENT at 2.0, not present-and-empty (revised 2026-08-05 when slots were
+  rescinded; see section 7). No models exist until step 2.3, the field cannot be typed until step
+  2.1 defines the base model, and the original reason to carry it early ("wave 4 adds slots without
+  reshaping the record") died with the slot mechanism. It is recorded as a deferred field with its
+  trigger instead.
 
 Snapshot/restore needs no field: it iterates the table (section 5), so participation is membership.
 
@@ -160,9 +164,10 @@ seating (prepare-all-then-seat) is unchanged. Per impl, keyed by its kind's desc
 3. **Side-effect-free constructibility check** (settled below).
 4. **Required operations implemented**: every name in `descriptor.required_operations` is present
    and callable on the impl.
-5. **Per-slot model conformance**: every provided slot model conforms to the slot's model contract.
-   Trivial at 2.0 (no slots); becomes real in 2.3. Presence is the support claim, so there is no
-   claimed-but-empty slot to check.
+5. **Config model conformance**: every registered config model conforms to the kind's model
+   contract. Does not exist at 2.0 (no models, and no config field on the record); arrives with step
+   2.3 alongside the deferred `config_schema` field. Nothing is claimed-but-empty, because an
+   implementation either declares a model or does not.
 6. **`contract_version` compatibility**: `impl` declares a `contract_version`; the check compares it
    to the kind's supported version. Trivial from day one (single version), so the discipline
    predates the first incompatible change.
@@ -276,21 +281,65 @@ hard-error-naming-the-rewrite anyway). Settled: 2.0 derives the enumeration and 
 unifies the folds; 2.5 owns the `_decode_*` decoders. `KIND_SECTIONS` (`decode.py:49`) and
 `KIND_REGISTRY` legitimately enumerate ALL resource kinds and are untouched.
 
-## 7. Schema slots (naming and default-slot spelling, settled)
+## 7. Config schemas, keyed by consuming resource kind (slots RESCINDED)
 
-The config contract is a set of named slots, not one model per kind. Every current kind is
-single-slot. Settled:
+> **Slots are rescinded** (operator ruling, 2026-08-05, roadmap note
+> `roadmap-note-config-schemas.md`; `capability-descriptor-contract.md` on `main` is updated to
+> match). This section previously specified a named-slot mechanism with a reserved `DEFAULT_SLOT`.
+> It is replaced by what follows.
 
-- Vocabulary: "schema slot"; the reserved single-slot name is a constant `DEFAULT_SLOT = "default"`.
-- **Single-slot kinds do NOT spell the slot.** Step 2.3 registers one model per kind via a
-  convenience that files it under `DEFAULT_SLOT` (e.g. a `single_slot(model)` helper), so authors
-  pass a model, not a `{"default": model}` dict. The naming layer is invisible where there is one
-  slot. Facet kinds (wave 4 harness-integration) spell slot names explicitly, one per facet; slot
-  presence IS the support claim (no separate support flag to disagree). This is why the field is
-  single-`Mapping` shaped from day one even though it holds one entry now.
+Each capability IMPLEMENTATION registers exactly one config model, which is what phase 2's original
+plan specified before the seed notes introduced slots. There is no slot vocabulary, no reserved
+default name, and nothing extra to spell for the common case. The premise, verified against HEAD
+before adopting the change: no implementation needs more than one model today. Secret backends have
+no backend-level config channel at all (`plugins/onepassword/backend.py:11`, citing ADR 0016), so
+`mapping_model` is genuinely their single model; and harness-integration has exactly one hosting
+surface today (session-template), because agent recipes carry no harness config. Slots had zero
+exercised cases.
 
-At 2.0 the field is empty for every kind (no models). Support-claim semantics bites only for
-multi-slot kinds; a single-slot kind, once modeled in 2.3, always has exactly its default slot.
+**Resolution is keyed by CONSUMING RESOURCE KIND, from day one.** The framework never asks an
+implementation for "its schema"; it asks for "your schema for `<consuming resource kind>`". The
+capability base supplies the default:
+
+```python
+class Capability:
+    config_model: ClassVar[type[BaseModel]]          # the common case: one model
+
+    @classmethod
+    def config_model_for(cls, consuming_kind: str) -> type[BaseModel]:
+        return cls.config_model                      # the argument is ignored by all-but-one kind
+```
+
+An author of a vm-platform writes `config_model = LimaConfig` and never sees the parameter, so the
+keying costs the simple kinds nothing. Every framework consumer of a config model (validation at the
+finalize fold, union assembly in 2.3, emission in 2.7, sample and describe rendering in 2.8) passes
+the consuming resource kind, which it always has: it is walking a consuming resource of a known
+kind.
+
+Why key it now rather than when wave 4 needs it: wave 4's harness-integration keys its schema by
+hosting surface (vm-template including the admin attachment, agent-template, workspace-template,
+session-template, per the roadmap's `scope-participation-contract.md`), and that becomes a local
+override of `config_model_for` in the harness package rather than a signature change rippling
+through four framework sites, at least one of which (the emission and rendering sources) the
+onboarding child's guide surface will be consuming by then. Changing a signature another child SDD
+depends on is the expensive version of this move; the cheap version is one ignored parameter today.
+Support for a scope is carried by the integration's implementation, never by schema presence.
+
+Union assembly is therefore per `(kind, consuming resource kind)` pair. At wave 2 every kind has
+exactly one consuming kind, so this reduces to today's per-kind union; wave 4 adds pairs without
+reshaping the mechanism.
+
+At 2.0 there is nothing to build: no models exist. The descriptor carries no config field at all,
+only a deferred-field comment recording the trigger (step 2.3, when the first model registers) and
+this shape, in the same style as `consumer_gating` and `migration_participation`. The field cannot
+be typed before step 2.1 defines the base model, which is the second reason not to carry an empty
+one through 2.0.
+
+**Not done, deliberately:** `manifest_section` stays singular. It drives exactly one thing today,
+the accept-warn `CAPABILITY_FIELDS` decode derivation (section 6), and that legacy sibling-shape
+fold is killed by 2.4 and 2.5 well before wave 4 introduces a second hosting surface. When emission
+and rendering need the surface set, the honest source is the capability's declared models, not this
+field.
 
 ## 8. Entry factory (unification question, settled)
 
@@ -442,8 +491,8 @@ That is the whole reconciliation: docstring pointers, no assertion changes.
   that: the descriptor table is a static core-owned enumeration, `registry` is a lazy callable on
   the descriptor (not a power wired onto graph nodes), and readiness dispatch is a fold-time
   concern. Future descriptor edits must not attach lazily-computing powers to graph nodes. If
-  per-kind guide topic content ever wants a typed registration point, a slot mapping beside
-  `config_slots` is the natural home; noted only, decided no earlier than wave 4's facet work.
+  per-kind guide topic content ever wants a typed registration point, a descriptor field beside the
+  deferred `config_schema` is the natural home; noted only, decided no earlier than wave 4.
 - No hard contradiction between the contract and HEAD was found. The kind names in the contract's
   illustrative record (`vm-platform`, `harness-integration`) match HEAD; the host/capability naming
   split (vm-site hosts vm-platform, git-credential hosts git-credential-provider, session-template

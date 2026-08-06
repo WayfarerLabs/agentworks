@@ -126,9 +126,11 @@ enumerated by 1.2f (operator-approved bounded window, see the preamble). The ste
 >
 > Two structural changes the roadmap seed folds into this plan, integrated below. (1) Phase 2
 > executes THROUGH the descriptor: a new **step 2.0** adopts it before the schema foundation. (2)
-> Per-kind config models register into named **schema slots** (every current kind uses a single
-> default slot, so 2.1/2.3/2.5 proceed as planned), and registration carries `contract_version` and
-> registration-time conformance from day one. The removals having landed first discharges the
+> Each capability implementation registers exactly one config model, resolved by **consuming
+> resource kind** (`config_model_for(consuming_kind)`), and registration carries `contract_version`
+> and registration-time conformance from day one. (The seed's intermediate schema-slot mechanism was
+> rescinded by the operator on 2026-08-05, before any model registered through it; 2.1/2.3/2.5
+> proceed as originally planned.) The removals having landed first discharges the
 > harness-selector-shim and `restart_command` coordination notes in 2.5 (confirmed in code at
 > seeding); the 2.4-before-2.5 hardening order stands (the generic sibling-shape deprecation is
 > still live on main, so 2.4 is real work). The four open doors from the roadmap's `target-state.md`
@@ -242,13 +244,18 @@ longer buys import deferral). Steps 4-10 of the derivation sequence are not star
       resolvability prediction, and dependency listings; readiness/enablement propagation across it
       is this LLD's policy call), and the retirement of the session resolver's use-time completeness
       call (`sessions/templates.py::_validate_merged`) in favor of the finalize pass.
-- [ ] Per-capability models registered into the descriptor's **default schema slot** (the
-      slot-shaped registration from step 2.0; every current kind is single-slot, so this is
-      `config_model` under a naming layer, and slot presence is the support claim). Registration
-      carries `contract_version` (day-one, operator ruling) and passes the registration-time
-      conformance checks from 2.0 (implementation-contract, metadata, constructibility, required
-      ops, per-slot model conformance) that replace the retired type-and-cast seam. The
-      secret-backend `mapping_model` registers as that kind's default slot; its
+- [ ] Per-capability models registered as `config_model` on the implementation, exactly one per
+      implementation (schema slots were rescinded by the operator on 2026-08-05 before any model
+      registered through them). The core reads a model only via `config_model_for(consuming_kind)`,
+      whose base default ignores the argument, so authors write `config_model = X` and every
+      framework consumer passes the consuming resource kind it already has; wave 4's harness
+      integrations override that one classmethod instead of changing a framework signature. The
+      descriptor's deferred `config_schema` field (the kind's model contract) is created here, and
+      union assembly is per `(kind, consuming resource kind)` pair. Registration carries
+      `contract_version` (day-one, operator ruling) and passes the registration-time conformance
+      checks from 2.0 (implementation-contract, metadata, constructibility, required ops, plus
+      config model conformance added here) that replace the retired type-and-cast seam. The
+      secret-backend `mapping_model` registers as that kind's config model; its
       constructed-singleton instance policy stays the descriptor-carried interim exception (wave 3
       re-homes it, not this effort). Empty-config capabilities register the shared empty model.
       Inventory re-enumerated 2026-08-02, still re-check at implementation: vm-platform lima, wsl2,
@@ -402,15 +409,16 @@ longer buys import deferral). Steps 4-10 of the derivation sequence are not star
       the rendered sample / describe surfaces; redundant hand-stated field lists deleted
       (narrative-necessary ones may stay).
 - [ ] Permanent-doc promotion: `capabilities/README.md` rewritten for the declare-schema contract
-      AND the capability-kind descriptor (the single kind-enumeration table, schema slots,
-      registration-time conformance, `contract_version`) so the descriptor contract has a permanent
-      home once the roadmap SDD is gone; the invoked-validation sections and their standing
-      deprecation notes retire; `capabilities/harness_integration/README.md` (the harness developer
-      guide, added 2026-08-02 and renamed with the kind, whose `validate`/`dependencies` sections
-      document the retired contract) updated the same way; `cli/agentworks/plugins/README.md`
-      documents the slot-shaped registration for plugin capability authors;
-      `docs/guides/resources.md` updated; the superseding ADR extended or a sibling ADR added for
-      the schema model and the descriptor if the phase 1 ADR (0022) did not already cover it.
+      AND the capability-kind descriptor (the single kind-enumeration table, config schemas keyed by
+      consuming resource kind, registration-time conformance, `contract_version`) so the contract
+      has a permanent home once the roadmap SDD is gone; the invoked-validation sections and their
+      standing deprecation notes retire; `capabilities/harness_integration/README.md` (the harness
+      developer guide, added 2026-08-02 and renamed with the kind, whose `validate`/`dependencies`
+      sections document the retired contract) updated the same way;
+      `cli/agentworks/plugins/README.md` documents `config_model` registration and
+      `config_model_for` for plugin capability authors; `docs/guides/resources.md` updated; the
+      superseding ADR extended or a sibling ADR added for the schema model and the descriptor if the
+      phase 1 ADR (0022) did not already cover it.
 - [ ] Dated lockfile entries: resource-manifests (Phase 5.7 invoked-validation contract retired;
       sample machinery replaced) and vm-sites (its "schema-registration is future work" deferral
       resolved).
