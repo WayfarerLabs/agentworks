@@ -238,9 +238,10 @@ the derivation sequence are not started.
       encoding, `extract_references` (total, never raising, reads raw blobs, applies owner
       templates) and `iter_field_docs` signatures, and the pydantic pin policy (latest stable v2 at
       implementation time, checked then, not from memory).
-- [x] `resources/schema/` package implemented with unit tests, including totality tests for
-      `extract_references` over malformed blobs (property-style: no input raises) and marker
-      round-trip into emitted JSON Schema.
+- [x] `agentworks/schema/` package implemented with unit tests (relocated from the
+      originally-specified `resources/schema/`; a package under `resources/` cannot be the leaf),
+      including totality tests for `extract_references` over malformed blobs (property-style: no
+      input raises) and marker round-trip into emitted JSON Schema.
 - [x] pydantic dependency added; mypy plugin enabled; strict mypy green across the repo.
 - [x] `pydantic` and related vocabulary promoted from the SDD cspell dictionary to the root
       dictionary (it now appears in permanent code).
@@ -489,6 +490,20 @@ until someone decides.
       it uniformly. Scope is the modeling and validation of the field (a datetime, TOML/YAML native
       or RFC 3339 string); any behavior that acts on expiry is out of scope and left to its own
       effort. Pinned by a test that the field validates on any kind and rejects a malformed value.
+
+- [ ] **Row-shape change forced by `tagged_config`'s deletion** (no box existed for this; added
+      2026-08-06). Retiring the synthesis means the rows themselves carry the tagged capability
+      table, which touches roughly twenty read sites plus three signatures. Scope it explicitly
+      rather than discovering it mid-swap.
+- [ ] **`EnvEntry` becomes a model and loses `key`** (forced by the frozen-model box, which does not
+      imply it; added 2026-08-06). Fourteen test modules reference it.
+- [ ] **Two error-bridge defects that step 2.5 is the first consumer to hit**, both verified by
+      execution in the 2.5 LLD: a constrained dict key renders as `env.1BAD.[key]`, and an
+      undiscriminated union produces three lines carrying pydantic's member labels where today's
+      message is one line. Leaving either ships a worse error than the code being replaced.
+- [ ] **Two PERMANENT files still cite the pre-relocation schema path**: `cli/pyproject.toml`'s
+      pydantic comment and `cli/agentworks/schema/reference.py`'s docstring. Permanent docs must
+      match HEAD, so these are corrected here rather than at 2.9.
 
 ### 2.6 Model-layer defaulting (FR15)
 

@@ -146,7 +146,10 @@ registers the first model.
 
 ### Component 1: the schema foundation
 
-A new `resources/schema/` package owning the framework-wide model vocabulary:
+A new `agentworks/schema/` package owning the framework-wide model vocabulary (**corrected
+2026-08-06**: this said `resources/schema/`, and it shipped top-level because a package under
+`resources/` cannot be the import leaf the design requires; see the schema-foundation LLD section
+8):
 
 - **Base model.** A shared Pydantic v2 base (strict mode, frozen, `extra="forbid"`) that all spec
   and capability config models extend. Closed-world is universal per FR12: unknown keys are hard
