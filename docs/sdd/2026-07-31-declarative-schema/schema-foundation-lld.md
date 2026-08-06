@@ -464,6 +464,20 @@ Per field of `model_cls.model_fields`, in declaration order:
 - **Discriminated union field**: read the raw tag; when it names an arm, recurse into that arm's
   model; an absent or unknown tag contributes nothing.
 - **Unmarked field**: nothing, at any depth.
+- **Collection OF MODELS** (`list[Model]`, `tuple[Model, ...]`, `dict[str, Model]`): **GAP, added
+  2026-08-06 after implementation surfaced it.** The enumeration above covers a marked list of
+  SCALARS and a single nested model, but not a collection whose elements are models, so as first
+  built such a field contributes no references and does not expand in `iter_field_docs`. The
+  extraction half is LATENT (no shipped capability puts a marked field inside a model collection),
+  but the field-docs half is LIVE and operator-visible: aws-ec2's `instance_types` and azure-vm's
+  `vm_sizes` are exactly operator-overridable catalogs of models (`plugins/aws/platform.py:144`,
+  `plugins/azure/platform.py:309`), so their entries' fields (`cpus`, `memory_gib`, `type`, `arch`)
+  would render as an opaque blob, which FR10 forbids ("every field with its type, required/default,
+  and description"). Both walkers must recurse per element, with the element index or mapping key
+  carried in the `FieldDoc` path. The path-scoped guard makes this safe: a self-referential model
+  nested through a list still terminates. Tracked as its own plan box under step 2.1 rather than
+  deferred, because discovering it at 2.8 means reworking the renderer's input contract after the
+  guide effort has begun consuming it.
 - **A root model** (`model_cls` is an `AgwRootModel`, so its only `model_fields` entry is `root`):
   **contributes no references, by construction.** The signature was widened to `type[BaseModel]` so
   root models pass rather than trip an assertion, and this is the honest answer for what happens
@@ -515,8 +529,20 @@ Under this foundation the entire derivation is the marker:
 ```python
 class GitHubConfig(AgwModel):                       # authored in 2.3
     token: Annotated[str, SecretRef(usage="the auth token",
-                                    default_template="git-token-{owner_name}")] = _TEMPLATED
+                                    default_template="git-token-{owner_name}")]
 ```
+
+> **Correction (implementation, 2026-08-06): there is NO `_TEMPLATED` sentinel, and the fill is a
+> `mode="before"` validator, not `mode="after"` as section 5.2 first specified.** Two independent
+> reasons, both verified by execution. The base is `frozen=True`, so assigning in an after-validator
+> raises `ValidationError` (`frozen_instance`). And an after-validator can only fill a field that
+> already validated, which would force every templated field to carry a placeholder default of the
+> right type, making it report `required=False` with a junk `default` in `FieldDoc` and putting a
+> fake default into every generated sample, contradicting section 6.1's separate `default_template`
+> field. The before-validator fills the raw mapping for keys that are absent or explicitly `null`
+> and raises `StateError` when the owner is missing from context, so a templated field stays a plain
+> REQUIRED field with no sentinel. Everything this section promises holds; only the mechanism
+> differs.
 
 and the three constant cases are just `default_template="azure-client-secret"` (a template with no
 placeholder), so ONE mechanism covers both. The capability's `dependencies` classmethod, its default

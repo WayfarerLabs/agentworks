@@ -244,6 +244,16 @@ the derivation sequence are not started.
 - [ ] pydantic dependency added; mypy plugin enabled; strict mypy green across the repo.
 - [ ] `pydantic` and related vocabulary promoted from the SDD cspell dictionary to the root
       dictionary (it now appears in permanent code).
+- [ ] **Collections of models walk in both walkers** (`list[Model]`, `tuple[Model, ...]`,
+      `dict[str, Model]`), with the element index or mapping key in the `FieldDoc` path. Surfaced by
+      the 2.1 implementation: the LLD's walk enumerated a marked list of SCALARS and a single nested
+      model, but not a collection whose elements are models, so such a field contributes no
+      references and does not expand. Extraction is latent today (nothing shipped puts a marked
+      field inside a model collection) but FIELD DOCS ARE LIVE: aws-ec2 `instance_types`
+      (`plugins/aws/platform.py:144`) and azure-vm `vm_sizes` (`plugins/azure/platform.py:309`) are
+      operator-overridable catalogs of models whose entry fields would render opaque, which FR10
+      forbids. Fixed here rather than at 2.8, because discovering it there means reworking the
+      renderer's input contract after the onboarding child's guide has started consuming it.
 - [ ] Structural secret-name reference extraction (issue #311): the `SecretRef` marker carries the
       owner-templated default name, and `extract_references` derives secret references structurally
       from the annotated model fields rather than by string-scraping the blob. This is the
@@ -344,7 +354,13 @@ the derivation sequence are not started.
       becomes an error too. Taking the break rather than carving out `Field(strict=False)` matches
       the operator's standing direction (hard, helpful errors everywhere; break the schema now if
       ever), but it needs a breaking-change marker and an upgrade note naming proxmox specifically,
-      and the migrator should be checked for whether it emits quoted scalars.
+      and the migrator should be checked for whether it emits quoted scalars. **Second break for the
+      same note (surfaced by the 2.1 implementation):** an explicit `secret: null` currently OMITS
+      the edge for azure, aws, and proxmox, because they read `config.get(key, DEFAULT)`. The model
+      rule is that absent OR `None` emits the owner template, matching git-credential's
+      `token_dependency` today, so `null` flips from "no dependency" to "the default-named
+      dependency" for those three. Deliberate and tested, and it makes the four capabilities
+      consistent, but it is operator-visible and belongs in the same note.
 - [ ] Core-driven validation and extraction wired: registry name-to-model maps per capability kind;
       `Capability.validate` / `Capability.dependencies` classmethods and
       `SecretBackend.validate_mapping` retired; per-capability hand-rolled validate code deleted;
