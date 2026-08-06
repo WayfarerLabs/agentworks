@@ -387,10 +387,6 @@ the derivation sequence are not started.
       the row marked, errors on enable/use; broken blob on an enabled resource is a load error; an
       unregistered capability name remains a hard finalize error (R9.2/R9.11 preserved, operator
       decision 2026-08-01; the cross-host story rides the enablement axis, not name tolerance).
-- [ ] FR17 pinned by a regression test over a fixture inheriting surface: a child overriding the
-      parent's default secret name declares only the override in its refs, the parent keeps its own
-      default-secret edge, and no runtime-need traversal (secret union, resolvability prediction,
-      dependency listing) attributes the parent's default secret to the child.
 - [ ] `test_capability_config_contract.py` and `test_capability_base.py` reworked to pin the new
       contract (declare-and-receive: models in, typed instances out).
 
@@ -412,6 +408,10 @@ current traversal.
       already in this plan, mark the RELATIONSHIP explicitly; do NOT filter on
       `isinstance(ref, TemplateReference)`, which means "points at a template" and would silently
       misclassify a future uses-a-template edge.
+- [ ] FR17 pinned by a regression test over a fixture inheriting surface: a child overriding the
+      parent's default secret name declares only the override in its refs, the parent keeps its own
+      default-secret edge, and no runtime-need traversal (secret union, resolvability prediction,
+      dependency listing) attributes the parent's default secret to the child.
 - [ ] `sessions/templates.py::_validate_merged` retires in favor of the finalize pass. Step 2.3
       repointed it at the core entry point (no capability code runs) but left its resolve-time
       timing, so the timing change lands here.
