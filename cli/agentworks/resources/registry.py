@@ -615,19 +615,23 @@ class Registry:
                 continue
             kind_handler = _lookup_kind(kind, refs[0])
             first = refs[0]
+            # The DECLARER, not the publisher: an inheriting row publishes
+            # the runtime needs of its merged declaration, so blaming its
+            # ``source`` would send an operator to a file that does not
+            # contain the name, and which row got blamed would depend on
+            # the order the walk reached them in.
+            blamed = first.declarer
             if kind_handler.miss_policy == "auto-declare":
                 allowed = kind_handler.auto_declare_names
                 if allowed is not None and name not in allowed:
                     raise ConfigError(
                         f"{kind} kind only auto-declares the reserved name(s) "
                         f"{sorted(allowed)!r}; got {name!r} "
-                        f"(required by {first.source[0]}/{first.source[1]})"
+                        f"(required by {blamed[0]}/{blamed[1]})"
                     )
                 deferred.add(target)
             elif kind_handler.miss_policy == "error":
-                raise ConfigError(
-                    f"{first.source[0]} {first.source[1]!r} references unknown {kind} {name!r} ({first.usage})"
-                )
+                raise ConfigError(f"{blamed[0]} {blamed[1]!r} references unknown {kind} {name!r} ({first.usage})")
             else:
                 raise StateError(f"unexpected miss_policy {kind_handler.miss_policy!r} on KIND_REGISTRY[{kind!r}]")
 
@@ -785,13 +789,15 @@ def _dependencies(resource: Any, context: FinalizeContext) -> Sequence[ResourceR
 
 def _lookup_kind(kind: str, req: ResourceReference) -> Any:
     """Look up the kind in ``KIND_REGISTRY``, raising a clear error if
-    the reference references a kind no one has registered. Includes
-    the reference's source in the error for traceability.
+    the reference references a kind no one has registered. Names the
+    reference's DECLARER for traceability (the row whose declaration
+    carries the name, which on an inheriting row is not the publisher).
     """
     try:
         return KIND_REGISTRY[kind]
     except KeyError:
-        raise ConfigError(f"{req.source[0]} {req.source[1]!r} references unregistered kind {kind!r}") from None
+        blamed = req.declarer
+        raise ConfigError(f"{blamed[0]} {blamed[1]!r} references unregistered kind {kind!r}") from None
 
 
 def _polish_auto_declared_description(
@@ -835,11 +841,14 @@ def _polish_auto_declared_description(
         description = f"(auto) auto-declared default {kind}"
     else:
         first = references[0]
-        # ReferenceEntry.source is typed tuple[str, str]; the framework
-        # guarantees the shape at finalize time. No runtime guard.
-        distinct_other = {entry.source for entry in references} - {first.source}
+        # Keyed on the DECLARER: a row auto-declared because an inheriting
+        # template published its merged declaration's need is described by
+        # the template that wrote the name, not by every descendant that
+        # inherited it. ReferenceEntry's tuples are shape-guaranteed by
+        # the framework at finalize time, so there is no runtime guard.
+        distinct_other = {entry.declarer for entry in references} - {first.declarer}
         suffix = f" (and {len(distinct_other)} more)" if distinct_other else ""
-        description = f"(auto) {first.usage} for {first.source[0]}/{first.source[1]}{suffix}"
+        description = f"(auto) {first.usage} for {first.declarer[0]}/{first.declarer[1]}{suffix}"
     return dataclasses.replace(resource, description=description)
 
 

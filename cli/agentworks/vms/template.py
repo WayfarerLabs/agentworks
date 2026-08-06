@@ -28,12 +28,16 @@ if TYPE_CHECKING:
 def tailscale_secret_reference(
     tailscale_auth_key: str,
     template_name: str,
+    declared_by: tuple[str, str] | None = None,
 ) -> SecretReference:
     """Build the ``SecretReference`` a VMTemplate publishes for its
     Tailscale auth key. Used by both ``VMTemplate.dependencies`` (the
     finalize edge) and ``VMTemplateNode.config_secret_refs`` (the
     preflight sweep's prediction input) so the reference shape is
     single-sourced.
+
+    ``declared_by`` names the template in the chain that set the key,
+    when that is an ancestor of ``template_name``.
     """
     from agentworks.resources.reference import SecretReference
 
@@ -42,6 +46,7 @@ def tailscale_secret_reference(
         kind="secret",
         usage="the Tailscale auth key",
         source=("vm-template", template_name),
+        declared_by=declared_by,
     )
 
 
@@ -93,7 +98,12 @@ class VMTemplate(DeclaredResource):
         depends on its override alone, while still inheriting the parent's
         env secrets as edges of its own rather than through a transitive
         walk that could not tell an override from an addition.
+
+        Every inherited edge carries the layer that DECLARED it, so an
+        error about it names a file that contains the name rather than
+        the row that merely publishes the edge.
         """
+        from agentworks.resources.inheritance import declarers, merge_layers
         from agentworks.resources.reference import (
             ResourceReference as _ResourceReq,
         )
@@ -103,8 +113,14 @@ class VMTemplate(DeclaredResource):
         from agentworks.vms.templates import effective_template
 
         source = ("vm-template", self.name)
-        effective = effective_template({**context.rows_of("vm-template"), self.name: self}, self.name)
-        refs: list[ResourceReference] = list(env_references(effective.env, source))
+        rows = {**context.rows_of("vm-template"), self.name: self}
+        effective = effective_template(rows, self.name)
+        layers = merge_layers(rows, self.name)
+        by_env = declarers(layers, "vm-template", lambda t: t.env)
+        by_pkg = declarers(layers, "vm-template", lambda t: t.apt_packages or ())
+        by_cmd = declarers(layers, "vm-template", lambda t: t.system_install_commands or ())
+        by_key = declarers(layers, "vm-template", lambda t: (t.tailscale_auth_key,) if t.tailscale_auth_key else ())
+        refs: list[ResourceReference] = list(env_references(effective.env, source, by_env))
         # Inherits: each parent template name in ``inherits = [...]`` is an
         # INHERITS edge (source composition, not a runtime need; FR17). The
         # framework's VMTemplateKind miss policy auto-declares "default"
@@ -114,8 +130,8 @@ class VMTemplate(DeclaredResource):
         refs.extend(inherits_reference(parent, source) for parent in self.inherits)
         # Apt / install-command references: each name in apt_packages /
         # system_install_commands resolves to a declared Resource via
-        # the framework's miss policy (error on typo, citing this
-        # template's source).
+        # the framework's miss policy (error on typo, citing the template
+        # that wrote the name).
         for pkg in effective.apt_packages:
             refs.append(
                 _ResourceReq(
@@ -123,6 +139,7 @@ class VMTemplate(DeclaredResource):
                     kind="apt-package",
                     usage="an apt package",
                     source=source,
+                    declared_by=by_pkg.get(pkg),
                 )
             )
         for cmd in effective.system_install_commands:
@@ -132,9 +149,17 @@ class VMTemplate(DeclaredResource):
                     kind="system-install-command",
                     usage="a system install command",
                     source=source,
+                    declared_by=by_cmd.get(cmd),
                 )
             )
         # The effective auth key: the kind's default when nothing in the
-        # lineage sets one, the nearest declaration otherwise.
-        refs.append(tailscale_secret_reference(effective.tailscale_auth_key, self.name))
+        # lineage sets one (nobody declared it, so nobody is named), the
+        # nearest declaration otherwise.
+        refs.append(
+            tailscale_secret_reference(
+                effective.tailscale_auth_key,
+                self.name,
+                by_key.get(effective.tailscale_auth_key),
+            )
+        )
         return refs

@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from agentworks.resources.reference import SecretReference
 
 
@@ -35,7 +37,11 @@ class EnvEntry:
                 f"EnvEntry for {self.key!r} cannot set both value and secret",
             )
 
-    def referenced_resources(self, source: tuple[str, str]) -> list[SecretReference]:
+    def referenced_resources(
+        self,
+        source: tuple[str, str],
+        declared_by: tuple[str, str] | None = None,
+    ) -> list[SecretReference]:
         """Emit a ``SecretReference`` for this entry's secret reference,
         or an empty list for plaintext entries.
 
@@ -44,6 +50,10 @@ class EnvEntry:
         declaring Resource's ``(kind, name)`` identity. The usage text is
         derived from the env-var key, so a typo'd KEY surfaces in
         diagnostics with the actual variable name.
+
+        ``declared_by`` is for an INHERITING owner, whose env table is the
+        merged one: it names the template that actually wrote this entry,
+        so the edge can be attributed to a file that contains it.
 
         The import of ``SecretReference`` is ``TYPE_CHECKING``-only to
         keep ``EnvEntry`` framework-ignorant at runtime; constructed
@@ -60,6 +70,7 @@ class EnvEntry:
                 kind=SECRET_KIND_NAME,
                 usage=f"the {self.key} env var",
                 source=source,
+                declared_by=declared_by,
             )
         ]
 
@@ -67,6 +78,7 @@ class EnvEntry:
 def env_references(
     env: dict[str, EnvEntry] | None,
     source: tuple[str, str],
+    declarers: Mapping[str, tuple[str, str]] | None = None,
 ) -> list[SecretReference]:
     """Aggregate ``EnvEntry.referenced_resources(source)`` across an env table.
 
@@ -75,6 +87,11 @@ def env_references(
     one line. ``env`` may be ``None`` (``SessionTemplate.env`` is
     optional) or empty, in which case the result is an empty list.
 
+    ``declarers`` maps an env-table KEY to the template that declared it,
+    for an inheriting owner passing its MERGED table (FR17). Absent, or
+    missing a key, means the owner declared it: the ordinary case, and the
+    only case for a kind that does not inherit.
+
     The env package owns this helper because it aggregates
     ``EnvEntry.referenced_resources``; the template dataclasses that
     live in the domain packages import it from here.
@@ -82,6 +99,6 @@ def env_references(
     if not env:
         return []
     out: list[SecretReference] = []
-    for entry in env.values():
-        out.extend(entry.referenced_resources(source))
+    for key, entry in env.items():
+        out.extend(entry.referenced_resources(source, (declarers or {}).get(key)))
     return out

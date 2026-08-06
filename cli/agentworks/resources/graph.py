@@ -418,7 +418,9 @@ def build_graph(
     inbound: dict[tuple[str, str], list[ReferenceEntry]] = {}
     for target, refs in all_refs.items():
         for ref in refs:
-            inbound.setdefault(target, []).append(ReferenceEntry(source=ref.source, usage=ref.usage))
+            inbound.setdefault(target, []).append(
+                ReferenceEntry(source=ref.source, usage=ref.usage, declared_by=ref.declared_by)
+            )
 
     nodes: dict[tuple[str, str], _Node] = {}
     for kind, kind_dict in resources.items():

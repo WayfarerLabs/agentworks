@@ -99,6 +99,11 @@ class ResourceReference:
       inheritance edge is; ``INHERITS`` says the target's declaration is
       composed into the source's, and is emitted only through
       :func:`inherits_reference`.
+    - ``declared_by``: the ``(kind, name)`` whose DECLARATION named the
+      target, when that is not ``source``. It is ``None`` on every edge a
+      row emits from its own declaration, which is all of them outside an
+      inheritance chain; read it through :attr:`declarer`, never
+      directly.
     """
 
     name: str
@@ -106,6 +111,25 @@ class ResourceReference:
     usage: str
     source: tuple[str, str]
     relationship: RefRelationship = RefRelationship.USES
+    declared_by: tuple[str, str] | None = None
+
+    @property
+    def declarer(self) -> tuple[str, str]:
+        """The row an operator has to go and edit to change this edge.
+
+        Usually ``source``, and on an INHERITING row usually not: such a
+        row publishes the runtime needs of its MERGED declaration (FR17),
+        so the edge exists because some ancestor wrote the name. Telling
+        an operator that ``vm-template/kid`` references an unknown apt
+        package sends them to a file with no ``apt_packages`` in it, and
+        which row gets blamed would otherwise depend on the order the
+        build walk happened to reach them in.
+
+        Every message that names WHO wanted a target reads this;
+        ``source`` stays the row that published the edge, which is what
+        the graph is keyed on.
+        """
+        return self.declared_by or self.source
 
 
 @dataclass(frozen=True)
@@ -166,10 +190,22 @@ class ReferenceEntry:
     side are dropped here because they are implicit from the graph node
     the entry is stored on -- there is no ambiguity about which Resource an
     entry on the ``("vm-template", "default")`` node belongs to.
+
+    ``declared_by`` mirrors the outbound side's, for the same reason:
+    "Referenced by: vm-template/kid" on a secret an ANCESTOR of kid named
+    is true but unhelpful on its own, so describe renders the declarer
+    beside it.
     """
 
     source: tuple[str, str]
     usage: str
+    declared_by: tuple[str, str] | None = None
+
+    @property
+    def declarer(self) -> tuple[str, str]:
+        """The row whose declaration named this target; see
+        :attr:`ResourceReference.declarer`."""
+        return self.declared_by or self.source
 
 
 def inherits_reference(parent: str, source: tuple[str, str]) -> TemplateReference:
@@ -198,6 +234,7 @@ def inherits_reference(parent: str, source: tuple[str, str]) -> TemplateReferenc
 def sourced_references(
     config_refs: Iterable[ConfigReference],
     source: tuple[str, str],
+    declared_by: tuple[str, str] | None = None,
 ) -> list[ResourceReference]:
     """Promote sourceless ``ConfigReference``s (a capability's
     ``dependencies`` output) to sourced outbound ``ResourceReference``s.
@@ -214,6 +251,13 @@ def sourced_references(
     marker is where a modeled inheritance edge would be declared, and
     dropping it here would leave the graph unable to tell one from a
     runtime need (FR17).
+
+    ``declared_by`` is for a host that assembled the blob by merging an
+    inheritance chain: it names the row whose declaration the BLOCK came
+    from. Block-level, not per key, because a ``ConfigReference`` does not
+    carry the field it was extracted from; see
+    ``SessionTemplate.dependencies`` for why that is precise in every
+    shape a template can currently write.
     """
     result: list[ResourceReference] = []
     for cref in config_refs:
@@ -225,6 +269,7 @@ def sourced_references(
                 usage=cref.usage,
                 source=source,
                 relationship=cref.relationship,
+                declared_by=declared_by,
             )
         )
     return result

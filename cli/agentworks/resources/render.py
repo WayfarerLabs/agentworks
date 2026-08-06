@@ -20,6 +20,25 @@ from agentworks.source_location import format_file_path
 
 if TYPE_CHECKING:
     from agentworks.resources.origin import Origin
+    from agentworks.resources.reference import ReferenceEntry
+
+
+def format_reference_entry(entry: ReferenceEntry) -> str:
+    """One "Referenced by:" line: who points here, what for, and where the
+    name was actually written when those differ.
+
+    An inheriting row publishes the runtime needs of its MERGED
+    declaration (FR17), so "vm-template/kid -- the BASE env var" can be
+    entirely true and still send an operator to a file with no such env
+    var in it. The tail names the template that wrote it.
+
+    Shared by ``agw resource describe`` and ``agw secret describe``, which
+    render the same list and must not drift.
+    """
+    line = f"{entry.source[0]}/{entry.source[1]} -- {entry.usage}"
+    if entry.declared_by is None or entry.declared_by == entry.source:
+        return line
+    return f"{line} (inherited from {entry.declared_by[0]}/{entry.declared_by[1]})"
 
 
 def format_origin_line(origin: Origin | None) -> str:

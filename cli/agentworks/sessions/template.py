@@ -74,7 +74,19 @@ class SessionTemplate(DeclaredResource):
         of an inherited config still depend on the whole merged blob's
         secrets, and a child that overrides the secret NAME depend on its
         override alone.
+
+        The pair's edges are attributed to the layer that SELECTED the
+        integration, which is the granularity the merge has: switching
+        integration discards the accumulated config, so the block belongs
+        to whoever named it. That is exact for every shape a template can
+        write today, because a child that wants to change one key has to
+        restate the selector beside it (a config block without one does
+        not load), which makes the child the selecting layer. A future
+        per-key attribution would need ``extract_references`` to carry the
+        field its edge came from; no shipped integration marks a reference
+        field, so no live edge turns on it.
         """
+        from agentworks.resources.inheritance import declarers, merge_layers
         from agentworks.resources.reference import (
             ResourceReference as _ResourceRef,
         )
@@ -85,21 +97,25 @@ class SessionTemplate(DeclaredResource):
         from agentworks.sessions.templates import effective_template
 
         source = ("session-template", self.name)
-        effective = effective_template({**context.rows_of("session-template"), self.name: self}, self.name)
+        rows = {**context.rows_of("session-template"), self.name: self}
+        effective = effective_template(rows, self.name)
         integration = effective.harness.name
-        refs: list[ResourceReference] = list(env_references(effective.resolved.env, source))
+        declared_by = effective.harness.declared_by
+        by_env = declarers(merge_layers(rows, self.name), "session-template", lambda t: t.env or {})
+        refs: list[ResourceReference] = list(env_references(effective.resolved.env, source, by_env))
         refs.extend(inherits_reference(parent, source) for parent in self.inherits)
         if integration is not None:
             # The selector edge: a declared harness_integration references the
             # capability row, so a typo is a finalize-time miss-policy
-            # error naming this template, and the harness integration row's
-            # "Referenced by:" lists its templates (FRD R2).
+            # error naming the template that wrote the name, and the harness
+            # integration row's "Referenced by:" lists its templates (FRD R2).
             refs.append(
                 _ResourceRef(
                     name=integration,
                     kind="harness-integration",
                     usage="the session harness integration",
                     source=source,
+                    declared_by=declared_by,
                 )
             )
             # Plus whatever the selected harness integration's config block
@@ -119,6 +135,7 @@ class SessionTemplate(DeclaredResource):
                         owner=RefOwner(kind="session-template", name=self.name),
                     ),
                     source,
+                    declared_by,
                 )
             )
         return refs

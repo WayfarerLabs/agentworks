@@ -77,11 +77,20 @@ class MergedHarness:
     (``shell`` unions ``required_commands``) the last declarer is one
     contributor among several, and the message says "inherited from" rather
     than claiming sole authorship.
+
+    ``declared_by`` is the same fact at BLOCK granularity, for the
+    reference path: an edge implied by this config, and the selector edge
+    itself, belong to the layer that named the integration, because
+    switching integration is what discards accumulated config. The two
+    coexist rather than one deriving from the other: a validation error
+    names a KEY and can be that precise, while a reference carries no key
+    to be precise about.
     """
 
     name: str | None = None
     config: Mapping[str, object] = MappingProxyType({})
     provenance: Mapping[str, RefOwner] = MappingProxyType({})
+    declared_by: tuple[str, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -206,6 +215,7 @@ def _resolve_walk(
                 tmpl.harness_integration_config or {},
                 RefOwner(kind="session-template", name=name),
             ),
+            declared_by=("session-template", name),
         ),
     )
     result.name = name
@@ -246,6 +256,7 @@ def _merge_pair(acc: MergedHarness, child: MergedHarness) -> MergedHarness:
         name=child.name,
         config=config,
         provenance={key: owner for key, owner in provenance.items() if key in config},
+        declared_by=child.declared_by,
     )
 
 

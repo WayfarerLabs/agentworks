@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.resources.inspect import used_by_for
-from agentworks.resources.render import format_origin_line
+from agentworks.resources.render import format_origin_line, format_reference_entry
 from agentworks.secrets.kinds import SECRET_KIND_NAME
 
 if TYPE_CHECKING:
@@ -431,14 +431,13 @@ def render_secret_description(desc: SecretDescription) -> None:
         output.detail("(none recorded)")
     else:
         # Dedupe by (source, usage) preserving first-encounter order.
-        seen: set[tuple[tuple[str, str], str]] = set()
+        seen: set[str] = set()
         for entry in desc.references:
-            key = (entry.source, entry.usage)
-            if key in seen:
+            line = format_reference_entry(entry)
+            if line in seen:
                 continue
-            seen.add(key)
-            src = f"{entry.source[0]}/{entry.source[1]}"
-            output.detail(f"- {src} -- {entry.usage}")
+            seen.add(line)
+            output.detail(f"- {line}")
 
     # --- Used by (dynamic, per current config) ---
     # Only rendered when describe_secret was called with a db. Same

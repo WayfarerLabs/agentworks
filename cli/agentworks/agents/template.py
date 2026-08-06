@@ -50,6 +50,7 @@ class AgentTemplate(DeclaredResource):
         the EFFECTIVE declaration (FR17; see ``VMTemplate.dependencies``
         for the rule the four inheriting kinds share)."""
         from agentworks.agents.templates import effective_template
+        from agentworks.resources.inheritance import declarers, merge_layers
         from agentworks.resources.reference import (
             ResourceReference as _ResourceReq,
         )
@@ -58,9 +59,14 @@ class AgentTemplate(DeclaredResource):
         )
 
         source = ("agent-template", self.name)
-        effective = effective_template({**context.rows_of("agent-template"), self.name: self}, self.name)
-        refs: list[ResourceReference] = list(env_references(effective.env, source))
-        refs.extend(credential_references(effective.git_credentials, source))
+        rows = {**context.rows_of("agent-template"), self.name: self}
+        effective = effective_template(rows, self.name)
+        layers = merge_layers(rows, self.name)
+        by_env = declarers(layers, "agent-template", lambda t: t.env)
+        by_cred = declarers(layers, "agent-template", lambda t: t.git_credentials or ())
+        by_cmd = declarers(layers, "agent-template", lambda t: t.user_install_commands or ())
+        refs: list[ResourceReference] = list(env_references(effective.env, source, by_env))
+        refs.extend(credential_references(effective.git_credentials, source, by_cred))
         refs.extend(inherits_reference(parent, source) for parent in self.inherits)
         # Install-command references for user_install_commands.
         for cmd in effective.user_install_commands:
@@ -70,6 +76,7 @@ class AgentTemplate(DeclaredResource):
                     kind="user-install-command",
                     usage="a user install command",
                     source=source,
+                    declared_by=by_cmd.get(cmd),
                 )
             )
         return refs

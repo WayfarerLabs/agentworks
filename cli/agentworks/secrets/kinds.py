@@ -119,7 +119,10 @@ class _SecretKind:
         return SecretDecl(
             name=first.name,
             description="",
-            origin=Origin.auto_declared(source=first.source),
+            # The DECLARER: an inheriting template publishes its merged
+            # declaration's secrets, so the row that WROTE the name is the
+            # provenance an operator can act on.
+            origin=Origin.auto_declared(source=first.declarer),
         )
 
     def instances(self, db: Database, registry: Registry, resource: Any) -> Iterable[InstanceRef]:
@@ -134,14 +137,15 @@ class _SecretKind:
         emitted. See ``_secrets_reachable_from_session`` for the full
         env-and-secrets layering rationale.
 
-        The walk uses ``collect_secrets_for`` (the same helper
-        ``vm create`` / ``agent create`` etc. use for eager-resolve), so
-        the "what secrets would this session need?" answer is exactly
-        the answer the orchestrator would compute at runtime -- modulo
-        per-command scoping (e.g. ``vm reinit`` walks only the VM's
-        subgraph). The result is *per current config*: edits to config
-        change the projection immediately, even for sessions that were
-        provisioned against a different config.
+        The walk uses ``collect_secrets_for``, the framework's
+        runtime-need closure over the graph, so the "what secrets would
+        this session need?" answer is derived from the same edges every
+        other structural surface reads rather than from a second walk of
+        its own. The orchestrator's runtime union is computed differently
+        (off a plan's already-resolved nodes), which is why this is a
+        projection rather than a prediction. The result is *per current
+        config*: edits to config change it immediately, even for sessions
+        that were provisioned against a different config.
         """
         target_name = resource.name
         for session in db.list_sessions():

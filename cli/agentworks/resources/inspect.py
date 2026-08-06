@@ -34,7 +34,7 @@ from typing import TYPE_CHECKING, Literal
 
 from agentworks import output
 from agentworks.resources.graph import Enablement
-from agentworks.resources.render import format_file_path, format_origin_line
+from agentworks.resources.render import format_file_path, format_origin_line, format_reference_entry
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -613,14 +613,13 @@ def render_resource_description(desc: ResourceDescription) -> None:
     else:
         # Dedupe by (source, usage) preserving first-encounter order --
         # same dedupe as agw secret describe.
-        seen: set[tuple[tuple[str, str], str]] = set()
+        seen: set[str] = set()
         for entry in desc.references:
-            key = (entry.source, entry.usage)
-            if key in seen:
+            line = format_reference_entry(entry)
+            if line in seen:
                 continue
-            seen.add(key)
-            src = f"{entry.source[0]}/{entry.source[1]}"
-            output.detail(f"- {src} -- {entry.usage}")
+            seen.add(line)
+            output.detail(f"- {line}")
 
     if desc.used_by is not None:
         output.info("")

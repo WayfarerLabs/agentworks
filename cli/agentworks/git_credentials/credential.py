@@ -27,13 +27,17 @@ if TYPE_CHECKING:
 def credential_references(
     git_credentials: list[str] | None,
     source: tuple[str, str],
+    declarers: Mapping[str, tuple[str, str]] | None = None,
 ) -> list[ResourceReference]:
     """Emit a ``ResourceReference`` of kind ``"git-credential"`` per
     name in ``git_credentials``. Used by ``AdminConfig.dependencies``
     and ``AgentTemplate.dependencies`` to feed the
     ``GitCredentialKind``'s error miss policy: a typo'd or undeclared
-    name errors at finalize with the reference source pointing at the
-    declaring Resource.
+    name errors at finalize naming the template that wrote the name.
+
+    ``declarers`` maps a credential name to the template that declared
+    it, for an inheriting owner passing its MERGED list (FR17). Absent, or
+    missing a name, means the owner declared it.
     """
     from agentworks.resources.reference import ResourceReference
 
@@ -45,6 +49,7 @@ def credential_references(
             kind="git-credential",
             usage="the git credential",
             source=source,
+            declared_by=(declarers or {}).get(cred_name),
         )
         for cred_name in git_credentials
     ]
