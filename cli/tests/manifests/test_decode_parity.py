@@ -418,20 +418,25 @@ def test_git_credential_org_must_nest_under_provider_config(tmp_path: Path) -> N
         load_manifests(tmp_path / "resources")
 
 
-def test_description_in_spec_rejected(tmp_path: Path) -> None:
+@pytest.mark.parametrize("field", ["description", "name"])
+def test_a_metadata_field_written_in_spec_is_refused(tmp_path: Path, field: str) -> None:
+    """The metadata fields ARE fields of the row, so ``extra="forbid"``
+    would accept one written in ``spec`` and let it silently override the
+    envelope. Parametrized over two of them because the guard is derived
+    from the row base rather than naming ``description`` alone."""
     _manifest(
         tmp_path,
-        """
+        f"""
         apiVersion: agentworks/v1
         kind: secret
         metadata:
           name: s1
           description: d
         spec:
-          description: also here
+          {field}: also here
         """,
     )
-    with pytest.raises(ConfigError, match="metadata.description"):
+    with pytest.raises(ConfigError, match=f"{field} belong\\(s\\) in metadata, not in spec"):
         load_manifests(tmp_path / "resources")
 
 

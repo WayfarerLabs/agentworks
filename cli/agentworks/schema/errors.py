@@ -41,7 +41,7 @@ from typing import TYPE_CHECKING, Final
 from pydantic import RootModel
 
 from agentworks.errors import ConfigError
-from agentworks.schema._shape import Collection, is_model, model_fields_of, shape_of
+from agentworks.schema._shape import Collection, is_hidden, is_model, model_fields_of, shape_of
 from agentworks.source_location import SYNTHESIZED_PATH, format_file_path
 
 if TYPE_CHECKING:
@@ -428,11 +428,19 @@ def _unknown_field(container: type[BaseModel] | None) -> str:
     what today's hand-rolled validators say ("unknown azure-vm platform
     field(s): ..."). Sorted, as every other unknown-key message in the
     codebase lists its alternatives.
+
+    A hidden field is not offered, because it is not a field the operator
+    may write HERE: a declared row carries its envelope metadata and its
+    provenance beside its spec fields, and listing those would answer an
+    operator's mistake with a worse one.
     """
     fields = model_fields_of(container) if container is not None else None
     if not fields:
         return "unknown field"
-    return "unknown field; expected one of: " + ", ".join(sorted(fields))
+    offered = sorted(name for name, field in fields.items() if not is_hidden(field))
+    if not offered:
+        return "unknown field"
+    return "unknown field; expected one of: " + ", ".join(offered)
 
 
 def _unknown_tag(ctx: Mapping[str, object]) -> str | None:

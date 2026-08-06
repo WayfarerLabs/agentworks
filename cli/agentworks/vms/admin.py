@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from pydantic import Field
+from pydantic.json_schema import SkipJsonSchema
 
 from agentworks.declared_resource import DeclaredResource
 from agentworks.env import EnvEntry
@@ -39,7 +40,9 @@ class AdminConfig(DeclaredResource):
 
     # Override the base's required ``name``: the admin-template surface is a
     # singleton today, so an omitted-name construction defaults to "default".
-    name: str = "default"
+    # ``SkipJsonSchema`` rides along because the field is still METADATA:
+    # without it the override would re-enter this kind's spec surface.
+    name: SkipJsonSchema[str] = "default"
     username: str = "agentworks"
     shell: str = "bash"
     git_credentials: list[str] = Field(default_factory=list)

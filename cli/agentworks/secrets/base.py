@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
 from pydantic import Field
+from pydantic.json_schema import SkipJsonSchema
 
 from agentworks.declared_resource import DeclaredResource
 from agentworks.schema import RefOwner
@@ -48,7 +49,9 @@ class SecretDecl(DeclaredResource):
 
     # Override the base's optional ``description``: a secret must carry one
     # (it is the operator-facing prompt/hint text), so it is required here.
-    description: str
+    # ``SkipJsonSchema`` rides along because the field is still METADATA:
+    # without it the override would re-enter this kind's spec surface.
+    description: SkipJsonSchema[str]
     hint: str | None = None
     backend_mappings: dict[str, MappingValue] = Field(default_factory=dict)
 

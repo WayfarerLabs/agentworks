@@ -10,13 +10,22 @@ fields here is what keeps a kind from silently lacking one of them (the gap
 that let five kinds ship without ``description``).
 
 **The row IS the kind's spec model, and the metadata / spec split is what
-lets one class be both.** A row's operator-writable fields are what a
-manifest's ``spec`` may say; the two framework fields below carry
-``SkipJsonSchema``, which takes them out of emitted JSON Schema (pydantic's
-own behavior) and out of the field-reference stream every human
-presentation reads. So the emission surface is ``model_json_schema(row)``
-and the render surface is ``iter_field_docs(row)``, both with no filtering
-at the call site. The metadata fields are still FIELDS, which is why decode
+lets one class be both.** A row carries three kinds of field:
+
+- the kind's own SPEC fields, which is what a manifest's ``spec`` may say;
+- the ENVELOPE fields (``EnvelopeMetadata`` below), which the operator
+  writes in the document's ``metadata`` block;
+- the FRAMEWORK fields (``declared_at``, ``origin``), which nothing
+  outside the framework sets.
+
+Only the first group is spec surface, and ``SkipJsonSchema`` on the other
+two is what says so, once, for both derivations: pydantic drops such a
+field from ``model_json_schema`` natively, and ``iter_field_docs`` drops
+it from the field-reference stream every human presentation reads. So the
+emission surface is ``model_json_schema(row)`` and the render surface is
+``iter_field_docs(row)``, both with no filtering at the call site.
+
+The envelope and framework fields are still FIELDS, which is why decode
 refuses one written inside ``spec``: it would be accepted and would
 silently override the envelope.
 
@@ -36,7 +45,7 @@ lower than every package that inherits it.
 from __future__ import annotations
 
 import dataclasses
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any, Final
 
 from pydantic import AfterValidator, BaseModel, Field
 from pydantic.json_schema import SkipJsonSchema
@@ -51,7 +60,35 @@ if TYPE_CHECKING:
     from agentworks.resources.reference import ResourceReference
 
 
-class DeclaredResource(AgwModel):
+class EnvelopeMetadata(AgwModel):
+    """The row fields an operator writes in a document's ``metadata``
+    block rather than in its ``spec``.
+
+    A separate base, not a marker and not a hand-kept list: the envelope
+    derives the metadata keys it accepts from :data:`METADATA_FIELDS`,
+    which is this class's own field set, so a fourth metadata field cannot
+    be accepted by one layer and rejected by the other. Every field here
+    carries ``SkipJsonSchema``, which is what keeps it out of the SPEC
+    surface (emitted schema, the field-reference stream, and the
+    unknown-key message's list of what is valid); ``spec.name`` is refused
+    by decode, so offering it as a spec field would be a lie.
+
+    A kind that RE-DECLARES one of these (``secret`` makes ``description``
+    required, ``admin-template`` defaults ``name``) must carry the marker
+    on the override too, or the field re-enters that kind's spec surface.
+    ``tests/manifests/test_kind_models.py`` pins that for every kind.
+    """
+
+    name: SkipJsonSchema[str]
+    description: SkipJsonSchema[str | None] = None
+
+
+#: The metadata keys a manifest document may carry, derived from the base
+#: that declares them.
+METADATA_FIELDS: Final = frozenset(EnvelopeMetadata.model_fields)
+
+
+class DeclaredResource(EnvelopeMetadata):
     """Common metadata every declared resource carries. Concrete resource
     rows inherit this and add only their kind-specific fields.
 
@@ -62,14 +99,13 @@ class DeclaredResource(AgwModel):
     the dependency graph (``Registry.graph.dependents_of``), not on the
     resource row.
 
-    ``declared_at`` and ``origin`` keep their frozen-dataclass types rather
-    than becoming nested models: a strict model accepts an already-built
-    frozen dataclass for such a field and REFUSES a mapping, which is
-    exactly the right answer for a field only the framework sets.
+    These two are framework surface rather than envelope surface: no
+    document may set either. They keep their frozen-dataclass types rather
+    than becoming nested models, because a strict model accepts an
+    already-built frozen dataclass for such a field and REFUSES a mapping,
+    which is exactly the right answer for a field only the framework sets.
     """
 
-    name: str
-    description: str | None = None
     declared_at: SkipJsonSchema[SourceLocation] = Field(default_factory=synthesized)
     origin: SkipJsonSchema[Origin | None] = None
 

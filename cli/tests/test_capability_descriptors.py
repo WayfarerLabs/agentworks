@@ -34,7 +34,7 @@ from agentworks.capabilities.harness_integration.kinds import HarnessIntegration
 from agentworks.capabilities.publish import publish_capability_rows
 from agentworks.capabilities.vm_platform import VMPlatformEntry
 from agentworks.errors import StateError
-from agentworks.manifests.decode import _host_surfaces
+from agentworks.manifests.decode import _hosting_descriptors
 from agentworks.resources.graph import Readiness, _capability_node_readiness
 from agentworks.resources.kind import KIND_REGISTRY
 from agentworks.resources.registry import Registry
@@ -294,19 +294,24 @@ def test_vm_platform_readiness_carries_the_host_support_sentence() -> None:
 
 
 def test_manifest_sections_match_the_decoders_host_surfaces() -> None:
-    """Decode's fold dispatch is exactly the three host surfaces, with the
-    field pair each one names.
+    """Decode's host dispatch is exactly the three host surfaces, with the
+    capability kind and the field pair each one names.
 
     Spelled out rather than recomputed from the descriptors, because decode
     now DERIVES this map from them: comparing the derivation against itself
     would only prove a comprehension runs. Membership is the dispatch, so
     the entries are the whole behavior. A kind gaining or losing a host
-    surface changes which specs get folded, which is why this is a literal.
+    surface changes which specs are read as capability blocks, which is why
+    this is a literal.
     """
-    assert {host: (s.naming_field, s.config_field) for host, s in _host_surfaces().items()} == {
-        "vm-site": ("platform", "platform_config"),
-        "git-credential": ("provider", "provider_config"),
-        "session-template": ("harness_integration", "harness_integration_config"),
+    assert {
+        host: (d.kind, d.manifest_section.naming_field, d.manifest_section.config_field)
+        for host, d in _hosting_descriptors().items()
+        if d.manifest_section is not None
+    } == {
+        "vm-site": ("vm-platform", "platform", "platform_config"),
+        "git-credential": ("git-credential-provider", "provider", "provider_config"),
+        "session-template": ("harness-integration", "harness_integration", "harness_integration_config"),
     }
 
     hosted = [d.manifest_section for d in _descriptors() if d.manifest_section is not None]

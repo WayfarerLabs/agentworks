@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from agentworks.declared_resource import METADATA_FIELDS
 from agentworks.errors import ConfigError
 from agentworks.resources import KIND_REGISTRY
 
@@ -20,7 +21,12 @@ if TYPE_CHECKING:
 API_VERSION = "agentworks/v1"
 
 _ENVELOPE_KEYS = {"apiVersion", "kind", "metadata", "spec"}
-_METADATA_KEYS = {"name", "description"}
+
+# Derived from the row base that DECLARES the metadata fields, not listed
+# here: the two used to be hand-kept lists that agreed only by luck, and a
+# fourth metadata field accepted by one layer and rejected by the other is
+# a mistake nobody would see until an operator wrote it.
+_METADATA_KEYS = METADATA_FIELDS
 
 # Kinds with no instance selector yet. named-console-template is
 # framework-plurified (named multi-instance) at the envelope layer, but

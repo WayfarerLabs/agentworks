@@ -13,8 +13,10 @@ agent-template) surfaces as a framework ``ConfigError`` at
 ``build_registry`` time citing the reference's source. Built-in entries
 ship as bundled manifests under ``manifests/builtin/``; operators may add
 or override entries via YAML manifests. The ``_load_system_commands`` /
-``_load_user_commands`` helpers below survive the TOML sunset (ADR 0022)
-because the manifest install decoders delegate to them.
+``_load_user_commands`` helpers below belong to the migrator's frozen TOML
+oracle (``agentworks.migrate.toml_resources``), which is written
+independently of the rows' own models on purpose, so its
+registry-equivalence check stays a real test of the emission mapping.
 
 ``agentworks.resources.kinds.__init__`` imports this module so the two
 kinds self-register into ``KIND_REGISTRY`` at load.
@@ -25,7 +27,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, TypedDict
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from agentworks.declared_resource import DeclaredResource
 from agentworks.errors import ConfigError
@@ -46,24 +48,57 @@ if TYPE_CHECKING:
 # -- Rows --------------------------------------------------------------
 
 
-class SystemInstallCommandEntry(DeclaredResource):
-    # System-declared entry; uniform metadata from ``DeclaredResource``.
-    description: str  # required, an override of the base's optional field
+class _InstallCommandEntry(DeclaredResource):
+    """The spec both install-command kinds declare.
+
+    The two kinds differ in WHO runs the command (root at VM init, the
+    agent or admin user at user init) and in nothing else, so the fields
+    are authored once. Each kind is a named subclass rather than an alias,
+    because the Registry keys rows by type and the two are separate kinds
+    with separate miss policies.
+    """
+
     command: str
+    """The shell command to run."""
+
     path: list[str] = Field(default_factory=list)
+    """Directories prepended to ``PATH`` for the duration of the command."""
+
     test_exec: str | None = None
+    """Skip the install when this command is already on ``PATH``. At most
+    one of the three ``test_*`` fields may be set."""
+
     test_file: str | None = None
+    """Skip the install when this file already exists. ``~`` resolves to
+    the target user's home."""
+
     test_dir: str | None = None
+    """Skip the install when this directory already exists. ``~`` resolves
+    to the target user's home."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _steer_bare_test(cls, data: Any) -> Any:
+        """``test`` is the mistake operators actually make, so it keeps its
+        own steer: as a plain unknown key it would lose the remedy."""
+        if isinstance(data, dict) and "test" in data:
+            raise ValueError("'test' is not a valid field. Use 'test_exec', 'test_file', or 'test_dir'.")
+        return data
+
+    @model_validator(mode="after")
+    def _at_most_one_test(self) -> _InstallCommandEntry:
+        set_count = sum(1 for value in (self.test_exec, self.test_file, self.test_dir) if value is not None)
+        if set_count > 1:
+            raise ValueError("at most one of test_exec, test_file, test_dir may be set")
+        return self
 
 
-class UserInstallCommandEntry(DeclaredResource):
-    # System-declared entry; uniform metadata from ``DeclaredResource``.
-    description: str  # required, an override of the base's optional field
-    command: str
-    path: list[str] = Field(default_factory=list)
-    test_exec: str | None = None
-    test_file: str | None = None
-    test_dir: str | None = None
+class SystemInstallCommandEntry(_InstallCommandEntry):
+    """A system-level (root) install command run during VM init."""
+
+
+class UserInstallCommandEntry(_InstallCommandEntry):
+    """A per-user install command run during admin or agent init."""
 
 
 # -- Loading -------------------------------------------------------------------
@@ -101,7 +136,7 @@ def _load_system_commands(
         tests = _load_test_fields(data, ctx)
         entries[name] = SystemInstallCommandEntry(
             name=name,
-            description=str(data.get("description", "")),
+            description=str(data["description"]) if "description" in data else None,
             command=str(_require_field(data, "command", ctx)),
             path=_require_list(data, "path", ctx) if "path" in data else [],
             declared_at=decls.lookup("system_install_commands", name),
@@ -122,7 +157,7 @@ def _load_user_commands(
         tests = _load_test_fields(data, ctx)
         entries[name] = UserInstallCommandEntry(
             name=name,
-            description=str(data.get("description", "")),
+            description=str(data["description"]) if "description" in data else None,
             command=str(_require_field(data, "command", ctx)),
             path=_require_list(data, "path", ctx) if "path" in data else [],
             declared_at=decls.lookup("user_install_commands", name),
@@ -155,6 +190,7 @@ class _SystemInstallCommandKind:
 
     kind: str = "system-install-command"
     description: str = "System-level (root) install commands for VM init"
+    model: type[DeclaredResource] = SystemInstallCommandEntry
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None
     category: Literal["declarable", "capability"] = "declarable"
@@ -170,6 +206,7 @@ class _UserInstallCommandKind:
 
     kind: str = "user-install-command"
     description: str = "Per-user install commands for admin/agent init"
+    model: type[DeclaredResource] = UserInstallCommandEntry
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None
     category: Literal["declarable", "capability"] = "declarable"

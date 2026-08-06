@@ -53,10 +53,11 @@ def test_plain_subclass_inherits_empty_dependencies() -> None:
     assert _NoOverride(name="x").dependencies(FinalizeContext()) == []
 
 
-def test_the_framework_fields_are_not_operator_surface() -> None:
+def test_only_the_kinds_own_fields_are_spec_surface() -> None:
     """The row IS the kind's spec model, so neither emitted schema nor the
-    field-reference stream may offer ``declared_at`` or ``origin`` as
-    something an operator fills in."""
+    field-reference stream may offer the envelope metadata or the
+    framework's provenance as something an operator writes under
+    ``spec``."""
     from agentworks.schema import iter_field_docs
 
     class _Spec(DeclaredResource):
@@ -64,8 +65,8 @@ def test_the_framework_fields_are_not_operator_surface() -> None:
 
         cpus: int | None = None
 
-    assert set(_Spec.model_json_schema()["properties"]) == {"name", "description", "cpus"}
-    assert {doc.path[0] for doc in iter_field_docs(_Spec)} == {"name", "description", "cpus"}
+    assert set(_Spec.model_json_schema()["properties"]) == {"cpus"}
+    assert [doc.path for doc in iter_field_docs(_Spec)] == [("cpus",)]
 
 
 # Every concrete declared-resource row (all carrying name + description +
@@ -118,17 +119,18 @@ def test_secret_decl_description_is_required() -> None:
         (UserInstallCommandEntry, {"command": "c"}),
     ],
 )
-def test_apt_and_install_entry_description_is_required(
+def test_apt_and_install_entry_description_is_optional(
     cls: type[DeclaredResource], kind_kwargs: dict[str, object]
 ) -> None:
-    """All four apt / install-command entries carry the same
-    required-``description`` override as ``SecretDecl``: omitting
-    description is a construction error, providing it round-trips, and the
-    entry gains the base's ``declared_at``. Parametrized so a future edit
-    that drops any one entry's override (leaving it optional) is
-    caught."""
-    with pytest.raises(PydanticValidationError):
-        cls(name="x", **kind_kwargs)  # type: ignore[call-arg]
+    """The four apt / install-command entries inherit the base's OPTIONAL
+    ``description``, unlike ``SecretDecl``.
+
+    They used to require it on the class while their loaders defaulted it
+    to ``""``, so a manifest that omitted ``metadata.description`` got an
+    empty string and a direct construction got a ``TypeError``: two
+    spellings of "no description", neither of them the base's. One value
+    now, and it is the base's."""
+    assert cls(name="x", **kind_kwargs).description is None
     entry = cls(name="x", description="d", **kind_kwargs)
     assert entry.description == "d"
     assert entry.declared_at == synthesized()

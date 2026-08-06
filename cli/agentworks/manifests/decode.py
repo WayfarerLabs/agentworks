@@ -1,30 +1,31 @@
-"""Spec decode: envelope ``spec`` -> the kind's Resource dataclass.
+"""Spec decode: envelope ``spec`` -> the kind's declared-resource row.
 
-Each decoder owns its per-kind field validation directly (config.toml no
-longer declares resources, ADR 0022, so the manifest decoders no longer
-route through the shared TOML loaders; those loaders relocated to the
-migrator's private oracle, ``agentworks.migrate.toml_resources``). This
-forks the per-kind assembly with the oracle: the two carry near-duplicate
-validation on purpose, so the migrator's registry-equivalence check is a
-real test of the emission mapping rather than a tautology. Phase 2's kind
-spec models dissolve this decoder side. The decoders share the leaf
-validators (``_warn_unexpected_keys``, ``_raise_unexpected_keys``,
-``_parse_env_table``, the two
-nonconforming-secret-name helpers, ``validate_name``) with the oracle, so
-the fork stays narrow. The apt / install-command decoders are the one
-exception: their emission is trivial envelope-wrapping, so they still
-delegate to the ``agentworks.apt`` / ``agentworks.install_commands`` domain
-loaders (imported from there, not from the relocated oracle).
+The adapter here knows nothing about any kind. It reads the row model off
+``KIND_REGISTRY[doc.kind].model``, merges the envelope's metadata into the
+document's ``spec``, validates, and lets the error bridge frame whatever
+comes back. Everything a kind used to say about itself now lives on its
+model, which is the same class the row IS (see
+``agentworks.declared_resource``).
+
+INTERIM, for the length of step 2.5 only: kinds whose model has not
+absorbed its decoder yet still route through ``_DECODERS`` below. That
+fork is what lets the swap land one kind at a time with the suite green
+after each; it goes when the last kind moves, and ``_model_for`` is the
+one place that decides.
+
+**Advisory checks are derived from a declared type or a declared marker,
+never from an enumeration of kinds.** ``ManifestSet.issues`` is the
+load-time warning channel, and a check wired per kind is a check the sixth
+kind of that shape will silently lack. So the non-conforming-secret-name
+warning walks the ``SecretRef`` edges the model declares
+(:func:`advisory_issues`), rather than being called at each site that
+happens to name a secret.
 
 A capability is named by ONE tagged table on its host's naming field
-(``spec.platform: {name: lima, vm_host: ...}``), which
-``_fold_capability_table`` splits into the internal pair the decoders
-consume (a ``platform`` string plus a ``platform_config`` mapping). The
-CONTENT of a capability-owned blob is NOT validated here: its shape check
-is the finalize ``validate`` pass (R3). Decode still performs the
-kind-owned spec-shape checks (a field may not shadow kind-owned surface)
-and attaches the TRUE blob to the decl, so the finalize pass sees every
-capability field.
+(``spec.platform: {name: lima, vm_host: ...}``), which the host row carries
+as a ``CapabilityBlock``. The CONTENT of a capability-owned blob is NOT
+validated here: its shape check is the finalize ``validate_config`` pass
+(R3), against the capability's own declared model.
 
 ``KIND_SECTIONS`` maps kind identifiers to their legacy TOML section
 names; it is the shared table the manifest migrator consumes so the two
@@ -37,15 +38,32 @@ from functools import cache
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
+from pydantic import ValidationError as PydanticValidationError
+
+from agentworks.declared_resource import DeclaredResource
 from agentworks.errors import AgentworksError, ConfigError
+from agentworks.resources import KIND_REGISTRY
+from agentworks.schema import RefOwner, config_error_from, extract_references, validation_context
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
-    from agentworks.capabilities.descriptor import HostSurface
-    from agentworks.config import _SectionLineMap
+    from agentworks.capabilities.descriptor import CapabilityKindDescriptor, HostSurface
     from agentworks.env import EnvEntry
     from agentworks.manifests.envelope import Document
+    from agentworks.schema.reference import ConfigReference
+
+#: The fields a row carries as METADATA rather than as spec surface. They
+#: are real fields of the model, so a document writing one inside ``spec``
+#: would be accepted and would silently override the envelope; derived from
+#: the base rather than listed, so a fourth metadata field cannot be
+#: rejected by one layer and accepted by the other.
+_ROW_METADATA_FIELDS = frozenset(DeclaredResource.model_fields)
+
+#: Where an operator goes to see the shape they got wrong. One hint for
+#: every kind, because the sample surface renders the fields live and a
+#: hand-kept per-kind steer is exactly the drift FR13 exists to kill.
+_SAMPLE_HINT = "see `agw resource sample <kind>` for this kind's fields"
 
 
 # Kind identifier -> legacy TOML section name(s) (the migrator's table).
@@ -73,8 +91,14 @@ KIND_SECTIONS: dict[str, tuple[str, ...]] = {
 
 
 @cache
-def _host_surfaces() -> Mapping[str, HostSurface]:
-    """Declarable kind -> the capability host surface its spec carries.
+def _hosting_descriptors() -> Mapping[str, CapabilityKindDescriptor]:
+    """Declarable kind -> the descriptor of the capability kind its spec
+    selects.
+
+    The whole descriptor rather than its ``manifest_section`` alone,
+    because a caller needs both halves: the field names to read
+    (``manifest_section``) and the capability kind to validate or extract
+    against (``kind``).
 
     Derived from the capability-kind descriptor table, which is where a
     kind records how it is selected inside its host's spec. Three of the
@@ -103,7 +127,7 @@ def _host_surfaces() -> Mapping[str, HostSurface]:
 
     return MappingProxyType(
         {
-            descriptor.manifest_section.host_kind: descriptor.manifest_section
+            descriptor.manifest_section.host_kind: descriptor
             for descriptor in capability_descriptors()
             if descriptor.manifest_section is not None
         }
@@ -181,64 +205,166 @@ def _fold_capability_table(surface: HostSurface, spec: dict[str, object]) -> Non
         spec[config_field] = config
 
 
-def _doc_decls(section: str, doc: Document) -> _SectionLineMap:
-    """A ``_SectionLineMap`` resolving ``(section, doc.name)`` to the
-    document's own location.
+def decode_document(doc: Document, issues: list[str]) -> Any:
+    """Decode one validated envelope into the kind's declared-resource row.
 
-    A manifest document has one position, not a per-section line map, so
-    this seeds the map with the single ``(section, name)`` entry the apt /
-    install-command domain loaders look up. Those loaders (in
-    ``agentworks.apt`` / ``agentworks.install_commands``) are the only
-    decoders that still delegate rather than owning their assembly (their
-    emission is trivial envelope-wrapping); the full-shape decoders below
-    build their decls directly.
+    The spec is validated against the kind's model, which is the row class
+    itself; the error bridge frames every problem with the document's
+    ``file:line`` and the owner's ``kind/name``. Advisory warnings are
+    appended to ``issues``, located the same way.
     """
-    from agentworks.config import _SectionLineMap
+    spec = dict(doc.spec)
+    _reject_spec_metadata(doc, spec)
+    model = _model_for(doc.kind)
+    if model is None:
+        return _legacy_decode(doc, spec, issues)
 
-    return _SectionLineMap(
-        config_path=doc.location.file,
-        section_lines={(section, doc.name): doc.location.line},
+    owner = RefOwner(kind=doc.kind, name=doc.name)
+    payload = {**spec, **_metadata_payload(doc)}
+    try:
+        resource = model.model_validate(payload, context=validation_context(owner))
+    except PydanticValidationError as exc:
+        raise config_error_from(
+            exc,
+            model_cls=model,
+            owner=owner,
+            location=doc.location,
+            hint=_SAMPLE_HINT,
+        ) from exc
+    issues.extend(f"{doc.where}: {issue}" for issue in advisory_issues(resource, doc))
+    return resource
+
+
+def _model_for(kind: str) -> type[DeclaredResource] | None:
+    """The kind's row model, or ``None`` while it is still decoded by
+    hand.
+
+    INTERIM: the ``None`` answer, ``_legacy_decode``, and the
+    ``_DECODERS`` table go together when the last kind gains a model.
+    """
+    model = getattr(KIND_REGISTRY[kind], "model", None)
+    return model if isinstance(model, type) and issubclass(model, DeclaredResource) else None
+
+
+def _metadata_payload(doc: Document) -> dict[str, object]:
+    """The envelope's metadata, as row fields.
+
+    ``description`` is injected only when the document declares one, so a
+    kind that requires it reports a missing field rather than a null.
+    """
+    payload: dict[str, object] = {"name": doc.name, "declared_at": doc.location}
+    if doc.description is not None:
+        payload["description"] = doc.description
+    return payload
+
+
+def _reject_spec_metadata(doc: Document, spec: Mapping[str, object]) -> None:
+    """Refuse a metadata field written inside ``spec``.
+
+    ``extra="forbid"`` closes the spec surface against keys the row does
+    not have, but the metadata fields ARE fields of the row, so
+    ``spec.name`` would be accepted and would silently override the
+    envelope. Derived from the base, so it cannot fall behind a new
+    metadata field.
+    """
+    reserved = sorted(_ROW_METADATA_FIELDS & set(spec))
+    if reserved:
+        raise ConfigError(
+            f"{doc.where}: {', '.join(reserved)} belong(s) in metadata, not in spec",
+        )
+
+
+def advisory_issues(resource: DeclaredResource, doc: Document) -> list[str]:
+    """The load-time warnings this document earns: non-fatal notes an
+    operator should act on but that do not stop the config loading.
+
+    Derived, never enumerated. The secret-name check walks every
+    ``SecretRef`` edge the models declare, on the row itself and on the
+    capability block it hosts, which is what closes issue #311's
+    "hand-enumerating the loaders that reference a secret".
+    """
+    owner = RefOwner(kind=doc.kind, name=doc.name)
+    refs = [*extract_references(type(resource), doc.spec, owner), *_hosted_capability_references(resource, doc, owner)]
+    return [
+        _nonconforming_secret(owner, ref) for ref in refs if ref.kind == "secret" and not _conforming_secret(ref.name)
+    ]
+
+
+def _hosted_capability_references(
+    resource: DeclaredResource,
+    doc: Document,
+    owner: RefOwner,
+) -> tuple[ConfigReference, ...]:
+    """The references the capability block this kind hosts implies, read
+    off that capability's own declared model.
+
+    One honest soft edge: a capability seated by a PLUGIN has not been
+    imported when manifests load (``bootstrap.build_registry`` seats
+    plugins after ``load_manifests``), so its blob contributes nothing
+    here. That is a missed advisory line, never a wrong answer, and the
+    finalize pass still checks the blob's shape.
+    """
+    descriptor = _hosting_descriptors().get(doc.kind)
+    if descriptor is None or descriptor.manifest_section is None:
+        return ()
+    from agentworks.capabilities.config import capability_config_references
+    from agentworks.schema import CapabilityBlock
+
+    block = getattr(resource, descriptor.manifest_section.naming_field, None)
+    if not isinstance(block, CapabilityBlock):
+        return ()
+    return capability_config_references(
+        kind=descriptor.kind,
+        name=block.name,
+        blob=block.config,
+        owner=owner,
     )
 
 
-def decode_document(doc: Document, issues: list[str]) -> Any:
-    """Decode one validated envelope into the kind's Resource instance.
+def _conforming_secret(name: str) -> bool:
+    from agentworks.config.validation import MAX_SECRET_NAME_LENGTH, validate_name
+    from agentworks.errors import ValidationError
 
-    Spec-level warnings (unknown keys on warn-mode kinds, env hygiene)
-    are appended to ``issues`` prefixed with the document location.
-    Spec-level errors re-raise as ``ConfigError`` with the same prefix.
+    try:
+        validate_name(name, max_length=MAX_SECRET_NAME_LENGTH)
+    except ValidationError:
+        return False
+    return True
+
+
+def _nonconforming_secret(owner: RefOwner, ref: ConfigReference) -> str:
+    """The warning text for a secret NAME an operator supplied that does
+    not follow the naming rules.
+
+    A warning rather than an error, deliberately: a non-conforming
+    reference still declares and resolves exactly as before, so this
+    unifies the guarantee at the operator boundary (issues #279, #308)
+    without breaking a config that already loads.
     """
+    from agentworks.config.validation import MAX_SECRET_NAME_LENGTH
+
+    return (
+        f"{owner.display}: secret name {ref.name!r} for {ref.usage} does not follow the secret naming "
+        f"rules (lowercase alphanumeric with hyphens or underscores, starting and ending with a letter "
+        f"or digit, at most {MAX_SECRET_NAME_LENGTH} characters). It still resolves as declared; rename "
+        f"it to conform."
+    )
+
+
+def _legacy_decode(doc: Document, spec: dict[str, Any], issues: list[str]) -> Any:
+    """The pre-model decode path, for the kinds whose model has not
+    absorbed its decoder yet. INTERIM; see :func:`_model_for`."""
     decoder = _DECODERS[doc.kind]
-    spec = dict(doc.spec)
-    # Every declarable kind carries a description field now (the nine
-    # full-shape resources via DeclaredResource, the four apt /
-    # install-command entries on their own), so the envelope's
-    # metadata.description is injected unconditionally: the shared
-    # loaders validate and attach it exactly as for TOML. Description
-    # belongs in metadata, never in spec.
-    if "description" in spec:
-        raise ConfigError(
-            f"{doc.where}: description belongs in metadata.description, not in spec",
-        )
     if doc.description is not None:
         spec["description"] = doc.description
 
     local_issues: list[str] = []
     try:
-        # Capability-shape normalization (tagged table -> internal
-        # sibling pair) runs next, so every decoder and the shared TOML
-        # loaders underneath see exactly one shape. A kind with no host
-        # surface names no capability and needs no fold.
-        surface = _host_surfaces().get(doc.kind)
-        if surface is not None:
-            _fold_capability_table(surface, spec)
+        descriptor = _hosting_descriptors().get(doc.kind)
+        if descriptor is not None and descriptor.manifest_section is not None:
+            _fold_capability_table(descriptor.manifest_section, spec)
         resource = decoder(doc, spec, local_issues)
     except AgentworksError as exc:
-        # A spec-level failure from any loader (the apt / install-command
-        # loaders raise ConfigError directly; others raise their own
-        # AgentworksError subtype) is, from a manifest, an operator-config
-        # mistake, so it re-raises as ConfigError with the document
-        # location, per the LLD's error catalog.
         raise ConfigError(f"{doc.where}: {exc}", hint=exc.hint) from exc
     issues.extend(f"{doc.where}: {issue}" for issue in local_issues)
     return resource
@@ -718,30 +844,6 @@ def _decode_named_console_template(doc: Document, spec: dict[str, Any], issues: 
     )
 
 
-def _decode_apt_source(doc: Document, spec: dict[str, Any], issues: list[str]) -> Any:
-    from agentworks.apt import _load_apt_sources
-
-    return _load_apt_sources({doc.name: spec}, _doc_decls("apt_sources", doc))[doc.name]
-
-
-def _decode_apt_package(doc: Document, spec: dict[str, Any], issues: list[str]) -> Any:
-    from agentworks.apt import _load_apt_packages
-
-    return _load_apt_packages({doc.name: spec}, _doc_decls("apt_packages", doc))[doc.name]
-
-
-def _decode_system_install_command(doc: Document, spec: dict[str, Any], issues: list[str]) -> Any:
-    from agentworks.install_commands import _load_system_commands
-
-    return _load_system_commands({doc.name: spec}, _doc_decls("system_install_commands", doc))[doc.name]
-
-
-def _decode_user_install_command(doc: Document, spec: dict[str, Any], issues: list[str]) -> Any:
-    from agentworks.install_commands import _load_user_commands
-
-    return _load_user_commands({doc.name: spec}, _doc_decls("user_install_commands", doc))[doc.name]
-
-
 _DECODERS: dict[str, Callable[[Document, dict[str, Any], list[str]], Any]] = {
     "secret": _decode_secret,
     "vm-template": _decode_vm_template,
@@ -752,8 +854,4 @@ _DECODERS: dict[str, Callable[[Document, dict[str, Any], list[str]], Any]] = {
     "vm-site": _decode_vm_site,
     "admin-template": _decode_admin_template,
     "named-console-template": _decode_named_console_template,
-    "apt-source": _decode_apt_source,
-    "apt-package": _decode_apt_package,
-    "system-install-command": _decode_system_install_command,
-    "user-install-command": _decode_user_install_command,
 }

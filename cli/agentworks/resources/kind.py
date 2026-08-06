@@ -85,6 +85,15 @@ class ResourceKind(Protocol):
       kinds.
     - ``description``: one operator-facing line for ``agw resource
       kinds``.
+    - ``model``: the kind's declared-resource row class, which IS its
+      spec model. Optional by CATEGORY rather than per kind, like
+      ``instances`` below: every ``declarable`` kind declares one and no
+      ``capability`` kind does, and a test pins exactly that. It is the
+      single per-kind schema authority: manifest decode validates a
+      document's ``spec`` against it, schema emission derives from it,
+      and the sample and describe surfaces render from it. Declared here
+      rather than in a table in the manifest layer, so a new kind cannot
+      be added without one and no switchboard has to be hand-maintained.
     - ``builtin_override``: what happens when an operator manifest
       collides with an app-published built-in row. ``"allow"`` lets the
       operator row replace the built-in; ``"reserved"`` makes the
@@ -143,6 +152,16 @@ class ResourceKind(Protocol):
 
     def synthesize(self, references: Sequence[ResourceReference]) -> Any: ...
 
+    # The ``model`` attribute is optional by CATEGORY, and so it is absent
+    # from this Protocol for the same reason ``instances`` is (below):
+    # declaring it here would force the capability kinds, which have no
+    # declared row at all, to carry a field that means nothing to them.
+    # Every ``declarable`` kind declares it and no ``capability`` kind
+    # does; ``tests/test_resource_kinds.py`` pins that split, and manifest
+    # decode reads it with ``KIND_REGISTRY[kind].model``. Its shape is:
+    #
+    #     model: type[DeclaredResource] = VMTemplate
+    #
     # The optional ``instances(db, registry, resource) -> Iterable[InstanceRef]``
     # method is intentionally NOT declared on this Protocol. Kinds with a
     # per-instance lifecycle concept (the four named template kinds plus
