@@ -85,9 +85,9 @@ kind. Every current kind declares a single default slot, so wave 2's per-kind mo
 exactly as its plan specifies. The slot mechanism exists for the multi-model case: the
 harness-integration kind registers a config model per scope it accepts configuration for (wave 4),
 and a slot is simply an entry in that named-model mapping. Scope support is carried by the
-integration API's methods, not by slot presence (operator simplification, 2026-08-05): a scope may
-be supported with no config model at all. Wave 4 then adds its per-scope models without reshaping
-the descriptor.
+integration's implementation, not by slot presence (operator simplification, 2026-08-05): a scope
+may be supported with no config model at all. Wave 4 then adds its per-scope models without
+reshaping the descriptor.
 
 This is the one deliberate deviation from phase 2's single-model framing, chosen because the cost
 now is a naming layer, while retrofitting multi-model kinds after wave 2 would be a second migration

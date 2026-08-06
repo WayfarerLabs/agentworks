@@ -24,7 +24,10 @@ event.
 
 Lifecycles are what Agentworks already provides. VMs and agents initialize and idempotently
 reinitialize (setup). Workspaces initialize once at create (setup). Sessions start and resume
-(runtime), fixed at create with narrow resume evolution.
+(runtime), fixed at create with narrow resume evolution. Admin-scope setup rides the VM lifecycle,
+as the perspective already held: admin identity work happens during VM init and reinit (today's
+admin plugin installs inside the VM initializer are the precedent). Whether it surfaces as an
+`admin_init` method or an admin phase of `vm_init` is the wave 4 seed's call.
 
 ### The setup pipeline
 
@@ -39,7 +42,9 @@ At every setup scope, one pipeline runs in one order:
 3. **Enabled harness integrations run last**, receiving all env and agent artifacts for the scope.
 
 Reinit (vm, agent) reruns the same pipeline idempotently. Env and agent artifacts are the two
-currencies of the pipeline; their concrete schemas are the wave 4 seed's to settle.
+currencies of the pipeline; their concrete schemas are the wave 4 seed's to settle, and the artifact
+schema MUST NOT foreclose wave 6's artifact model (stable identity, attributed composition, typed
+hooks): composition and hook semantics belong to wave 6.
 
 ### The integration API
 
@@ -48,8 +53,13 @@ directly on the one registered integration API as methods (names indicative): `v
 `agent_init`, `workspace_init`, alongside the existing session `start` and `resume`. The per-scope
 orchestrators call these at the end of their pipelines for the integrations the owning template
 selects. Env is delivered through the run targets; agent artifacts arrive as inputs. The base class
-provides no-op defaults, and an integration implements what it supports; whether a lightweight
-supported-scopes report exists for doctor and guide output is the effort lead's call.
+provides no-op defaults, and an integration implements what it supports; this deliberately
+supersedes the perspective's absence-means-unsupported rule (review and testing catch a mistyped
+override), and whether a lightweight supported-scopes report exists for doctor and guide output is
+the effort lead's call. A per-scope invocation is constructed for its owning resource; it never
+reuses a session instance's target identity, readiness cache, or state namespace, which stay
+session-bound. The Claude-specific template fields (`claude_marketplaces`, `claude_plugins`) migrate
+into the Claude integration's agent-scope and admin-scope config as wave 4 work.
 
 Templates at each owning level select integrations and may attach per-scope config. An integration
 registers a config model for each scope it accepts config for (a named-model mapping under the
@@ -77,7 +87,9 @@ session, and the integration decides placement using its harness knowledge (for 
 session-scoped artifacts under a harness-specific workspace path keyed by `session_uuid`), including
 deduplication and double-provisioning avoidance. Hoisting is isolation, not security: other sessions
 being able to see user-scope artifacts is expected; the integration's job is that hoisted material
-only takes effect for its own workload.
+only takes effect for its own workload. Session-scope env and artifacts come from the session
+template's own declarations; there is deliberately no session-feature initially (one gets added only
+if real pressure emerges).
 
 ### Artifact conduct
 
@@ -98,8 +110,9 @@ schema version as an attribute, so upgrades migrate rather than orphan.
 
 A session integration checks its own upstream prerequisites during readiness (it knows its harness)
 using persisted applied state and inexpensive probes, and reports gaps with remediation pointing at
-the owning operation (`agw agent reinit ...`), through core's standard error framing. It never
-repairs upstream state from a session operation.
+the owning operation (`agw agent reinit ...`), through core's standard error framing. Gaps carry
+severity: a required prerequisite fails the operation, a recommended one warns and permits degraded
+operation. It never repairs upstream state from a session operation.
 
 ## Session and run identity
 
@@ -136,7 +149,9 @@ not as a permission system.
   (wave 4).
 - Whether a supported-scopes report exists for doctor and guide, and its mechanism (wave 4).
 - The interim state home before the instance-state store lands (wave 4).
-- Whether admin setup shares the VM template attachment or is independently configured (wave 4).
+- The admin execution surface (an `admin_init` method versus an admin phase of `vm_init`) and
+  whether admin shares the VM template attachment or is independently configured (wave 4).
+- The retry contract for a partially created workspace with some artifacts already written (wave 4).
 - Ordering and conflict reporting when multiple integrations attach at one broader scope (wave 4).
 - The first slice of the universal event vocabulary and its source/origin/fidelity metadata (wave
   5).
