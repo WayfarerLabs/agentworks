@@ -17,6 +17,7 @@
     "frontends",
     "frozenset",
     "griffe",
+    "introspectable",
     "jsonschema",
     "jsonschema2md",
     "karuppiah",

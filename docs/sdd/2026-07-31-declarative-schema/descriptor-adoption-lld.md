@@ -52,7 +52,7 @@ class CapabilityKindDescriptor:
     #   config_schema            -> step 2.3, when the first config model registers. Holds the kind's model
     #                               CONTRACT (the base every impl's model must extend), which step 2.1 defines,
     #                               so it cannot be typed before then. Implementations declare the model, not
-    #                               the descriptor; consumers choose a named offering (section 7).
+    #                               the descriptor; consumers choose a named config (section 7).
     #   consumer_gating          -> the first NEW consuming surface that consolidates gating (waves 3, 4).
     #                               Wave 2 changes no gating behavior, so no field yet.
     #   migration_participation  -> only if wave 2 rules `agw resource migrate` survives AND should derive
@@ -63,7 +63,7 @@ class CapabilityKindDescriptor:
 Two adjustments to the contract's illustrative list, settled here:
 
 - `union_assembly` is NOT a stored per-record field. Assembly is uniform across kinds (the framework
-  builds one discriminated union per `(kind, offering)` at the registration boundary and caches it),
+  builds one discriminated union per `(kind, config)` at the registration boundary and caches it),
   so it has no per-kind variation to carry. It is a framework operation owned by Component 3 (step
   2.3), not a descriptor field. The contract's field list is explicitly "illustrative, not final
   code," so this is a settlement, not a contradiction.
@@ -305,7 +305,7 @@ hard-error-naming-the-rewrite anyway). Settled: 2.0 derives the enumeration and 
 unifies the folds; 2.5 owns the `_decode_*` decoders. `KIND_SECTIONS` (`decode.py:49`) and
 `KIND_REGISTRY` legitimately enumerate ALL resource kinds and are untouched.
 
-## 7. Config as a producer-side offering (slots and consuming-kind keying both RESCINDED)
+## 7. Config as a producer-side declaration (slots and consuming-kind keying both RESCINDED)
 
 > **Slots are rescinded** (operator ruling, 2026-08-05, roadmap note
 > `roadmap-note-config-schemas.md`; `capability-descriptor-contract.md` on `main` is updated to
@@ -321,22 +321,34 @@ no backend-level config channel at all (`plugins/onepassword/backend.py:11`, cit
 surface today (session-template), because agent recipes carry no harness config. Slots had zero
 exercised cases.
 
-**Config is a producer-side OFFERING** (operator, 2026-08-06, superseding the consuming-kind keying
-this section first specified). A capability declares the config it OFFERS as a fixed set, exactly as
-it declares its fixed set of API methods, and consumers choose which offering they use, exactly as
-they choose which method they call.
+> **PROVISIONAL, 2026-08-06: under discussion with the roadmap lead, do NOT build to this yet.** The
+> operator paused step 2.3 to settle this with the roadmap lead. Two designs have already been
+> rescinded here (the seed's schema slots, then `config_model_for(consuming_kind)`), and the framing
+> below is the third and current one, recorded so the reasoning is not lost. It is not settled.
+> Nothing in the code implements it: step 2.3 was stopped before it wrote anything, so the tree is
+> clean and no rework is owed whichever way this lands.
+
+**Config belongs to the API METHODS, not to the capability object** (operator, 2026-08-06,
+superseding the consuming-kind keying this section first specified). A capability exposes a fixed
+set of methods; each method that takes config has a config TYPE, and that type is the config. There
+is no second table to declare, name, or keep in step with the methods, because the method's contract
+carries it. Choosing the method IS choosing the config.
 
 ```python
 class Capability:
-    config_model: ClassVar[type[BaseModel]]          # the common case: one unnamed offering
+    config_model: ClassVar[type[BaseModel]]          # today: one config shared by all this
+                                                     # capability's operations
 ```
 
-A vm-platform author writes `config_model = LimaConfig` and names nothing. A capability serving
-several surfaces additionally declares NAMED offerings using the scope vocabulary that already names
-its API methods (`vm`, `user`, `workspace`, `session`), so config names and method names are one
-vocabulary. The consuming resource kind declares which offering it uses: a vm-template's admin
-attachment and an agent-template both ask for `user`, exactly as both call `user_init`. Asking for
-an offering a capability does not have is a hard error naming what it does offer.
+Every capability today has exactly one config shared by all of its operations, so a vm-platform
+author writes `config_model = LimaConfig` and names nothing. Wave 4's harness integrations have
+methods that run at different levels (`vm_init`, `user_init`, `workspace_init`, session
+`start`/`resume`), so their configs differ per method for the same reason their parameters do; a
+vm-template's admin attachment and an agent-template both carry the config for `user_init`, exactly
+as both call it. Asking for a config a capability does not have is a hard error naming what it does
+have. One implementation requirement: core validates a declared blob at FINALIZE, before any method
+runs, so the method-to-config association must be introspectable rather than living only in a
+signature the framework never reads.
 
 **Why this replaced `config_model_for(consuming_kind)`.** That design made every PRODUCER enumerate
 its CONSUMERS, so adding a hosting surface meant editing every capability that should serve it, and
@@ -344,20 +356,20 @@ the capability gained nothing from knowing who was asking. It was also strictly 
 the API it parallels, which has fixed methods at fixed levels that are settled and not worth
 generalizing. And it forced each harness integration to encode that vm-template-hosting-admin and
 agent-template mean the same thing, so the two would have had to be kept answering alike by hand.
-Offerings dissolve all three. The wrong-kind rejection that design needed is replaced by the
-stronger and simpler unknown-offering error.
+Declared configs dissolve all three. The wrong-kind rejection that design needed is replaced by the
+stronger and simpler unknown-config error.
 
-**Offering presence is NOT the support claim, and must not become one.** This is the line between
-offerings and the rescinded slot mechanism, and it is easy to blur. The roadmap's
+**Config presence is NOT the support claim, and must not become one.** This is the line between this
+and the rescinded slot mechanism, and it is easy to blur. The roadmap's
 `scope-participation-contract.md` is explicit: scope support is carried by the integration's
 implementation (the base class provides no-op defaults and an integration implements what it
 supports), and "accepting no config at a surface means emitting no schema for it". So a capability
-may support a scope while offering no config there, and the two facts stay independent. Wiring them
+may support a scope while declaring no config there, and the two facts stay independent. Wiring them
 together would reinvent slots under a new name.
 
-Union assembly is therefore per `(kind, offering)`. At wave 2 every capability has exactly one
-unnamed offering, so this reduces to today's per-kind union; wave 4 adds offerings without reshaping
-the mechanism.
+Union assembly is therefore per `(kind, config)`. At wave 2 every capability has exactly one unnamed
+config, so this reduces to today's per-kind union; wave 4 adds configs without reshaping the
+mechanism.
 
 At 2.0 there is nothing to build: no models exist. The descriptor carries no config field at all,
 only a deferred-field comment recording the trigger (step 2.3, when the first model registers) and

@@ -94,37 +94,58 @@ plugin promise (that stays gated on the roadmap's wave 8). Secret-backend's cons
 registry policy is a descriptor-carried interim exception that wave 3 removes; `_VMPlatformKind`
 moves in from `vms/kinds.py` for symmetry during adoption.
 
-**Config is a producer-side OFFERING, not a lookup keyed by consumer** (operator, 2026-08-06,
-superseding the consuming-kind keying it replaced). A capability declares the config it OFFERS as a
-fixed set, exactly as it declares its fixed set of API methods, and CONSUMERS choose which offering
-they use, exactly as they choose which method they call.
+> **PROVISIONAL, 2026-08-06: under discussion with the roadmap lead, do NOT build to this yet.** The
+> operator paused step 2.3 to settle this with the roadmap lead. Two designs have already been
+> rescinded here (the seed's schema slots, then `config_model_for(consuming_kind)`), and the framing
+> below is the third and current one, recorded so the reasoning is not lost. It is not settled.
+> Nothing in the code implements it: step 2.3 was stopped before it wrote anything, so the tree is
+> clean and no rework is owed whichever way this lands.
 
-- **The common case spells nothing extra.** A capability with one config writes `config_model = X`.
-  That covers vm-platform, git-credential-provider, secret-backend, and harness-integration today.
-- **A capability serving several surfaces declares NAMED offerings**, using the scope vocabulary
-  that already names its API methods (`vm`, `user`, `workspace`, `session`), so config names and
-  method names are one vocabulary rather than two that must be kept in step.
-- **The consuming resource kind declares which offering it uses.** A vm-template's admin attachment
-  and an agent-template both ask for `user`, exactly as both call `user_init`.
-- Asking for an offering a capability does not have is a hard error naming what it does offer, which
-  replaces the wrong-kind rejection the earlier design needed.
+**Config belongs to the API METHODS, not to the capability object** (operator, 2026-08-06). This is
+the settled framing, and it supersedes two earlier designs in a row: the seed's schema slots, and
+`config_model_for(consuming_kind)`.
 
-Why this and not `config_model_for(consuming_kind)`: that made every producer enumerate its
-consumers, so adding a hosting surface meant editing every capability that should serve it, and it
-was strictly more dynamic than the API it parallels (which has fixed methods at fixed levels). It
-also forced each harness integration to know that vm-template-hosting-admin and agent-template mean
-the same thing. Under offerings that duplication disappears, and union assembly happens once per
-`(kind, offering)` rather than once per consuming kind.
+A capability exposes a fixed set of methods. Each method that takes config has a config TYPE, and
+that type is the config. There is no second table of config models to declare, name, or keep in step
+with the methods, because the method's own contract carries it. A consumer that drives a capability
+at some level chooses a method, and choosing the method IS choosing the config.
 
-**Offering presence is NOT the support claim, and must not become one.** That is the line between
-this and the rescinded slot mechanism. The roadmap's scope-participation contract is explicit: scope
+- **The common case spells nothing extra.** Every capability today has one config shared by all of
+  its operations, so it writes `config_model = X` and nothing else. That covers vm-platform,
+  git-credential-provider, secret-backend, and harness-integration as they stand.
+- **Wave 4's multi-level case falls out without new machinery.** A harness integration's methods run
+  at different levels (`vm_init`, `user_init`, `workspace_init`, session `start`/`resume`), so its
+  configs differ per method for the same reason its parameters do. A vm-template's admin attachment
+  and an agent-template both carry the config for `user_init`, exactly as both call it, so neither
+  the capability nor the framework has to encode that those two kinds mean the same thing.
+- **Nothing needs naming.** The methods are already named; the configs inherit those names rather
+  than getting a parallel vocabulary. This is also why no collective noun is introduced: the API
+  side never needed one for "the set of methods", and the config side is the same set viewed
+  differently.
+- Asking for a config a capability does not have is a hard error naming what it does have, which
+  replaces the wrong-kind rejection the consumer-keyed design needed.
+
+Why not `config_model_for(consuming_kind)`: it made every PRODUCER enumerate its CONSUMERS, so
+adding a hosting surface meant editing every capability that should serve it; it was strictly more
+dynamic than the API it parallels, whose methods and levels are settled; and it forced each harness
+integration to encode that vm-template-hosting-admin and agent-template mean the same thing. All
+three dissolve once the config is simply part of the method contract.
+
+**One implementation requirement this framing creates.** Core validates a declared config blob at
+FINALIZE, before any method runs, so the association from method to config type has to be
+introspectable rather than living only in a signature annotation the framework never reads. Step 2.3
+keeps that association adjacent to the method contract rather than in a separate registry, precisely
+so the two cannot drift; the drift rule the previous design needed stops existing.
+
+**Config presence is NOT the support claim, and must not become one.** That is the line between this
+and the rescinded slot mechanism. The roadmap's scope-participation contract is explicit: scope
 support is carried by the integration's implementation (the base class provides no-op defaults and
 an integration implements what it supports), and "accepting no config at a surface means emitting no
-schema for it". So a capability may support a scope while offering no config there, and the two
-facts stay independent. Wiring them together would reinvent slots under a new name.
+schema for it". So a capability may support a scope while declaring no config there, and a method
+that takes no config is ordinary. Wiring the two together would reinvent slots under a new name.
 
-Union assembly is per `(kind, offering)`, which reduces to today's per-kind union while every
-capability has exactly one unnamed offering. The descriptor carries no config field until step 2.3
+Union assembly is per `(kind, config)`, which reduces to today's per-kind union while every
+capability has exactly one unnamed config. The descriptor carries no config field until step 2.3
 registers the first model.
 
 ### Component 1: the schema foundation
@@ -171,12 +192,12 @@ The capability contract changes from invoked validation to declared schema:
 - Each capability class declares `config_model` (a model class) at registration; capabilities with
   no config declare the shared empty model. Secret backends declare `mapping_model` the same way,
   dissolving `validate_mapping` and the classmethod-vs-instance inconsistency.
-- The core reaches a model by asking the capability for a named OFFERING, defaulting to the unnamed
+- The core reaches a model by asking the capability for a named config, defaulting to the unnamed
   one (Component 0), never by assuming a capability has exactly one. The declaration above is all a
   simple capability author writes; the indirection exists so a capability serving several surfaces
-  (wave 4's harness integrations) adds offerings without any framework change, and so consuming
-  kinds pick an offering the way they pick an API method. Registration-time conformance checks every
-  model an implementation offers against the kind's model contract.
+  (wave 4's harness integrations) adds configs without any framework change, and so consuming kinds
+  pick a config the way they pick an API method. Registration-time conformance checks every model an
+  implementation offers against the kind's model contract.
 - The base `Capability.validate` / `Capability.dependencies` classmethods are retired. The core
   performs both: validation is `model_validate` on the registered model (owner-framed by the error
   bridge), extraction is `extract_references`. Capability code is never invoked for either, which is
