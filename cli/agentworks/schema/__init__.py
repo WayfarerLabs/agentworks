@@ -8,6 +8,8 @@ hand-validated lives here:
 - :class:`SecretRef` / :class:`ResourceRef`, the ``Annotated`` markers
   that say what a field means about another Resource, and their
   ``x-agw-ref`` JSON Schema encoding.
+- :class:`CapabilityBlock`, the tagged table a hosting kind's spec field
+  holds: the capability's name plus that capability's own config.
 - :func:`extract_references`, the total, never-raising reference
   extractor that reads a raw blob through a model's markers.
 - :func:`iter_field_docs`, the ordered field-reference stream every human
@@ -46,6 +48,7 @@ from agentworks.schema.base import (
     PositiveInt,
     validation_context,
 )
+from agentworks.schema.block import CapabilityBlock
 from agentworks.schema.errors import (
     MAX_ERROR_LINES,
     FramedConfigError,
@@ -80,6 +83,7 @@ __all__ = [
     "UNSET",
     "AgwModel",
     "AgwRootModel",
+    "CapabilityBlock",
     "FieldDoc",
     "FramedConfigError",
     "ModelDoc",

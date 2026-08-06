@@ -203,6 +203,9 @@ _EDGELESS_BY_DESIGN = {
     "NumericallyTaggedSite": "tagged by something other than a name",
     "NeverResolved": "the model cannot be built",
     "ResolvesToUnbuildable": "the model cannot be built",
+    "TableWithConstrainedKeys": "a constrained key names nothing, and neither does its value",
+    "MappingValueLike": "a backend mapping is an external identifier, never a Resource name",
+    "FrameworkFielded": "framework provenance names nothing",
 }
 
 

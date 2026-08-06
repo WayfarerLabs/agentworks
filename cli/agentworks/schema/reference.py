@@ -30,8 +30,8 @@ class RefRelationship(Enum):
 
     Defined here, beside the reference records that carry it, rather than
     with the field markers that declare it: it is the reference
-    vocabulary's word, and this module is a leaf that
-    ``resources/schema/`` imports, never the reverse.
+    vocabulary's word, and this module is a leaf that the rest of
+    ``agentworks/schema/`` imports, never the reverse.
     """
 
     USES = "uses"

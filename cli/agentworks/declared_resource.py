@@ -24,9 +24,13 @@ than every package that inherits it.
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated, Any
 
+from pydantic import AfterValidator, BaseModel
+
+from agentworks.errors import StateError
 from agentworks.source_location import SourceLocation, synthesized
 
 if TYPE_CHECKING:
@@ -114,3 +118,59 @@ class DeclaredResource:
         (``VMSiteDecl``, ``GitCredentialConfig``, ``SessionTemplate``)
         override it.
         """
+
+
+def replace_fields(row: Any, **updates: Any) -> Any:
+    """``row`` with ``updates`` applied, for a frozen dataclass or a
+    frozen model.
+
+    Declared-resource rows are models and the capability marker rows
+    (``VMPlatformEntry`` and kin) are still frozen dataclasses, and both
+    flow through the same framework code (origin stamping, the migrator's
+    source-field normalization). One helper rather than an
+    ``is_dataclass`` branch at each site, because a branch that silently
+    no-ops on the shape it does not know is exactly how the migrator's
+    equivalence check would start comparing provenance.
+
+    Framework-supplied values only: the model path does not re-validate,
+    exactly as ``dataclasses.replace`` does not.
+    """
+    if dataclasses.is_dataclass(row) and not isinstance(row, type):
+        return dataclasses.replace(row, **updates)
+    if isinstance(row, BaseModel):
+        return row.model_copy(update=updates)
+    raise StateError(f"cannot replace fields on {type(row).__name__}: it is neither a frozen dataclass nor a model")
+
+
+def ResourceName(max_length: int) -> object:  # noqa: N802  (an annotation factory, named like the type it builds)
+    """The ``name`` annotation for a kind whose names are validated at
+    load, with that kind's cap.
+
+    The cap is never defaulted here: there is no single correct ceiling,
+    and each kind's is derived at the module that owns its sink (see
+    ``validate_name``). A kind that does not validate its names at load
+    keeps the base's plain ``str``, exactly as it does today.
+
+    The wrapper converts the agentworks ``ValidationError`` into a
+    ``ValueError`` because the former is NOT a ``ValueError`` subclass
+    (it extends ``AgentworksError``), and pydantic re-raises an exception
+    that is neither, so it would escape ``model_validate`` and bypass the
+    error bridge entirely, losing the batch framing for that one error
+    class.
+    """
+
+    def _check(value: str) -> str:
+        # Imported inside the validator, not at module scope: importing
+        # ``agentworks.config.validation`` runs the config package, which
+        # imports the very domain modules that declare the rows using
+        # this annotation.
+        from agentworks.config.validation import validate_name
+        from agentworks.errors import ValidationError
+
+        try:
+            validate_name(value, max_length=max_length)
+        except ValidationError as exc:
+            raise ValueError(str(exc)) from None
+        return value
+
+    return Annotated[str, AfterValidator(_check)]

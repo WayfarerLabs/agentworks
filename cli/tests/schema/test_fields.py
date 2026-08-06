@@ -32,6 +32,7 @@ from ._fixture_models import (
     CatalogLike,
     DiamondLike,
     FieldDiscriminatedSite,
+    FrameworkFielded,
     GithubLike,
     LimaArm,
     MultiArmMarked,
@@ -399,3 +400,32 @@ def test_the_stream_and_the_emitted_schema_agree_inside_a_nested_block() -> None
     assert stream.ref is not None
     emitted = AzureLike.model_json_schema()["$defs"]["PrincipalLike"]["properties"]["secret"][REF_SCHEMA_KEY]
     assert stream.ref.schema_extension() == emitted
+
+
+# --- framework fields are not operator surface ------------------------
+
+
+def test_a_skipped_field_is_not_in_the_stream() -> None:
+    """``SkipJsonSchema`` says "framework, not operator" once, for both
+    derivations. Without the skip, every rendered sample and every
+    describe view would list ``origin`` and ``declared_at`` as fields an
+    operator should fill in."""
+    assert [doc.path for doc in iter_field_docs(FrameworkFielded)] == [("name",), ("cpus",)]
+
+
+def test_a_skipped_field_is_not_in_the_emitted_schema_either() -> None:
+    """The other half of the same claim, pinned beside it: the two
+    derivations drop the same set, off the same marker."""
+    emitted = FrameworkFielded.model_json_schema()
+
+    assert set(emitted["properties"]) == {"name", "cpus"}
+    assert emitted["additionalProperties"] is False
+
+
+def test_a_skipped_field_still_validates() -> None:
+    """The marker hides the field from the two PRESENTATIONS; it does not
+    take it off the model, which is what makes the row and its spec one
+    class."""
+    row = FrameworkFielded.model_validate({"name": "n", "origin": "operator-declared"})
+
+    assert row.origin == "operator-declared"

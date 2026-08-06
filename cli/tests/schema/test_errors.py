@@ -37,11 +37,13 @@ from agentworks.source_location import SourceLocation
 
 from ._fixture_models import (
     CatalogLike,
+    MappingValueLike,
     OneArmSite,
     PrincipalLike,
     SiteLike,
     StringOrTableRoot,
     StringRoot,
+    TableWithConstrainedKeys,
     TemplateLike,
     UndiscriminatedSite,
 )
@@ -364,6 +366,65 @@ def test_an_undiscriminated_union_keeps_its_arms_field_list() -> None:
     lines = _lines(UndiscriminatedSite, {"platform": {"name": "lima", "bogus": 1}})
 
     assert "vm-site/lab.platform.bogus: unknown field; expected one of: name, vm_host" in lines
+
+
+def test_a_constrained_table_key_is_addressed_without_pydantics_key_marker() -> None:
+    """Pydantic's loc is ``('env', 'lower', '[key]')``: the marker says
+    the failure is in the KEY rather than the value, and the key is
+    already the segment before it, so the marker is one more thing the
+    operator never wrote."""
+    assert _lines(TableWithConstrainedKeys, {"env": {"lower": "x"}}) == [
+        "vm-site/lab.env.lower: invalid key 'lower' (must be upper case)"
+    ]
+
+
+def test_a_table_key_spelled_like_the_marker_is_still_addressed() -> None:
+    """The drop is keyed on the walk standing just past a MAPPING key, so
+    a table whose key genuinely is ``[key]`` keeps it. Silly input,
+    but a rule that silently renamed an operator's key would be a wrong
+    answer rather than a rough one."""
+    assert _lines(TableWithConstrainedKeys, {"env": {"[key]": "x"}}) == [
+        "vm-site/lab.env.[key]: invalid key '[key]' (must be upper case)"
+    ]
+
+
+def test_a_value_matching_no_alternative_of_a_union_is_one_problem() -> None:
+    """Pydantic tries each member of an undiscriminated union and reports
+    a failure per member, so one mistake arrives as three problems at one
+    address. The operator has one thing to fix and reads one line."""
+    assert _lines(MappingValueLike, {"backend_mappings": {"npm": 3}}) == [
+        "vm-site/lab.backend_mappings.npm: must be a string, a table, or False"
+    ]
+
+
+def test_a_collapsed_union_line_replaces_pydantics_member_labels() -> None:
+    """The paths those three problems carried (``...npm.str``,
+    ``...npm.dict[str,any]``) named pydantic's members, which is neither
+    something the operator wrote nor something they can act on."""
+    exc = _fails(MappingValueLike, {"backend_mappings": {"npm": 3}})
+
+    assert exc.error_count() == 3
+    assert len(render_validation_error(exc, model_cls=MappingValueLike, owner=OWNER)) == 1
+
+
+def test_a_failure_inside_a_union_member_is_not_collapsed_away() -> None:
+    """A problem DEEPER than the union position is the informative kind
+    (it names a field of the member the operator clearly meant), so the
+    collapse deliberately leaves those alone."""
+    lines = _lines(UndiscriminatedSite, {"platform": {"name": "lima", "vm_host": 8}})
+
+    assert "vm-site/lab.platform.vm_host: must be a string" in lines
+
+
+def test_alternatives_that_name_no_shape_keep_their_own_lines() -> None:
+    """A union member that fails on a LENGTH rather than on a shape has
+    no phrase to contribute to an alternatives list, so the run is left
+    uncollapsed rather than described with a phrase this module would
+    have to invent."""
+    lines = _lines(StringOrTableRoot, "")
+
+    assert "vm-site/lab: must not be empty" in lines
+    assert len(lines) > 1
 
 
 def test_an_undiscriminated_root_models_scalar_arm_renders_unprefixed() -> None:

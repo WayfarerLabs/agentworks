@@ -36,6 +36,7 @@ from agentworks.errors import StateError
 from agentworks.schema._shape import (
     Collection,
     element_metadata,
+    is_hidden,
     model_fields_of,
     shape_of,
     spine_metadata,
@@ -165,6 +166,11 @@ def iter_field_docs(model_cls: type[BaseModel]) -> Iterator[FieldDoc]:
     """``model_cls``'s fields in declaration order, nested blocks expanded
     inline depth-first, union arms left as handles.
 
+    A field marked ``SkipJsonSchema`` is not in the stream: it is
+    framework surface rather than the operator's, and the same one marker
+    takes it out of emitted schema (see
+    :func:`agentworks.schema._shape.is_hidden`).
+
     Determinism is part of the contract: rendered samples have to be
     stable across runs or the tests that pin them are worthless.
 
@@ -235,6 +241,12 @@ def _walk(
         )
     visiting = (*visiting, model_cls)
     for name, field in fields.items():
+        if is_hidden(field):
+            # Framework surface, not the operator's: a declared-resource
+            # row carries its provenance beside its spec fields, and a
+            # sample that listed ``origin`` would be telling operators to
+            # fill in something only the framework sets.
+            continue
         shape = shape_of(field)
         yield _field_doc((*path, name), field, shape)
         block, segment = _expandable(shape)

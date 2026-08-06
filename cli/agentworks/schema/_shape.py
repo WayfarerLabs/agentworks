@@ -7,7 +7,7 @@ a discriminated union? Asking them once, here, is what keeps the two
 walkers from drifting apart on a shape.
 
 Internal to the package: the public surface is
-``resources/schema/__init__``.
+``agentworks/schema/__init__``.
 """
 
 from __future__ import annotations
@@ -17,15 +17,23 @@ import typing
 from contextlib import suppress
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Annotated, TypeGuard, Union, get_args, get_origin
+from typing import TYPE_CHECKING, Annotated, Final, TypeGuard, Union, get_args, get_origin
 
 from pydantic import BaseModel, Discriminator
 from pydantic.errors import PydanticSchemaGenerationError, PydanticUndefinedAnnotation
+from pydantic.json_schema import SkipJsonSchema
 
 from agentworks.schema.markers import RefMarker
 
 if TYPE_CHECKING:
     from pydantic.fields import FieldInfo
+
+#: The runtime class behind ``SkipJsonSchema[X]``, which expands to
+#: ``Annotated[X, SkipJsonSchema()]``, so the metadata item a field
+#: carries is an INSTANCE of it. Bound to a plainly-typed name because
+#: type checkers read the imported symbol as a parameterized alias and
+#: refuse it as an ``isinstance`` target.
+_SKIP_MARKER: Final[type] = SkipJsonSchema
 
 
 @dataclass(frozen=True)
@@ -101,6 +109,19 @@ class FieldShape:
     per member and prefixes each with the member's own name, a segment
     the operator never wrote."""
 
+    item_union_members: tuple[object, ...]
+    """:attr:`union_members` one level down: the members of an
+    undiscriminated union held by a COLLECTION's elements
+    (``dict[str, str | dict[str, object] | Literal[False]]``, a secret's
+    ``backend_mappings``).
+
+    Kept apart from :attr:`union_members` for the same reason
+    ``item_marker`` is kept apart from ``marker``: one describes the
+    field, the other describes one value inside it. Only the error bridge
+    reads it, and for the same reason it reads ``union_members``: without
+    it the walk loses track at the element and renders pydantic's member
+    labels (``backend_mappings.b.str``) as path segments."""
+
 
 def spine_metadata(field: FieldInfo) -> list[object]:
     """Every ``Annotated`` metadata item attached to the field's OWN
@@ -165,6 +186,7 @@ def shape_of(field: FieldInfo) -> FieldShape:
     discriminator: str | None = None
     arms: tuple[UnionArmType, ...] = ()
     union_members: tuple[object, ...] = ()
+    item_union_members: tuple[object, ...] = ()
 
     found = _collection_element(inner)
     if found is not None:
@@ -172,6 +194,8 @@ def shape_of(field: FieldInfo) -> FieldShape:
         element, element_meta = _split_annotated(element)
         item_marker = _first_marker(element_meta)
         item_model = element if _is_model(element) else None
+        if item_model is None and _is_union(element):
+            item_union_members = tuple(_split_annotated(arg)[0] for arg in get_args(element))
     elif _is_model(inner) or _is_union(inner):
         discriminator = _discriminator_of(field)
         if discriminator is not None:
@@ -200,7 +224,25 @@ def shape_of(field: FieldInfo) -> FieldShape:
         discriminator=discriminator,
         arms=arms,
         union_members=union_members,
+        item_union_members=item_union_members,
     )
+
+
+def is_hidden(field: FieldInfo) -> bool:
+    """Whether ``field`` is framework surface rather than operator surface.
+
+    ``SkipJsonSchema`` is the one marker that says so, and it says it
+    once for BOTH derivations: pydantic drops the field from
+    ``model_json_schema`` natively, and the field-reference stream drops
+    it here. That is what lets a declared-resource row carry its
+    ``origin`` and ``declared_at`` beside the operator's spec fields
+    without either surface having to keep an exclusion list.
+
+    Read off :func:`spine_metadata` rather than ``field.metadata``, so
+    the answer does not depend on which of the three legal places the
+    author spelled the annotation in.
+    """
+    return any(isinstance(item, _SKIP_MARKER) for item in spine_metadata(field))
 
 
 def model_is_complete(model_cls: type[BaseModel]) -> bool:

@@ -13,7 +13,8 @@ from __future__ import annotations
 import socket
 from typing import Annotated, Literal
 
-from pydantic import Discriminator, Field
+from pydantic import AfterValidator, Discriminator, Field
+from pydantic.json_schema import SkipJsonSchema
 
 from agentworks.schema import AgwModel, AgwRootModel, NonEmptyStr, ResourceRef, SecretRef
 from agentworks.schema.reference import RefRelationship
@@ -300,6 +301,45 @@ class StringOrTableRoot(AgwRootModel[NonEmptyStr | AccountRefLike]):
     (nothing tags a bare string)."""
 
 
+def _shouty(value: str) -> str:
+    if not value.isupper():
+        raise ValueError(f"invalid key {value!r} (must be upper case)")
+    return value
+
+
+ShoutyKey = Annotated[str, AfterValidator(_shouty)]
+
+
+class TableWithConstrainedKeys(AgwModel):
+    """A table whose KEYS are constrained, which is how an env table
+    validates its variable names. Pydantic reports a key's failure with a
+    trailing ``[key]`` marker segment."""
+
+    env: dict[ShoutyKey, NonEmptyStr] = Field(default_factory=dict)
+
+
+class MappingValueLike(AgwModel):
+    """A table whose VALUES are an undiscriminated union of three
+    shapes: the secret ``backend_mappings`` shape, and the one place
+    pydantic reports a single mistake as one error per member."""
+
+    backend_mappings: dict[str, str | dict[str, object] | Literal[False]] = Field(default_factory=dict)
+
+
+class FrameworkFielded(AgwModel):
+    """A row carrying framework fields beside the operator's.
+
+    ``SkipJsonSchema`` is the one marker that takes a field out of BOTH
+    emitted schema and the field-reference stream, which is what lets a
+    declared-resource row be its own spec model.
+    """
+
+    name: str
+    cpus: int | None = None
+    origin: SkipJsonSchema[str | None] = None
+    declared_at: SkipJsonSchema[str] = "synthesized"
+
+
 #: Every fixture model the totality suite throws garbage at.
 ALL_FIXTURES = (
     GithubLike,
@@ -331,4 +371,7 @@ ALL_FIXTURES = (
     MappingRoot,
     AccountRefLike,
     StringOrTableRoot,
+    TableWithConstrainedKeys,
+    MappingValueLike,
+    FrameworkFielded,
 )

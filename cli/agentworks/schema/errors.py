@@ -41,7 +41,7 @@ from typing import TYPE_CHECKING, Final
 from pydantic import RootModel
 
 from agentworks.errors import ConfigError
-from agentworks.schema._shape import is_model, model_fields_of, shape_of
+from agentworks.schema._shape import Collection, is_model, model_fields_of, shape_of
 from agentworks.source_location import SYNTHESIZED_PATH, format_file_path
 
 if TYPE_CHECKING:
@@ -79,6 +79,32 @@ _TYPE_MESSAGES: Final[Mapping[str, str]] = {
     # "a valid dictionary or object to extract fields from".
     "model_attributes_type": "must be a table",
 }
+
+#: The same shapes as :data:`_TYPE_MESSAGES`, phrased as ONE ALTERNATIVE
+#: in a list ("must be a string, a table, or false"). Only the type
+#: errors appear: an alternative is a SHAPE the value could have taken,
+#: and an error type that reports something else about a value (a length
+#: floor, a bound) does not name a shape. A union whose members are not
+#: all in here is left uncollapsed rather than described with a phrase
+#: this module would have to invent; see :func:`_collapsed`.
+_ALTERNATIVE_PHRASES: Final[Mapping[str, str]] = {
+    "string_type": "a string",
+    "int_type": "an integer",
+    "bool_type": "a boolean",
+    "float_type": "a number",
+    "list_type": "a list",
+    "dict_type": "a table",
+    "model_type": "a table",
+    "model_attributes_type": "a table",
+}
+
+#: Pydantic's marker for a failure in a mapping KEY rather than in its
+#: value: ``('env', '1BAD', '[key]')``. The key itself is already the
+#: preceding segment, so the marker is a segment the operator never
+#: wrote. Dropped by :func:`_resolve_path`, and only where one can
+#: legitimately occur, so a table whose key really is spelled ``[key]``
+#: still renders that key.
+_KEY_MARKER: Final = "[key]"
 
 
 class FramedConfigError(ConfigError):
@@ -180,6 +206,14 @@ class _Problem:
     path: str
     message: str
     inherited_from: str | None = None
+    alternatives: tuple[str, ...] = ()
+    """The shapes this problem says the value could have taken, when it
+    is one member's report of an undiscriminated union's failure.
+    Pydantic reports such a failure as an error per member, all at the
+    same address, and :func:`_collapsed` folds the run back into the
+    single problem the operator actually has. Empty for every problem
+    that is not a union member's, and for a member whose failure names no
+    shape."""
 
     def render(self) -> str:
         text = f"{self.path}: {self.message}" if self.path else self.message
@@ -192,7 +226,7 @@ def _problems(
     owner: RefOwner,
     provenance: Mapping[str, RefOwner] | None = None,
 ) -> list[_Problem]:
-    return [_problem(model_cls, detail, owner, provenance) for detail in exc.errors(include_url=False)]
+    return _collapsed([_problem(model_cls, detail, owner, provenance) for detail in exc.errors(include_url=False)])
 
 
 def _problem(
@@ -201,12 +235,71 @@ def _problem(
     owner: RefOwner,
     provenance: Mapping[str, RefOwner] | None,
 ) -> _Problem:
-    path, container = _resolve_path(model_cls, detail["loc"])
+    address = _resolve_path(model_cls, detail["loc"])
     return _Problem(
-        path=path,
-        message=_message(detail, container),
-        inherited_from=_inherited_from(path, owner, provenance),
+        path=address.path,
+        message=_message(detail, address.container),
+        inherited_from=_inherited_from(address.path, owner, provenance),
+        alternatives=_alternatives(detail) if address.at_union else (),
     )
+
+
+def _collapsed(problems: list[_Problem]) -> list[_Problem]:
+    """One problem per union whose value matched no alternative.
+
+    Pydantic tries every member of an undiscriminated union and reports a
+    failure per member, so ``backend_mappings: {b: 3}`` arrives as three
+    problems at one address. The operator made ONE mistake and has ONE
+    thing to fix, so a run of problems sharing an address and standing at
+    the union position folds into a line naming the alternatives.
+
+    Deliberately narrow in two ways. A problem DEEPER than the union
+    position (``account.reference: is required``, inside a model member)
+    is not part of a run and stays: those are the informative ones, and
+    collapsing them would throw away the only useful thing in the batch.
+    And a run whose members do not all name a SHAPE keeps its lines, so
+    this never has to invent a phrase for an alternative it cannot
+    describe.
+    """
+    collapsed: list[_Problem] = []
+    for problem in problems:
+        previous = collapsed[-1] if collapsed else None
+        if previous is None or not problem.alternatives or not previous.alternatives or previous.path != problem.path:
+            collapsed.append(problem)
+            continue
+        # Deduplicated, because a two-arm union of models reports "a
+        # table" once per arm.
+        merged = previous.alternatives + tuple(
+            item for item in problem.alternatives if item not in previous.alternatives
+        )
+        collapsed[-1] = _Problem(
+            path=previous.path,
+            message="must be " + _one_of(merged),
+            inherited_from=previous.inherited_from,
+            alternatives=merged,
+        )
+    return collapsed
+
+
+def _alternatives(detail: ErrorDetails) -> tuple[str, ...]:
+    """The shape this error says the value could have taken, as one item
+    of an alternatives list, or nothing when it names no shape."""
+    if detail["type"] == "literal_error":
+        # Pydantic pre-formats the values ("'a' or 'b'"), which reads as
+        # one alternative of the outer list without further work.
+        expected = (detail.get("ctx") or {}).get("expected")
+        return (expected,) if isinstance(expected, str) else ()
+    phrase = _ALTERNATIVE_PHRASES.get(detail["type"])
+    return (phrase,) if phrase is not None else ()
+
+
+def _one_of(items: Sequence[str]) -> str:
+    """``items`` as prose: "a", "a or b", "a, b, or c"."""
+    if len(items) <= 1:
+        return "".join(items)
+    if len(items) == 2:
+        return f"{items[0]} or {items[1]}"
+    return ", ".join(items[:-1]) + f", or {items[-1]}"
 
 
 def _inherited_from(path: str, owner: RefOwner, provenance: Mapping[str, RefOwner] | None) -> str | None:
@@ -409,6 +502,16 @@ class _AtElement:
     list index or a table key, both of which the operator DID write."""
 
     item_model: type[BaseModel] | None
+    item_union_members: tuple[object, ...] = ()
+    """What one element holds when it is an undiscriminated union, so the
+    walk can step into :class:`_AtUnion` rather than losing track and
+    rendering pydantic's member labels (``backend_mappings.b.str``)."""
+
+    mapping: bool = False
+    """Whether the elements are addressed by an operator-written KEY.
+    Only a mapping can produce pydantic's ``[key]`` marker, so this is
+    what lets the marker be dropped without also dropping a table key
+    that is genuinely spelled that way."""
 
 
 #: Where a ``loc`` walk currently stands. ``None`` is "lost track", which
@@ -417,23 +520,43 @@ class _AtElement:
 _Cursor = _AtModel | _AtTag | _AtUnion | _AtElement | None
 
 
-def _resolve_path(
-    model_cls: type[BaseModel],
-    loc: tuple[int | str, ...],
-) -> tuple[str, type[BaseModel] | None]:
-    """``loc`` as the dotted address the operator wrote, plus the model
-    that CONTAINS its last segment (which is what an unknown-key message
-    lists the valid fields of).
+@dataclass(frozen=True)
+class _Address:
+    """Where one error happened, as the operator can address it."""
 
-    Walking the model alongside the loc is what makes the two adjustments
+    path: str
+    """The dotted address the operator wrote, empty for a whole-document
+    problem."""
+
+    container: type[BaseModel] | None
+    """The model that CONTAINS the last segment, which is what an
+    unknown-key message lists the valid fields of."""
+
+    at_union: bool
+    """Whether the walk ended ON an undiscriminated union rather than
+    inside one of its members: the mark that this error is one member's
+    report of a single failure the operator sees once."""
+
+
+def _resolve_path(model_cls: type[BaseModel], loc: tuple[int | str, ...]) -> _Address:
+    """``loc`` as the address the operator can act on.
+
+    Walking the model alongside the loc is what makes every adjustment
     honest: a union arm tag is dropped because the model says it is one,
-    and an index becomes ``[i]`` on the field that holds the collection.
+    a key marker is dropped only where a mapping key can produce one, and
+    an index becomes ``[i]`` on the field that holds the collection.
     """
     parts: list[str] = []
     cursor: _Cursor = _initial_cursor(model_cls)
     container: type[BaseModel] | None = None
+    at_union = False
+    after_mapping_key = False
     for segment in loc:
+        if segment == _KEY_MARKER and after_mapping_key:
+            continue
         container = cursor.model if isinstance(cursor, _AtModel) else None
+        at_union = isinstance(cursor, _AtUnion)
+        after_mapping_key = isinstance(cursor, _AtElement) and cursor.mapping
         keep, cursor = _advance(cursor, segment)
         if not keep:
             continue
@@ -441,7 +564,7 @@ def _resolve_path(
             _append_index(parts, segment)
         else:
             parts.append(segment)
-    return ".".join(parts), container
+    return _Address(path=".".join(parts), container=container, at_union=at_union)
 
 
 def _initial_cursor(model_cls: type[BaseModel]) -> _Cursor:
@@ -479,7 +602,9 @@ def _advance(cursor: _Cursor, segment: int | str) -> tuple[bool, _Cursor]:
         member = next((m for m in cursor.members if getattr(m, "__name__", None) == segment), None)
         return False, _AtModel(member) if is_model(member) else None
     if isinstance(cursor, _AtElement):
-        return True, None if cursor.item_model is None else _AtModel(cursor.item_model)
+        if cursor.item_model is not None:
+            return True, _AtModel(cursor.item_model)
+        return True, _AtUnion(cursor.item_union_members) if cursor.item_union_members else None
     if isinstance(cursor, _AtModel) and isinstance(segment, str):
         fields = model_fields_of(cursor.model)
         field = fields.get(segment) if fields is not None else None
@@ -492,7 +617,11 @@ def _cursor_for(shape: FieldShape) -> _Cursor:
     if shape.nested_model is not None:
         return _AtModel(shape.nested_model)
     if shape.collection is not None:
-        return _AtElement(shape.item_model)
+        return _AtElement(
+            shape.item_model,
+            item_union_members=shape.item_union_members,
+            mapping=shape.collection is Collection.MAPPING,
+        )
     if shape.arms:
         return _AtTag(shape.arms)
     if shape.union_members:
