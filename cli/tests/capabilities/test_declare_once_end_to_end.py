@@ -11,12 +11,13 @@ edit to learn about a field, one of these fails, which is the whole
 promise (FR15 for the default, FR6 for the description, FR13 for the
 regime being provable on a fixture rather than only on shipped models).
 
-Coverage as of this file's writing: validation, reference extraction, and
-the ordered field-reference stream that the rendered sample and the
-describe surface both read (``iter_field_docs``). The sample RENDERER and
-the describe COMMAND are step 2.8's and do not exist yet; the emitted
-JSON Schema is step 2.7's. Those arms belong here as they land, against
-this same fixture, rather than in files of their own.
+Coverage as of this file's writing: validation, reference extraction, the
+emitted JSON Schema, and the ordered field-reference stream that the
+rendered sample and the describe surface both read (``iter_field_docs``).
+The sample RENDERER and the describe COMMAND are step 2.8's and do not
+exist yet; their arms belong here as they land, against this same
+fixture, rather than in files of their own, where the
+with-no-other-edits claim would be split up and weakened.
 """
 
 from __future__ import annotations
@@ -31,6 +32,7 @@ from agentworks.capabilities.config import (
     validate_capability_config,
 )
 from agentworks.errors import ConfigError
+from agentworks.manifests.emit import document_schema
 from agentworks.plugins import Plugin, seated_plugin
 from agentworks.schema import AgwModel, NonEmptyStr, RefOwner, SecretRef, iter_field_docs
 from tests.plugins._fixtures import ConformingVMPlatform
@@ -194,3 +196,47 @@ def test_the_stream_is_the_declaration_order() -> None:
     """Determinism is part of the contract: a rendered sample has to be
     stable across runs or the tests pinning it are worthless."""
     assert [doc.path for doc in iter_field_docs(DeclareOnceConfig)] == [("name",), ("region",), ("token",)]
+
+
+# -- Surface 4: the emitted JSON Schema ---------------------------------------
+
+
+def _emitted_arm() -> dict[str, object]:
+    """The fixture platform's arm of the vm-site document schema.
+
+    Emitted for the HOST kind, not for the capability: a schema-aware
+    editor validates the manifest an operator writes, and the arm is
+    reachable only because the platform is seated.
+    """
+    schema = document_schema("vm-site")
+    defs = schema["$defs"]
+    assert isinstance(defs, dict)
+    arm = defs["DeclareOnceConfig"]
+    assert isinstance(arm, dict)
+    return arm
+
+
+def test_the_emitted_schema_carries_the_default_and_the_description(seated: None) -> None:
+    """Same one declaration, reaching the editor: the operator's YAML
+    completes ``region`` with its default and hovers its description
+    without either being authored a second time."""
+    region = _emitted_arm()["properties"]["region"]  # type: ignore[index]
+
+    assert region["default"] == REGION_DEFAULT
+    assert region["description"] == REGION_DESCRIPTION
+    assert region["minLength"] == 1
+
+
+def test_a_defaulted_field_is_not_emitted_as_required(seated: None) -> None:
+    """The counterpart of applying the default: an editor must not
+    red-underline the omission the model resolves. ``token`` is not
+    required either, for the derived case, since ``AgwModel`` fills it
+    from its owner template."""
+    assert _emitted_arm()["required"] == ["name"]
+
+
+def test_the_arm_is_there_only_because_the_capability_is_seated() -> None:
+    """The other half of "no other edits": emission reads the live
+    registry, so an unseated platform contributes no arm, and seating one
+    is the entire act of publishing its schema."""
+    assert "DeclareOnceConfig" not in document_schema("vm-site")["$defs"]
