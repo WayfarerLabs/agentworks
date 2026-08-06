@@ -1,7 +1,7 @@
 """Base interface for session harness integrations.
 
 A harness integration is a capability (see ``capabilities/README.md``): it DECLARES
-the shape of its ``harness_integration_config`` block as a model
+the shape of its own config block as a model
 (``config_model``, which the core validates against), owns the
 session's launch-target readiness (the required-commands probe and the
 skip/defer/probe/error fork), and produces the tmux pane command string
@@ -138,7 +138,7 @@ class HarnessIntegration(Capability):
     def __init__(
         self,
         owner_name: str,  # the session-template name (config owner)
-        config: Mapping[str, object],  # the merged harness_integration_config blob
+        config: Mapping[str, object],  # the merged harness config, without the tag
         *,
         session_name: str,  # the session's own name (addresses the tool)
         vm_name: str,  # the session's VM ancestor
@@ -186,8 +186,8 @@ class HarnessIntegration(Capability):
         config secret gets (issue #305). The usage is the capability's
         own prose plus the declaration site: the sweep frames its error
         with the NODE's key (``session/<name>``), which names the
-        session but not the template whose ``harness_integration_config`` named the
-        secret, so the reference carries that locating info itself. A
+        session but not the template whose ``harness_integration`` table
+        named the secret, so the reference carries that locating info itself. A
         public accessor, so the node never reaches into the base
         ``Capability._secret_refs`` private field. Empty for every
         shipped harness integration (none declares a secret); the
@@ -200,7 +200,7 @@ class HarnessIntegration(Capability):
         enriched = tuple(
             replace(
                 ref,
-                usage=f"{ref.usage}, from the harness_integration_config of {self.owner_kind} '{self.owner_name}'",
+                usage=f"{ref.usage}, from the harness_integration of {self.owner_kind} '{self.owner_name}'",
             )
             for ref in self._secret_refs
         )

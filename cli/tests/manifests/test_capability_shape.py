@@ -632,7 +632,19 @@ def test_the_migrator_covers_every_surface_whose_error_names_it() -> None:
     upgrade covers. A fourth hosting kind would get the hint for free and
     would need an entry there for it to be true; session-template already
     did, and the hint pointed at a command that printed "nothing to
-    migrate" for the exact document that had just failed to load."""
+    migrate" for the exact document that had just failed to load.
+
+    The FIELD NAMES are compared too, not just the kinds. The migrator is
+    a deliberately independent oracle so it hand-writes its own pairs
+    rather than deriving them from ``HostSurface``, and a hand-written
+    copy that has drifted would leave the upgrade looking for a key decode
+    never refuses."""
     from agentworks.manifests.decode import _hosting_descriptors
 
-    assert set(_hosting_descriptors()) == set(_LEGACY_SIBLING_SHAPES)
+    core = {
+        kind: (descriptor.manifest_section.naming_field, descriptor.manifest_section.config_field)
+        for kind, descriptor in _hosting_descriptors().items()
+        if descriptor.manifest_section is not None
+    }
+
+    assert core == _LEGACY_SIBLING_SHAPES

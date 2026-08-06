@@ -1,7 +1,7 @@
 """The ``shell`` harness integration: run an operator-authored command (or a bare
 login shell) as the session workload.
 
-The plain, default member. Its ``harness_integration_config`` vocabulary is exactly
+The plain, default member. Its config vocabulary is exactly
 the flat session-template fields the harness integration model replaces: ``command``
 (the pane command; empty = login shell), ``resume_command`` (the
 command on ``session resume``, falling back to ``command``), and

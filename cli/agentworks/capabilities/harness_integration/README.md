@@ -177,10 +177,9 @@ The capability ladder, harness-integration edition:
   (`capabilities/publish.py`, driven by the kind's descriptor); a plugin-seated integration's row is
   published by the plugin machinery with a `system-plugin` origin instead, and the built-in
   publisher skips it.
-- An **instance** is one integration bound to one session: the merged `harness_integration_config`
-  blob plus the session's identity (`session_name`, `vm_name`, `workspace_name`, the agent-or-admin
-  target) and its per-session state blob. Constructed fresh per operation by the session node
-  factories.
+- An **instance** is one integration bound to one session: the merged harness config blob plus the
+  session's identity (`session_name`, `vm_name`, `workspace_name`, the agent-or-admin target) and
+  its per-session state blob. Constructed fresh per operation by the session node factories.
 - The **consuming resource** is the `session-template` (it owns the config: in manifests,
   `spec.harness_integration` is one tagged table whose `name` key selects the integration and whose
   remaining keys are that integration's config; the operator-facing shapes, including the TOML

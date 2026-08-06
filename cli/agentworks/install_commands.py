@@ -87,6 +87,15 @@ class _InstallCommandEntry(DeclaredResource):
 
     @model_validator(mode="after")
     def _at_most_one_test(self) -> _InstallCommandEntry:
+        """At most one of the three may be set.
+
+        Counted on ``is not None``, so an EMPTY string counts as set. The
+        loader this replaces normalized ``""`` to ``None`` before counting,
+        which made ``test_exec: ""`` beside a real ``test_file`` legal; it
+        is an error now. That follows from strict mode dropping the
+        normalization, but it does not follow from it automatically, so it
+        is said here rather than left to be discovered.
+        """
         set_count = sum(1 for value in (self.test_exec, self.test_file, self.test_dir) if value is not None)
         if set_count > 1:
             raise ValueError("at most one of test_exec, test_file, test_dir may be set")

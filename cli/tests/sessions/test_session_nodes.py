@@ -334,7 +334,12 @@ class _SecretHarnessIntegration(HarnessIntegration):
         return None
 
 
-_EXPECTED_USAGE = "the scanner API key, from the harness_integration_config of session-template 'scan'"
+_EXPECTED_USAGE = "the scanner API key, from the harness_integration of session-template 'scan'"
+"""The usage text a harness integration's declared secret carries.
+
+It named ``harness_integration_config`` until the row started carrying one
+tagged ``harness_integration`` table; there is no such field now, so the
+old text pointed an operator at a key they cannot write."""
 
 
 def _scanner_session(db: Database, monkeypatch: pytest.MonkeyPatch):  # noqa: ANN202

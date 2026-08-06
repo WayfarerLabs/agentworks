@@ -466,3 +466,48 @@ def test_the_upgrade_verifies_against_the_pre_rewrite_rows(tmp_path: Path) -> No
     )
     with pytest.raises(StateError, match="migration verification failed"):
         execute_plan(plan, config)
+
+
+_LEGACY_SESSION_TEMPLATE = """\
+apiVersion: agentworks/v1
+kind: session-template
+metadata:
+  name: htop
+spec:
+  harness_integration: shell
+  harness_integration_config:
+    command: htop
+"""
+
+
+def test_the_session_template_surface_upgrades_too(tmp_path: Path) -> None:
+    """The third host surface, which no shipped release ever EMITTED in
+    the sibling shape and which an operator can still type from `harness:`
+    muscle memory.
+
+    Decode refuses that document and names `agw resource migrate --all` as
+    the remedy, so the remedy has to do something for it. Pinned end to
+    end rather than by the table entry alone: the entry is what makes the
+    upgrade look for the pair, and this is what proves the rewrite it
+    produces loads.
+    """
+    cfg = _write_config(tmp_path)
+    resources = _resources(tmp_path, sessions=_LEGACY_SESSION_TEMPLATE)
+
+    with pytest.raises(ConfigError, match="names the capability as a string"):
+        load_manifests(resources)
+
+    _run(cfg)
+
+    assert (resources / "sessions.yaml").read_text() == dedent("""\
+        apiVersion: agentworks/v1
+        kind: session-template
+        metadata:
+          name: htop
+        spec:
+          harness_integration:
+            name: shell
+            command: htop
+        """)
+    (entry,) = load_manifests(resources).entries
+    assert entry.resource.harness_integration.tagged == {"name": "shell", "command": "htop"}

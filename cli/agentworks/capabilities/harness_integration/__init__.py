@@ -2,7 +2,7 @@
 ``session-template`` ``spec.harness_integration`` value.
 
 Each harness integration implementation is a ``Capability`` (see
-``capabilities/README.md``): it validates its ``harness_integration_config``, owns the
+``capabilities/README.md``): it declares its own config block, owns the
 session's launch-target readiness, and produces the tmux pane command as its
 op (``start`` / ``resume``). The consuming resource is the ``session`` node,
 which HOLDS a harness integration instance and composes its readiness; that node lives in

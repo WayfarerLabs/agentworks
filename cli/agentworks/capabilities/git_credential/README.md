@@ -138,13 +138,14 @@ The capability ladder (`../README.md` has the full model), credential edition:
   `system-plugin` origin, and the built-in publisher skips it (that is exactly how `azdo`
   publishes).
 - An **instance** is one provider bound to one declared credential:
-  `cls(credential_name, provider_config, description=...)`, its config only, never a resolved token.
-  Constructed by the composition roots (see below).
+  `cls(credential_name, config, description=...)`, the capability's own keys only (not the tag), and
+  never a resolved token. Constructed by the composition roots (see below).
 - The **consuming resource** is the `git-credential` declarable (`GitCredentialConfig`,
   `git_credentials/credential.py`): a thin wrapper that names a provider (`spec.provider`'s `name`
-  key) and supplies its `provider_config`, and owns the instance built from it. Its node
-  (`GitCredentialNode`, `git_credentials/nodes.py`) holds the instance, composes its readiness with
-  the one-line fan-in, and folds the instance's declared token secret into its own `secret_refs`.
+  key) and supplies the rest of that table as its config, and owns the instance built from it. Its
+  node (`GitCredentialNode`, `git_credentials/nodes.py`) holds the instance, composes its readiness
+  with the one-line fan-in, and folds the instance's declared token secret into its own
+  `secret_refs`.
 
 Layering is a hard rule: this package depends only on the framework and never imports its consuming
 domain. The consuming resource (`GitCredentialConfig`) and the materials assembly that writes
@@ -368,11 +369,11 @@ Grounded in the two shipped providers.
 #### Source Secrets by Name, Never by Value
 
 A provider names its token secret and reads the value only through the context; it never holds a
-token. The `provider_config`'s `token` field carries a NAME (defaulting to `git-token-<name>`), the
-edge comes from the field's `SecretRef` marker, and the value is delivered to `runup` and the
-materials op through the framework's resolve pass. This is the same discipline the cloud platforms
-follow for their API credentials (see the credentials section of `vm_platform/README.md`): nothing
-ever invites an operator to paste a live credential into a plaintext config file.
+token. The config's `token` field carries a NAME (defaulting to `git-token-<name>`), the edge comes
+from the field's `SecretRef` marker, and the value is delivered to `runup` and the materials op
+through the framework's resolve pass. This is the same discipline the cloud platforms follow for
+their API credentials (see the credentials section of `vm_platform/README.md`): nothing ever invites
+an operator to paste a live credential into a plaintext config file.
 
 #### Probe at Runup, Not Before and Not at Construct
 
@@ -422,8 +423,8 @@ templates:
   selection (verified against a real git version), scope-collision errors, and the store-username
   disjointness rule.
 - **Config contract:** `cli/tests/test_capability_config_contract.py`. The declared model at the
-  `provider_config` boundary: accepted shapes, unknown-field and wrong-type raises, and the token
-  edge extraction.
+  `spec.provider` boundary: accepted shapes, unknown-field and wrong-type raises, and the token edge
+  extraction.
 - **Kind and miss policy:** `cli/tests/resources/test_git_credential_provider_kind.py` (the provider
   kind and its published rows) and `cli/tests/test_git_credentials_typo_errors.py` (the
   `git-credential` kind's error miss policy: a typo'd or undeclared name errors at finalize with the

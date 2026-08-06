@@ -688,10 +688,12 @@ def toml_resource_rows(config_path: Path) -> dict[tuple[str, str], Any]:
 
     Read the ORIGINAL config file text and reconstruct every TOML-declared
     resource decl, keyed by ``(kind, name)``. Soft issues (unknown-key
-    warnings, nonconforming-secret-name nudges) are collected but discarded:
-    the oracle exists to produce the decls the registry comparison uses, not
-    to surface config-load warnings (config.toml declaring resources is a
-    hard error on the normal load path now).
+    warnings) are collected but discarded: the oracle exists to produce the
+    decls the registry comparison uses, not to surface config-load warnings
+    (config.toml declaring resources is a hard error on the normal load
+    path now). It emits no nonconforming-secret-name nudge at all; that
+    check is derived from the models on the manifest side, and the copies
+    here warned into this discarded list.
 
     ``declared_at`` and the other source-dependent fields are left on the
     decls; the caller (``plan_migration``) normalizes them through

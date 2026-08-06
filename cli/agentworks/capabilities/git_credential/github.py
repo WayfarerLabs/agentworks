@@ -84,7 +84,7 @@ def _parse_expiration(raw: str | None) -> date | None:
 class GitHubCredentialProvider(GitCredentialProvider):
     """Configures git credentials for GitHub via a personal access token.
 
-    Optionally scoped via ``provider_config``: ``repos: ["owner/name", ...]``
+    Optionally scoped in the ``spec.provider`` table: ``repos: ["owner/name", ...]``
     (the fine-grained PAT's selected repos) or ``owner: "org"`` (an
     owner-scoped PAT covering any repo under that owner, including
     repos cloned ad hoc that no workspace declared). Unscoped

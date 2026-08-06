@@ -4,7 +4,7 @@ each ``[git_credentials.<name>].provider`` value.
 Each provider implementation (``GitHubCredentialProvider`` in core,
 ``AzDOCredentialProvider`` in the opt-in ``azure`` system plugin) is a
 ``Capability`` (see ``capabilities/README.md``): it declares the shape of
-its ``provider_config``, authenticates its token at the ``runup`` stage, and
+its own config block, authenticates its token at the ``runup`` stage, and
 produces the credential materials as its op. The consuming resource
 (``GitCredentialConfig``) and the materials assembly that writes them to
 a VM live in the ``git_credentials`` domain, not here; capabilities

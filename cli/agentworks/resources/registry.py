@@ -349,7 +349,7 @@ class Registry:
         6. **attach**: build the retained frozen ``DependencyGraph``
            (inbound references + fold verdicts on the node), then synthesize
            descriptions for auto-declared rows from the graph's inbound refs.
-        7. **validate**: run each READY + ENABLED Resource's ``validate()``
+        7. **validate**: run each READY + ENABLED Resource's ``validate_config()``
            (throwing, ``file:line``-framed). A not-ready or disabled row's
            block is deferred, not validated (R9.4). Distinct from graph
            construction (R3): the build passes never throw on a malformed

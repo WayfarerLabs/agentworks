@@ -1,7 +1,7 @@
 """Base interface for git credential providers.
 
 A git credential provider is a capability (see ``capabilities/README.md``):
-it DECLARES the shape of its own ``provider_config`` block as a model,
+it DECLARES the shape of its own config block as a model,
 including the secret its token comes from, checks that token against the
 host at the post-resolve ``runup`` stage, and produces the credential
 materials (``credential_lines`` / ``helper_entry``) as its op. Token
@@ -89,10 +89,12 @@ class GitCredentialProvider(Capability):
 
     A thin-wrapper capability (``git-credential`` over
     ``git-credential-provider``): the ``git-credential`` consuming
-    resource names a provider and supplies its ``provider_config``, and
-    the instance does the real work. It is constructed by the
-    composition roots as ``cls(credential_name, provider_config,
-    description=...)``: bound to one declared credential, never
+    resource names a provider in one tagged ``spec.provider`` table and
+    the rest of that table IS this config, so the instance does the real
+    work. It is constructed by the composition roots as
+    ``cls(credential_name, config, description=...)``, with the
+    capability's OWN keys and not the tag: bound to one declared
+    credential, never
     resolved secret values (see the ``Capability`` lifecycle). The
     declared token secret joins the operation's boundary union through
     the holding node's ``secret_refs`` and its value arrives through
@@ -114,13 +116,13 @@ class GitCredentialProvider(Capability):
         description: str | None = None,
     ) -> None:
         # An omitted config is an EMPTY one, not a missing one: an
-        # unscoped credential declares no provider_config at all and its
-        # token secret comes from the owner template. Defaulted here
+        # unscoped credential writes nothing but the tag and its token
+        # secret comes from the owner template. Defaulted here
         # rather than on each provider, which is where the two shipped
         # ones used to spell it.
         super().__init__(owner_name, config or {})
         # Display sugar for the consuming resource's name; not part of
-        # the capability's config (which is provider_config alone).
+        # the capability's config (which is the tagged table's other keys).
         self._description = description
 
     @property
