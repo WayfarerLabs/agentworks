@@ -50,9 +50,13 @@ Plan A for onboarding: the operator's existing vanilla workstation harness drive
 harness-specific plugins or marketplace entries published from the Agentworks repo. The onboarding
 agent deliberately sits outside Agentworks (a managed agent must not modify the system it runs in),
 so the agentic-artifacts layer is not the delivery path for onboarding skills. Onboarding is
-idempotent and rerunnable, and conspicuously consent-first about probing the operator's machine.
-Discovery and schema help are derived from registries, schema emission, live samples, and describe
-surfaces so they cannot drift.
+idempotent and rerunnable, and conspicuously consent-first about examining the operator's machine:
+Agentworks itself never probes, the agent does (instructed by guide content), and `agw` supplies
+non-probing verification of configured state. The repository README leads with a single copy-paste
+bootstrap block addressed to the agent (install from PyPI, run `agw guide`), a first-class
+zero-plugin path beside the plugins, which are kept primarily for advertising and discoverability
+(operator rulings, 2026-08-06). Discovery and schema help are derived from registries, schema
+emission, live samples, and describe surfaces so they cannot drift.
 
 The teaching surface (operator rulings, 2026-08-05): `agw guide [topic ...]` serves skill-shaped
 markdown for agents and humans alike, blending static authored content with dynamic content from the
