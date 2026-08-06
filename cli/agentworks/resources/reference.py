@@ -116,17 +116,24 @@ class ResourceReference:
 
 @dataclass(frozen=True)
 class ConfigReference:
-    """A resource reference implied by a capability's config block,
-    returned by the capability's ``dependencies``. Sourceless by
-    design: the consuming resource that owns the config block attaches
-    itself as the ``source`` when it emits the corresponding
+    """A resource reference implied by a modeled blob: the record
+    ``extract_references`` produces from a model's reference-marked
+    fields, and the record a capability's ``dependencies`` returns while
+    that hand-rolled surface still exists.
+
+    Sourceless by design: the consuming resource that owns the blob
+    attaches itself as the ``source`` when it emits the corresponding
     ``ResourceReference`` (whoever hosts the config that names the
     resource emits the reference).
+
+    ``relationship`` says what the referrer MEANS by the edge; it
+    defaults to ``USES``, which is what every producer implies today.
     """
 
     kind: str
     name: str
     usage: str
+    relationship: RefRelationship = RefRelationship.USES
 
 
 @dataclass(frozen=True)

@@ -8,6 +8,8 @@ hand-validated lives here:
 - :class:`SecretRef` / :class:`ResourceRef`, the ``Annotated`` markers
   that say what a field means about another Resource, and their
   ``x-agw-ref`` JSON Schema encoding.
+- :func:`extract_references`, the total, never-raising reference
+  extractor that reads a raw blob through a model's markers.
 
 This package sits BELOW the domains that use it. It may import
 ``resources/reference.py`` (the reference records it produces) and
@@ -20,7 +22,8 @@ imports ``resources/reference.py``, never the reverse.
 
 from __future__ import annotations
 
-from agentworks.resources.schema.base import AgwModel, AgwRootModel
+from agentworks.resources.schema.base import AgwModel, AgwRootModel, validation_context
+from agentworks.resources.schema.extract import extract_references
 from agentworks.resources.schema.markers import (
     REF_SCHEMA_KEY,
     RefMarker,
@@ -37,4 +40,6 @@ __all__ = [
     "RefOwner",
     "ResourceRef",
     "SecretRef",
+    "extract_references",
+    "validation_context",
 ]
