@@ -2,8 +2,9 @@
 
 Date: 2026-08-05
 
-Status: REVIEWED, UNDER IMPLEMENTATION (section 10 steps 1-3 landed 2026-08-05). Companion to
-[frd.md](frd.md), [hla.md](hla.md) (Component 0), [plan.md](plan.md) (step 2.0). Authority:
+Status: IMPLEMENTED (all ten steps of the section 10 sequence landed 2026-08-05 and 2026-08-06,
+reviewed in three batches, findings fixed). Companion to [frd.md](frd.md), [hla.md](hla.md)
+(Component 0), [plan.md](plan.md) (step 2.0). Authority:
 `../2026-08-04-next-steps/capability-descriptor-contract.md` (the design decision record; where it
 says "settled" this LLD builds, where it lists open questions for the wave 2 seed this LLD settles
 them). Deviations found during implementation are recorded inline against the section they revise.
@@ -95,14 +96,28 @@ at module import. This inherits the existing cycle discipline rather than invent
 > read `capability_descriptors()`. The lazy discipline buys CYCLE SAFETY, not import deferral:
 > anything importing `resources.kinds` now transitively loads the capability packages.
 >
-> **The same constraint applied one level down at every derived site**, so each of these is a cached
-> accessor rather than the module-level constant the LLD writes, for the identical reason (the
-> consuming module loads before the capability packages): `_CAPABILITY_KINDS` reads as
-> `_capability_kinds()`, `_CAPABILITY_REGISTRY_LOADERS` as `_capability_registry_loaders()`,
-> `CAPABILITY_ADAPTERS` as `capability_adapters()`, and `CAPABILITY_FIELDS` as `capability_fields()`
-> (with an internal `_host_surfaces()`). Caching is safe because every cached value derives only
-> from frozen module-level records and caches ACCESSORS rather than registries, so plugin seating
-> and snapshot/restore stay fully visible. Read sections 3, 6, 10, and 12 through these spellings.
+> **Every derived site is likewise a cached accessor, not the module-level constant the LLD
+> writes:** `_CAPABILITY_KINDS` reads as `_capability_kinds()`, `_CAPABILITY_REGISTRY_LOADERS` as
+> `_capability_registry_loaders()`, `CAPABILITY_ADAPTERS` as `capability_adapters()`, and
+> `CAPABILITY_FIELDS` as `capability_fields()` (with an internal `_host_surfaces()`). Read sections
+> 3, 6, 10, and 12 through these spellings.
+>
+> **Correction (review, 2026-08-06): only the two `resources/graph.py` accessors are FORCED.** An
+> earlier version of this note claimed all four were forced by the same cycle constraint. That was
+> checked and disproved: converting `capability_adapters()`, `_host_surfaces()`, and
+> `capability_fields()` to eager module-level constants and importing `decode`, `adapters`,
+> `plugins`, `resources.kinds`, `config`, and `cli` all succeed, because no capability `kinds.py`
+> transitively imports anything under `agentworks.plugins` or `agentworks.manifests` (and
+> `agentworks.manifests.__init__` already loads the capability packages anyway). Only
+> `agentworks.capabilities.vm_platform.kinds` transitively loads `agentworks.resources.graph`, so
+> only graph's accessors resolve a real cycle. The other two stay accessors for UNIFORMITY with the
+> forced pair and to keep the load boundary at first use, which is a defensible reason but not the
+> cycle-safety one. Stating it accurately matters because a false forcing claim would let a future
+> reader believe the shape is load-bearing everywhere.
+>
+> Caching is safe because every cached value derives only from frozen module-level records and
+> caches ACCESSORS rather than registries, so plugin seating and snapshot/restore stay fully
+> visible.
 
 `KIND_REGISTRY` stays the all-kinds runtime map; the descriptor is the capability-kind SWITCHBOARD
 enumeration. Their relationship is pinned, not merged: the guard (section 12) asserts

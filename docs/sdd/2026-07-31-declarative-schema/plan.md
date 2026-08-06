@@ -188,7 +188,18 @@ policy is recorded as an explicit descriptor-carried interim exception (wave 3 r
       `test_every_capability_switchboard_site_derives_from_the_descriptor` since the old name no
       longer described it, and proven non-vacuous by mutation. Sibling guards got docstring-only
       changes, no assertion touched.)
-- [ ] Reviewer pass on the whole step; findings fixed. (Roadmap lead reviews the PR before merge.)
+- [x] Reviewer pass on the whole step; findings fixed. (Roadmap lead reviews the PR before merge.)
+      Three independent reviewer passes, one per batch, all findings fixed. The substantive ones:
+      `interactive` escaped the conformance check entirely and would have surfaced as a late
+      `AttributeError` in the resolve loop (fixed via `required_attributes`); the graph guard's
+      pattern-2 coverage had silently shrunk to "reads spelled with the constant's name" once
+      modules moved to `descriptor.registry()` (fixed with a second detector); session-template's
+      wave-1 hardening had become one token in a data record with NO behavioral test, so flipping it
+      un-hardened the manifest shape while only two table-shape tests noticed (fixed with two
+      negative tests in `test_capability_shape.py`); and the flipped guard proved agreement but not
+      derivation, since set-equality is satisfied exactly by a re-hardcoded enumeration (fixed with
+      a source-level AST pin over all six derived sites). The last three were each verified by
+      re-running the mutation that motivated them, by the lead independently of the implementer.
 
 **Progress note, 2026-08-05 (paused here for a design revision).** The first batch (the three boxes
 above, LLD section 10 steps 1-3) is landed, reviewed, and green at 3443 tests; the reviewer's two
