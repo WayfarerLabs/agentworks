@@ -277,7 +277,7 @@ the derivation sequence are not started.
       its docstring. Step 2.2 builds no severity mechanism; the real requirement behind the phrase
       is a PURE rendering entry point (`render_validation_error`) beside the throwing one, so the
       same text is reusable as diagnostic output.
-- [ ] Bridge implemented with the FRD's representative-mistakes corpus as a pinned test: unknown
+- [x] Bridge implemented with the FRD's representative-mistakes corpus as a pinned test: unknown
       key, wrong type, missing required field, bad capability name, each asserting owner framing and
       file/position context at least as good as today's. (The old-sibling-shape corpus entry lands
       in 2.4, where its bespoke error exists to pin.)

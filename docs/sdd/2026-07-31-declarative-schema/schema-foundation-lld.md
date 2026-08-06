@@ -842,10 +842,32 @@ correct one. Day-one entries, chosen to match shipped phrasing:
 - `extra_forbidden`: `unknown field; expected one of: a, b, c` (the list read off `model_cls`)
 - `string_type` / `int_type` / `bool_type` / `float_type`: `must be a string` / `an integer` /
   `a boolean` / `a number`
-- `list_type`: `must be a list`; `dict_type` and `model_type`: `must be a table`
-- `string_too_short`: `must not be empty`
-- `literal_error`: `must be one of: x, y`
-- `union_tag_missing`: `name is required`; `union_tag_invalid`: `unknown name 'x'; registered: ...`
+- `list_type`: `must be a list`; `dict_type`, `model_type`, and `model_attributes_type`:
+  `must be a table`
+- `string_too_short`: `must not be empty`, but ONLY when `min_length == 1`
+- `literal_error`: `must be one of: <pydantic's own rendered alternatives>`
+- `union_tag_not_found`: `name is required`; `union_tag_invalid`:
+  `unknown name 'x'; registered: ...`
+
+> **Corrections from the 2.2 implementation (2026-08-06), each verified by execution against
+> pydantic 2.13.4.** This table was written from memory of pydantic's error types and four entries
+> were wrong in ways that would have shipped bad messages:
+>
+> - **`union_tag_missing` does not exist**; the real type is `union_tag_not_found`. As spelled the
+>   entry would never have fired, and a missing capability name would have fallen through to "Unable
+>   to extract tag using discriminator 'name'".
+> - **`model_attributes_type` was missing.** A discriminated-union field given a bare scalar
+>   (`platform: lima` instead of a table) reports it, not `model_type`. That is the likeliest single
+>   operator mistake at 2.3, so it would have been the worst message the bridge emits.
+> - **`string_too_short` is guarded to `min_length == 1`.** A flat "must not be empty" is a FALSE
+>   paraphrase for a floor of 3, and the never-fabricate rule forbids that more strongly than the
+>   table entry requires it. Above 1 it falls through to pydantic's exact wording.
+> - **`literal_error`'s alternatives come pre-rendered** in `ctx["expected"]`
+>   (`"'arm64' or 'x86_64'"`). Re-deriving them from the annotation would be a second enumeration to
+>   keep in sync with pydantic's own.
+> - Two smaller facts: `ctx["discriminator"]` arrives PRE-QUOTED, so it is unquoted before use or
+>   every message reads `unknown 'name' 'lmia'`; and a root model's errors carry no `root` loc
+>   segment, so the walk must start inside what the root wraps or the first segment eats the path.
 
 The last entry is the capability-name case; it is listed here because the bridge owns the rendering,
 but the registered-options text only becomes real in 2.3 when unions are assembled, and R9.2's hard
