@@ -102,7 +102,9 @@ reviewer alike, and inherit only when inheriting is the deliberate choice.
 
 Every development step gets reviewed by the `agentworks-reviewer` subagent before you consider it
 done, at the model tier from section 4 (reviewer >= dev). This holds for delegated steps and for
-small changes you make directly.
+small changes you make directly. Give the reviewer what the diff cannot show it: who held which role
+(you, or a delegated dev) and whether this PR is meant to merge as-is. Its SDD-process check turns
+on both, and neither is recoverable from the changes themselves.
 
 The stance toward any finding, from the reviewer or from automated review (section 7), is the same:
 
@@ -126,12 +128,14 @@ after a burst of process changes, before locking a roadmap-level effort, or when
 asks, run one comprehensive consistency review over the whole process tree: skills, rules, and
 subagent definitions together, in a single pass.
 
-That pass needs a fresh context reading the tree cold, never the context that authored the changes.
-It hunts pairwise contradictions, rules that silently override one another, gaps where one document
-assumes something another never establishes, and cross-references gone stale. Porting the process
-docs into a separate context and having independent reviewers read them as outsiders is a proven
-technique here: it surfaced four live contradictions that per-change reviews had passed. Findings
-route like any other review; triage them, push back on the wrong ones, and fix the valid ones.
+Run it as an `agentworks-reviewer` subagent in a fresh context, launched explicitly at the top tier
+(section 4 applies here too: name the model, do not inherit). Never use the context that authored
+the changes; the whole point is a reader who has to work the tree out from what it says. It hunts
+pairwise contradictions, rules that silently override one another, gaps where one document assumes
+something another never establishes, and cross-references gone stale. Porting the process docs into
+a separate context and having independent reviewers read them as outsiders is a proven technique
+here: it surfaced four live contradictions that per-change reviews had passed. Findings route like
+any other review; triage them, push back on the wrong ones, and fix the valid ones.
 
 ## 6. Commit, push, and PR
 

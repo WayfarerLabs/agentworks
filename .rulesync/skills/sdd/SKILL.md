@@ -79,11 +79,12 @@ is no longer relevant, it should be left as-is and new checkboxes should be adde
 plan. This preserves the historical record of what was actually done, even if the implemented
 solution evolves.
 
-Immutability protects _truthful_ records, which leaves one carve-out. While the branch is still
-unmerged, correcting a box that was checked prematurely or in error is fixing a bad entry, not
-rewriting a good one, and is allowed: an inaccurate checkbox is not a historical record of anything.
-The rule binds fully once the plan is on `main`, in step with the lock-at-merge paragraph under
-[Lockfile](#lockfile).
+Immutability protects _truthful_ records, which leaves one carve-out. A box checked prematurely or
+in error may be corrected while it is still unmerged: fixing a bad entry is not rewriting a good
+one, and an inaccurate checkbox is not a historical record of anything. The rule binds fully once
+the checked box has merged to `main`, in step with the lock-at-merge paragraph under
+[Lockfile](#lockfile). Key that to the box, not to the plan file: plans routinely merge mid-effort,
+so the plan being on `main` says nothing about whether any particular box has landed there yet.
 
 Mutability also follows ownership. An agent working an effort edits that effort's SDD artifacts and
 no other's: do not update another SDD's content (a roadmap SDD's ledger, a sibling effort's plan)
