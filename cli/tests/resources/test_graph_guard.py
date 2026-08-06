@@ -41,9 +41,12 @@ are the same call). "Non-exempt module" is the guard's unit: a banned pattern
 reintroduced in any module NOT on the relevant allow-list fails the build. The
 allow-listed modules are trusted; each is justified inline on its allow-list.
 
-- ``capabilities/base.py``: the construct-time ``_secret_refs`` derivation, a
-  capability computing its OWN config-implied refs from its OWN config via
-  ``dependencies(config)`` (not a graph re-walk).
+An exemption is not a permanent grant. ``test_every_exemption_is_load_bearing``
+fails an entry whose module has stopped performing the banned operation, because
+such an entry is a HOLE rather than a leftover: the guard goes on trusting a
+module that has nothing left to trust it for. Declarative-schema step 2.3 left
+eight of them behind in one change, which is why the check exists.
+
 - ``resources/graph.py`` + ``resources/registry.py``: the graph BUILDER. It
   walks each resource's ``dependencies(context)`` (handing it the build
   context), reaches the capability code registries to stamp each capability
@@ -135,6 +138,8 @@ import ast
 from collections.abc import Callable
 from pathlib import Path
 from typing import TypeGuard
+
+import pytest
 
 import agentworks
 
@@ -303,10 +308,16 @@ _DEPENDENCIES_ALLOWLIST = frozenset(
     {
         "resources/graph.py",  # graph builder
         "resources/registry.py",  # graph builder (walks dependencies(context))
-        "capabilities/base.py",  # construct-time _secret_refs (own config)
-        "vms/sites.py",  # edge production (capability.dependencies)
-        "git_credentials/credential.py",  # edge production
-        "sessions/template.py",  # edge production
+        # Deliberately ABSENT since declarative-schema step 2.3, and each
+        # absence is the point of that step rather than an oversight. The
+        # three consuming resources and the capability base all used to call
+        # a CAPABILITY's ``dependencies(owner, config)``; that classmethod is
+        # gone, and the core reads a capability's references off its declared
+        # model instead. An attribute call to ``dependencies`` reappearing in
+        # any of them would be the invoked contract coming back, which is
+        # exactly what this guard should refuse:
+        #   capabilities/base.py, vms/sites.py,
+        #   git_credentials/credential.py, sessions/template.py
     }
 )
 
@@ -336,16 +347,19 @@ _REGISTRY_READ_ALLOWLIST = frozenset(
         "capabilities/harness_integration/kinds.py",
         "capabilities/git_credential/kinds.py",
         "secrets/kinds.py",
-        # Edge production + finalize validate (fetch the capability class).
-        "vms/sites.py",
-        "git_credentials/credential.py",
-        "sessions/template.py",
-        "secrets/base.py",
         # Op-time construction of a capability instance.
+        "vms/sites.py",  # resolve_site: the one chokepoint every VM op passes
         "git_credentials/__init__.py",
         "vms/initializer/credentials.py",
-        # Migrate dry-run (not a finalized-registry path).
-        "migrate/planning.py",
+        # Deliberately ABSENT since declarative-schema step 2.3: edge
+        # production and finalize validate no longer fetch a capability
+        # class at all. Each of the four asks the core instead
+        # (``capability_config_references`` / ``validate_capability_config``),
+        # which reaches the registry once, in ``capabilities/config.py``, on
+        # the descriptor allow-list below. A registry read reappearing in any
+        # of them would be the probe this pattern bans:
+        #   git_credentials/credential.py, sessions/template.py,
+        #   secrets/base.py, migrate/planning.py
         # Decode-time shadow check (code-registry membership).
         "manifests/decode.py",
         # Load-time validation of the deprecated [secret_backends] section.
@@ -366,11 +380,11 @@ _DESCRIPTOR_REGISTRY_ALLOWLIST = frozenset(
         # fetches the seated implementation CLASS to read the config model it
         # declares, which is the edge-production-and-validate read the four
         # consuming resources used to do by naming their kind's registry.
-        # Same sanctioned read, relocated: as each consuming resource moves
-        # onto this module it gives up its own exemption above, so the
-        # exempted surface shrinks from four call sites to one. Availability
-        # is never what it asks: an absent name yields no model, and the
-        # dangling capability edge is what reports it.
+        # Same sanctioned read, relocated: all four gave up their own
+        # exemptions above when they moved onto this module, so the exempted
+        # surface for that read is one call site rather than four.
+        # Availability is never what it asks: an absent name yields no model,
+        # and the dangling capability edge is what reports it.
         "capabilities/config.py",
         # Deliberately ABSENT, and each absence is load-bearing rather than an
         # oversight:
@@ -631,6 +645,67 @@ def test_descriptor_exempt_reads_are_function_scoped() -> None:
     assert not not_ready_offenders, (
         "secrets/kinds.py calls not_ready outside the descriptor's readiness "
         "callable (read the stored verdict via readiness_of instead):\n" + "\n".join(not_ready_offenders)
+    )
+
+
+# -- Allow-list hygiene: an exemption that stops firing is a hole -------------
+
+
+#: Allow-list entries kept even though nothing in them currently fires the
+#: detector, with the reason each is worth keeping. Both are the graph
+#: BUILDER, which walks every resource's ``dependencies(context)`` through
+#: the module-level ``_dependencies`` helper (a bare-name call the detector
+#: deliberately ignores). Spelling that walk as an attribute call again would
+#: be an ordinary refactor of the sanctioned path, not a regression, so the
+#: exemption stays ahead of it.
+_DELIBERATELY_QUIET = {
+    ("_DEPENDENCIES_ALLOWLIST", "resources/graph.py"),
+    ("_DEPENDENCIES_ALLOWLIST", "resources/registry.py"),
+}
+
+
+@pytest.mark.parametrize(
+    ("name", "finder", "allowlist"),
+    [
+        pytest.param("_DEPENDENCIES_ALLOWLIST", find_dependencies_calls, _DEPENDENCIES_ALLOWLIST, id="dependencies"),
+        pytest.param("_REGISTRY_READ_ALLOWLIST", find_registry_reads, _REGISTRY_READ_ALLOWLIST, id="registry-read"),
+        pytest.param(
+            "_DESCRIPTOR_REGISTRY_ALLOWLIST",
+            find_descriptor_registry_calls,
+            _DESCRIPTOR_REGISTRY_ALLOWLIST,
+            id="descriptor-registry",
+        ),
+        pytest.param("_NOT_READY_ALLOWLIST", find_not_ready_calls, _NOT_READY_ALLOWLIST, id="not-ready"),
+        pytest.param(
+            "_REFERENCES_FIELD_ALLOWLIST", find_references_fields, _REFERENCES_FIELD_ALLOWLIST, id="references-field"
+        ),
+    ],
+)
+def test_every_exemption_is_load_bearing(name: str, finder: object, allowlist: frozenset[str]) -> None:
+    """An exemption whose module no longer performs the banned operation is a
+    HOLE, not a harmless leftover: the guard goes on trusting a module that
+    has nothing left to trust it for, so a regression reintroducing the
+    pattern there passes silently.
+
+    This is the rot that follows a migration, and it is invisible without a
+    check like this one: declarative-schema step 2.3 moved four modules off
+    the capability registries and four off the invoked ``dependencies``
+    contract, and every one of those eight exemptions survived the change
+    reading as if it were still justified.
+
+    Deliberate exceptions are declared, not tolerated (:data:`_DELIBERATELY_QUIET`).
+    """
+    dead = sorted(
+        entry
+        for entry in allowlist
+        if (name, entry) not in _DELIBERATELY_QUIET and not _scan(finder, frozenset(allowlist - {entry}))
+    )
+
+    assert not dead, (
+        f"{name} exempts {dead}, but removing each changes nothing: those modules no longer "
+        f"perform the banned operation, so the exemption only widens what a future regression "
+        f"can slip through. Delete the entry, or add it to _DELIBERATELY_QUIET with the reason "
+        f"it is worth keeping ahead of a refactor."
     )
 
 
