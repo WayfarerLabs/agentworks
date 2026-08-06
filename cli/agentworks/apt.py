@@ -97,8 +97,15 @@ class AptPackageEntry(DeclaredResource):
     (name, description, origin, ...) comes from ``DeclaredResource``.
     """
 
-    apt: list[str]
-    """The apt package names to install."""
+    apt: list[str] = Field(default_factory=list)
+    """The apt package names to install.
+
+    Optional, and deliberately so rather than by transcription: the loader
+    this replaces read it through ``_require_list``, whose ``get(key, [])``
+    made an omitted ``apt`` an empty list rather than an error. The
+    migrator's oracle still reads it that way, so requiring it here would
+    make a config.toml that hard-errors on load carry a remediation that
+    refuses to run."""
 
     apt_sources: list[Annotated[str, ResourceRef(kind="apt-source", usage="an apt source")]] = Field(
         default_factory=list

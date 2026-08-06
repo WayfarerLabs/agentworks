@@ -53,7 +53,13 @@ def test_an_unknown_key_names_the_fields_that_are_valid() -> None:
 
 
 def test_a_missing_required_field_says_it_is_required() -> None:
-    assert rejection("apt-package", "tools", {}) == "res.yaml:7: apt-package/tools.apt: is required"
+    """``apt-source`` is the kind with genuinely required fields: its
+    loader read all four through ``_require_field``, which raises on an
+    absent key."""
+    assert (
+        rejection("apt-source", "example", {})
+        == "res.yaml:7: apt-source/example: 4 problems\n  key_url: is required\n  key_path: is required\n  source: is required\n  source_file: is required"
+    )
 
 
 def test_a_bare_string_where_a_list_belongs_is_refused() -> None:
@@ -84,6 +90,20 @@ def test_every_rejection_points_at_the_sample_surface() -> None:
     from agentworks.errors import ConfigError
 
     with pytest.raises(ConfigError) as caught:
-        decode("apt-package", "tools", {})
+        decode("apt-source", "example", {})
 
-    assert caught.value.hint == "`agw resource sample apt-package` prints this kind's fields"
+    assert caught.value.hint == "`agw resource sample apt-source` prints this kind's fields"
+
+
+def test_an_apt_package_with_no_packages_loads_on_both_sides() -> None:
+    """The two sides have to agree about what is REQUIRED, not just about
+    what a document means, or `agw resource migrate` dead-ends: the
+    operator's config.toml hard-errors on load and the remediation aborts
+    at verification and rolls back.
+
+    `apt` reads as optional through the oracle's `_require_list`, whose
+    `get(key, [])` predates this step, so the model matches it."""
+    from agentworks.apt import _load_apt_packages
+
+    assert decode("apt-package", "empty", {}).apt == []
+    assert _load_apt_packages({"empty": {}})["empty"].apt == []
