@@ -91,6 +91,16 @@ def test_sibling_shape_is_rejected_with_the_exact_rewrite(
     release earlier than their siblings and kept a fold of their own
     through that window; there is one fold now, so this is one table-driven
     expectation rather than an asymmetry to describe.
+
+    **This is the representative-mistakes corpus's old-sibling-shape
+    entry**, and it is deliberately end to end (a manifest on disk, not a
+    model and a blob) rather than living beside the other four in
+    ``tests/schema/test_errors.py``. Under the kind spec models this input
+    is just two problems the model layer has no reason to connect, an
+    unknown ``platform_config`` key and a ``platform`` that is not a table,
+    which is exactly the generic pair this sentence exists to beat. Pinning
+    it at the surface an operator actually types is what stops the swap
+    from quietly degrading it.
     """
     with pytest.raises(ConfigError) as excinfo:
         _load_one(tmp_path, "old", old_doc)

@@ -107,6 +107,13 @@ def _raised(
 
 
 # -- The representative-mistakes corpus ---------------------------------------
+#
+# A fifth entry, the retired sibling capability shape, lives END TO END in
+# ``tests/manifests/test_capability_shape.py`` instead of here. It is a
+# whole-document mistake rather than a blob-versus-model one: to this layer
+# it is just an unknown ``platform_config`` key beside a ``platform`` that
+# is not a table, which is the generic pair its error exists to beat. See
+# ``test_sibling_shape_is_rejected_with_the_exact_rewrite``.
 
 
 def test_an_unknown_key_names_the_fields_that_are_valid() -> None:
