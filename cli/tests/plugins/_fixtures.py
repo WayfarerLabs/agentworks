@@ -19,8 +19,11 @@ one-of-each set ``fixture_plugin`` seats.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
+from pydantic import BaseModel, create_model
+
+from agentworks.capabilities.descriptor import descriptor_for
 from agentworks.capabilities.git_credential.base import GitCredentialProvider, HelperEntry
 from agentworks.capabilities.harness_integration.base import HarnessIntegration
 from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
@@ -33,6 +36,26 @@ if TYPE_CHECKING:
     from agentworks.resources.reference import ConfigReference
     from agentworks.secrets.base import MappingValue, SecretDecl
     from agentworks.transports import Transport
+
+
+def config_model_for(kind: str, name: str) -> type[BaseModel]:
+    """A minimal conforming config model for capability ``name`` of
+    ``kind``: no fields but the tag its kind dispatches on.
+
+    Built rather than authored, because a fixture's name is often chosen
+    at call time and a ``Literal`` tag has to match it. Authored models
+    are always written out as classes (attribute docstrings need source);
+    a fixture that documents nothing loses nothing by being generated.
+    """
+    contract = descriptor_for(kind).config_schema
+    if contract.discriminator is None:
+        return contract.base
+    model: type[BaseModel] = create_model(
+        f"{name.replace('-', '_')}_config",
+        __base__=contract.base,
+        **{contract.discriminator: (Literal[name], ...)},  # type: ignore[call-overload]
+    )
+    return model
 
 
 class ConformingVMPlatform(VMPlatform):
@@ -122,16 +145,19 @@ class ConformingSecretBackend:
 class FixtureVMPlatform(ConformingVMPlatform):
     name = "fixture-vm"
     description = "Fixture VM platform"
+    config_model = config_model_for("vm-platform", "fixture-vm")
 
 
 class FixtureHarnessIntegration(ConformingHarnessIntegration):
     name = "fixture-harness"
     description = "Fixture harness"
+    config_model = config_model_for("harness-integration", "fixture-harness")
 
 
 class FixtureProvider(ConformingGitCredentialProvider):
     name = "fixture-provider"
     description = "Fixture git credential provider"
+    config_model = config_model_for("git-credential-provider", "fixture-provider")
 
 
 class FixtureBackend(ConformingSecretBackend):
@@ -166,4 +192,7 @@ def conforming_impl(kind: str, name: str, description: str = "a conforming fixtu
         "git-credential-provider": ConformingGitCredentialProvider,
         "secret-backend": ConformingSecretBackend,
     }[kind]
-    return type(name.replace("-", "_"), (base,), {"name": name, "description": description})
+    members: dict[str, Any] = {"name": name, "description": description}
+    if kind != "secret-backend":
+        members["config_model"] = config_model_for(kind, name)
+    return type(name.replace("-", "_"), (base,), members)

@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from agentworks.declared_resource import DeclaredResource
+from agentworks.schema import RefOwner
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -89,22 +90,25 @@ class GitCredentialConfig(DeclaredResource):
             ),
         ]
         # Everything the credential references (its token secret and any
-        # other provider-declared resources) comes from the provider
-        # deriving the references its config block implies (dependencies,
-        # total and non-throwing); this resource (the config block's
-        # owner) attributes them to itself via the shared conversion.
-        from agentworks.capabilities.git_credential import (
-            GIT_CREDENTIAL_PROVIDER_REGISTRY,
-        )
+        # other resource the provider's config names) is read structurally
+        # off the provider's DECLARED model, by the core: no provider code
+        # runs here. Total and non-throwing, so a malformed blob
+        # contributes no edges rather than sinking the walk. This resource
+        # (the config block's owner) attributes them to itself via the
+        # shared conversion.
+        from agentworks.capabilities.config import capability_config_references
 
-        capability = GIT_CREDENTIAL_PROVIDER_REGISTRY.get(self.provider)
-        if capability is not None:
-            refs.extend(
-                sourced_references(
-                    capability.dependencies(f"git-credential/{self.name}", self.provider_config),
-                    source,
-                )
+        refs.extend(
+            sourced_references(
+                capability_config_references(
+                    kind="git-credential-provider",
+                    name=self.provider,
+                    blob=self.provider_config,
+                    owner=RefOwner(kind="git-credential", name=self.name),
+                ),
+                source,
             )
+        )
         return refs
 
     def not_ready(self, deps: Mapping[tuple[str, str], DependencyState]) -> Readiness:
@@ -136,14 +140,21 @@ class GitCredentialConfig(DeclaredResource):
         """Throwing shape check for the ``provider_config`` blob, run by
         the finalize ``validate`` pass (``enabled_backends`` is the
         secret-only R9.9 input, ignored here). Mirrors ``dependencies``:
-        the named provider capability validates the blob it owns. An
-        unknown provider is tolerated here (the framework miss policy
-        reports it); a seated provider validates the blob.
-        """
-        from agentworks.capabilities.git_credential import (
-            GIT_CREDENTIAL_PROVIDER_REGISTRY,
-        )
+        the CORE validates the blob against the named provider's declared
+        model, and no provider code runs. An unknown provider is tolerated
+        here (the framework miss policy reports it); a seated provider's
+        blob is validated.
 
-        capability = GIT_CREDENTIAL_PROVIDER_REGISTRY.get(self.provider)
-        if capability is not None:
-            capability.validate(f"git-credential/{self.name}", self.provider_config)
+        The error this raises already carries its own file/line framing
+        (the schema error bridge), so the finalize pass leaves it alone
+        rather than appending an origin a second time.
+        """
+        from agentworks.capabilities.config import validate_capability_config
+
+        validate_capability_config(
+            kind="git-credential-provider",
+            name=self.provider,
+            blob=self.provider_config,
+            owner=RefOwner(kind="git-credential", name=self.name),
+            location=self.declared_at,
+        )

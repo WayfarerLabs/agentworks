@@ -497,6 +497,7 @@ class Registry:
         """
         from agentworks.resources.graph import Enablement
         from agentworks.resources.render import format_origin_location
+        from agentworks.schema import FramedConfigError
 
         assert self._graph is not None  # built in pass 6, before this pass
         enabled_backends = frozenset(
@@ -514,6 +515,15 @@ class Registry:
                     continue
                 try:
                     validate(enabled_backends)
+                except FramedConfigError:
+                    # Already located by the schema error bridge, which frames
+                    # its own batch because pydantic reports every problem at
+                    # once and this suffix can only reach the LAST line.
+                    # Re-framing here would locate it twice. INTERIM, with one
+                    # trigger: this branch and the wrapper below go together
+                    # when the last hand-rolled validator does (step 2.5), and
+                    # every error is framed one way after that.
+                    raise
                 except ConfigError as exc:
                     origin = getattr(resource, "origin", None)
                     raise ConfigError(

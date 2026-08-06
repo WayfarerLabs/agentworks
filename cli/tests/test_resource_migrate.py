@@ -1365,6 +1365,6 @@ bogus = "stray"
     )
     with pytest.raises(ConfigError, match="cannot migrate git-credential/ado") as exc:
         _plan(cfg, ["git-credential/ado"])
-    assert "unknown azdo provider field" in str(exc.value)
+    assert "bogus: unknown field" in str(exc.value)
     assert "Remove them from config.toml" in (exc.value.hint or "")
     assert not (tmp_path / "resources").exists()  # nothing written

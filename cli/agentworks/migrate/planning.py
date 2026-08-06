@@ -26,6 +26,7 @@ from agentworks.manifests.loader import RESOURCES_DIRNAME
 from agentworks.migrate.toml_edit import apply_toml_edits, key_name
 from agentworks.migrate.toml_resources import toml_resource_rows
 from agentworks.migrate.verify import strip_source_fields
+from agentworks.schema import RefOwner
 
 if TYPE_CHECKING:
     from agentworks.config import Config
@@ -544,14 +545,16 @@ def _emit_document(doc: tomlkit.TOMLDocument, unit: MigrationUnit) -> str:
         # instead: fail before anything is written, in the operator's
         # TOML vocabulary.
         provider_config = dict(spec)
-        from agentworks.capabilities.git_credential import (
-            GIT_CREDENTIAL_PROVIDER_REGISTRY,
-        )
+        from agentworks.capabilities.config import validate_capability_config
 
-        capability = GIT_CREDENTIAL_PROVIDER_REGISTRY.get(str(provider))
-        if capability is not None and provider_config:
+        if provider_config:
             try:
-                capability.validate(f"git-credential/{unit.name}", provider_config)
+                validate_capability_config(
+                    kind="git-credential-provider",
+                    name=str(provider),
+                    blob=provider_config,
+                    owner=RefOwner(kind="git-credential", name=unit.name),
+                )
             except ConfigError as exc:
                 raise ConfigError(
                     f"cannot migrate git-credential/{unit.name}: {exc}",

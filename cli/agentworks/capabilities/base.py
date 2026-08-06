@@ -41,6 +41,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any, ClassVar, Protocol
 
 from agentworks.errors import ConfigError, StateError
+from agentworks.schema import RefOwner
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -347,28 +348,89 @@ class Capability(ABC):
         self,
         owner_name: str,
         config: Mapping[str, object],
+        *,
+        facet: Facet | None = None,
     ) -> None:
-        """Bind to ``(owner_name, config)``.
+        """Bind to ``(owner_name, config)``, validated.
 
-        Config validity is a construct-time invariant: ``validate``
-        re-runs here, so a shape error dies at construction, never later
-        in preflight. Construction is otherwise cheap: no network, no
-        secret resolution, no prompt, and no secret machinery at all:
-        the operation's boundary union comes from the plan's declared
+        Config validity is a construct-time invariant: the blob is
+        validated here, so a shape error dies at construction rather than
+        later in preflight, and what is BOUND is the validated,
+        fully-defaulted model instance, which is what lets an operation
+        read a typed field instead of a dict key with a fallback beside
+        it. Construction is otherwise cheap: no network, no secret
+        resolution, no prompt, and no secret machinery at all. The
+        operation's boundary union comes from the plan's declared
         ``secret_refs`` (the walk), and resolved values arrive per call
-        through the context (``ctx.secret``, scoped delivery). The
+        through the context (``ctx.secret``, scoped delivery); the
         instance never holds a value source.
+
+        ``facet`` is the LEVEL this instance is being built to drive, and
+        it selects the config among those the capability offers. Every
+        consumer today leaves it unset, because every capability offers
+        one config shared by all of its operations; it is on the
+        signature because construction is exactly where a capability
+        driven at several levels has to say which one, and adding it
+        later would touch every construction site.
         """
         self.owner_name = owner_name
-        self.config = config
-        # Validate first (the construct-time invariant), then extract the
-        # config-implied edges: ``validate`` guarantees validity, so the
-        # total ``dependencies`` sees a valid blob and yields the same
-        # refs it would at finalize.
-        type(self).validate(self._owner_display, config)
-        self._secret_refs: tuple[ConfigReference, ...] = tuple(
-            ref for ref in type(self).dependencies(self._owner_display, config) if ref.kind == "secret"
-        )
+        self._raw_config = config
+        owner = RefOwner(kind=self.owner_kind, name=owner_name)
+        model = getattr(type(self), "config_model", None)
+        if model is None:
+            # INTERIM, deleted with the invoked contract itself (step 2.3's
+            # last commit): a capability whose kind has not been migrated
+            # yet still validates and extracts through its own classmethods.
+            # Only that commit can remove this, because only then is a
+            # capability without a declared model genuinely unusable.
+            type(self).validate(owner.display, config)
+            self._config: BaseModel | None = None
+            self._secret_refs: tuple[ConfigReference, ...] = tuple(
+                ref for ref in type(self).dependencies(owner.display, config) if ref.kind == "secret"
+            )
+            return
+        from agentworks.capabilities.config import validate_own_config
+        from agentworks.schema import extract_references
+
+        self._config = validate_own_config(type(self), config, owner=owner, facet=facet)
+        # Extracted from the RAW blob, exactly as the finalize pass does,
+        # so an instance's declared secrets are the same set the graph
+        # carries for it.
+        self._secret_refs = tuple(ref for ref in extract_references(model, config, owner) if ref.kind == "secret")
+
+    @property
+    def config(self) -> Any:
+        """This instance's bound config.
+
+        The validated MODEL instance where the capability declares one,
+        and the raw mapping where it does not.
+
+        The return type is the interim half of that sentence, and it is
+        deliberately loud: it is ``Any`` only until every capability kind
+        declares a model, at which point it becomes the model and
+        ``_raw_config`` goes. Every migrated capability narrows it to its
+        own model type immediately, so the hole is only ever open for a
+        kind that has not been migrated yet.
+        """
+        return self._config if self._config is not None else self._raw_config
+
+    def _config_as[M: BaseModel](self, model: type[M]) -> M:
+        """This instance's bound config, as ``model``.
+
+        The narrowing every capability's own typed ``config`` property
+        goes through. It is an ``isinstance`` check rather than a
+        ``cast`` because the invariant is worth ENFORCING: construction
+        validated the blob against exactly the model the class declares,
+        so a mismatch here is a framework bug, and a cast would let it
+        surface as an ``AttributeError`` somewhere in an operation
+        instead.
+        """
+        if not isinstance(self._config, model):
+            raise StateError(
+                f"{type(self).__name__} bound a {type(self._config).__name__} config "
+                f"where its own declared model is {model.__name__}"
+            )
+        return self._config
 
     @property
     def _owner_display(self) -> str:

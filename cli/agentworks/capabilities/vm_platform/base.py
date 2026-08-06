@@ -15,7 +15,7 @@ from __future__ import annotations
 from abc import abstractmethod
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from agentworks.capabilities.base import Capability, idempotent_op
 
@@ -150,9 +150,15 @@ class VMPlatform(Capability):
 
     @property
     def platform_config(self) -> Mapping[str, object]:
-        """The bound site's validated config blob (the
-        capability-generic ``config``, under the domain's vocabulary)."""
-        return self.config
+        """The bound site's raw config blob, under the domain's
+        vocabulary.
+
+        INTERIM, and it goes when this kind's platforms read typed fields
+        off their models instead: ``Capability.config`` is the validated
+        model where one is declared, so a platform that has migrated
+        reads that and never this.
+        """
+        return cast("Mapping[str, object]", self.config)
 
     @classmethod
     def legacy_platform_metadata(cls, row: Mapping[str, Any], legacy: Mapping[str, Any]) -> dict[str, str]:

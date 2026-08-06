@@ -276,7 +276,7 @@ def test_r9_3_manifest_malformed_block_surfaces_under_resource_registry(
 
     fails = {c.name: c for c in g.checks if c.status == Status.FAIL}
     assert "Resource registry" in fails
-    assert "unknown azdo provider field" in (fails["Resource registry"].message or "")
+    assert "bogus: unknown field" in (fails["Resource registry"].message or "")
     assert "Manifest" not in fails  # the malformed block is no longer a decode/load failure
     assert registry is None  # the registry-dependent tail is skipped after the failure
 

@@ -42,6 +42,7 @@ from pydantic import RootModel
 
 from agentworks.errors import ConfigError
 from agentworks.schema._shape import is_model, model_fields_of, shape_of
+from agentworks.source_location import SYNTHESIZED_PATH, format_file_path
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -196,7 +197,24 @@ def _framed_batch(
 
 
 def _located(location: SourceLocation | None, text: str) -> str:
-    return f"{location.file}:{location.line}: {text}" if location is not None else text
+    """``text`` prefixed with where the operator can go and fix it.
+
+    ``SourceLocation`` carries its own sentinels and they are honored
+    rather than rendered: ``line == 0`` means the resource was not
+    introduced by a specific declaration site, and the synthesized path
+    means there is no file either (a framework-constructed row). A
+    location an operator cannot navigate to is worse than no location, so
+    those frame nothing.
+
+    The path renders home-relative, matching every other operator-facing
+    rendering of a config path.
+    """
+    if location is None or location.file == SYNTHESIZED_PATH:
+        return text
+    where = format_file_path(location.file)
+    if location.line:
+        where = f"{where}:{location.line}"
+    return f"{where}: {text}"
 
 
 # -- Message normalization ----------------------------------------------------

@@ -3,8 +3,8 @@ each ``[git_credentials.<name>].provider`` value.
 
 Each provider implementation (``GitHubCredentialProvider`` in core,
 ``AzDOCredentialProvider`` in the opt-in ``azure`` system plugin) is a
-``Capability`` (see ``capabilities/README.md``): it validates its
-``provider_config``, authenticates its token at the ``runup`` stage, and
+``Capability`` (see ``capabilities/README.md``): it declares the shape of
+its ``provider_config``, authenticates its token at the ``runup`` stage, and
 produces the credential materials as its op. The consuming resource
 (``GitCredentialConfig``) and the materials assembly that writes them to
 a VM live in the ``git_credentials`` domain, not here; capabilities
@@ -22,10 +22,7 @@ from __future__ import annotations
 from agentworks.capabilities.git_credential.base import (
     GitCredentialProvider,
     HelperEntry,
-    credential_name_from_owner,
-    default_token_secret,
-    token_dependency,
-    validate_token_field,
+    TokenSourcedConfig,
 )
 from agentworks.capabilities.git_credential.github import GitHubCredentialProvider
 
@@ -34,17 +31,14 @@ __all__ = [
     "GitCredentialProvider",
     "GitHubCredentialProvider",
     "HelperEntry",
-    "credential_name_from_owner",
-    "default_token_secret",
-    "token_dependency",
-    "validate_token_field",
+    "TokenSourcedConfig",
 ]
 
 
 # The capability registry (the canonical provider list): provider name
-# -> implementation class. ``dependencies`` (implied references) and
-# ``validate`` (blob validation) are invoked through this dict at each
-# source's blob boundary and at finalize; descriptor rows publish from it.
+# -> implementation class. The core reaches each provider's DECLARED
+# config model through this dict to validate a blob and to extract the
+# references it implies; descriptor rows publish from it.
 # ``azdo`` is re-seated here by the ``azure`` system plugin at import.
 GIT_CREDENTIAL_PROVIDER_REGISTRY: dict[str, type[GitCredentialProvider]] = {
     "github": GitHubCredentialProvider,
