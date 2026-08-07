@@ -624,6 +624,73 @@ def test_direct_runtime_rejected_topic_renders_its_issue_and_unknowns_stay_atomi
         )
 
 
+def test_truly_unknown_validation_precedes_dynamic_topic_construction(monkeypatch: pytest.MonkeyPatch) -> None:
+    registry = _ExactRegistry()
+    config = cast("Config", object())
+
+    def fail_dynamic_topic(registry: object, slug: str) -> TopicContribution:
+        raise AssertionError(f"constructed {slug} before validating the complete request")
+
+    monkeypatch.setattr("agentworks.guide.service._dynamic_topic", fail_dynamic_topic)
+    with pytest.raises(UnknownGuideTopicError):
+        render_guide(
+            ("vm-template/demo", "vm-template/truly-unknown"),
+            GuideMode.AGENT,
+            load_config_fn=lambda: config,
+            load_registry_fn=lambda loaded: cast("Registry", registry),
+        )
+
+
+@pytest.mark.parametrize(
+    "requested",
+    [
+        ("concept-valid", "vm-platform/rejected"),
+        ("vm-platform/rejected", "concept-valid"),
+    ],
+)
+def test_mixed_retained_and_rejected_topics_preserve_requested_slots_and_issue_status(
+    requested: tuple[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    retained = TopicContribution(
+        TopicSlug("concept-valid"),
+        "Retained topic",
+        "Retained summary.",
+        ConceptAnchor("concept-valid"),
+        (Overview(BlockId("overview"), "Retained teaching."),),
+    )
+    rejected = TopicContribution(
+        TopicSlug("vm-platform/rejected"),
+        "Rejected resource topic",
+        "The capability kind makes this resource anchor invalid.",
+        ResourceAnchor("vm-platform", "rejected"),
+        (Overview(BlockId("overview"), "Rejected teaching."),),
+    )
+    catalog = _build_guide_catalog((("core:retained", retained), ("core:rejected", rejected)))
+    monkeypatch.setattr("agentworks.guide.service.build_authored_catalog", lambda: catalog)
+    registry = _ExactRegistry()
+    config = cast("Config", object())
+
+    response = render_guide(
+        requested,
+        GuideMode.AGENT,
+        load_config_fn=lambda: config,
+        load_registry_fn=lambda loaded: cast("Registry", registry),
+        db=cast("Database", _EmptyInventory()),
+    )
+
+    positions = {
+        "concept-valid": response.markdown.index("# Retained topic"),
+        "vm-platform/rejected": response.markdown.index("# vm-platform/rejected"),
+    }
+    assert positions[requested[0]] < positions[requested[1]]
+    assert "Retained teaching." in response.markdown
+    assert response.markdown.count("This guide topic is unavailable.") == 1
+    assert response.markdown.count("anchor does not match a registered kind category") == 1
+    assert response.markdown.count("## Guide content unavailable") == 1
+    assert response.exit_code == 1
+
+
 def test_live_catalog_advertises_every_valid_platform_name_and_filters_invalid_names() -> None:
     ordinary_name = "o" * 64
     secret_name = "s" * 253
