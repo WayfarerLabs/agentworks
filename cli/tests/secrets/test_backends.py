@@ -19,9 +19,11 @@ from agentworks.bootstrap import build_registry
 from agentworks.capabilities.config import capability_config_references
 from agentworks.config import load_config
 from agentworks.errors import ConfigError
-from agentworks.schema import AgwModel, AgwRootModel, NonEmptyStr, RefOwner, SecretRef, extract_references
+from agentworks.plugins import Plugin, seated_plugin
+from agentworks.schema import AgwModel, AgwRootModel, NonEmptyStr, RefOwner, SecretRef
 from agentworks.secrets import SECRET_BACKEND_REGISTRY, active_backends, resolve_secrets
 from agentworks.secrets.base import SecretDecl
+from tests.plugins._fixtures import ConformingSecretBackend
 
 
 def _config(tmp_path: Path, body: str = "") -> Any:
@@ -125,17 +127,34 @@ def test_a_shipped_mapping_implies_no_agentworks_resource(backend: str, mapping:
 
 
 def test_extraction_over_a_backend_mapping_is_reached_at_all() -> None:
-    """Non-vacuity for the pin above: a mapping model that DOES mark a
-    field yields the reference, so the empty answers there are the
-    walker's answer rather than a walk that never happened."""
+    """Non-vacuity for the pin above: the empty answers there are the
+    walker's answer rather than a walk that never happened.
 
-    class _Marked(AgwRootModel[MarkedMapping]):
-        pass
+    Through ``capability_config_references`` with a SEATED backend, not
+    through ``extract_references`` directly. Calling the walker straight
+    proves only that the walker walks, which
+    ``tests/schema/test_extract.py`` already owns; what is unproven
+    without seating is the secret-backend WIRING, which is the whole
+    reason this pin is here (``capabilities/config.py:214-218`` resolves
+    the mapping model off the registered backend, and answers ``()`` for
+    any name it cannot resolve). This test used to make the direct call
+    and so could not fail for a broken lookup.
+    """
 
-    assert [
-        ref.name
-        for ref in extract_references(_Marked, {"vault_secret": "shared-key"}, RefOwner(kind="secret", name="s"))
-    ] == ["shared-key"]
+    class _MarkedBackend(ConformingSecretBackend):
+        name = "marked-backend"
+        description = "a fixture backend whose mapping names a secret"
+        config_model = AgwRootModel[MarkedMapping]
+
+    with seated_plugin(Plugin(name="marked", capabilities={"secret-backend": (_MarkedBackend,)})):
+        references = capability_config_references(
+            kind="secret-backend",
+            name="marked-backend",
+            config={"vault_secret": "shared-key"},
+            owner=RefOwner(kind="secret", name="npm-token"),
+        )
+
+    assert [ref.name for ref in references] == ["shared-key"]
 
 
 def test_builtin_backends_registered() -> None:

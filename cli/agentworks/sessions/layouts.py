@@ -36,8 +36,9 @@ TmuxLayout = Literal[
     "main-horizontal",
     # The agentworks layout above, spelled out because a ``Literal`` cannot
     # be built from a name. It is the one value here that appears twice in
-    # this module, and ``tests/sessions/test_layouts.py`` pins that the two
-    # agree.
+    # this module; that the two agree is pinned through the surface the
+    # choices exist for, by
+    # ``tests/manifests/test_spec_admin_and_console.py::test_the_console_layout_defaults_to_the_agentworks_one``.
     "aw-session-vertical",
 ]
 

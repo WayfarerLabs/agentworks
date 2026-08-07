@@ -181,12 +181,21 @@ def _validate(mapping: object) -> None:
     )
 
 
-def test_mapping_accepts_valid_forms() -> None:
-    _validate("op://Work/npm/token")
-    _validate({"account": "my.1password.com", "reference": "op://Work/npm/token"})
-    # A section segment (4 parts) is allowed, in both forms.
-    _validate("op://Work/npm/section/token")
-    _validate({"account": "acct", "reference": "op://Work/npm/section/token"})
+@pytest.mark.parametrize(
+    "mapping",
+    [
+        pytest.param("op://Work/npm/token", id="string"),
+        pytest.param({"account": "my.1password.com", "reference": "op://Work/npm/token"}, id="table"),
+        # A section segment (4 parts) is allowed, in both forms.
+        pytest.param("op://Work/npm/section/token", id="string-with-section"),
+        pytest.param({"account": "acct", "reference": "op://Work/npm/section/token"}, id="table-with-section"),
+    ],
+)
+def test_mapping_accepts_valid_forms(mapping: Any) -> None:
+    """Parametrized rather than four calls in one body: the four are
+    independent claims, and unrolled they stop at the first failure, so a
+    regression in the table form hid behind one in the string form."""
+    _validate(mapping)
 
 
 @pytest.mark.parametrize(
@@ -219,88 +228,63 @@ def test_mapping_rejects_bad_forms(mapping: Any) -> None:
         _validate(mapping)
 
 
-@pytest.mark.parametrize(
-    ("mapping", "expected"),
-    [
-        pytest.param({"reference": "op://Work/npm/token"}, "account: is required", id="table-missing-account"),
-        pytest.param({"account": "acct"}, "reference: is required", id="table-missing-reference"),
-        pytest.param(
-            {"account": "acct", "reference": "op://Work/npm/token", "x": 1},
-            "x: unknown field; expected one of: account, reference",
-            id="table-unknown-key",
-        ),
-        pytest.param(
-            "Work/npm/token",
-            "must start with 'op://'",
-            id="string-missing-scheme",
-        ),
-    ],
-)
-def test_the_backends_own_revalidation_says_what_the_finalize_pass_says(mapping: Any, expected: str) -> None:
-    """``_resolved_ref`` re-validates a mapping defensively, and what it
-    reports has to be what an operator would have been told at load.
+_BAD_MAPPINGS = [
+    pytest.param(
+        {"account": "acct"},
+        "secret/s.backend_mappings.onepassword.reference: is required",
+        id="table-the-string-arm-rejected",
+    ),
+    pytest.param(
+        {"reference": "op://Work/npm/token"},
+        "secret/s.backend_mappings.onepassword.account: is required",
+        id="table-missing-account",
+    ),
+    pytest.param(
+        {"account": "acct", "reference": "op://Work/npm/token", "x": 1},
+        "secret/s.backend_mappings.onepassword.x: unknown field; expected one of: account, reference",
+        id="table-unknown-key",
+    ),
+    pytest.param(
+        "Work/npm/token",
+        "secret/s.backend_mappings.onepassword: onepassword reference 'Work/npm/token' "
+        "must start with 'op://' (an 'op://vault/item/field' reference, optionally "
+        "with a section: 'op://vault/item/section/field')",
+        id="string-the-table-arm-rejected",
+    ),
+]
 
-    It used to read ``exc.errors()[0]['msg']``, which is whichever arm of
-    the string-or-table union pydantic tried first: every malformed TABLE
-    came back "Input should be a valid string", the one answer this
-    model's own before-validator exists to prevent, from the single
-    ``model_validate`` in the project that skipped the error bridge. The
-    two paths now produce the same text for the same mapping, which is the
-    property worth pinning: an operator has no way to know which one they
-    reached.
+
+@pytest.mark.parametrize(("mapping", "expected"), _BAD_MAPPINGS)
+def test_a_bad_mapping_reads_the_same_way_wherever_it_is_caught(mapping: Any, expected: str) -> None:
+    """One message for a bad mapping, from both places that produce one.
+
+    **What it says.** The mapping is the framework's one undiscriminated
+    union, so it is where an arm's shape rejection reaches an operator as
+    noise. Pinned as the WHOLE message rather than a substring, because
+    the defect this guards was never a wrong line, it was a true line with
+    an irrelevant one stapled to it: a malformed table led with "must be a
+    string" (the ``op://`` arm's report) and a malformed string trailed
+    with "must be a table". A substring assertion passes with either still
+    present, which is how the framing fix shipped over a batch that still
+    read wrong.
+
+    **Where it says it.** ``_resolved_ref`` re-validates defensively, and
+    what IT reports has to be what the operator would have been told at
+    load. It used to read ``exc.errors()[0]["msg"]``, whichever arm
+    pydantic tried first, from the single ``model_validate`` in the
+    project that skipped the error bridge. An operator has no way to know
+    which path they reached, so the two are asserted against one expected
+    string rather than in two tests with two expectations, which is what
+    let them drift.
     """
-    secret = _decl("s", backend_mappings={"onepassword": mapping})
-
-    with pytest.raises(ConfigError) as revalidated:
-        OnePasswordBackend().describe_lookup(secret, mapping)
     with pytest.raises(ConfigError) as at_load:
         _validate(mapping)
+    secret = _decl("s", backend_mappings={"onepassword": mapping})
+    with pytest.raises(ConfigError) as revalidated:
+        OnePasswordBackend().describe_lookup(secret, secret.backend_mappings["onepassword"])
 
-    assert expected in str(revalidated.value)
-    assert str(revalidated.value) == str(at_load.value)
-
-
-@pytest.mark.parametrize(
-    ("mapping", "expected"),
-    [
-        pytest.param(
-            {"account": "acct"},
-            "secret/s.backend_mappings.onepassword.reference: is required",
-            id="table-the-string-arm-rejected",
-        ),
-        pytest.param(
-            {"account": "acct", "reference": "op://Work/npm/token", "x": 1},
-            "secret/s.backend_mappings.onepassword.x: unknown field; expected one of: account, reference",
-            id="table-unknown-key",
-        ),
-        pytest.param(
-            "Work/npm/token",
-            "secret/s.backend_mappings.onepassword: onepassword reference 'Work/npm/token' "
-            "must start with 'op://' (an 'op://vault/item/field' reference, optionally "
-            "with a section: 'op://vault/item/section/field')",
-            id="string-the-table-arm-rejected",
-        ),
-    ],
-)
-def test_only_the_arm_the_operator_meant_reports_on_a_bad_mapping(mapping: Any, expected: str) -> None:
-    """The mapping is the framework's one undiscriminated union, so it is
-    where an arm's shape rejection reaches an operator as noise.
-
-    Pinned as the WHOLE message rather than a substring, because the
-    defect this guards was never a wrong line, it was a true line with an
-    irrelevant one stapled to it: a malformed table led with "must be a
-    string" (the ``op://`` arm's report) and a malformed string trailed
-    with "must be a table". A substring assertion passes with either
-    still present, which is how the framing fix shipped over a batch that
-    still read wrong.
-
-    Through ``validate_capability_config``, so this is the path an
-    operator actually reaches at load, not the model in isolation.
-    """
-    with pytest.raises(ConfigError) as excinfo:
-        _validate(mapping)
-
-    assert str(excinfo.value) == expected
+    assert str(at_load.value) == expected
+    assert str(revalidated.value) == expected
 
 
 def test_an_absent_mapping_is_framed_like_a_malformed_one() -> None:

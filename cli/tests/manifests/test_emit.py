@@ -42,7 +42,6 @@ from agentworks.manifests.loader import load_manifests
 from agentworks.manifests.samples import sample_text
 from agentworks.manifests.spec_model import declarable_kinds
 from agentworks.plugins import Plugin, seated_plugin
-from agentworks.resources import KIND_REGISTRY
 from agentworks.schema import AgwModel
 from tests._emitted_schema import ref_extension
 from tests.plugins._fixtures import ConformingVMPlatform
@@ -169,10 +168,13 @@ def test_every_declarable_kind_is_emittable_and_no_capability_kind_is() -> None:
     emittable set is derived from the registry's per-kind category rather
     than listed. Emission and the sample surface now call the SAME
     derivation (``spec_model.declarable_kinds``), so the two cannot come to
-    describe different kinds; what is left to pin is that the derivation
-    itself is the registry's category and that the written set matches."""
-    declarable = {name for name, handler in KIND_REGISTRY.items() if handler.category == "declarable"}
-    assert set(declarable_kinds()) == declarable
+    describe different kinds; what is left to pin here is that the WRITTEN
+    set matches it.
+
+    That the derivation is itself the registry's category is pinned where
+    the derivation lives, in
+    ``test_spec_model.py::test_declarable_kinds_is_the_registry_category_and_nothing_else``.
+    """
     assert sorted(schema_set()) == sorted(
         [ENVELOPE_SCHEMA_FILENAME, *(schema_filename(kind) for kind in declarable_kinds())]
     )
@@ -308,7 +310,16 @@ def test_the_capability_union_replaces_the_open_block_at_the_host_field() -> Non
     """A row carries its capability as an open ``CapabilityBlock``, which
     as a schema says only "some table with a name". Emission replaces it
     with the union over what is registered, keeping the row's authored
-    description."""
+    description.
+
+    The mapping is compared against the live registry, so this is also
+    where a TRUNCATED union fails. A separate test naming
+    ``azure-vm``/``aws-ec2``/``proxmox`` stood here and is gone: the only
+    mutation it caught that this one does not is a registry missing the
+    plugins altogether, which is the seating direction, and that has to be
+    checked in a fresh interpreter
+    (``test_spec_model.py::test_the_plugin_platforms_are_present_in_a_FRESH_interpreter``).
+    """
     schema = document_schema("vm-site")
     platform = schema["$defs"]["VmSiteSpec"]["properties"]["platform"]
     assert "vm-platform backing this site" in platform["description"]
@@ -318,29 +329,6 @@ def test_the_capability_union_replaces_the_open_block_at_the_host_field() -> Non
     assert set(union["discriminator"]["mapping"]) == _platform_names()
     # The open block is gone entirely, not merely shadowed.
     assert "CapabilityBlock" not in schema["$defs"]
-
-
-def test_the_union_carries_the_platforms_shipped_plugins_contribute() -> None:
-    """A plugin's capability reaches the emitted schema, by name.
-
-    Named plugins rather than a count, and rather than the live registry
-    (which is what ``_platform_names`` reads, so it would have agreed with
-    a truncated union). What this does NOT prove is that the seating step
-    is doing it: three test modules import ``agentworks.plugins`` at module
-    scope for their own fixtures, so by the time this runs, the process is
-    seated whatever ``spec_model`` does. That guard has to run in a fresh
-    interpreter and lives in ``tests/manifests/test_spec_model.py``; this
-    one is about the emitted SHAPE carrying the names."""
-    mapping = _vm_platform_union()["discriminator"]["mapping"]
-    assert {"azure-vm", "aws-ec2", "proxmox"} <= set(mapping)
-
-
-def _vm_platform_union() -> dict[str, Any]:
-    schema = document_schema("vm-site")
-    platform = schema["$defs"]["VmSiteSpec"]["properties"]["platform"]
-    union = schema["$defs"][platform["$ref"].rsplit("/", 1)[-1]]
-    assert isinstance(union, dict)
-    return union
 
 
 def _platform_names() -> set[str]:

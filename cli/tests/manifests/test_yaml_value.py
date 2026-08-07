@@ -30,36 +30,37 @@ class Weight(Enum):
 
 
 @pytest.mark.parametrize(
-    ("value", "rendered"),
+    ("value", "rendered", "loaded"),
     [
-        ("auto", "auto"),
-        (True, "true"),
-        (False, "false"),
-        (None, "null"),
-        (0, "0"),
-        (3.5, "3.5"),
-        (["zsh", "ripgrep"], "[zsh, ripgrep]"),
-        ({"K": "v"}, "{K: v}"),
-        (Layout.TILED, "tiled"),
-        (Weight.LIGHT, "1"),
-        ({"layout": Layout.TILED}, "{layout: tiled}"),
-        ([Layout.TILED], "[tiled]"),
-        (frozenset({"b", "a"}), "[a, b]"),
-        (datetime(2026, 1, 1, tzinfo=UTC), "2026-01-01 00:00:00+00:00"),
+        ("auto", "auto", "auto"),
+        (True, "true", True),
+        (False, "false", False),
+        (None, "null", None),
+        (0, "0", 0),
+        (3.5, "3.5", 3.5),
+        (["zsh", "ripgrep"], "[zsh, ripgrep]", ["zsh", "ripgrep"]),
+        ({"K": "v"}, "{K: v}", {"K": "v"}),
+        (Layout.TILED, "tiled", "tiled"),
+        (Weight.LIGHT, "1", 1),
+        ({"layout": Layout.TILED}, "{layout: tiled}", {"layout": "tiled"}),
+        ([Layout.TILED], "[tiled]", ["tiled"]),
+        (frozenset({"b", "a"}), "[a, b]", ["a", "b"]),
+        (datetime(2026, 1, 1, tzinfo=UTC), "2026-01-01 00:00:00+00:00", datetime(2026, 1, 1, tzinfo=UTC)),
     ],
 )
-def test_a_value_renders_as_the_yaml_a_document_carries(value: object, rendered: str) -> None:
+def test_a_value_renders_as_the_yaml_a_document_carries(value: object, rendered: str, loaded: object) -> None:
+    """The text, and what the loader makes of it, over one case list.
+
+    Both halves per case, because the point of rendering YAML rather than
+    ``repr`` is that the reader is about to paste this into a document:
+    text nobody reads back proves the renderer is self-consistent and not
+    that it is right. The round trip used to be a second parametrize
+    asserting only ``is not None``, which no mutation of this module could
+    fail (``repr`` in place of the dumper left ten of its eleven cases
+    green); an exact loaded value is what makes it a check.
+    """
     assert render_value(value) == rendered
-
-
-@pytest.mark.parametrize(
-    "value",
-    ["auto", True, False, None, 0, 3.5, ["zsh"], {"K": "v"}, Layout.TILED, Weight.LIGHT, frozenset({"a"})],
-)
-def test_what_is_rendered_loads_back_as_yaml(value: object) -> None:
-    """The point of rendering YAML rather than ``repr``: the reader is
-    about to paste this into a document."""
-    assert yaml.safe_load(render_value(value)) is not None or value is None
+    assert yaml.safe_load(rendered) == loaded
 
 
 def test_a_value_pyyaml_cannot_represent_renders_rather_than_raising() -> None:

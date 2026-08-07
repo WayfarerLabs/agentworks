@@ -84,7 +84,17 @@ def _config(tmp_path: Path, body: str):  # type: ignore[no-untyped-def]
     return load_config(cfg, warn_issues=False)
 
 
-def test_unknown_shell_field_errors_at_build(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "field",
+    [
+        pytest.param("nope", id="a-plain-typo"),
+        # The retired TOML spelling of a real setting. It is an unknown key
+        # to the shell arm like any other, which is the point: it earns no
+        # migration steer of its own.
+        pytest.param("restart_command", id="a-retired-key"),
+    ],
+)
+def test_an_unknown_key_in_the_harness_block_errors_at_build(tmp_path: Path, field: str) -> None:
     """The effective blob is shape-validated by the finalize ``validate``
     pass (R3), so a malformed shell block fails at build_registry, not at
     load (this template inherits nothing, so effective and declared are the
@@ -93,7 +103,7 @@ def test_unknown_shell_field_errors_at_build(tmp_path: Path) -> None:
     file now)."""
     root = _manifest(
         tmp_path,
-        """
+        f"""
         apiVersion: agentworks/v1
         kind: session-template
         metadata:
@@ -101,11 +111,11 @@ def test_unknown_shell_field_errors_at_build(tmp_path: Path) -> None:
         spec:
           harness_integration:
             name: shell
-            nope: x
+            {field}: x
         """,
     )
     config = _config(tmp_path, "")
-    with pytest.raises(ConfigError, match="nope: unknown field; expected one of:") as exc:
+    with pytest.raises(ConfigError, match=f"{field}: unknown field; expected one of:") as exc:
         build_registry(config, load_manifests(root))
     assert "res.yaml" in str(exc.value)
 
@@ -200,24 +210,6 @@ def test_child_silent_inherits_the_pair_unchanged() -> None:
     resolved = resolve_from_dict(templates, "child")
     assert resolved.harness_integration == "shell"
     assert resolved.harness_integration_config == {"command": "claude"}
-
-
-def test_yaml_restart_command_is_rejected(tmp_path: Path) -> None:
-    root = _manifest(
-        tmp_path,
-        """
-        apiVersion: agentworks/v1
-        kind: session-template
-        metadata:
-          name: old-shell
-        spec:
-          harness_integration:
-            name: shell
-            restart_command: old-resume
-        """,
-    )
-    with pytest.raises(ConfigError, match="restart_command: unknown field"):
-        build_registry(_config(tmp_path, ""), load_manifests(root))
 
 
 def test_child_different_harness_integration_starts_fresh(fake_harness_integration: None) -> None:

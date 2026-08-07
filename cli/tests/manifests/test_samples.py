@@ -59,7 +59,9 @@ def _registered_kinds() -> list[str]:
 def test_every_declarable_kind_renders() -> None:
     # secret-backend is a capability descriptor post-collapse
     # (2026-07-07): in KIND_SECTIONS as a retired section name, not
-    # declarable, no sample.
+    # declarable, no sample. That sampling it reports the capability-kind
+    # error rather than crashing is one case of
+    # `test_capability_kinds_report_no_sample`, which sweeps the category.
     assert "secret-backend" not in declarable_kinds()
     assert set(declarable_kinds()) | {"secret-backend"} == set(KIND_SECTIONS)
     for kind in declarable_kinds():
@@ -85,14 +87,6 @@ def test_every_registered_kind_is_declarable_or_a_capability() -> None:
     the CLI just listed, and no schema is emitted for it either.
     """
     assert set(declarable_kinds()) | set(_capability_kinds()) == set(_registered_kinds())
-
-
-def test_secret_backend_has_no_sample() -> None:
-    """The declarable secret-backend kind died in the Phase 5.5 collapse;
-    it survives only as a capability, so sampling it reports the
-    capability-kind error rather than crashing."""
-    with pytest.raises(ValidationError, match="capability kind"):
-        sample_text("secret-backend")
 
 
 @pytest.mark.parametrize("kind", _capability_kinds())
@@ -206,44 +200,16 @@ def test_the_whole_set_uncomments_as_one_file(tmp_path: Path) -> None:
     assert not manifests.issues, manifests.issues
 
 
-def test_uncommented_samples_build_a_registry(tmp_path: Path) -> None:
-    """Beyond the loader: the whole uncommented set builds a full registry,
-    so every reference a rendered document makes resolves at finalize and
-    every capability config block validates against its own model.
-
-    The plugins are enabled for one reason: a disabled platform's site
-    never reaches its platform's validation, so the rendered capability
-    block would be parsed as YAML and never checked against the model it
-    claims to describe. The rendered vm-site writes the lima arm, whose
-    plugin is not among these; they are enabled so that the day the
-    rendered arm is a plugin's (a registration order change, a new
-    built-in), this test keeps checking what it says it checks instead of
-    quietly weakening.
-    """
-    from agentworks.bootstrap import build_registry
-    from agentworks.config import load_config
-
-    pub = tmp_path / "id.pub"
-    priv = tmp_path / "id"
-    pub.write_text("ssh-ed25519 AAAA...")
-    priv.write_text("-----BEGIN OPENSSH PRIVATE KEY-----")
-    cfg = tmp_path / "config.toml"
-    cfg.write_text(
-        f"""\
-[operator]
-ssh_public_key = "{pub.as_posix()}"
-ssh_private_key = "{priv.as_posix()}"
-
-[plugins]
-system = ["azure", "aws", "proxmox"]
-"""
-    )
-    resources = tmp_path / "resources"
-    resources.mkdir()
-    for kind in declarable_kinds():
-        (resources / f"{kind}.yaml").write_text(_uncomment(sample_text(kind)))
-    config = load_config(cfg, warn_issues=False)
-    build_registry(config)
+# That the whole uncommented set also BUILDS a full registry (so every
+# reference a rendered document makes resolves at finalize, and every
+# capability config block validates against its own model) is asserted in
+# ``test_emit.py::test_emitted_schemas_accept_every_document_the_full_load
+# _path_accepts``, which renders this same corpus with the same plugins
+# enabled and then validates it against the emitted schemas. A second copy
+# of the corpus-and-build stood here; every mutation it caught (a
+# truncated capability union, an optional field rendered as a live line, a
+# dropped metadata block) reddens that test too, and only that test also
+# proves what the schemas make of the result.
 
 
 # --- --write ----------------------------------------------------------

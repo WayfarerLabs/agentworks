@@ -7,6 +7,12 @@ shipped integration has one (and until this step none COULD: the base
 refused it at class definition, since validating each declared blob would
 have failed such a child at load), so the surface is a fixture.
 
+That the interim guard is GONE needs no assertion of its own: ``_NeedyConfig``
+below declares a required field, so if the guard came back this module would
+not import and every test here would error. A test restating what the fixture
+literally sets up (``config_model is _NeedyConfig``, ``command`` is required)
+stood here and could not fail for any change to production code.
+
 The provenance channel is here too rather than beside the error bridge:
 its only producer is this merge, and a per-key attribution is only
 meaningful over a blob more than one template wrote.
@@ -155,12 +161,3 @@ def test_a_key_the_child_overrode_is_not_attributed_to_the_parent(seated: None) 
     message = str(exc.value)
     assert "session-template/kid.timeout: must be an integer" in message
     assert "inherited from" not in message
-
-
-def test_a_required_field_is_now_declarable_at_all() -> None:
-    """The interim ``__init_subclass__`` guard is gone, and its expiry was
-    exactly this step. Asserted as its own fact so the deletion cannot be
-    mistaken for an accident: the class above defining ``_NeedyConfig``
-    would not have imported before."""
-    assert _NeedyIntegration.config_model is _NeedyConfig
-    assert _NeedyConfig.model_fields["command"].is_required()
