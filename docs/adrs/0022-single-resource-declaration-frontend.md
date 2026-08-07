@@ -12,16 +12,16 @@ Accepted. Supersedes the "Dual-path: deprecate, don't break" stance of
 > decision this ADR records is unaffected: the frontend is still single, `config.toml` is still
 > settings only, and a resource-declaring section is still a hard error. What changed is the
 > remediation the error names. It now carries the rewrite itself, plus `agw resource sample` and
-> `agw resource describe-kind` (which print the target shape) and the upgrade section of
-> `docs/guides/resources.md` (which walks it through). The settings-only escape hatch survives for
-> `resource sample --write` and `resource edit`'s fallback, so an operator can still author the
-> replacement manifests against a config the app would otherwise refuse to load. The migrator's
-> deletability was designed in (a separability guard kept it a leaf), which is what let it be
-> removed before release rather than maintained until a scheduled expiry. Everything else ADR 0016
-> decides still stands: the two-layer config/resource split, the vocabulary law,
-> resources-reference-capabilities (with the capability naming rule and the graduate-when-real
-> clause), the Kubernetes envelope and auto-load, and the slash ban. This ADR narrows the
-> resource-declaration frontend from two paths to one; it does not reopen the model.
+> `agw resource describe-kind` (which print the target shape) and `docs/guides/upgrading-to-0.14.md`
+> (which walks it through). The settings-only escape hatch survives for `resource sample --write`
+> and `resource edit`'s fallback, so an operator can still author the replacement manifests against
+> a config the app would otherwise refuse to load. The migrator's deletability was designed in (a
+> separability guard kept it a leaf), which is what let it be removed before release rather than
+> maintained until a scheduled expiry. Everything else ADR 0016 decides still stands: the two-layer
+> config/resource split, the vocabulary law, resources-reference-capabilities (with the capability
+> naming rule and the graduate-when-real clause), the Kubernetes envelope and auto-load, and the
+> slash ban. This ADR narrows the resource-declaration frontend from two paths to one; it does not
+> reopen the model.
 
 ## Context
 
@@ -81,7 +81,7 @@ config the app would otherwise refuse to load.
   error on the next command instead of a silent load-with-warning. The error names the sections and
   the exact remediation (`agw resource migrate --all`, or per kind), and the migrator can still run
   against the offending config via the settings-only load. The upgrade note lives in
-  `docs/guides/resources.md`; the removal commit carries a `feat(config)!:` marker with a
+  `docs/guides/upgrading-to-0.14.md`; the removal commit carries a `feat(config)!:` marker with a
   `BREAKING CHANGE` footer so release-please surfaces it.
 - **The runway is spent.** With the TOML resource path gone, the aggregated TOML-section deprecation
   warning and its `--no-deprecations` channel entry retire. The tagged-capability-config shape

@@ -70,7 +70,7 @@ def test_resource_sections_hard_error_naming_sections(tmp_path: Path) -> None:
     hint = excinfo.value.hint or ""
     assert "agw resource sample" in hint
     assert "agw resource describe-kind" in hint
-    assert "docs/guides/resources.md" in hint
+    assert "docs/guides/upgrading-to-0.14.md" in hint
 
 
 def test_legacy_site_sections_get_the_vm_site_clause(tmp_path: Path) -> None:

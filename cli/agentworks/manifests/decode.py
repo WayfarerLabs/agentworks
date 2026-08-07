@@ -146,7 +146,7 @@ def _hosting_descriptors() -> Mapping[str, CapabilityKindDescriptor]:
 SIBLING_SHAPE_HINT = (
     "Apply the rewrite above; `agw resource describe-kind <kind>` documents the field, "
     "and `agw resource sample <kind>` prints it as a document to edit. "
-    'See "Upgrading" in docs/guides/resources.md.'
+    'See "The retired sibling capability shape" in docs/guides/upgrading-to-0.14.md.'
 )
 """Where an operator goes to make the retired sibling shape load again.
 
@@ -154,6 +154,11 @@ Attached only to the errors that PRINT a rewrite, which is what "the
 rewrite above" refers to. The two shapes with no honest rewrite (below)
 carry their instruction inline instead and get no hint, so the hint never
 points at something that is not on screen.
+
+RELEASE-SCOPED, like the guide it names: the sibling shape is a 0.13
+spelling, and this hint retires when
+``docs/guides/upgrading-to-0.14.md`` is deleted. The errors it decorates
+keep their inline rewrite, which is the part that stands on its own.
 """
 
 

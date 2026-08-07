@@ -110,6 +110,16 @@ def _raise_for_resource_sections(data: dict[str, object]) -> None:
     fallback) load that way and so still read a config that carries
     resource sections, which is what lets an operator author the
     replacement manifests before deleting the sections.
+
+    RELEASE-SCOPED, and paired with its guide. This check exists only to
+    carry hosts across the 0.14 TOML sunset, so it retires on the same
+    schedule as ``docs/guides/upgrading-to-0.14.md``, which its hint names.
+    Delete the two together, or the error outlives the document it sends
+    the operator to. The retirement is this function, the ``resources=``
+    escape hatch it is gated by, and the retired section names in
+    ``EXPECTED_TOP_LEVEL_KEYS`` (they sit in that set only so this error
+    fires instead of the generic unexpected-key one; leaving them there
+    would make ``[secrets.*]`` load silently again).
     """
     from agentworks.manifests.decode import KIND_SECTIONS
 
@@ -145,7 +155,7 @@ def _raise_for_resource_sections(data: dict[str, object]) -> None:
         hint=(
             "`agw resource sample <kind> --write <kind>s.yaml` writes a commented starter to edit, "
             "and `agw resource describe-kind <kind>` lists every field with its type. "
-            'The "TOML resource sections: removed" section of docs/guides/resources.md '
+            'The "TOML resource sections: removed" section of docs/guides/upgrading-to-0.14.md '
             "walks through it section by section."
         ),
     )
