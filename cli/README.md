@@ -692,8 +692,8 @@ description merge as usual.
 **TOML session-template sections are removed.** `config.toml` is settings only, so
 `[session_templates.<name>]` no longer loads: any resource-declaring section is now a hard error at
 config load. Declare session templates as YAML manifests (`agw resource sample session-template`),
-and rewrite any that still live in `config.toml`; the [resources guide](../docs/guides/resources.md)
-walks through it.
+and rewrite any that still live in `config.toml`; the
+[0.14 upgrade guide](../docs/guides/upgrading-to-0.14.md) walks through it.
 
 ### Config
 
@@ -781,7 +781,7 @@ Configuration splits into two surfaces:
   classic TOML resource sections are no longer supported: a `config.toml` that still declares
   resources is a hard error at load (they were previously deprecated with a warning). Rewriting
   those sections as manifests is a manual step, walked through by
-  [docs/guides/resources.md](../docs/guides/resources.md).
+  [docs/guides/upgrading-to-0.14.md](../docs/guides/upgrading-to-0.14.md).
 
 Settings sections (`config.toml`, permanent):
 

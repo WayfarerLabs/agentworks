@@ -155,8 +155,8 @@ completes with a summary.
   the resource is not-ready (or refused at use) with an "enable plugin `<name>`" hint. This is
   deliberate (the whole point is that world-specific functionality is opt-in), guided (the hint
   names the exact fix, never a silent failure or an unknown-name dead end), and bounded (the default
-  local path is untouched). The upgrade note lives in `docs/guides/resources.md`; the release
-  carries a `BREAKING CHANGE` changelog entry.
+  local path is untouched). The upgrade note lives in `docs/guides/upgrading-to-0.14.md`; the
+  release carries a `BREAKING CHANGE` changelog entry.
 
 ## Alternatives Considered
 

@@ -140,8 +140,8 @@ stays all-or-nothing.
   blobs and invokes no user code at all.
 - **Breaking, and broadly.** Closed-world validation, strict types, and model-layer defaulting each
   reject configuration that used to load. The operator upgrade note is in
-  `docs/guides/resources.md`; the commits carry `!` markers with `BREAKING CHANGE` footers so
-  release-please surfaces them.
+  `docs/guides/upgrading-to-0.14.md`; the commits carry `!` markers with `BREAKING CHANGE` footers
+  so release-please surfaces them.
 - **Editor support falls out, as a deliberate UNDER-approximation.** Emitted JSON Schema rejects
   only what the loader also rejects; the loader rejects more (cross-field validators, name character
   rules, whether a capability is registered on this host). A permissive schema costs an operator a

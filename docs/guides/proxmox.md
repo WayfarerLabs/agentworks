@@ -131,7 +131,7 @@ the template. `node` is the node name in the Proxmox UI sidebar, usually `pve`.
 
 (The legacy flat `[proxmox]` section in `config.toml` is a hard error at load now. Its keys are the
 same ones shown above, so rewriting it as the vm-site manifest above is a move rather than a
-translation; see [resources.md](resources.md).)
+translation; see [upgrading-to-0.14.md](upgrading-to-0.14.md).)
 
 The API token value is an ordinary agentworks secret named `proxmox-token` (auto-declared; rename
 per site via the `token_secret` key). The default env-var backend reads it from:

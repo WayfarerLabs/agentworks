@@ -21,7 +21,7 @@ from agentworks.manifests import load_manifests
 _REWRITE_HINT = (
     "Apply the rewrite above; `agw resource describe-kind <kind>` documents the field, "
     "and `agw resource sample <kind>` prints it as a document to edit. "
-    'See "Upgrading" in docs/guides/resources.md.'
+    'See "The retired sibling capability shape" in docs/guides/upgrading-to-0.14.md.'
 )
 """The operator-facing text, spelled out rather than imported.
 
