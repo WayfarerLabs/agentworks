@@ -182,9 +182,9 @@ class SSHLogger:
         self._write(f"[{ts}] TIMEOUT (attempt {attempt}/{retries}): {command}\n")
 
     def warning(self, msg: str) -> None:
-        """Record a warning (also written to the log)."""
+        """Record warning text in memory and persist only a static marker."""
         self._warnings.append(msg)
-        self._write(f"WARNING: {msg}\n")
+        self._write("WARNING\n")
 
     def log_error(self, msg: str) -> None:
         """Log an error message."""
@@ -226,12 +226,6 @@ class SSHLogger:
         lines = [f"\n# Finished: {ts}"]
         if self._warnings:
             lines.append(f"# Warnings: {len(self._warnings)}")
-            for w in self._warnings:
-                lines.append(f"#   - {w}")
-        # Every warning is sanitized by _write before persistence. CodeQL does
-        # not model that immediately downstream replacement sanitizer; the
-        # adversarial logger tests cover both the first write and this recap.
-        # codeql[py/clear-text-storage-sensitive-data]
         self._write("\n".join(lines) + "\n")
 
     def _write(self, text: str) -> None:
