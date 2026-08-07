@@ -83,11 +83,12 @@ The initial block vocabulary is closed:
 Contributions supply block records and authored strings only. They cannot supply functions, imports,
 expressions, format strings, attribute paths, or renderer names outside the closed enum. Markdown is
 emitted as text, never interpreted by Agentworks as executable content. Registration rejects unknown
-fields and any expression-like placeholder syntax. A participant with no content registers no topic.
-Registration also enforces byte and count bounds on every authored field, block payload, selector,
-and related-topic slug. Rendering removes terminal control bytes at one final boundary, preserving
-only line feed and tab from the control ranges, so neither authored nor projected text can reset a
-terminal, ring a bell, erase output, or forge a control sequence.
+fields and expression-like placeholder syntax outside the contract's narrow same-line inline-code
+form. Inline literals are always inert and are never template-evaluated. A participant with no
+content registers no topic. Registration also enforces byte and count bounds on every authored
+field, block payload, selector, and related-topic slug. Rendering removes terminal control bytes at
+one final boundary, preserving only line feed and tab from the control ranges, so neither authored
+nor projected text can reset a terminal, ring a bell, erase output, or forge a control sequence.
 
 ### Registration ownership
 

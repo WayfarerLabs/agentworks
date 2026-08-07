@@ -72,6 +72,12 @@ For kind and implementation topics, `SchemaReference.title` becomes `TopicContri
 field block does not repeat those authored facts. Authored overview Markdown crosses the ordinary
 contribution validator and remains Markdown; it is not escaped into plain text.
 
+The landed `session-template` overview documents `{{session_name}}` and `{{workspace_name}}` inside
+same-line, unescaped single-backtick spans. The ordinary validator preserves only that exact form.
+Multi-backtick runs, fenced blocks, multiline spans, escaped backticks, unmatched openers, and
+prose-position delimiters remain invalid. No trusted bypass exists, and the overview is not passed
+through `plain_text`.
+
 The field renderer then reads only the remaining `SchemaReference` records. Its Markdown names the
 target and emits stable rows for path, required or optional status, type, default or owner-templated
 default, description, choices, constraints, examples, and reference marker when those facts exist.
@@ -163,6 +169,9 @@ The adapter is complete when tests prove:
   single atomic request while `config.toml` is refused;
 - dynamic `SchemaReference` prose passes through contribution validation once, preserves authored
   overview Markdown, and does not repeat it in the field block;
+- exact same-line single-backtick spans preserve literal expression delimiters, while prose,
+  multi-backtick, fenced, multiline, escaped, and unmatched placements are rejected for trusted and
+  plugin contributions alike;
 - field and sample payloads change when fixture model declarations change, with no guide switchboard
   or copied field list;
 - capability references never reach the sample renderer;
