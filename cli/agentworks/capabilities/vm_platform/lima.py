@@ -5,10 +5,10 @@ from __future__ import annotations
 
 import contextlib
 import json
+import re
 import shlex
-import tempfile
+import sys
 import textwrap
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from pydantic import Field
@@ -22,9 +22,9 @@ from agentworks.capabilities.vm_platform.bootstrap_script import (
 )
 from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
 from agentworks.db import VMStatus
-from agentworks.errors import StateError
+from agentworks.errors import ProvisioningError, SensitiveDataCleanupError, StateError
 from agentworks.schema import AgwModel, NonEmptyStr
-from agentworks.ssh import SSHError, SSHTarget, copy_to
+from agentworks.ssh import SSHError, SSHTarget
 from agentworks.ssh import run as ssh_run
 from agentworks.topics import TopicProse
 from agentworks.transports import LimaTransport, RemoteLimaTransport, SSHTransport
@@ -43,6 +43,11 @@ if TYPE_CHECKING:
 # either way, so an absent sentinel stays a normal result, not an exception.
 _REBOOT_PENDING_MARKER = "AGW_REBOOT_PENDING"
 _REBOOT_CLEAR_MARKER = "AGW_REBOOT_CLEAR"
+
+_REMOTE_TEMPLATE_CLEANUP_ATTEMPTS = 3
+_REMOTE_TEMPLATE_ROOT = "/tmp"
+_REMOTE_TEMPLATE_PREFIX = "agentworks-lima-template."
+_REMOTE_TEMPLATE_RANDOM_LENGTH = 10
 
 # Lima template for Debian cloud VMs (values substituted at create time).
 # The provision block runs the full bootstrap script (user, packages, swap,
@@ -192,24 +197,29 @@ class LimaPlatform(VMPlatform):
             )
         return str(name)
 
-    def _run_lima(self, command: str, *, check: bool = True) -> str:
+    def _run_lima(self, command: str, *, check: bool = True, input_text: str | None = None) -> str:
         """Run a limactl command, locally or on the site's vm_host."""
         if self.is_remote:
             assert self._vm_host_ssh is not None
             target = SSHTarget(host=self._vm_host_ssh, user=None, login_shell=True)
-            result = ssh_run(target, command, check=check)
+            result = ssh_run(target, command, check=check, input_text=input_text)
             return result.stdout
         else:
             import subprocess
 
             proc = subprocess.run(
                 shlex.split(command),
+                input=input_text,
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
                 errors="replace",
             )
             if check and proc.returncode != 0:
+                if input_text is not None:
+                    # A parser may echo template lines to stderr. Keep the
+                    # secret-bearing stdin out of this diagnostic boundary.
+                    raise SSHError(f"limactl stdin command failed (exit {proc.returncode}): {command}")
                 raise SSHError(f"limactl failed: {proc.stderr.strip()}")
             return proc.stdout
 
@@ -424,19 +434,20 @@ class LimaPlatform(VMPlatform):
         return LimaTransport(vm_name=instance_name)
 
     def _create_local(self, instance_name: str, lima_yaml: str) -> None:
-        """Create and start a Lima VM locally."""
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-            f.write(lima_yaml)
-            template_path = f.name
-
+        """Create and start a local Lima VM without persisting its template."""
         try:
-            self._run_lima(f"limactl create --name {instance_name} --tty=false {template_path}")
+            # Lima's documented ``-`` template source consumes stdin. The
+            # secret-bearing YAML therefore never needs a local filesystem
+            # path, including on Windows where unlinking an open temp file is
+            # not reliable.
+            self._run_lima(
+                f"limactl create --name {instance_name} --tty=false -",
+                input_text=lima_yaml,
+            )
             self._run_lima(f"limactl start {instance_name}")
         except SSHError:
             self._log_provision_errors(instance_name)
             raise
-        finally:
-            Path(template_path).unlink(missing_ok=True)
 
     def _host_transport(self, logger: SSHLogger | None = None) -> SSHTransport:
         """An exec transport to the site's vm_host (remote sites only):
@@ -472,17 +483,19 @@ class LimaPlatform(VMPlatform):
         assert self._vm_host_ssh is not None
         target = SSHTarget(host=self._vm_host_ssh, user=None)
 
-        # Write Lima YAML locally and copy to VM Host
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-            f.write(lima_yaml)
-            local_template = f.name
-
-        remote_template = f"/tmp/agentworks-{instance_name}.yaml"
+        remote_template_dir = self._allocate_remote_template_dir(target)
+        remote_template = f"{remote_template_dir}/template.yaml"
+        operation_failure: BaseException | None = None
         try:
-            try:
-                copy_to(target, local_template, remote_template)
-            finally:
-                Path(local_template).unlink(missing_ok=True)
+            # Stream directly into the private directory allocated above.
+            # ``umask 077`` creates mode 0600. The input is carried only on
+            # subprocess stdin and is never included in argv or logger
+            # surfaces.
+            ssh_run(
+                target,
+                f"umask 077 && cat > {shlex.quote(remote_template)}",
+                input_text=lima_yaml,
+            )
 
             # Run limactl create + start as a single detached operation
             from agentworks.remote_exec import run_detached
@@ -529,18 +542,83 @@ class LimaPlatform(VMPlatform):
                 # appends a footer), hence one call here rather than one per
                 # branch; called with an exception in flight it also lands
                 # the traceback in the per-op log (its documented behavior).
-                # Suppressed so a local log-write failure (disk full,
-                # permissions) cannot skip the remote rm below or mask the
-                # original error.
-                with contextlib.suppress(OSError):
+                # An OSError cannot skip the remote cleanup. A second Ctrl-C
+                # during close also cannot replace a provisioning failure or
+                # the operator's first Ctrl-C, but remains visible when close
+                # itself is the operation that was interrupted.
+                active_failure = sys.exc_info()[1]
+                try:
                     ssh_logger.close()
-        finally:
-            # Clean up the remote temp file on success, failure, AND
-            # interrupt, including a copy that created only a partial
-            # secret-bearing YAML. A second interrupt or transport failure
-            # during this best-effort unwind cannot replace the original.
-            with contextlib.suppress(Exception, KeyboardInterrupt):
-                ssh_run(target, f"rm -f {remote_template}", check=False)
+                except OSError:
+                    pass
+                except KeyboardInterrupt:
+                    if active_failure is None:
+                        raise
+        except BaseException as exc:
+            operation_failure = exc
+
+        cleanup_failure: SensitiveDataCleanupError | None = None
+        try:
+            self._remove_remote_template_dir(target, remote_template_dir)
+        except SensitiveDataCleanupError as exc:
+            cleanup_failure = exc
+
+        if cleanup_failure is not None:
+            if operation_failure is None:
+                raise cleanup_failure
+            # Residue risk takes precedence over the earlier failure. Do not
+            # chain provider or transport text into the diagnostic: the safe
+            # combined error tells the operator both facts and how to remove
+            # the sensitive path.
+            raise self._remote_template_cleanup_error(remote_template_dir, operation_failed=True) from None
+
+        if operation_failure is not None:
+            raise operation_failure
+
+    def _allocate_remote_template_dir(self, target: SSHTarget) -> str:
+        """Atomically allocate and validate a private remote staging directory."""
+        path_template = f"{_REMOTE_TEMPLATE_ROOT}/{_REMOTE_TEMPLATE_PREFIX}{'X' * _REMOTE_TEMPLATE_RANDOM_LENGTH}"
+        result = ssh_run(target, f"umask 077 && mktemp -d {shlex.quote(path_template)}")
+        remote_template_dir = result.stdout.strip()
+        expected = (
+            rf"{re.escape(_REMOTE_TEMPLATE_ROOT)}/{re.escape(_REMOTE_TEMPLATE_PREFIX)}"
+            rf"[A-Za-z0-9]{{{_REMOTE_TEMPLATE_RANDOM_LENGTH}}}"
+        )
+        if re.fullmatch(expected, remote_template_dir) is None:
+            raise ProvisioningError(
+                "VM host returned an invalid temporary directory for Lima provisioning",
+                entity_kind="vm",
+            )
+        return remote_template_dir
+
+    def _remove_remote_template_dir(self, target: SSHTarget, remote_template_dir: str) -> None:
+        """Retry and verify removal of the remote secret-bearing directory."""
+        quoted_dir = shlex.quote(remote_template_dir)
+        command = f"rm -rf -- {quoted_dir} && test ! -e {quoted_dir}"
+        for _attempt in range(_REMOTE_TEMPLATE_CLEANUP_ATTEMPTS):
+            try:
+                ssh_run(target, command)
+                return
+            except (SSHError, OSError, KeyboardInterrupt):
+                continue
+        raise self._remote_template_cleanup_error(remote_template_dir, operation_failed=False) from None
+
+    def _remote_template_cleanup_error(
+        self,
+        remote_template_dir: str,
+        *,
+        operation_failed: bool,
+    ) -> SensitiveDataCleanupError:
+        prefix = "Lima provisioning failed and " if operation_failed else ""
+        assert self._vm_host_ssh is not None
+        return SensitiveDataCleanupError(
+            prefix + "removal of sensitive Lima provisioning input could not be confirmed",
+            entity_kind="vm",
+            hint=(
+                f"On VM host '{self._vm_host_ssh}', recursively remove directory "
+                f"'{remote_template_dir}' before retrying. It may contain credentials."
+            ),
+        )
 
     def _cleanup_partial_create(self, instance_name: str) -> None:
         """Best-effort teardown of the instance a failed ``create`` made
