@@ -147,6 +147,15 @@ answers to that question, and the failure would be silent: a sample teaching a s
 not describe. Emission's behavior is unchanged (the moved code is the same code, and its `$defs`
 naming is pinned by `tests/manifests/test_emit.py`).
 
+Three more per-kind facts moved with it, because both surfaces need all of them and neither should
+own them: `declarable_kinds()` (which replaced the two spellings of one set, emission's
+`emittable_kinds` and the sample surface's `SAMPLE_KINDS`), `row_model(kind)`, and
+`metadata_model(kind)`. The metadata model gained one change on the way: its fields are in
+DECLARATION order rather than sorted, because `name` is what a document's metadata block opens with
+and a rendered sample that led with `expires` would teach an order nobody writes. Emitted schema
+sees the same reordering, where property order is presentational and an editor's completion list
+follows it.
+
 **The root-model hop is collapsed by the renderer, not by the foundation.** The union is an
 `AgwRootModel`, because that is what the error bridge frames against, so the stream reads `platform`
 -> `platform.root` -> the arms. `root` is a mechanism, never a key an operator writes, so the
@@ -174,7 +183,7 @@ iter_field_docs ->  reference.py  ->  SchemaReference  ->  skeleton.py  (comment
 identically, computed once here rather than twice:
 
 - `children`, so a nested block renders as a block;
-- `arms` and `rendered_arm`, for a discriminated union;
+- `alternatives` and `rendered`, for a discriminated union;
 - `writable`, which is `required` MINUS the owner-templated case (section 6.3);
 - `type_label`, `render_type(doc.annotation)`, which a presenter may replace;
 - `sample_value`, the value the skeleton writes (section 6.2).
@@ -182,6 +191,26 @@ identically, computed once here rather than twice:
 The record is presentation-free in the sense the contract requires: it carries `FieldDoc` verbatim,
 no markdown, no ANSI, no CLI vocabulary, and no pre-rendered text. `type_label` is a convenience
 computed from the exported `render_type`, and every consumer can ignore it and keep the annotation.
+
+Two things the tree needs that the stream does not carry:
+
+- **the element of a collection of blocks.** `iter_field_docs` streams `env` and then
+  `env.<key>.value`, with nothing at `env.<key>`: rightly, since the element is not a field anyone
+  declared. A tree has to have it or the element's fields hang off the collection and render one
+  indent too shallow, which in YAML is a different document. The collector synthesizes that node
+  when a doc arrives whose parent path ends in a placeholder segment.
+- **an alternative's summary.** The arm's `ModelDoc.description` describes the CONFIG MODEL ("Where
+  a Lima site's `limactl` runs"); what an operator choosing between platforms wants is what the
+  IMPLEMENTATION is ("Lima VMs, local or on a remote host via SSH"), which is its `description`. The
+  collector reads the implementation where the arms are capability configs and falls back to the arm
+  model's docstring where they are not.
+
+**The capability registry is read through `capabilities/config.py`, never through the descriptor's
+accessor.** `registered_implementations` / `registered_implementation` were added there for this,
+and `tests/resources/test_graph_guard.py` is why: reaching `<descriptor>.registry()` from a new
+module is a banned pattern, and the right answer was the one step 2.3 already took, which is to keep
+the sanctioned read at one call site rather than let it become two. The guard caught this, which is
+what a guard is for.
 
 ## 6. The commented-YAML skeleton
 
@@ -192,30 +221,35 @@ document lines are `#` + the YAML, prose lines are `##` plus a space. Stripping 
 line turns the document lines into YAML and the prose lines into ordinary YAML comments. `--all`
 concatenates, with `#---` between documents.
 
+The header carries the kind identifier, the kind's summary, and its overview, and not the authored
+title: the document below it says `kind: vm-site` already, and an operator scrolling a `--all` dump
+is looking for the identifier. The title is the field reference's heading.
+
 ```yaml
 ## kind: vm-site
 ##
-## VM sites
+## Configured places to create VMs (a platform plus its settings)
 ##
-## A configured place to create VMs: a platform capability plus its settings.
-## <overview, wrapped at 88 columns>
+## <overview, wrapped>
 ##
 ## Uncomment the document lines (delete one leading `#`) and edit.
 ##
 #apiVersion: agentworks/v1
 #kind: vm-site
 #metadata:
-#  # The resource's name, unique within its kind. (string, required)
+#  # What this resource is called: ... (string, required)
 #  name: my-vm-site
-#  # What this resource is for. (string, optional)
-#  # description: ...
+#  # One operator-facing line saying what this resource is for ...
+#  # (string or null, optional)
+#  # description: <string>
 #spec:
 #  # The vm-platform backing this site ... (table, required)
-#  # Alternatives: lima, wsl2, proxmox, azure-vm, aws-ec2. This skeleton shows
-#  # lima; `agw resource describe-kind vm-platform/azure-vm` prints another.
+#  # One of: lima, wsl2, proxmox, azure-vm, aws-ec2. Shown here: lima.
+#  # `agw resource describe-kind vm-platform/wsl2` prints another one's fields.
 #  platform:
+#    # The platform this config is for. (one of: lima, required)
 #    name: lima
-#    # The SSH host running `limactl` for a REMOTE-Lima site. (string, optional)
+#    # The SSH host running `limactl` for a REMOTE-Lima site. (string or null, optional)
 #    # vm_host: me@gpu-box
 ```
 
@@ -238,15 +272,34 @@ set honest:
   or example, and its description. That is FR10's complete skeleton; the only difference is which
   lines are live.
 
-The VALUE a line carries is, in order: the field's first `examples` entry, else its declared
-default, else a type-shaped placeholder (`<string>`, `<integer>`). A required field with no example
-and no sensible placeholder is caught by the load test, which is what turns "author an example" from
-advice into a gate. Values are YAML-dumped, so a table or a list example renders as a real block.
+The VALUE a line carries is, in order: the field's first `examples` entry, the one value a closed
+field can hold (a union arm's tag), its declared default where that default says anything, and
+finally a type-shaped placeholder (`<string>`, `[<string>]`, `{<key>: <string>}`). A required field
+with no example and no sensible placeholder is caught by the load test, which is what turns "author
+an example" from advice into a gate. Values are YAML-dumped in FLOW style, so a short list or table
+sits on the key's own line (`apt: [zsh, ripgrep]`), which is how the hand-written samples wrote one
+and what an operator edits in place.
 
-The `metadata.name` value has one derived rule, because the name is the one field whose good value
-depends on the kind: `default` where the envelope accepts only that name (read from
-`envelope.only_default_name`, the single authority for that rule), the declared default where the
-kind declares one (`admin-template`), and `my-<kind>` otherwise.
+An EMPTY default is skipped in favor of the placeholder, and `false` and `0` are not: `repos: []` is
+the honest default and teaches nothing, while `repos: [<string>]` says what may go there, and
+`enabled: false` is the value the field takes rather than an absence. `worth_showing` is that rule,
+spelled once and shared by the value and by the parenthetical naming it.
+
+### 6.2.1 `metadata.name`, the one value the collector derives
+
+The name is the one field where the ROW and the DOCUMENT disagree, and the document is what is being
+described. Two corrections, both discovered by the load test rather than by reading:
+
+- **it is always required.** The envelope demands `metadata.name` of every document whatever the row
+  says, and a kind that DEFAULTS its name (`admin-template`) does so for the row the framework
+  synthesizes. Left alone, a rendered admin-template commented out the only key in its metadata
+  block and produced `metadata:` with nothing under it, which the loader rejects.
+- **its example is per-kind**: `default` where the envelope accepts only that name (read from
+  `envelope.only_default_name`, promoted so that rule has one authority and two readers), the
+  declared default where a kind declares one, and `my-<kind>` otherwise.
+
+Both are attached to the RECORD rather than handled in the skeleton, so the field reference and the
+guide see the same field the sample writes.
 
 ### 6.3 An owner-templated field is not the operator's to write
 
@@ -257,8 +310,9 @@ skeleton follows the same rule for the same reason, and says what the omission r
 
 ```yaml
 #    # The secret holding this credential's personal access token.
-#    # (string, optional; defaults to the secret named `git-token-<this resource's name>`)
-#    # token: my-git-token
+#    # (string, optional, defaults to the resource named `git-token-<this resource's
+#    # name>`, names a secret)
+#    # token: <string>
 ```
 
 ### 6.4 The uncomment contract and the modeline
@@ -277,9 +331,9 @@ editor association for a mechanical convenience nobody has asked for.
 Every fact both surfaces show is reachable without a CLI:
 
 ```python
-from agentworks.manifests.reference import kind_reference, reference_for, describable_targets
-from agentworks.manifests.skeleton import skeleton_text
+from agentworks.manifests.reference import describable_targets, kind_reference, reference_for
 from agentworks.manifests.samples import sample_text, write_sample
+from agentworks.manifests.skeleton import skeleton_text
 ```
 
 `reference_for("vm-platform/lima")` and `skeleton_text(...)` are what the onboarding effort's
@@ -287,6 +341,11 @@ from agentworks.manifests.samples import sample_text, write_sample
 neither constructs a capability: they read the code registries and the models. Rendering an
 implementation therefore works for a DISABLED one (enablement is a property of a registry ROW, and
 nothing here reads rows), which is pinned by a test rather than left as a consequence.
+
+The presenters share one text transform, `plain_text`, which turns the RST-style double backticks a
+model's attribute docstrings use into single ones. It is on the presenter side by design: markdown
+consumers (emitted schema descriptions, the guide's topic pages) render a double-backtick span
+correctly, and only a plain-text reader sees them as noise, so the record keeps the author's text.
 
 ## 8. Live means the plugins are seated (a 2.7 defect, fixed here)
 
@@ -336,7 +395,14 @@ through the swap unchanged; what is REPLACED is only what pinned file content.
   owner-templated field, and a root-model config;
 - a DISABLED capability renders, pinned against a fixture plugin that is not enabled in config;
 - `test_declare_once_end_to_end.py` gains the two arms it reserved: the fixture platform's field
-  reaches the rendered sample and the field reference with no edit anywhere else.
+  reaches the rendered sample and the field reference with no edit anywhere else. The sample arm is
+  the ALTERNATIVES line rather than a rendered body, because the skeleton renders one arm and the
+  fixture is not the first registered one; its negative twin (no mention when unseated) is what
+  keeps that from being a coincidence.
+
+The secret kind's prose points at `secret-backend/onepassword` for what a `backend_mappings` value
+may hold, which is the one place a rendered document still hands an operator to another surface
+rather than describing the shape inline. That is section 11's un-built splice, not an oversight.
 
 ## 11. Deliberately not built
 
