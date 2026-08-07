@@ -55,9 +55,9 @@ identifies all wave 2 gates, and has no unresolved review finding.
       and executable contributions rejected.
 - [x] `GuideView` implemented over finalized registry and graph facts with no capability object,
       secret resolver, raw config, run target, mutation, or arbitrary traversal surface.
-- [ ] Tests prove rendering performs no probe, secret resolution, capability invocation, finalize,
+- [x] Tests prove rendering performs no probe, secret resolution, capability invocation, finalize,
       or mutation and rejects an expression-evaluation attempt from plugin content.
-- [ ] Broken-config fixtures prove authored content and the framed config error still render, every
+- [x] Broken-config fixtures prove authored content and the framed config error still render, every
       affected dynamic block reports unavailable, full guide requests attempt the normal registry
       build, and `GuideView` construction cannot prompt for a secret.
 - [ ] Core concept topics and initial kind topics colocated with their owning packages, including
@@ -79,9 +79,9 @@ identifies all wave 2 gates, and has no unresolved review finding.
       backend without explicit consent.
 - [ ] A non-mutating named-VM connection verification operation uses the standard transport and
       reports success or framed failure without repair, rekey, or implicit power-state change.
-- [ ] `agw guide [topic ...]`, `--agent/--human`, and `--names-only` implemented with atomic
+- [x] `agw guide [topic ...]`, `--agent/--human`, and `--names-only` implemented with atomic
       multi-topic validation, exact lookup, deterministic ordering, and markdown-only output.
-- [ ] Dynamic topic completion implemented and tested for Bash, Zsh, and PowerShell, including
+- [x] Dynamic topic completion implemented and tested for Bash, Zsh, and PowerShell, including
       `concept-` discovery and resource/capability `kind/name` topics.
 - [ ] Golden-path acceptance is step-bounded in automation and timed manually on a clean machine;
       the evidence records time to first working session and every operator interaction.

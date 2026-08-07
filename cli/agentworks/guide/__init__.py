@@ -1,5 +1,6 @@
 """Public guide contribution, catalog, and safe projection API."""
 
+from agentworks.guide.agent_mode import GuideMode, select_guide_mode
 from agentworks.guide.catalog import GuideCatalog, GuideCatalogIssue
 from agentworks.guide.contract import (
     ActionId,
@@ -35,6 +36,7 @@ from agentworks.guide.contract import (
     parse_topic_contribution,
     validate_guide_action,
 )
+from agentworks.guide.service import GuideResponse, render_guide
 from agentworks.guide.view import (
     GuideIdentity,
     GuideInstanceFact,
@@ -63,6 +65,8 @@ __all__ = [
     "GuideCatalogIssue",
     "GuideContributionError",
     "GuideIdentity",
+    "GuideMode",
+    "GuideResponse",
     "GuideInstanceFact",
     "GuideOrigin",
     "GuideRelationship",
@@ -90,5 +94,7 @@ __all__ = [
     "UnknownGuideTopicError",
     "build_guide_view",
     "parse_topic_contribution",
+    "render_guide",
+    "select_guide_mode",
     "validate_guide_action",
 ]

@@ -695,6 +695,34 @@ config load. Declare session templates as YAML manifests (`agw resource sample s
 and rewrite any that still live in `config.toml`; the
 [0.14 upgrade guide](../docs/guides/upgrading-to-0.14.md) walks through it.
 
+### Guide
+
+`agw guide [TOPIC]...` renders Markdown teaching together with safe facts from the current finalized
+resource registry. With no topic it prints a security disclosure, onboarding entry point, and topic
+index. Bare kind topics such as `vm-template` list the current resources of that kind; exact
+`kind/name` topics describe current state and relationships. Core concepts use names such as
+`concept-onboarding`, `concept-secrets`, and `concept-reporting-bugs`.
+
+Multiple topics render in the requested order and are validated atomically: one unknown topic
+prevents all output. Repeated topics render once at their first position. `--agent` and `--human`
+override automatic presentation selection; explicit selection wins over the Claude Code execution
+signature and stdout TTY fallback. Both modes carry the same semantic content. Guide output is
+instructional and never grants consent to resolve secrets, inspect the workstation, connect to a VM,
+or mutate state.
+
+Guide remains useful when configuration or registry finalization fails. Authored prose still
+renders, live blocks are marked unavailable, the framed failure appears once, and the command
+exits 1. `--names-only` emits one retained topic per line, degrades to authored topics plus
+code-owned kind names under broken configuration, and exits 0. This stable stream backs Bash, Zsh,
+and PowerShell topic completion.
+
+| Command                              | Description                                      |
+| ------------------------------------ | ------------------------------------------------ |
+| `agw guide`                          | Render the guide index and onboarding disclosure |
+| `agw guide TOPIC...`                 | Render one or more exact topics atomically       |
+| `agw guide TOPIC... --agent/--human` | Override automatic presentation mode             |
+| `agw guide --names-only`             | Emit topic names for shell completion            |
+
 ### Config
 
 | Command                             | Description                                  |

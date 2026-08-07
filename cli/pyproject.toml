@@ -57,6 +57,7 @@ build-backend = "hatchling.build"
 # to bundle so it doesn't try to auto-discover an `agentworks_cli/` directory.
 [tool.hatch.build.targets.wheel]
 packages = ["agentworks"]
+exclude = ["**/guide-content/.markdownlint.jsonc"]
 
 [tool.ruff]
 target-version = "py312"
