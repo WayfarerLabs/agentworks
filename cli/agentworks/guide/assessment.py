@@ -207,6 +207,8 @@ def assess_onboarding(
     for fact in snapshot.resources:
         if not fact.verdict.enabled:
             findings.append(OnboardingFinding(fact.identity, OnboardingStatus.DISABLED, fact.verdict.reason))
+        elif not fact.verdict.is_available:
+            findings.append(OnboardingFinding(fact.identity, OnboardingStatus.UNVERIFIABLE, fact.verdict.reason))
         elif not fact.verdict.ready:
             findings.append(OnboardingFinding(fact.identity, OnboardingStatus.NOT_READY, fact.verdict.reason))
         elif fact.identity.kind in {"secret", "vm"} and fact.identity.name != fact.identity.kind:

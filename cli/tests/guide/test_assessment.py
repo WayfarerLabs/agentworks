@@ -35,14 +35,21 @@ from agentworks.resources import KIND_REGISTRY, Origin, Registry, ResourceRefere
 from agentworks.resources.kind import InstanceRef
 
 
-def _fact(kind: str, name: str, *, enabled: bool = True, ready: bool = True) -> GuideResourceFact:
+def _fact(
+    kind: str,
+    name: str,
+    *,
+    enabled: bool = True,
+    ready: bool = True,
+    available: bool = True,
+) -> GuideResourceFact:
     reason = None if enabled and ready else f"{name} projected reason"
     return GuideResourceFact(
         GuideIdentity(kind, name),
         "capability" if kind.endswith("backend") else "declarable",
         None,
         GuideOrigin("operator-declared", None),
-        GuideVerdict(enabled, ready, reason),
+        GuideVerdict(enabled, ready, reason, is_available=available),
     )
 
 
@@ -157,7 +164,12 @@ def test_action_validation_occurs_only_when_guide_operation_requests_records(
     import agentworks.guide.assessment as module
 
     calls: list[object] = []
-    monkeypatch.setattr(module, "validate_guide_action", lambda action, source: calls.append(action) or action)
+
+    def record_action(action, source):
+        calls.append(action)
+        return action
+
+    monkeypatch.setattr(module, "validate_guide_action", record_action)
     assert calls == []
     module.onboarding_actions()
     assert len(calls) == 3

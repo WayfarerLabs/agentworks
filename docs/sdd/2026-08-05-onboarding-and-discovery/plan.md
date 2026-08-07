@@ -60,6 +60,11 @@ identifies all wave 2 gates, and has no unresolved review finding.
 - [x] Broken-config fixtures prove authored content and the framed config error still render, every
       affected dynamic block reports unavailable, full guide requests attempt the normal registry
       build, and `GuideView` construction cannot prompt for a secret.
+- [x] Following live acceptance, guide-scoped registry construction preserves normal declaration,
+      publication, materialization, validation, finalization, and freezing while disabling host
+      probes; probe-dependent readiness remains unavailable and unverifiable. This corrective item
+      supersedes the preceding completed item's historical "normal registry build" wording. Ordinary
+      command registry builds retain their existing readiness checks.
 - [x] Core concept topics and initial kind topics colocated with their owning packages, including
       security disclosure, consent-first behavior, progressive onboarding, management, secrets, and
       troubleshooting. `concept-reporting-bugs` covers redacted reproduction, existing-issue search,
@@ -83,7 +88,7 @@ identifies all wave 2 gates, and has no unresolved review finding.
       multi-topic validation, exact lookup, deterministic ordering, and markdown-only output.
 - [x] Dynamic topic completion implemented and tested for Bash, Zsh, and PowerShell, including
       `concept-` discovery and resource/capability `kind/name` topics.
-- [ ] Golden-path acceptance is step-bounded in automation and timed manually on a clean machine;
+- [x] Golden-path acceptance is step-bounded in automation and timed manually on a clean machine;
       the evidence records time to first working session and every operator interaction.
 - [x] A management coverage matrix proves topics cover creating and changing resources, adopting a
       capability, resolving upgrade deprecations, and consented doctor-driven troubleshooting.
@@ -93,7 +98,7 @@ identifies all wave 2 gates, and has no unresolved review finding.
       `agentworks-dev` completeness and `agentworks-reviewer` drift checks; other roles are audited,
       shared Claude Code, Codex, and Copilot outputs regenerated, and
       `./scripts/rulesync-upgen.sh --check` passes.
-- [ ] Unit, integration, CLI, completion, packaging, typing, and lint gates pass.
+- [x] Unit, integration, CLI, completion, packaging, typing, and lint gates pass.
 - [ ] Step reviewed by `agentworks-reviewer` and a fresh-eyes reviewer; valid findings resolved.
 - [ ] Always-green ready-to-merge implementation PR opened and roadmap-lead review requested.
 

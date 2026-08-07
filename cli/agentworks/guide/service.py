@@ -169,9 +169,9 @@ def render_guide(
 
         load_config_fn = load_config_for_guide
     if load_registry_fn is None:
-        from agentworks.bootstrap import load_request_registry
+        from agentworks.bootstrap import load_guide_registry
 
-        load_registry_fn = load_request_registry
+        load_registry_fn = load_guide_registry
     registry: Registry | None = None
     system_error: AgentworksError | None = None
     try:

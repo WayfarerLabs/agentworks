@@ -296,7 +296,10 @@ Every full guide request follows this order:
 
 1. Build the authored catalog independently of operator configuration.
 2. Validate only request syntax and repeated-slug normalization. Invalid syntax produces no output.
-3. Attempt the normal `load_config()` and `load_request_registry()` path exactly once.
+3. Attempt `load_config()` and one guide-scoped registry build. This build uses the normal
+   declaration, publication, materialization, validation, finalization, and freezing path with host
+   readiness checks disabled. It preserves probe-dependent readiness as unavailable rather than
+   converting it to not-ready. Ordinary command registry builds remain unchanged.
 4. On success, derive dynamic bare-kind and `kind/name` topics from the finalized registry, combine
    them with authored topics, then validate existence for the entire request atomically. Any unknown
    topic produces no output. Only after that check does rendering begin.
@@ -312,6 +315,10 @@ or raw configuration. It exits 1 because live facts were requested but unavailab
 before atomic existence validation, and no partial dynamic facts from a failed build are retained.
 Catalog issues and system failure are independent sections. Completion uses the same attempt but
 degrades to retained authored names plus code-owned bare kind names and exits 0.
+
+`GuideVerdict` preserves whether readiness was available. An unavailable verdict renders as
+unavailable and assessment classifies it as `unverifiable`; it must not trigger a doctor action as
+if a host check had actually failed.
 
 Missing configuration is broken configuration, not a cue to create it or prompt. Guide code never
 changes interactivity, catches a prompt, substitutes a prompt backend, or retries with a reduced

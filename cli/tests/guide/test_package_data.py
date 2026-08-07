@@ -23,8 +23,7 @@ def test_installed_wheel_contains_every_authored_guide_block(tmp_path: Path) -> 
     )
     wheel = next((tmp_path / "dist").glob("*.whl"))
     authored = {
-        path.relative_to(project).as_posix()
-        for path in (project / "agentworks").glob("**/guide-content/**/*.md")
+        path.relative_to(project).as_posix() for path in (project / "agentworks").glob("**/guide-content/**/*.md")
     }
     assert authored
     with zipfile.ZipFile(wheel) as archive:

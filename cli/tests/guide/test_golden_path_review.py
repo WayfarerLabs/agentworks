@@ -1,0 +1,88 @@
+from __future__ import annotations
+
+from agentworks.guide import (
+    ActionId,
+    GuideIdentity,
+    GuideMode,
+    GuideOrigin,
+    GuideResourceFact,
+    GuideVerdict,
+    OnboardingSnapshot,
+    OnboardingStatus,
+    assess_onboarding,
+)
+from agentworks.guide.contributions import guide_contributions
+from agentworks.guide.render import render_index, render_topic
+from agentworks.guide.service import _dynamic_topic
+from agentworks.guide.view import build_guide_view
+from agentworks.resources.graph import Enablement, Readiness
+
+
+def test_unavailable_readiness_renders_and_assesses_as_unverifiable() -> None:
+    reason = "host readiness unavailable: guide does not inspect the workstation"
+    fact = GuideResourceFact(
+        GuideIdentity("vm-site", "lima-local"),
+        "declarable",
+        None,
+        GuideOrigin("built-in", None),
+        GuideVerdict(enabled=True, ready=False, is_available=False, reason=reason),
+    )
+
+    assessment = assess_onboarding(OnboardingSnapshot((fact,), (), ()))
+
+    assert assessment.findings[0].status is OnboardingStatus.UNVERIFIABLE
+    assert assessment.findings[0].reason == reason
+    assert ActionId("run-doctor") not in assessment.action_ids
+
+
+def test_unavailable_readiness_is_explicit_in_dynamic_rendering() -> None:
+    class Graph:
+        def readiness_of(self, kind: str, name: str) -> Readiness:
+            return Readiness.unavailable("guide does not inspect the workstation")
+
+        def enablement_of(self, kind: str, name: str) -> Enablement:
+            return Enablement.enabled
+
+        def edges_of(self, kind: str, name: str) -> tuple[()]:
+            return ()
+
+        def dependents_of(self, kind: str, name: str) -> tuple[()]:
+            return ()
+
+    class Registry:
+        is_finalized = True
+        graph = Graph()
+        resource = type("Resource", (), {"description": None, "origin": None})()
+
+        def lookup(self, kind: str, name: str) -> object:
+            return self.resource
+
+        def iter_kind_items(self, kind: str):
+            return iter((("lima", self.resource),)) if kind == "vm-platform" else iter(())
+
+    registry = Registry()
+    topic = _dynamic_topic(registry, "vm-platform/lima")  # type: ignore[arg-type]
+    view = build_guide_view(topic, registry, object())  # type: ignore[arg-type]
+    markdown = render_topic(topic, view, GuideMode.AGENT).markdown
+
+    assert "readiness unavailable: guide does not inspect the workstation" in markdown
+    assert "not ready:" not in markdown
+
+
+def test_no_topic_modes_have_semantic_parity_and_golden_path_ordering() -> None:
+    topics = guide_contributions()
+    human = render_index(topics, GuideMode.HUMAN)
+    agent = render_index(topics, GuideMode.AGENT)
+
+    disclosure = "An agent managing Agentworks gains access to everything Agentworks can reach"
+    onboarding = "Run `agw guide concept-onboarding --agent`"
+    for markdown in (human, agent):
+        disclosure_at = markdown.index(disclosure)
+        start_at = markdown.index("## Start here")
+        onboarding_at = markdown.index(onboarding)
+        topics_at = markdown.index("## Topics")
+        assert disclosure_at < start_at < onboarding_at < topics_at
+
+    human_semantics = human.replace("## Security and consent", "## Disclosure")
+    agent_semantics = agent.replace("## Agent operating contract", "## Disclosure")
+    assert human_semantics == agent_semantics

@@ -49,7 +49,12 @@ def begin_request_warning_scope() -> None:
     _warned_request_configs.set(frozenset())
 
 
-def build_registry(config: Config, manifests: ManifestSet | None = None) -> Registry:
+def build_registry(
+    config: Config,
+    manifests: ManifestSet | None = None,
+    *,
+    probe_host_readiness: bool = True,
+) -> Registry:
     """Build a finalized ``Registry`` from the standard set of publishers.
 
     Publisher order: the bundled built-in manifests first
@@ -110,7 +115,10 @@ def build_registry(config: Config, manifests: ManifestSet | None = None) -> Regi
     plugins.publish_plugins(registry, config)
     config.publish_to(registry)
     manifests.publish_to(registry)
-    registry.finalize(enablement_sources=[plugins.plugin_enablement_source(config)])
+    registry.finalize(
+        enablement_sources=[plugins.plugin_enablement_source(config)],
+        probe_host_readiness=probe_host_readiness,
+    )
     # Config consistency against the finalized graph, at the boundary that
     # holds both worlds. The registry cannot do this itself: it is
     # config-agnostic by construction and settings are never published as
@@ -135,13 +143,19 @@ def build_registry(config: Config, manifests: ManifestSet | None = None) -> Regi
     return registry
 
 
-def load_request_registry(config: Config, manifests: ManifestSet | None = None, *, warn: bool = True) -> Registry:
+def load_request_registry(
+    config: Config,
+    manifests: ManifestSet | None = None,
+    *,
+    warn: bool = True,
+    probe_host_readiness: bool = True,
+) -> Registry:
     """Build a registry and render request-scoped warnings once."""
     from agentworks import output
     from agentworks.manifests import RESOURCES_DIRNAME, load_manifests
 
     resolved = manifests if manifests is not None else load_manifests(config.source_path.parent / RESOURCES_DIRNAME)
-    registry = build_registry(config, resolved)
+    registry = build_registry(config, resolved, probe_host_readiness=probe_host_readiness)
     request_key = str(config.source_path)
     already_warned = request_key in _warned_request_configs.get()
     if warn and not already_warned:
@@ -149,3 +163,8 @@ def load_request_registry(config: Config, manifests: ManifestSet | None = None, 
         for issue in resolved.issues:
             output.warn(f"Manifest: {issue}")
     return registry
+
+
+def load_guide_registry(config: Config) -> Registry:
+    """Build guide facts without inspecting host tools or backend availability."""
+    return load_request_registry(config, probe_host_readiness=False)
