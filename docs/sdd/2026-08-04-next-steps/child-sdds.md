@@ -1,7 +1,7 @@
 # Child SDDs
 
 - Status: Active ledger
-- Last updated: 2026-08-05
+- Last updated: 2026-08-07
 
 This is the roadmap's tracking document, the analog of an ordinary SDD's `plan.md`. Completed
 checkboxes are immutable records, per the standard rule. The roadmap SDD locks when every entry here
@@ -62,9 +62,17 @@ is locked.
 
 - [x] Seeded (FRD, PR #413, 2026-08-05; runs parallel to wave 2 per `phasing.md`)
 - [x] FRD merged to `main` (2026-08-06)
-- [ ] Picked up by an effort lead (HLA, plan)
-- [ ] First-slice implementation (plugin, skills, output contract); schema-derived depth adopts wave
-      2 surfaces as they land
+- [x] Picked up by an effort lead (HLA, plan, prior-art; design PR #421 merged 2026-08-06)
+- [x] Phase 1 (guide core, safe projection, verification surfaces) reviewed: three-pass roadmap
+      review of PR #428 (2026-08-07, request changes, six blockers), fix round re-reviewed by
+      execution and approved (2026-08-07); all mutations pinned, gates green
+- [x] Merge order ruled (operator, 2026-08-07, confirming the effort's D7): wave 2 merges first,
+      #428 rebases once, re-homing its probe-suppression mechanism onto the descriptor-derived
+      dispatch as anticipated by its phase 4
+- [ ] Phase 1 merged (after wave 2 lands, the heading-forgery decision is recorded per the
+      re-review, and the rebase clears re-check)
+- [ ] Remaining phases (machine-readable output, bootstraps, wave 2 adoption, closeout) per the
+      effort's per-phase PR plan
 - [ ] Locked
 
 ### Not yet spawned
@@ -80,8 +88,10 @@ Planned children, seeded when their prerequisites land (see `phasing.md`):
 - Closeout wave: comprehensive security, test-consolidation, and cleanup review (gates the lock)
 
 Not children of this roadmap (explicitly out of scope, see `target-state.md`): the
-named-console-template selector SDD, the herdr effort, and the companion-shell and resilient-attach
-wins. They proceed standalone.
+named-console-template selector SDD, the herdr effort, the companion-shell and resilient-attach
+wins, and the agentworks.build website (`docs/sdd/2026-08-07-website/`, seeded 2026-08-07; the
+roadmap lead seeds and reviews it like a child, but it does not gate the roadmap lock). They proceed
+standalone.
 
 ## Issue intake (2026-08-05)
 

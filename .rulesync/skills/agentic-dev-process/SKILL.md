@@ -9,11 +9,13 @@ targets: ["*"]
 # Agentic Development Process
 
 This is the top-level playbook for how a development effort runs, from a standing start to a
-merge-ready PR. It ties three things together: the `sdd` skill (how we spec significant work), the
-`agentworks-dev` subagent (who implements), and the `agentworks-reviewer` subagent (who checks). The
-always-on rules in `.rulesync/rules/` and the repo's `CONTRIBUTING.md` cover the mechanics (code
-style, linting, conventional commits); the `agentworks-dev` philosophy covers _how_ to write the
-code. This skill covers the flow that sits above both.
+merge-ready PR. It is written for whoever is **driving** the effort; a delegated subagent gets its
+lane from its persona and its invoking prompt, not from here. The playbook ties three things
+together: the `sdd` skill (how we spec significant work), the `agentworks-dev` subagent (who
+implements), and the `agentworks-reviewer` subagent (who checks). The always-on rules (already in
+your context) and the repo's `CONTRIBUTING.md` cover the mechanics (code style, linting,
+conventional commits); the `development-principles` rule covers _how_ to write the code. This skill
+covers the flow that sits above both.
 
 The process scales with the work. A large effort walks every step below; a small change collapses
 several of them, but review, regular commits, and escalation still apply. Hold the whole picture,
@@ -29,9 +31,9 @@ Before touching anything, decide how big this is, because the size picks the tra
 - **Small, simple changes** (localized, well-patterned, low-risk): skip SDD and implement directly.
   They still get reviewed (section 5), committed regularly (section 6), and escalated if they turn
   out bigger than they looked. Implementing directly changes who writes the code, not the bar it is
-  held to: the lead holds every standard the `agentworks-dev` philosophy sets out. That philosophy
-  is the project's, merely packaged as a persona so it can be handed to a subagent; skipping the
-  delegation does not waive it.
+  held to: the always-on `development-principles` rule applies to the lead directly, and skipping
+  the delegation does not waive it. (The `agentworks-dev` persona is that rule embodied for
+  delegated implementation, plus the delegation-specific lane.)
 - When it is genuinely ambiguous which track fits, lean heavier for anything that reshapes a
   contract or is hard to undo, lighter for a localized change that follows an existing pattern. If
   still unsure, ask (the `ask-questions` rule).
@@ -85,7 +87,11 @@ stays out of the weeds on purpose:
   scratchpad, a shared temp or fixture directory) must be subdivided the same way. Charter each
   subagent to create and stay inside its own namespaced subdirectory (for example `<task-slug>/`
   under the shared root), and anything fixture-sensitive (like a tester) to create a fresh temp
-  directory under that.
+  directory under that. Isolation changes where the dev's commits land: git refuses to check out a
+  branch already checked out in another worktree, so an isolated dev commits on its own branch
+  (usually the one its worktree starts on), pushes it so nothing is hoarded locally, and reports
+  branch and head SHA; integrating that branch back onto the effort's branch is the lead's step, not
+  the dev's, and doing it promptly keeps section 6's no-hoarding rule satisfied end to end.
 
 ## 4. Choose the model deliberately for each delegation
 
@@ -139,25 +145,45 @@ after a burst of process changes, before locking a roadmap-level effort, or when
 asks, run one comprehensive consistency review over the whole process tree: skills, rules, and
 subagent definitions together, in a single pass.
 
-Run it as an `agentworks-reviewer` subagent in a fresh context, launched explicitly at the top tier
-(section 4 applies here too: name the model, do not inherit). Never use the context that authored
-the changes; the whole point is a reader who has to work the tree out from what it says. It hunts
-pairwise contradictions, rules that silently override one another, gaps where one document assumes
-something another never establishes, and cross-references gone stale. Porting the process docs into
-a separate context and having independent reviewers read them as outsiders is a proven technique
-here: it surfaced four live contradictions that per-change reviews had passed. Findings route like
-any other review; triage them, push back on the wrong ones, and fix the valid ones.
+Run it as an `agentworks-reviewer` subagent in its consistency-review mode (defined in that
+subagent: six categories, composition failures chief among them), in a fresh context, launched
+explicitly at the top tier (section 4 applies here too: name the model, do not inherit). Never use
+the context that authored the changes; the whole point is a reader who has to work the tree out from
+what it says. It hunts pairwise contradictions, rules that silently override one another, gaps where
+one document assumes something another never establishes, and cross-references gone stale. Porting
+the process docs into a separate context and having independent reviewers read them as outsiders is
+a proven technique here: it surfaced four live contradictions that per-change reviews had passed.
+Findings route like any other review; triage them, push back on the wrong ones, and fix the valid
+ones.
 
 ## 6. Commit, push, and PR
 
 - **Commit and push at regular intervals.** Do not hoard work in a local branch; frequent, honest
   commits keep the work reviewable and recoverable. Follow the project's Conventional Commits
   convention (`CONTRIBUTING.md`) for message shape.
-- **One PR per feature is the default.** Put the whole feature in a single PR, SDD artifacts
-  included. Split into multiple PRs only when there is a good reason, the usual one being legitimate
-  SDD phases that each carry independent, standalone value. A phase that only has value once a later
-  phase lands is not a reason to split; it is a commit within the one PR. Always-green phased
-  commits give reviewers a natural commit-by-commit reading order inside a single large PR.
+- **One PR per feature is the default, with a size ceiling.** Put the whole feature in a single PR,
+  SDD artifacts included. Split into multiple PRs only when there is a good reason. The usual one is
+  legitimate SDD phases that each carry independent, standalone value; another is cross-effort
+  visibility, per the `sdd` skill's merge-artifacts-early guidance: when another effort could build
+  against your design (under an active roadmap, assume one can), the SDD artifacts land on `main`
+  ahead of the implementation instead of riding the feature branch to the end. A phase that only has
+  value once a later phase lands is not a reason to split; it is a commit within the one PR.
+  Always-green phased commits give reviewers a natural commit-by-commit reading order inside a
+  single large PR. The ceiling: when a feature's projected diff grows past what one reviewer can
+  actually hold (as a rough guide, a few thousand lines of substantive change), the default flips
+  and the effort ships as a PR series of always-green phases. Plan the split at plan-writing time,
+  not when the branch is already huge; review depth decays faster than diff size grows, and a
+  monster PR forces the review to happen after the design has hardened, when findings are most
+  expensive to act on.
+- **Within a PR series, stack dependent phases; don't wait for merge.** The expensive deltas come
+  from review, not from merge, so the gate for building phase N+1 on phase N is the dust settling on
+  N: its major review findings incorporated and re-review clean, not its merge. Before that gate,
+  stacking bets against exactly the reshaping a review can force; after it, the remaining churn is
+  mechanical and stacking is preferred for parallel-yet-dependent work. Keep the stack shallow (one
+  not-yet-merged layer at a time; a stack of unreviewed PRs is the big PR wearing a disguise), and
+  the stack's owner carries the rebases and retargets the base branch as predecessors merge. Work
+  that does not actually depend on the unmerged phase branches off `main` as a sibling instead, and
+  design-time work (LLDs, content, research) needs no branch gate at all: paper does not rebase.
 - **Open a PR when the work is close to merge-ready**, not before. A PR signals "this is ready for
   eyes," so open it when that is true.
 - **Non-draft by default.** Avoid draft PRs unless specifically asked for one. The single routine
@@ -182,7 +208,8 @@ misses.
   pushing), substitute a **vanilla generic review right here**: a `general-purpose` subagent on a
   **lower model (e.g. Sonnet)**, prompted to review the diff as a senior engineer reading it cold,
   no project-specific checklist. Run it in parallel with the `agentworks-reviewer` and triage both
-  together.
+  together. This pass is deliberately exempt from section 4's reviewer-tier floor: it is a
+  complementary lens, not the reviewer of record, which stays bound by that floor.
 
 Either way, apply the same finding stance as section 5 (push back on the wrong, fix the valid).
 Reserve this for **code-heavy** slices; a doc-only or closeout change has little for a fresh-eyes

@@ -306,13 +306,21 @@ The settled rules for the species:
   effort.
 - The roadmap lead seeds each child SDD with its FRD plus any constraints the roadmap has already
   settled, and reviews the child's PRs. A separately launched effort lead owns the child's HLA,
-  plan, and implementation per the ordinary process. Seeding PRs are ready, not draft: their content
-  is limited by design, but they are intended to merge as-is (see PR Review).
+  plan, and implementation from the start, per the ordinary process. Seeding PRs are ready, not
+  draft: their content is limited by design, but they are intended to merge as-is (see PR Review).
+  Ownership of the seeded FRD transfers to the effort lead when the seeding PR merges: from then on
+  it is the child's artifact like the rest of its SDD, the effort lead revises it when it turns out
+  wrong (keeping the roadmap lead informed of material revisions), and the roadmap lead stops
+  editing it like any other child artifact. Settled roadmap constraints recorded in the FRD still
+  bind; the effort lead flags disagreement rather than reopening them unilaterally.
 - The roadmap's artifacts, ledger included, are the roadmap lead's to maintain. Child effort leads
   do not update the roadmap SDD to mark their own progress; the roadmap lead tracks child status
   from merged PRs. Child leads flag inconsistencies they notice to the operator instead (see
   Artifact Mutability's ownership rule).
 - Terminology: roadmap SDD, roadmap lead, child SDD, effort lead. Not "program".
+- The `roadmap-lead` skill is the operating manual for the role itself: watching child efforts, the
+  multi-pass review protocol for their PRs, and the lead's after-round duties. This section defines
+  the artifact form; that skill defines how the lead runs it.
 
 ## Branching Model
 
@@ -326,7 +334,8 @@ Work driven via SDD should be done in one or more feature branches. The general 
    yet: the PR is a pure review vehicle while the artifacts churn. It is not draft because the
    content is partial. See [PR Review](#pr-review) for the merge-intent rule this follows from.
 4. The first push of work should use that existing branch.
-5. SDD artifacts will naturally get merged with the work itself.
+5. SDD artifacts merge with the work itself, or ahead of it when other efforts need visibility (see
+   [Merge artifacts early](#merge-artifacts-early-when-other-efforts-need-visibility)).
 6. If additional work remains per the specs, it should be done in additional feature branches,
    tracking the work via the existing plan files. It is entirely permissible (encouraged) to modify
    the artifacts if the requirements, architecture, plan, etc. has changed.
@@ -342,13 +351,40 @@ about requirements, architecture, or plan early, while changes are still cheap.
 
 Ready versus draft is purely a merge-intent signal, and it should be set accordingly. The
 pre-implementation review above uses a draft PR because there is genuinely no intent to merge at
-that point: the PR exists as a pure review vehicle while the artifacts churn. By contrast, a PR
-whose content is complete and intended to merge as-is should be ready no matter how small it is;
-limited content is not draftness. A PR that seeds a new effort with only its FRD, for example, is
-ready to merge, not a draft.
+that point: the PR exists as a pure review vehicle while the artifacts churn, until the review
+converges and the PR is promoted (see Merge artifacts early below). By contrast, a PR whose content
+is complete and intended to merge as-is should be ready no matter how small it is; limited content
+is not draftness. A PR that seeds a new effort with only its FRD, for example, is ready to merge,
+not a draft.
 
 Consider phasing the review across multiple PRs rather than landing all the artifacts in one. A
 common pattern is FRD first (to confirm we agree on what we're building), then HLA (to confirm the
 design holds up), then plan and any LLDs. Each phased review is cheaper to consume than a single
 sprawling PR, and it limits how far the work can drift down the wrong path before someone catches
 it.
+
+### Merge artifacts early when other efforts need visibility
+
+A branch is private state; `main` is the coordination plane. That is why message passing delivers
+via `main`, and the same logic applies to the artifacts themselves: a sibling effort designing
+against your FRD, HLA, or plan can only see what has landed on `main`, and "read my feature branch"
+is not a coordination mechanism (branches rebase, drift, and can vanish, and nothing notifies a
+sibling when they do). So when another effort could build against your design (under an active
+roadmap, assume one can), merge SDD artifacts ahead of the implementation. Instances of the pattern:
+a roadmap child's seeding PR; the reviewed pre-implementation artifacts (once the draft review
+converges, promote and merge rather than letting the artifacts ride the feature branch to the end;
+for a roadmap child, the effort lead explicitly requests that draft review from the roadmap lead,
+whose ready-flip watch covers merge-intent PRs, and the review's convergence is what sanctions
+promotion); and material in-flight DESIGN revisions, which keep flowing to `main` promptly as small
+PRs rather than accumulating. After an early artifact merge, implementation simply continues on the
+same branch (or a fresh one) and opens its own PR; the branching flow above is otherwise unchanged.
+
+Two things never merge ahead of their work. Checkbox flips are completion claims, not design: a
+checked box merges with or after the work that makes it true (an early-merged box would be an
+immutable record of work that never shipped if the branch dies, and the reviewer rightly flags a box
+checked in a PR that does not contain the work). And `locked.md` rides the effort's final PR, never
+an early artifact PR: once it lands on `main` the CI guard freezes the directory against the
+still-open implementation and cuts off message delivery to a live effort. Merged-early artifacts
+describe intent rather than shipped behavior, which is exactly what SDD artifacts are for; permanent
+docs stay bound to behavior at HEAD per SDDs Are Not Permanent. This is a sanctioned exception to
+the one-PR-per-feature default in the `agentic-dev-process` skill, which cross-references it.
