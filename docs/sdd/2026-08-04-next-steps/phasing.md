@@ -84,6 +84,10 @@ Two things this graph deliberately does not serialize:
 
 ## Tracks
 
+- **Installer-plugins child (pre-0.14 core slimming): seeded 2026-08-07, launchable whenever.** The
+  R1 inventory has no dependencies; the plugin moves consume wave 2's descriptor registration and
+  the guide topics consume onboarding's first slice, both of which precede the 0.14.0 cut this child
+  gates (see release mapping).
 - **Onboarding-and-discovery child (destination 1): seeds at wave 1 completion, runs parallel to
   wave 2.** Slotted as early as sensible without rework: it teaches the post-cleanup 0.14 surface,
   so nothing wave 1 removes gets taught, and its first slice (onboarding harness plugin and skills,

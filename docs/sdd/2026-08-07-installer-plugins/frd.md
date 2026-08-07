@@ -3,9 +3,11 @@
 - Status: Seed, ready for an effort lead
 - Date: 2026-08-07
 - Seeded by: the roadmap lead. This is a child of the 2026-08-04-next-steps roadmap (operator
-  ruling, 2026-08-07: in roadmap scope, gates the 0.14.0 cut). It has no dependencies on other waves
-  and can run whenever. The effort lead owns the HLA and plan; the roadmap lead reviews PRs. Per the
-  sdd skill, this FRD becomes the effort lead's on merge of this seeding PR.
+  ruling, 2026-08-07: in roadmap scope, gates the 0.14.0 cut). It is launchable whenever: the R1
+  inventory has no dependencies, while the plugin moves consume wave 2's descriptor registration and
+  the guide topics consume onboarding's first slice, both of which precede the 0.14.0 cut this child
+  gates. The effort lead owns the HLA and plan; the roadmap lead reviews PRs. Per the sdd skill,
+  this FRD becomes the effort lead's on merge of this seeding PR.
 
 ## Purpose
 
@@ -27,15 +29,16 @@ and the mise tooling step; the authoritative inventory of what moves versus what
   lead's call, made on cohesion, not convenience; the descriptor work from wave 2 is the
   registration substrate.
 - R3. **The disabled experience is a first-class requirement.** An existing config that references a
-  moved surface while the owning plugin is not enabled fails with a crisp error that names the moved
-  surface, the plugin that now owns it, and the exact remediation (the config line to add), making
-  it super easy to know what to do. This follows the remediation-posture ruling in the roadmap's
-  `target-state.md`: precise errors plus guide content, no automated migrator.
+  moved surface while the owning plugin is not enabled MUST fail with a crisp error that names the
+  moved surface, the plugin that now owns it, and the exact remediation (the config line to add).
+  This follows the remediation-posture ruling in the roadmap's `target-state.md`: precise errors
+  plus guide content, no automated migrator.
 - R4. Behavior parity when enabled: with the plugin enabled, initialization behaves as today,
   idempotent reinit included, per `docs/guides/idempotency.md`.
-- R5. Guide and docs ride the change: guide topic contributions for the new plugins per the
-  `guide-contributions` rule, sample-config and completions updated, and the 0.14 upgrade guide
-  gains the enable-the-plugin step.
+- R5. Guide and docs ride the change: guide topic contributions for the new plugins through the
+  universal contribution contract (the onboarding FRD's R14; the always-on guide-contributions rule
+  arrives with onboarding phase 1), sample-config and completions updated, and the 0.14 upgrade
+  guide gains the enable-the-plugin step.
 - R6. Ships in 0.14.0: this is part of the breaking-cleanup release and rides the same runway
   posture (the release that rejects old inputs also ships the teaching that explains them).
 

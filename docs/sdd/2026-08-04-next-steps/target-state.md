@@ -158,8 +158,10 @@ memory is a cache, the repository is the system of record, and distillation is t
 The miscellaneous built-in installers in core VM initialization (the package installers and similar
 setup steps; authoritative inventory owned by the child effort) move behind one or more system
 plugins before the 0.14.0 cut, as a child of this roadmap
-(`docs/sdd/2026-08-07-installer-plugins/`). The core keeps only what is essential to what a VM is.
-An existing config referencing a moved surface without the owning plugin enabled fails with a crisp
+(`docs/sdd/2026-08-07-installer-plugins/`). The ruling deliberately accepts the reopened
+current-equals-target gap that a late target addition costs; the child's ledger entry and the 0.14.0
+release gate are the catch-up plan. The core keeps only what is essential to what a VM is. An
+existing config referencing a moved surface without the owning plugin enabled fails with a crisp
 disabled error naming the surface, the plugin, and the exact remediation, per the remediation
 posture below. This gives the internal plugin boundary first-party exercise ahead of wave 8's
 external promises.
