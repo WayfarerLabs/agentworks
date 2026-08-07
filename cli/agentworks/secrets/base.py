@@ -168,31 +168,50 @@ class SecretDecl(DeclaredResource):
             emit(backend_name)
         return refs
 
-    def validate_config(self, enabled_backends: frozenset[str], context: FinalizeContext) -> None:
+    def validate_config(self, context: FinalizeContext) -> None:
         """Throwing per-mapping spec check, run by the finalize ``validate``
-        pass: every declared ``backend_mappings`` entry addressed to a PRESENT
-        AND ENABLED backend is validated by the CORE against that backend's
-        declared model (R9.9: every declared mapping, not just the opted-in
-        ones, so a stale mapping for a configured-but-not-opted-in backend
-        fails at build). No backend code runs.
+        pass: EVERY declared ``backend_mappings`` entry is validated by the
+        CORE against its backend's declared model (R9.9: every declared
+        mapping, not just the opted-in ones, so a stale mapping for a
+        configured-but-not-opted-in backend fails at build). No backend code
+        runs.
 
-        ``enabled_backends`` is the set of enabled ``secret-backend`` names the
-        finalize pass threads from the graph's enablement axis. A mapping to a
-        present-but-DISABLED backend is INERT (not validated until enabled),
-        the same enablement seam materialization-gating and resolution already
-        consult; inert today (no disabled producer ships, R7). The generic
-        ``False`` opt-out is loop-owned and never validated; a mapping to an
-        ABSENT backend is the dangling edge the resolve pass already
-        hard-errored (R9.11), so it never reaches here.
+        UNCONDITIONAL over enablement, like the pass that calls it
+        (:meth:`~agentworks.resources.registry.Registry._validate_resources`).
+        A mapping addressed to a present-but-DISABLED backend is validated
+        exactly like one addressed to an enabled backend: whether a key is
+        accepted is the backend model's answer, and an operator must not be
+        able to bank invalid config that detonates at the moment they enable
+        the backend. That is the worst possible moment to learn the mapping
+        was never well-formed.
+
+        Being validated is a SEPARATE property from being live, and only the
+        latter tracks enablement. A mapping to a disabled backend is still
+        INERT for resolution: :func:`~agentworks.secrets.resolve.active_backends`
+        drops a disabled backend from the chain, so it is never selected and
+        never resolved through. Nothing about that changes here; this method
+        decides only when the shape is checked.
+
+        Two entries are still not validated against a backend model, neither
+        of them for an environmental reason:
+
+        - the ``False`` opt-out, which is LOOP-owned vocabulary rather than
+          backend config. It names no model to check it against, and it says
+          the same thing on every host, so skipping it is a fact about the
+          document, not about the environment.
+        - a mapping naming an ABSENT backend, which selects no model and so
+          validates vacuously (``validate_capability_config`` no-ops when no
+          implementation is seated). Checking it is not possible: the model
+          that would judge it does not exist on this host. It is not silently
+          accepted either, because the secret's dangling ``secret-backend``
+          edge reports it once as a hard finalize miss (R9.11), which is the
+          right vocabulary for "no such backend". Naming it a second time as
+          a config error would be one problem told twice.
         """
         from agentworks.capabilities.config import validate_capability_config
 
         for backend_name, mapping in self.backend_mappings.items():
             if mapping is False:
-                continue
-            if backend_name not in enabled_backends:
-                # Absent (dangling, already hard-errored) or present-but-disabled
-                # (inert until enabled): neither is validated here.
                 continue
             validate_capability_config(
                 kind="secret-backend",

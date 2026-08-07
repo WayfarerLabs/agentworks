@@ -463,6 +463,20 @@ never WHEN. That scope was removed outright later in the effort (2026-08-07, rev
 validation is now unconditional, because readiness is computed from config the validate pass has not
 yet checked, so gating the pure check on the environmental one let a typo suppress its own error.
 
+The enabled-backend filter described above went the same way, later the same day, under the same
+reasoning applied one level down: an operator must not be able to accumulate invalid configuration
+that blows up the moment they enable the underlying resource. `SecretDecl.validate_config` now
+validates EVERY declared mapping, disabled backend or not, and the enabled-backend set it needed is
+gone from the whole `validate_config` signature (`declared_resource.py` and the three other
+overrides included), so no implementation can reach for an environmental verdict. Two properties
+that the filter conflated are now separate and only one of them tracks enablement: a mapping to a
+disabled backend is still INERT for resolution, dropped from the chain by `active_backends`, so it
+is never selected or resolved through. The `False` opt-out skip stays, and is NOT the same defect:
+it is loop-owned vocabulary that names no model to check against and reads identically on every
+host, so skipping it is a fact about the document. A mapping to an ABSENT backend also stays as it
+was, validating vacuously because no seated implementation means no model exists to judge it, and
+reported once by the secret's dangling `secret-backend` edge as a hard finalize miss (R9.11).
+
 ### 7.5 What is deleted, and what survives
 
 Deleted outright:
@@ -916,7 +930,9 @@ Details worth having in one place:
   shape check are two readings of one merged declaration and must not be computed from two different
   ones. `enabled_backends` deliberately did NOT move onto it: that set is only known after the fold,
   so a field for it would read empty during the build walk, which is the
-  silently-wrong-at-one-call-site shape this effort keeps finding.
+  silently-wrong-at-one-call-site shape this effort keeps finding. It has since been removed from
+  the signature entirely (section 7.4), which settles the question the other way: no implementation
+  of `validate_config` gets an enablement verdict at all, from the context or from anywhere else.
 - **Totality needed two mechanisms, neither of them a bare `except ConfigError`.**
   `InheritanceCycleError` (new, `errors.py`, raised by all four resolvers' cycle guards through one
   shared constructor) lets the finalize view degrade on a cyclic chain and nothing else; the

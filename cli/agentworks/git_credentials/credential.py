@@ -145,10 +145,9 @@ class GitCredentialConfig(DeclaredResource):
             )
         return Readiness.ready()
 
-    def validate_config(self, enabled_backends: frozenset[str], context: FinalizeContext) -> None:
+    def validate_config(self, context: FinalizeContext) -> None:
         """Throwing shape check for the provider config block, run by
-        the finalize ``validate`` pass (``enabled_backends`` is the
-        secret-only R9.9 input, ignored here). Mirrors ``dependencies``:
+        the finalize ``validate`` pass. Mirrors ``dependencies``:
         the CORE validates the blob against the named provider's declared
         model, and no provider code runs. An unknown provider is tolerated
         here (the framework miss policy reports it); a seated provider's

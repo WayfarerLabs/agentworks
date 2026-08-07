@@ -2,9 +2,10 @@
 
 Pins the fold's verdicts (LLD c), the B1 property (the fold is total over a
 malformed ``platform_config`` because ``not_ready`` never constructs), the
-INDEPENDENCE of the finalize ``validate`` pass from readiness (a not-ready
-resource's block is validated like any other; what config is valid is the
-declared model's answer, not the host's), the readiness gating of
+INDEPENDENCE of the finalize ``validate`` pass from both readiness and
+enablement (a not-ready resource's block, and a secret's mapping to a disabled
+backend, are validated like any other; what config is valid is the declared
+model's answer, not the host's), the readiness gating of
 materialization (R12, for both the not-ready and the disabled referrer), the
 enablement-axis DISTRIBUTION through the fold end to end via the injected
 enablement-source seam (R7/R13), and that readiness is independent of validity
@@ -241,14 +242,22 @@ def test_disabled_secret_backend_is_excluded_from_the_active_chain() -> None:
     assert chain == ["prompt"]  # onepassword excluded (disabled), never built into an ActiveBackend
 
 
-def test_r9_9_mapping_to_disabled_backend_is_inert_until_enabled() -> None:
-    """R9.9 disabled sub-clause: the finalize ``validate`` pass validates a
-    secret's mapping only for a present AND ENABLED backend. A malformed
-    onepassword mapping is INERT while onepassword is disabled (the build
-    succeeds) and FAILS once it is enabled. onepassword is injected disabled via
-    a stub enablement source, the same axis materialization-gating and
-    resolution consult, so validation no longer needs re-touching for the
-    plugin source's disabled units."""
+@pytest.mark.parametrize("disable_onepassword", [True, False], ids=["disabled", "enabled"])
+def test_r9_9_mapping_is_validated_whether_or_not_its_backend_is_enabled(disable_onepassword: bool) -> None:
+    """R9.9: the finalize ``validate`` pass validates a secret's mapping
+    against its backend's model regardless of the backend's ENABLEMENT.
+
+    A malformed onepassword mapping fails the build whether onepassword is
+    enabled or injected disabled through the shipped enablement-source seam.
+    Deferring the check to enablement time would let an operator accumulate
+    mappings that all detonate the moment they turn the backend on.
+
+    Non-vacuous on the disabled branch: it first finalizes the same shape with
+    a VALID mapping and reads the enablement axis off the graph, so a stub
+    source that stopped disabling could not leave this green by accident.
+    onepassword stays PRESENT on both branches (only the mark moves), which is
+    what keeps this off the absent-backend path, where no model exists to
+    validate against and the dangling edge answers instead."""
     from types import SimpleNamespace
     from typing import cast
 
@@ -258,7 +267,7 @@ def test_r9_9_mapping_to_disabled_backend_is_inert_until_enabled() -> None:
     from agentworks.plugins import publish_plugins
     from agentworks.secrets.base import SecretDecl
 
-    def _build(*, disable_onepassword: bool) -> Registry:
+    def _build(mapping: str) -> Registry:
         registry = Registry.empty()
         publish_capability_rows(registry, descriptor_for("secret-backend"))
         # onepassword's row now comes from the plugin path, not a built-in.
@@ -266,7 +275,7 @@ def test_r9_9_mapping_to_disabled_backend_is_inert_until_enabled() -> None:
         registry.add(
             "secret",
             "vaulted",
-            SecretDecl(name="vaulted", description="a vaulted key", backend_mappings={"onepassword": "not-an-op-uri"}),
+            SecretDecl(name="vaulted", description="a vaulted key", backend_mappings={"onepassword": mapping}),
             Origin.operator_declared(file=Path("c.toml"), line=1),
         )
         # Always disable the claude and codex plugins' weak install-command,
@@ -292,12 +301,16 @@ def test_r9_9_mapping_to_disabled_backend_is_inert_until_enabled() -> None:
         registry.finalize(enablement_sources=[_source_disabling(*disabled)])
         return registry
 
-    # Disabled onepassword: its malformed mapping is inert, the build succeeds.
-    _build(disable_onepassword=True)
+    # The precondition, proven rather than assumed: onepassword is present, and
+    # its axis reads whichever way this branch asked for.
+    precondition = _build("op://Vault/Item/field")
+    assert precondition.graph.enablement_of("secret-backend", "onepassword") is (
+        Enablement.disabled if disable_onepassword else Enablement.enabled
+    )
 
-    # Enabled onepassword (default): the same malformed mapping fails validation.
+    # The malformed mapping fails on both branches.
     with pytest.raises(ConfigError, match="onepassword"):
-        _build(disable_onepassword=False)
+        _build("not-an-op-uri")
 
 
 # -- B1: the fold is total over a malformed block ------------------------------

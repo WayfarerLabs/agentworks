@@ -418,9 +418,9 @@ class Registry:
         # 4: fold readiness for the present nodes (LLD c). ``marks`` is the
         # single source of truth: compose the injected enablement sources over
         # the present rows (all-enabled when none fire). The binary
-        # ``enablement`` map the fold / materialization gate / ``build_graph`` /
-        # ``_validate_resources`` consume is a PURE PROJECTION of ``marks``
-        # (disabled iff a mark exists), so "which nodes are disabled" and "why"
+        # ``enablement`` map the fold / materialization gate / ``build_graph``
+        # consume is a PURE PROJECTION of ``marks`` (disabled iff a mark
+        # exists), so "which nodes are disabled" and "why"
         # never drift; ``marks`` also flows to the fold as ``disabled_marks`` so
         # a propagating dependent's hint reads the carried reason.
         marks = compose_enablement(enablement_sources, self._resources)
@@ -461,16 +461,12 @@ class Registry:
         # 7: validate every present resource's capability config (R3). No
         # readiness or enablement gate: the declared model is the only
         # authority on what config is valid.
-        self._validate_resources(enablement, context)
+        self._validate_resources(context)
 
         # 8: freeze.
         self._frozen = True
 
-    def _validate_resources(
-        self,
-        enablement: Mapping[tuple[str, str], Enablement],
-        context: FinalizeContext,
-    ) -> None:
+    def _validate_resources(self, context: FinalizeContext) -> None:
         """Run EVERY present Resource's ``validate_config()`` (the throwing
         correctness check for its capability config sub-block), raising on
         the first malformed block.
@@ -531,39 +527,40 @@ class Registry:
         with no capability config (a secret, an apt entry) validates via
         the no-op base ``validate_config`` and passes.
 
-        Each ``validate_config`` is handed the enabled ``secret-backend`` name set so a
-        ``secret`` validates only mappings addressed to a present AND enabled
-        backend (R9.9); a mapping to a disabled backend stays inert until
-        enabled. Every non-secret resource ignores the set.
+        NO enablement-keyed suppression survives here, and the pass takes
+        no enablement input at all. It briefly kept one, recorded here as an
+        exception: a ``secret``'s mapping addressed to a present-but-DISABLED
+        ``secret-backend`` was left unvalidated until the backend was
+        enabled (R9.9's disabled sub-clause), for which this pass threaded
+        the enabled backend-name set down to every ``validate_config``. It
+        was the same shape as the pass-level gate removed above, only
+        narrower, and it failed the same way: an operator could accumulate
+        mappings no model would ever accept and learn about all of them at
+        the instant they enabled the backend, which is the worst moment to
+        find out. So the skip is retired and the parameter with it; a
+        mapping is validated whether or not its backend is enabled.
 
-        That set is the LAST enablement-keyed suppression of validation left
-        in this pass, and it is the same shape as the gate removed above:
-        a mapping to a present-but-disabled backend is accepted because
-        validation never runs on it, not because the backend's model
-        accepts it. Its scope is much smaller (one field of one kind, and
-        the mapping is inert for resolution too), which is why it is
-        recorded here rather than changed alongside the pass-level gate:
-        retiring it is a decision about R9.9, not about this loop. A reader
-        adding a new suppression should read it as the exception it is.
+        What that skip was conflated with survives untouched. A mapping to a
+        disabled backend is still INERT for resolution
+        (:func:`~agentworks.secrets.resolve.active_backends` drops a disabled
+        backend from the chain, so it is never selected or resolved
+        through). Being validated and being live were always two properties;
+        only the second one tracks enablement.
 
-        It is also handed the build walk's own ``context``, so an INHERITING
-        resource validates the same merged declaration its edges came from
-        (FR12: validation runs on the effective config, because a child's
-        declared blob is legitimately partial). One context object for both
-        passes is what keeps the two readings of a chain from drifting.
+        Each ``validate_config`` is handed the build walk's own ``context``,
+        so an INHERITING resource validates the same merged declaration its
+        edges came from (FR12: validation runs on the effective config,
+        because a child's declared blob is legitimately partial). One context
+        object for both passes is what keeps the two readings of a chain from
+        drifting.
         """
-        from agentworks.resources.graph import Enablement
-
-        enabled_backends = frozenset(
-            name for (kind, name), axis in enablement.items() if kind == "secret-backend" and axis is Enablement.enabled
-        )
         for kind in list(self._resources.keys()):
             for name in list(self._resources[kind].keys()):
                 resource = self._resources[kind][name]
                 validate_config = getattr(resource, "validate_config", None)
                 if validate_config is None:
                     continue
-                validate_config(enabled_backends, context)
+                validate_config(context)
 
     def _present_keys(self) -> set[tuple[str, str]]:
         """The ``(kind, name)`` of every currently-published Resource."""

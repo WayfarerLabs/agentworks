@@ -250,7 +250,7 @@ class DeclaredResource(EnvelopeMetadata):
         """
         return []
 
-    def validate_config(self, enabled_backends: frozenset[str], context: FinalizeContext) -> None:
+    def validate_config(self, context: FinalizeContext) -> None:
         """Throwing correctness check for the resource's own capability
         config sub-block(s): the resource-level counterpart of
         ``dependencies`` (the edge-extraction half). Mirrors that
@@ -266,21 +266,19 @@ class DeclaredResource(EnvelopeMetadata):
         ``getattr(resource, ...)`` lookup would call pydantic's with this
         method's arguments.
 
-        ``enabled_backends`` is the set of enabled ``secret-backend`` names,
-        threaded from the finalize pass (which reads the enablement axis off the
-        graph) so a ``secret`` validates only mappings addressed to a present
-        AND enabled backend (R9.9). Every non-secret resource ignores it; the
-        param is uniform so the pass can call it without per-kind
-        dispatch.
+        The signature carries no enablement input, and that is deliberate:
+        what config is valid is the declared model's answer alone, so no
+        implementation of this method may take an environmental verdict into
+        account. An earlier signature threaded the enabled ``secret-backend``
+        name set here for ``SecretDecl`` to skip mappings to disabled
+        backends; that skip is retired (an operator must not be able to bank
+        invalid config that fails only once they enable the backend), and the
+        parameter went with it rather than lingering as an invitation.
 
         ``context`` is the same :class:`~agentworks.resources.graph.FinalizeContext`
         the build walk was handed, so an INHERITING resource validates the
         merged declaration its edges came from rather than a partial
-        declared blob (FR12). It stays separate from ``enabled_backends``
-        rather than absorbing it: the enabled-backend set is only known
-        after the fold, so a context field for it would read empty during
-        the build walk, and a field that is silently wrong at one call site
-        is worse than a second parameter.
+        declared blob (FR12).
 
         Base behavior: no-op. A resource with no capability config block
         has nothing to validate. Resources that host a capability config

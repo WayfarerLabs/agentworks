@@ -97,7 +97,7 @@ def test_an_inherited_required_field_loads_and_does_not_validate() -> None:
     )
     context = FinalizeContext(rows={"session-template": {"base": parent, "child": child}})
     # The loader's answer: the merged blob is complete, so this is fine.
-    child.validate_config(frozenset(), context)
+    child.validate_config(context)
 
     # The schema's answer, on the same document.
     document = _a_child_document({"inherits": ["base"], "harness_integration": {"name": "demanding"}})
