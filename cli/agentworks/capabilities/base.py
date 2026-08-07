@@ -48,7 +48,6 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
-    from agentworks.capabilities.facets import Facet
     from agentworks.config import Config
     from agentworks.resources.graph import Readiness
     from agentworks.resources.reference import ConfigReference
@@ -338,37 +337,45 @@ class Capability(ABC):
     contract (``CapabilityKindDescriptor.config_schema``)."""
 
     @classmethod
-    def config_for(cls, facet: Facet | None = None) -> type[BaseModel]:
-        """The config model this capability offers at ``facet``.
+    def config_for(cls) -> type[BaseModel]:
+        """The config model this capability offers.
 
-        A facet is the LEVEL a capability is driven at (vm, user,
-        workspace, session): the pairing of that level's API methods with
-        that level's config. Consumers choose the facet they drive, so a
-        producer never has to know who is asking.
+        A capability DECLARES the config it offers the way it declares its
+        API methods, and the core reads the declaration rather than asking
+        the capability to do anything with it. This hook is the override
+        point for a capability whose answer is not simply ``config_model``,
+        and reading the config THROUGH it is what makes such a capability
+        an ordinary registration rather than a framework change.
 
-        Base behavior: ONE config, offered at every facet, which is every
-        capability shipped today and is why the ordinary author spells
-        nothing beyond ``config_model``. A capability whose methods run at
-        several levels with different config overrides this and resolves
-        through :func:`~agentworks.capabilities.facets.facet_config`,
-        which answers an offered facet and hard-errors on one it does not
-        offer, naming what it does.
+        Config is offered per FACET by contract, a facet being the LEVEL a
+        capability is driven at (vm, user, workspace, session): the pairing
+        of that level's API methods with that level's config. CONSUMERS
+        choose the facet they drive, so a producer never has to know who is
+        asking. Facets are deliberately NOT scopes and core owns the
+        mapping between them: admin and agent both drive the user level,
+        and session start and resume share the session level, so two
+        surfaces that mean the same level get the same answer by
+        construction rather than by each capability encoding the
+        equivalence. Nothing under ``capabilities/`` spells a scope.
 
-        Note what this does NOT say: offering a config at a facet is not a
-        claim to support that level, and offering none is not a claim to
-        lack it. Support is carried by the implementation. Reading this as
-        a support signal would rebuild the declaration-contract mechanism
-        that was rescinded on 2026-08-05, under a new name.
+        **The parameter selecting a facet is not on this signature, because
+        nothing yet offers more than one config.** Every capability shipped
+        today shares a single config across all of its operations, so a
+        facet parameter would be a signature every reader has to decode and
+        no caller can use. It arrives, additively, with the first
+        capability whose methods run at several levels (a harness
+        integration is the expected one), which is the same change that
+        brings the consumers that would pass it.
+
+        Note what offering a config does NOT say: it is not a claim to
+        support a level, and offering none is not a claim to lack one.
+        Support is carried by the implementation. Reading a config offering
+        as a support signal would rebuild the declaration-contract
+        mechanism that was rescinded on 2026-08-05, under a new name.
         """
         return cls.config_model
 
-    def __init__(
-        self,
-        owner_name: str,
-        config: Mapping[str, object],
-        *,
-        facet: Facet | None = None,
-    ) -> None:
+    def __init__(self, owner_name: str, config: Mapping[str, object]) -> None:
         """Bind to ``(owner_name, config)``, validated.
 
         Config validity is a construct-time invariant: the blob is
@@ -383,21 +390,17 @@ class Capability(ABC):
         through the context (``ctx.secret``, scoped delivery); the
         instance never holds a value source.
 
-        ``facet`` is the LEVEL this instance is being built to drive, and
-        it selects the config among those the capability offers. Every
-        consumer today leaves it unset, because every capability offers
-        one config shared by all of its operations; it is on the
-        signature because construction is exactly where a capability
-        driven at several levels has to say which one, and adding it
-        later would touch every construction site.
+        What is validated is whatever :meth:`config_for` answers with, so a
+        capability that overrides the hook is bound to the model it
+        actually offers rather than to its ``config_model`` declaration.
         """
         from agentworks.capabilities.config import validate_own_config
         from agentworks.schema import extract_references
 
         self.owner_name = owner_name
         owner = RefOwner(kind=self.owner_kind, name=owner_name)
-        model = type(self).config_for(facet)
-        self._config = validate_own_config(type(self), config, owner=owner, facet=facet)
+        model = type(self).config_for()
+        self._config = validate_own_config(type(self), config, owner=owner)
         # Extracted from the RAW blob, exactly as the finalize pass does,
         # so an instance's declared secrets are the same set the graph
         # carries for it.

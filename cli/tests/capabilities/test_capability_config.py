@@ -26,7 +26,6 @@ from agentworks.capabilities.config import (
     validate_own_config,
 )
 from agentworks.capabilities.descriptor import descriptor_for
-from agentworks.capabilities.facets import Facet, facet_config
 from agentworks.errors import ConfigError, StateError
 from agentworks.plugins import Plugin, seated_plugin
 from agentworks.resources.reference import ConfigReference
@@ -146,29 +145,35 @@ def test_an_unseated_name_answers_none_rather_than_raising(seated: None) -> None
     assert _refs({}, name="nope") == ()
 
 
-def test_a_single_config_capability_answers_at_every_facet(seated: None) -> None:
-    """The ordinary case: one config shared by all of a capability's
-    operations, so no facet distinction exists to refuse."""
-    for facet in (None, *Facet):
-        assert offered_model(FixturePlatform, facet) is FixtureConfig
+def test_the_base_hook_answers_with_the_declared_model() -> None:
+    """The ordinary case, and why an author spells nothing beyond
+    ``config_model``: one config shared by all of a capability's
+    operations, which is every capability shipped today."""
+    assert offered_model(FixturePlatform) is FixtureConfig
 
 
-def test_a_per_facet_capability_answers_per_facet_and_refuses_the_rest() -> None:
-    """The wave-4 shape, spelled here so the base's override point is
-    proven to work before anything ships one."""
+def test_the_offered_model_is_read_through_the_hook_not_off_the_declaration() -> None:
+    """``config_for`` is the override point, so a capability that answers
+    with something other than its ``config_model`` is honored wherever the
+    framework asks for a config.
 
-    class PerFacet(ConformingVMPlatform):
-        name: ClassVar[str] = "per-facet"
-        description: ClassVar[str] = "offers config at one facet only"
+    Nothing overrides it today, and it is pinned because that hook is what
+    makes wave 4's per-facet offering an additive registration rather than
+    a framework change: reading ``config_model`` directly here would work
+    identically for every shipped capability and silently ignore the first
+    one that needs the seam.
+    """
+
+    class Overriding(ConformingVMPlatform):
+        name: ClassVar[str] = "overriding-platform"
+        description: ClassVar[str] = "answers with a model other than the one it declares"
         config_model: ClassVar[type[AgwModel]] = FixtureConfig
 
         @classmethod
-        def config_for(cls, facet: Facet | None = None) -> type[BaseModel]:
-            return facet_config({Facet.SESSION: OtherConfig}, facet, capability=cls.name)
+        def config_for(cls) -> type[BaseModel]:
+            return OtherConfig
 
-    assert offered_model(PerFacet, Facet.SESSION) is OtherConfig
-    with pytest.raises(StateError, match="per-facet"):
-        offered_model(PerFacet, Facet.VM)
+    assert offered_model(Overriding) is OtherConfig
 
 
 # -- No capability code runs --------------------------------------------------
