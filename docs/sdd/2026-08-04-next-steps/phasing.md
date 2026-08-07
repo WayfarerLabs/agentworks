@@ -69,6 +69,15 @@ Two things this graph deliberately does not serialize:
   real event stream. This closes the memory-learning loop.
 - **Wave 7: structured control.** Observability phase 2 (validated intents, ACP projection,
   stale-decision rejection).
+- **Closeout wave (gates the roadmap lock; operator ruling, 2026-08-06):** after the waves complete
+  and before the roadmap locks, one comprehensive review of everything the roadmap changed, in
+  strict priority order: (1) security above all, reviewing the accumulated whole as one attack
+  surface (the trust-based integration discipline, the gated graph projection and guide content
+  channel, secret-source resolution, the event stream) rather than per-change; (2) test
+  consolidation and removal, with the working assumption that the accreted unit-test estate can be
+  cut in half, maybe more, without sacrificing any coverage or quality; (3) code cleanup: file-size
+  limits, vestigial code removal, package renaming and refactoring left behind by the waves' moves.
+  Findings are fixed before the roadmap locks.
 - **Wave 8: external plugin API.** Registration conformance, discovery, namespacing, versioning, and
   the distribution-trust model, promised publicly only once the internal contracts survive
   first-party use.
@@ -91,11 +100,14 @@ picked off whenever bandwidth allows, on its own merits and its own schedule.
 
 ## Release mapping
 
-- **0.14.0:** waves 0 and 1. One breaking-cleanup story: single declaration frontend, expired
-  compatibility removed, SDD ledger clean.
-- **0.15.x:** wave 2, likely with the generic-discriminator hard error as its headline breaking
-  change, plus whichever of waves 3 and 5 complete.
-- **Later:** waves 4, 6, 7, 8 map to releases as they prove out; no need to pin numbers now.
+- **0.14.0 (held; operator ruling, 2026-08-06):** the breaking cleanup does not ship alone. The cut
+  waits for the guide first slice (guide command core, `concept-onboarding`, the README bootstrap),
+  so the release that rejects old inputs also ships the CLI that teaches the new ones; newcomers
+  ride the forgiving 0.13.0 until then. The 0.13.0 warnings stay true because the version number
+  attaches to the breaking content, not the date. If wave 2's generic-discriminator hard error lands
+  in the same window, it folds in: one well-cushioned breaking release instead of two. While `main`
+  holds unreleased breaking changes, urgent operator fixes ship from a `0.13.x` backport branch.
+- **Later:** remaining waves map to releases as they prove out; no need to pin numbers now.
 
 ## Open ordering decisions
 

@@ -477,6 +477,36 @@ Look for:
   on one OS, or with one config shape. Environment-dependent branches need the other branches tested
   too, via deterministic stubbing.
 
+### 14. SDD process execution
+
+When the change belongs to an SDD effort, the process is under review alongside the code. Read the
+effort's artifacts under `docs/sdd/<sdd_feature_dir>/` and check that this change executes that SDD
+faithfully rather than drifting from it.
+
+Look for:
+
+- Artifact updates that do not ride the behavior they describe: a plan, HLA, or LLD revised in a PR
+  that does not contain the corresponding work, or work that lands with the artifacts still
+  describing the superseded design. The doc claim and the change that makes it true belong in the
+  same PR.
+- Dishonest checkboxes: a box checked for work this change does not actually contain, a box whose
+  stated definition of done is not met, or completed work landing with no box moved at all. A
+  previously completed box that has been unchecked, reworded, moved, or deleted is a violation in
+  its own right (the `sdd` skill permits correcting a wrongly-checked box only while the branch is
+  unmerged, so say which case you believe you are looking at).
+- Ownership breaches: edits to another effort's SDD artifacts, or a child effort updating its
+  roadmap SDD's ledger instead of flagging the inconsistency. Cross-effort messages are new files
+  only, and never into a locked feature directory.
+- Changes under a feature directory whose `locked.md` is already on `main`, other than a `locked.md`
+  update or a full wipe to the tombstone.
+- Content that belongs in a permanent home (`docs/arch/`, an ADR, a module README, a rule or skill)
+  landing only inside the SDD, where it dies with the SDD.
+
+Two things are genuinely invisible in a diff: who held which role (effort lead versus delegated dev)
+and whether a PR is intended to merge as-is. Both change what is correct here. Take them from the
+invoking prompt, and when the prompt is silent, raise the point under **Questions** rather than
+asserting a violation you cannot see.
+
 ## Output format
 
 Produce a single review document with this structure:

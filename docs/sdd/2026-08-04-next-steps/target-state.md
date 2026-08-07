@@ -1,7 +1,7 @@
 # Target State
 
 - Status: North star, accumulating settled rulings
-- Last updated: 2026-08-05
+- Last updated: 2026-08-07
 
 This document describes where Agentworks is going across this roadmap effort, synthesized from the
 perspectives in `inputs/`. It is the target of these waves, not a forever vision: when
@@ -50,9 +50,13 @@ Plan A for onboarding: the operator's existing vanilla workstation harness drive
 harness-specific plugins or marketplace entries published from the Agentworks repo. The onboarding
 agent deliberately sits outside Agentworks (a managed agent must not modify the system it runs in),
 so the agentic-artifacts layer is not the delivery path for onboarding skills. Onboarding is
-idempotent and rerunnable, and conspicuously consent-first about probing the operator's machine.
-Discovery and schema help are derived from registries, schema emission, live samples, and describe
-surfaces so they cannot drift.
+idempotent and rerunnable, and conspicuously consent-first about examining the operator's machine:
+Agentworks itself never probes, the agent does (instructed by guide content), and `agw` supplies
+non-probing verification of configured state. The repository README leads with a single copy-paste
+bootstrap block addressed to the agent (install from PyPI, run `agw guide`), a first-class
+zero-plugin path beside the plugins, which are kept primarily for advertising and discoverability
+(operator rulings, 2026-08-06). Discovery and schema help are derived from registries, schema
+emission, live samples, and describe surfaces so they cannot drift.
 
 The teaching surface (operator rulings, 2026-08-05): `agw guide [topic ...]` serves skill-shaped
 markdown for agents and humans alike, blending static authored content with dynamic content from the
@@ -60,17 +64,18 @@ live system. Topics span resource kinds (with live instance lists), specific res
 implementations, and `concept-` prefixed meta topics (collision-free and discoverable by
 completion). Output is markdown only. Every kind, implementation, and plugin contributes its own
 topics through one generic contract, with built-in content living beside the kind it documents, and
-contributed content is data rendered through locked-down templating, never code, against a
-pared-down, read-only projection of the resource graph anchored by `me` shorthand (the resource the
-topic documents), with rendering side-effect-free. The published harness plugins reduce to thin
-bootstraps (install, disclose, run `agw guide`), which makes cross-harness parity structural. The
-command is named `guide`, not `skill`, reserving the skill noun for the artifacts layer (destination
-6's rules, skills, hooks). Reference surfaces (describe, schema, samples) and the teaching surface
-render the same underlying sources: wave 2 owns the sources and the reference surfaces, the
-onboarding child owns the guide. A live example of the artifact need (operator observation,
-2026-08-05): this workspace authenticates GitHub through a custom git credential helper serving
-fine-grained PATs by full HTTP path, environment knowledge an agent currently must be told in
-conversation; a feature provisioning such a helper should emit exactly that fact as a skill.
+contributed content is data rendered through declarative content blocks (a closed, core-owned block
+vocabulary, not a template engine), never code, against a pared-down, read-only projection of the
+resource graph anchored by `me` shorthand (the resource the topic documents), with rendering
+side-effect-free. The published harness plugins reduce to thin bootstraps (install, disclose, run
+`agw guide`), which makes cross-harness parity structural. The command is named `guide`, not
+`skill`, reserving the skill noun for the artifacts layer (destination 6's rules, skills, hooks).
+Reference surfaces (describe, schema, samples) and the teaching surface render the same underlying
+sources: wave 2 owns the sources and the reference surfaces, the onboarding child owns the guide. A
+live example of the artifact need (operator observation, 2026-08-05): this workspace authenticates
+GitHub through a custom git credential helper serving fine-grained PATs by full HTTP path,
+environment knowledge an agent currently must be told in conversation; a feature provisioning such a
+helper should emit exactly that fact as a skill.
 
 ### Declarative model (destination 2)
 
@@ -150,12 +155,24 @@ memory is a cache, the repository is the system of record, and distillation is t
 
 ### Compatibility posture (all destinations)
 
-Breaking changes are acceptable across this roadmap provided each ships with a deprecation runway
-and migration helpers: warn and migrate in one release, reject in the next (the 0.13 to 0.14
-pattern). Deprecations are dropped on their scheduled release rather than accumulating: wave 1
-restores that baseline by clearing every expired surface, and each later breaking wave clears its
-own runway on schedule so the target state carries no expired compatibility. The generic deprecation
-framework survives every cleanup.
+Breaking changes are acceptable across this roadmap provided each ships with a deprecation runway:
+warn in one release, reject in the next (the 0.13 to 0.14 pattern). Deprecations are dropped on
+their scheduled release rather than accumulating: wave 1 restores that baseline by clearing every
+expired surface, and each later breaking wave clears its own runway on schedule so the target state
+carries no expired compatibility. The generic deprecation framework survives every cleanup.
+
+**Remediation is precise errors plus the guide, not automated migrators** (operator ruling,
+2026-08-07). A breaking change ships with hard errors that name the offending input and the exact
+remediation, and with guide content that walks the operator or their agent through the rewrite;
+Agentworks does not maintain automated migration tooling. The ruling came from the wave 2 review:
+`agw resource migrate` required a frozen re-implementation of the old shapes as a verification
+oracle, and every divergence between oracle and model surfaced as a self-blaming failure. Its
+deliberate deletability (the separability guard) let it be removed before release rather than
+maintained until a scheduled expiry. The agent-led path verifies with real surfaces (`agw doctor`,
+loading the result) instead of an oracle, and the guide teaches it in the same release that breaks
+the old inputs. One consequence stays on the ledger: the manifest surface currently has no
+deprecation warn-window channel, so a future manifest-shape deprecation must rebuild one or ship as
+a hard break with guide coverage.
 
 ### Cross-cutting: anchored projections (all destinations)
 
@@ -179,6 +196,17 @@ mechanisms, chosen per surface and done properly. Authored content still carries
 graph carries the dynamic truth, and no effort should over-index on pushing everything into the
 graph. Where a projection is impossible (the workstation agent sits outside the platform), the
 principle inverts to disclosure, per the onboarding security disclosure.
+
+### Cross-cutting: shared traversal discipline (all destinations)
+
+Traversals of operator-controlled graphs (inheritance chains, reference graphs, nested model walks
+over operator data) go through shared, iterative or memoized, cycle-safe helpers rather than each
+module hand-rolling recursive descent (operator agreement, 2026-08-07, from the wave 2 review: the
+registry's cycle detector was deliberately iterative while a finalize-pass walker upstream of it was
+hand-rolled, unmemoized, and exponential on diamond inheritance). Bounded walks over code-shaped
+structures (a model class's own fields) may stay naturally recursive; the discipline applies where
+the input size or shape is the operator's to choose. The closeout wave checks this property across
+everything the roadmap touched.
 
 ## Explicitly out of scope
 

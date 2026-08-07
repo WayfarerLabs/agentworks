@@ -16,7 +16,8 @@ is locked.
 - [x] Picked up by an effort lead (HLA, plan, residual inventory; PR #406)
 - [x] Implementation complete, pre-roadmap SDD closeouts done (PR #406, 2026-08-05: all five
       pre-roadmap SDDs locked, plan 46/46, docs promoted including ADR 0020)
-- [ ] Ships in 0.14.0 with phase 1 (release pending)
+- [ ] Ships in 0.14.0 with phase 1 (cut held for the guide first slice per operator ruling,
+      2026-08-06; see `phasing.md` release mapping)
 - [x] Locked (`locked.md` on `main` via PR #406)
 
 ### Wave 2 (adopted child): 2026-07-31-declarative-schema
@@ -30,6 +31,13 @@ is locked.
       first commit records the release in that SDD's plan)
 - [ ] Phase 2 implementation complete (absorbs generic-discriminator removal and the migrator's
       fate)
+- [x] Five-pass roadmap review of PR #414 delivered (2026-08-07): request changes, three blockers,
+      structural core verified sound
+- [ ] Migrator deleted per the remediation-posture ruling (operator, 2026-08-07; see
+      `target-state.md` compatibility posture): both halves of `migrate/` removed on the branch,
+      error hints repointed at guide-led remediation, `locked.md` updated with a dated entry
+- [ ] Surviving review findings fixed on the branch (inheritance merge guard and restored coverage,
+      the schema silent-edge cluster, robustness items, SDD artifact corruption)
 - [ ] Locked
 
 ### Design track: capability-kind descriptor contract
@@ -69,6 +77,7 @@ Planned children, seeded when their prerequisites land (see `phasing.md`):
 - Wave 6: agentic artifacts and distillation
 - Wave 7: structured control
 - Wave 8: external plugin API
+- Closeout wave: comprehensive security, test-consolidation, and cleanup review (gates the lock)
 
 Not children of this roadmap (explicitly out of scope, see `target-state.md`): the
 named-console-template selector SDD, the herdr effort, and the companion-shell and resilient-attach

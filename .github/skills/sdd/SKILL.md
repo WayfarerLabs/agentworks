@@ -77,6 +77,13 @@ is no longer relevant, it should be left as-is and new checkboxes should be adde
 plan. This preserves the historical record of what was actually done, even if the implemented
 solution evolves.
 
+Immutability protects _truthful_ records, which leaves one carve-out. A box checked prematurely or
+in error may be corrected while it is still unmerged: fixing a bad entry is not rewriting a good
+one, and an inaccurate checkbox is not a historical record of anything. The rule binds fully once
+the checked box has merged to `main`, in step with the lock-at-merge paragraph under
+[Lockfile](#lockfile). Key that to the box, not to the plan file: plans routinely merge mid-effort,
+so the plan being on `main` says nothing about whether any particular box has landed there yet.
+
 Mutability also follows ownership. An agent working an effort edits that effort's SDD artifacts and
 no other's: do not update another SDD's content (a roadmap SDD's ledger, a sibling effort's plan)
 unless specifically instructed to, and treat such an instruction as the exception, not standard
@@ -89,21 +96,39 @@ reliable route.
 One sanctioned channel does exist: new-file message passing. Adding a NEW file to another SDD's
 feature directory as a message is fine (a roadmap delivering seed notes into an adopted child's
 directory is the standing example); the restriction is on modifying another effort's existing
-artifacts. A delivered message file belongs to the receiving effort once read: integrate it into
-your own artifacts, then keep or delete it as you see fit.
+artifacts. Name new message files `message-<YYYY>-<MM>-<DD>-<topic>.md`. The convention governs new
+messages only: message files delivered before it keep the names they already have, so there is no
+rename sweep to do and no inference to draw from an older name. A sender never overwrites an
+existing message file, because overwriting is an edit to another effort's artifact and can destroy a
+message the recipient has not read yet; a follow-up is always a new file. A delivered message file
+belongs to the receiving effort once read: integrate it into your own artifacts, then keep or delete
+it as you see fit.
 
 Delivery semantics: messages deliver via `main`, never by committing to another effort's live
 branch. A branch is mutable state under its owner's control (a rebase or force-push can silently
 drop a foreign commit, so branch delivery can lose messages while looking delivered), and the
-PR-to-main hop is the operator's review gate on inter-agent instructions. A running effort only sees
-messages that existed at its branch point, so a sender whose message lands after the recipient's
-branch was cut must tell the operator so the recipient gets nudged. Pickup is cheap and needs no
-branch changes: `git show origin/main:<path>` reads the message as delivered. To bring it in-tree,
-cherry-pick the message commit or merge `main` in. To keep cherry-picking clean, a sender delivers
-each message as a single commit touching only the message file (other changes ride separate commits,
-even in the same PR), and the nudge carries that commit's sha. Recipients on long-running branches
-should also glance at their feature directory on `origin/main` at natural checkpoints for messages
-that arrived mid-flight.
+PR-to-main hop is the operator's review gate on inter-agent instructions. Pickup is cheap and needs
+no branch changes: `git show origin/main:<path>` reads the message as delivered. To bring it
+in-tree, cherry-pick the message commit or merge `main` in. To keep cherry-picking clean, a sender
+delivers each message as a single commit touching only the message file (other changes ride separate
+commits, even in the same PR).
+
+A running effort only sees messages that existed at its branch point, so a message that lands after
+the recipient's branch was cut needs two independent mechanisms. Neither side may assume the other
+covers it:
+
+- **Primary: the sender notifies the operator.** A sender whose message lands late tells the
+  operator, carrying the message commit's sha, so the recipient gets nudged. This is the mechanism
+  delivery actually relies on; the backstop below is not a substitute for it.
+- **Backstop: the recipient looks.** Recipients on long-running branches glance at their feature
+  directory on `origin/main` at natural checkpoints, so a mid-flight message still lands when the
+  notification never arrives.
+
+Messages MUST NOT be delivered into a locked feature directory. Once `locked.md` is on `main`, the
+lockfile CI rejects every change under that directory except a `locked.md` update or a full wipe
+(see [Lockfile](#lockfile)), so the message simply cannot merge. When the recipient is locked there
+is no live effort to receive anything: send the message to the operator instead, and let the
+operator decide whether it warrants reopening the topic elsewhere.
 
 ## Lockfile
 
@@ -130,6 +155,13 @@ directory except two: updating `locked.md` itself, or deleting the whole directo
 `locked.md` tombstone (a full wipe, not a partial deletion). It compares against the merge-base with
 `main`, so a PR that introduces `locked.md` alongside the final SDD edits is fine; only a lockfile
 that was _already_ on `main` freezes the directory.
+
+Abandoned and superseded efforts lock like any other. The trigger for `locked.md` is that work on
+the effort has _stopped_, not that it succeeded: write the lockfile, dated as usual, and record
+honestly what shipped (possibly nothing, possibly one phase of four) and why the rest did not. This
+is not bookkeeping for its own sake. [Deleting Stale SDDs](#deleting-stale-sdds) excludes anything
+without a lockfile, so an abandoned SDD left unlocked is permanently ineligible for cleanup and sits
+in the live tree misleading readers with a design nobody is building.
 
 ## SDDs Are Not Permanent
 
@@ -255,8 +287,18 @@ The settled rules for the species:
 - A roadmap constrains only its own scope. Work outside the roadmap is not paused by it and can be
   picked off whenever bandwidth allows; the roadmap's target-state should say explicitly what is out
   of scope so that boundary stays crisp.
-- It stays open until every child SDD is closed, then locks like any other SDD. Its ledger plays the
-  role plan checkboxes play in an ordinary SDD, one level up.
+- It stays open until current state and target state agree and every child SDD is locked, then locks
+  like any other SDD. Its ledger plays the role plan checkboxes play in an ordinary SDD, one level
+  up.
+- `target-state.md` stays mutable while children are still running, but revising it late reopens the
+  current-equals-target gap by definition: whatever the revision adds is by construction not yet
+  true of the current system, so the roadmap cannot lock until current state catches up to the
+  revised target. That is a real cost, not a formality. Revise the target deliberately, and prefer a
+  follow-on roadmap to a late expansion of this one.
+- The settled design rulings `target-state.md` accumulates are exactly the load-bearing content
+  [SDDs Are Not Permanent](#sdds-are-not-permanent) requires promoting into permanent homes
+  (`docs/arch/`, ADRs) before the roadmap locks and is eventually deleted. As the artifact's owner,
+  the roadmap lead owns those promotions.
 - Roadmap state lives on `main`: every change (a new child SDD, a status change, a design revision)
   is a PR, and child SDDs reference their roadmap SDD so the coordination is discoverable from any
   effort.
@@ -277,8 +319,10 @@ Work driven via SDD should be done in one or more feature branches. The general 
 1. Create an initial feature branch. This should generally relate to the naming of the feature
    directory, although additional info (e.g. phase) is allowed.
 2. Create the SDD feature directory and artifacts in this branch.
-3. If pre-implementation review is needed, publish a draft PR to allow others to review and provided
-   feedback on the SDD artifacts.
+3. If pre-implementation review is needed, publish a draft PR to allow others to review and provide
+   feedback on the SDD artifacts. Draft is the right state here because there is no merge intent
+   yet: the PR is a pure review vehicle while the artifacts churn. It is not draft because the
+   content is partial. See [PR Review](#pr-review) for the merge-intent rule this follows from.
 4. The first push of work should use that existing branch.
 5. SDD artifacts will naturally get merged with the work itself.
 6. If additional work remains per the specs, it should be done in additional feature branches,
