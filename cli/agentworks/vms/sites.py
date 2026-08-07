@@ -179,13 +179,15 @@ class VMSiteDecl(DeclaredResource):
         (the schema error bridge), so the finalize pass leaves it alone
         rather than appending an origin a second time.
 
-        Readiness-gated, which is worth naming beside the shadow guard
-        decode used to carry: the finalize pass skips a not-ready or
-        disabled node (R9.4), so a key the platform does not accept is
-        refused only on a host where that platform can run. A ``wsl2``
-        site carrying junk loads clean on Linux and is refused on Windows.
-        That is the deferral rule working as designed, and it does mean
-        the refusal is a property of the host as well as the document.
+        UNGATED, which is worth naming beside the shadow guard decode used
+        to carry: the finalize pass runs this for every present site
+        regardless of readiness or enablement, so a key the platform does
+        not accept is refused on every host. A ``wsl2`` site carrying junk
+        is refused on Linux exactly as on Windows. The refusal is a
+        property of the document alone, which is the only way a closed
+        capability config can mean anything: it was readiness-gated once,
+        and the effect was that a typo severe enough to change a site's
+        readiness thereby bought its own silence.
         """
         from agentworks.capabilities.config import validate_capability_config
 

@@ -138,7 +138,21 @@ class LimaPlatform(VMPlatform):
 
         Non-constructing (LLD c): reads ``config`` fields directly, never
         builds an instance, so the readiness fold stays total over
-        unvalidated ``platform_config``."""
+        unvalidated ``platform_config``.
+
+        Reading unvalidated config means this verdict is only trustworthy
+        because something else refuses the configs it would misread. A
+        missing ``vm_host`` and a MISSPELLED one are indistinguishable
+        here: both make a remote site look local, and this would then
+        report ``limactl not installed``, naming a problem the operator
+        does not have while their host setting silently does not apply.
+        What rules that out is that the finalize validate pass runs on
+        every present resource, whatever its readiness, so ``vm_hst``
+        never survives to be folded into a verdict an operator reads. That
+        pass used to be readiness-gated and this method was the exact
+        place the resulting circle closed. Keep the two facts together: if
+        validation is ever made conditional again, every presence-keyed
+        read below becomes a silent wrong answer."""
         from agentworks.resources.graph import Readiness
 
         if config.get("vm_host"):
