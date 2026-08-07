@@ -8,13 +8,14 @@ from enum import Enum
 from typing import NewType, cast
 
 from agentworks.errors import NotFoundError, ValidationError
+from agentworks.resource_names import MAX_RESOURCE_NAME_LENGTH, RESOURCE_NAME_RE
 
 TopicSlug = NewType("TopicSlug", str)
 BlockId = NewType("BlockId", str)
 ActionId = NewType("ActionId", str)
 
 _ID_RE = re.compile(r"^[a-z][a-z0-9-]{0,62}$")
-_TOPIC_RE = re.compile(r"^[a-z][a-z0-9-]{0,62}(?:/[a-z][a-z0-9-]{0,62}){0,2}$")
+_TOPIC_SEGMENT_RE = re.compile(r"^[a-z][a-z0-9-]{0,62}$")
 _EXPRESSION_MARKERS = ("{{", "}}", "${", "<%", "%>", "{%", "%}")
 _MAX_TITLE_BYTES = 256
 _MAX_SUMMARY_BYTES = 2 * 1024
@@ -22,7 +23,7 @@ _MAX_MARKDOWN_BYTES = 64 * 1024
 _MAX_TOPIC_MARKDOWN_BYTES = 256 * 1024
 _MAX_BLOCKS = 64
 _MAX_RELATED_TOPICS = 64
-_MAX_TOPIC_SLUG_BYTES = 191
+_MAX_TOPIC_SLUG_BYTES = 63 + 1 + MAX_RESOURCE_NAME_LENGTH
 _MAX_SECTION_ITEMS = 32
 _MAX_SECTION_ITEM_BYTES = 256
 
@@ -75,6 +76,30 @@ class UnknownGuideTopicError(NotFoundError):
 
 class GuideTraversalError(ValidationError):
     """The current guide anchor does not permit a requested traversal."""
+
+
+def is_valid_topic_slug(value: object) -> bool:
+    """Return whether ``value`` is one requestable guide topic identity."""
+    if type(value) is not str:
+        return False
+    parts = value.split("/")
+    if len(parts) == 1:
+        return _TOPIC_SEGMENT_RE.fullmatch(parts[0]) is not None
+    if len(parts) == 2:
+        kind, name = parts
+        return (
+            _TOPIC_SEGMENT_RE.fullmatch(kind) is not None
+            and len(name) <= MAX_RESOURCE_NAME_LENGTH
+            and RESOURCE_NAME_RE.fullmatch(name) is not None
+        )
+    if len(parts) == 3:
+        namespace, plugin, topic = parts
+        return (
+            namespace == "plugin"
+            and _TOPIC_SEGMENT_RE.fullmatch(plugin) is not None
+            and _TOPIC_SEGMENT_RE.fullmatch(topic) is not None
+        )
+    return False
 
 
 @dataclass(frozen=True, slots=True)
@@ -423,8 +448,15 @@ def parse_topic_contribution(value: object, source: str) -> TopicContribution:
         topic=None,
         path="",
     )
-    topic = _string(data["topic"], source=source, topic=None, path="topic")
-    if not _TOPIC_RE.fullmatch(topic):
+    topic = _bounded_string(
+        data["topic"],
+        source=source,
+        topic=None,
+        path="topic",
+        max_bytes=_MAX_TOPIC_SLUG_BYTES,
+        error_type=InvalidTopicSlugError,
+    )
+    if not is_valid_topic_slug(topic):
         raise _error(InvalidTopicSlugError, source, topic, "topic", "is not a valid topic slug")
     anchor = _parse_anchor(data["anchor"], source, topic)
     expected = anchor.name if isinstance(anchor, ConceptAnchor) else anchor.kind
@@ -491,7 +523,7 @@ def parse_topic_contribution(value: object, source: str) -> TopicContribution:
             max_bytes=_MAX_TOPIC_SLUG_BYTES,
             error_type=InvalidTopicSlugError,
         )
-        if not _TOPIC_RE.fullmatch(related_topic):
+        if not is_valid_topic_slug(related_topic):
             raise _error(InvalidTopicSlugError, source, topic, item_path, "is not a valid topic slug")
         related_items.append(TopicSlug(related_topic))
     related = tuple(related_items)
@@ -507,20 +539,16 @@ def parse_topic_contribution(value: object, source: str) -> TopicContribution:
     )
 
 
-_SHELL_META = re.compile(r"[|&;<>'\"`\\]|\$\(|\$\{|(?:^|\s)[A-Za-z_][A-Za-z0-9_]*=")
+_LITERAL_ACTION_TOKEN_RE = re.compile(r"^(?:[A-Za-z0-9][A-Za-z0-9._:/-]*|--?[a-z0-9][a-z0-9-]*)$")
 _INPUT_NAME = re.compile(r"^[A-Z][A-Z0-9_]*$")
 
 
 def _is_literal_action_token(token: object, input_names: set[str]) -> bool:
-    if type(token) is not str or not token or any(character.isspace() for character in token):
+    if type(token) is not str:
         return False
-    if any(ord(character) < 32 or 0x7F <= ord(character) <= 0x9F for character in token):
-        return False
-    if _SHELL_META.search(token):
-        return False
-    if "$" not in token:
-        return True
-    return token.startswith("$") and token.count("$") == 1 and token[1:] in input_names
+    if token.startswith("$"):
+        return token.count("$") == 1 and token[1:] in input_names
+    return _LITERAL_ACTION_TOKEN_RE.fullmatch(token) is not None
 
 
 def validate_guide_action(action: GuideAction, source: str) -> GuideAction:

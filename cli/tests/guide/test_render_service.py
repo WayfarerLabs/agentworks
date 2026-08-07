@@ -23,6 +23,7 @@ from agentworks.guide import (
     GuideContributionError,
     GuideMode,
     InstanceList,
+    KindAnchor,
     Overview,
     Relationships,
     ResourceAnchor,
@@ -35,6 +36,7 @@ from agentworks.guide import (
     UnknownGuideTopicError,
 )
 from agentworks.guide.agent_mode import select_guide_mode
+from agentworks.guide.catalog import _build_guide_catalog
 from agentworks.guide.contributions import guide_contributions
 from agentworks.guide.render import _dynamic, render_index, render_topic, sanitize_terminal_output
 from agentworks.guide.service import _dynamic_topic, _EmptyInventory, render_guide
@@ -533,6 +535,139 @@ def test_unrelated_catalog_issue_does_not_change_clean_requested_topic_exit_stat
     assert "Guide content unavailable" not in selected.markdown
     assert index.exit_code == 1
     assert "invalid unrelated plugin topic" in index.markdown
+
+
+def test_authored_topics_deduplicate_generic_live_topics_in_names_and_index(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    authored = (
+        TopicContribution(
+            TopicSlug("vm-template"),
+            "Authored kind",
+            "Authored kind summary.",
+            KindAnchor("vm-template"),
+            (Overview(BlockId("overview"), "Authored kind teaching."),),
+        ),
+        TopicContribution(
+            TopicSlug("vm-template/demo"),
+            "Authored resource",
+            "Authored resource summary.",
+            ResourceAnchor("vm-template", "demo"),
+            (Overview(BlockId("overview"), "Authored resource teaching."),),
+        ),
+    )
+    catalog = _build_guide_catalog(tuple((f"core:{topic.topic}", topic) for topic in authored))
+    monkeypatch.setattr("agentworks.guide.service.build_authored_catalog", lambda: catalog)
+    registry = _ExactRegistry()
+    config = cast("Config", object())
+
+    names = render_guide(
+        (),
+        GuideMode.AGENT,
+        names_only=True,
+        load_config_fn=lambda: config,
+        load_registry_fn=lambda loaded: cast("Registry", registry),
+    )
+    index = render_guide(
+        (),
+        GuideMode.AGENT,
+        load_config_fn=lambda: config,
+        load_registry_fn=lambda loaded: cast("Registry", registry),
+    )
+
+    assert names.names.count("vm-template") == 1
+    assert names.names.count("vm-template/demo") == 1
+    assert names.markdown.count("vm-template\n") == 1
+    assert names.markdown.count("vm-template/demo\n") == 1
+    assert index.markdown.count("- `vm-template`:") == 1
+    assert index.markdown.count("- `vm-template/demo`:") == 1
+    assert "Authored kind summary." in index.markdown
+    assert "Authored resource summary." in index.markdown
+
+
+def test_direct_runtime_rejected_topic_renders_its_issue_and_unknowns_stay_atomic(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rejected = TopicContribution(
+        TopicSlug("vm-platform/rejected"),
+        "Rejected resource topic",
+        "The capability kind makes this resource anchor invalid.",
+        ResourceAnchor("vm-platform", "rejected"),
+        (Overview(BlockId("overview"), "Rejected teaching."),),
+    )
+    catalog = _build_guide_catalog((("core:rejected", rejected),))
+    assert catalog.names() == ()
+    assert [(issue.error.topic, issue.error.field_path) for issue in catalog.issues] == [
+        ("vm-platform/rejected", "anchor")
+    ]
+    monkeypatch.setattr("agentworks.guide.service.build_authored_catalog", lambda: catalog)
+    registry = _ExactRegistry()
+    config = cast("Config", object())
+
+    response = render_guide(
+        ("vm-platform/rejected",),
+        GuideMode.AGENT,
+        load_config_fn=lambda: config,
+        load_registry_fn=lambda loaded: cast("Registry", registry),
+    )
+
+    assert response.exit_code == 1
+    assert "# vm-platform/rejected" in response.markdown
+    assert "This guide topic is unavailable." in response.markdown
+    assert "anchor does not match a registered kind category" in response.markdown
+    with pytest.raises(UnknownGuideTopicError):
+        render_guide(
+            ("vm-platform/rejected", "vm-template/truly-unknown"),
+            GuideMode.AGENT,
+            load_config_fn=lambda: config,
+            load_registry_fn=lambda loaded: cast("Registry", registry),
+        )
+
+
+def test_live_catalog_advertises_every_valid_platform_name_and_filters_invalid_names() -> None:
+    ordinary_name = "o" * 64
+    secret_name = "s" * 253
+    invalid_names = ("bad.name", "x" * 254)
+    resource = SimpleNamespace(description="Long named resource.", origin=None)
+
+    class LongNameRegistry(_ExactRegistry):
+        def iter_kind_items(self, kind: str):
+            if kind == "vm-site":
+                return iter(((ordinary_name, resource),))
+            if kind == "secret":
+                return iter(((secret_name, resource), *((name, resource) for name in invalid_names)))
+            return super().iter_kind_items(kind)
+
+        def lookup(self, kind: str, name: str) -> object:
+            if (kind, name) in {("vm-site", ordinary_name), ("secret", secret_name)}:
+                return resource
+            return super().lookup(kind, name)
+
+    registry = LongNameRegistry()
+    config = cast("Config", object())
+    response = render_guide(
+        (),
+        GuideMode.AGENT,
+        names_only=True,
+        load_config_fn=lambda: config,
+        load_registry_fn=lambda loaded: cast("Registry", registry),
+    )
+    index = render_guide(
+        (),
+        GuideMode.AGENT,
+        load_config_fn=lambda: config,
+        load_registry_fn=lambda loaded: cast("Registry", registry),
+    )
+
+    for slug in (f"vm-site/{ordinary_name}", f"secret/{secret_name}"):
+        assert slug in response.names
+        assert f"- `{slug}`:" in index.markdown
+        direct = render_guide((slug,), GuideMode.AGENT, load_config_fn=_broken)
+        expected_title = slug if len(slug.encode("utf-8")) <= 256 else secret_name
+        assert f"# {expected_title}" in direct.markdown
+    for name in invalid_names:
+        assert f"secret/{name}" not in response.names
+        assert f"`secret/{name}`" not in index.markdown
 
 
 def test_no_topic_live_rendering_includes_authored_and_dynamic_entries() -> None:

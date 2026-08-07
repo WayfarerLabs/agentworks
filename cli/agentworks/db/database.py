@@ -41,6 +41,10 @@ if TYPE_CHECKING:
     )
 
 
+DatabaseDriverError = sqlite3.DatabaseError
+"""Driver failure type exposed so read-only consumers need no SQLite import."""
+
+
 class Database:
     """Typed interface to the Agentworks state database."""
 

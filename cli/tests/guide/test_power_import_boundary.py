@@ -13,6 +13,7 @@ FORBIDDEN_IMPORT_ROOTS = {
     "pathlib",
     "shutil",
     "socket",
+    "sqlite3",
     "subprocess",
     "tempfile",
     "agentworks.capabilities",
@@ -35,14 +36,40 @@ FORBIDDEN_CALL_NAMES = {
 }
 FORBIDDEN_CALL_PREFIXES = ("delete_", "insert_", "remove_", "set_", "update_")
 ALLOWED_INERT_IMPORTS = {"agentworks.secrets.guide_contributions"}
+FORBIDDEN_BOUND_NAMES = {"__import__", "compile", "eval", "exec", "open"}
 
 
 def _is_forbidden_import(module: str) -> bool:
     return any(module == root or module.startswith(f"{root}.") for root in FORBIDDEN_IMPORT_ROOTS)
 
 
+def _import_bindings(tree: ast.AST) -> dict[str, str]:
+    bindings: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                bound = alias.asname or alias.name.split(".", 1)[0]
+                bindings[bound] = alias.name if alias.asname else bound
+        elif isinstance(node, ast.ImportFrom) and node.level == 0:
+            module = node.module or ""
+            for alias in node.names:
+                full_path = f"{module}.{alias.name}" if module else alias.name
+                bindings[alias.asname or alias.name] = full_path
+    return bindings
+
+
+def _qualified_name(node: ast.expr, bindings: dict[str, str]) -> str | None:
+    if isinstance(node, ast.Name):
+        return bindings.get(node.id, node.id)
+    if isinstance(node, ast.Attribute):
+        owner = _qualified_name(node.value, bindings)
+        return f"{owner}.{node.attr}" if owner is not None else None
+    return None
+
+
 def _power_boundary_violations(source: str, filename: str = "<synthetic>") -> tuple[str, ...]:
     tree = ast.parse(source, filename=filename)
+    bindings = _import_bindings(tree)
     violations: list[str] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -55,10 +82,15 @@ def _power_boundary_violations(source: str, filename: str = "<synthetic>") -> tu
                 full_path = f"{module}.{alias.name}" if module else alias.name
                 if _is_forbidden_import(full_path) and full_path not in ALLOWED_INERT_IMPORTS:
                     violations.append(f"line {node.lineno}: import {full_path}")
-        elif isinstance(node, ast.Call):
-            name = node.func.attr if isinstance(node.func, ast.Attribute) else None
-            if name is not None and (name in FORBIDDEN_CALL_NAMES or name.startswith(FORBIDDEN_CALL_PREFIXES)):
-                violations.append(f"line {node.lineno}: call to {name}")
+        elif isinstance(node, ast.Attribute):
+            qualified = _qualified_name(node, bindings)
+            forbidden_method = node.attr in FORBIDDEN_CALL_NAMES or node.attr.startswith(FORBIDDEN_CALL_PREFIXES)
+            if qualified is not None and _is_forbidden_import(qualified):
+                violations.append(f"line {node.lineno}: reference to {qualified}")
+            elif forbidden_method:
+                violations.append(f"line {node.lineno}: reference to {node.attr}")
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load) and node.id in FORBIDDEN_BOUND_NAMES:
+            violations.append(f"line {node.lineno}: reference to {node.id}")
     return tuple(violations)
 
 
@@ -78,6 +110,11 @@ def test_guide_package_has_no_operational_power_imports_or_mutating_calls(path: 
         "from agentworks import output as output",
         "from agentworks import secrets as secrets",
         "from agentworks import transports as transports",
+        "import agentworks as aw\nask = aw.output.prompt",
+        "open('state.txt')",
+        "writer = Path.write_text",
+        "mutator = db.insert_vm",
+        "import sqlite3\nconnect = sqlite3.connect",
     ],
 )
 def test_power_boundary_rejects_direct_and_parent_package_alias_imports(source: str) -> None:
