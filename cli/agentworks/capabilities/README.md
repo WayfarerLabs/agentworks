@@ -267,7 +267,7 @@ or a secret just finds it absent.) The rule that pairs with it: pre-resolve conc
 
 ```python
 config_model: ClassVar[type[BaseModel]]          # what this capability's config IS
-config_for(facet: Facet | None) -> type[BaseModel]   # which config, at which level
+config_for() -> type[BaseModel]                  # which config the core reads, the override point
 ```
 
 A capability DECLARES the shape of its config as a model, and the core does everything else with it:
@@ -312,14 +312,21 @@ even though it could see them: they are checked closed-world at finalize against
 own declared model. Validating them twice, against two models, is how a host kind would end up
 encoding what its capabilities accept, which is the coupling this whole layer exists to avoid.
 
-`config_for(facet)` is how the core asks which config a capability offers at a given LEVEL. A facet
-is the level a capability is driven at (`vm`, `user`, `workspace`, `session`), pairing that level's
-methods with that level's config. Every capability today offers ONE config shared by all of its
-operations, so it declares `config_model` and names no facet, and `config_for` answers with it at
-every facet. A capability whose methods run at several levels overrides `config_for` and refuses a
-facet it does not offer, naming what it does. Offering a config at a facet is **not** a claim to
-support that level, and offering none is not a claim to lack it: support is carried by the
-implementation.
+`config_for()` is how the core asks which config a capability offers, and every read of a
+capability's config goes through it rather than off `config_model` directly. Every capability today
+offers ONE config shared by all of its operations, so it declares `config_model` and the base hook
+answers with it.
+
+Config is offered per FACET by contract: a facet is the level a capability is driven at (`vm`,
+`user`, `workspace`, `session`), pairing that level's methods with that level's config. CONSUMERS
+choose which facet they drive, so a producer never has to know who is asking, and facets are
+deliberately **not** scopes, with core owning the mapping between them (admin and agent both drive
+the `user` level; session start and resume share `session`). Nothing under `capabilities/` spells a
+scope. The parameter that names a facet is not on the signature yet, because nothing offers more
+than one config; it arrives additively with the first capability whose methods run at several
+levels, which is the same change that brings the consumers able to pass it. Offering a config at a
+facet is **not** a claim to support that level, and offering none is not a claim to lack it: support
+is carried by the implementation.
 
 The references the core extracts are sourceless. The consuming resource attaches itself as the
 source when it emits them, in its `dependencies()` at finalize ("whoever hosts the config that names
@@ -523,7 +530,7 @@ capability author's contract, so it lives in
 The shared surface is real (it is a lifecycle, not a boilerplate default), so it earns a base class
 (`capabilities/base.py`). The base owns the contract above and nothing domain-specific:
 
-- the `config_model` declaration and the `config_for(facet)` hook whose default answers with it;
+- the `config_model` declaration and the `config_for()` hook whose default answers with it;
 - the construct, `preflight`, and `runup` instance contract (both readiness stages no-op by default:
   resolvability prediction belongs to the operation's preflight sweep, not to the instance or its
   node, and the capabilities with nothing to check or authenticate get the right behavior for free);

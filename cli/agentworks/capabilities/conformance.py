@@ -173,10 +173,10 @@ def _config_model_error(descriptor: CapabilityKindDescriptor, impl: type) -> str
 
     Read off ``config_model`` directly rather than through
     ``Capability.config_for``, and deliberately: conformance must not
-    invoke implementation code. A capability whose methods run at several
-    levels therefore declares its offered models as DATA this can read,
-    which is the second reason the offered set is a mapping rather than a
-    computation.
+    invoke implementation code. That constrains what a capability whose
+    methods run at several levels may do, and the constraint is the point:
+    such a capability has to declare its offered models as DATA this can
+    read rather than as a computation only the capability can run.
 
     Wave 4 extends this check to a capability's per-facet offerings, which
     is the seam: the checks below run against ONE declared model today and

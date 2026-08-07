@@ -26,11 +26,13 @@ Delivered:
 
 - The registration surface: `config_model` on every capability implementation, uniform across all
   four kinds (section 2).
-- The facet vocabulary and `config_for(facet)`, declared as data, with the unknown-facet hard error
-  (section 3).
+- The `config_for()` hook every core read of a capability's config goes through, which is the seam
+  wave 4's per-facet offering arrives on. The facet vocabulary and the `facet` parameter shipped
+  here originally and were removed on 2026-08-07 as mechanism with no consumer; the per-facet
+  CONTRACT stands (section 3).
 - The descriptor's `config_schema` field (the kind's model contract) and registration-time
   conformance check five (section 4).
-- Union assembly per `(kind, facet)`, cached at the post-registration boundary (section 5).
+- Union assembly per `kind`, cached on the arms the union would be built from (section 5).
 - The interim tagged-table synthesis that bridges phase-1 decode to the tagged union (section 6).
 - The core-owned validation and extraction entry points, and the retirement of every hand-rolled
   validator and `dependencies` classmethod (section 7).
@@ -116,24 +118,17 @@ documents is how the drift FR13 targets gets reintroduced. Where a platform modu
 the model and its nested models go in a sibling `config.py` under the same package rather than a
 shared models module.
 
-## 3. The facet, declared as data
+## 3. The facet contract, and why no facet code ships
 
-### 3.1 Vocabulary
+### 3.1 The contract
 
-```python
-# capabilities/facets.py
-class Facet(Enum):
-    """The level a capability is DRIVEN at: the pairing of one level's API
-    methods and that level's config."""
+Config is offered per FACET. A **facet** is the level a capability is DRIVEN at, pairing one level's
+API methods with that level's config: `vm`, `user`, `workspace`, `session`. Four levels, fixed and
+core-owned, not extensible; a change here is an ordinary contract change, as the scope-participation
+contract already says of scopes.
 
-    VM = "vm"
-    USER = "user"
-    WORKSPACE = "workspace"
-    SESSION = "session"
-```
-
-Four members, fixed, core-owned, not extensible; a change here is an ordinary contract change, as
-the scope-participation contract already says of scopes.
+A capability offers a fixed set of facet configs the same way it offers a fixed set of API methods,
+and CONSUMERS choose which facet they drive, so a producer never has to know who is asking.
 
 **Facets are not scopes, and core owns the mapping.** The roadmap's scopes are `vm`, `admin`,
 `agent`, `workspace`, `session`. Admin and agent both resolve to `USER`; session start and resume
@@ -141,69 +136,60 @@ share `SESSION`. That mapping lives in the CORE code that drives each level, so 
 admin attachment and an agent template get the same answer by construction. A capability only ever
 sees a facet, and nothing in `capabilities/` may spell a scope.
 
-### 3.2 The resolution hook
+**Config presence is NOT the support claim.** Asking a capability for its config at a facet asks
+what SHAPE the config has there, never whether the capability implements that level. A capability
+may support a facet and offer an empty config there, and a capability that offers a config at a
+facet has claimed nothing about implementing it. Support is carried by the implementation, per the
+scope-participation contract. Wiring the two together would reinvent the rescinded slot mechanism
+under a new name, so `config_for` is documented in exactly these terms and no core code may read it
+as a support signal.
+
+### 3.2 The hook that ships
 
 ```python
 class Capability(ABC):
     @classmethod
-    def config_for(cls, facet: Facet | None = None) -> type[BaseModel]:
-        """The config model this capability offers at ``facet``.
-
-        Base behavior: one config, offered at every facet, which is every
-        shipped capability. A capability whose methods run at several levels
-        with different config overrides this and answers per facet, refusing
-        a facet it does not offer (:func:`facet_config`).
-        """
+    def config_for(cls) -> type[BaseModel]:
+        """The config model this capability offers."""
         return cls.config_model
 ```
 
-and the core-owned resolution a per-facet capability writes:
+`config_model = LimaConfig` and nothing else, for all thirteen shipped capabilities. What the hook
+buys is that every core read of a capability's config goes THROUGH it rather than off `config_model`
+directly (`capabilities/config.py:offered_model`), so the first capability that answers with
+something other than its declaration is an ordinary registration rather than a framework change.
+That indirection is the whole of the seam wave 4 needs, and it is pinned by a test over a fixture
+capability that overrides the hook.
 
-```python
-# capabilities/facets.py
-def facet_config(
-    offered: Mapping[Facet, type[BaseModel]],
-    facet: Facet | None,
-    *,
-    capability: str,
-) -> type[BaseModel]:
-    """``offered[facet]``, or a hard error naming what IS offered."""
-```
+**The association is DECLARED DATA, readable before any method runs.** `config_model` is a ClassVar
+and `config_for` is a classmethod over class-level data; core reads both at finalize, with no
+instance and no operation invoked. That is the ruling's "readable at finalize" requirement, and it
+constrains wave 4: a per-facet capability must DECLARE its offered models as data, not compute them,
+because registration conformance reads `config_model` directly and may not invoke implementation
+code (`capabilities/conformance.py:_config_model_error`).
 
-Settled points, each with its reason:
+### 3.3 No facet vocabulary and no facet parameter ship
 
-- **The ordinary case spells nothing extra.** `config_model = LimaConfig` and no facet, for all
-  thirteen shipped capabilities. `config_for` exists so wave 4's per-facet harness integrations need
-  no framework change, and so that consumers pick a config the way they pick an API method.
-- **The association is DECLARED DATA, readable before any method runs.** `config_model` is a
-  ClassVar and `config_for` is a classmethod over class-level data; core reads both at finalize,
-  with no instance and no operation invoked. That is the ruling's "readable at finalize"
-  requirement, and it is what `facet_config`'s `offered` mapping keeps true for the wave-4 case: a
-  per-facet capability declares a mapping, it does not compute one.
-- **Asking for a facet a capability does not offer is a hard error naming what it does offer.**
-  `facet_config` raises `StateError` (a framework-level mistake: the consumer asked for a level the
-  producer does not serve, which review and typing should have caught, not an operator's config
-  mistake). Pinned by a test over a fixture capability that offers two facets.
-- **Config presence is NOT the support claim.** `config_for` answers "what shape is the config at
-  this level", never "do you support this level". A capability may support a facet and offer an
-  empty config there; a capability that offers a config at a facet has claimed nothing about
-  implementing it. Support is carried by the implementation, per the scope-participation contract.
-  Wiring the two together would reinvent the rescinded slot mechanism under a new name, so
-  `config_for` is documented in exactly these terms and no core code may read it as a support
-  signal.
+This step originally shipped a `capabilities/facets.py` (a `Facet` enum and a `facet_config`
+resolver that hard-errored on an unoffered facet) plus a `facet` parameter on nine signatures. Both
+were removed on 2026-08-07 under the roadmap lead's **no mechanism without a consumer** direction:
+no production code named a facet, nothing passed the parameter, and a vocabulary with no consumer is
+a signature every reader has to decode and no reader can use.
 
-### 3.3 Wave 2 names no facet, deliberately
+**This is a removal of unused mechanism, not a reversal of the contract.** Section 3.1 stands as
+settled. Wave 4 reintroduces the parameter ADDITIVELY, in the same change that brings the
+harness-integration kind whose methods run at several levels and the consumers that would pass it,
+so the declaration and the call site's facet still arrive together. That pairing is what the
+vocabulary existed to enable, and it is exactly what the vocabulary could not deliver on its own.
 
-Every core call site in this step passes `facet=None`, meaning "the capability's single config".
-
-The alternative was considered and rejected: naming a facet per hosting surface now (vm-site → `VM`,
-session-template → `SESSION`, git-credential → `USER`, secret-backend → none) would make wave 4's
-session-template call site free. It would also have wave 2 ASSERT a scope-to-facet mapping that the
-ruling gives to core-at-wave-4, on evidence that does not exist yet: a git credential is plausibly
-user-level and a per-secret backend mapping is plausibly no level at all, and neither guess has a
-consumer that would catch it being wrong. Deciding it here on zero evidence is the cheaper-looking
-mistake. `Facet` and `config_for` exist so wave 4 adds both halves (the declaration and the call
-site's facet) in one change; wave 2 supplies the half that has a consumer.
+The alternative considered and rejected at the time was naming a facet per hosting surface now
+(vm-site as `VM`, session-template as `SESSION`, git-credential as `USER`, secret-backend as none),
+which would have made wave 4's session-template call site free. It would also have had wave 2 ASSERT
+a scope-to-facet mapping that the ruling gives to core-at-wave-4, on evidence that does not exist
+yet: a git credential is plausibly user-level and a per-secret backend mapping is plausibly no level
+at all, and neither guess has a consumer that would catch it being wrong. That reasoning is why the
+parameter was defaulted rather than threaded; the same reasoning carried one step further is why it
+is now absent: a default no call site passes is the same guess with a signature attached.
 
 ## 4. The descriptor's `config_schema`, and conformance check five
 
@@ -249,9 +235,9 @@ follows the descriptor LLD's section 4 list) runs at registration, before any re
    registered model degrades a graph edge at runtime instead of failing where the author can see it.
 
 Check five reads `config_model` directly rather than calling `config_for`, and that is deliberate:
-conformance must not invoke plugin code. A per-facet capability (wave 4) therefore conforms by
-declaring its offered models as data that the check can read, which is the second reason the offered
-set is a mapping rather than a computation.
+conformance must not invoke plugin code. A per-facet capability (wave 4) therefore has to conform by
+declaring its offered models as DATA the check can read rather than as a computation only the
+capability can run, which is a constraint wave 4 inherits from this choice.
 
 **Not doing this, and why.** No check that every field carries a description. The schema-foundation
 LLD left it open (its section 11) and it stays open: it is a real quality gate but it belongs with
@@ -267,12 +253,12 @@ union over the registered implementations' offered models:
 
 ```python
 # capabilities/config.py
-def capability_config_union(kind: str, facet: Facet | None = None) -> type[BaseModel]:
+def capability_config_union(kind: str) -> type[BaseModel]:
     """The tagged union over every registered ``kind`` implementation's
-    config at ``facet``, cached."""
+    config, cached."""
 ```
 
-Arms are `impl.config_for(facet)` for every name in the kind's live registry, in registry order; the
+Arms are `impl.config_for()` for every name in the kind's live registry, in registry order; the
 discriminator is `contract.discriminator`.
 
 > **Correction (implementation): the union is a generated ROOT MODEL, not the bare `TypeAdapter`
@@ -293,10 +279,10 @@ which seats plugins before it publishes and finalizes. Nothing is built at impor
 ### 5.2 The cache key is the union's own arms
 
 ```python
-_UNION_CACHE: dict[tuple[str, Facet | None, frozenset[tuple[str, type[BaseModel]]]], type[BaseModel]] = {}
+_UNION_CACHE: dict[tuple[str, frozenset[tuple[str, type[BaseModel]]]], type[BaseModel]] = {}
 ```
 
-**Settled: cache on what the union would be BUILT from rather than on `(kind, facet)` with an
+**Settled: cache on what the union would be BUILT from rather than on `kind` alone with an
 invalidation protocol.** The alternative needs every mutator of a capability registry to remember to
 invalidate: plugin seating, `seated_plugin`'s snapshot/restore (`plugins/registration.py:170`), and
 every test that installs a fixture capability. A forgotten invalidation is a stale union, which
@@ -333,9 +319,9 @@ Reference extraction does NOT go through the union: it walks the impl's own mode
 blob (section 7.3). Constructing a capability does not either: the class is in hand, so the arm is
 already selected (section 10.1).
 
-At wave 2 every capability offers exactly one config and no facet, so `(kind, None)` is the only key
-ever built, and this reduces to today's per-kind union. That is the point of stating the key as
-`(kind, facet)` now: wave 4 adds keys, not machinery.
+Every capability offers exactly one config, so the key is `(kind, arms)` and this is a per-kind
+union. Wave 4's per-facet offering widens the key rather than replacing the machinery: the arms half
+already makes staleness impossible, and a facet is one more thing the arms are read at.
 
 ## 6. The interim tagged-table synthesis
 
@@ -377,7 +363,7 @@ One new core module, `capabilities/config.py`, holding everything a consuming re
 nothing a capability does:
 
 ```python
-def capability_config_model(kind: str, name: str, facet: Facet | None = None) -> type[BaseModel] | None:
+def capability_config_model(kind: str, name: str) -> type[BaseModel] | None:
     """The registered implementation's offered config model, or ``None``
     when no implementation of that name is seated on this host."""
 
@@ -388,7 +374,6 @@ def validate_capability_config(
     name: str,
     blob: Mapping[str, object],
     owner: RefOwner,
-    facet: Facet | None = None,
     location: SourceLocation | None = None,
 ) -> BaseModel | None:
     """Validate ``blob`` as ``kind``/``name``'s config and return the
@@ -403,7 +388,6 @@ def capability_config_references(
     name: str,
     blob: Mapping[str, object],
     owner: RefOwner,
-    facet: Facet | None = None,
 ) -> tuple[ConfigReference, ...]:
     """The references ``blob`` implies. Total, never raising, for any
     inputs; ``()`` when no such implementation is seated."""
@@ -418,9 +402,9 @@ That direction is the same one the descriptor table already established, and it 
 
 `validate_capability_config` resolves the descriptor, looks up the seated implementation, and:
 
-- for a tagged kind, validates `tagged_config(name, blob)` through
-  `capability_config_union(kind, facet)`, returning the selected arm instance;
-- for a map-keyed kind, validates `blob` through `impl.config_for(facet)`.
+- for a tagged kind, validates `tagged_config(name, blob)` through `capability_config_union(kind)`,
+  returning the selected arm instance;
+- for a map-keyed kind, validates `blob` through `impl.config_for()`.
 
 Both pass `validation_context(owner)` so owner-templated `SecretRef` defaults resolve (FR18), and
 both translate a `pydantic.ValidationError` through `config_error_from(...)` with the location the
@@ -702,10 +686,10 @@ better of the two failures and needs no separate handling.
 
 ```python
 class Capability(ABC):
-    def __init__(self, owner_name: str, config: Mapping[str, object], *, facet: Facet | None = None) -> None:
+    def __init__(self, owner_name: str, config: Mapping[str, object]) -> None:
         self.owner_name = owner_name
         owner = RefOwner(kind=self.owner_kind, name=owner_name)
-        model = type(self).config_for(facet)
+        model = type(self).config_for()
         self._config = validate_config(model, config, owner=owner, capability=type(self).name)
         self._secret_refs = tuple(
             ref for ref in extract_references(model, config, owner) if ref.kind == "secret"
@@ -717,9 +701,10 @@ construction"); what changes is that the check is `model_validate` and its resul
 discarded. Validation happens against the model directly, not through the union: the class is in
 hand, so the arm is already chosen.
 
-`facet` defaults to `None` and no shipped call site passes it (section 3.3). It is on the signature
-because construction is exactly where wave 4 must say which level it is building for, and adding it
-later would touch every construction site.
+The constructor takes no facet (section 3.3). Construction is exactly where wave 4 must say which
+level it is building for, so a facet argument arrives here then; it is absent now because no caller
+could pass a meaningful one, and a defaulted parameter no call site passes buys nothing over adding
+it with the consumers that need it.
 
 > **Correction (implementation): the tag synthesis at construct derives from the impl's KIND, which
 > may be absent.** `validate_own_config` needs the kind's discriminator to know whether to
@@ -808,9 +793,10 @@ through `build_registry`), because that is what proves the finalize pass reaches
 **`test_capability_base.py`** pins construction: the bound instance is the validated model, a
 malformed blob raises at construct with owner framing, and `_secret_refs` comes from extraction.
 
-**Facets.** A fixture capability offering two facets answers each and refuses a third, naming the
-two it offers. A single-config capability answers any facet. Both are the ruling's requirements,
-pinned rather than described.
+**The config hook.** A fixture capability that overrides `config_for` is honored by `offered_model`,
+which is what proves the core reads the hook rather than `config_model` and so that wave 4's
+per-facet offering is additive. The ordinary case (the base hook answering with the declaration) is
+pinned beside it.
 
 **Conformance check five.** Negative tests at `register_plugin`, one per defect: a model that is not
 a `type`, one that does not extend the kind's `base`, one whose `name` Literal disagrees with the
@@ -1028,9 +1014,9 @@ Each is one commit with the full gate green after it. Always additive-then-subtr
 path lands and is exercised beside the old one, then the old one is deleted per kind, so there is no
 red window.
 
-1. **Vocabulary and contract.** `Facet`, `facet_config`, `NonEmptyStr` / `PositiveInt`,
-   `FramedConfigError`, the two bridge extensions (section 8) with their corpus entries,
-   `RefOwner.label`. Additive; nothing consumes them yet.
+1. **Vocabulary and contract.** `Facet` and `facet_config` (both since removed, section 3.3),
+   `NonEmptyStr` / `PositiveInt`, `FramedConfigError`, the two bridge extensions (section 8) with
+   their corpus entries, `RefOwner.label`. Additive; nothing consumes them yet.
 2. **The descriptor's `config_schema` and conformance check five.** `ConfigContract` on the four
    records, the check, its negative tests. Still additive: no implementation declares a model, so
    the check is scoped to implementations that do (a model-less impl is refused only from step 4
@@ -1178,9 +1164,11 @@ Step 2.3b's own sequence, appended when it landed (2026-08-06; rationale in sect
 - **Abstract base templates are now a load error, and that is a new ruling** (section 12.1, last
   paragraph). Latent until a capability declares a required field, so it costs nothing to overturn
   today and gets expensive once one ships.
-- **`facet_config` raises `StateError`, not `ConfigError`.** An unoffered facet is a consumer asking
-  a producer for a level it does not serve: a framework mistake, not an operator's. If the lead
-  expects a facet to ever be operator-selectable, that changes and should change now.
+- **~~`facet_config` raises `StateError`, not `ConfigError`.~~** Moot: `facet_config` was removed on
+  2026-08-07 (section 3.3). The question returns with wave 4's resolver, and the answer proposed
+  then was that an unoffered facet is a consumer asking a producer for a level it does not serve, a
+  framework mistake rather than an operator's. It becomes live again if the lead ever expects a
+  facet to be operator-selectable.
 - **github's `repo`-singular hint.** Today `_validated_scope` special-cases the singular misspelling
   with a bespoke message (`github.py:52-55`). Under a closed-world model it becomes the generic
   unknown-field error, which names `repos` in its field list, so the information survives but the
@@ -1190,7 +1178,7 @@ Step 2.3b's own sequence, appended when it landed (2026-08-06; rationale in sect
 - **`RefOwner` gains an optional `label`** (section 7.6) so the migrator keeps its TOML vocabulary.
   This widens a record the schema foundation owns. Additive and defaulted, but the lead may prefer
   the migrator adopt `kind/name` framing and the field not exist.
-- **The union cache keys on registry CONTENTS** rather than on `(kind, facet)` with invalidation
+- **The union cache keys on registry CONTENTS** rather than on `kind` alone with invalidation
   (section 5.2), which differs from the HLA's "cached on the kind's registry entry". Cheap to
   overturn; the reason to prefer it is that the failure mode of the alternative is silent.
 - **`_config_as` narrowing versus a generic `Capability`** (section 10.1). Four lines per capability
