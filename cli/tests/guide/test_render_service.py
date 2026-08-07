@@ -3,6 +3,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
@@ -17,6 +18,11 @@ from agentworks.plugins.base import Plugin
 from agentworks.resources import ResourceReference
 from agentworks.resources.graph import Enablement, Readiness
 from agentworks.resources.reference import ReferenceEntry
+
+if TYPE_CHECKING:
+    from agentworks.config import Config
+    from agentworks.db import Database
+    from agentworks.resources import Registry
 
 
 def _broken() -> object:
@@ -117,12 +123,15 @@ def test_successful_live_rendering_uses_no_denied_power(monkeypatch: pytest.Monk
     monkeypatch.setattr(transports, "transport", denied)
     monkeypatch.setattr(Database, "_migrate", denied)
     registry = _LiveRegistry()
+    config = cast("Config", object())
+    typed_registry = cast("Registry", registry)
+    database = cast("Database", object())
     response = render_guide(
         ("vm-template",),
         GuideMode.AGENT,
-        load_config_fn=lambda: object(),  # type: ignore[arg-type]
-        load_registry_fn=lambda config: registry,  # type: ignore[arg-type]
-        db=object(),  # type: ignore[arg-type]
+        load_config_fn=lambda: config,
+        load_registry_fn=lambda config: typed_registry,
+        db=database,
     )
     assert response.exit_code == 0
     assert "vm-template/demo" in response.markdown
@@ -154,9 +163,13 @@ class _ExactGraph:
         return (ReferenceEntry(("session-template", "consumer"), "selects demo"),)
 
 
-class _ExactRegistry(_LiveRegistry):
+class _ExactRegistry:
+    is_finalized = True
     graph = _ExactGraph()
     resource = SimpleNamespace(name="demo", description="Demo template.", origin=None)
+
+    def finalize(self) -> None:
+        raise AssertionError("finalize invoked")
 
     def iter_kind_items(self, kind: str):
         if kind == "vm-template":
@@ -189,9 +202,7 @@ def test_live_exact_topic_semantic_parity_covers_state_relationships_and_instanc
 
 
 @pytest.mark.parametrize("malformed", [False, True])
-def test_unusable_state_database_fails_soft(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, malformed: bool
-) -> None:
+def test_unusable_state_database_fails_soft(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, malformed: bool) -> None:
     import agentworks.db as db_package
 
     path = tmp_path / "state.db"
@@ -205,11 +216,13 @@ def test_unusable_state_database_fails_soft(
         connection.close()
     monkeypatch.setattr(db_package, "DB_PATH", path)
     registry = _LiveRegistry()
+    config = cast("Config", object())
+    typed_registry = cast("Registry", registry)
     response = render_guide(
         ("vm-template",),
         GuideMode.HUMAN,
-        load_config_fn=lambda: object(),  # type: ignore[arg-type]
-        load_registry_fn=lambda config: registry,  # type: ignore[arg-type]
+        load_config_fn=lambda: config,
+        load_registry_fn=lambda config: typed_registry,
     )
     assert response.exit_code == 1
     assert "Live facts unavailable" in response.markdown
@@ -218,6 +231,7 @@ def test_unusable_state_database_fails_soft(
 
 def test_broken_finalization_discards_partial_registry() -> None:
     partial = object()
+    config = cast("Config", object())
 
     def fail_after_partial(config: object) -> object:
         assert partial is not None
@@ -226,7 +240,7 @@ def test_broken_finalization_discards_partial_registry() -> None:
     response = render_guide(
         ("vm-template/demo",),
         GuideMode.AGENT,
-        load_config_fn=lambda: object(),  # type: ignore[arg-type]
+        load_config_fn=lambda: config,
         load_registry_fn=fail_after_partial,  # type: ignore[arg-type]
     )
     assert response.exit_code == 1

@@ -150,12 +150,16 @@ inventory is a read-only stored-row query already used by resource inspection; i
 remote operation.
 
 Guide remains usable when operator configuration is broken. It always loads and validates authored
-core content independently, then attempts a normal config load and full registry build for every
-guide request. If config load or finalization fails, authored content still renders, each affected
-dynamic block says its facts are unavailable, and the original framed config error appears in the
-markdown. `GuideView` construction is non-interactive by construction and can never prompt for or
-resolve a secret. A malformed plugin contribution is isolated to the guide-scoped catalog build,
-reported as unavailable, and cannot break unrelated CLI commands or valid core topics.
+core content independently, then attempts a normal config load and a guide-scoped registry build for
+every guide request. The guide build preserves declaration, publication, materialization,
+validation, graph finalization, and freezing, but disables host-readiness probes. A readiness fact
+that requires such a probe remains explicitly unavailable and is assessed as unverifiable, never as
+an observed failure. Normal command registry builds retain their existing readiness probes. If
+config load or finalization fails, authored content still renders, each affected dynamic block says
+its facts are unavailable, and the original framed config error appears in the markdown. `GuideView`
+construction is non-interactive by construction and can never prompt for or resolve a secret. A
+malformed plugin contribution is isolated to the guide-scoped catalog build, reported as
+unavailable, and cannot break unrelated CLI commands or valid core topics.
 
 ## Guide rendering and agent shaping
 

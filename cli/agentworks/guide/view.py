@@ -48,6 +48,7 @@ class GuideVerdict:
     enabled: bool
     ready: bool
     reason: str | None
+    is_available: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -178,6 +179,7 @@ def _resource_fact(registry: Registry, kind: str, name: str, resource: object) -
             registry.graph.enablement_of(kind, name) is Enablement.enabled,
             readiness.is_ready,
             readiness.reason,
+            is_available=readiness.is_available,
         ),
     )
 

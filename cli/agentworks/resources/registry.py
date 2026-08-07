@@ -306,7 +306,12 @@ class Registry:
 
     # -- Finalize phase ------------------------------------------------
 
-    def finalize(self, enablement_sources: Sequence[EnablementSource] = ()) -> None:
+    def finalize(
+        self,
+        enablement_sources: Sequence[EnablementSource] = (),
+        *,
+        probe_host_readiness: bool = True,
+    ) -> None:
         """Run the framework pass over published Resources, then freeze.
 
         ``enablement_sources`` is the injected list of enablement sources
@@ -443,10 +448,19 @@ class Registry:
             for kind, kind_dict in self._resources.items()
             for key in ((kind, name) for name in kind_dict)
         }
-        readiness = fold_readiness(self._resources, all_outbound, enablement, marks)
+        readiness = fold_readiness(self._resources, all_outbound, enablement, marks, probe_host=probe_host_readiness)
 
         # 5: readiness-gated materialization (R12), looping to a fixpoint.
-        self._materialize_deferred(deferred, all_refs, all_outbound, readiness, enablement, marks, context)
+        self._materialize_deferred(
+            deferred,
+            all_refs,
+            all_outbound,
+            readiness,
+            enablement,
+            marks,
+            context,
+            probe_host_readiness=probe_host_readiness,
+        )
 
         # 6: attach. Build the retained graph (inbound + readiness + enablement
         # on the node), then polish auto-declared descriptions off its inbound
@@ -665,6 +679,8 @@ class Registry:
         enablement: Mapping[tuple[str, str], Enablement],
         disabled_marks: Mapping[tuple[str, str], DisabledMark],
         context: FinalizeContext,
+        *,
+        probe_host_readiness: bool = True,
     ) -> None:
         """Materialize deferred auto-declare targets, readiness-gated (R12),
         looping to a fixpoint (LLD b subtlety 3).
@@ -702,7 +718,7 @@ class Registry:
                     # A disabled referrer does not drive materialization (R12):
                     # its readiness is not even computed.
                     continue
-                if verdict.is_ready:
+                if verdict.is_ready or not verdict.is_available:
                     return True
             return False
 
@@ -727,7 +743,13 @@ class Registry:
                 self._walk_into(target, all_refs, all_outbound, context)
                 self._resolve_misses(all_refs, deferred)
                 readiness[target] = node_readiness(
-                    target, self._resources, all_outbound, readiness, enablement, disabled_marks
+                    target,
+                    self._resources,
+                    all_outbound,
+                    readiness,
+                    enablement,
+                    disabled_marks,
+                    probe_host=probe_host_readiness,
                 )
             if not progressed:
                 # Every remaining deferred target lacks a ready referrer (R12):

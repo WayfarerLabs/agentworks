@@ -711,6 +711,10 @@ signature and stdout TTY fallback. Both modes carry the same semantic content. G
 instructional and never grants consent to resolve secrets, inspect the workstation, connect to a VM,
 or mutate state.
 
+Guide registry construction never probes host tools or backend availability. Readiness that would
+require workstation inspection is rendered as unavailable; use an explicitly consented diagnostic
+surface when that fact is needed. Normal commands retain their ordinary readiness probes.
+
 `concept-onboarding` also renders a pure assessment of the projected registry, relationship, and
 stored-instance facts. It reports each fact as done, disabled, not ready, or unverifiable and emits
 only the still-applicable ordered action records. Verification evidence is caller-owned and scoped

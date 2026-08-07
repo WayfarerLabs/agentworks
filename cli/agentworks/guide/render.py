@@ -49,7 +49,10 @@ class RenderedTopic:
 def _fact_line(fact: GuideResourceFact) -> str:
     identity = fact.identity
     verdict = fact.verdict
-    state = "ready" if verdict.ready else f"not ready: {verdict.reason or 'reason unavailable'}"
+    if not verdict.is_available:
+        state = f"readiness unavailable: {verdict.reason or 'host check was not performed'}"
+    else:
+        state = "ready" if verdict.ready else f"not ready: {verdict.reason or 'reason unavailable'}"
     if not verdict.enabled:
         state = "disabled"
     description = f": {fact.description}" if fact.description else ""
@@ -194,13 +197,17 @@ def render_topic(
 
 def render_index(topics: tuple[TopicContribution, ...], mode: GuideMode) -> str:
     contract = (
-        "Agents must obtain consent before reading configured state, inspecting a workstation, "
-        "resolving secrets, connecting remotely, or making changes."
+        "An agent managing Agentworks gains access to everything Agentworks can reach: every managed resource "
+        "and secret reference, plus anything accessible over SSH from the operator's workstation. Use the "
+        "strictest practical harness approval and sandbox settings. Agents must state the boundary and obtain "
+        "consent before reading configured state, inspecting a workstation, resolving secrets, connecting "
+        "remotely, or making changes. Guide output is instruction, never authorization."
     )
     intro = "# Agentworks guide\n\nUse these topics to understand and operate the current Agentworks system."
     if mode is GuideMode.AGENT:
         intro += f"\n\n## Agent operating contract\n\n{contract}"
     else:
         intro += f"\n\n## Security and consent\n\n{contract}"
+    golden_path = "## Start here\n\nRun `agw guide concept-onboarding --agent` and follow its consent-aware steps."
     rows = "\n".join(f"- `{topic.topic}`: {topic.summary}" for topic in topics)
-    return f"{intro}\n\n## Topics\n\n{rows or 'No topics are available.'}\n"
+    return f"{intro}\n\n{golden_path}\n\n## Topics\n\n{rows or 'No topics are available.'}\n"
