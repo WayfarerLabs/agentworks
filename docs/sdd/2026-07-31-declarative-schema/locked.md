@@ -137,9 +137,23 @@ inventing a dependency on a resource the operator never wrote, which finalize wo
   nothing. A no-op should not fail harder, earlier, and less accurately than the key that decides
   resolution order. The generalization worth carrying: settings values that NAME things
   (`[secret_config].backends`, `defaults.site`, `defaults.runup_git_credentials`) are references.
-  Two of the three are checked by hand in `doctor`, per field, which is the switchboard pattern this
-  effort collapsed elsewhere; typing them as references would give existence checking and the
-  dangling-name error from machinery manifests already use.
+  Typing them as such would give existence checking and the dangling-name error from machinery
+  manifests already use, in place of the per-field checks in `doctor` that are the switchboard
+  pattern this effort collapsed elsewhere.
+
+**The severity is settled: config errors are hard errors, full stop** (operator ruling, 2026-08-07).
+That resolves an inconsistency the successor would otherwise have inherited three different answers
+to. A dangling MANIFEST reference is already a hard finalize error (`registry.py:655`).
+`[secret_config].backends` naming an unknown backend is already a hard error, raised in
+`active_backends`. But a `defaults.site` naming a site that does not exist is only a `doctor`
+warning, and `vms/sites.py:22` records that degradation as a deliberate decision, which this ruling
+reverses; implementing it needs a dated entry on the `2026-07-01-vm-sites` lockfile. The same ruling
+settles `[secret_backends.*]`: it is a resource-declaring section (it is in `KIND_SECTIONS`), so it
+fails hard, uniformly, rather than warning for built-in names and erroring for plugin ones. Keep its
+current remediation text when making that change, because the section carried no configuration and
+the generic resource-section error would tell the operator to write a manifest for something that
+needs none.
+
 - **Two union shapes extract no edges, by design.** An undiscriminated union of two or more models
   addresses no arm without guessing which; a union tagged by non-string literals is outside the
   framework's rule that every discriminator is a capability or kind NAME. Both are fixture-only; no
