@@ -14,6 +14,7 @@ because a curated file could be fixed by hand and a renderer cannot.
 from __future__ import annotations
 
 import re
+import stat
 from pathlib import Path
 
 import pytest
@@ -339,6 +340,59 @@ def test_a_third_append_separates_from_the_second(tmp_path: Path) -> None:
         ("secret", "my-secret"),
         ("apt-package", "my-apt-package"),
     }
+
+
+def test_an_append_that_dies_at_the_commit_point_leaves_the_manifest_whole(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An append is a read-then-write over a file the OPERATOR authored,
+    and this command holds the only copy of the old content between the
+    two. A plain write truncates first, so anything that stops it (a
+    Ctrl-C, a full disk) used to leave the operator with an empty or
+    half-written manifest and nowhere to get the original back from.
+
+    The failure is induced at ``os.replace``, because that is the only
+    moment the target is touched at all: everything before it happens to a
+    temp file. A write that truncates in place has no such moment, which
+    is why this fails against one (nothing raises, and the manifest comes
+    back appended-to rather than untouched).
+    """
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    manifest = resources / "mine.yaml"
+    original = "apiVersion: agentworks/v1\nkind: vm-template\nmetadata:\n  name: dev\nspec:\n  cpus: 4\n"
+    manifest.write_text(original, encoding="utf-8")
+
+    def _interrupted(*_args: object, **_kwargs: object) -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("agentworks.manifests.samples.os.replace", _interrupted)
+
+    with pytest.raises(KeyboardInterrupt):
+        write_sample(resources, "mine.yaml", "secret")
+
+    assert manifest.read_text(encoding="utf-8") == original
+    # And no residue: the temp file is dot-prefixed, so a leftover would
+    # be invisible to the loader AND to the operator listing the directory.
+    assert [path.name for path in resources.iterdir()] == ["mine.yaml"]
+
+
+def test_an_append_keeps_the_permission_bits_the_operator_chose(tmp_path: Path) -> None:
+    """Writing through a temp file means the mode comes from ``mkstemp``
+    (0600) unless it is carried over deliberately, so an append could
+    silently narrow a manifest the operator had made group-readable.
+    Nothing about appending a sample is a reason to change who can read
+    the file."""
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    manifest = resources / "mine.yaml"
+    manifest.write_text("apiVersion: agentworks/v1\nkind: secret\n", encoding="utf-8")
+    manifest.chmod(0o640)
+
+    write_sample(resources, "mine.yaml", "secret")
+
+    assert stat.S_IMODE(manifest.stat().st_mode) == 0o640
 
 
 def test_writing_into_a_file_that_exists_and_is_blank_emits_no_separator(tmp_path: Path) -> None:
