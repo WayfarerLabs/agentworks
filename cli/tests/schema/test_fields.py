@@ -201,25 +201,17 @@ def test_a_root_model_streams_its_one_root_field() -> None:
     assert paths(MappingRoot) == [("root",), ("root", "token"), ("root", "api_url")]
 
 
-def test_an_unbuildable_model_fails_loudly() -> None:
+@pytest.mark.parametrize("model_cls", [NeverResolved, ResolvesToUnbuildable])
+def test_every_unbuildable_model_fails_loudly_and_names_itself(model_cls: type[AgwModel]) -> None:
     # The opposite of what extraction does with the same model, and
     # deliberately: a silently truncated field reference is worse than a
-    # loud failure in a renderer.
-    class Unresolvable(AgwModel):
-        nested: NeverDefined  # type: ignore[name-defined]  # noqa: F821
-
+    # loud failure in a renderer. Both failures are covered, including the
+    # one whose annotation RESOLVES to something pydantic cannot build: a
+    # raw pydantic error escaping here would contradict this walker's own
+    # docstring, and would not name the model either.
     with pytest.raises(StateError) as exc:
-        list(iter_field_docs(Unresolvable))
-    assert "Unresolvable" in str(exc.value)
-
-
-@pytest.mark.parametrize("model_cls", [NeverResolved, ResolvesToUnbuildable])
-def test_every_unbuildable_model_fails_as_a_state_error(model_cls: type[AgwModel]) -> None:
-    # Including the one whose annotation RESOLVES to something pydantic
-    # cannot build: a raw pydantic error escaping here would contradict
-    # this walker's own docstring.
-    with pytest.raises(StateError):
         list(iter_field_docs(model_cls))
+    assert model_cls.__name__ in str(exc.value)
 
 
 # --- required, defaults, descriptions ---------------------------------
@@ -364,14 +356,11 @@ def test_choices_survive_every_annotated_and_optional_spelling(field_name: str, 
 
 
 def test_constraints_are_normalized_to_plain_keys_and_values() -> None:
+    # Plain values as well as plain keys: an ``annotated_types`` object
+    # leaking through would compare unequal to the bare bound here, so
+    # nobody downstream has to know pydantic stores them wrapped.
     assert dict(docs(Constrained)[("name",)].constraints) == {"min_length": 1, "pattern": "^[a-z]+$"}
     assert dict(docs(Constrained)[("cpus",)].constraints) == {"ge": 1, "le": 64}
-
-
-def test_no_annotated_types_object_leaks_into_the_record() -> None:
-    for doc in iter_field_docs(Constrained):
-        for value in doc.constraints.values():
-            assert isinstance(value, int | str | float)
 
 
 # --- authored examples ------------------------------------------------
@@ -388,20 +377,19 @@ class Exemplified(AgwModel):
 def test_examples_reach_the_stream_in_the_shape_a_document_carries() -> None:
     """A list example stays a list: the generated sample writes the value
     into YAML, so an example spelled as anything else would render as
-    something the loader then refuses."""
+    something the loader then refuses.
+
+    That verbatim shape is also what keeps the two derivations agreeing:
+    emitted JSON Schema carries the authored values unchanged, so the
+    value a sample writes is the value an editor offers.
+    """
     assert docs(Exemplified)[("host",)].examples == ("me@gpu-box",)
     assert docs(Exemplified)[("sizes",)].examples == (["small", "large"],)
+    assert Exemplified.model_json_schema()["properties"]["host"]["examples"] == ["me@gpu-box"]
 
 
 def test_a_field_with_no_authored_example_reports_none() -> None:
     assert docs(Exemplified)[("plain",)].examples == ()
-
-
-def test_the_stream_and_the_emitted_schema_report_the_same_examples() -> None:
-    """One declaration, two derivations, as with the reference marker: the
-    value a sample writes is the value an editor offers."""
-    emitted = Exemplified.model_json_schema()["properties"]["host"]["examples"]
-    assert list(docs(Exemplified)[("host",)].examples) == emitted
 
 
 # --- reference semantics ----------------------------------------------
@@ -633,10 +621,10 @@ def test_a_block_a_union_offers_stops_when_it_is_reachable_from_itself() -> None
     """The stream's own path guard covers the block a union offers, the
     same way it covers one a field opens outright: the model is already on
     the current path, so the field is streamed and not descended into."""
+    # The same answer the shape gets when the block is opened outright
+    # (``test_a_self_referential_model_terminates``), which is what says
+    # the guard is one guard rather than two.
     assert paths(SelfReferentialUnion) == [("name",), ("child",)]
-    # The same answer the shape gets when the block is opened outright,
-    # which is what says the guard is one guard rather than two.
-    assert paths(SelfReferential) == [("secret",), ("child",), ("children",)]
 
 
 # --- render_type ------------------------------------------------------

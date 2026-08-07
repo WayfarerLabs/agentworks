@@ -3,15 +3,19 @@ row inherits.
 
 Two guarantees are pinned here. First, the base itself carries the four
 metadata fields with the right defaults and an empty ``dependencies``,
-and a plain subclass inherits that override-free. Second, every concrete
-declared-resource row (the operator-declared templates plus the
-apt / install-command entries) actually descends from the base, so the
-"metadata (including ``description``) exists by construction" promise cannot
-silently regress for any one kind.
+and a plain subclass inherits that override-free. Second, what each row
+does with the base's ``description``: ``SecretDecl`` overrides it back to
+required and the apt / install-command entries take the base's optional
+one, which is a dataclass-inheritance trap two of them have already
+fallen into.
 
-A third is pinned as a consequence of the rows being MODELS: the two
-framework fields are not operator surface, so neither the emitted schema
-nor the field-reference stream carries them.
+THAT every concrete row descends from the base is not pinned here. It is
+pinned off the kind registry, in ``tests/manifests/test_kind_models.py``,
+where the sweep cannot go stale as kinds are added.
+
+A third guarantee is pinned as a consequence of the rows being MODELS:
+the two framework fields are not operator surface, so neither the emitted
+schema nor the field-reference stream carries them.
 """
 
 from __future__ import annotations
@@ -19,22 +23,17 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError as PydanticValidationError
 
-from agentworks.agents.template import AgentTemplate
 from agentworks.apt import AptPackageEntry, AptSourceEntry
 from agentworks.declared_resource import DeclaredResource
-from agentworks.git_credentials.credential import GitCredentialConfig
 from agentworks.install_commands import (
     SystemInstallCommandEntry,
     UserInstallCommandEntry,
 )
 from agentworks.resources.graph import FinalizeContext
 from agentworks.secrets.base import SecretDecl
-from agentworks.sessions.template import NamedConsoleConfig, SessionTemplate
 from agentworks.source_location import synthesized
 from agentworks.vms.admin import AdminConfig
-from agentworks.vms.sites import VMSiteDecl
 from agentworks.vms.template import VMTemplate
-from agentworks.workspaces.template import WorkspaceTemplate
 
 
 def test_base_carries_metadata_fields_with_defaults() -> None:
@@ -69,32 +68,13 @@ def test_only_the_kinds_own_fields_are_spec_surface() -> None:
     assert [doc.path for doc in iter_field_docs(_Spec)] == [("cpus",)]
 
 
-# Every concrete declared-resource row (all carrying name + description +
-# declared_at + origin via the base). Pinning the subclass relationship is what
-# keeps a kind from silently dropping a metadata field again. The last four are
-# the apt / install-command entries.
-_FULL_SHAPE_RESOURCES = [
-    VMTemplate,
-    AgentTemplate,
-    WorkspaceTemplate,
-    AdminConfig,
-    NamedConsoleConfig,
-    SessionTemplate,
-    SecretDecl,
-    GitCredentialConfig,
-    VMSiteDecl,
-    AptSourceEntry,
-    AptPackageEntry,
-    SystemInstallCommandEntry,
-    UserInstallCommandEntry,
-]
-
-
-@pytest.mark.parametrize("cls", _FULL_SHAPE_RESOURCES)
-def test_concrete_resource_subclasses_declared_resource(
-    cls: type[DeclaredResource],
-) -> None:
-    assert issubclass(cls, DeclaredResource)
+# That every concrete row descends from the base is pinned off the KIND
+# REGISTRY rather than off a hand-kept list here, in
+# ``tests/manifests/test_kind_models.py::test_a_declarable_kind_declares_its_row_as_its_model``:
+# a list written out in a test file goes stale the moment a kind is added,
+# and the registry-driven sweep is the one that cannot. What is left below
+# is what the sweep does NOT say, which is what each row does with the
+# base's ``description``.
 
 
 def test_secret_decl_description_is_required() -> None:

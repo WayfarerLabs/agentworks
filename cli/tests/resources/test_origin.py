@@ -1,5 +1,10 @@
-"""Tests for ``Origin`` -- variant invariants and immutability across all
+"""Tests for ``Origin``: variant invariants and immutability across all
 four constructible variants.
+
+Each factory's test pins the variant label it stamps and which of the
+optional fields it fills, which is the whole of what ``Origin`` decides.
+Equality is the frozen dataclass's, and follows from those four labels
+differing; it is not pinned again here.
 """
 
 from __future__ import annotations
@@ -67,44 +72,3 @@ def test_origin_is_immutable() -> None:
     o = Origin.operator_declared(file=Path("/x.toml"), line=1)
     with pytest.raises(FrozenInstanceError):
         o.line = 2  # type: ignore[misc]
-
-
-def test_origin_equality_per_variant() -> None:
-    a = Origin.operator_declared(file=Path("/x.toml"), line=1)
-    b = Origin.operator_declared(file=Path("/x.toml"), line=1)
-    c = Origin.operator_declared(file=Path("/x.toml"), line=2)
-    assert a == b
-    assert a != c
-
-    d = Origin.built_in(source="agentworks.manifests.builtin/apt-sources.yaml")
-    e = Origin.built_in(source="agentworks.manifests.builtin/apt-sources.yaml")
-    f = Origin.built_in(source="other")
-    assert d == e
-    assert d != f
-
-    g = Origin.auto_declared(source=("vm-template", "default"))
-    h = Origin.auto_declared(source=("vm-template", "default"))
-    i = Origin.auto_declared(source=("vm-template", "other"))
-    assert g == h
-    assert g != i
-
-    j = Origin.system_plugin(plugin="apt", source="agentworks.plugins.apt")
-    k = Origin.system_plugin(plugin="apt", source="agentworks.plugins.apt")
-    m = Origin.system_plugin(plugin="other", source="agentworks.plugins.apt")
-    assert j == k
-    assert j != m
-
-
-def test_variants_do_not_cross_compare_equal() -> None:
-    # An operator-declared and auto-declared with same-looking incidental
-    # data still differ by variant.
-    op = Origin.operator_declared(file=Path("/x"), line=1)
-    code = Origin.built_in(source="agentworks.manifests.builtin/apt-sources.yaml")
-    auto = Origin.auto_declared(source=("vm-template", "default"))
-    plugin = Origin.system_plugin(plugin="apt", source="agentworks.plugins.apt")
-    assert op != code
-    assert op != auto
-    assert op != plugin
-    assert code != auto
-    assert code != plugin
-    assert auto != plugin

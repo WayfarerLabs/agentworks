@@ -92,7 +92,19 @@ def _refs(blob: dict[str, object], owner_name: str = "t", name: str = "github") 
 
 @pytest.mark.parametrize(
     "blob",
-    [{}, {"repos": ["acme/widgets"]}, {"repos": ["acme/widgets", "acme/gadgets"]}, {"owner": "acme"}],
+    [
+        {},
+        {"repos": ["acme/widgets"]},
+        {"owner": "acme"},
+        # A deliberate loosening, recorded rather than hidden: the shipped
+        # validator rejected ``repos: []`` and the model does not, because
+        # an empty list and an absent field mean the same thing to every
+        # consumer (``store_username`` and ``helper_entry`` both test
+        # truthiness). A ``min_length=1`` would restore the rejection; it is
+        # not worth an error an operator can only hit by writing something
+        # inert.
+        {"repos": []},
+    ],
 )
 def test_valid_scopes_accepted(blob: dict[str, object]) -> None:
     # Extraction yields the token-secret reference the provider sources its
@@ -122,18 +134,19 @@ def test_extraction_total_on_malformed_config() -> None:
     assert _refs({"repos": "not-a-list"}, owner_name="gh") == [("secret", "git-token-gh")]
 
 
+# One case per RULE, not one per way of breaking it: the three `repos`
+# spellings that used to be listed here (`no-slash`, `a/b/c`, `/leading`)
+# all violate the one ``GitHubRepo`` pattern and produce the one message,
+# as do the two `owner` spellings against ``GitHubName``, and `repo` and
+# `org` against closed-world.
 @pytest.mark.parametrize(
     ("blob", "match"),
     [
         ({"repos": ["acme/widgets"], "owner": "acme"}, "mutually exclusive"),
         ({"repos": ["no-slash"]}, "must match `"),
+        ({"owner": "acme/"}, "must match `"),
         ({"repos": "acme/widgets"}, "repos: must be a list"),
         ({"repo": "acme/widgets"}, "unknown field; expected one of: name, owner, repos, token"),
-        ({"repos": ["a/b/c"]}, "must match `"),
-        ({"repos": ["/leading"]}, "must match `"),
-        ({"owner": "acme/"}, "must match `"),
-        ({"owner": ""}, "must match `"),
-        ({"org": "acme"}, "unknown field; expected one of: name, owner, repos, token"),
         ({"repos": [123]}, r"repos\[0\]: must be a string"),
         ({"owner": 123}, "owner: must be a string"),
     ],
@@ -141,16 +154,6 @@ def test_extraction_total_on_malformed_config() -> None:
 def test_invalid_scopes_rejected(blob: dict[str, object], match: str) -> None:
     with pytest.raises(ConfigError, match=match):
         _validate(blob)
-
-
-def test_an_empty_repo_list_is_accepted_now() -> None:
-    """A deliberate loosening, recorded rather than hidden: the shipped
-    validator rejected ``repos: []`` and the model does not, because an
-    empty list and an absent field mean the same thing to every consumer
-    (``store_username`` and ``helper_entry`` both test truthiness). A
-    ``min_length=1`` would restore the rejection; it is not worth an error
-    an operator can only hit by writing something inert."""
-    _validate({"repos": []})
 
 
 # -- per-credential emission --------------------------------------------------

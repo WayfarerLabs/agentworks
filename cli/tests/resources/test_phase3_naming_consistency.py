@@ -19,8 +19,6 @@ from __future__ import annotations
 import inspect
 from types import ModuleType
 
-import pytest
-
 import agentworks.resources as resources_pkg
 from agentworks import apt as apt_mod
 from agentworks import install_commands as install_commands_mod
@@ -44,34 +42,45 @@ def _public_names(module: ModuleType) -> list[str]:
     return [name for name in dir(module) if not name.startswith("_")]
 
 
-@pytest.mark.parametrize(
-    "module",
-    [
-        resources_pkg,
-        reference_mod,
-        registry_mod,
-        walk_mod,
-        inspect_mod,
-        agents_kinds_mod,
-        apt_mod,
-        install_commands_mod,
-        git_credentials_kinds_mod,
-        secrets_kinds_mod,
-        sessions_kinds_mod,
-        vms_kinds_mod,
-        workspaces_kinds_mod,
-    ],
+#: Every module whose PUBLIC surface the rename swept.
+_SWEPT_MODULES = (
+    resources_pkg,
+    reference_mod,
+    registry_mod,
+    walk_mod,
+    inspect_mod,
+    agents_kinds_mod,
+    apt_mod,
+    install_commands_mod,
+    git_credentials_kinds_mod,
+    secrets_kinds_mod,
+    sessions_kinds_mod,
+    vms_kinds_mod,
+    workspaces_kinds_mod,
 )
-def test_framework_module_has_no_old_vocabulary(module: ModuleType) -> None:
+
+
+def test_no_framework_module_has_old_vocabulary() -> None:
     """No public symbol on a framework module carries the old
     ``Requirement`` / ``UsageEntry`` vocabulary. Phase 3a's rename is
     a public-surface change; a future edit that re-introduces either
     word is a regression.
+
+    One test rather than one per module, and reporting every offender
+    rather than the first: this is a lint over a module list, so an author
+    who reintroduced the vocabulary in three places is owed all three
+    addresses at once. Only two of the thirteen own a Reference-family
+    symbol at all today; the other eleven are here so that a NEW one
+    landing under the old name is caught wherever it lands.
     """
-    offenders = [name for name in _public_names(module) if any(banned in name for banned in _BANNED_SUBSTRINGS)]
+    offenders = [
+        f"{module.__name__}.{name}"
+        for module in _SWEPT_MODULES
+        for name in _public_names(module)
+        if any(banned in name for banned in _BANNED_SUBSTRINGS)
+    ]
     assert offenders == [], (
-        f"{module.__name__} exposes legacy-named symbols: {offenders}. "
-        f"Rename to the Phase 3a vocabulary (Reference / ReferenceEntry)."
+        f"legacy-named public symbols: {offenders}. Rename to the Phase 3a vocabulary (Reference / ReferenceEntry)."
     )
 
 
