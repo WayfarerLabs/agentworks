@@ -118,11 +118,16 @@ class Sample:
     id: BlockId
 
 @dataclass(frozen=True, slots=True)
+class ActionList:
+    id: BlockId
+    actions: tuple["GuideAction", ...]
+
+@dataclass(frozen=True, slots=True)
 class TopicLinks:
     id: BlockId
 
 GuideBlock = Overview | Teaching | AgentContract | InstanceList | State | Relationships |
-    FieldReference | Sample | TopicLinks
+    FieldReference | Sample | ActionList | TopicLinks
 
 @dataclass(frozen=True, slots=True)
 class TopicContribution:
@@ -134,9 +139,15 @@ class TopicContribution:
     related_topics: tuple[TopicSlug, ...] = ()
 ```
 
-`FieldReference` and `Sample` are valid contract members in Phase 1 but render an explicit
-"available after schema services are installed" notice until the Phase 4 adapters bind their
-authoritative services. They never scrape another CLI renderer.
+`FieldReference` and `Sample` were initially inert Phase 1 placeholders. The release-gate adapter in
+`wave2-guide-adapter-lld.md` binds their now-authoritative declarative-schema services. They never
+scrape another CLI renderer.
+
+`ActionList` contains the same validated, inert `GuideAction` records used by onboarding assessment.
+It is presentation data, not an executor. Every action states its precondition, named inputs,
+consent boundary, expected state, optional verification command, and useful refusal alternative. A
+command action supplies literal tokens; a manual action supplies bounded platform-neutral steps.
+Rendering an action never authorizes or invokes it.
 
 Semantic identity is `(topic, block.id)`, rendered in snapshots as an internal
 `GuideBlockKey(topic, block_id)` and not emitted as a visible HTML comment. A block ID matches
@@ -217,15 +228,31 @@ retained names, suppresses issue prose, and exits 0 so completion remains useful
 construction has no global cache because installed package inventory is a request fact; enablement
 is a later finalized-view fact and never controls collection.
 
-Validation applies limits before catalog retention: title 256 bytes, summary 2 KiB, each block 64
-KiB, total topic content 256 KiB, and at most 64 blocks and 64 related links. Selectors and every
-related-topic value are bounded separately from that markdown total: a `FieldReference.section` has
-at most 32 components of 256 bytes each, and every related topic is at most 317 bytes. Bare concept
-and kind slugs use one strict 63-character lower-kebab segment. `kind/name` uses that strict kind
-segment plus the canonical resource-name grammar and its 253-character maximum. Plugin-owned slugs
-use `plugin/<plugin>/<topic>` with two strict 63-character segments. The final renderer strips every
-C0 control except line feed and tab, plus DEL and the entire C1 range, from both authored and
-projected text.
+Validation applies limits before catalog retention: title 256 bytes, summary 2 KiB, each static
+block 64 KiB, total topic content 256 KiB, and at most 64 blocks and 64 related links. Selectors and
+every related-topic value are bounded separately from that markdown total: a
+`FieldReference.section` has at most 32 components of 256 bytes each, and every related topic is at
+most 317 bytes.
+
+An `ActionList` contains at most 32 actions and 128 KiB of cumulative action data, which also counts
+toward the topic's 256 KiB limit. Action IDs are unique across every action block in one topic. One
+action has at most 32 inputs, 64 command tokens, and 64 verification tokens. An input name is at
+most 64 bytes; an action token is at most 1 KiB; an input description is at most 2 KiB; and each
+precondition, expected state, refusal alternative, or manual instruction is at most 8 KiB. Every
+string is copied into a new exact frozen `GuideAction` or `ActionInput`, and duplicate input names
+are rejected. Raw mappings and contributor-owned object instances are never retained.
+
+The `action-list` block parser accepts only `type`, `id`, and `actions`. Each action mapping accepts
+only the `GuideAction` fields above; each input mapping accepts only the `ActionInput` fields.
+`command` and `verification` are token sequences, while `manual_steps` is bounded inert prose, and
+exactly one of `command` or `manual_steps` must be non-null. Programmatic records are first copied
+into this closed decoded shape and then recursively parsed through the same path as plugin data.
+
+Bare concept and kind slugs use one strict 63-character lower-kebab segment. `kind/name` uses that
+strict kind segment plus the canonical resource-name grammar and its 253-character maximum.
+Plugin-owned slugs use `plugin/<plugin>/<topic>` with two strict 63-character segments. The final
+renderer strips every C0 control except line feed and tab, plus DEL and the entire C1 range, from
+both authored and projected text.
 
 ## `GuideView`: denied powers and allowed facts
 
@@ -383,11 +410,17 @@ class GuideAction:
     precondition: str
     required_inputs: tuple[ActionInput, ...]
     consent: ConsentBoundary
-    command: tuple[str, ...]
+    command: tuple[str, ...] | None
     expected_state: str
     verification: tuple[str, ...] | None
     refusal_alternative: str
+    manual_steps: str | None = None
 ```
+
+Exactly one of `command` and `manual_steps` is present. Command actions retain the closed token
+grammar below. Manual actions describe a bounded, platform-neutral file or configuration operation
+whose exact scope comes from registered inputs. They do not smuggle a shell fragment into prose and
+the guide never chooses an editor, file-copy tool, or platform-specific command for the operator.
 
 Command tokens are literals or exact `$INPUT_NAME` substitutions validated against
 `required_inputs`. Literal tokens use a closed grammar: an alphanumeric first character followed by

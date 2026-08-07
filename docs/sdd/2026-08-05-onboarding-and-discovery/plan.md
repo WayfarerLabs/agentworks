@@ -154,21 +154,31 @@ current registry/resource-derived content without any wave 2 surface.
 ### Release-gate adoption after wave 2
 
 The 2026-08-07 remediation-posture ruling supersedes Phase 1's originally dependency-free merge
-boundary. PR #428 addresses all wave-2-independent review findings first, then waits for wave 2's
-service contracts to merge to `main` and rebases once. It must not depend on provisional branch
-content.
+boundary. PR #428 addressed all wave-2-independent review findings first, then rebased once after
+the declarative-schema service contracts merged to `main`. It has no provisional branch dependency.
 
 - [ ] After wave 2 merges, add `concept-migration` as the exceptional resource-model remediation
       topic, distinct from ordinary upgrading, using authoritative live sample and field-reference
       service APIs rather than copied shapes or rendered CLI output.
+- [ ] Config-free `describable_targets`, `SchemaReference`, and `sample_text` adapters populate kind
+      and capability-implementation topics from one source, including disabled implementations,
+      exact contribution validation, completions, field references, and declarable samples.
 - [ ] Link migration from onboarding and management without duplicating its teaching; cover TOML to
       manifest rewrites, tagged capability configuration, strict validation changes, and the precise
-      null-secret discovery and decision path settled by wave 2.
+      null-secret discovery and implemented decision path: omitted and explicit-null fields both use
+      the default secret; Azure and AWS require removing the enclosing auth block for ambient auth;
+      Proxmox has no no-secret mode.
 - [ ] Prove the topic remains available when operator config does not load, names exact live
       remediation surfaces, and verifies results through normal loading and doctor rather than a
       frozen migration oracle.
+- [ ] Every migration read, probe, and mutation crossing a consent boundary is a validated inert
+      action record with exact scope, expected result, verification, and refusal behavior; backups
+      and the old name inventory precede edits.
 - [ ] Review the cross-SDD adapter and migration teaching after the wave 2 rebase, then rerun the
       full Phase 1 and CI gates before requesting roadmap-lead re-review.
+
+The release-gate adapter is specified in `wave2-guide-adapter-lld.md`. It binds existing schema
+blocks and the migration workflow only; the broader registry-inventory scope remains in Phase 4.
 
 ## Phase 2: machine-readable operational output
 
@@ -222,39 +232,23 @@ one fact source.
 Definition of done: R1, R11, R12, R16, AC1, AC3, AC7, AC8, and AC10 hold for both harnesses and the
 zero-plugin README path.
 
-## Phase 4: wave 2 adoption and registry inventory
+## Phase 4: registry inventory and specific-resource projection
 
-Each adapter starts when its required wave 2 contract merges to `main`; unrelated adapters do not
-wait for the whole phase. Registry inventory remains deliberately last to minimize conflict with
-wave 2. Rebase once after its descriptor work merges if needed.
+The Phase 1 release gate now owns schema-derived kind and implementation pages because the 0.14
+migration topic requires them. This phase retains only runtime registry inventory and
+specific-resource depth that does not block the first release.
 
-- [ ] Main checked for delivered coordination messages and wave 2's merged HLA, plan, LLD, and
-      implementation reviewed against this HLA. Any incompatible contract is flagged to the
-      operator; this effort does not patch wave 2 artifacts.
-- [ ] Plan and HLA updated before implementation if authoritative wave 2 contracts differ from the
-      provisional `FieldDoc`, sample, describe, or blurb direction recorded on 2026-08-06.
-- [ ] `wave2-guide-adapter-lld.md` pins each independently merged service API and maps shared
-      overview, field docs, schemas, samples, disabled implementations, and capability descriptors
-      into guide blocks with a separate merge gate per source.
-- [ ] After the field-doc service merges, `FieldReference` consumes it directly with no rendered CLI
-      scraping, copied field list, or alternate schema walker.
-- [ ] After the live-sample service merges, `Sample` consumes it directly with no rendered CLI
-      scraping or bundled sample copy.
 - [ ] After the descriptor inventory merges, registry inventory renders capability kinds and
       implementations, including enablement/readiness, without a hand-maintained adapter table.
-- [ ] Kind and implementation guide pages combine shared overview, field reference, sample, current
-      state, and progressive links. Disabled implementations remain discoverable and truthful.
 - [ ] Specific-resource topics delegate to the same service fact source as instance describe.
 - [ ] Adding a registered implementation or resource changes the guide inventory with no topic
       switchboard edit, pinned by fixture-plugin tests.
-- [ ] Wave 2 CLI names and this effort's guide links documented together; completions updated for
-      authoritative names.
-- [ ] Full cross-SDD integration gates pass; step reviewed by `agentworks-reviewer` and a fresh-eyes
+- [ ] Full registry integration gates pass; step reviewed by `agentworks-reviewer` and a fresh-eyes
       reviewer; valid findings resolved.
 - [ ] Always-green ready-to-merge PR opened and roadmap-lead review requested.
 
-Definition of done: R6, R8, D4, AC5, and the schema-derived depth of R13 and R14 use only
-authoritative wave 2 sources.
+Definition of done: R8 and AC5 project runtime registry and specific-resource facts without a
+hand-maintained switchboard.
 
 ## Phase 5: acceptance, promotion, and closeout
 
