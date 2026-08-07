@@ -38,7 +38,8 @@ from pathlib import PurePath
 from typing import TYPE_CHECKING, Annotated, Any, Final, Literal, Union, cast
 
 from pydantic import Field, create_model
-from pydantic.json_schema import GenerateJsonSchema
+from pydantic.json_schema import GenerateJsonSchema, JsonSchemaValue
+from pydantic_core import core_schema
 
 from agentworks.errors import ValidationError
 from agentworks.manifests.envelope import API_VERSION
@@ -61,6 +62,70 @@ SCHEMA_DIRNAME: Final = ".schema"
 #: The any-kind document schema's filename.
 ENVELOPE_SCHEMA_FILENAME: Final = "manifest.schema.json"
 
+#: The plain scalars the LOADER reads as a boolean but a schema-aware
+#: editor hands the validator as a string.
+#:
+#: The loader is pyyaml's ``SafeLoader``, which resolves YAML 1.1: ``no``,
+#: ``off`` and friends are booleans to it. Every editor that consumes these
+#: schemas parses YAML 1.2 core, where only ``true``/``false`` (in three
+#: casings each) are booleans and the rest stay strings. So an operator who
+#: writes the perfectly valid ``verify_ssl: no`` is handing a JSON Schema
+#: validator the STRING ``"no"``, and a bare ``"type": "boolean"`` would
+#: red-underline configuration that loads.
+#:
+#: Derived by running both parsers over every casing of every candidate
+#: word rather than transcribed from either spec; ``tests/manifests/
+#: test_emit.py`` re-derives the pyyaml half so a pyyaml resolver change
+#: cannot leave this list quietly short.
+YAML_11_ONLY_BOOLEANS: Final = (
+    "yes",
+    "Yes",
+    "YES",
+    "no",
+    "No",
+    "NO",
+    "on",
+    "On",
+    "ON",
+    "off",
+    "Off",
+    "OFF",
+)
+
+
+class _ManifestJsonSchema(GenerateJsonSchema):
+    """Pydantic's generator, with booleans widened to what YAML spells.
+
+    A JSON Schema never sees YAML; it sees whatever the editor's parser
+    produced. The loader's parser and the editor's parser disagree about
+    which plain scalars are booleans (see
+    :data:`YAML_11_ONLY_BOOLEANS`), and that disagreement is not something
+    any per-field annotation can fix, because it is a property of the
+    PARSE rather than of the field. So it is corrected in the one place
+    every boolean in every emitted schema comes through.
+
+    Overriding the generator rather than post-walking the emitted dict so
+    a boolean added anywhere later (a new kind, a plugin's capability
+    config, a nested block) is covered without anyone remembering to do
+    it.
+    """
+
+    def bool_schema(self, schema: core_schema.BoolSchema) -> JsonSchemaValue:
+        """A boolean, or the string an editor saw one of its YAML 1.1
+        spellings as.
+
+        ``pattern`` rather than ``enum``, deliberately: JSON Schema
+        applies ``pattern`` only to string instances, so one flat schema
+        covers both types, and an editor draws its completions from
+        ``enum`` but not from ``pattern``. Listing the spellings as an
+        enum would offer twelve odd ways to say ``true`` on every boolean
+        field in the surface.
+        """
+        return {
+            "type": ["boolean", "string"],
+            "pattern": f"^(?:{'|'.join(YAML_11_ONLY_BOOLEANS)})$",
+        }
+
 
 def schema_filename(kind: str) -> str:
     """The filename ``kind``'s document schema is written under."""
@@ -77,7 +142,7 @@ def document_schema(kind: str) -> dict[str, Any]:
     nothing that could point at it.
     """
     _require_emittable(kind)
-    return _with_dialect(_document_model(kind).model_json_schema())
+    return _with_dialect(_document_model(kind).model_json_schema(schema_generator=_ManifestJsonSchema))
 
 
 def envelope_schema() -> dict[str, Any]:
@@ -108,7 +173,7 @@ def envelope_schema() -> dict[str, Any]:
             {"__module__": __name__, "__doc__": "One agentworks resource manifest document, of any declarable kind."},
         ),
     )
-    return _with_dialect(root.model_json_schema())
+    return _with_dialect(root.model_json_schema(schema_generator=_ManifestJsonSchema))
 
 
 def schema_set() -> dict[str, dict[str, Any]]:
@@ -291,7 +356,8 @@ def _require_emittable(kind: str) -> None:
 def _with_dialect(schema: dict[str, Any]) -> dict[str, Any]:
     """``schema`` with its ``$schema`` dialect declared, first.
 
-    Read off pydantic's own generator rather than written as a literal, so
-    the declared dialect is always the one the schema was generated for.
+    Read off the generator these schemas are actually produced by rather
+    than written as a literal, so the declared dialect is always the one
+    the schema was generated for.
     """
-    return {"$schema": GenerateJsonSchema.schema_dialect, **schema}
+    return {"$schema": _ManifestJsonSchema.schema_dialect, **schema}

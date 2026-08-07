@@ -100,6 +100,76 @@ level only, so they would have reported "no reference here" for a field that dec
 `tests/_emitted_schema.py` is now the single reader and searches the subtree, which makes the guards
 cover both shapes for a reason unrelated to the widening.
 
+### 2.3 The third round is not an emission bug: the two parsers read different YAML
+
+**Added 2026-08-06, from the greenfield closeout verification.** Sections 2.1 and 2.2 are both bugs
+in what emission WROTE. This one is not: every schema involved describes its model correctly. The
+divergence is that a JSON Schema never sees YAML, it sees whatever a parser already turned the YAML
+into, and the loader's parser is not the editor's parser.
+
+Measured, both sides, rather than read off the specs:
+
+| source text           | loader (pyyaml `SafeLoader`, YAML 1.1) | editor (`yaml` npm, YAML 1.2 core) |
+| --------------------- | -------------------------------------- | ---------------------------------- |
+| `verify_ssl: no`      | `False`                                | the string `"no"`                  |
+| `expires: 2027-01-01` | `datetime.date(2027, 1, 1)`            | the string `"2027-01-01"`          |
+
+yaml-language-server parses with the `yaml` package at its defaults, verified to be `version: 1.2`,
+`schema: core`. So there is no single YAML version at which the emitted schema agrees with the
+loader on every loader-valid input, and the two halves are decided differently because they are not
+the same problem.
+
+**Booleans: fixed, by widening.** `verify_ssl: no` is ordinary YAML the loader reads as `False`, and
+a `"type": "boolean"` made the real yaml-language-server answer `Incorrect type. Expected "boolean"`
+on it. That is over-reporting, the one direction section 2 forbids. Every emitted boolean is now
+`{"type": ["boolean", "string"], "pattern": ...}` over the twelve spellings YAML 1.1 resolves to a
+boolean and 1.2 core does not (`yes`/`no`/`on`/`off`, three casings each). Three choices inside
+that:
+
+- **In `bool_schema` on a `GenerateJsonSchema` subclass**, not a post-walk of the emitted dict, so a
+  boolean added later anywhere (new kind, plugin capability config, nested block) is covered without
+  anyone remembering. Consistent with section 2.1's rule that a fix belongs at the layer owning the
+  fact; here the fact is "what a YAML boolean can look like", which is emission's alone.
+- **`pattern`, not `enum`.** JSON Schema applies `pattern` only to string instances, so one flat
+  schema covers both types with no nested `anyOf`; and an editor draws completions from `enum` but
+  not from `pattern`, so a boolean field still completes to `true` / `false` rather than to twelve
+  odd ways of saying them.
+- **The spelling list is derived**, from pyyaml's own `SafeConstructor.bool_values` through a real
+  load, so a pyyaml change moves it instead of leaving it quietly short.
+
+The residual, and it is deliberate: the widened schema also accepts the QUOTED `"no"`, which the
+loader refuses. A schema sees the parsed instance and cannot tell `no` from `"no"` under 1.2, so
+this is not fixable, only assignable to a direction. It is under-reporting, which section 2 permits.
+The nine field docstrings that warn about quoted booleans carry the weight instead, and they were
+corrected in the same pass (they claimed bare `no` was a string, which is true of TOML and false of
+this loader).
+
+**Dates: not fixable in the schema, and not a defect against the documented editor.** `expires`
+emits string-typed arms, so a validator handed a `datetime.date` would reject it. No arm can fix
+that: JSON Schema's type system is JSON's, and a date is not a JSON type. Verified by execution
+against the reference implementation, feeding a `datetime.date` to each candidate:
+
+```text
+{"type": "string"}                         -> REJECTED (not of type 'string')
+{"type": "string", "format": "date"}       -> REJECTED (not of type 'string')
+{"anyOf": [all six JSON types]}            -> REJECTED (not valid under any of the given schemas)
+{}                                         -> ACCEPTED (an empty schema, which constrains nothing)
+```
+
+Only the empty schema takes one, and an empty schema is not a description. So "widen the arms" was
+never on the table for dates, and a future round should not re-open it. It costs nothing today
+because the editors these schemas are written for are 1.2, where a bare date is a string and
+validates clean: checked against the real yaml-language-server, `expires: 2027-01-01` produces no
+diagnostic. The exposure is confined to a hypothetical YAML 1.1 validator, and is recorded in the
+guide under the declared target rather than worked around.
+
+**`tests/manifests/test_emit.py`'s `_EditorLoader` is where this class of bug hides.** It existed
+already and modelled the timestamp half of the 1.1/1.2 difference while leaving the boolean half
+resolving as pyyaml does, so no document the harness held ever exercised the disagreement (every
+rendered sample spells its booleans `true` / `false`, which is why following the samples never lands
+an operator here). It now models both, which is what makes the pairing test in section 2 a real
+oracle for this class rather than for one member of it.
+
 ## 3. The per-kind document schema
 
 ### 3.1 It is a DOCUMENT schema, not a spec schema

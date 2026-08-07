@@ -17,6 +17,7 @@ design.
 from __future__ import annotations
 
 import json
+import re
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 import pytest
@@ -27,6 +28,7 @@ from agentworks.declared_resource import METADATA_FIELDS
 from agentworks.manifests.emit import (
     ENVELOPE_SCHEMA_FILENAME,
     SCHEMA_DIRNAME,
+    YAML_11_ONLY_BOOLEANS,
     document_schema,
     envelope_schema,
     modeline,
@@ -53,17 +55,41 @@ class _EditorLoader(yaml.SafeLoader):
     """A YAML load that sees what a SCHEMA-AWARE EDITOR sees.
 
     yaml-language-server reads the document's syntax tree under YAML 1.2's
-    core schema, which has no implicit timestamp type, so ``2026-01-01``
-    reaches its validator as a string. pyyaml's safe loader resolves it to
-    a ``datetime.date``, which no JSON Schema ``type`` matches, and a test
-    validating THAT would be testing a document no editor ever holds.
+    core schema; the loader is pyyaml's safe loader, which resolves YAML
+    1.1. The two disagree on exactly two things a manifest can contain,
+    and this class is where the difference is modelled, because a test
+    validating pyyaml's answer would be testing a document no editor ever
+    holds:
+
+    - **timestamps.** 1.2 core has no implicit timestamp type, so
+      ``2026-01-01`` reaches the editor's validator as a string where
+      pyyaml makes it a ``datetime.date``.
+    - **booleans.** 1.1 resolves ``yes`` / ``no`` / ``on`` / ``off`` (in
+      three casings each) to booleans; 1.2 core recognizes only
+      ``true`` / ``false``, so those twelve reach the validator as
+      strings. Modelling the timestamps and NOT the booleans is what let
+      an over-strict ``"type": "boolean"`` ship: every rendered sample
+      spells its booleans ``true`` / ``false``, so no document this
+      harness held ever exercised the difference.
     """
 
 
+_YAML_12_BOOLEANS = frozenset({"true", "True", "TRUE", "false", "False", "FALSE"})
+"""The only plain scalars YAML 1.2 core resolves to a boolean."""
+
 _EditorLoader.yaml_implicit_resolvers = {
-    first: [(tag, regexp) for tag, regexp in resolvers if tag != "tag:yaml.org,2002:timestamp"]
+    first: [
+        (tag, regexp)
+        for tag, regexp in resolvers
+        if tag not in {"tag:yaml.org,2002:timestamp", "tag:yaml.org,2002:bool"}
+    ]
     for first, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
 }
+for _first in "tTfF":
+    _EditorLoader.yaml_implicit_resolvers[_first].insert(
+        0,
+        ("tag:yaml.org,2002:bool", re.compile(f"^(?:{'|'.join(_YAML_12_BOOLEANS)})$")),
+    )
 
 
 def _uncomment(text: str) -> str:
@@ -493,6 +519,148 @@ system = ["azure", "aws", "proxmox"]
 """
     )
     return cfg
+
+
+# -- Booleans: the loader's YAML version is not the editor's ---------------
+
+
+def _loader_boolean_spellings() -> set[str]:
+    """Every plain scalar the LOADER resolves to a boolean.
+
+    Derived from pyyaml's own table and confirmed through a real load,
+    rather than transcribed from the YAML 1.1 spec: if a pyyaml release
+    ever adds or drops a spelling, this moves with it and the assertions
+    below fail instead of quietly describing an older parser.
+    """
+    words = yaml.constructor.SafeConstructor.bool_values
+    casings = {casing for word in words for casing in (word.lower(), word.upper(), word.capitalize())}
+    return {text for text in casings if isinstance(yaml.safe_load(f"a: {text}")["a"], bool)}
+
+
+def test_the_widened_spellings_are_exactly_where_the_two_parsers_disagree() -> None:
+    """``YAML_11_ONLY_BOOLEANS`` is neither short nor long.
+
+    Short would put the over-reporting back for the spellings it missed;
+    long would have the schema accept a string the loader refuses, for no
+    reason. Both halves are derived, so neither list is maintained by
+    hand.
+    """
+    loader_spellings = _loader_boolean_spellings()
+
+    # The editor's set is a subset of the loader's: the two agree that
+    # `true` / `false` are booleans, and differ only by what 1.1 adds.
+    assert _YAML_12_BOOLEANS <= loader_spellings
+    assert loader_spellings - _YAML_12_BOOLEANS == set(YAML_11_ONLY_BOOLEANS)
+
+
+def test_no_emitted_boolean_type_is_narrower_than_the_loader() -> None:
+    """No bare ``"type": "boolean"`` survives anywhere in the set.
+
+    The widening lives in the schema GENERATOR, so it covers every
+    boolean automatically; this is the guard for a future emission path
+    that assembles a schema without going through it.
+
+    ``const`` nodes are exempt, and there is exactly one: the
+    ``Literal[False]`` opt-out arm of a secret's ``backend_mappings``.
+    It cannot over-report on its own, because it only ever appears in a
+    union beside the string arm that carries an identifier override, and
+    a string is what a 1.2 editor has in hand. The test below proves
+    that rather than leaving it as an argument.
+    """
+    for filename, schema in schema_set().items():
+        for node in _every_subschema(schema):
+            if "const" in node:
+                continue
+            assert node.get("type") != "boolean", (filename, node)
+
+
+def test_a_yaml_11_opt_out_is_not_a_schema_error() -> None:
+    """``backend_mappings: {env-var: no}`` is an opt-out to the loader and
+    a string to the editor, and the schema flags neither.
+
+    This is the exemption above, executed. The editor reads the string
+    as an identifier override rather than as the opt-out it is, which is
+    a difference in what the two UNDERSTAND rather than a diagnostic on
+    valid config; no schema can settle it, because ``"no"`` is a
+    perfectly good identifier and the arms are genuinely ambiguous.
+    """
+    text = (
+        f"apiVersion: {API_VERSION}\n"
+        "kind: secret\n"
+        "metadata:\n"
+        "  name: npm-token\n"
+        "  description: npm registry token\n"
+        "spec:\n"
+        "  backend_mappings:\n"
+        "    env-var: no\n"
+    )
+    (document,) = _documents(text)
+
+    assert document["spec"]["backend_mappings"]["env-var"] == "no"
+    assert _errors(document_schema("secret"), document) == []
+
+
+def _every_subschema(node: object) -> Iterator[dict[str, Any]]:
+    if isinstance(node, dict):
+        yield node
+        for value in node.values():
+            yield from _every_subschema(value)
+    elif isinstance(node, list):
+        for value in node:
+            yield from _every_subschema(value)
+
+
+def _an_apt_source(dearmor: str) -> str:
+    return (
+        f"apiVersion: {API_VERSION}\n"
+        "kind: apt-source\n"
+        "metadata:\n"
+        "  name: docker\n"
+        "spec:\n"
+        "  key_url: https://example.com/k.gpg\n"
+        "  key_path: /etc/apt/keyrings/docker.gpg\n"
+        f"  key_dearmor: {dearmor}\n"
+        "  source: deb https://example.com stable main\n"
+        "  source_file: docker.list\n"
+    )
+
+
+@pytest.mark.parametrize("spelling", YAML_11_ONLY_BOOLEANS)
+def test_a_yaml_11_boolean_spelling_is_not_a_schema_error(spelling: str, tmp_path: Path) -> None:
+    """The soundness contract at the one place the two parsers disagree.
+
+    ``key_dearmor: no`` is a perfectly ordinary way to write this field
+    and the loader reads it as ``False``. The editor hands its validator
+    the STRING ``"no"``, so a boolean-only schema red-underlined valid
+    configuration, which is the one direction emission may not go.
+
+    Both halves are asserted over the SAME text: what the editor sees is
+    accepted, and what the loader does with it is what the operator
+    meant.
+    """
+    text = _an_apt_source(spelling)
+
+    (document,) = _documents(text)
+    assert isinstance(document["spec"]["key_dearmor"], str), "the editor sees a string, or this proves nothing"
+    assert _errors(document_schema("apt-source"), document) == []
+    assert _errors(envelope_schema(), document) == []
+
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    (resources / "docker.yaml").write_text(text)
+    (entry,) = load_manifests(resources).entries
+    assert entry.resource.key_dearmor is (spelling.lower() in {"yes", "on"})
+
+
+def test_a_string_that_is_not_a_boolean_spelling_is_still_a_schema_error() -> None:
+    """The widening is a widening, not a hole: everything else a string
+    could say is still flagged, and so is a value of the wrong type."""
+    schema = document_schema("apt-source")
+    (nonsense,) = _documents(_an_apt_source("maybe"))
+    (number,) = _documents(_an_apt_source("7"))
+
+    assert _errors(schema, nonsense)
+    assert _errors(schema, number)
 
 
 def test_reference_markers_reach_emitted_schema() -> None:
