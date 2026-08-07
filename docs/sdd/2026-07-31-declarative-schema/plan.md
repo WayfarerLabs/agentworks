@@ -781,7 +781,7 @@ reach through `offered_model`. The only missing fact is where the map lives. Rai
 > it as needing coordination with the onboarding child, and the contract does not name it. 2.8
 > cannot close without it; raised to the operator.
 
-- [ ] `emission-and-renderer-lld.md` (shared with 2.7 if the seams overlap) written and reviewed:
+- [x] `emission-and-renderer-lld.md` (shared with 2.7 if the seams overlap) written and reviewed:
       renderer output contract, blurb registration surface, and the describe surface's naming. Per
       the roadmap's guide-surface note (2026-08-05), the LLD must (a) shape blurbs as structured
       markdown data (identity, level, title, body; never pre-rendered CLI text) so the onboarding
@@ -791,25 +791,55 @@ reach through `offered_model`. The only missing fact is where the map lives. Rai
       than inventing a second home, and (c) record the templating guardrail: blurbs are inert prose
       today, and any future dynamic placeholders adopt the guide's locked-down template vocabulary,
       never a second dialect.
-- [ ] Renderer over `iter_field_docs`: commented-YAML skeleton per kind and capability arm (one
+- [x] Renderer over `iter_field_docs`: commented-YAML skeleton per kind and capability arm (one
       union arm rendered, alternatives listed), merged with registered prose blurbs (kind-level and
       capability-level; blurbs carry no field lists). Disabled capabilities render too (rendering
       reads the model, not the operator's blob), pinned by a test.
-- [ ] `agw resource sample` (and `--write`) rendering live from the registry, plugins included;
+- [x] `agw resource sample` (and `--write`) rendering live from the registry, plugins included;
       bundled sample YAML files deleted; `samples.py`'s bundled-file machinery retired;
       sample-pinning tests replaced by renderer tests (every kind renders, loads through the
       manifest path, and builds a registry; fixture-schema renderer unit tests).
-- [ ] `agw resource describe` (or the sibling surface the LLD names) renders the field reference for
+- [x] `agw resource describe` (or the sibling surface the LLD names) renders the field reference for
       kinds and capabilities from the same stream; completions updated for any new command or
       argument surface. The `agw resource schema` / describe surface NAMES are settled here (open in
       the phase-2 plan and left open by the descriptor contract), coordinated with the roadmap's
       onboarding-and-discovery child SDD, since those surfaces are its raw material.
-- [ ] Prose blurbs authored for every bundled kind and capability (content lifted from today's
+- [x] Prose blurbs authored for every bundled kind and capability (content lifted from today's
       samples' narrative lines, field lists dropped).
-- [ ] Contributed-sample uniform validation (issue #214): operator-authored and plugin-contributed
+- [x] Contributed-sample uniform validation (issue #214): operator-authored and plugin-contributed
       manifests validate through the one model regime, and unknown keys are hard errors there
       (FR12's strict direction resolves #214's open warn-vs-error tradeoff). Pinned by a test that a
       contributed sample with an unknown key fails validation the same way a first-party one does.
+
+**Step 2.8 records, closed 2026-08-06 at 4872 tests.** The bundled sample corpus is deleted and
+every kind renders live; the whole set uncomments, loads through the manifest path, and builds a
+registry, both per-file and as one `--all` file (new coverage the per-file corpus never had).
+
+**Naming, SETTLED** (the coordination point open since the first roadmap note):
+`agw resource schema` keeps the name 2.7 shipped, and the field reference is
+**`agw resource describe-kind KIND[/NAME]`**. `agw resource describe` was already taken by a
+different question (a declared resource, not a type), and deciding between them on the presence of a
+slash would make argument shape carry meaning.
+
+**The finding worth carrying out of this phase.** 2.8 found that emission silently dropped three
+plugin platforms, because seating is an import side effect and no test caught it: every emission
+test derived its expectation from the same live registry the emitter read, so a union missing three
+platforms agreed with a name set missing the same three. It fixed that with literal platform names.
+**Its own fix's pin then fell into a variant of the same trap:** with seating neutered the ENTIRE
+suite still passed, because three sibling modules import `agentworks.plugins` at module scope and
+collection seats everything before any assertion runs. Only running that one file alone failed. The
+pin is now a subprocess in a fresh interpreter, which asserts its own premise first; the lead
+verified by mutation that it fails INSIDE the full run, which is the case the old pin missed. An
+in-process fixture cannot work, because `seat_installed_plugins()` is a `sys.modules` hit once the
+package is loaded, and the docstring says so and asks not to be simplified.
+
+**Also settled:** the import IS the seating (importing any submodule initializes the parent
+package), so the named call is always a no-op; it stays because its placement inside a function is
+what keeps the seating lazy, and both docstrings now say that rather than claiming idempotence they
+cannot deliver. Only required fields are live document lines, which is what makes uncomment-and-load
+a property rather than hand-curation. Prose is TWO authored fields, not the contract's three,
+because `summary` IS the one-line description every kind already declares; `topics.summary_of` is
+public so the onboarding collector gets the pair without reverse-engineering it.
 
 ### 2.9 Pointer sweep and docs promotion (FR16, FR4 tail)
 
