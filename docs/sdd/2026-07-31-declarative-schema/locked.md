@@ -126,45 +126,41 @@ inventing a dependency on a resource the operator never wrote, which finalize wo
   not relaxing `required`, which would delete a real diagnostic from standalone templates.
 - **FR14 (settings-section models and a config.toml schema) is descoped**, as the plan permitted.
   The settings layer is the largest remaining cluster of consumer-side re-defaulting, and
-  `_warn_unexpected_keys` survives with EIGHT call sites for the same reason. Its name validation is
-  uneven rather than absent. `[secret_config].backends` gets the split right already: shape at
-  settings load (a list of strings), names later against the finalized graph in `active_backends`,
-  which raises naming the unknown backend and listing the registered ones. That is the correct
-  shape, forced by the chicken and egg (the registry does not exist at settings-load time), and
-  `doctor` plus every consuming path reaches it. What is uneven: `[secret_backends.<plugin>]`, a
-  deprecated no-op section, hard-fails at settings load against the BUILT-IN registry alone, so a
-  correctly spelled plugin backend is reported as unknown and the load dies over a section that does
-  nothing. A no-op should not fail harder, earlier, and less accurately than the key that decides
-  resolution order. The generalization worth carrying: settings values that NAME things
-  (`[secret_config].backends`, `defaults.site`, `defaults.runup_git_credentials`) are references.
-  Typing them as such would give existence checking and the dangling-name error from machinery
-  manifests already use, in place of the per-field checks in `doctor` that are the switchboard
-  pattern this effort collapsed elsewhere.
+  `_warn_unexpected_keys` survives with EIGHT call sites for the same reason. Settings that NAME
+  resources are references, and a dangling one is a hard error (operator ruling, 2026-08-07: config
+  errors are hard errors, full stop). There are exactly two: `[secret_config].backends` and
+  `defaults.site`. They are shape-checked at settings load, because the registry does not exist yet,
+  and their names are resolved once at the composition boundary after finalize, raising the same
+  shape a dangling MANIFEST reference already does (`registry.py:655`). That boundary is in
+  `bootstrap.build_registry`, deliberately NOT in `Registry.finalize`: the Registry is
+  config-agnostic by construction, and making it finalize against settings would force every
+  hand-built test registry to carry a Config or opt out. Settings stay strings checked at a boundary
+  rather than becoming typed references, because a `ResourceReference` carries the `(kind, name)` of
+  a declaring ROW, and inventing a `("config", "defaults")` source is the pseudo-resource ADR 0016
+  forbids; it would surface in `describe`'s "Referenced by" as though a resource pointed at it. What
+  settings share with manifest references is the obligation, not the type.
 
-**The severity is settled: config errors are hard errors, full stop** (operator ruling, 2026-08-07).
-That resolves an inconsistency the successor would otherwise have inherited three different answers
-to. A dangling MANIFEST reference is already a hard finalize error (`registry.py:655`).
-`[secret_config].backends` naming an unknown backend is already a hard error, raised in
-`active_backends`. But a `defaults.site` naming a site that does not exist is only a `doctor`
-warning, and `vms/sites.py:22` records that degradation as a deliberate decision, which this ruling
-reverses; implementing it needs a dated entry on the `2026-07-01-vm-sites` lockfile. The same ruling
-settles `[secret_backends.*]`: it is a resource-declaring section (it is in `KIND_SECTIONS`), so it
-fails hard, uniformly, rather than warning for built-in names and erroring for plugin ones. Keep its
-current remediation text when making that change, because the section carried no configuration and
-the generic resource-section error would tell the operator to write a manifest for something that
-needs none.
+  **`[secret_backends.*]` is a resource DECLARATION and fails hard as one.** It is in
+  `KIND_SECTIONS`, and it now reaches the ordinary resource-section error with its own accurate
+  remediation as a second clause: the section carried no configuration, so there is nothing to
+  rewrite and the answer is to delete it. Previously it split on the backend NAME, warning for
+  built-ins and erroring for anything else against the built-in registry alone, so a correctly
+  spelled, enabled, healthy plugin backend was reported as unknown. The severity split was the
+  visible half. The damaging half was that it was refused by the SETTINGS load, which
+  `resources=False` cannot skip, so a section carrying no configuration took down
+  `resource sample --write` and `resource schema --write`, the two commands the 0.14 rewrite depends
+  on, and truncated `agw doctor` to a single fail row. An entire section of the upgrade guide
+  existed to work around that and is deleted with it.
 
-- **Two union shapes extract no edges, by design.** An undiscriminated union of two or more models
-  addresses no arm without guessing which; a union tagged by non-string literals is outside the
-  framework's rule that every discriminator is a capability or kind NAME. Both are fixture-only; no
-  shipped field has either shape.
-- `agw guide` **is not built.** It is named in FR2 as the vehicle that fills the migrator's role,
-  and the roadmap gates the 0.14.0 cut on the guide's first slice, but that slice ships
-  `concept-onboarding` and no migration topic is contracted by name. If the sunset reaches operators
-  first, `docs/guides/upgrading-to-0.14.md` carries the break alone, which it is written to do.
-- No surface shows a resource's parsed spec values, and `cpus: 0` is accepted by both layers.
-- The name-charset rule the samples state is enforced only on some kinds. Issues #279 and #308
-  settled that tolerance deliberately, so the documentation was corrected rather than the behavior.
+  **Three claims made about this area during the effort were wrong, and are corrected here because
+  the wrong versions are more memorable than the right ones.** `defaults.site` naming an unknown
+  site was never a doctor warning; `validate_sites` has hard-errored on it since `fd69f8a0`, and
+  `vms/sites.py`'s degradation note is about NOT-READY sites, which is a different question.
+  `[secret_config].backends` was never checked only at use time; `validate_chain` called
+  `active_backends` eagerly from the same boundary. And `defaults.runup_git_credentials` names
+  nothing at all: it is a `bool`. What was actually wrong was smaller and duller than any of that:
+  two hand-written checks at one boundary, which is the switchboard pattern this effort collapsed
+  everywhere else, now one table.
 
 ## Deliberately unused, do not delete as dead code
 
