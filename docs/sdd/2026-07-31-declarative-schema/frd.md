@@ -49,10 +49,21 @@ builds against a single declaration frontend.
 
 - **FR1.** Resources are no longer loaded from config.toml. The presence of any resource-declaring
   TOML section is a hard, actionable error at config load (not a silent ignore, not a warning)
-  naming the sections found and pointing at `agw resource migrate` and `agw resource sample`.
-- **FR2.** `agw resource migrate` keeps working after removal; it is the stranded operator's escape
-  hatch and reads the TOML file directly rather than requiring the sections to load into the
-  registry. Sunsetting the migrator itself is explicitly out of scope.
+  naming the sections found, the exact rewrite for each, and the surfaces that render the target
+  shape (`agw resource sample`, `agw resource describe-kind`).
+- **FR2.** Remediation is precise errors plus guide content, not a migration tool (operator ruling,
+  2026-08-07, which REVERSES this requirement's original text: it previously held that
+  `agw resource migrate` keeps working and that sunsetting it was out of scope).
+  `agw resource migrate` is deleted, both halves. In its place: the load error names every offending
+  section and the exact rewrite for it; `agw resource sample` and `agw resource describe-kind`
+  render the target shape live from the registry; and the upgrade section of
+  `docs/guides/resources.md` walks the rewrite. The agent-oriented `agw guide` command (owned by the
+  onboarding effort) is the intended vehicle, and it is why this effort ships `describable_targets`,
+  `implementation_reference`, and `capability_kind_reference` with no in-tree caller: an agent walks
+  the operator through the rewrite against live registry state rather than against prose. The
+  ruling's rationale is recorded in the roadmap's `target-state.md`: the migrator required a frozen
+  re-implementation of the old shapes as a verification oracle, and every divergence between oracle
+  and model surfaced to the operator as a self-blaming failure.
 - **FR3.** Settings sections (`[operator]`, `[paths]`, `[plugins]`, `[defaults]`, `[secret_config]`,
   `[session.config]`) are unaffected. config.toml remains the settings file.
 - **FR4.** The permanent record moves with the change: a superseding ADR replaces ADR 0016's
@@ -101,9 +112,9 @@ Declaration:
   because the schema model makes it cheapest now. Pre-support shipped ahead of this SDD (PR #349):
   decode accepts both shapes with an aggregated deprecation warning on the old one, and
   `agw resource migrate` already emits the tagged form. This effort's remaining job is hardening:
-  the old shape becomes a hard error naming the exact rewrite, and `agw resource migrate` gains a
-  manifest-upgrade mode that rewrites YAML files in place under its existing backup-first
-  discipline.
+  the old shape becomes a hard error naming the exact rewrite. A manifest-upgrade mode was
+  originally specified here and shipped; it was deleted with the rest of the migrator under the
+  2026-08-07 ruling (FR2), so the hard error and the guide carry this break alone.
 - **FR17.** Inheritance is not a dependency. An inheritance edge (a session template's `inherits`,
   and any future inheriting surface) is source composition: it participates in existence checking,
   cycle detection, and merge ordering, and is EXCLUDED from runtime-need traversal (the secret
@@ -236,7 +247,8 @@ renegotiating this FRD):
 - Adopting pydantic-settings or changing config file discovery, layering, or precedence.
 - New capability kinds, changes to the capability lifecycle (preflight/runup/ops), or plugin
   protocol changes beyond how config schema is declared.
-- Removing `agw resource migrate` or `agw config` compatibility surfaces beyond FR1.
+- Removing `agw config` compatibility surfaces beyond FR1. (Removing `agw resource migrate` was out
+  of scope as originally written and became in scope under the 2026-08-07 ruling; see FR2.)
 - Publishing schemas externally (SchemaStore or hosted URLs); emitted schemas are local artifacts.
 - Generating doc content inside the prose guides (embedded generated field tables, a guide
   generation pipeline, drift tests over prose). Guides defer to the rendered samples and describe
@@ -251,8 +263,10 @@ renegotiating this FRD):
 - Zero hand-maintained duplication of schema facts remains for migrated kinds: the hand-authored
   sample files are gone, prose blurbs carry no field lists, and the FR13 renderer tests are in
   place.
-- The TOML resource loaders and the decoder shim layer are deleted (phase 1), with the full test
-  suite green and the migrator verified working against a fixture config.
+- The TOML resource loaders and the decoder shim layer are deleted, with the full test suite green.
+  Phase 1 met this with the loaders relocated into the migrator to serve as its verification oracle;
+  under the 2026-08-07 ruling (FR2) the migrator and that oracle are both deleted, so the deletion
+  is now total.
 - Operator-facing error output for the reworked validation passes review against a corpus of
   representative mistakes (unknown key, wrong type, missing required field, bad capability name)
   with file/position framing preserved.
@@ -298,7 +312,8 @@ Decided with the operator on 2026-08-01:
   rides the enablement axis.
 - **Tagged-union shape break.** The naming-field-plus-blob pair collapses into one
   `name`-discriminated table (FR8), accepted as a breaking manifest change now, shipped with hard
-  actionable errors on the old shape plus a manifest-upgrade mode in `agw resource migrate`.
+  actionable errors on the old shape. (The manifest-upgrade mode shipped and was then deleted with
+  the migrator under the 2026-08-07 ruling; see FR2.)
 
 Decided with the operator on 2026-08-02:
 
