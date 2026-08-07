@@ -32,7 +32,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, RootModel
 
-from agentworks.schema._shape import Collection, model_fields_of, shape_of
+from agentworks.schema._shape import Collection, accepts_table, model_fields_of, shape_of
 from agentworks.schema.reference import ConfigReference
 from agentworks.traversal import iter_descendants
 
@@ -127,7 +127,9 @@ def _identity_of(node: _Node) -> Hashable:
 
 def _below(node: _Node, owner: RefOwner) -> Iterator[_Node]:
     """What ``node`` contains, in declaration order: the edge each marked
-    field names, and the block each nested field opens.
+    field names, and the block each nested field opens, whether it opens
+    it outright, through a tag, or by being written as a table where a
+    union offers one.
 
     An unresolvable model contributes nothing rather than raising.
     Registration-time conformance is what keeps that unreachable in
@@ -144,6 +146,8 @@ def _below(node: _Node, owner: RefOwner) -> Iterator[_Node]:
             yield _Block(model=shape.nested_model, blob=value)
         elif shape.arms and shape.discriminator is not None:
             yield from _arm_block(shape.arms, shape.discriminator, value)
+        elif shape.union_model is not None:
+            yield from _union_block(shape.union_model, shape.union_members, value)
 
 
 def _field_values(block: _Block) -> Iterator[tuple[FieldShape, bool, object]]:
@@ -195,10 +199,12 @@ def _collection_nodes(shape: FieldShape, value: object) -> Iterator[_Node]:
     """A field holding many values: every element contributes.
 
     An element is a marked scalar (one edge per element that names
-    something), a model (a block, walked like a nested one), or a tagged
-    union of models (the arm its own tag names). No template default at
-    any element: a collection has no single default identity, and there
-    is no element to default when the collection is absent.
+    something), a model (a block, walked like a nested one), a tagged
+    union of models (the arm its own tag names), or an untagged
+    scalar-or-block union (the block, when the element is written as one).
+    No template default at any element: a collection has no single default
+    identity, and there is no element to default when the collection is
+    absent.
     """
     for element in _elements_of(shape.collection, value):
         if shape.item_marker is not None:
@@ -208,6 +214,8 @@ def _collection_nodes(shape: FieldShape, value: object) -> Iterator[_Node]:
             yield _Block(model=shape.item_model, blob=element)
         elif shape.item_arms and shape.item_discriminator is not None:
             yield from _arm_block(shape.item_arms, shape.item_discriminator, element)
+        elif shape.item_union_model is not None:
+            yield from _union_block(shape.item_union_model, shape.item_union_members, element)
 
 
 def _elements_of(collection: Collection | None, value: object) -> tuple[object, ...]:
@@ -240,6 +248,41 @@ def _arm_block(arms: tuple[UnionArmType, ...], discriminator: str, value: object
         if arm.tag == tag:
             yield _Block(model=arm.model, blob=value)
             return
+
+
+def _union_block(model: type[BaseModel], members: tuple[object, ...], value: object) -> Iterator[_Block]:
+    """The one model arm of an UNdiscriminated union, when a table can
+    only be that arm.
+
+    Nothing tags such a union, so what addresses an arm from a raw blob is
+    the value's own shape: a table is the block, and a scalar is one of the
+    scalar members, which have nothing to walk. A field spelled
+    ``str | Creds`` accepts every block ``Creds`` accepts, so a secret
+    named inside one is a secret the operator declared, and an arm left
+    unwalked drops it from the dependency graph with nothing reported.
+
+    "A table is the block" is a fact rather than a guess only while the
+    block is the one member a table could satisfy, which is what
+    :func:`~agentworks.schema._shape.accepts_table` is asked. A union
+    offering a bare table beside the model (``dict[str, str] | Creds``)
+    addresses no arm before validation, since pydantic settles that one by
+    trying the arms and preferring whichever fits; naming the block there
+    would invent an edge for a value that validates as the table. That is
+    the refusal the classifier already makes for a union holding two
+    models, one member further out.
+
+    A scalar contributes nothing here rather than being walked as a block,
+    and the check is explicit rather than left to
+    :func:`_field_values`'s mapping test, because a ROOT model arm has no
+    such test: it reads the blob directly, so ``str | SomeRootModel`` would
+    extract the operator's plain string as though it were the root model's
+    marked value.
+    """
+    if not isinstance(value, Mapping):
+        return
+    if any(member is not model and accepts_table(member) for member in members):
+        return
+    yield _Block(model=model, blob=value)
 
 
 def _reference(marker: RefMarker, name: str) -> ConfigReference:

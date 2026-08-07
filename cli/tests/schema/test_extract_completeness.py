@@ -41,6 +41,7 @@ from ._fixture_models import (
     GithubLike,
     MappingRoot,
     RenamedArmSite,
+    ScalarOrBlockLike,
     SelfReferential,
     SiteLike,
     TaggedCollectionSite,
@@ -116,6 +117,15 @@ _VALID = [
     pytest.param(SiteLike, {"platform": {"name": "proxmox", "token_secret": "lab"}}, id="tagged-union"),
     pytest.param(RenamedArmSite, {"platform": {"name": "ec2", "access_key_secret": "key"}}, id="renamed-arm"),
     pytest.param(MappingRoot, {"token": "rooted"}, id="root-model"),
+    pytest.param(
+        ScalarOrBlockLike,
+        {
+            "mapping": {"secret": "in-the-field-arm"},
+            "mappings": {"k": {"secret": "in-a-table-element"}},
+            "mapping_list": [{"secret": "in-a-list-element"}, "a plain scalar"],
+        },
+        id="untagged-scalar-or-block-union",
+    ),
     pytest.param(
         TaggedCollectionSite,
         {

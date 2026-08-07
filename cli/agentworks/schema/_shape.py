@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import types
 import typing
+from collections.abc import Mapping
 from contextlib import suppress
 from dataclasses import dataclass
 from enum import Enum
@@ -129,11 +130,11 @@ class FieldShape:
     raw annotations. Empty unless the field is a union with no
     discriminator (``str | AccountRef``, a secret backend's mapping).
 
-    Neither walker reads this: an undiscriminated union names no single
-    arm from a raw blob, so it contributes no references and does not
-    expand. The error bridge reads it, because pydantic reports one error
-    per member and prefixes each with the member's own name, a segment
-    the operator never wrote."""
+    The error bridge reads this because pydantic reports one error per
+    member and prefixes each with the member's own name, a segment the
+    operator never wrote. Reference extraction reads it to ask whether a
+    raw table could be a member OTHER than :attr:`union_model`, which is
+    what decides whether a table addresses the block or nothing."""
 
     union_model: type[BaseModel] | None
     """The ONE model among :attr:`union_members`, when exactly one of them
@@ -142,15 +143,17 @@ class FieldShape:
 
     Kept apart from :attr:`nested_model` rather than folded into it,
     because a field that MAY be a block is not a field that IS one, and
-    the two other readers of that attribute depend on the difference:
-    reference extraction would walk a raw string as though it were a
-    block, and the error bridge would stop reading
-    :attr:`union_members` and start rendering pydantic's per-member name
-    segments (``AccountRef``) as path segments the operator never wrote.
-    Only the field-documentation stream reads this, and only to expand
-    what the block contains: without it a shape whose emitted schema
-    spells out both arms documents the model arm as the bare word
-    "table"."""
+    both other readers of that attribute depend on the difference. The
+    error bridge would stop reading :attr:`union_members` and start
+    rendering pydantic's per-member name segments (``AccountRef``) as path
+    segments the operator never wrote. Reference extraction would walk a
+    raw string as though it were a block, which for a ROOT-model arm is a
+    wholly invented edge; it reads this attribute through a selector of
+    its own, which walks the arm only where a table can BE the arm.
+
+    The field-documentation stream reads it to expand what the block
+    contains: without it a shape whose emitted schema spells out both arms
+    documents the model arm as the bare word "table"."""
 
     item_union_members: tuple[object, ...]
     """:attr:`union_members` one level down: the members of an
@@ -176,7 +179,8 @@ class FieldShape:
     :attr:`item_arms` is: the field-documentation surfaces would otherwise
     render such an element as an opaque "table" while the emitted schema
     spelled out its properties, which is the same disagreement between the
-    two derivations, one level down."""
+    two derivations, one level down, and a reference marked inside such an
+    element would be missing from the dependency graph."""
 
     @property
     def block(self) -> type[BaseModel] | None:
@@ -185,12 +189,13 @@ class FieldShape:
         offers.
 
         Only that stream, which is why this is a derived pairing rather
-        than one classified attribute: reference extraction and the error
-        bridge read :attr:`nested_model` and :attr:`union_members` on
-        their own, and each would be wrong about the other's shape (see
-        :attr:`union_model`). Paired here rather than at the two places
-        the stream needs it, so what the stream SAYS a field contains and
-        what it actually streams under it cannot come apart.
+        than one classified attribute: the stream documents every block an
+        operator MAY write, while the other two readers must decide which
+        one an operator DID write, and each reads the attributes that
+        answer its own question (see :attr:`union_model`). Paired here
+        rather than at the two places the stream needs it, so what the
+        stream SAYS a field contains and what it actually streams under it
+        cannot come apart.
         """
         return self.nested_model or self.union_model
 
@@ -358,6 +363,30 @@ def is_model(annotation: object) -> TypeGuard[type[BaseModel]]:
     """Whether ``annotation`` is a model class. Shared so the bridge asks
     the same question this module does."""
     return _is_model(annotation)
+
+
+def accepts_table(annotation: object) -> bool:
+    """Whether a raw TABLE could satisfy ``annotation``.
+
+    Reference extraction asks this of an undiscriminated union's members,
+    because being a table is the only thing that selects such a union's
+    block from a raw blob: no tag names it. The answer is a fact only
+    while the block is the ONE member a table could be, so the extractor
+    asks after the others (see ``extract._union_block``).
+
+    Recognized by spelling, not by trying a value against it: a model, any
+    mapping type (``dict``, ``Mapping``, a ``TypedDict``, which is a
+    ``dict`` subclass at runtime), and ``object``/``Any``, which accept
+    anything. A member outside that list reads as scalar-shaped, and a
+    custom type with a before-validator that turns a table into a scalar
+    would fool it. That is a boundary rather than an oversight: this
+    module reads annotations and never runs user code, so a validator is
+    exactly what it cannot see.
+    """
+    if _is_model(annotation) or annotation is object or annotation is typing.Any:
+        return True
+    origin = get_origin(annotation) or annotation
+    return isinstance(origin, type) and issubclass(origin, Mapping)
 
 
 def model_fields_of(model_cls: type[BaseModel]) -> dict[str, FieldInfo] | None:

@@ -344,10 +344,11 @@ class ScalarOrBlockLike(AgwModel):
     emitted schema spelled its properties out.
 
     The arm is a MARKED model on purpose, which is what makes this fixture
-    pin the boundary as well as the shape: the field-documentation stream
-    expands the block, and reference extraction does not walk it, so a
-    secret named in here implies no graph edge. That is what
-    ``test_extract_totality`` records this model as edgeless for.
+    pin the boundary as well as the shape: both walkers have to reach it,
+    the stream to document the block and extraction to carry the secret an
+    operator names inside one. Nothing tags the arm, so extraction selects
+    it on the value's own shape, which works here because the only other
+    member is a string.
     """
 
     mapping: str | CredsLike | None = None

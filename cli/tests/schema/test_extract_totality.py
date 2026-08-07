@@ -196,12 +196,10 @@ _EDGELESS_BY_DESIGN = {
     "LimaArm": "the arm that names nothing",
     "UnmarkedLike": "no marked field at any depth",
     "StringRoot": "a bare scalar root names nothing",
-    "StringOrTableRoot": "an undiscriminated root union addresses no arm",
-    # The stream DOES expand this one's model arm, which is what makes the
-    # pairing worth pinning: the two walkers read different attributes of
-    # the same classified shape on purpose, so a marker inside a union's
-    # block is documented and is not a graph edge.
-    "ScalarOrBlockLike": "extraction does not walk a union's model arm, at either depth",
+    # Both arms are now reached; neither names a Resource. The string is
+    # an external 1Password reference and the table is an account
+    # selector beside one.
+    "StringOrTableRoot": "neither arm of a backend mapping names a Resource",
     "SelfReferentialUnion": "no marked field at any depth",
     "AccountRefLike": "nothing in an account reference names a Resource",
     "UndiscriminatedSite": "no discriminator, so no arm is addressable",
