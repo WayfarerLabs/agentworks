@@ -511,7 +511,15 @@ Per field of `model_cls.model_fields`, in declaration order:
 - **Nested model field**: recurse with the raw sub-value when it is a mapping; contribute nothing
   otherwise.
 - **Discriminated union field**: read the raw tag; when it names an arm, recurse into that arm's
-  model; an absent or unknown tag contributes nothing.
+  model; an absent or unknown tag contributes nothing. The rule is one equality (`arm.tag == tag`)
+  and nothing may weaken it into a fallback: a block naming no arm addresses no arm, so the honest
+  result is no edges, matching the under-report already chosen for the ambiguous union above.
+  Selecting the first arm instead would contribute the first-registered implementation's secret and
+  resource edges for an untagged block, putting a Resource the operator never wrote into the graph
+  for finalize to refuse. Deliberately an equality rather than a truthiness test: pydantic
+  dispatches on `Literal[""]` like any other tag, so a guard reading "an empty tag names no arm"
+  would drop a real edge. What makes a block address no arm is that no arm answers to what it wrote,
+  not that what it wrote looks empty.
 - **UNtagged scalar-or-block union field** (`str | Model`, the shipped onepassword mapping): **GAP,
   closed 2026-08-07, the third instance of this defect family.** Nothing tags such a union, so as
   first built the enumeration had no branch for it and a marker inside the model arm produced no
@@ -565,6 +573,55 @@ registry: the union type carries its own arms, so the walk stays a pure function
 (section 4.4). And absence-versus-malformed is the distinction that reproduces shipped behavior
 byte-for-byte: azure emits its edge when `service_principal.secret` is absent (default) and omits it
 when the field is present but not a non-empty string (`plugins/azure/platform.py:469-478`).
+
+**Amended 2026-08-07 (second), from a closeout review.** The enumeration is exhaustive over the
+shapes the classifier RECOGNIZES, and that qualifier was doing unacknowledged work.
+`_collection_element` matched bare `list`/`set`/`frozenset`/`dict`/`tuple` origins by identity, so
+an abstract spelling (`Sequence[Annotated[str, SecretRef(...)]]`) and any doubly-nested collection
+(`dict[str, list[Annotated[str, SecretRef(...)]]]`) fell through to "ordinary scalar" and emitted
+nothing while validating cleanly. That is the worst failure shape this layer has, because the
+dependency graph is built from these edges BEFORE validation runs: the Resource is never gated,
+never resolved, and never reported. Latent (no shipped field uses either spelling) and never a
+regression, but it is a gating bypass, and the secret non-exposure argument rests on this contract
+being total.
+
+Fixed in both halves, because neither is sufficient alone:
+
+- **Recognize the abstract spellings.** `_collection_element` now asks what an origin IS
+  (`issubclass(origin, Mapping)`, then `Sequence`/`Set`) rather than matching a list of concrete
+  classes, which is how the neighbouring `accepts_table` already answers. `Sequence[X]` and
+  `list[X]` are the same shape to pydantic and to every reader of a `FieldShape`, and the raw value
+  a frontend produces is a list either way, so this closes a SPELLING gap rather than adding a
+  capability. Mapping is asked first because every mapping is also a `Collection`, and it addresses
+  its values rather than its elements.
+- **Fail closed on everything else.** `reference_marker_error` now also refuses a marker the
+  classifier could not PLACE: `_shape.markers_in` reports every marker written in a field's
+  annotation tree (stopping at a model, whose markers are its own fields'), and any marker that is
+  neither `shape.marker` nor `shape.item_marker` is one no walker will ever read. This is what keeps
+  the recognized-shape list from doubling as a list of silent failures, and it is shape-agnostic:
+  the NEXT unrecognized origin someone writes is loud without anyone having predicted it.
+
+A nested collection is therefore refused rather than supported, deliberately. `FieldShape` is flat
+by design (what the field holds, and what ONE value inside it holds), so a third level has nowhere
+to go, and giving it one is a contract change across all three readers (extraction, the error
+bridge's path segments, the field-documentation stream's rendering) rather than a bug fix. An author
+who wants that shape spells the inner collection as a model, and gets a registration error naming
+the field if they do not.
+
+Two enforcement points, because registration conformance sees only capability CONFIG models
+(`capabilities/conformance.py:203` is its one production caller). First-party kind spec models have
+no registration pass at all, so their gate is a test:
+`tests/capabilities/test_conformance.py::test_every_marker_a_shipped_model_declares_sits_where_it_can_be_honored`
+now runs `reference_marker_error` over `metadata_model(kind)` and `spec_model(kind)` for every
+declarable kind, rather than over the row class alone. The row alone missed both the capability
+config union that `spec_model` splices into a hosting kind's naming field and the `metadata` block
+entirely.
+
+`_marker_error`'s recursion was also short of its own docstring's claim ("recursive over the same
+shapes validation reaches"). It descended `nested_model`, `item_model`, and `arms`, but not
+`item_arms`, `union_model`, or `item_union_model`, all three of which extraction reaches. A marker
+misplaced inside a tagged-collection arm or a scalar-or-block union's block was accepted at
+registration and then read by nothing. All six are now descended, and the docstring is true.
 
 ### 4.4 FR21 door (a): source-agnostic by signature
 

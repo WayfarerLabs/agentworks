@@ -20,13 +20,15 @@ So this module calls ``conformance_error`` the way the self-test does.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Annotated, Literal
 
 import pytest
-from pydantic import Field
+from pydantic import Discriminator, Field
 
 from agentworks.capabilities.conformance import conformance_error
 from agentworks.capabilities.descriptor import descriptor_for
+from agentworks.manifests.spec_model import metadata_model, spec_model
 from agentworks.schema import (
     AgwModel,
     RefOwner,
@@ -55,6 +57,41 @@ def _impl(config_model: type[AgwModel], *, name: str = "fixture-platform") -> ty
         (ConformingVMPlatform,),
         {"name": name, "description": "a platform under conformance test", "config_model": config_model},
     )
+
+
+class _MisplacedMarker(AgwModel):
+    """One arm, carrying the misplaced marker every case below is looking
+    for: on a field that holds MANY values, where nothing can honor it."""
+
+    name: Literal["misplaced"]
+    tokens: Annotated[list[str], SecretRef(usage="a token")] = Field(default_factory=list)
+
+
+class _Innocent(AgwModel):
+    """The other arm, so each union below is a union."""
+
+    name: Literal["innocent"]
+
+
+class _ViaItemArms(AgwModel):
+    """The marker sits in an arm of a COLLECTION's tagged union."""
+
+    name: Literal["fixture-platform"]
+    platforms: list[Annotated[_MisplacedMarker | _Innocent, Discriminator("name")]] = Field(default_factory=list)
+
+
+class _ViaUnionModel(AgwModel):
+    """The marker sits in the block of an untagged scalar-or-block union."""
+
+    name: Literal["fixture-platform"]
+    thing: str | _MisplacedMarker | None = None
+
+
+class _ViaItemUnionModel(AgwModel):
+    """The marker sits in the block one ELEMENT of a collection may be."""
+
+    name: Literal["fixture-platform"]
+    things: dict[str, str | _MisplacedMarker] = Field(default_factory=dict)
 
 
 # -- The name rule, which only the self-test path reaches --------------------
@@ -177,22 +214,109 @@ def test_the_refused_shape_is_the_one_that_answers_three_different_things() -> N
 
 def test_every_marker_a_shipped_model_declares_sits_where_it_can_be_honored() -> None:
     """The invariant over the models registration conformance does NOT
-    reach: a declarable kind's spec model has no registration pass, so
+    reach: a declarable kind's document has no registration pass, so
     without this the rule would hold for plugin config and nowhere else.
-    """
-    from agentworks.declared_resource import DeclaredResource
-    from agentworks.resources.kind import KIND_REGISTRY
 
-    # ``model`` is the kind's declared-resource row class, read the way
-    # ``manifests.decode`` reads it; a capability kind declares none.
-    models = [
-        (kind, model)
-        for kind, strategy in KIND_REGISTRY.items()
-        if isinstance(model := getattr(strategy, "model", None), type) and issubclass(model, DeclaredResource)
-    ]
-    assert models, "no kind exposed a spec model; this test would prove nothing"
-    for kind, model in models:
-        assert reference_marker_error(model) is None, kind
+    Both blocks of every declarable kind's document, which is the same
+    enumeration ``tests/manifests/test_accepted_type_parity.py`` calls the
+    shipped surface. The row class alone is not enough: a kind hosting a
+    capability has its naming field re-annotated to the capability's config
+    union by ``spec_model``, and ``metadata_model`` is a second block an
+    author can put a marker in. A first-party model is in-repo, so a test
+    IS its gate; nothing else runs this over one.
+    """
+    from agentworks.manifests.spec_model import declarable_kinds
+
+    blocks = [(kind, block, builder(kind)) for kind in declarable_kinds() for block, builder in _DOCUMENT_BLOCKS]
+    assert blocks, "no kind exposed a model; this test would prove nothing"
+
+    faults = [f"{kind} {block}: {reason}" for kind, block, model in blocks if (reason := reference_marker_error(model))]
+    assert not faults, "\n".join(faults)
+
+
+#: The two blocks of a kind document, by the function that builds each.
+_DOCUMENT_BLOCKS = (("metadata", metadata_model), ("spec", spec_model))
+
+
+@pytest.mark.parametrize(
+    "config_model",
+    [
+        pytest.param(_ViaItemArms, id="a collection element's union arm"),
+        pytest.param(_ViaUnionModel, id="an untagged union's block"),
+        pytest.param(_ViaItemUnionModel, id="a collection element's untagged union block"),
+    ],
+)
+def test_a_misplaced_marker_is_found_wherever_a_walker_could_reach_it(config_model: type[AgwModel]) -> None:
+    """The check has to descend exactly as far as extraction does.
+
+    Each shape below is one reference extraction walks into and this rule
+    did not, so a marker inside it was accepted at registration and then
+    read by nothing: the field filled with the marker's rendered default,
+    the emitted schema hung the marker off the whole collection, and the
+    graph got an edge for an element that does not exist. The three
+    answers the rule exists to prevent, reached by a route it did not
+    cover.
+    """
+    assert reference_marker_error(config_model) is not None
+
+
+def test_a_marker_no_walker_could_ever_read_is_refused() -> None:
+    """Fail closed on a shape the classifier does not recognize.
+
+    Extraction reads a marker in exactly two positions, the field's own
+    value and one element of a collection, so a marker anywhere else is
+    read by nothing at all while the document validates perfectly well.
+    That is the worst failure this layer has, because the dependency graph
+    is built from the extracted edges BEFORE validation: the secret is
+    never gated, never resolved, and never reported.
+
+    Refusing here is what keeps the set of collection shapes the
+    classifier recognizes from doubling as a set of silent failures. The
+    next unrecognized shape someone writes is loud, without anyone having
+    to predict which one it will be.
+    """
+
+    class NestedCollection(AgwModel):
+        name: Literal["fixture-platform"]
+        tokens: dict[str, list[Annotated[str, SecretRef(usage="a token")]]] = Field(default_factory=dict)
+
+    reason = reference_marker_error(NestedCollection)
+    assert reason is not None
+    assert "cannot classify" in reason
+    assert conformance_error(VM_PLATFORM, _impl(NestedCollection)) is not None
+
+    # The half that makes the refusal necessary rather than merely tidy.
+    assert extract_references(NestedCollection, {"tokens": {"k": ["named"]}}, OWNER) == ()
+
+
+def test_an_unmarked_shape_the_classifier_does_not_recognize_is_left_alone() -> None:
+    """The refusal is about the MARKER, not about the shape.
+
+    A nested collection with nothing marked inside it references nothing,
+    so there is no edge to lose and no reason an author cannot write one.
+    """
+
+    class NestedButUnmarked(AgwModel):
+        name: Literal["fixture-platform"]
+        rows: dict[str, list[str]] = Field(default_factory=dict)
+
+    assert reference_marker_error(NestedButUnmarked) is None
+    assert conformance_error(VM_PLATFORM, _impl(NestedButUnmarked)) is None
+
+
+def test_an_abstract_collection_spelling_is_recognized_rather_than_refused() -> None:
+    """The other side of the fail-closed rule: what the classifier DOES
+    read must not be refused. ``Sequence[X]`` is ``list[X]`` to pydantic
+    and to both walkers, so an author who reaches for the ABC gets the
+    edges rather than an error."""
+
+    class AbstractlySpelled(AgwModel):
+        name: Literal["fixture-platform"]
+        tokens: Sequence[Annotated[str, SecretRef(usage="a token")]] = ()
+
+    assert reference_marker_error(AbstractlySpelled) is None
+    assert conformance_error(VM_PLATFORM, _impl(AbstractlySpelled)) is None
+    assert extract_references(AbstractlySpelled, {"tokens": ["named"]}, OWNER)[0].name == "named"
 
 
 def test_a_well_placed_marker_is_left_alone() -> None:

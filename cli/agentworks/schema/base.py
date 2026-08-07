@@ -35,15 +35,17 @@ from weakref import WeakKeyDictionary
 from pydantic import BaseModel, ConfigDict, Field, RootModel, model_validator
 
 from agentworks.errors import StateError
-from agentworks.schema._shape import marker_of, model_fields_of, shape_of
+from agentworks.schema._shape import marker_of, markers_in, model_fields_of, shape_of
 from agentworks.schema.markers import REF_SCHEMA_KEY, RefOwner
 from agentworks.schema.shorthand import ScalarShorthand, shorthand_field_error
 
 if TYPE_CHECKING:
     from pydantic import GetJsonSchemaHandler, ValidationInfo
+    from pydantic.fields import FieldInfo
     from pydantic.json_schema import JsonSchemaValue
     from pydantic_core import CoreSchema
 
+    from agentworks.schema._shape import FieldShape
     from agentworks.schema.markers import RefMarker
 
 #: The key an owner rides under in pydantic's validation context. Build
@@ -444,10 +446,30 @@ def reference_marker_error(model_cls: type[BaseModel]) -> str | None:
     declared config model, so a plugin author sees it at registration
     rather than an operator seeing its consequences at load.
 
+    A marker the CLASSIFIER cannot place is refused by the same call, and
+    for the same reason one sentence up. Extraction reads a field through
+    :class:`~agentworks.schema._shape.FieldShape`, which names the field's
+    own marker and the marker on one element of a collection, and those
+    are the only two positions any walker looks at. A marker written
+    anywhere else in the annotation (under an unrecognized origin, or
+    under a second level of collection) is read by nothing at all, so the
+    field contributes no edge while validating perfectly well. That
+    failure is the worst-shaped one this layer has: the dependency graph
+    is built from the extracted edges BEFORE validation, so the Resource
+    is never gated, never resolved, and never reported, and the operator's
+    document looks correct throughout. Refusing at registration is what
+    keeps the set of shapes
+    :func:`~agentworks.schema._shape._collection_element` recognizes from
+    doubling as a set of silent failures: whatever it does not classify is
+    loud here instead.
+
     Recursive over the same shapes validation reaches, since a nested
     block, a collection's element model, and a union arm each fill and
-    extract on their own. A model that cannot be built reports nothing:
-    it has no fields to judge, and its own check
+    extract on their own. Every model a walker can descend into is
+    descended into here, which is both kinds of union arm and the single
+    block an untagged scalar-or-block union offers, at the field and at
+    one element alike. A model that cannot be built reports nothing: it
+    has no fields to judge, and its own check
     (:func:`~agentworks.schema.model_is_complete`) already refuses it.
     """
     return _marker_error(model_cls, ())
@@ -484,9 +506,52 @@ def _marker_error(model_cls: type[BaseModel], visiting: tuple[type[BaseModel], .
                 f"where nothing can honor it; a marker names one Resource, so move it onto the "
                 f"value that names one"
             )
-        for reachable in (shape.nested_model, shape.item_model, *(arm.model for arm in shape.arms)):
-            if reachable is not None:
-                reason = _marker_error(reachable, visiting)
-                if reason is not None:
-                    return reason
+        if _has_unplaceable_marker(field, shape):
+            return (
+                f"{model_cls.__name__}.{name} carries a reference marker in a position this layer "
+                f"cannot classify, so no edge would ever be extracted for it; a marker is read on "
+                f"the field's own value or on one element of a list, a set, or a table, so spell "
+                f"the field as one of those (a nested collection needs a model for the inner one)"
+            )
+        for reachable in _reachable_models(shape):
+            reason = _marker_error(reachable, visiting)
+            if reason is not None:
+                return reason
     return None
+
+
+def _has_unplaceable_marker(field: FieldInfo, shape: FieldShape) -> bool:
+    """Whether ``field`` carries a marker the classifier did not place.
+
+    Compared by IDENTITY, not equality: two fields may legitimately carry
+    equal markers (the same kind and usage), and the question here is
+    whether THIS marker object is the one the shape reports, not whether
+    something like it is.
+
+    One-directional on purpose. A marker pydantic lifted off the
+    annotation onto ``field.metadata`` (which is what it does with an
+    outermost ``Annotated[str, SecretRef(...)]``) is placed as
+    ``shape.marker`` while appearing nowhere in the annotation tree, and
+    that is the ordinary case rather than a fault.
+    """
+    placed = (shape.marker, shape.item_marker)
+    return any(all(marker is not found for found in placed) for marker in markers_in(field.annotation))
+
+
+def _reachable_models(shape: FieldShape) -> tuple[type[BaseModel], ...]:
+    """Every model a walker can descend into from one field.
+
+    Both kinds of union arm and both untagged scalar-or-block blocks are
+    here beside the plain nested block and a collection's element model,
+    because reference extraction reaches all six, and a marker this check
+    does not visit is one an author ships.
+    """
+    models = (
+        shape.nested_model,
+        shape.item_model,
+        shape.union_model,
+        shape.item_union_model,
+        *(arm.model for arm in shape.arms),
+        *(arm.model for arm in shape.item_arms),
+    )
+    return tuple(model for model in models if model is not None)

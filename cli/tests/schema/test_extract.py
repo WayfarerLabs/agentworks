@@ -7,18 +7,22 @@ shape.
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 import pytest
+from pydantic import Discriminator
 
 from agentworks.schema import AgwModel, AgwRootModel, RefOwner, SecretRef, extract_references
 from agentworks.schema.reference import ConfigReference, RefRelationship
 
 from ._fixture_models import (
+    AbstractCollectionLike,
     AwsLike,
     AzureLike,
     CatalogLike,
     DiamondLike,
+    EveryArmMarkedCollectionSite,
+    EveryArmMarkedSite,
     FieldDiscriminatedSite,
     GithubLike,
     MappingRoot,
@@ -240,6 +244,41 @@ def test_a_data_cycle_through_a_collection_terminates() -> None:
     assert names(extract_references(SelfReferential, blob, OWNER)) == ["top"]
 
 
+def test_a_collection_spelled_as_an_abc_is_still_a_collection() -> None:
+    """``Sequence[X]`` is ``list[X]`` to everything downstream.
+
+    Pydantic accepts both, and the raw value is a list either way, so a
+    classifier that knew only the concrete spelling would read every field
+    here as an ordinary scalar and emit no edge at all. Silent, and a
+    gating bypass rather than a cosmetic gap: the graph is built from
+    these edges before anything validates.
+    """
+    blob = {
+        "sequence_tokens": ["in-a-sequence"],
+        "mutable_sequence_tokens": ["in-a-mutable-sequence"],
+        "mapping_tokens": {"k": "in-a-mapping"},
+        "mutable_mapping_tokens": {"k": "in-a-mutable-mapping"},
+        "set_tokens": ["in-a-set"],
+        "blocks": [{"token": "in-a-block"}],
+    }
+    assert names(extract_references(AbstractCollectionLike, blob, OWNER)) == [
+        "in-a-sequence",
+        "in-a-mutable-sequence",
+        "in-a-mapping",
+        "in-a-mutable-mapping",
+        "in-a-set",
+        "in-a-block",
+    ]
+
+
+def test_an_abstract_mapping_addresses_its_values_not_its_keys() -> None:
+    """``Mapping[K, V]`` has two type arguments and the marker is on the
+    second. Classifying it as a sequence would read the KEY type, so a
+    marked value would go unread while an unmarked key looked marked."""
+    blob = {"mapping_tokens": {"a-key-that-is-not-a-secret": "the-value-that-is"}}
+    assert names(extract_references(AbstractCollectionLike, blob, OWNER)) == ["the-value-that-is"]
+
+
 # --- discriminated unions ---------------------------------------------
 
 
@@ -293,6 +332,92 @@ def test_a_marker_inside_a_multi_arm_union_is_still_found() -> None:
 def test_a_union_with_no_discriminator_has_no_addressable_arm() -> None:
     blob = {"platform": {"name": "proxmox", "token_secret": "lab-token"}}
     assert extract_references(UndiscriminatedSite, blob, OWNER) == ()
+
+
+# --- a block that names no arm selects none of them --------------------
+#
+# The rule is one equality (``arm.tag == tag``) and the whole content of
+# these tests is that nothing weakens it into a fallback. A blob that
+# addresses no arm must contribute NOTHING, matching the under-report the
+# ambiguous-union case already chose: extraction that invented the
+# first-registered implementation's edges would put a Resource the
+# operator never wrote into the dependency graph, and finalize would
+# refuse a config over it.
+#
+# Asserted against a union in which EVERY arm names a Resource, so the
+# claim is "no arm was selected" rather than "not that particular arm";
+# see the fixture for why arm order cannot carry that weight.
+
+#: Every way a raw block can fail to name an arm: the tag key absent,
+#: written empty, written null, written as a name no arm answers to, and
+#: written as something that is not a name at all.
+_NAMES_NO_ARM: tuple[object, ...] = (
+    {},
+    {"name": None},
+    {"name": ""},
+    {"name": "unregistered"},
+    {"name": 8},
+    {"name": False},
+    {"name": ["first-arm"]},
+    {"name": {"first-arm": True}},
+)
+
+
+@pytest.mark.parametrize("block", _NAMES_NO_ARM, ids=range(len(_NAMES_NO_ARM)))
+def test_a_block_naming_no_arm_contributes_nothing(block: object) -> None:
+    assert extract_references(EveryArmMarkedSite, {"platform": block}, OWNER) == ()
+
+
+@pytest.mark.parametrize("block", _NAMES_NO_ARM, ids=range(len(_NAMES_NO_ARM)))
+def test_a_collection_element_naming_no_arm_contributes_nothing(block: object) -> None:
+    # The same question of the other walker: both select arms through one
+    # call, and a fallback added to it would be reachable from either.
+    blob = {"platforms": [block], "platforms_by_name": {"x": block}}
+    assert extract_references(EveryArmMarkedCollectionSite, blob, OWNER) == ()
+
+
+@pytest.mark.parametrize(
+    ("tag", "expected"),
+    [("first-arm", "first-arm-token"), ("second-arm", "second-arm-token")],
+)
+def test_selecting_any_arm_would_show(tag: str, expected: str) -> None:
+    """Non-vacuity for the two tests above, which is the whole reason
+    those fixtures exist.
+
+    They assert an empty result, so they are worth nothing unless
+    selecting an arm from blobs of that shape WOULD produce one. Every arm
+    is checked, not just one, because "no arm was selected" is only
+    established if each arm the walker could have fallen back to is one
+    whose selection shows.
+    """
+    assert names(extract_references(EveryArmMarkedSite, {"platform": {"name": tag}}, OWNER)) == [expected]
+
+    blob = {"platforms": [{"name": tag}], "platforms_by_name": {"x": {"name": tag}}}
+    assert names(extract_references(EveryArmMarkedCollectionSite, blob, OWNER)) == [expected, expected]
+
+
+def test_an_arm_tagged_with_the_empty_string_is_still_addressable() -> None:
+    """Why the rule is an equality rather than a truthiness test.
+
+    Pydantic dispatches on ``Literal[""]`` like any other tag, so a guard
+    reading "an empty tag names no arm" would drop a real edge, which is
+    the silent failure this walker exists to avoid. What makes a block
+    address no arm is that no arm answers to what it wrote, not that what
+    it wrote looks empty.
+    """
+
+    class Nameless(AgwModel):
+        name: Literal[""]
+        token_secret: Annotated[str, SecretRef(usage="the nameless arm's token")] | None = None
+
+    class Named(AgwModel):
+        name: Literal["named"]
+
+    class EmptyTagSite(AgwModel):
+        platform: Annotated[Nameless | Named, Discriminator("name")]
+
+    assert names(extract_references(EmptyTagSite, {"platform": {"name": "", "token_secret": "t"}}, OWNER)) == ["t"]
+    assert extract_references(EmptyTagSite, {"platform": {"name": "other"}}, OWNER) == ()
 
 
 # --- untagged scalar-or-block unions ----------------------------------
