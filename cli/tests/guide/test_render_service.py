@@ -88,6 +88,7 @@ def test_broken_config_keeps_authored_content_and_marks_dynamic_facts() -> None:
     assert "Progressive onboarding" in response.markdown
     assert response.markdown.count("Configuration error: broken settings") == 1
     assert response.markdown.count("Live facts unavailable: see the system failure below") == 4
+    assert response.markdown.count("## ⟦AGW framework⟧ Live facts unavailable") == 1
 
 
 def test_atomic_unknown_request_raises_before_a_response_exists() -> None:
@@ -241,7 +242,7 @@ def test_live_render_guide_denies_probes_secrets_capabilities_writes_and_mutatio
     assert config_load_calls == [True]
     assert finalize_probe_values and set(finalize_probe_values) == {False}
     assert response.exit_code == 0
-    assert "Derived onboarding plan" in response.markdown
+    assert "## ⟦AGW framework⟧ Derived onboarding plan" in response.markdown
 
 
 def test_live_dynamic_block_payloads_have_semantic_parity() -> None:
@@ -401,6 +402,17 @@ def test_every_block_renderer_and_unsupported_block_refusal_are_explicit() -> No
     }
     assert rendered.markdown.count("available after schema services are installed") == 2
     assert "`concept-management`" in rendered.markdown
+    assert {line for line in rendered.markdown.splitlines() if line.startswith("## ⟦AGW framework⟧")} == {
+        "## ⟦AGW framework⟧ Agent operating contract",
+        "## ⟦AGW framework⟧ Current inventory",
+        "## ⟦AGW framework⟧ Current state",
+        "## ⟦AGW framework⟧ Fields",
+        "## ⟦AGW framework⟧ How it works",
+        "## ⟦AGW framework⟧ Overview",
+        "## ⟦AGW framework⟧ Related topics",
+        "## ⟦AGW framework⟧ Relationships",
+        "## ⟦AGW framework⟧ Sample",
+    }
     with pytest.raises(TypeError, match="unsupported dynamic guide block object"):
         _dynamic(object(), view)  # type: ignore[arg-type]
 
@@ -689,7 +701,7 @@ def test_mixed_retained_and_rejected_topics_preserve_requested_slots_and_issue_s
     assert "Retained teaching." in response.markdown
     assert response.markdown.count("This guide topic is unavailable.") == 1
     assert response.markdown.count("anchor does not match a registered kind category") == 1
-    assert response.markdown.count("## Guide content unavailable") == 1
+    assert response.markdown.count("## ⟦AGW framework⟧ Guide content unavailable") == 1
     assert response.exit_code == 1
 
 

@@ -77,12 +77,13 @@ def test_no_topic_modes_have_semantic_parity_and_golden_path_ordering() -> None:
     disclosure = "An agent managing Agentworks gains access to everything Agentworks can reach"
     onboarding = "Run `agw guide concept-onboarding --agent`"
     for markdown in (human, agent):
+        assert all(line.startswith("## ⟦AGW framework⟧") for line in markdown.splitlines() if line.startswith("## "))
         disclosure_at = markdown.index(disclosure)
-        start_at = markdown.index("## Start here")
+        start_at = markdown.index("## ⟦AGW framework⟧ Start here")
         onboarding_at = markdown.index(onboarding)
-        topics_at = markdown.index("## Topics")
+        topics_at = markdown.index("## ⟦AGW framework⟧ Topics")
         assert disclosure_at < start_at < onboarding_at < topics_at
 
-    human_semantics = human.replace("## Security and consent", "## Disclosure")
-    agent_semantics = agent.replace("## Agent operating contract", "## Disclosure")
+    human_semantics = human.replace("## ⟦AGW framework⟧ Security and consent", "## ⟦AGW framework⟧ Disclosure")
+    agent_semantics = agent.replace("## ⟦AGW framework⟧ Agent operating contract", "## ⟦AGW framework⟧ Disclosure")
     assert human_semantics == agent_semantics

@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 GUIDE_PACKAGE = Path(__file__).parents[2] / "agentworks" / "guide"
+GUIDE_PACKAGE_NAME = "agentworks.guide"
 FORBIDDEN_IMPORT_ROOTS = {
     "builtins",
     "io",
@@ -41,6 +42,20 @@ FORBIDDEN_BOUND_NAMES = {"__import__", "compile", "eval", "exec", "open"}
 
 def _is_forbidden_import(module: str) -> bool:
     return any(module == root or module.startswith(f"{root}.") for root in FORBIDDEN_IMPORT_ROOTS)
+
+
+def _python_files_below(root: Path) -> tuple[Path, ...]:
+    return tuple(sorted(root.rglob("*.py")))
+
+
+def _python_package_for(
+    path: Path,
+    *,
+    root: Path = GUIDE_PACKAGE,
+    root_package: str = GUIDE_PACKAGE_NAME,
+) -> str:
+    relative_parent = path.parent.relative_to(root)
+    return ".".join((root_package, *relative_parent.parts))
 
 
 def _resolved_from_module(node: ast.ImportFrom, package: str) -> str:
@@ -113,12 +128,44 @@ def _power_boundary_violations(
     return tuple(violations)
 
 
-@pytest.mark.parametrize("path", sorted(GUIDE_PACKAGE.glob("*.py")), ids=lambda path: path.name)
+@pytest.mark.parametrize(
+    "path",
+    _python_files_below(GUIDE_PACKAGE),
+    ids=lambda path: str(path.relative_to(GUIDE_PACKAGE)),
+)
 def test_guide_package_has_no_operational_power_imports_or_mutating_calls(path: Path) -> None:
     """Keep the inert guide boundary resistant to aliases and low-level writes."""
-    violations = _power_boundary_violations(path.read_text(), str(path))
+    violations = _power_boundary_violations(
+        path.read_text(),
+        str(path),
+        package=_python_package_for(path),
+    )
 
     assert not violations, f"{path.name} crosses the guide power boundary: {', '.join(violations)}"
+
+
+def test_power_boundary_scans_nested_packages_with_their_derived_package(tmp_path: Path) -> None:
+    root = tmp_path / "agentworks" / "guide"
+    nested = root / "nested"
+    nested.mkdir(parents=True)
+    allowed = nested / "allowed.py"
+    forbidden = nested / "forbidden.py"
+    allowed.write_text("from ...secrets import guide_contributions as secret_topics\n")
+    forbidden.write_text("from ... import output as output\n")
+
+    paths = _python_files_below(root)
+    assert paths == (allowed, forbidden)
+    assert _python_package_for(allowed, root=root) == "agentworks.guide.nested"
+    assert not _power_boundary_violations(
+        allowed.read_text(),
+        str(allowed),
+        package=_python_package_for(allowed, root=root),
+    )
+    assert _power_boundary_violations(
+        forbidden.read_text(),
+        str(forbidden),
+        package=_python_package_for(forbidden, root=root),
+    ) == ("line 1: import agentworks.output",)
 
 
 @pytest.mark.parametrize(

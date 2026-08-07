@@ -25,7 +25,7 @@ from agentworks.guide.contract import (
     is_valid_topic_slug,
 )
 from agentworks.guide.contributions import guide_contributions
-from agentworks.guide.render import render_index, render_topic, sanitize_terminal_output
+from agentworks.guide.render import framework_heading, render_index, render_topic, sanitize_terminal_output
 from agentworks.guide.view import build_guide_view
 from agentworks.resources import KIND_REGISTRY
 
@@ -366,8 +366,10 @@ def render_guide(
     issue_markdown = ""
     if issue_details:
         details = "\n".join(issue_details)
-        issue_markdown = f"\n\n## Guide content unavailable\n\n{details}"
-    error_markdown = f"\n\n## Live facts unavailable\n\n{_framed_error(system_error)}" if system_error else ""
+        issue_markdown = f"\n\n{framework_heading('Guide content unavailable')}\n\n{details}"
+    error_markdown = (
+        f"\n\n{framework_heading('Live facts unavailable')}\n\n{_framed_error(system_error)}" if system_error else ""
+    )
     exit_code = 1 if visible_issues or runtime_issues or system_error is not None else 0
     output = sanitize_terminal_output(markdown.rstrip() + issue_markdown + error_markdown + "\n")
     return GuideResponse(output, exit_code, all_names)
