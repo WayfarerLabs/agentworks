@@ -211,6 +211,89 @@ def test_a_yaml_1_1_boolean_spelling_survives_verification(tmp_path: Path) -> No
     assert entry.resource.platform.config["verify_ssl"] is False
 
 
+def test_an_explicit_null_secret_name_survives_the_rewrite(tmp_path: Path) -> None:
+    """The rewrite must not erase the evidence for the one input whose
+    MEANING this release changed.
+
+    ``token_secret: null`` used to be a hard error telling the operator to
+    omit the key; absent and null mean the same thing now, so that same
+    document quietly resolves to the default-named secret and declares a
+    dependency on it. That is a decision the operator still has to make,
+    and the migrator's own summary says the registry is unchanged, so
+    normalizing the line to a bare ``token_secret:`` (which is what
+    ruamel does left alone) would take away the one thing left to grep
+    for. Every spelling comes back as it went in.
+    """
+    cfg = _write_config(tmp_path)
+    resources = _resources(
+        tmp_path,
+        sites=dedent("""\
+            apiVersion: agentworks/v1
+            kind: vm-site
+            metadata:
+              name: proxmox
+            spec:
+              platform: proxmox
+              platform_config:
+                api_url: https://pve:8006
+                node: pve1
+                token_id: agw@pam!agw
+                template_vmid: 9000
+                token_secret: null
+            """),
+        more=dedent("""\
+            apiVersion: agentworks/v1
+            kind: vm-site
+            metadata:
+              name: tilde
+            spec:
+              platform: proxmox
+              platform_config:
+                api_url: https://pve:8006
+                node: pve1
+                token_id: agw@pam!agw
+                template_vmid: 9000
+                token_secret: ~
+            """),
+    )
+
+    _run(cfg)
+
+    assert "    token_secret: null\n" in (resources / "sites.yaml").read_text()
+    assert "    token_secret: ~\n" in (resources / "more.yaml").read_text()
+    # And the null still means what it meant: the default-named secret.
+    entries = {entry.name: entry.resource for entry in load_manifests(resources).entries}
+    assert entries["proxmox"].platform.config["token_secret"] is None
+
+
+def test_a_bare_null_key_does_not_grow_a_spelling(tmp_path: Path) -> None:
+    """The other direction of the same promise. Preserving ``null`` must
+    not mean INVENTING one: a key the operator left bare stays bare, and
+    picks up no trailing whitespace on the way through."""
+    cfg = _write_config(tmp_path)
+    resources = _resources(
+        tmp_path,
+        sites=dedent("""\
+            apiVersion: agentworks/v1
+            kind: vm-site
+            metadata:
+              name: proxmox
+            spec:
+              platform: proxmox
+              platform_config:
+                api_url: https://pve:8006
+                node: pve1
+                token_id: agw@pam!agw
+                template_vmid: 9000
+                token_secret:
+            """),
+    )
+
+    _run(cfg)
+
+    assert "    token_secret:\n" in (resources / "sites.yaml").read_text()
+
+
 def test_rerunning_the_upgrade_is_a_no_op(tmp_path: Path) -> None:
     cfg = _write_config(tmp_path)
     resources = _resources(tmp_path, sites=_COMMENTED_LEGACY)

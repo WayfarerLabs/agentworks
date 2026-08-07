@@ -12,10 +12,8 @@ Three properties shape everything here.
 **Comments survive.** These are files the operator wrote and keeps
 editing, so the rewrite round-trips through ``ruamel.yaml`` rather than
 re-emitting from parsed values: comments, quote style, key order,
-document separators, and unrelated keys all stay put. Only the affected
-document's capability keys move. (One known normalization: an explicit
-``key: ~`` comes back as ``key:``. Both spell the same null to every
-reader, and ruamel's emitter offers no way to keep the tilde.)
+document separators, null spelling, and unrelated keys all stay put.
+Only the affected document's capability keys move.
 
 **ruamel emits; it never reads anything that gets compared.** The
 round-trip loader reads YAML 1.2 and the manifest loader reads YAML 1.1,
@@ -51,6 +49,7 @@ the same reasoning).
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import cache
 from hashlib import sha256
 from io import StringIO
 from typing import TYPE_CHECKING, Any, cast
@@ -234,6 +233,53 @@ def legacy_pre_rows(documents: list[LegacyDocument]) -> dict[tuple[str, str], An
     return rows
 
 
+class _SpelledNull:
+    """A null that remembers how the operator wrote it.
+
+    ruamel's round-trip constructor returns a plain ``None`` for every
+    null, and ``NoneType`` cannot be subclassed, so the source spelling
+    has nowhere to ride back to the emitter. This carries it.
+    """
+
+    __slots__ = ("text",)
+
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+
+@cache
+def _null_preserving_types() -> tuple[Any, Any]:
+    """The ``(Constructor, Representer)`` pair that keeps null spelling.
+
+    SUBCLASSES, not ``add_constructor`` on a live instance:
+    ``add_constructor`` is a classmethod that mutates the class it is
+    reached through, so registering on ``YAML().constructor`` would
+    change round-trip loading for every other ruamel user in the
+    process. Cached because the registration only needs doing once.
+    """
+    from ruamel.yaml.constructor import RoundTripConstructor
+    from ruamel.yaml.representer import RoundTripRepresenter
+
+    class NullPreservingConstructor(RoundTripConstructor):
+        pass
+
+    class NullPreservingRepresenter(RoundTripRepresenter):
+        pass
+
+    def construct(_self: Any, node: Any) -> Any:
+        # A bare ``key:`` has no spelling to preserve, and handing it
+        # back as a _SpelledNull would emit ``key: `` with a trailing
+        # space. Plain None takes ruamel's own (correct) bare path.
+        return _SpelledNull(node.value) if node.value else None
+
+    def represent(self: Any, data: _SpelledNull) -> Any:
+        return self.represent_scalar("tag:yaml.org,2002:null", data.text)
+
+    NullPreservingConstructor.add_constructor("tag:yaml.org,2002:null", construct)
+    NullPreservingRepresenter.add_representer(_SpelledNull, represent)
+    return NullPreservingConstructor, NullPreservingRepresenter
+
+
 def _round_trip() -> Any:
     """The configured round-trip YAML. The EMITTER only, never a reader
     whose values are compared against anything (see ``legacy_pre_rows``).
@@ -249,11 +295,24 @@ def _round_trip() -> Any:
     reading YAML 1.1: ``verify_ssl: no`` is a string to ruamel and comes
     back out as ``no``, so the loader reads the same ``False`` from the
     rewritten file that it read from the original.
+
+    The null spelling is preserved for a sharper reason than symmetry.
+    An explicit ``token_secret: null`` on a site now MEANS the
+    default-named secret, where it used to be a hard error, so it is the
+    one input whose meaning this release changes silently. Normalizing
+    it to a bare ``token_secret:`` would leave the operator with nothing
+    to grep for while the migrator's own summary said the registry was
+    unchanged. The rewrite has no business editing evidence of a
+    decision the operator still has to make, so ``null``, ``~``, and
+    ``Null`` all come back out as they went in.
     """
     from ruamel.yaml import YAML
 
+    constructor_cls, representer_cls = _null_preserving_types()
     yaml = YAML(typ="rt")
     yaml.preserve_quotes = True
+    yaml.Constructor = constructor_cls
+    yaml.Representer = representer_cls
     return yaml
 
 
