@@ -26,12 +26,21 @@ shared machinery worth speaking of.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from collections.abc import Mapping, MutableMapping, MutableSequence, Sequence
+from typing import TYPE_CHECKING, Annotated
 
 import pytest
 from pydantic import BaseModel
 
-from agentworks.schema import RefOwner, extract_references, marker_of, validation_context
+from agentworks.schema import (
+    AgwModel,
+    RefOwner,
+    SecretRef,
+    extract_references,
+    marker_of,
+    reference_marker_error,
+    validation_context,
+)
 
 from ._fixture_models import (
     AzureLike,
@@ -156,6 +165,88 @@ def test_no_reference_a_validated_value_carries_is_missing_from_the_edges(
     # subset assertion below true for a walker that extracted nothing.
     assert expected, "this case carries no reference, so it proves nothing"
     assert expected <= extracted, f"{sorted(expected - extracted)} validated but produced no edge"
+
+
+# --- the same shape spelled every way pydantic accepts -----------------
+#
+# The oracle above cannot reach this one. It reads a marker off a FIELD
+# (see the module docstring), and a collection carries its marker on the
+# ELEMENT, so a collection spelling that extracted nothing would satisfy
+# it vacuously. The oracle here is the CONCRETE spelling of the same
+# shape: pydantic validates ``Sequence[X]`` and ``list[X]`` identically,
+# so a walker that answers differently for the two is wrong about one of
+# them, and the one it is wrong about contributes no edge while its
+# document validates.
+
+#: The one-argument collection spellings a DOCUMENT can address, concrete
+#: and abstract, the concrete one being the baseline the rest are compared
+#: to.
+#:
+#: ``set`` and ``frozenset`` are deliberately absent, and not because the
+#: classifier misses them: it has always read both. They are absent
+#: because a document cannot reach them. Every frontend produces a list,
+#: and ``AgwModel`` is ``strict=True``, so a list handed to a set-typed
+#: field is refused at validation rather than coerced. Asserting agreement
+#: between two derivations over a value neither can be given would be a
+#: test of the test.
+_SEQUENCE_SPELLINGS = [list, Sequence, MutableSequence]
+
+#: The same for the two-argument mapping spellings.
+_MAPPING_SPELLINGS = [dict, Mapping, MutableMapping]
+
+
+def _sequence_model(spelling: object) -> type[BaseModel]:
+    class Spelled(AgwModel):
+        tokens: spelling[Annotated[str, SecretRef(usage="a token")]] = ()  # type: ignore[valid-type]
+
+    return Spelled
+
+
+def _mapping_model(spelling: object) -> type[BaseModel]:
+    class Spelled(AgwModel):
+        tokens: spelling[str, Annotated[str, SecretRef(usage="a token")]] = {}  # type: ignore[valid-type]
+
+    return Spelled
+
+
+@pytest.mark.parametrize("spelling", _SEQUENCE_SPELLINGS, ids=lambda s: getattr(s, "__name__", str(s)))
+def test_every_sequence_spelling_extracts_what_the_concrete_one_does(spelling: object) -> None:
+    model_cls = _sequence_model(spelling)
+    blob = {"tokens": ["named"]}
+
+    model_cls.model_validate(blob, context=validation_context(OWNER))
+    assert {ref.name for ref in extract_references(model_cls, blob, OWNER)} == {"named"}
+
+
+@pytest.mark.parametrize("spelling", _MAPPING_SPELLINGS, ids=lambda s: getattr(s, "__name__", str(s)))
+def test_every_mapping_spelling_extracts_what_the_concrete_one_does(spelling: object) -> None:
+    model_cls = _mapping_model(spelling)
+    blob = {"tokens": {"k": "named"}}
+
+    model_cls.model_validate(blob, context=validation_context(OWNER))
+    assert {ref.name for ref in extract_references(model_cls, blob, OWNER)} == {"named"}
+
+
+def test_a_shape_no_spelling_covers_is_refused_rather_than_walked_silently() -> None:
+    """The other half of the rule above, and the reason it is safe for the
+    list of spellings to be finite.
+
+    A marker the classifier cannot place extracts nothing, which is the
+    silent failure this whole suite is about. It is not left silent: the
+    model is refused where an author can see it, so an unrecognized shape
+    costs a registration error rather than a missing graph edge. Pinned
+    here, next to the spellings that ARE covered, because the two facts
+    are only safe together.
+    """
+
+    class Nested(AgwModel):
+        tokens: dict[str, list[Annotated[str, SecretRef(usage="a token")]]] = {}
+
+    blob = {"tokens": {"k": ["named"]}}
+    Nested.model_validate(blob, context=validation_context(OWNER))
+
+    assert extract_references(Nested, blob, OWNER) == ()
+    assert reference_marker_error(Nested) is not None, "an unwalkable marker must not also be accepted"
 
 
 def test_the_oracle_sees_what_the_walker_would_miss() -> None:

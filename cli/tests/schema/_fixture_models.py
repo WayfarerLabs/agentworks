@@ -11,6 +11,8 @@ parity tests at them.
 from __future__ import annotations
 
 import socket
+from collections.abc import Mapping, MutableMapping, MutableSequence, Sequence
+from collections.abc import Set as AbstractSet
 from typing import Annotated, ClassVar, Literal
 
 from pydantic import AfterValidator, Discriminator, Field
@@ -215,6 +217,100 @@ class FieldTaggedCollectionSite(AgwModel):
     """
 
     platforms: list[Annotated[LimaArm | ProxmoxArm, Field(discriminator="name")]] = Field(default_factory=list)
+
+
+class EveryArmMarkedFirst(AgwModel):
+    """One arm of :class:`EveryArmMarkedSite`, naming a Resource of its
+    own even when the operator writes nothing but the tag."""
+
+    name: Literal["first-arm"]
+    token_secret: (
+        Annotated[str, SecretRef(usage="the first arm's token", default_template="first-arm-token")] | None
+    ) = None
+
+
+class EveryArmMarkedSecond(AgwModel):
+    """The other arm, naming a DIFFERENT Resource, so which arm a walker
+    selected is readable from the edge it produced."""
+
+    name: Literal["second-arm"]
+    token_secret: (
+        Annotated[str, SecretRef(usage="the second arm's token", default_template="second-arm-token")] | None
+    ) = None
+
+
+class EveryArmMarkedSite(AgwModel):
+    """A tagged union in which EVERY arm names a Resource.
+
+    Selecting no arm is observable only against a union where selecting
+    one would show. Every other tagged fixture here has :class:`LimaArm`
+    in it, which names nothing, so a walker that fell back to some arm for
+    a block that named none could produce the same empty tuple as one that
+    correctly selected nothing, and a test written against it would pass
+    for the wrong reason.
+
+    Marking every arm rather than putting the marked one FIRST is
+    deliberate, and the first attempt at this fixture is why. Arm order
+    cannot be relied on: ``A | B`` and ``B | A`` are the same object to
+    Python, so spelling a union in the other order returns the one already
+    built and the "first" arm is whichever arm some earlier fixture put
+    there. Marking all of them makes the assertion independent of order,
+    which is the property being tested anyway: no arm at all, not "not
+    that particular arm".
+
+    Each marker carries a default template, so an arm contributes its edge
+    from a block holding nothing but a tag. That is what lets the
+    no-arm cases be spelled as nearly-empty blocks.
+    """
+
+    platform: Annotated[EveryArmMarkedFirst | EveryArmMarkedSecond, Discriminator("name")]
+
+
+class EveryArmMarkedCollectionSite(AgwModel):
+    """:class:`EveryArmMarkedSite`'s union held by collections.
+
+    The element walker selects arms through the same call the field walker
+    does, so the observability the fixture above buys is worth nothing
+    unless the collection path is asked the same question.
+    """
+
+    platforms: list[Annotated[EveryArmMarkedFirst | EveryArmMarkedSecond, Discriminator("name")]] = Field(
+        default_factory=list
+    )
+    platforms_by_name: dict[str, Annotated[EveryArmMarkedFirst | EveryArmMarkedSecond, Discriminator("name")]] = Field(
+        default_factory=dict
+    )
+
+
+class AbstractCollectionLike(AgwModel):
+    """Collections spelled as ABCs rather than as concrete classes.
+
+    Pydantic accepts these exactly as it accepts ``list`` and ``dict``, and
+    the raw values a YAML or TOML frontend produces for them are the same
+    lists and tables, so a classifier that recognized only the concrete
+    spelling would leave every marker here unread while the document
+    validated cleanly. That is the silent shape: the dependency graph is
+    built from the extracted edges BEFORE validation, so a secret named
+    under one of these would never be gated, resolved, or reported.
+
+    ``set_tokens`` is classified like the ``set`` and ``frozenset``
+    spellings that were always read, and like them it is a shape no
+    DOCUMENT can fill: a frontend produces a list, and ``AgwModel`` is
+    ``strict=True``, so validation refuses the list rather than coercing
+    it. Carried here so the abstract spelling is read the same way its
+    concrete twins are, not as a claim that an operator can write one.
+    """
+
+    sequence_tokens: Sequence[Annotated[str, SecretRef(usage="a token in a Sequence")]] = ()
+    mutable_sequence_tokens: MutableSequence[Annotated[str, SecretRef(usage="a token in a MutableSequence")]] = Field(
+        default_factory=list
+    )
+    mapping_tokens: Mapping[str, Annotated[str, SecretRef(usage="a token in a Mapping")]] = Field(default_factory=dict)
+    mutable_mapping_tokens: MutableMapping[str, Annotated[str, SecretRef(usage="a token in a MutableMapping")]] = Field(
+        default_factory=dict
+    )
+    set_tokens: AbstractSet[Annotated[str, SecretRef(usage="a token in an abstract Set")]] = frozenset()
+    blocks: Sequence[GithubLike] = ()
 
 
 class NumericallyTaggedSite(AgwModel):
@@ -468,6 +564,11 @@ ALL_FIXTURES = (
     FieldDiscriminatedSite,
     OptionalUnionSite,
     RenamedArmSite,
+    EveryArmMarkedFirst,
+    EveryArmMarkedSecond,
+    EveryArmMarkedSite,
+    EveryArmMarkedCollectionSite,
+    AbstractCollectionLike,
     NumericallyTaggedSite,
     UndiscriminatedSite,
     OneArmSite,

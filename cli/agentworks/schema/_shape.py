@@ -14,7 +14,8 @@ from __future__ import annotations
 
 import types
 import typing
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from collections.abc import Set as AbstractSet
 from contextlib import suppress
 from dataclasses import dataclass
 from enum import Enum
@@ -432,18 +433,43 @@ def _collection_element(annotation: object) -> tuple[Collection, object] | None:
     """What kind of collection ``annotation`` is and what ONE element of
     it holds, or ``None`` when the field holds a single value.
 
-    A fixed-length heterogeneous tuple (``tuple[str, int]``) is not a
-    collection here: it has no single element type, and it is not a shape
-    an operator writes in YAML.
+    Recognized by what the origin IS rather than by a list of concrete
+    classes, the way :func:`accepts_table` already answers the neighbouring
+    question. ``Sequence[X]`` and ``list[X]`` are the same shape to every
+    reader of a :class:`FieldShape`, and the raw values a YAML or TOML
+    frontend produces are lists and tables either way, so classifying only
+    the concrete spelling would leave the abstract one holding a marker
+    that nothing extracts. Silence there is a gating bypass rather than a
+    cosmetic gap: the dependency graph is built from the extracted edges
+    BEFORE anything validates, so a secret named under an unclassified
+    collection is never gated, never resolved, and never reported.
+
+    Mapping is asked FIRST because every mapping is also a ``Collection``
+    and an ``Iterable``, and it addresses its VALUES: reading a table as a
+    sequence would classify its element type off the wrong type argument.
+
+    Two shapes are deliberately not collections here. A fixed-length
+    heterogeneous tuple (``tuple[str, int]``) has no single element type,
+    and it is not a shape an operator writes in YAML. A NESTED collection
+    (``dict[str, list[X]]``) is one this flat classifier cannot describe:
+    :class:`FieldShape` says what a field holds and what ONE value inside
+    it holds, and there is no third level to put the inner element in.
+    Both fall through to ``None``, and a marker underneath either is
+    refused at registration by
+    :func:`~agentworks.schema.reference_marker_error` rather than silently
+    dropped, which is what keeps this function's list of recognized shapes
+    from being a list of silent failures.
     """
     origin = get_origin(annotation)
     args = get_args(annotation)
-    if origin is dict:
+    if not isinstance(origin, type):
+        return None
+    if issubclass(origin, Mapping):
         return (Collection.MAPPING, args[1]) if len(args) == 2 else None
     if origin is tuple:
         return (Collection.SEQUENCE, args[0]) if len(args) == 2 and args[1] is Ellipsis else None
-    if origin in (list, set, frozenset):
-        return (Collection.SEQUENCE, args[0]) if args else None
+    if issubclass(origin, (Sequence, AbstractSet)):
+        return (Collection.SEQUENCE, args[0]) if len(args) == 1 else None
     return None
 
 
@@ -452,6 +478,34 @@ def _first_marker(metadata: list[object]) -> RefMarker | None:
         if isinstance(item, RefMarker):
             return item
     return None
+
+
+def markers_in(annotation: object) -> tuple[RefMarker, ...]:
+    """Every reference marker written anywhere inside ``annotation``, at
+    any depth, as the marker OBJECTS the author attached.
+
+    The counterpart to the classifier rather than a part of it: where
+    :func:`shape_of` reports the markers it can place (``marker`` for the
+    field's own value, ``item_marker`` for one element of a collection),
+    this reports the markers that are THERE. A marker in the second set
+    and not the first is one no walker will ever read, and the whole
+    point of returning the objects rather than a count is that the two
+    sets are compared by identity: see
+    :func:`~agentworks.schema.reference_marker_error`, which turns the
+    difference into a registration refusal.
+
+    The walk stops at a model, because a model's markers belong to its own
+    fields and are judged when that model is judged. It is finite for the
+    same reason: a recursive model is reached as a model, not as a tree of
+    annotations.
+    """
+    base, metadata = split_annotated(annotation)
+    found = [item for item in metadata if isinstance(item, RefMarker)]
+    if _is_model(base):
+        return tuple(found)
+    for arg in get_args(base):
+        found.extend(markers_in(arg))
+    return tuple(found)
 
 
 def strip_markers(annotation: object) -> object:

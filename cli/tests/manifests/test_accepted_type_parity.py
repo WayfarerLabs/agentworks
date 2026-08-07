@@ -41,6 +41,8 @@ comparison must not read as arms:
 from __future__ import annotations
 
 import types
+from collections.abc import Mapping, Sequence
+from collections.abc import Set as AbstractSet
 from datetime import date, datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Final, Literal, Union, get_args, get_origin
@@ -88,10 +90,17 @@ def _annotation_types(annotation: object) -> frozenset[str]:
         return frozenset[str]().union(*(_annotation_types(arg) for arg in get_args(annotation)))
     if origin is Literal:
         return frozenset(_value_type(value) for value in get_args(annotation))
-    if origin is dict:
-        return frozenset({"object"})
-    if origin in (list, set, frozenset, tuple):
-        return frozenset({"array"})
+    # Asked as "what does this origin BEHAVE like" rather than against a
+    # list of concrete classes, so an author who spells a field with the
+    # ABC (``Sequence[str]``) gets the same answer as one who spells it
+    # ``list[str]``, which is the answer pydantic gives. Mapping first:
+    # every mapping is also a ``Collection``, and it serializes as an
+    # object rather than an array.
+    if isinstance(origin, type):
+        if issubclass(origin, Mapping):
+            return frozenset({"object"})
+        if issubclass(origin, (Sequence, AbstractSet)) and origin is not str:
+            return frozenset({"array"})
     if isinstance(annotation, type) and issubclass(annotation, Enum):
         return frozenset(_value_type(member.value) for member in annotation)
     if isinstance(annotation, type) and issubclass(annotation, BaseModel):
