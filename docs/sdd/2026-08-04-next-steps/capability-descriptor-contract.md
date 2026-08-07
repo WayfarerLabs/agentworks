@@ -73,11 +73,18 @@ each, so wave 2 neither builds them early nor reinvents them later:
 ```text
     consumer_gating          when gating derivation actually consolidates (the first new consuming
                              surface, waves 3 and 4); wave 2 changes no gating behavior
-    migration_participation  only if wave 2 rules that `agw resource migrate` survives AND should
-                             derive from the live descriptor; note the counterargument that the
-                             migrator is deliberately an independent frozen oracle and may never
-                             derive from live wiring
+    migration_participation  RETIRED 2026-08-07: `agw resource migrate` was deleted per the
+                             remediation-posture ruling, so this field's trigger can no longer fire
 ```
+
+**Amendment (roadmap ruling, 2026-08-07): map-keyed hosting becomes a descriptor field.** The wave 2
+closeout escalated that emission for map-keyed capability config (the `secret.backend_mappings`
+table) cannot be spliced without the descriptor recording where a map-keyed capability is hosted,
+and the trigger has fired (`onepassword` ships a fully modeled mapping that gets no completions or
+key checking). The descriptor therefore gains a field (name indicative: `mapping_host`) recording
+the hosting surface for a kind's map-keyed config, with schema emission as its first consumer. This
+follows the contract's own rule (a field exists only when it has a consumer; adding it is purely
+additive) and lands with wave 3 (`docs/sdd/2026-08-07-secret-sources/`, R8).
 
 ### Config schemas
 
