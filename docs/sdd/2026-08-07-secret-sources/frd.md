@@ -30,16 +30,21 @@ declarable instance kind, the secret-backend analog of vm-site").
   unchanged, and the model has exactly one concept (sources). Synthesized sources appear on
   discovery surfaces (describe, samples, guide) like declared ones.
 - R3. Every per-secret reference names a source. Direct backend references become a deprecated
-  compatibility path riding the kept config deprecation channel (warn in one release, reject in the
-  next), never a permanent second branch.
+  compatibility path (warn in one release, reject in the next), never a permanent second branch. The
+  runway has two carriers: the settings-side chain (`[secret_config].backends`) rides the kept
+  config deprecation channel, while manifest-side per-secret references need their own carrier added
+  into the shared deprecation surface (the per-source-carrier pattern recorded at the kept channel,
+  reusing `--no-deprecations` and the suppression reporting), built as part of this wave. This is
+  the "rebuild one" branch `target-state.md`'s manifest channel-gap item anticipated, and this wave
+  closes that item.
 - R4. Resolution API evolution: typed per-secret outcomes with explicit failure categories,
   policy-aware interaction requirements (the non-interactive discipline the verification surfaces
   established), timeouts and cleanup, and bounded-lifetime source clients. The simple case must not
   get more verbose.
 - R5. The descriptor's constructed-singleton interim exception is removed: the `secret-backend`
   registry stores classes or factories like every other kind, with a chosen construction point and
-  the resolve machinery updated. Lifecycle layering per the descriptor contract: source resolution
-  runs upstream of every other capability's runup.
+  the resolve machinery updated. Lifecycle layering per `target-state.md`'s descriptor rulings:
+  source resolution runs upstream of every other capability's runup.
 - R6. **A source's config MUST NOT reference secrets** (v1), enforced structurally at registration
   conformance (no secret-reference-annotated fields in a source config model), keeping resolution
   single-stage and the chain a simple order. Interactive authentication remains source-client
@@ -77,9 +82,10 @@ declarable instance kind, the secret-backend analog of vm-site").
   report through them.
 - AC2. A declared source (the `onepassword` account case) is a manifest resource with validated
   config, readiness, and describe/schema/sample surfaces derived from its models.
-- AC3. A direct backend reference warns through the deprecation channel with the exact rewrite
-  named; the same reference under the next release's posture hard-errors (mechanism proven in tests;
-  the release flip itself is scheduled work).
+- AC3. A direct backend reference warns through its carrier (config channel for the settings chain,
+  the new manifest carrier for per-secret references) with the exact rewrite named; the same
+  reference under the next release's posture hard-errors (mechanism proven in tests; the release
+  flip itself is scheduled work).
 - AC4. Editing an `onepassword` `backend_mappings` table in a schema-associated editor offers
   completions and key checking (R8 landed end to end).
 - AC5. Resolution outcomes are typed: at minimum unavailable, refused-interaction, timeout, and
@@ -93,8 +99,8 @@ declarable instance kind, the secret-backend analog of vm-site").
 - The readiness shape the `secret-source` kind declares (capability classmethod over config versus
   consuming-resource hook); the descriptor records the choice made (descriptor contract, open
   question carried from wave 2).
-- Whether the backend's per-secret `mapping_model` re-homes onto the source (wave 2's lockfile
-  leaves this to wave 3).
+- Whether the backend's per-secret `mapping_model` re-homes onto the source (the descriptor contract
+  and the wave 2 plan record this as wave 3's call).
 - How synthesized sources are represented internally (true registry rows versus a projection) so
   long as R2's surface behavior holds.
 - The deprecation window release mapping (which release warns, which rejects), proposed to the

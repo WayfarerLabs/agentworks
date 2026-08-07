@@ -114,10 +114,11 @@ The switchboard collapses: every site that today independently enumerates the fo
 from the descriptor table instead. From `starting-state.md`, that is the adapter table (one generic
 adapter parameterized by descriptor replaces the four hand-written five-method classes), the graph's
 kind set and readiness dispatch, the per-kind registry loaders, bootstrap publication, the
-plugin-registry snapshot/restore tuple, and manifest decode's kind sections. The migrator's kind
-participation flags stay hand-maintained unless the deferred `migration_participation` field is ever
-created (see the deferred list above). The existing guard test flips its job from "detect an omitted
-site" to "assert every site derives."
+plugin-registry snapshot/restore tuple, and manifest decode's kind sections. (The migrator's kind
+participation flags were resolved by deletion: the migrator went per the 2026-08-07
+remediation-posture ruling, and its flags and the `migration_participation` trigger went with it;
+see the retired entry in the deferred list above.) The existing guard test flips its job from
+"detect an omitted site" to "assert every site derives."
 
 ## What stays domain-owned
 
@@ -153,14 +154,14 @@ internal extension framework; it does not create a public plugin promise, which 
 - `secret-backend` is the implementation kind; `secret-source` is the declarable configured instance
   kind (the vm-site analog), carrying the per-source config model, references, and readiness.
   Zero-config backends get synthesized sources under their current names per `target-state.md`.
-- Lifecycle layering (proposed decision): sources resolve in active-chain order, and in the first
-  version a source's config MUST NOT reference secrets. Enforcement is structural, at registration
-  conformance: the source config model may carry no secret-reference-annotated fields, so the rule
-  cannot be violated by any operator config. This keeps resolution single-stage and the chain a
-  simple order rather than a dependency graph. Interactive authentication (a vault prompting the
-  operator) is source-client behavior, not a secret reference, so it stays legal. If a future
-  backend genuinely needs secret-valued config, the chain order is promoted to an explicit
-  resolution order then, as its own decision.
+- Lifecycle layering (promoted from proposed to settled, roadmap ruling 2026-08-07, seeded as wave 3
+  R6): sources resolve in active-chain order, and in the first version a source's config MUST NOT
+  reference secrets. Enforcement is structural, at registration conformance: the source config model
+  may carry no secret-reference-annotated fields, so the rule cannot be violated by any operator
+  config. This keeps resolution single-stage and the chain a simple order rather than a dependency
+  graph. Interactive authentication (a vault prompting the operator) is source-client behavior, not
+  a secret reference, so it stays legal. If a future backend genuinely needs secret-valued config,
+  the chain order is promoted to an explicit resolution order then, as its own decision.
 - Relocation into the `capabilities/` tree rides wave 3, and `_VMPlatformKind` moves in from
   `vms/kinds.py` during descriptor adoption for symmetry.
 
