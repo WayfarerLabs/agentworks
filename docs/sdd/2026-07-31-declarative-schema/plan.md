@@ -973,6 +973,46 @@ final state is not a closeout review, so it was re-run at `a597997c`, and the re
 regression: two fix commits collided, so an explicit `null` tripped a refusal added for data loss
 and rendered a heap address in an operator-facing message.
 
+## Rework round (roadmap-lead review, 2026-08-07)
+
+The review returned request-changes on three blockers plus a should-fix list, and an operator ruling
+landed alongside it deleting the migrator outright. Completed boxes above are the record of what was
+BUILT, including the migrator; they stay as written. These are the boxes for what the rework did.
+
+- [x] Plan structural repairs: the 2.3 LLD box un-spliced, the facet-contract box detached from the
+      prose line it was glued to (findings 1, 2).
+- [x] Capability config validated regardless of readiness and enablement (finding 16, plus the
+      operator ruling that unexpected keys are config errors everywhere unless the model allows
+      them). Readiness was computed from config the validate pass had not yet checked, so a
+      misspelled key suppressed the error naming it.
+- [x] B2: a silent parent no longer overwrites a declaring one, in all four resolvers. Coverage
+      restored and mutation-verified. Two defects the review did not find: a misspelled parent
+      clobbered identically, and a diamond re-applied the grandparent over the parent that overrode
+      it.
+- [x] `agw resource migrate` deleted, both halves, with its guards re-anchored, its hints repointed
+      at the manual path, and its completion providers removed.
+- [x] Schema correctness: findings 4, 6, 7, 22, and the rule D reachability verdict (reachable for
+      built-ins, which never pass through plugin registration).
+- [x] Two shared components replacing seven local patches: `agentworks/traversal.py` and
+      `manifests/yaml_value.py` (findings 3, 5, 17, 19, 20, 21).
+- [x] `capabilities/facets.py` and the `facet` parameter removed until there is a consumer; the
+      contract stays settled in the roadmap docs (findings 25, 28).
+- [x] `ruamel-yaml` and `tomlkit` removed, orphaned by the deletion.
+- [x] FRD and HLA reconciled with the ruling; dated entry on the readiness refactor's lockfile,
+      which is on `main` and therefore locked.
+- [ ] R9.9's enablement-keyed validation suppression closed (operator ruling: an operator should not
+      accumulate invalid config that blows up when they enable the resource).
+- [ ] Robustness and test hardening: findings 14, 18, 24, 27, 31, the surviving union arm noise, and
+      the two style nits.
+- [ ] Operator upgrade guide rewritten for the no-migrator path, including the agent-led route.
+- [ ] INDEPENDENT operator rehearsal of the rewritten guide. Not optional and not the writer's to
+      run: the migrator-era rehearsal took 13 rounds against a guide whose content was correct and
+      whose order could not work, and prose review cannot find an ordering defect.
+- [ ] Unknown-key posture applied uniformly across config.toml, kind specs, and capability blobs.
+- [ ] `locked.md` rewritten to describe what ships. The lock binds at `main`, so pre-merge this is
+      an ordinary edit rather than a dated superseding entry.
+- [ ] Final review pass at the finished state.
+
 ## Pressure-test notes (what writing this plan surfaced)
 
 - The migrator pre-side "relocate the loaders into migrate/" candidate resolves FR2, verification
