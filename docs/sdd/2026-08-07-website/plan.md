@@ -29,7 +29,7 @@ landing on `main`. Design and review proceed now; no website code binds to its f
 
 - [x] FRD ownership/status, prior-art research, HLA, and this plan are internally consistent and
       pass repository file-quality checks.
-- [ ] Draft design PR opened for pre-implementation review and explicitly sent to the roadmap lead,
+- [x] Draft design PR opened for pre-implementation review and explicitly sent to the roadmap lead,
       because the roadmap lead seeded this standalone effort and reviews its PRs.
 - [x] `agentworks-reviewer` reviews the artifacts against the FRD, project principles, SDD process,
       and roadmap constraints; all valid findings are resolved and re-reviewed.
