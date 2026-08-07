@@ -165,35 +165,17 @@ def test_inherits_default_works_without_operator_declaration(tmp_path: Path) -> 
     assert child.origin.variant == "operator-declared"
 
 
-def test_non_default_inherits_cycle_caught_by_framework(tmp_path: Path) -> None:
-    """Mutually-inheriting templates form a cycle; the resolver's
-    internal visited-set guard catches it during ``load_config``'s
-    eager resolve of the default template. The framework's
-    ``Registry.finalize`` cycle pass is the canonical check (and
-    runs independently at ``build_registry`` time); the resolver
-    guard is the safety net for the load-time eager path.
-
-    Note: this particular config (cycle between non-default
-    templates) doesn't actually trip the eager resolve, since
-    ``resolve_from_dict`` only descends from "default". The
-    framework path is what catches it here.
-    """
-    cfg_file = _write_cfg(
-        tmp_path / "config.toml",
-        ManifestDoc("vm-template", "a", {"inherits": ["b"]}),
-        ManifestDoc("vm-template", "b", {"inherits": ["a"]}),
-    )
-    cfg = load_config(cfg_file, warn_issues=False)
-    with pytest.raises(ConfigError, match="cycle detected"):
-        build_registry(cfg)
-
-
 def test_non_default_self_reference_caught_by_framework(tmp_path: Path) -> None:
-    """``inherits = ["a"]`` where the template itself is ``a`` -- a
-    self-loop is a one-node cycle. As with the mutual-inherits case,
-    a non-default self-loop slips past the eager resolve (which
-    descends from "default" only) and is caught by the framework's
-    cycle pass at ``build_registry`` time.
+    """``inherits = ["a"]`` where the template itself is ``a``: a
+    self-loop is a one-node cycle. A non-default self-loop slips past the
+    eager resolve (which descends from "default" only) and is caught by
+    the framework's cycle pass at ``build_registry`` time.
+
+    The one-node shape is what this case is here for. The two-node one is
+    pinned once, in ``test_template_kinds.py``, since the detector
+    branches on nothing kind-shaped; publishing the same two-node cycle
+    straight into a ``Registry`` rather than through manifests reached
+    that same pass by a shorter road and proved nothing further.
     """
     cfg_file = _write_cfg(
         tmp_path / "config.toml",
@@ -202,33 +184,6 @@ def test_non_default_self_reference_caught_by_framework(tmp_path: Path) -> None:
     cfg = load_config(cfg_file, warn_issues=False)
     with pytest.raises(ConfigError, match="cycle detected"):
         build_registry(cfg)
-
-
-def test_framework_cycle_detector_catches_registry_cycles(tmp_path: Path) -> None:
-    """The framework's cycle detector is the canonical check (per
-    Phase 2a.1's design). Bypass the defensive load-time check by
-    publishing VMTemplates directly into a Registry, then finalize.
-    The framework pass should detect the cycle and raise.
-    """
-    from agentworks.resources import Origin, Registry
-    from agentworks.vms.template import VMTemplate
-
-    registry = Registry.empty()
-    fake_origin = Origin.operator_declared(file=tmp_path / "c.toml", line=1)
-    registry.add(
-        "vm-template",
-        "a",
-        VMTemplate(name="a", inherits=["b"]),
-        fake_origin,
-    )
-    registry.add(
-        "vm-template",
-        "b",
-        VMTemplate(name="b", inherits=["a"]),
-        fake_origin,
-    )
-    with pytest.raises(ConfigError, match="cycle detected"):
-        registry.finalize()
 
 
 def test_inherits_cycle_through_default_caught_at_build_registry(tmp_path: Path) -> None:

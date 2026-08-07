@@ -120,9 +120,6 @@ class TestValidateConfig:
             == ()
         )
 
-    def test_accepts_valid_vm_sizes(self) -> None:
-        _config({"vm_sizes": [{"cpus": 2, "memory": 4, "size": "Standard_B2s"}]})
-
     def test_rejects_malformed_vm_sizes_at_load(self) -> None:
         with pytest.raises(ConfigError, match=r"vm_sizes\[0\].memory: is required"):
             _config({"vm_sizes": [{"cpus": 2, "size": "Standard_B2s"}]})

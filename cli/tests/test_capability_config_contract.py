@@ -385,7 +385,11 @@ def test_prompt_rejects_any_mapping(tmp_path: Path) -> None:
     """Prompt has no mapping vocabulary: any non-false value is dead
     config (a typo for another backend) and errors at build_registry.
     The generic false opt-out is loop-owned and never reaches the
-    capability."""
+    capability.
+
+    One value, and "any" is not an overclaim: ``PromptMapping``'s
+    before-validator raises without looking at the value at all, so a
+    table refuses for exactly the reason a string does."""
     _manifest(
         tmp_path,
         ManifestDoc("secret", "npm-token", {"backend_mappings": {"prompt": "ignored"}}, description="npm token"),
@@ -430,18 +434,6 @@ def test_declared_mapping_for_non_opted_in_backend_is_validated_at_build(tmp_pat
         """,
     )
     with pytest.raises(ConfigError, match="backend_mappings.env-var: must be a string"):
-        build_registry(config)
-
-
-def test_prompt_rejects_structured_mapping_too(tmp_path: Path) -> None:
-    _manifest(
-        tmp_path,
-        ManifestDoc(
-            "secret", "npm-token", {"backend_mappings": {"prompt": {"vault": "Work"}}}, description="npm token"
-        ),
-    )
-    config = _config(tmp_path)
-    with pytest.raises(ConfigError, match="prompt backend has no mapping vocabulary"):
         build_registry(config)
 
 

@@ -179,36 +179,25 @@ def test_inherits_default_works_without_operator_declaration(spec: _KindSpec, tm
     assert child.origin.variant == "operator-declared"
 
 
-@pytest.mark.parametrize("spec", SPECS, ids=lambda s: s.kind)
-def test_inherits_cycle_caught_by_framework(spec: _KindSpec, tmp_path: Path) -> None:
+def test_inherits_cycle_caught_by_framework(tmp_path: Path) -> None:
     """Non-default cycles slip past any load-time eager resolve
     (workspace and session resolve lazily; agent's eager resolve only
     descends from default). The framework's cycle pass at
     build_registry time catches them.
+
+    One kind, not all three: ``Registry._detect_cycles`` is a DFS over
+    the built edge map and branches on nothing kind-shaped, and THAT each
+    kind emits its inherits edges at all is what
+    ``test_template_dependencies_emits_template_requirement`` pins, per
+    kind. A cycle through ``default``, where materialization is also in
+    play, is a different shape and is pinned on vm-template in
+    ``test_vm_template_kind.py``.
     """
     cfg_file = _write_cfg(
         tmp_path / "config.toml",
-        ManifestDoc(spec.kind, "a", {"inherits": ["b"]}),
-        ManifestDoc(spec.kind, "b", {"inherits": ["a"]}),
+        ManifestDoc("agent-template", "a", {"inherits": ["b"]}),
+        ManifestDoc("agent-template", "b", {"inherits": ["a"]}),
     )
     cfg = load_config(cfg_file, warn_issues=False)
     with pytest.raises(ConfigError, match="cycle detected"):
-        build_registry(cfg)
-
-
-def test_agent_template_default_cycle_caught_at_build_registry(tmp_path: Path) -> None:
-    """A cycle through ``default`` loads cleanly (Phase 1 of the
-    resource-manifests SDD removed load_config's eager default
-    resolve) and is caught by the framework's cycle pass at
-    build_registry time. The resolver's internal visited-set guard
-    remains as a safety net for callers that resolve without going
-    through build_registry.
-    """
-    cfg_file = _write_cfg(
-        tmp_path / "config.toml",
-        ManifestDoc("agent-template", "default", {"inherits": ["a"]}),
-        ManifestDoc("agent-template", "a", {"inherits": ["default"]}),
-    )
-    cfg = load_config(cfg_file, warn_issues=False)
-    with pytest.raises(ConfigError, match="cycle"):
         build_registry(cfg)

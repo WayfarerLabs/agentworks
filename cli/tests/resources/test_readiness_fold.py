@@ -119,25 +119,6 @@ def _present(registry: Registry, kind: str, name: str) -> bool:
 # -- The fixture disabled node (R7): the enablement axis, modeled --------------
 
 
-def test_disabled_platform_dependency_propagates_enable_its_unit() -> None:
-    """The enablement branch of ``vm-site.not_ready``: a DISABLED platform
-    dependency yields the "enable its unit" hint read off the disabled node's
-    own state. No producer ships a disabled node this effort, so the axis is
-    proven by handing ``not_ready`` a disabled ``DependencyState`` directly
-    (the fold's job is only to distribute these states)."""
-    site = VMSiteDecl(name="x", platform=CapabilityBlock.of("lima", **{}))
-    deps: dict[tuple[str, str], DependencyState] = {
-        ("vm-platform", "lima"): DependencyState(
-            enablement=Enablement.disabled,
-            readiness=None,  # None iff disabled
-            impl=None,
-        )
-    }
-    verdict = site.not_ready(deps)
-    assert not verdict.is_ready
-    assert verdict.reason == "depends on vm-platform 'lima', which is disabled; enable its unit"
-
-
 def test_not_ready_platform_dependency_propagates_its_reason() -> None:
     """An enabled-but-not-ready platform propagates its verdict verbatim into
     the site's verdict (the self-determined single-platform AND). The platform's
@@ -157,8 +138,13 @@ def test_not_ready_platform_dependency_propagates_its_reason() -> None:
 
 
 def test_disabled_platform_node_folds_end_to_end_to_enable_its_unit() -> None:
-    """R7 end-to-end: the FOLD distributes a disabled dependency's state, not
-    just the leaf ``not_ready`` logic. A registry is finalized with the lima
+    """R7: the enablement branch of ``vm-site.not_ready``, reached the way
+    production reaches it.
+
+    The FOLD distributes a disabled dependency's state, not just the leaf
+    ``not_ready`` logic, so going end to end covers both and handing
+    ``not_ready`` a hand-built disabled ``DependencyState`` covers only the
+    leaf. A registry is finalized with the lima
     platform node injected DISABLED via a stub enablement source; the fold then
     hands the (remote-ready) site a disabled platform ``DependencyState``, and
     the site's stored ``readiness_of`` verdict, the graph's source of truth, is
@@ -341,23 +327,15 @@ def test_fold_does_not_throw_on_malformed_platform_config() -> None:
 def test_r5_ready_site_with_unknown_field_fails_validation() -> None:
     """R5: readiness is not validity. A ready site (lima is supported
     everywhere; no vm_host but we make it ready) with an unknown config field
-    still fails the validate pass."""
+    still fails the validate pass.
+
+    The NOT-ready host is not a second test: the typo case below runs its
+    whole assertion under both host states, which is where the direction
+    R9.4 originally had backwards is pinned (deferring validation until a
+    resource was ready meant a not-ready host silently accepted config a
+    ready host refused, so what "valid" meant depended on the machine
+    reading the document)."""
     site = VMSiteDecl(name="bad", platform=CapabilityBlock.of("lima", **{"vm_host": "me@box", "bogus": "x"}))
-    with pytest.raises(ConfigError, match="bogus: unknown field"):
-        _finalized(site)
-
-
-def test_not_ready_site_malformed_block_is_still_validated(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Validation does not depend on readiness. With no local ``limactl`` the
-    local-lima site is NOT-ready, and its unknown config field is refused all
-    the same, with the same message a ready site gets (compare R5 above).
-
-    This is the direction R9.4 originally had backwards. Deferring validation
-    until a resource was ready meant a not-ready host silently accepted config
-    that a ready host refused, so what "valid" meant depended on the machine
-    reading the document."""
-    monkeypatch.setattr("shutil.which", lambda name: None)  # no limactl
-    site = VMSiteDecl(name="local", platform=CapabilityBlock.of("lima", **{"bogus": "x"}))
     with pytest.raises(ConfigError, match="bogus: unknown field"):
         _finalized(site)
 

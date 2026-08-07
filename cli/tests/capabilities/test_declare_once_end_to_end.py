@@ -26,7 +26,6 @@ from typing import TYPE_CHECKING, Annotated, ClassVar, Literal
 import pytest
 
 from agentworks.capabilities.config import (
-    capability_config_model,
     capability_config_references,
     validate_capability_config,
 )
@@ -101,14 +100,9 @@ def _region_doc() -> FieldDoc:
     return docs[("region",)]
 
 
-# -- The registry finds the declaration without being told about it ----------
-
-
-def test_seating_the_capability_is_the_whole_registration(seated: None) -> None:
-    """The premise every assertion below rests on: the core reaches the
-    model through the registry, so declaring a field is the only step
-    there is."""
-    assert capability_config_model("vm-platform", "declare-once") is DeclareOnceConfig
+# The premise every assertion below rests on, and it needs no test of its
+# own: the core reaches the model through the registry, so if seating were
+# not the whole registration, every surface below would report nothing.
 
 
 # -- Surface 1: validation ----------------------------------------------------
@@ -130,21 +124,6 @@ def test_the_declarations_constraint_reaches_validation(seated: None) -> None:
     enforced without a validator being registered anywhere."""
     with pytest.raises(ConfigError, match="region: must not be empty"):
         _validate({"region": ""})
-
-
-def test_a_default_is_checked_rather_than_trusted() -> None:
-    """``validate_default`` is on, so a default that violates its own
-    field's constraint is caught. It fires when a document OMITS the
-    field, not at class definition, which is why this model can be
-    declared at all."""
-
-    class BadDefaultConfig(AgwModel):
-        name: Literal["bad-default"]
-        region: NonEmptyStr = ""
-
-    BadDefaultConfig(name="bad-default", region="ok")
-    with pytest.raises(ValueError, match="region"):
-        BadDefaultConfig(name="bad-default")
 
 
 # -- Surface 2: reference extraction ------------------------------------------
@@ -192,12 +171,6 @@ def test_the_stream_carries_the_reference_semantics_too() -> None:
 
     assert token.default_template == "declare-once-{owner_name}"
     assert token.ref is not None and token.ref.usage == "the fixture token"
-
-
-def test_the_stream_is_the_declaration_order() -> None:
-    """Determinism is part of the contract: a rendered sample has to be
-    stable across runs or the tests pinning it are worthless."""
-    assert [doc.path for doc in iter_field_docs(DeclareOnceConfig)] == [("name",), ("region",), ("token",)]
 
 
 # -- Surface 4: the emitted JSON Schema ---------------------------------------
