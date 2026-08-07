@@ -11,8 +11,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from agentworks.git_credentials.credential import GitCredentialConfig
 from agentworks.naming import MAX_FREEFORM_NAME_LENGTH
 from agentworks.schema import CapabilityBlock
@@ -21,6 +19,12 @@ from agentworks.vms.sites import VMSiteDecl
 
 from ._specs import WHERE, decode, decode_issues, rejection
 
+#: ``(kind, name, field, capability)`` per hosting kind. A corpus, not a
+#: table of cases: every sweep below applies ONE claim to all three, and
+#: what breaks a claim is the shared decode path, so the useful report is
+#: every host that stopped answering rather than one red id per host.
+#: ``test_capability_shape.py::test_decode_refuses_exactly_the_three_retired_sibling_shapes``
+#: is what pins this list against the descriptor table.
 _HOSTS = [
     ("vm-site", "lab", "platform", "lima"),
     ("git-credential", "gh", "provider", "github"),
@@ -28,23 +32,24 @@ _HOSTS = [
 ]
 
 
-@pytest.mark.parametrize(("kind", "name", "field", "capability"), _HOSTS)
-def test_the_tagged_table_lands_on_the_row_as_written(kind: str, name: str, field: str, capability: str) -> None:
-    row = decode(kind, name, {field: {"name": capability, "extra_key": "v"}})
-    block = getattr(row, field)
+def test_the_tagged_table_lands_on_the_row_as_written() -> None:
+    wrong: list[str] = []
+    for kind, name, field, capability in _HOSTS:
+        block = getattr(decode(kind, name, {field: {"name": capability, "extra_key": "v"}}), field)
+        got = (block.name, block.config, block.tagged)
+        want = (capability, {"extra_key": "v"}, {"name": capability, "extra_key": "v"})
+        if got != want:
+            wrong.append(f"{kind}.{field}: {got} is not {want}")
+    assert not wrong, "\n".join(wrong)
 
-    assert block.name == capability
-    assert block.config == {"extra_key": "v"}
-    assert block.tagged == {"name": capability, "extra_key": "v"}
 
-
-@pytest.mark.parametrize(("kind", "name", "field", "capability"), _HOSTS)
-def test_the_capabilitys_own_keys_are_not_validated_here(kind: str, name: str, field: str, capability: str) -> None:
+def test_the_capabilitys_own_keys_are_not_validated_here() -> None:
     """A key the capability does not accept decodes fine and is refused by
     the capability's own model at finalize (R3). Decode validating it too
     is how a host kind would end up encoding what its capabilities
     accept."""
-    assert decode(kind, name, {field: {"name": capability, "nonsense": 1}}) is not None
+    for kind, name, field, capability in _HOSTS:
+        assert decode(kind, name, {field: {"name": capability, "nonsense": 1}}) is not None, kind
 
 
 def test_a_vm_site_round_trips() -> None:
@@ -80,23 +85,38 @@ def test_a_session_template_may_name_no_integration() -> None:
 # -- What an operator reads when it is wrong ----------------------------------
 
 
-@pytest.mark.parametrize(("kind", "name", "field", "capability"), _HOSTS)
-def test_a_table_with_no_tag_reads_as_a_missing_field(kind: str, name: str, field: str, capability: str) -> None:
-    assert rejection(kind, name, {field: {"vm_host": "h"}}) == f"res.yaml:7: {kind}/{name}.{field}.name: is required"
+def test_a_table_with_no_tag_reads_as_a_missing_field() -> None:
+    misread = [
+        (kind, got)
+        for kind, name, field, _capability in _HOSTS
+        if (got := rejection(kind, name, {field: {"vm_host": "h"}}))
+        != f"res.yaml:7: {kind}/{name}.{field}.name: is required"
+    ]
+    assert not misread
 
 
-@pytest.mark.parametrize(("kind", "name", "field", "capability"), _HOSTS)
-def test_a_non_table_reads_as_a_table_requirement(kind: str, name: str, field: str, capability: str) -> None:
+def test_a_non_table_reads_as_a_table_requirement() -> None:
     """A scalar that is not even a capability name, so not the retired
     string shape its own guard refuses first."""
-    assert rejection(kind, name, {field: 42}) == f"res.yaml:7: {kind}/{name}.{field}: must be a table"
+    misread = [
+        (kind, got)
+        for kind, name, field, _capability in _HOSTS
+        if (got := rejection(kind, name, {field: 42})) != f"res.yaml:7: {kind}/{name}.{field}: must be a table"
+    ]
+    assert not misread
 
 
-@pytest.mark.parametrize(("kind", "name"), [("vm-site", "lab"), ("git-credential", "gh")])
-def test_a_host_that_requires_a_capability_says_so(kind: str, name: str) -> None:
-    field = "platform" if kind == "vm-site" else "provider"
-
-    assert rejection(kind, name, {}) == f"res.yaml:7: {kind}/{name}.{field}: is required"
+def test_a_host_that_requires_a_capability_says_so() -> None:
+    """The two hosts whose capability is REQUIRED. ``session-template`` is
+    absent on purpose: its selector is optional, which
+    ``test_a_session_template_may_name_no_integration`` above states."""
+    misread = [
+        (kind, got)
+        for kind, name, field, _capability in _HOSTS
+        if kind != "session-template"
+        and (got := rejection(kind, name, {})) != f"res.yaml:7: {kind}/{name}.{field}: is required"
+    ]
+    assert not misread
 
 
 def test_a_top_level_token_keeps_its_steer() -> None:

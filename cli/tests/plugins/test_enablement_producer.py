@@ -304,8 +304,7 @@ def _registry_mapping_fixture_backend(mapping: MappingValue, *, publish_backend:
     return registry
 
 
-@pytest.mark.parametrize("enabled", [False, True], ids=["disabled", "enabled"])
-def test_mapping_to_a_disabled_plugin_backend_is_validated_like_any_other(enabled: bool) -> None:
+def test_mapping_to_a_disabled_plugin_backend_is_validated_like_any_other() -> None:
     """A mapping addressed to a PRESENT-but-DISABLED backend is validated
     exactly as one addressed to an enabled backend.
 
@@ -317,23 +316,26 @@ def test_mapping_to_a_disabled_plugin_backend_is_validated_like_any_other(enable
 
     The backend row is PUBLISHED on both branches (only the plugin opt-in
     moves), so neither branch can pass through the absent-backend path below,
-    which would raise a different error for a different reason. The disabled
-    branch also PROVES it is disabled rather than assuming the opt-in plumbing
-    fired: it finalizes the same shape with a valid mapping first and reads the
-    axis off the graph. Without that, a source that silently stopped disabling
-    would leave this test green for the wrong reason.
-    """
-    sources = [_plugin_source(*([PLUGIN] if enabled else []))]
-    with seated_plugin(_capable_plugin()):
-        precondition = _registry_mapping_fixture_backend("good")
-        precondition.finalize(enablement_sources=sources)
-        assert precondition.graph.enablement_of("secret-backend", "fixture-backend") is (
-            Enablement.enabled if enabled else Enablement.disabled
-        )
+    which would raise a different error for a different reason. Each branch
+    also PROVES which side of the axis it is on rather than assuming the
+    opt-in plumbing fired: it finalizes the same shape with a valid mapping
+    first and reads the axis off the graph. Without that, a source that
+    silently stopped disabling would leave this test green for the wrong
+    reason.
 
-        registry = _registry_mapping_fixture_backend("bad")
-        with pytest.raises(ConfigError, match="backend_mappings.fixture-backend: must be one of"):
-            registry.finalize(enablement_sources=sources)
+    The two branches run in one body because "the verdict does not move" is
+    a claim ABOUT the pair, and reading it as one test is what says so.
+    """
+    for enabled, expected in ((False, Enablement.disabled), (True, Enablement.enabled)):
+        sources = [_plugin_source(*([PLUGIN] if enabled else []))]
+        with seated_plugin(_capable_plugin()):
+            precondition = _registry_mapping_fixture_backend("good")
+            precondition.finalize(enablement_sources=sources)
+            assert precondition.graph.enablement_of("secret-backend", "fixture-backend") is expected
+
+            registry = _registry_mapping_fixture_backend("bad")
+            with pytest.raises(ConfigError, match="backend_mappings.fixture-backend: must be one of"):
+                registry.finalize(enablement_sources=sources)
 
 
 def test_a_valid_mapping_to_a_disabled_backend_builds_and_stays_inert() -> None:

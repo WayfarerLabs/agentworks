@@ -83,22 +83,23 @@ def test_a_capability_kind_declares_no_model() -> None:
 # -- metadata.expires, which every kind inherits (FR20) ------------------------
 
 
-@pytest.mark.parametrize(
-    "written",
-    [
-        pytest.param(datetime(2026, 1, 1, tzinfo=UTC), id="rfc3339-timestamp"),
-        pytest.param(date(2026, 1, 1), id="bare-date"),
-        pytest.param("2026-01-01", id="quoted-date"),
-    ],
-)
-def test_an_expiry_validates_from_every_spelling_a_document_can_produce(written: object) -> None:
+def test_an_expiry_validates_from_every_spelling_a_document_can_produce() -> None:
     """pyyaml's safe loader yields a ``datetime``, a ``date`` and a ``str``
     for the three ways an operator writes the same moment, and strict mode
     accepts only the first, so the field is one of the base model's
-    sanctioned per-field carve-outs."""
-    row = decode("apt-package", "tools", {"apt": ["jq"]}, expires=written)
+    sanctioned per-field carve-outs.
 
-    assert row.expires == datetime(2026, 1, 1, tzinfo=row.expires.tzinfo)
+    One loop over the three: the carve-out is one ``isinstance`` covering
+    all of them, so a narrowing loses several at once and the spellings
+    that stopped resolving are the report. The two REFUSALS below stay a
+    parametrized pair, because each names its own message.
+    """
+    refused: list[str] = []
+    for written in (datetime(2026, 1, 1, tzinfo=UTC), date(2026, 1, 1), "2026-01-01"):
+        row = decode("apt-package", "tools", {"apt": ["jq"]}, expires=written)
+        if row.expires != datetime(2026, 1, 1, tzinfo=row.expires.tzinfo):
+            refused.append(f"{written!r} resolved to {row.expires!r}")
+    assert not refused, "\n".join(refused)
 
 
 def test_an_expiry_is_modeled_once_for_every_kind() -> None:

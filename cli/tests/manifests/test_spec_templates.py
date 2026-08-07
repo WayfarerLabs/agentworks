@@ -122,16 +122,23 @@ def test_a_bad_mise_package_says_what_the_syntax_is() -> None:
     )
 
 
-@pytest.mark.parametrize("field", ["username", "git_force_safe_directory"])
-def test_a_key_that_never_did_anything_is_now_refused(field: str) -> None:
+def test_a_key_that_never_did_anything_is_now_refused() -> None:
     """The clearest single argument for FR12's flip: both keys were in
     this kind's accepted key set and are NOT fields of the row, so an
-    operator who wrote either got no warning and no effect."""
-    value: object = "ops" if field == "username" else True
+    operator who wrote either got no warning and no effect.
 
-    assert rejection("agent-template", "claude", {field: value}).startswith(
-        f"res.yaml:7: agent-template/claude.{field}: unknown field; expected one of: "
-    )
+    Both in one loop, and "both" is the argument: they land on the one
+    ``extra="forbid"`` refusal, so re-admitting either is what a failure
+    naming the key would be reporting.
+    """
+    accepted = [
+        (field, got)
+        for field, value in (("username", "ops"), ("git_force_safe_directory", True))
+        if not (got := rejection("agent-template", "claude", {field: value})).startswith(
+            f"res.yaml:7: agent-template/claude.{field}: unknown field; expected one of: "
+        )
+    ]
+    assert not accepted
 
 
 # -- FR17: markers on an inheriting row do not fill anything ------------------
