@@ -380,7 +380,7 @@ def parse_topic_contribution(value: object, source: str) -> TopicContribution:
     if len(ids) != len(set(ids)):
         raise _error(InvalidBlockError, source, topic, "blocks", "contains duplicate block IDs")
     permitted: dict[type[object], tuple[type[object], ...]] = {
-        InstanceList: (ConceptAnchor, KindAnchor, ImplementationAnchor),
+        InstanceList: (ConceptAnchor, KindAnchor, ResourceAnchor, ImplementationAnchor),
         State: (ResourceAnchor, ImplementationAnchor),
         Relationships: (ResourceAnchor, ImplementationAnchor),
     }

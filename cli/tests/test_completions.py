@@ -127,6 +127,16 @@ class TestDynamicCompletionsMapping:
                 f"Completer '{completer_id}' from ({command_path}, {param_name}) has no bash snippet mapping"
             )
 
+    def test_guide_topics_use_names_only_in_every_shell(self) -> None:
+        from agentworks.completions.bash import DYNAMIC_SNIPPETS as BASH_SNIPPETS
+        from agentworks.completions.powershell import DYNAMIC_SNIPPETS as POWERSHELL_SNIPPETS
+        from agentworks.completions.zsh import DYNAMIC_FUNCTIONS
+
+        assert DYNAMIC_COMPLETIONS[("guide", "topics")] == "guide_topics"
+        assert "agw guide --names-only" in BASH_SNIPPETS["guide_topics"]
+        assert "agw guide --names-only" in POWERSHELL_SNIPPETS["guide_topics"]
+        assert "agw guide --names-only" in DYNAMIC_FUNCTIONS["guide_topics"]
+
 
 class TestOptionFlagsInSpec:
     """Pin option flags that must (or must not) reach the completion tree.

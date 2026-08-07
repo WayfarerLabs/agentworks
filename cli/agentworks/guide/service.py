@@ -1,0 +1,227 @@
+"""Request-scoped guide orchestration below the CLI presentation layer."""
+
+from __future__ import annotations
+
+import difflib
+import re
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, cast
+
+from agentworks.errors import AgentworksError, ConfigError, ValidationError
+from agentworks.guide.catalog import GuideCatalog, _build_guide_catalog
+from agentworks.guide.contract import (
+    BlockId,
+    ImplementationAnchor,
+    InstanceList,
+    KindAnchor,
+    Relationships,
+    ResourceAnchor,
+    State,
+    TopicContribution,
+    TopicSlug,
+    UnknownGuideTopicError,
+)
+from agentworks.guide.contributions import guide_contributions
+from agentworks.guide.render import render_index, render_topic
+from agentworks.guide.view import build_guide_view
+from agentworks.resources import KIND_REGISTRY
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from agentworks.config import Config
+    from agentworks.db import Database
+    from agentworks.guide.agent_mode import GuideMode
+    from agentworks.resources import Registry
+
+_TOPIC_RE = re.compile(r"^[a-z][a-z0-9-]{0,62}(?:/[a-z][a-z0-9-]{0,62}){0,2}$")
+
+
+@dataclass(frozen=True, slots=True)
+class GuideResponse:
+    markdown: str
+    exit_code: int
+    names: tuple[str, ...]
+
+
+class _EmptyInventory:
+    """Read-only empty state used before Agentworks has created its database."""
+
+    def list_vms(self) -> tuple[()]:
+        return ()
+
+    def list_workspaces(self) -> tuple[()]:
+        return ()
+
+    def list_agents(self) -> tuple[()]:
+        return ()
+
+    def list_sessions(self) -> tuple[()]:
+        return ()
+
+    def list_consoles(self) -> tuple[()]:
+        return ()
+
+
+def build_authored_catalog() -> GuideCatalog:
+    """Collect core and installed-plugin records without reading operator config."""
+    from agentworks.plugins import SYSTEM_PLUGINS
+
+    trusted = tuple((f"core:{topic.topic}", topic) for topic in guide_contributions())
+    plugins = tuple((plugin, tuple(plugin.guide_topics)) for _, plugin in sorted(SYSTEM_PLUGINS.items()))
+    return _build_guide_catalog(trusted, plugins)
+
+
+def _dynamic_topic(registry: Registry | None, slug: str) -> TopicContribution:
+    if "/" not in slug:
+        handler = KIND_REGISTRY[slug]
+        return TopicContribution(
+            TopicSlug(slug),
+            f"{slug} resources",
+            handler.description or f"Current {slug} resources.",
+            KindAnchor(slug),
+            (InstanceList(BlockId("inventory")),),
+        )
+    kind, name = slug.split("/", 1)
+    handler = KIND_REGISTRY[kind]
+    title = f"{kind}/{name}"
+    summary = f"Current facts for {kind}/{name}."
+    if registry is not None:
+        resource = registry.lookup(kind, name)
+        description = getattr(resource, "description", None)
+        if isinstance(description, str) and description.strip():
+            summary = description
+    anchor = ImplementationAnchor(kind, name) if handler.category == "capability" else ResourceAnchor(kind, name)
+    return TopicContribution(
+        TopicSlug(slug),
+        title,
+        summary,
+        anchor,
+        (State(BlockId("state")), Relationships(BlockId("relationships")), InstanceList(BlockId("instances"))),
+    )
+
+
+def _dynamic_names(registry: Registry) -> tuple[str, ...]:
+    return tuple(sorted(KIND_REGISTRY)) + tuple(
+        f"{kind}/{name}"
+        for kind in sorted(KIND_REGISTRY)
+        for name, _resource in sorted(registry.iter_kind_items(kind))
+    )
+
+
+def _normalize_requested(requested: tuple[str, ...]) -> tuple[str, ...]:
+    normalized: list[str] = []
+    for slug in requested:
+        if not _TOPIC_RE.fullmatch(slug):
+            raise ValidationError(f"invalid guide topic {slug!r}")
+        if slug not in normalized:
+            normalized.append(slug)
+    return tuple(normalized)
+
+
+def _framed_error(error: AgentworksError) -> str:
+    message = f"Configuration error: {error}" if isinstance(error, ConfigError) else f"Error: {error}"
+    if error.hint:
+        message += f"\nHint: {error.hint}"
+    return message
+
+
+def _unknown(slug: str, names: tuple[str, ...]) -> UnknownGuideTopicError:
+    return UnknownGuideTopicError(slug, tuple(difflib.get_close_matches(slug, names, n=3)))
+
+
+def render_guide(
+    requested: tuple[str, ...],
+    mode: GuideMode,
+    *,
+    names_only: bool = False,
+    load_config_fn: Callable[[], Config] | None = None,
+    load_registry_fn: Callable[[Config], Registry] | None = None,
+    db: Database | None = None,
+) -> GuideResponse:
+    """Build and render one atomic guide request with fail-soft live facts."""
+    authored = build_authored_catalog()
+    requested = _normalize_requested(requested)
+    if load_config_fn is None:
+        from agentworks.config import load_config
+
+        def load_config_for_guide() -> Config:
+            return load_config(raise_errors=True)
+
+        load_config_fn = load_config_for_guide
+    if load_registry_fn is None:
+        from agentworks.bootstrap import load_request_registry
+
+        load_registry_fn = load_request_registry
+    registry: Registry | None = None
+    system_error: AgentworksError | None = None
+    try:
+        config = load_config_fn()
+        registry = load_registry_fn(config)
+    except AgentworksError as error:
+        system_error = error
+
+    dynamic_names = _dynamic_names(registry) if registry is not None else tuple(sorted(KIND_REGISTRY))
+    all_names = tuple(sorted((*authored.names(), *dynamic_names)))
+    if names_only:
+        return GuideResponse("".join(f"{name}\n" for name in all_names), 0, all_names)
+
+    selected: list[TopicContribution] = []
+    if requested:
+        for slug in requested:
+            if slug in authored.names():
+                selected.append(authored.lookup(slug))
+                continue
+            kind = slug.split("/", 1)[0]
+            valid_dynamic = (
+                slug in dynamic_names
+                if registry is not None
+                else kind in KIND_REGISTRY and slug.count("/") <= 1
+            )
+            if not valid_dynamic:
+                raise _unknown(slug, all_names)
+            selected.append(_dynamic_topic(registry, slug))
+
+    issue_markdown = ""
+    visible_issues = authored.issues
+    if requested:
+        visible_issues = tuple(issue for issue in authored.issues if issue.error.topic in requested)
+    if visible_issues:
+        details = "\n".join(f"- {issue.error.source}: {issue.error}" for issue in visible_issues)
+        issue_markdown = f"\n\n## Guide content unavailable\n\n{details}"
+    if not selected:
+        index_topics = tuple((*authored.topics, *(_dynamic_topic(registry, name) for name in dynamic_names)))
+        markdown = render_index(index_topics, mode)
+    else:
+        owned_db = False
+        if registry is not None and db is None:
+            from agentworks.db import DB_PATH, Database
+
+            if DB_PATH.exists():
+                try:
+                    db = Database(read_only=True)
+                    owned_db = True
+                except AgentworksError as error:
+                    system_error = error
+                    db = cast("Database", _EmptyInventory())
+            else:
+                db = cast("Database", _EmptyInventory())
+        documents = []
+        try:
+            for topic in selected:
+                view = None
+                unavailable = None
+                if registry is not None and system_error is None:
+                    if db is None:
+                        raise RuntimeError("guide database was not constructed")
+                    view = build_guide_view(topic, registry, db)
+                else:
+                    unavailable = "see the system failure below"
+                documents.append(render_topic(topic, view, mode, unavailable=unavailable).markdown.rstrip())
+        finally:
+            if owned_db and db is not None:
+                db.close()
+        markdown = "\n\n---\n\n".join(documents) + "\n"
+    error_markdown = f"\n\n## Live facts unavailable\n\n{_framed_error(system_error)}" if system_error else ""
+    exit_code = 1 if authored.issues or system_error is not None else 0
+    return GuideResponse(markdown.rstrip() + issue_markdown + error_markdown + "\n", exit_code, all_names)
