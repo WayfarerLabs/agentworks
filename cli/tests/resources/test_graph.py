@@ -12,7 +12,6 @@ from __future__ import annotations
 
 from dataclasses import FrozenInstanceError, dataclass
 from pathlib import Path
-from textwrap import dedent
 
 import pytest
 
@@ -27,7 +26,7 @@ from agentworks.resources import (
     collect_secrets_for,
 )
 from agentworks.resources.reference import ReferenceEntry
-from tests.conftest import ManifestDoc, write_manifests
+from tests.conftest import ManifestDoc, write_cfg
 
 
 @dataclass(frozen=True)
@@ -176,29 +175,8 @@ def test_every_node_is_ready_and_enabled_this_phase() -> None:
 
 
 def _write_cfg(tmp_path: Path, settings: str = "", *manifests: ManifestDoc | str) -> Path:
-    """Write a settings-only config.toml plus its resources/ manifests and
-    return the config path. ``settings`` carries settings-only TOML (operator
-    block plus any ``[secret_config]`` / ``[plugins]``); the resources under
-    test are authored as ``manifests`` beside it (ADR 0022)."""
-    pub = tmp_path / "id.pub"
-    priv = tmp_path / "id"
-    pub.write_text("ssh-ed25519 X")
-    priv.write_text("-----BEGIN-----")
-    p = tmp_path / "c.toml"
-    p.write_text(
-        dedent(
-            f"""\
-            [operator]
-            ssh_public_key = "{pub}"
-            ssh_private_key = "{priv}"
-
-            """
-        )
-        + dedent(settings)
-    )
-    if manifests:
-        write_manifests(tmp_path, *manifests)
-    return p
+    """``write_cfg`` under this file's spelling."""
+    return write_cfg(tmp_path, *manifests, settings=settings, filename="c.toml")
 
 
 def _recompute_inbound(registry: Registry) -> dict[tuple[str, str], list[ReferenceEntry]]:

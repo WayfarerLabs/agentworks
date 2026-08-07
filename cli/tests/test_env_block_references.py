@@ -12,7 +12,6 @@ surfaces "no active backend resolved" if no backend yields a value.
 
 from __future__ import annotations
 
-from textwrap import dedent
 from typing import TYPE_CHECKING
 
 import pytest
@@ -27,48 +26,21 @@ from agentworks.sessions.template import SessionTemplate
 from agentworks.vms.admin import AdminConfig
 from agentworks.vms.template import VMTemplate
 from agentworks.workspaces.template import WorkspaceTemplate
-from tests.conftest import ManifestDoc, write_manifests
+from tests.conftest import ManifestDoc, write_cfg
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from pathlib import Path
 
 
-@pytest.fixture()
-def ssh_keys(tmp_path: Path) -> tuple[Path, Path]:
-    pub = tmp_path / "id.pub"
-    priv = tmp_path / "id"
-    pub.write_text("ssh-ed25519 X")
-    priv.write_text("-----BEGIN-----")
-    return pub, priv
-
-
 def _write_cfg(
     tmp_path: Path,
-    ssh_keys: tuple[Path, Path],
     *,
     settings: str = "",
     manifests: Sequence[ManifestDoc | str] = (),
 ) -> Path:
-    """Write a settings-only config.toml plus its resources/ manifests and
-    return the config path. ``settings`` carries settings-only TOML; the
-    env-block resources under test go in ``manifests``."""
-    pub, priv = ssh_keys
-    p = tmp_path / "c.toml"
-    p.write_text(
-        dedent(
-            f"""\
-            [operator]
-            ssh_public_key = "{pub}"
-            ssh_private_key = "{priv}"
-
-            """
-        )
-        + dedent(settings)
-    )
-    if manifests:
-        write_manifests(tmp_path, *manifests)
-    return p
+    """``write_cfg`` under this file's keyword spelling."""
+    return write_cfg(tmp_path, *manifests, settings=settings, filename="c.toml")
 
 
 # -- EnvEntry.referenced_resources --------------------------------------------
@@ -171,16 +143,13 @@ def test_session_template_dependencies_with_secrets() -> None:
 # -- End-to-end: undeclared secret auto-declares through the framework -------
 
 
-def test_undeclared_env_secret_auto_declares_through_build_registry(
-    tmp_path: Path, ssh_keys: tuple[Path, Path]
-) -> None:
+def test_undeclared_env_secret_auto_declares_through_build_registry(tmp_path: Path) -> None:
     """The defining behavior of Phase 1b: a typo'd or otherwise
     undeclared env-block secret no longer errors at config load; the
     Registry auto-declares it and tags it with the source.
     """
     cfg = _write_cfg(
         tmp_path,
-        ssh_keys,
         manifests=[ManifestDoc("admin-template", "default", {"env": {"API_KEY": {"secret": "anthropic-api-ky"}}})],
     )
     config = load_config(cfg, warn_issues=False)
@@ -196,9 +165,7 @@ def test_undeclared_env_secret_auto_declares_through_build_registry(
     assert dependents[0].usage == "the API_KEY env var"
 
 
-def test_operator_declared_secret_referenced_from_env_gets_usage_populated(
-    tmp_path: Path, ssh_keys: tuple[Path, Path]
-) -> None:
+def test_operator_declared_secret_referenced_from_env_gets_usage_populated(tmp_path: Path) -> None:
     """A secret operator-typed in ``[secrets.X]`` AND referenced from an
     env block ends up with usage attached after finalize. Origin stays
     operator-declared (publish-time stamp wins); usage records the
@@ -206,7 +173,6 @@ def test_operator_declared_secret_referenced_from_env_gets_usage_populated(
     """
     cfg = _write_cfg(
         tmp_path,
-        ssh_keys,
         manifests=[
             ManifestDoc("secret", "shared-key", description="Used by both admin and a template"),
             ManifestDoc("admin-template", "default", {"env": {"ADMIN_KEY": {"secret": "shared-key"}}}),
@@ -229,10 +195,9 @@ def test_operator_declared_secret_referenced_from_env_gets_usage_populated(
     ]
 
 
-def test_multiple_env_refs_from_one_resource_each_contribute_usage(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
+def test_multiple_env_refs_from_one_resource_each_contribute_usage(tmp_path: Path) -> None:
     cfg = _write_cfg(
         tmp_path,
-        ssh_keys,
         manifests=[
             ManifestDoc(
                 "admin-template",

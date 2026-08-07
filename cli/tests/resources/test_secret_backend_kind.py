@@ -8,37 +8,24 @@ names these rows directly.
 from __future__ import annotations
 
 from pathlib import Path
-from textwrap import dedent
 
 import pytest
 
 from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
 from agentworks.resources import KIND_REGISTRY, NoUnreferencedDefaultError
+from tests.conftest import write_cfg
 
 BUILTIN_BACKENDS = ("env-var", "prompt")
 
 
 def _write_cfg(path: Path, body: str = "") -> Path:
-    pub = path.parent / "id.pub"
-    priv = path.parent / "id"
-    pub.write_text("ssh-ed25519 AAAA...")
-    priv.write_text("-----BEGIN OPENSSH PRIVATE KEY-----")
-    path.write_text(
-        dedent(f"""\
-        [operator]
-        ssh_public_key = "{pub.as_posix()}"
-        ssh_private_key = "{priv.as_posix()}"
-
-        """)
-        + dedent(body),
-    )
-    return path
+    """``write_cfg`` under this file's path-taking spelling."""
+    return write_cfg(path.parent, settings=body, filename=path.name)
 
 
 def test_kind_attributes() -> None:
     kind = KIND_REGISTRY["secret-backend"]
-    assert kind.kind == "secret-backend"
     assert kind.miss_policy == "error"
     assert kind.auto_declare_names is None
     assert kind.category == "capability"

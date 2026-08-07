@@ -24,7 +24,6 @@ What we pin:
 from __future__ import annotations
 
 from pathlib import Path
-from textwrap import dedent
 
 import pytest
 
@@ -33,30 +32,17 @@ from agentworks.config import load_config
 from agentworks.env import EnvEntry
 from agentworks.errors import ConfigError
 from agentworks.resources import (
-    KIND_REGISTRY,
     Origin,
     Registry,
 )
 from agentworks.resources.graph import FinalizeContext
 from agentworks.vms.admin import AdminConfig
-from tests.conftest import ManifestDoc, write_manifests
+from tests.conftest import ManifestDoc, write_cfg, write_manifests
 
 
 def _write_cfg(path: Path, body: str = "") -> Path:
-    pub = path.parent / "id.pub"
-    priv = path.parent / "id"
-    pub.write_text("ssh-ed25519 AAAA...")
-    priv.write_text("-----BEGIN OPENSSH PRIVATE KEY-----")
-    path.write_text(
-        dedent(f"""\
-        [operator]
-        ssh_public_key = "{pub.as_posix()}"
-        ssh_private_key = "{priv.as_posix()}"
-
-        """)
-        + dedent(body),
-    )
-    return path
+    """``write_cfg`` under this file's path-taking spelling."""
+    return write_cfg(path.parent, settings=body, filename=path.name)
 
 
 # -- AdminConfig shape ------------------------------------------------------
@@ -98,22 +84,9 @@ def test_admin_dependencies_sources_from_self_name() -> None:
 # plurification-specific behavior layered on top.
 
 
-def test_admin_template_kind_synthesize_returns_admin_config_with_name() -> None:
-    """``_AdminTemplateKind.synthesize(())`` builds an empty-defaults
-    ``AdminConfig`` with ``name="default"`` -- the only reserved
-    auto-declare name. Pinning the explicit ``name="default"`` because
-    Phase 2a.3 added the field; a future change that drops it would
-    silently regress the named-multi-instance shape.
-    """
-    kind = KIND_REGISTRY["admin-template"]
-    result = kind.synthesize(())
-    assert isinstance(result, AdminConfig)
-    assert result.name == "default"
-    assert result.origin is not None
-    assert result.origin.variant == "auto-declared"
-
-
-# -- Framework supports multi-row admin (future-surface readiness) ---------
+# What ``_AdminTemplateKind.synthesize(())`` builds is pinned in
+# ``test_kind_synthesize_empty.py``, beside the other kinds' answers to
+# the same call, and with the framework source this file never asserted.
 
 
 def test_registry_can_hold_multiple_admin_template_rows(tmp_path: Path) -> None:
@@ -183,19 +156,10 @@ def test_admin_template_kind_errors_on_unreserved_name_reference(
 # -- Operator surface: admin-template defaults -----------------------------
 
 
-def test_loader_produces_admin_template_default_unchanged(tmp_path: Path) -> None:
-    """A config with no ``[admin.*]`` sections still yields an
-    ``admin-template:default`` row at the Registry level -- auto-declared
-    by the always-materialize pre-step, since the TOML publisher no
-    longer publishes placeholder rows for omitted sections."""
-    cfg = load_config(_write_cfg(tmp_path / "config.toml"), warn_issues=False)
-    registry = build_registry(cfg)
-
-    admin = registry.lookup("admin-template", "default")
-    assert isinstance(admin, AdminConfig)
-    assert admin.name == "default"
-    assert admin.origin is not None
-    assert admin.origin.variant == "auto-declared"
+# That an undeclared admin-template still lands as an auto-declared
+# ``default`` is ``test_singleton_publishing.py``'s subject, where it is
+# asserted with the provenance and the row count too. What this file is
+# for is the PLURAL shape: several rows under one kind.
 
 
 def test_admin_config_manifest_still_produces_named_default(tmp_path: Path) -> None:

@@ -12,7 +12,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from textwrap import dedent
 from typing import Any
 
 import pytest
@@ -28,8 +27,9 @@ from agentworks.resources import (
 )
 from agentworks.resources.graph import FinalizeContext
 from agentworks.sessions.template import SessionTemplate
+from agentworks.vms.template import VMTemplate
 from agentworks.workspaces.template import WorkspaceTemplate
-from tests.conftest import ManifestDoc, write_manifests
+from tests.conftest import ManifestDoc, write_cfg
 
 
 @dataclass(frozen=True)
@@ -40,7 +40,12 @@ class _KindSpec:
     expected_type: type
 
 
+#: Every kind whose rows inherit. All four behave identically here, which
+#: is the point of the parametrization: what makes one an inheriting kind
+#: is its ``auto-declare`` miss policy and its ``inherits`` field, not
+#: anything per kind, so a fifth arrives by being added to this tuple.
 SPECS: tuple[_KindSpec, ...] = (
+    _KindSpec("vm-template", VMTemplate),
     _KindSpec("agent-template", AgentTemplate),
     _KindSpec("workspace-template", WorkspaceTemplate),
     _KindSpec("session-template", SessionTemplate),
@@ -48,20 +53,8 @@ SPECS: tuple[_KindSpec, ...] = (
 
 
 def _write_cfg(path: Path, *manifests: ManifestDoc) -> Path:
-    pub = path.parent / "id.pub"
-    priv = path.parent / "id"
-    pub.write_text("ssh-ed25519 AAAA...")
-    priv.write_text("-----BEGIN OPENSSH PRIVATE KEY-----")
-    path.write_text(
-        dedent(f"""\
-        [operator]
-        ssh_public_key = "{pub.as_posix()}"
-        ssh_private_key = "{priv.as_posix()}"
-        """),
-    )
-    if manifests:
-        write_manifests(path.parent, *manifests)
-    return path
+    """``write_cfg`` under this file's path-taking spelling."""
+    return write_cfg(path.parent, *manifests, filename=path.name)
 
 
 # -- Kind shape -------------------------------------------------------------
@@ -70,7 +63,6 @@ def _write_cfg(path: Path, *manifests: ManifestDoc) -> Path:
 @pytest.mark.parametrize("spec", SPECS, ids=lambda s: s.kind)
 def test_kind_attributes(spec: _KindSpec) -> None:
     kind = KIND_REGISTRY[spec.kind]
-    assert kind.kind == spec.kind
     assert kind.miss_policy == "auto-declare"
     assert kind.auto_declare_names == frozenset({"default"})
 

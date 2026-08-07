@@ -174,10 +174,6 @@ def test_a_marked_list_skips_the_elements_that_name_nothing() -> None:
     ]
 
 
-def test_a_marked_list_that_is_not_a_list_contributes_nothing() -> None:
-    assert extract_references(TemplateLike, {"inherits": "base"}, OWNER) == ()
-
-
 def test_an_omitted_list_has_no_default_identity() -> None:
     assert extract_references(TemplateLike, {}, OWNER) == ()
 
@@ -204,13 +200,25 @@ def test_a_tuple_of_names_is_a_sequence_like_a_list() -> None:
     assert names(extract_references(CatalogLike, {"templates": ["base", "other"]}, OWNER)) == ["base", "other"]
 
 
-@pytest.mark.parametrize("value", ["not a list", {"a": "table"}])
-def test_a_collection_that_is_not_one_contributes_nothing(value: object) -> None:
-    # The two values that are ITERABLE without being the declared
-    # collection, which is what ``_elements_of`` has to refuse by shape
-    # rather than by truthiness: a bare string would otherwise decompose
-    # into characters and a table would hand over its keys.
-    assert extract_references(CatalogLike, {"accounts": value}, OWNER) == ()
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        # A sequence handed the two values that are ITERABLE without being
+        # a sequence, which is what ``_elements_of`` has to refuse by shape
+        # rather than by truthiness: a bare string would otherwise
+        # decompose into characters and a table would hand over its keys.
+        ("templates", "base"),
+        ("templates", {"one": "base"}),
+        # And a MAPPING handed the sequence, which is the mirror: a list is
+        # not a table, and reading its entries as values would emit an edge
+        # per element of a field that declares none.
+        ("extra_secrets", ["one", "two"]),
+    ],
+)
+def test_a_collection_that_is_not_one_contributes_nothing(field: str, value: object) -> None:
+    # Fields whose ELEMENTS are marked, so a refusal that leaked would
+    # emit edges rather than quietly walking blocks that name nothing.
+    assert extract_references(CatalogLike, {field: value}, OWNER) == ()
 
 
 def test_malformed_elements_are_skipped_and_the_rest_still_extract() -> None:
