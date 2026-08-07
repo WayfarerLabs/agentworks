@@ -178,6 +178,15 @@ _OPERATOR_KEYS = {
     "ssh_allow_cidrs",
 }
 
+_SSH_KEY_HINT = "Point it at a key you already use, or create one with `ssh-keygen -t ed25519`."
+"""Remedy for the missing-key errors below.
+
+The sample config ships a plausible default path for both keys, so on a
+machine with no key there this is the first error a greenfield operator
+meets, and `agw config init` sends them straight at it. The message was
+correct and specific and said nothing about what to do about it.
+"""
+
 
 def _load_operator(data: dict[str, object], issues: list[str]) -> OperatorConfig:
     raw = data.get("operator")
@@ -190,9 +199,9 @@ def _load_operator(data: dict[str, object], issues: list[str]) -> OperatorConfig
     priv = _expand(str(_require(raw, "ssh_private_key", "operator")))
 
     if not pub.exists():
-        raise ConfigError(f"operator.ssh_public_key does not exist: {pub}")
+        raise ConfigError(f"operator.ssh_public_key does not exist: {pub}", hint=_SSH_KEY_HINT)
     if not priv.exists():
-        raise ConfigError(f"operator.ssh_private_key does not exist: {priv}")
+        raise ConfigError(f"operator.ssh_private_key does not exist: {priv}", hint=_SSH_KEY_HINT)
 
     ssh_config = Path.home() / ".ssh" / "config"
     if "ssh_config" in raw:
