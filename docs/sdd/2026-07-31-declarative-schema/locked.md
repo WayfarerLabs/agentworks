@@ -162,6 +162,33 @@ inventing a dependency on a resource the operator never wrote, which finalize wo
   two hand-written checks at one boundary, which is the switchboard pattern this effort collapsed
   everywhere else, now one table.
 
+- **A field carrying two markers keeps only the first.**
+  `Annotated[str, SecretRef(...), ResourceRef(...)]` emits the secret edge alone, with no refusal.
+  It is the same family as the gaps closed above, and the machinery to refuse it now exists one
+  predicate away in the fail-closed check that reads which markers the classifier could place. Left
+  open because no shipped field carries more than one marker (verified by sweeping every declarable
+  kind's spec model) and because a field that is simultaneously a secret name and a resource name is
+  a modeling error rather than a shape to support: the honest close is a refusal, not two edges.
+  Trigger: the first author who writes one.
+- **Two union shapes extract no edges, by design.** An undiscriminated union of two or more models
+  addresses no arm without guessing which; a union tagged by non-string literals is outside the
+  framework's rule that every discriminator is a capability or kind NAME. Both are fixture-only; no
+  shipped field has either shape.
+- **Nested collections carrying a marker are refused, not supported.** `FieldShape` is deliberately
+  flat (a field, and one value inside it), so a third level is a contract change across extraction,
+  error-path segments, and field-doc rendering. Registration refuses the shape with an author-facing
+  message rather than silently extracting nothing.
+- `agw guide` **is not built.** It is named in FR2 as the vehicle that fills the migrator's role,
+  and the roadmap gates the 0.14.0 cut on the guide's first slice, but that slice ships
+  `concept-onboarding` and no migration topic is contracted by name. If the sunset reaches operators
+  first, `docs/guides/upgrading-to-0.14.md` carries the break alone, which it is written to do.
+- `set`/`frozenset` fields are unwritable from any document (`AgwModel` is `strict=True`, so a list
+  is never coerced), while extraction reads them as collections. An over-report on an unreachable
+  path; pre-existing.
+- No surface shows a resource's parsed spec values, and `cpus: 0` is accepted by both layers.
+- The name-charset rule the samples state is enforced only on some kinds. Issues #279 and #308
+  settled that tolerance deliberately, so the documentation was corrected rather than the behavior.
+
 ## Deliberately unused, do not delete as dead code
 
 `describable_targets`, `implementation_reference`, and `capability_kind_reference` have no in-tree

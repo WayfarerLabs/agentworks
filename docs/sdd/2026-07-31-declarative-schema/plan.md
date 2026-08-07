@@ -1047,12 +1047,23 @@ BUILT, including the migrator; they stay as written. These are the boxes for wha
 - [x] Final review pass at the finished state, run twice: an internal closeout review and the
       roadmap lead's re-review at `9b4a9e93`. Both verdicts were approve-pending-a-list; the lists
       are the boxes above and below.
-- [ ] The re-review's blocker closed: `extract_references` emits no edges for a marker under an
-      abstract collection ABC or a nested collection, silently, which is a gating bypass because the
-      graph is built before validation. Reproduced at HEAD.
-- [ ] `_marker_error` extended to the shapes the walkers now reach (`item_arms` arm models,
-      `union_model`, `item_union_model`), so its docstring's claim becomes true.
-- [ ] Branch brought current with `main` and re-review requested.
+- [x] The re-review's blocker closed on both halves. Abstract collection ABCs were a SPELLING gap
+      (`Sequence[X]` and `list[X]` are the same shape to pydantic and to every `FieldShape` reader)
+      and are now recognized. Nested collections are REFUSED at registration rather than supported:
+      `FieldShape` is deliberately flat, so a third level is a contract change across extraction,
+      error paths, and field docs, which is a design decision rather than a bug fix. The refusal is
+      shape-agnostic, comparing markers present in the annotation against those the classifier could
+      place, so the next unrecognized origin is loud without anyone having predicted it.
+- [x] `_marker_error` extended to all six shapes the walkers reach, and its docstring's claim is now
+      true. The kind-spec enforcement point was broadened in the same change: a test-time gate
+      existed but ran over kind ROW models only, missing the capability-config union spliced into a
+      hosting kind's naming field, and `metadata` entirely.
+- [x] Arm selection needed no code change: the tag equality already is the guard, and what was
+      missing was a test that could observe it. The re-review's stated invariant included "or
+      empty", which would have been a defect: pydantic dispatches on `Literal[""]` like any other
+      tag, so guarding on falsiness would have dropped a real edge.
+- [x] Branch brought current with `main` (0 behind, mergeable, gates green at the merge).
+- [ ] Re-review requested from the roadmap lead.
 
 ## Pressure-test notes (what writing this plan surfaced)
 
