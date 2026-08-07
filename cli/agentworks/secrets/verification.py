@@ -62,16 +62,14 @@ def verify_named_secret(
     # their typed diagnostics; only calls into a selected backend are treated
     # as provider-controlled and sanitized by ``resolve_secrets_quiet``.
     backends = active_backends(config, registry)
-    permitted = backends if allow_interactive else [backend for backend in backends if not backend.interactive]
     resolved = resolve_secrets_quiet(
         [decl],
-        permitted,
+        backends,
         registry=registry,
         interactive_available=allow_interactive,
     )
     # The ordered resolver either proves every requested name or raises. Keep
     # this membership check as an internal contract without carrying a
     # permanently true result field into the CLI.
-    if name not in resolved:
-        raise RuntimeError("secret resolver returned without the requested proof")
+    assert name in resolved, "secret resolver returned without the requested proof"
     return SecretVerification(name=name)
