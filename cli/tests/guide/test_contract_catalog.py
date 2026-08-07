@@ -24,6 +24,7 @@ from agentworks.guide import (
     validate_guide_action,
 )
 from agentworks.guide.catalog import _build_guide_catalog
+from agentworks.guide.contract import is_valid_topic_slug
 from agentworks.plugins.base import Plugin
 from agentworks.resources import KIND_REGISTRY
 
@@ -291,7 +292,32 @@ def test_action_nested_input_validation_is_exact(field: str, bad: object) -> Non
 
 @pytest.mark.parametrize(
     "token",
-    ["a;b", "a|b", "a&b", "a>b", "a<b", "a'b", 'a"b', "a\\b", "a b", "a\nb", "a\x1bb"],
+    [
+        "a;b",
+        "a|b",
+        "a&b",
+        "a>b",
+        "a<b",
+        "a'b",
+        'a"b',
+        "a\\b",
+        "a b",
+        "a\nb",
+        "a\x1bb",
+        "*",
+        "?",
+        "[abc]",
+        "#comment",
+        "(command)",
+        "{left,right}",
+        "~/state",
+        "!history",
+        "$(command)",
+        "${NAME}",
+        "$NAME-suffix",
+        "NAME=value",
+        "--flag=value",
+    ],
 )
 @pytest.mark.parametrize("field", ["command", "verification"])
 def test_action_tokens_reject_shell_syntax_whitespace_and_controls_anywhere(field: str, token: str) -> None:
@@ -299,6 +325,13 @@ def test_action_tokens_reject_shell_syntax_whitespace_and_controls_anywhere(fiel
     object.__setattr__(action, field, ("agw", token))
     with pytest.raises(GuideContributionError):
         validate_guide_action(action, "core")
+
+
+@pytest.mark.parametrize("token", ["--non-interactive", "vm-template/demo", "secret_name", "v1.2", "127.0.0.1"])
+def test_action_tokens_accept_only_the_closed_literal_vocabulary(token: str) -> None:
+    action = _action()
+    object.__setattr__(action, "command", ("agw", token))
+    assert validate_guide_action(action, "core").command == ("agw", token)
 
 
 @pytest.mark.parametrize("verification", [(), ("&&",), ("${NAME}",), ("$UNKNOWN",)])
@@ -354,9 +387,32 @@ def test_related_topics_apply_the_canonical_slug_grammar(related: str) -> None:
 
 def test_related_topic_values_have_an_explicit_byte_bound() -> None:
     with pytest.raises(InvalidTopicSlugError) as raised:
-        parse_topic_contribution(_topic("concept-safe", related=["a" * 192]), "plugin:z")
+        parse_topic_contribution(_topic("concept-safe", related=["a" * 318]), "plugin:z")
     assert raised.value.field_path == "related_topics[0]"
-    assert "191-byte limit" in str(raised.value)
+    assert "317-byte limit" in str(raised.value)
+
+
+def test_resource_topics_accept_actual_ordinary_and_secret_name_limits() -> None:
+    ordinary_name = "o" * 64
+    secret_name = "s" * 253
+    for slug in (f"vm-site/{ordinary_name}", f"secret/{secret_name}", "secret/name_with_underscores"):
+        assert is_valid_topic_slug(slug)
+        assert parse_topic_contribution(_topic(slug), "core").topic == slug
+
+
+@pytest.mark.parametrize(
+    "slug",
+    [
+        f"secret/{'s' * 254}",
+        f"{'k' * 64}/name",
+        f"concept-{'c' * 56}",
+        f"plugin/{'p' * 64}/topic",
+        "plugin/name_with_underscore/topic",
+        "vm-site/name.with-dot",
+    ],
+)
+def test_topic_taxonomy_stays_closed_outside_resource_name_limits(slug: str) -> None:
+    assert not is_valid_topic_slug(slug)
 
 
 def test_contribution_total_markdown_volume_is_bounded() -> None:

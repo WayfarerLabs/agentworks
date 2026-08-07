@@ -5,7 +5,6 @@ from __future__ import annotations
 import difflib
 import html
 import re
-import sqlite3
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
@@ -23,6 +22,7 @@ from agentworks.guide.contract import (
     TopicContribution,
     TopicSlug,
     UnknownGuideTopicError,
+    is_valid_topic_slug,
 )
 from agentworks.guide.contributions import guide_contributions
 from agentworks.guide.render import render_index, render_topic, sanitize_terminal_output
@@ -38,7 +38,6 @@ if TYPE_CHECKING:
     from agentworks.guide.assessment import VerificationEvidence
     from agentworks.resources import Registry
 
-_TOPIC_RE = re.compile(r"^[a-z][a-z0-9-]{0,62}(?:/[a-z][a-z0-9-]{0,62}){0,2}$")
 _MARKDOWN_PUNCTUATION_RE = re.compile(r"([\\`*_{}\[\]()<>#!|])")
 
 
@@ -96,7 +95,7 @@ def _dynamic_topic(registry: Registry | None, slug: str) -> TopicContribution:
         )
     kind, name = slug.split("/", 1)
     handler = KIND_REGISTRY[kind]
-    title = f"{kind}/{name}"
+    title = slug if len(slug.encode("utf-8")) <= 256 else name
     summary = f"Current facts for {kind}/{name}."
     if registry is not None:
         resource = registry.lookup(kind, name)
@@ -114,8 +113,13 @@ def _dynamic_topic(registry: Registry | None, slug: str) -> TopicContribution:
 
 
 def _dynamic_names(registry: Registry) -> tuple[str, ...]:
-    return tuple(sorted(KIND_REGISTRY)) + tuple(
-        f"{kind}/{name}" for kind in sorted(KIND_REGISTRY) for name, _resource in sorted(registry.iter_kind_items(kind))
+    candidates = set(KIND_REGISTRY) | {
+        f"{kind}/{name}"
+        for kind in sorted(KIND_REGISTRY)
+        for name, _resource in sorted(registry.iter_kind_items(kind))
+    }
+    return tuple(
+        sorted(name for name in candidates if is_valid_topic_slug(name))
     )
 
 
@@ -140,7 +144,7 @@ def build_onboarding_snapshot(registry: Registry, db: Database) -> OnboardingSna
 def _normalize_requested(requested: tuple[str, ...]) -> tuple[str, ...]:
     normalized: list[str] = []
     for slug in requested:
-        if not _TOPIC_RE.fullmatch(slug):
+        if not is_valid_topic_slug(slug):
             raise ValidationError(f"invalid guide topic {slug!r}")
         if slug not in normalized:
             normalized.append(slug)
@@ -202,15 +206,24 @@ def render_guide(
     except AgentworksError as error:
         system_error = error
 
-    dynamic_names = _dynamic_names(registry) if registry is not None else tuple(sorted(KIND_REGISTRY))
-    all_names = tuple(sorted((*authored.names(), *dynamic_names)))
+    authored_names = frozenset(authored.names())
+    dynamic_names = (
+        _dynamic_names(registry)
+        if registry is not None
+        else tuple(name for name in sorted(KIND_REGISTRY) if is_valid_topic_slug(name))
+    )
+    dynamic_only_names = tuple(name for name in dynamic_names if name not in authored_names)
+    all_names = tuple(sorted(authored_names | frozenset(dynamic_only_names)))
     if names_only:
         return GuideResponse("".join(f"{name}\n" for name in all_names), 0, all_names)
 
     selected: list[TopicContribution] = []
     if requested:
+        rejected_topics = frozenset(
+            issue.error.topic for issue in authored.issues if issue.error.topic is not None
+        )
         for slug in requested:
-            if slug in authored.names():
+            if slug in authored_names:
                 selected.append(authored.lookup(slug))
                 continue
             kind = slug.split("/", 1)[0]
@@ -218,6 +231,8 @@ def render_guide(
                 slug in dynamic_names if registry is not None else kind in KIND_REGISTRY and slug.count("/") <= 1
             )
             if not valid_dynamic:
+                if slug in rejected_topics:
+                    continue
                 raise _unknown(slug, all_names)
             selected.append(_dynamic_topic(registry, slug))
 
@@ -225,10 +240,16 @@ def render_guide(
     if requested:
         visible_issues = tuple(issue for issue in authored.issues if issue.error.topic in requested)
     runtime_issues: list[str] = []
-    if not selected:
-        index_topics = tuple((*authored.topics, *(_dynamic_topic(registry, name) for name in dynamic_names)))
+    if not selected and requested:
+        markdown = "\n\n---\n\n".join(
+            f"# {slug}\n\nThis guide topic is unavailable." for slug in requested
+        ) + "\n"
+    elif not selected:
+        index_topics = tuple((*authored.topics, *(_dynamic_topic(registry, name) for name in dynamic_only_names)))
         markdown = render_index(index_topics, mode)
     else:
+        from agentworks.db import DatabaseDriverError
+
         owned_db = False
         if registry is not None and db is None:
             from agentworks.db import DB_PATH, Database
@@ -295,7 +316,7 @@ def render_guide(
                         verification_evidence=verification_evidence,
                     ).markdown.rstrip()
                 )
-        except sqlite3.DatabaseError:
+        except DatabaseDriverError:
             # The guide owns a read-only connection. A future projection that
             # accidentally attempts a write must degrade like any other live
             # fact failure, without exposing SQLite internals or a database
