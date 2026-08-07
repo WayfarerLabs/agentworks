@@ -198,7 +198,19 @@ def kill_detached(target: Transport, base_path: str) -> None:
     the command precisely so it SURVIVES the workstation process, so a
     locally raised ``KeyboardInterrupt`` stops nothing remotely
     (LimaPlatform's create-interrupt rollback is the motivating case)."""
-    _kill_by_pid_file(target, f"{base_path}.pid")
+    try:
+        _kill_by_pid_file(target, f"{base_path}.pid")
+    finally:
+        # Interrupted callers never reach run_detached's normal cleanup.
+        # Remove the wrapper and every result artifact after the kill so
+        # command output and stale status cannot survive the rollback.
+        # Ordinary cleanup failures are suppressed because this function
+        # runs while its caller is preserving an earlier failure.
+        with contextlib.suppress(Exception):
+            target.run(
+                f"rm -f {base_path}.out {base_path}.sh {base_path}.pid {base_path}.status",
+                check=False,
+            )
 
 
 def _is_running(target: Transport, pid_file: str) -> bool:

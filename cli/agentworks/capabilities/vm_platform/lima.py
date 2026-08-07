@@ -592,66 +592,67 @@ class LimaPlatform(VMPlatform):
 
         remote_template = f"/tmp/agentworks-{instance_name}.yaml"
         try:
-            copy_to(target, local_template, remote_template)
-        finally:
-            Path(local_template).unlink(missing_ok=True)
+            try:
+                copy_to(target, local_template, remote_template)
+            finally:
+                Path(local_template).unlink(missing_ok=True)
 
-        # Run limactl create + start as a single detached operation
-        from agentworks.remote_exec import run_detached
-        from agentworks.ssh import SSHLogger
+            # Run limactl create + start as a single detached operation
+            from agentworks.remote_exec import run_detached
+            from agentworks.ssh import SSHLogger
 
-        ssh_logger = SSHLogger(instance_name, "vm-provision", redactions=redactions)
-        host_target = self._host_transport(logger=ssh_logger)
-        lima_cmd = (
-            f"limactl create --name {instance_name} --tty=false {remote_template} && limactl start {instance_name}"
-        )
-        output.detail("Starting and provisioning VM via Lima (this may take several minutes)...")
-        try:
-            # reuse_completed=False: creation is one-shot, so a leftover
-            # status file can only be stale garbage from an interrupted
-            # attempt; consuming it would report a phantom result for a
-            # limactl run that never happened.
-            result = run_detached(
-                host_target,
-                lima_cmd,
-                label=f"Lima ({instance_name})",
-                base_path=self._remote_base_path(instance_name),
-                timeout=600,
-                quiet=True,
-                reuse_completed=False,
+            ssh_logger = SSHLogger(instance_name, "vm-provision", redactions=redactions)
+            host_target = self._host_transport(logger=ssh_logger)
+            lima_cmd = (
+                f"limactl create --name {instance_name} --tty=false {remote_template} && limactl start {instance_name}"
             )
-            if result.exit_code != 0:
-                # Parse structured markers from provision script output if present
-                bootstrap = parse_bootstrap_output(result.output, result.exit_code)
-                for step in bootstrap.steps:
-                    if step.error:
-                        ssh_logger.log_error(f"Provision step '{step.name}': {step.error}")
-
-                ssh_logger.log_error(f"limactl failed (exit {result.exit_code})")
-                ssh_logger.log_error(result.output)
-                raise SSHError(
-                    f"limactl create/start failed (exit {result.exit_code})\n"
-                    f"Sanitized output is in SSH log: {ssh_logger.display_path}"
+            output.detail("Starting and provisioning VM via Lima (this may take several minutes)...")
+            try:
+                # reuse_completed=False: creation is one-shot, so a leftover
+                # status file can only be stale garbage from an interrupted
+                # attempt; consuming it would report a phantom result for a
+                # limactl run that never happened.
+                result = run_detached(
+                    host_target,
+                    lima_cmd,
+                    label=f"Lima ({instance_name})",
+                    base_path=self._remote_base_path(instance_name),
+                    timeout=600,
+                    quiet=True,
+                    reuse_completed=False,
                 )
+                if result.exit_code != 0:
+                    # Parse structured markers from provision script output if present
+                    bootstrap = parse_bootstrap_output(result.output, result.exit_code)
+                    for step in bootstrap.steps:
+                        if step.error:
+                            ssh_logger.log_error(f"Provision step '{step.name}': {step.error}")
+
+                    ssh_logger.log_error(f"limactl failed (exit {result.exit_code})")
+                    ssh_logger.log_error(result.output)
+                    raise SSHError(
+                        f"limactl create/start failed (exit {result.exit_code})\n"
+                        f"Sanitized output is in SSH log: {ssh_logger.display_path}"
+                    )
+            finally:
+                # Exactly-once close, covering the paths where run_detached
+                # itself raises (a transport failure, or the interrupt from
+                # the poll) that used to skip it and leave the per-op log
+                # without its footer. close() is not idempotent (each call
+                # appends a footer), hence one call here rather than one per
+                # branch; called with an exception in flight it also lands
+                # the traceback in the per-op log (its documented behavior).
+                # Suppressed so a local log-write failure (disk full,
+                # permissions) cannot skip the remote rm below or mask the
+                # original error.
+                with contextlib.suppress(OSError):
+                    ssh_logger.close()
         finally:
-            # Exactly-once close, covering the paths where run_detached
-            # itself raises (a transport failure, or the interrupt from
-            # the poll) that used to skip it and leave the per-op log
-            # without its footer. close() is not idempotent (each call
-            # appends a footer), hence one call here rather than one per
-            # branch; called with an exception in flight it also lands
-            # the traceback in the per-op log (its documented behavior).
-            # Suppressed so a local log-write failure (disk full,
-            # permissions) cannot skip the remote rm below or mask the
-            # original error.
-            with contextlib.suppress(OSError):
-                ssh_logger.close()
             # Clean up the remote temp file on success, failure, AND
-            # interrupt (these were accumulating in /tmp on the VM host
-            # after failures; an interrupt inside run_detached used to
-            # skip this entirely). Suppressed so a transport hiccup on
-            # the unwind can never mask the original error or interrupt.
-            with contextlib.suppress(SSHError):
+            # interrupt, including a copy that created only a partial
+            # secret-bearing YAML. A second interrupt or transport failure
+            # during this best-effort unwind cannot replace the original.
+            with contextlib.suppress(Exception, KeyboardInterrupt):
                 ssh_run(target, f"rm -f {remote_template}", check=False)
 
     def _cleanup_partial_create(self, instance_name: str) -> None:
@@ -664,6 +665,15 @@ class LimaPlatform(VMPlatform):
         second Ctrl-C (``KeyboardInterrupt``) deliberately escapes so
         :meth:`_rollback_create_on_interrupt` can abandon the cleanup.
         """
+        if self.is_remote:
+            # A failed or interrupted run_detached may still be alive on the
+            # VM host and never reached its normal artifact cleanup. Stop it
+            # and erase its output, wrapper, PID, and status before deleting
+            # the instance it was mutating.
+            from agentworks.remote_exec import kill_detached
+
+            with contextlib.suppress(Exception):
+                kill_detached(self._host_transport(), self._remote_base_path(instance_name))
         try:
             self._delete_instance(instance_name)
         except Exception as e:
@@ -685,22 +695,6 @@ class LimaPlatform(VMPlatform):
             "please wait (Ctrl-C again to abandon it)..."
         )
         try:
-            if self.is_remote:
-                # This locally raised interrupt stopped nothing on the
-                # placement host: run_detached nohups the remote limactl
-                # precisely so it survives this process. Kill the
-                # detached wrapper before deleting, or the delete races
-                # a create/start still mutating the same instance. The
-                # kill targets the wrapper PID, not the process group,
-                # so an in-flight limactl child may briefly survive it;
-                # severing the wrapper stops the && chain from
-                # advancing, and the limactl delete --force below stops
-                # the instance's own processes. (Local creates need no
-                # equivalent: the terminal delivers the SIGINT to the
-                # foreground limactl itself.)
-                from agentworks.remote_exec import kill_detached
-
-                kill_detached(self._host_transport(), self._remote_base_path(instance_name))
             self._cleanup_partial_create(instance_name)
         except KeyboardInterrupt:
             output.warn(
