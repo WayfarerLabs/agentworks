@@ -85,7 +85,11 @@ stays out of the weeds on purpose:
   scratchpad, a shared temp or fixture directory) must be subdivided the same way. Charter each
   subagent to create and stay inside its own namespaced subdirectory (for example `<task-slug>/`
   under the shared root), and anything fixture-sensitive (like a tester) to create a fresh temp
-  directory under that.
+  directory under that. Isolation changes where the dev's commits land: git refuses to check out a
+  branch already checked out in another worktree, so an isolated dev commits on its own branch
+  (usually the one its worktree starts on), pushes it so nothing is hoarded locally, and reports
+  branch and head SHA; integrating that branch back onto the effort's branch is the lead's step, not
+  the dev's, and doing it promptly keeps section 6's no-hoarding rule satisfied end to end.
 
 ## 4. Choose the model deliberately for each delegation
 
@@ -139,14 +143,16 @@ after a burst of process changes, before locking a roadmap-level effort, or when
 asks, run one comprehensive consistency review over the whole process tree: skills, rules, and
 subagent definitions together, in a single pass.
 
-Run it as an `agentworks-reviewer` subagent in a fresh context, launched explicitly at the top tier
-(section 4 applies here too: name the model, do not inherit). Never use the context that authored
-the changes; the whole point is a reader who has to work the tree out from what it says. It hunts
-pairwise contradictions, rules that silently override one another, gaps where one document assumes
-something another never establishes, and cross-references gone stale. Porting the process docs into
-a separate context and having independent reviewers read them as outsiders is a proven technique
-here: it surfaced four live contradictions that per-change reviews had passed. Findings route like
-any other review; triage them, push back on the wrong ones, and fix the valid ones.
+Run it as an `agentworks-reviewer` subagent in its consistency-review mode (defined in that
+subagent: six categories, composition failures chief among them), in a fresh context, launched
+explicitly at the top tier (section 4 applies here too: name the model, do not inherit). Never use
+the context that authored the changes; the whole point is a reader who has to work the tree out from
+what it says. It hunts pairwise contradictions, rules that silently override one another, gaps where
+one document assumes something another never establishes, and cross-references gone stale. Porting
+the process docs into a separate context and having independent reviewers read them as outsiders is
+a proven technique here: it surfaced four live contradictions that per-change reviews had passed.
+Findings route like any other review; triage them, push back on the wrong ones, and fix the valid
+ones.
 
 ## 6. Commit, push, and PR
 
@@ -200,7 +206,8 @@ misses.
   pushing), substitute a **vanilla generic review right here**: a `general-purpose` subagent on a
   **lower model (e.g. Sonnet)**, prompted to review the diff as a senior engineer reading it cold,
   no project-specific checklist. Run it in parallel with the `agentworks-reviewer` and triage both
-  together.
+  together. This pass is deliberately exempt from section 4's reviewer-tier floor: it is a
+  complementary lens, not the reviewer of record, which stays bound by that floor.
 
 Either way, apply the same finding stance as section 5 (push back on the wrong, fix the valid).
 Reserve this for **code-heavy** slices; a doc-only or closeout change has little for a fresh-eyes

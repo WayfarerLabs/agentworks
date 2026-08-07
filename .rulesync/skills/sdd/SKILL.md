@@ -306,8 +306,13 @@ The settled rules for the species:
   effort.
 - The roadmap lead seeds each child SDD with its FRD plus any constraints the roadmap has already
   settled, and reviews the child's PRs. A separately launched effort lead owns the child's HLA,
-  plan, and implementation per the ordinary process. Seeding PRs are ready, not draft: their content
-  is limited by design, but they are intended to merge as-is (see PR Review).
+  plan, and implementation from the start, per the ordinary process. Seeding PRs are ready, not
+  draft: their content is limited by design, but they are intended to merge as-is (see PR Review).
+  Ownership of the seeded FRD transfers to the effort lead when the seeding PR merges: from then on
+  it is the child's artifact like the rest of its SDD, the effort lead revises it when it turns out
+  wrong (keeping the roadmap lead informed of material revisions), and the roadmap lead stops
+  editing it like any other child artifact. Settled roadmap constraints recorded in the FRD still
+  bind; the effort lead flags disagreement rather than reopening them unilaterally.
 - The roadmap's artifacts, ledger included, are the roadmap lead's to maintain. Child effort leads
   do not update the roadmap SDD to mark their own progress; the roadmap lead tracks child status
   from merged PRs. Child leads flag inconsistencies they notice to the operator instead (see
