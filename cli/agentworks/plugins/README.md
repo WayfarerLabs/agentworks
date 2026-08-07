@@ -57,8 +57,8 @@ _INSTALLED_MODULES: tuple[_PluginModule, ...] = (
 )
 ```
 
-The index ships the installed system plugins (`onepassword`, `claude`, `proxmox`, `azure`, `codex`);
-each listed module is registered and seated at import. On import the index:
+Every module listed there is registered and seated at import; `agw doctor`'s **System plugins**
+roster is what a given build actually ships. On import the index:
 
 - registers each plugin, wrapping any failure with the real module name (a bad descriptor is a
   curation bug that reads as `system plugin '<module>' failed to register: ...`, not an opaque

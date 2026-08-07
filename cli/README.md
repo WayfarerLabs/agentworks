@@ -610,23 +610,15 @@ spec:
     required_commands: [htop]
 ```
 
-`shell`'s config vocabulary is the command surface every template used to spell at the spec top
-level:
+`agw resource describe-kind harness-integration/shell` documents its config field by field. Two
+things that reference cannot tell you: command strings support `{{session_name}}` and
+`{{workspace_name}}` substitution (double-brace syntax), and the executables an integration checks
+are checked on the session's launch target (the agent, or the VM admin for admin sessions) before
+any state mutation, so launching a session whose tool is not installed fails fast with a clear error
+instead of a cryptic downstream tmux failure.
 
-- `command`: the pane command (empty/omitted is a plain login shell). Supports `{{session_name}}`
-  and `{{workspace_name}}` variable substitution (double-brace syntax).
-- `resume_command`: used by `session resume`, for a tool that needs a different invocation on
-  resume. If omitted, `command` is used. (To run Claude Code, prefer the dedicated `claude-code`
-  integration below, which resumes the previous conversation on its own.)
-- `required_commands`: executables the command needs, checked on the session's launch target (the
-  agent, or the VM admin for admin sessions) before any state mutation, so launching a session whose
-  tool is not installed fails fast with a clear error instead of a cryptic downstream tmux failure.
-  Merged (de-duped, order-preserving) across template inheritance.
-
-In a YAML manifest these three keys live only inside the `harness_integration` table; spelling any
-of them at the `spec` top level is a load error that points you at the nested shape. That check is
-an explicit session-template validation boundary. It is separate from the TOML flat-field handling
-below, which is a permanent supported spelling, not a deprecation.
+Those keys live only inside the `harness_integration` table; spelling any of them at the `spec` top
+level is a load error that points you at the nested shape.
 
 The `claude-code` integration runs Claude Code as the session: `session create` starts a new Claude
 session and `session resume` resumes the same conversation when its transcript still exists on disk
@@ -636,14 +628,10 @@ ready, but creating a session on it is refused with an "enable plugin `claude`" 
 `claude` to `[plugins].system`. (The built-in `shell` integration stays the default and needs no
 opt-in.) Once enabled, it needs only that `claude` is installed on the launch target, and announces
 the chosen action (resume vs new session) in the pane, so the decision is never silent. Its config
-vocabulary is three optional fields:
-
-- `permission_mode`: forwarded verbatim to `claude --permission-mode` (its choice set is Claude's,
-  not validated here).
-- `model`: forwarded verbatim to `claude --model`.
-- `extra_args`: a list of raw argv tokens appended last, the escape hatch for any flag the
-  integration does not model. Each element is one argv token (shell-quoted, never re-split), and
-  elements support the `{{session_name}}` / `{{workspace_name}}` variables.
+is all optional and documented by `agw resource describe-kind harness-integration/claude-code`. The
+fields that forward a value to `claude` are not validated here, because the choice sets are Claude's
+and they move between its releases; and each `extra_args` element is one argv token (shell-quoted,
+never re-split).
 
 ```yaml
 apiVersion: agentworks/v1
@@ -674,19 +662,11 @@ fallback remains a heuristic, though, so if that conversation is the only one re
 workspace the new session's first resume can still adopt it, announced with the id it chose. It
 ships as the opt-in `codex` system plugin, disabled by default with the same gating as `claude-code`
 above. Once enabled, it needs only that `codex` is installed on the launch target, and announces
-which of those it did, both in the command output and in the pane. Its config vocabulary is ten
-optional fields: `model`, `sandbox`, `approval_policy`, and `profile` forward verbatim to `codex -m`
-/ `-s` / `-a` / `-p` (their choice sets are Codex's, not validated here); `network` (bool) forwards
-to Codex's `sandbox_workspace_write.network_access` config key (sandboxed network is off by default,
-so coding sessions usually want `network: true`); `approvals_reviewer` (string) forwards to Codex's
-`approvals_reviewer` config key (who adjudicates approval escalations: `user`, the default, prompts
-the human; `auto_review` routes them to Codex's risk-based reviewer subagent, the usual choice for
-unattended-leaning auto templates, trading a person's approval for a model's while the sandbox still
-enforces the outer boundary); `writable_dirs` (list of paths) emits one `codex --add-dir` each;
-`web_search` (bool) enables the live web-search tool (`codex --search`); `disable_strict_config`
-(bool) suppresses the `--strict-config` the integration otherwise always passes (strictness makes a
-Codex config mistake or a Codex-renamed key fail loudly at launch instead of being silently
-ignored); and `extra_args` is the same appended-last escape hatch:
+which of those it did, both in the command output and in the pane. Its config is all optional and
+documented by `agw resource describe-kind harness-integration/codex`; the
+[resources guide](../docs/guides/resources.md) covers the Codex behavior behind the fields (network
+off by default under `workspace-write`, who adjudicates an approval escalation, and why the
+integration always passes `--strict-config`):
 
 ```yaml
 apiVersion: agentworks/v1
@@ -835,38 +815,32 @@ Settings sections (`config.toml`, permanent):
 - `[plugins]`: the plugin-subsystem namespace; its `system` key is the opt-in list of enabled system
   plugins (see [System Plugins](#system-plugins) below)
 
-Resource kinds (declared as YAML manifests). Each parenthetical names the removed legacy TOML
-section that used to declare the kind: it no longer loads, and is listed only as a reference for
-`agw resource migrate`:
+Resources are declared as YAML manifests. `agw resource kinds` lists every kind with its category
+and purpose, and `agw resource describe-kind KIND` documents what one accepts, field by field.
 
-- `vm-site` (`[azure]` / `[proxmox]`, flat legacy shape): a configured place to create VMs.
-  `spec.platform` is one tagged table: its `name` key selects the backing platform and the remaining
-  keys are its settings (Azure subscription/resource-group/region plus an optional
-  `service_principal` block to authenticate as a specific service principal instead of with ambient
-  credentials, Proxmox API endpoint + token secret, remote-Lima `vm_host`). The `lima-local` and
-  `wsl2` sites ship built in (on hosts where their platform can run) and their names are reserved
-- `vm-platform`: read-only capability rows for the VM platforms (`lima`, `wsl2` built in;
-  `azure-vm`, `proxmox`, and `aws-ec2` ship as the opt-in `azure`, `proxmox`, and `aws` system
-  plugins, disabled by default, see [System Plugins](#system-plugins)); listed by
-  `agw resource kinds`, never declared
-- `vm-template` (`[vm_templates.*]`): VM resources, apt packages, system install commands, mise, and
-  the target `site`
-- `admin-template` (`[admin.config]`) -- admin user shell, dotfiles, git credentials, user install
-  commands, mise
-- `agent-template` (`[agent_templates.*]`) -- agent user shell, dotfiles, git credentials, user
-  install commands, mise
-- `session-template` (`[session_templates.*]`) -- session commands with variable substitution
-- `workspace-template` (`[workspace_templates.*]`): workspace repo, tmuxinator, optional git
-  identity (`git_user_name` / `git_user_email`, stamped into the cloned repo), inheritance
-- `named-console-template` (`[named_console]`) -- named-console layout (tmux preset names +
-  `aw-session-vertical`)
-- `git-credential` (`[git_credentials.*]`) -- git credentials; `spec.provider` selects github or
-  azdo
-- `secret` (`[secrets.*]`) -- secret declarations referenced by `{secret: name}` env entries
-- `apt-source` / `apt-package` / `system-install-command` / `user-install-command`
-  (`[apt_sources.*]` etc.): apt / install-command extensions
-- Env vars ride their owning resource: an `env` map in the template's `spec` (the removed TOML shape
-  used `[<scope>.env]` subsections) at vm / workspace / admin / agent / session scope
+The table below exists for one thing this repository is otherwise the only record of: which removed
+legacy TOML section used to declare each kind. Those sections no longer load; the mapping is a
+reference for reading an old `config.toml` and for `agw resource migrate`.
+
+| Kind                                                                          | Removed TOML section                        |
+| ----------------------------------------------------------------------------- | ------------------------------------------- |
+| `vm-site`                                                                     | `[azure]` / `[proxmox]` (flat legacy shape) |
+| `vm-template`                                                                 | `[vm_templates.*]`                          |
+| `admin-template`                                                              | `[admin.config]`                            |
+| `agent-template`                                                              | `[agent_templates.*]`                       |
+| `session-template`                                                            | `[session_templates.*]`                     |
+| `workspace-template`                                                          | `[workspace_templates.*]`                   |
+| `named-console-template`                                                      | `[named_console]`                           |
+| `git-credential`                                                              | `[git_credentials.*]`                       |
+| `secret`                                                                      | `[secrets.*]`                               |
+| `apt-source`, `apt-package`, `system-install-command`, `user-install-command` | `[apt_sources.*]` and siblings              |
+
+The four capability kinds (`vm-platform`, `harness-integration`, `git-credential-provider`,
+`secret-backend`) are read-only rows for registered code, never declared and never in TOML.
+
+Env vars ride their owning resource, as an `env` map in the template's `spec` (the removed TOML
+shape used `[<scope>.env]` subsections), at vm / workspace / admin / agent / session scope. The
+`lima-local` and `wsl2` vm-sites ship built in and their names are reserved.
 
 ### Environment Variables and Secrets
 
@@ -894,7 +868,8 @@ spec:
 
 Every secret reference points to a `secret` resource declaration (auto-declared with a
 framework-synthesized description if you skip it). Active backends (and their precedence order) are
-listed in `[secret_config].backends`. Today the implemented backends are:
+listed in `[secret_config].backends`. `agw resource describe-kind secret-backend` lists the backends
+this build has, and naming one documents the address it expects. The two that are always available:
 
 - `env-var` -- reads from the operator's process env. Default convention is
   `AW_SECRET_<UPPER_SNAKE_CASE>`, overridable per secret via the secret's `backend_mappings`

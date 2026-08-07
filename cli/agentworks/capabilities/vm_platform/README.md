@@ -24,9 +24,9 @@ includes location, credentials, and other platform-specific settings.
 
 ## Available Platforms
 
-Five platforms ship today. This list can change, so
-`agw resource list --kind vm-platform --include-disabled` is the definitive set on any given
-install.
+Five platforms ship today. This list can change, so `agw resource describe-kind vm-platform` is the
+definitive set on any given install (it reads no config, so it answers even on a host that cannot
+load one), and `agw resource describe-kind vm-platform/<name>` is the definitive config for one.
 
 - **`lima`** (built in) runs fast local VMs on the operator's machine (commonly macOS, but any host
   Lima supports). It can also connect to a remote Linux host over SSH and drive `limactl` there,
@@ -277,11 +277,12 @@ claim it never made; registration refuses an implementation missing any of them,
 `contract_version` must match exactly the version the vm-platform descriptor declares supported, so
 a contract change is a hard cutover rather than a silent re-certification.
 
-- `config_model` declares what the `platform_config` IS, as an `AgwModel` carrying the platform's
-  own name as a `Literal` tag plus one field per accepted key. The core validates against it
-  (closed-world) and extracts the references its `SecretRef` / `ResourceRef` markers imply (total,
-  never raising); no platform code runs for either. Proxmox marks its `token_secret` field; the
-  marker is what later lets the op read that secret (below).
+- `config_model` declares what the platform's config IS (the keys a site writes beside `name` inside
+  `spec.platform`), as an `AgwModel` carrying the platform's own name as a `Literal` tag plus one
+  field per accepted key. The core validates against it (closed-world) and extracts the references
+  its `SecretRef` / `ResourceRef` markers imply (total, never raising); no platform code runs for
+  either. Proxmox marks its `token_secret` field; the marker is what later lets the op read that
+  secret (below).
 - `legacy_platform_metadata(cls, row, legacy) -> dict[str, str]` maps pre-migration DB rows into the
   `platform_metadata` shape, consumed only by the one-shot DB migration.
 
@@ -292,9 +293,9 @@ read back only by the owning platform (Lima stores `instance_name`, WSL2 `distro
 `backend_name`, and never the public IP, which it reads live). Add a platform-specific **input** by
 adding a field to `ProvisionRequest`, not by changing the protocol. But note the opposite pattern is
 also right: purely internal translation stays inside the platform. Azure's VM-size selection
-(mapping the request's `cpus`/`memory_gib`/`disk_gib` onto a concrete SKU, with a
-`platform_config.vm_sizes` override, per ADR 0018) lives entirely in `plugins/azure/platform.py` and
-adds nothing to `ProvisionRequest`.
+(mapping the request's `cpus`/`memory_gib`/`disk_gib` onto a concrete SKU, with a site-level
+`vm_sizes` override, per ADR 0018) lives entirely in `plugins/azure/platform.py` and adds nothing to
+`ProvisionRequest`.
 
 ### How an Op Gets Its Dependencies
 
@@ -339,16 +340,18 @@ and `access_key_secret` naming the secret that holds the secret access key (plus
 `assume_role_arn`). Read it alongside azure when adding the third. Four rules, in
 `plugins/azure/platform.py`:
 
-**1. Explicit credentials are an OPTIONAL nested table naming a secret.** The site's
-`platform_config` may carry a `service_principal` table:
+**1. Explicit credentials are an OPTIONAL nested table naming a secret.** The site's platform block
+may carry a `service_principal` table:
 
 ```yaml
-platform_config:
-  subscription_id: "..."
-  service_principal:
-    tenant_id: "..." # plain config: an identifier, not a secret
-    client_id: "..." # plain config
-    secret: azure-client-secret # the NAME of a secret, and the default
+spec:
+  platform:
+    name: azure-vm
+    subscription_id: "..."
+    service_principal:
+      tenant_id: "..." # plain config: an identifier, not a secret
+      client_id: "..." # plain config
+      secret: azure-client-secret # the NAME of a secret, and the default
 ```
 
 Three deliberate choices. The identifiers are plain config because they are identifiers, not
@@ -611,9 +614,9 @@ YAML block scalar, remote shell). Two traps that have already occurred:
    with a persistent client memoizes the derived client, not the secret (the Proxmox `_api`
    pattern). `create` is intentionally not `@idempotent_op`; the idempotent ops must land in-state
    themselves.
-2. `config_model` declares the `platform_config` shape, with a `SecretRef` marker on each field
-   naming a secret the implementation reads. Marking a field authorizes the op to read that secret
-   later.
+2. `config_model` declares the shape of the platform's own config block, with a `SecretRef` marker
+   on each field naming a secret the implementation reads. Marking a field authorizes the op to read
+   that secret later.
 3. The class is registered in `VM_PLATFORM_REGISTRY` (`__init__.py`).
 4. `unsupported_reason` identifies platforms that cannot run on some hosts (WSL2 off Windows), while
    the non-constructing `not_ready(config)` handles per-site tool checks (Lima with no `limactl`).

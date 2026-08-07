@@ -31,8 +31,8 @@ actual git credential helper on the VM; the provider never does.
 ## Available Providers
 
 Two providers ship today, one per supported host. This list can change, so
-`agw resource list --kind git-credential-provider --include-disabled` is the definitive set on any
-given install.
+`agw resource describe-kind git-credential-provider` is the definitive set on any given install, and
+`agw resource describe-kind git-credential-provider/<name>` the definitive config for one.
 
 - **`github`** (built in) sources a GitHub PAT for `github.com`. It can optionally be scoped to a
   set of repositories (`repos`) or to a single owner (`owner`), so several credentials can serve the
@@ -352,7 +352,7 @@ are the contract:
 | Host                  | `github.com`                                          | `dev.azure.com`                                            |
 | Probe endpoint        | `GET /user` on `api.github.com`, Bearer header        | `GET /<org>/_apis/connectionData`, Basic `:<token>` header |
 | Reject statuses       | `401`                                                 | `401`, `203` (AzDO's sign-in-page answer for a bad PAT)    |
-| Config vocabulary     | optional `repos` XOR `owner`, plus `token`            | required `org`, plus `token`                               |
+| Config vocabulary     | scoped by repo XOR owner                              | scoped by a required organization                          |
 | Store username        | resource name (scoped) or `x-access-token` (unscoped) | the `org`                                                  |
 | `helper_entry` scope  | `repos` / `owner` from config                         | the `org` doubles as the owner scope                       |
 | Success enrichment    | announces `login` and (fine-grained) expiry           | announces success only                                     |

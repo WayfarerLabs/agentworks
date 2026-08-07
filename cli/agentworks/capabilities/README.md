@@ -52,6 +52,10 @@ agent up on a machine and let it work: where it runs, what it runs, how it gets 
 it authenticates to git hosts. Each kind is an independent extension point with its own shipped
 options, allowing an operator to enable only those needed in a particular environment.
 
+The implementations named below are the ones that shipped when this was written, as illustration.
+`agw resource describe-kind <capability-kind>` is the set a given install actually has, and naming
+one documents its config; the per-kind READMEs linked below carry the implementation detail.
+
 ### VM Platform
 
 The `vm-platform` capability decides where agent VMs live and how they are brought up, torn down,

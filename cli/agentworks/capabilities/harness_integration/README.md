@@ -58,8 +58,8 @@ session-scoped.
 ## Available Integrations
 
 Three integrations ship today. This list can change, so
-`agw resource list --kind harness-integration --include-disabled` is the definitive set on any given
-install.
+`agw resource describe-kind harness-integration` is the definitive set on any given install, and
+`agw resource describe-kind harness-integration/<name>` the definitive config for one.
 
 - **`shell`** (built in) is the default. By default it simply opens the configured shell for the
   session's target user (agent or admin user). It can further be configured to run a specific
@@ -69,9 +69,8 @@ install.
 - **`claude-code`** (via the `claude` system plugin) drives an interactive Claude Code session. It
   knows how to launch Claude Code and, on resume, how to check for an existing session and reattach
   if found so that the operator experience is seamless and they can pick up right where they left
-  off. Limited configuration is supported, expressed in Claude Code's own terms: `permission_mode`
-  and `model` map to the `--permission-mode` and `--model` CLI flags, and `extra_args` passes
-  additional Claude Code CLI arguments through verbatim.
+  off. Limited configuration is supported, expressed in Claude Code's own terms: its fields map to
+  Claude Code CLI flags, with an `extra_args` escape hatch that passes arguments through verbatim.
 - **`codex`** (via the `codex` system plugin) drives an interactive Codex session. Like
   `claude-code`, it launches the tool and, on resume, reattaches to the existing conversation
   instead of starting over when a Codex session exists, and offers limited configuration options.
@@ -182,9 +181,9 @@ The capability ladder, harness-integration edition:
   its per-session state blob. Constructed fresh per operation by the session node factories.
 - The **consuming resource** is the `session-template` (it owns the config: in manifests,
   `spec.harness_integration` is one tagged table whose `name` key selects the integration and whose
-  remaining keys are that integration's config; the operator-facing shapes, including the TOML
-  spelling and the deprecated sibling form, are documented in `docs/guides/resources.md`) and, at
-  runtime, the session node that holds the instance.
+  remaining keys are that integration's config, which is the only accepted shape; the
+  operator-facing view is in `docs/guides/resources.md`) and, at runtime, the session node that
+  holds the instance.
 
 Layering is a hard rule: this package imports neither `sessions/` nor `orchestration/` (the `target`
 type is a local `Protocol` for exactly this reason), and `test_shell_integration.py` asserts it. An
@@ -530,14 +529,23 @@ authority on the descriptor, registration mechanics, and the enablement model; t
    `[plugins] system = ["<name>"]`; `agw doctor` shows the roster. No other installer machinery
    exists or is needed.
 
-The checklist beyond code, per the repo rules: the `[plugins]` block comment in
-`cli/agentworks/sample-config.toml`, the harness-integration section of `docs/guides/resources.md`,
-the integration's own `prose` (a `TopicProse` beside its class, which is what
-`agw resource describe-kind harness-integration/<name>` prints; there is no sample manifest to edit,
-because samples are rendered), the harness-integration material in `cli/README.md` (under "Session
-Templates"), `.cspell.json` for harness names, and a completions check (today no completer
-enumerates integration names, so there is nothing to regenerate unless the change also adds CLI
-surface; the rule still requires the check).
+The checklist beyond code, per the repo rules:
+
+- **The integration's own `prose`** (a `TopicProse` beside its class) plus the attribute docstring
+  on every config field. Between them those ARE the documentation:
+  `agw resource describe-kind harness-integration/<name>`, the generated sample, and the editor's
+  hover text all render them, and there is no sample manifest to hand-edit because samples are
+  rendered.
+- **Do not add a field list to a guide.** `docs/guides/resources.md` and `cli/README.md` carry
+  pointers to the rendered surfaces plus whatever an operator needs that is not a fact about a field
+  (a tool's own behavior, a choice worth explaining). Add there only if you have something of that
+  kind to say. A field list written out in a guide is a second description of the model, and the
+  ones that used to be there had already drifted.
+- **The `[plugins]` block comment** in `cli/agentworks/sample-config.toml`, if the integration
+  arrives with a new system plugin.
+- **`.cspell.json`** for harness names, and a completions check (today no completer enumerates
+  integration names, so there is nothing to regenerate unless the change also adds CLI surface; the
+  rule still requires the check).
 
 ### Reserved Directions (Recorded, Not Built)
 
