@@ -150,6 +150,14 @@ def schema_json(schema: dict[str, Any]) -> str:
     return json.dumps(schema, indent=2) + "\n"
 
 
+MODELINE_PREFIX = "# yaml-language-server: $schema="
+"""What a modeline starts with, for recognizing one already in a file.
+
+A file's first line either is one of these or the file has none; nothing
+reads further than the prefix to decide.
+"""
+
+
 def modeline(*, manifest_path: Path, resources_dir: Path, kind: str | None) -> str:
     """The yaml-language-server modeline for a manifest file, without its
     trailing newline.
@@ -167,7 +175,7 @@ def modeline(*, manifest_path: Path, resources_dir: Path, kind: str | None) -> s
     filename = ENVELOPE_SCHEMA_FILENAME if kind is None else schema_filename(kind)
     target = resources_dir / SCHEMA_DIRNAME / filename
     relative = os.path.relpath(target, start=manifest_path.parent)
-    return f"# yaml-language-server: $schema={PurePath(relative).as_posix()}"
+    return f"{MODELINE_PREFIX}{PurePath(relative).as_posix()}"
 
 
 # -- Model assembly --------------------------------------------------------

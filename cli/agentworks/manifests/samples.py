@@ -62,10 +62,18 @@ def write_sample(
     A file this CREATES opens with the yaml-language-server modeline, and
     the schema set it refers to is written alongside, because a modeline
     pointing at a file that is not there is a red banner in the operator's
-    editor rather than a missing feature. An append leaves the existing
-    file's first line alone: a modeline has to be at the top, so stamping
-    one means shifting every line number in a file the operator already
-    knows.
+    editor rather than a missing feature.
+
+    An append never INSERTS a modeline: one has to be at the top, so
+    stamping a file that has none would shift every line number the
+    operator already knows. It does RESTAMP one that is already there and
+    has stopped being true, which costs no line numbers at all. A file
+    created for one kind carries that kind's own schema, and appending a
+    second kind's sample to it leaves the editor validating the new
+    document against the first kind's shape: red underlines under
+    configuration the loader accepts, which is worse than shipping no
+    schema association at all. The file becomes a multi-kind file, so it
+    gets the multi-kind (envelope) schema.
 
     The modeline is NOT part of :func:`sample_text`, which stays fully
     commented under its own uncomment rule. It is a file header, so the
@@ -79,17 +87,49 @@ def write_sample(
     appended = target.exists()
     target.parent.mkdir(parents=True, exist_ok=True)
     if appended:
-        existing = target.read_bytes()
-        prefix = "" if existing.endswith(b"\n") or not existing else "\n"
-        with target.open("a", encoding="utf-8") as handle:
-            handle.write(prefix)
-            handle.write("\n")
-            handle.write(text)
+        existing = target.read_text(encoding="utf-8")
+        separator = "" if existing.endswith("\n") or not existing else "\n"
+        body, restamped = _restamped(
+            f"{existing}{separator}\n{text}",
+            target=target,
+            resources_dir=resources_dir,
+            kinds=_validated_kinds(kind, all_kinds),
+        )
+        target.write_text(body, encoding="utf-8")
+        if restamped:
+            # The line now names the envelope schema, so that file has to
+            # be there for the same reason a created file's does.
+            write_schema_set(resources_dir / SCHEMA_DIRNAME)
     else:
         header = modeline(manifest_path=target, resources_dir=resources_dir, kind=kind)
         target.write_text(f"{header}\n{text}", encoding="utf-8")
         write_schema_set(resources_dir / SCHEMA_DIRNAME)
     return target, appended
+
+
+def _restamped(text: str, *, target: Path, resources_dir: Path, kinds: tuple[str, ...]) -> tuple[str, bool]:
+    """``text`` with its modeline corrected for the kinds now in the file.
+
+    Returns ``(text, changed)``. A file with no modeline is returned as it
+    came: this only ever REPLACES a first line that is already one, never
+    adds one, so no line number moves.
+
+    The existing modeline is what says which kind the file was for, so
+    nothing has to parse the body (which is mostly commented-out samples
+    that no YAML parser would report a kind for anyway).
+    """
+    from agentworks.manifests.emit import MODELINE_PREFIX, modeline
+
+    first, newline, rest = text.partition("\n")
+    if not first.startswith(MODELINE_PREFIX):
+        return text, False
+    only = kinds[0] if len(kinds) == 1 else None
+    if first == modeline(manifest_path=target, resources_dir=resources_dir, kind=only):
+        return text, False
+    envelope = modeline(manifest_path=target, resources_dir=resources_dir, kind=None)
+    if first == envelope:
+        return text, False
+    return f"{envelope}{newline}{rest}", True
 
 
 def _validated_kinds(kind: str | None, all_kinds: bool) -> tuple[str, ...]:

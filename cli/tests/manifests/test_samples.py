@@ -216,7 +216,9 @@ def test_write_sample_creates_and_appends(tmp_path: Path) -> None:
     assert appended2
     assert path2 == path
     text = path.read_text()
-    assert text.startswith(first)
+    # The BODY is appended to, never rewritten. The first line is the
+    # modeline, which a second kind restamps (test_editor_association.py).
+    assert text.split("\n", 1)[1].startswith(first.split("\n", 1)[1])
     assert "kind: vm-template" in text
     # Still inert after the append.
     manifests = load_manifests(resources)

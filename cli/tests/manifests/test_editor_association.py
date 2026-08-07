@@ -93,19 +93,61 @@ def test_an_all_kinds_file_points_at_the_any_kind_schema(tmp_path: Path) -> None
     assert first == f"{MODELINE_PREFIX}{SCHEMA_DIRNAME}/{ENVELOPE_SCHEMA_FILENAME}"
 
 
-def test_an_append_leaves_the_existing_files_first_line_alone(tmp_path: Path) -> None:
-    """A modeline has to be the first line, so stamping an existing file
-    means inserting at line 1 and shifting every line number an operator
-    (and every stored ``declared_at``) already knows. Creation only."""
+def test_an_append_never_inserts_a_modeline(tmp_path: Path) -> None:
+    """A modeline has to be the first line, so stamping a file that has
+    none means inserting at line 1 and shifting every line number an
+    operator (and every stored ``declared_at``) already knows. Insertion
+    is creation-only, and a file the operator wrote by hand keeps its own
+    first line."""
     resources = tmp_path / "resources"
-    manifest, _ = write_sample(resources, "mixed.yaml", "secret")
+    resources.mkdir(parents=True)
+    manifest = resources / "hand-written.yaml"
+    manifest.write_text("# my own notes\napiVersion: agentworks/v1\n")
     before = manifest.read_text()
 
-    _, appended = write_sample(resources, "mixed.yaml", "vm-template")
+    _, appended = write_sample(resources, "hand-written.yaml", "secret")
+
     assert appended
     after = manifest.read_text()
     assert after.startswith(before)
-    assert after.count(MODELINE_PREFIX) == 1
+    assert MODELINE_PREFIX not in after
+
+
+def test_appending_a_second_kind_restamps_the_modeline(tmp_path: Path) -> None:
+    """A single-kind file's modeline stops being true the moment a second
+    kind lands in it: the editor validates the new document against the
+    first kind's shape, red-underlining configuration the loader accepts,
+    which is worse than no association at all.
+
+    Restamping costs no line numbers, because it REPLACES a line that is
+    already there rather than inserting one, so the reason insertion is
+    creation-only does not apply.
+    """
+    resources = tmp_path / "resources"
+    manifest, _ = write_sample(resources, "mixed.yaml", "secret")
+    body_before = manifest.read_text().split("\n", 1)[1]
+
+    _, appended = write_sample(resources, "mixed.yaml", "vm-template")
+
+    assert appended
+    first, body_after = manifest.read_text().split("\n", 1)
+    assert first == f"{MODELINE_PREFIX}{SCHEMA_DIRNAME}/{ENVELOPE_SCHEMA_FILENAME}"
+    assert body_after.startswith(body_before), "the body is appended to, never rewritten"
+    assert manifest.read_text().count(MODELINE_PREFIX) == 1
+    assert (resources / SCHEMA_DIRNAME / ENVELOPE_SCHEMA_FILENAME).is_file()
+
+
+def test_appending_the_same_kind_leaves_the_modeline_alone(tmp_path: Path) -> None:
+    """The single-kind schema localizes an error far better than the
+    thirteen-arm envelope, so a file that is still about one kind keeps
+    it. Restamping is for a file that stopped being single-kind."""
+    resources = tmp_path / "resources"
+    manifest, _ = write_sample(resources, "secrets.yaml", "secret")
+    before = manifest.read_text().splitlines()[0]
+
+    write_sample(resources, "secrets.yaml", "secret")
+
+    assert manifest.read_text().splitlines()[0] == before
 
 
 def test_writing_a_sample_writes_the_schemas_it_refers_to(tmp_path: Path) -> None:
