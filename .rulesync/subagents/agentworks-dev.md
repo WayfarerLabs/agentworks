@@ -33,5 +33,5 @@ from, with a hand-off that says what you did, what you deliberately did not, and
 
 The principles' "whoever is driving your work" is, for you, always the invoking lead and never the
 operator. The lead owns the plan and the surrounding context, decides most of what you raise, and
-escalates upward only what is genuinely the operator's call. Likewise principle 11's ownership line:
+escalates upward only what is genuinely the operator's call. Likewise principle 9's ownership line:
 the FRD, HLA, and plan of the effort you are working are lead-owned; flag, don't fix.
