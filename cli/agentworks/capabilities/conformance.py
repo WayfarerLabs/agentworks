@@ -24,7 +24,7 @@ import inspect
 from typing import TYPE_CHECKING, Literal, get_args, get_origin
 
 from agentworks.errors import StateError
-from agentworks.schema import model_is_complete
+from agentworks.schema import model_is_complete, reference_marker_error
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
@@ -107,6 +107,15 @@ def _metadata_error(impl: type) -> str | None:
     Concrete impls expose ``name`` / ``description`` as class attributes
     uniformly, including the secret backends whose Protocol declares them as
     properties, so this reads them off the class without constructing.
+
+    The ``name`` half looks redundant against ``register_plugin``, which
+    rejects the same shape first (``plugins/registration.py``) and so never
+    reaches this line. It is not: a core BUILT-IN never passes through
+    registration at all, it is assigned straight into its kind's registry at
+    import, and the table self-test calling :func:`conformance_error`
+    directly is the only thing that checks its name is a usable registry
+    key. Deleting this would take the check away from exactly the
+    implementations that have no other one.
     """
     name = getattr(impl, "name", None)
     if not isinstance(name, str) or not name or "/" in name:
@@ -168,6 +177,11 @@ def _config_model_error(descriptor: CapabilityKindDescriptor, impl: type) -> str
     levels therefore declares its offered models as DATA this can read,
     which is the second reason the offered set is a mapping rather than a
     computation.
+
+    Wave 4 extends this check to a capability's per-facet offerings, which
+    is the seam: the checks below run against ONE declared model today and
+    will run against each offered model then, so anything added here is
+    written per model rather than per implementation.
     """
     contract = descriptor.config_schema
     model = getattr(impl, "config_model", None)
@@ -186,6 +200,14 @@ def _config_model_error(descriptor: CapabilityKindDescriptor, impl: type) -> str
             f"its config_model {model.__name__} cannot be built (an unresolved annotation?), "
             f"so nothing could validate or extract references against it"
         )
+    placement = reference_marker_error(model)
+    if placement is not None:
+        # A misplaced marker is the silent kind: the model builds, the
+        # manifest loads, and validation, emitted schema, and the
+        # dependency graph each quietly answer something different. The
+        # author is the only one who can move it, so it is refused here
+        # rather than worked around at the three sites that read it.
+        return f"its config_model declares a reference marker nothing can honor: {placement}"
     return _config_tag_error(descriptor, impl, model)
 
 

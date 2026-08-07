@@ -60,6 +60,12 @@ class Marked(AgwModel):
     ] = Field(default_factory=list)
     principal: Principal | None = None
     platform: Annotated[LimaArm | ProxmoxArm, Discriminator("name")] | None = None
+    optional_secret: Annotated[str, SecretRef(usage="an optional secret")] | None = None
+    """A marked field that is natively optional and has no template: the
+    shipped shape of an env entry's ``secret`` and a template's
+    ``tailscale_auth_key``. Pydantic buries its marker in the string arm
+    without any agentworks widening involved, so it is the second of the
+    two ways a marker ends up one level down."""
 
 
 def test_secret_ref_defaults_its_kind() -> None:
@@ -164,16 +170,34 @@ def test_each_union_arm_carries_its_own_markers() -> None:
     assert token_secret["default_template"] == "proxmox-token"
 
 
-def test_a_marker_is_found_wherever_the_annotation_put_it() -> None:
-    """A natively optional marked field nests its marker in the branch the
-    ``Annotated`` sits on, which is pydantic's doing and predates the
-    owner-template widening that produces the same shape. A reader that
-    only looked at the property's top level would report "no reference
-    here" for a field that declares one, so the readers search."""
-    schema = Marked.model_json_schema()
-    assert "anyOf" in schema["properties"]["token"], "token is widened, so its marker is one level down"
-    assert REF_SCHEMA_KEY not in schema["properties"]["token"]
-    assert ref_extension(schema["properties"]["token"]) is not None
+def test_a_marked_property_carries_its_marker_at_the_top_level() -> None:
+    """A marker says what THE FIELD means, so the property is where it
+    rides, in every shape the field can take.
+
+    Pydantic puts it wherever the ``Annotated`` sat, which for a union
+    (``Annotated[str, SecretRef(...)] | None``) is inside one branch, and
+    ``AgwModel``'s widening of a required templated field produces that
+    same branch shape. Left there, the promise the model base makes (a
+    hover shows what the field names) is false in emitted schema for every
+    optional marked field and for every shipped templated secret, which is
+    all of them.
+
+    Both burial shapes are checked, and the branch is checked CLEAN, so a
+    consumer never has to decide which of two copies is authoritative.
+    """
+    properties = Marked.model_json_schema()["properties"]
+    for name in ("token", "optional_secret"):
+        prop = properties[name]
+        assert "anyOf" in prop, f"{name} is optional, so pydantic emits its branches"
+        assert prop[REF_SCHEMA_KEY]["kind"] == "secret", f"{name} states its reference on the property"
+        assert all(REF_SCHEMA_KEY not in branch for branch in prop["anyOf"]), (
+            f"{name} keeps ONE copy of its marker, not one per branch"
+        )
+
+    # A field with nothing optional about it needs no lifting: pydantic
+    # already emits the marker on the property.
+    assert "anyOf" not in properties["template"]
+    assert properties["template"][REF_SCHEMA_KEY]["kind"] == "vm-template"
 
 
 def test_the_extension_key_is_ignored_by_conforming_validators() -> None:

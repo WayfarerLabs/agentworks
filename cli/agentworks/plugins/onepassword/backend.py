@@ -55,7 +55,7 @@ from agentworks.errors import (
     ExternalError,
     SecretMappingError,
 )
-from agentworks.schema import AgwModel, AgwRootModel, NonEmptyStr
+from agentworks.schema import AgwModel, AgwRootModel, NonEmptyStr, config_error_from
 from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
@@ -317,16 +317,37 @@ class OnePasswordBackend:
         mapping means a hand-built decl bypassed the finalize validate
         pass. Defense in depth, exactly as env-var's ``_resolved_name``
         keeps its own check.
+
+        Framed through ``SecretDecl.mapping_owner`` and the error bridge,
+        so the text an operator reads here is the text the finalize pass
+        would have given for the same mapping. Two validations of one value
+        that disagree about how to describe its faults are worse than one,
+        and the operator has no way to know which pass they reached.
         """
-        owner = f"secret {secret.name!r}"
+        owner = secret.mapping_owner(self.name)
         if mapping is None:
             raise ConfigError(
-                f"{owner}: the onepassword backend needs a backend_mappings.onepassword entry ({_FORMS_HINT})"
+                f"{owner.display}: the onepassword backend needs a backend_mappings.onepassword entry",
+                entity_kind=owner.kind,
+                entity_name=owner.name,
+                hint=_FORMS_HINT,
             )
         try:
             root = OnePasswordMapping.model_validate(mapping).root
         except PydanticValidationError as exc:
-            raise ConfigError(f"{owner}: {exc.errors()[0]['msg']}") from exc
+            # Through the bridge, like every other validation of a modeled
+            # surface. Reading ``errors()[0]`` instead reported whichever
+            # arm pydantic tried first, so every malformed table came back
+            # "Input should be a valid string": the one message this
+            # model's own before-validator exists to prevent, delivered by
+            # the one call site that skipped the shared translation.
+            raise config_error_from(
+                exc,
+                model_cls=OnePasswordMapping,
+                owner=owner,
+                location=secret.error_location,
+                hint=_FORMS_HINT,
+            ) from exc
         if isinstance(root, str):
             return _OpRef(reference=root, account=None)
         return _OpRef(reference=root.reference, account=root.account)

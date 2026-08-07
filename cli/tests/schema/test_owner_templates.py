@@ -125,17 +125,22 @@ def test_a_templated_field_is_nullable_in_emitted_schema() -> None:
 
 
 def test_a_widened_field_keeps_its_hover_text_and_its_marker() -> None:
-    """The null arm must not bury what an editor shows. Describing
-    keywords ride outside the ``anyOf`` and the constraints ride inside,
-    which is byte for byte what pydantic emits for a natively optional
-    field, so a widened property is indistinguishable from a declared
-    one.
+    """The null arm must not bury what an editor shows. What DESCRIBES the
+    property rides outside the ``anyOf`` and what CONSTRAINS one shape
+    rides inside, which is byte for byte what pydantic emits for a
+    natively optional field, so a widened property is indistinguishable
+    from a declared one.
+
+    The marker is on the describing side of that split, and a field's
+    marker describes the field: it says what the omission this widening
+    exists for resolves to, which is the one thing a hover on an omitted
+    ``token`` should show.
     """
     token = GithubLike.model_json_schema()["properties"]["token"]
     assert token["title"] == "Token"
     constrained, null = token["anyOf"]
     assert null == {"type": "null"}
-    assert constrained["type"] == "string"
+    assert constrained == {"type": "string"}
     marker = ref_extension(token)
     assert marker is not None
     assert marker["default_template"] == "git-token-{owner_name}"

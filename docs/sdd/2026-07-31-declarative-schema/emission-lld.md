@@ -100,6 +100,17 @@ level only, so they would have reported "no reference here" for a field that dec
 `tests/_emitted_schema.py` is now the single reader and searches the subtree, which makes the guards
 cover both shapes for a reason unrelated to the widening.
 
+**Corrected 2026-08-07, from the roadmap-lead review.** The paragraph above accepted the burial and
+taught the readers to work around it, which left the promise on `AgwModel` ("the field keeps its
+`x-agw-ref`, so a hover still shows what the omission resolves to") false in every emitted schema
+that mattered: all five templated secrets, plus every natively optional marked field. A widened
+property is not indistinguishable from a declared one if neither can be hovered. `AgwModel`'s hook
+now lifts the marker onto the property, for every marked field rather than the templated ones alone,
+because pydantic's native burial and our own widening produce the same shape and only one of them
+was ever this step's doing. The subtree search stays and is still needed, for the case where the
+marker genuinely belongs one level down: a COLLECTION's element marker rides `items`, where it
+describes what it sits on, and lifting that onto the field would claim the list names a Resource.
+
 ### 2.3 The third round is not an emission bug: the two parsers read different YAML
 
 **Added 2026-08-06, from the greenfield closeout verification.** Sections 2.1 and 2.2 are both bugs

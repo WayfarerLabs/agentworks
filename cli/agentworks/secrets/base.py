@@ -155,7 +155,7 @@ class SecretDecl(DeclaredResource):
                         kind="secret-backend",
                         name=backend_name,
                         config=mapping,
-                        owner=self._mapping_owner(backend_name),
+                        owner=self.mapping_owner(backend_name),
                     ),
                     source,
                 )
@@ -198,17 +198,22 @@ class SecretDecl(DeclaredResource):
                 kind="secret-backend",
                 name=backend_name,
                 config=mapping,
-                owner=self._mapping_owner(backend_name),
+                owner=self.mapping_owner(backend_name),
                 location=self.error_location,
             )
 
-    def _mapping_owner(self, backend_name: str) -> RefOwner:
+    def mapping_owner(self, backend_name: str) -> RefOwner:
         """Who owns one ``backend_mappings`` value, for error framing.
 
         The secret alone would be ambiguous: a secret may map several
         backends, and a root model's errors carry no field path of their
         own, so without the key an operator reading "must not be empty"
         would not know WHICH mapping to fix.
+
+        Public, because the finalize pass above is not the only validator
+        of a mapping: a backend that re-validates its own entry defensively
+        (``onepassword``) has to frame the result identically, and a second
+        spelling of this label would be a second thing to keep in sync.
         """
         return RefOwner(
             kind="secret",
