@@ -542,7 +542,7 @@ def test_every_capability_switchboard_site_derives_from_the_descriptor() -> None
     Only the sites with static structure to compare appear here. The other
     two (the generic built-in publisher and the graph's readiness dispatch)
     have none, and are pinned by their OUTPUT in
-    ``tests/test_capability_descriptors.py``.
+    ``tests/capabilities/test_capability_descriptors.py``.
     """
     descriptors = capability_descriptors()
     kinds = {d.kind for d in descriptors}
@@ -551,7 +551,7 @@ def test_every_capability_switchboard_site_derives_from_the_descriptor() -> None
     # stopped being imported, would satisfy every set equality below
     # trivially. WHICH kinds the table carries, and that each one's record
     # points at the live strategy object, are the table's own facts and are
-    # pinned where the table is, in ``tests/test_capability_descriptors.py``;
+    # pinned where the table is, in ``tests/capabilities/test_capability_descriptors.py``;
     # restating them here made this file an owner of something it only
     # consumes.
     assert kinds, "the descriptor table is empty, so nothing below proves anything"
