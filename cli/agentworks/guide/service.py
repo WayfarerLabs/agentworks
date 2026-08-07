@@ -81,12 +81,22 @@ def build_authored_catalog(*, strict_trusted_taxonomy: bool = False) -> GuideCat
 
     trusted = tuple((f"core:{topic.topic}", topic) for topic in guide_contributions())
     plugins = tuple((plugin, tuple(plugin.guide_topics)) for _, plugin in sorted(SYSTEM_PLUGINS.items()))
-    resource_owners = plugin_manifest_resource_owners(plugin for plugin, _topics in plugins)
+    resource_owners: list[tuple[str, str, str]] = []
+    unavailable_resource_owners: set[str] = set()
+    for plugin, _topics in plugins:
+        try:
+            resource_owners.extend(plugin_manifest_resource_owners(plugin))
+        except ConfigError:
+            # A broken package cannot establish manifest-backed ownership. The
+            # catalog rejects only that plugin's resource topics with an
+            # accurate scoped issue while retaining unrelated contributions.
+            unavailable_resource_owners.add(plugin.name)
     return _build_guide_catalog(
         trusted,
         plugins,
-        resource_owners,
+        tuple(resource_owners),
         strict_trusted_taxonomy=strict_trusted_taxonomy,
+        unavailable_plugin_resource_owners=frozenset(unavailable_resource_owners),
     )
 
 

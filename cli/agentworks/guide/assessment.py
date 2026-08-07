@@ -11,10 +11,12 @@ from agentworks.guide.contract import (
     ActionInput,
     ConsentBoundary,
     GuideAction,
+    is_valid_topic_segment,
     is_valid_topic_slug,
     validate_guide_action,
 )
 from agentworks.guide.view import GuideIdentity, GuideInstanceFact, GuideRelationship, GuideResourceFact
+from agentworks.resource_names import MAX_RESOURCE_NAME_LENGTH, RESOURCE_NAME_RE
 
 
 class OnboardingStatus(Enum):
@@ -177,6 +179,9 @@ def _validate_evidence(
         if (
             type(target_kind) is not str
             or type(target_name) is not str
+            or not is_valid_topic_segment(target_kind)
+            or len(target_name) > MAX_RESOURCE_NAME_LENGTH
+            or RESOURCE_NAME_RE.fullmatch(target_name) is None
             or not is_valid_topic_slug(target_kind + "/" + target_name)
         ):
             raise ValidationError("verification evidence has an invalid target or outcome")
