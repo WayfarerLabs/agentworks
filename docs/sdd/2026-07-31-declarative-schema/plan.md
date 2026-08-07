@@ -677,6 +677,34 @@ which is FR14's to sweep when settings sections become models, not this step's.
 
 **Step 2.7 records, 2026-08-06.**
 
+**Two calls the 2.7 fix pass escalated rather than taking unilaterally, both decided by the lead
+2026-08-06.**
+
+**(a) The `x-agw-ref` marker's location: match pydantic, do not hoist.** Widening the templated
+fields to nullable moved the marker into the `anyOf` arm and broke five round-trip guards. The
+implementer checked whether the nested shape was ours: it is not. Plain pydantic puts the marker on
+the branch its `Annotated` sits on, so `Annotated[str, SecretRef(...)] | None` has ALWAYS emitted it
+one level down, and the guards read only the property's top level, so they would have silently
+reported "no reference here" for such a field. That is a pre-existing hole in the guards, not a new
+one. Decision: keep the marker where pydantic puts it and teach the single reader to search the
+subtree. Hoisting it to the property would give the codebase TWO marker locations depending on how
+the optionality arose, which is worse than one rule that is occasionally nested. This is a rule the
+onboarding child's guide surface will also read, so it is written down rather than left as
+`_emitted_schema.py`'s behavior.
+
+**(b) The inherited-capability-config divergence: leave it, and build the conditional if it ever
+fires.** `validate_config` checks the MERGED harness config, so a child that partially restates an
+inherited config is legal at load while the schema validates the child's fragment against the arm
+model directly. Latent today with nil exposure, because no shipped arm requires a field beyond its
+tag, and now carried as a tripwire test naming what to do when it fires. The structural fix the
+implementer identified (relax `required` on an inheriting kind's capability arms) is NOT taken: it
+buys soundness for inheriting children by deleting a real missing-field diagnostic from standalone
+templates, and there is no evidence which matters more. **The better fix, when it is needed, is
+conditional:** the condition is knowable from the document itself, so emit
+`if: {required: [inherits]} then: <relaxed> else: <strict>`, which 2020-12 expresses and which keeps
+both diagnostics. Not built now because exposure is nil and an unexercised conditional is its own
+risk; the tripwire is what turns this from a memory into a trigger.
+
 **The dev-only `jsonschema` validator paid for itself before the step closed.** The argument for
 taking it was that assertions hand-written by the emitter's own author encode that author's beliefs
 about JSON Schema, so they pass in exactly the cases where those beliefs are wrong. It found three
