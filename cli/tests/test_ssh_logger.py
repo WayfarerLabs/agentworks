@@ -78,31 +78,38 @@ def test_write_sink_sanitizes_every_persistent_surface(
         SSHResult(returncode=1, stdout=f"out {secret}", stderr=f"err {secret}"),
     )
     logger._write(f"caller bypassed every public surface: {secret}\n")
-    logger.close()  # the footer re-writes recorded warnings
+    logger.close()
 
     text = logger.path.read_text()
     assert secret not in text
     assert text.count("[REDACTED]") >= 8
 
 
-def test_close_footer_redacts_recorded_warnings(
+def test_warning_text_remains_in_memory_but_is_never_persisted(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The footer's warning recap is written at close time, after the
-    live WARNING line; a secret inside a recorded warning must be
-    redacted there too (this leaked before sanitization moved into the
-    sink)."""
+    """Warning details are useful to live callers but are too unconstrained
+    to copy into an operation log, even when known secrets are registered."""
     secret = "ghp-supersecret-token"
+    warning = f"credential rejected: {secret}"
     monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
     logger = SSHLogger("vm1", "test-op", redactions=(secret,))
-    logger.warning(f"credential rejected: {secret}")
+    logger.warning(warning)
+
+    initial_text = logger.path.read_text()
+    assert warning not in initial_text
+    assert secret not in initial_text
+    assert initial_text.endswith("WARNING\n")
+    assert logger.warnings == [warning]
+
     logger.close()
 
     text = logger.path.read_text()
+    assert warning not in text
     assert secret not in text
-    # Once on the live WARNING line, once in the footer recap.
-    assert text.count("[REDACTED]") == 2
+    assert "# Warnings: 1" in text
+    assert logger.warnings == [warning]
 
 
 def test_redactions_cannot_be_registered_after_writes(logger: SSHLogger) -> None:
