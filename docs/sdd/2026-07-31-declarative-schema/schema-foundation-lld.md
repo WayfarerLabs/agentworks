@@ -517,6 +517,16 @@ Per field of `model_cls.model_fields`, in declaration order:
   to mark the field inside a root model whose root IS a nested `AgwModel`, which the nested-model
   rule above already walks; the bare-scalar root carries no references.
 
+**Amended 2026-08-07, from the roadmap-lead review.** This enumeration assumed a marker sits either
+on a scalar or on a collection's ELEMENTS, and nothing enforced it. A marker on the collection
+itself (`Annotated[list[str], SecretRef(...)]`) reads as "marked scalar" here and takes the first
+branch, so an element-bearing list contributed no edges at all, and a templated one contributed an
+edge to the owner-templated name that no element ever wrote. `AgwModel.__get_pydantic_json_schema__`
+and `_fill_owner_templated_defaults` each answered differently again. The shape is now refused at
+registration conformance (`schema.reference_marker_error`, run from `capabilities/conformance.py`),
+so the enumeration above is exhaustive by construction rather than by convention, and a marker
+misplaced this way fails where its author can act on it.
+
 Two notes. The discriminated-union arm is selected from the RAW tag value, never from the capability
 registry: the union type carries its own arms, so the walk stays a pure function of the model
 (section 4.4). And absence-versus-malformed is the distinction that reproduces shipped behavior
@@ -697,7 +707,12 @@ than editing a file. All three have concrete day-one consumers:
   `gt`, `le`, `lt`, `pattern`, `multiple_of`), so a presenter never has to know that pydantic stores
   them as `annotated_types.Ge` objects. The bridge's `string_too_short` normalization (section 7.4)
   implies models will carry these, and an operator reading a field reference that omits "at least 1
-  character" is reading an incomplete reference.
+  character" is reading an incomplete reference. **Amended 2026-08-07:** they come from ONE carrier,
+  the field's own spine when it declares any and its elements' otherwise, the same precedence `ref`
+  uses. The first implementation merged both element-last-wins, which reported a list's length bound
+  and a string element's length bound under one `min_length` key: they render identically and an
+  operator reads a limit on the wrong thing. Omitting a fact is recoverable; stating a false one is
+  not.
 - **`ModelDoc`**: describe and the guide both want a heading with the model's own prose, and an arm
   handle carrying only `(tag, model)` forces every presenter to dig the docstring out itself. Making
   `UnionArm` carry a `ModelDoc` rather than a bare class means "one arm rendered, alternatives
