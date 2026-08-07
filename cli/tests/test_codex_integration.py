@@ -501,7 +501,8 @@ def test_a_dropped_stale_binding_is_reported_alongside_whatever_replaced_it() ->
     assert note.startswith("Previous Codex conversation is archived or gone. Could not identify")
     assert "previous codex conversation archived or gone" in _echo(picker_command)
 
-    # And with nothing to replace it, the bare archived-or-gone leaf stands.
+    # And with nothing to replace it, the bare archived-or-gone leaf stands,
+    # which is the whole of what the stale drop says on its own.
     alone = _harness_integration(state={"session_id": _SID})
     alone.resume(_op_ctx(_target(rollout=1)))
     assert alone.launch_note() == "Previous Codex session is archived or gone. Starting a new one..."
@@ -629,12 +630,6 @@ def test_launch_note_reports_the_picker_including_what_esc_does() -> None:
     assert "session picker is opening in the pane" in note
     assert "binds this session to that conversation from its next turn" in note
     assert "esc starts a fresh conversation instead" in note
-
-
-def test_launch_note_reports_the_stale_id_drop() -> None:
-    harness_integration = _harness_integration(state={"session_id": _SID})
-    harness_integration.resume(_op_ctx(_target(rollout=1)))
-    assert harness_integration.launch_note() == ("Previous Codex session is archived or gone. Starting a new one...")
 
 
 # -- the notify override on every launch form ---------------------------------
