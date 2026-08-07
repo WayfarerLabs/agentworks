@@ -223,7 +223,8 @@ class SSHLogger:
         # a narrow suppression backed by the adversarial logger and lifecycle
         # wiring tests.
         with open(self.path, "a", encoding="utf-8", errors="replace") as f:
-            f.write(self._sanitize(text))  # codeql[py/clear-text-storage-sensitive-data]
+            # codeql[py/clear-text-storage-sensitive-data]
+            f.write(self._sanitize(text))
 
 
 SSH_CONNECT_TIMEOUT = 30
