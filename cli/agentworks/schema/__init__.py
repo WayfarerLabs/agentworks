@@ -5,6 +5,9 @@ hand-validated lives here:
 
 - :class:`AgwModel` / :class:`AgwRootModel`, the shared strict, frozen,
   closed-world bases every spec and capability config model extends.
+- :class:`ScalarShorthand`, the model-level declaration that a table may
+  also be written as one bare scalar, from which validation, emitted
+  schema, and the field-reference stream all derive.
 - :class:`SecretRef` / :class:`ResourceRef`, the ``Annotated`` markers
   that say what a field means about another Resource, and their
   ``x-agw-ref`` JSON Schema encoding. :func:`reference_marker_error` is
@@ -42,7 +45,7 @@ sit at top level for.
 
 from __future__ import annotations
 
-from agentworks.schema._shape import marker_of, model_is_complete
+from agentworks.schema._shape import element_annotation, marker_of, model_is_complete
 from agentworks.schema.base import (
     AgwModel,
     AgwRootModel,
@@ -75,6 +78,7 @@ from agentworks.schema.markers import (
     ResourceRef,
     SecretRef,
 )
+from agentworks.schema.shorthand import ScalarShorthand
 
 __all__ = [
     "MAPPING_KEY",
@@ -92,9 +96,11 @@ __all__ = [
     "RefMarker",
     "RefOwner",
     "ResourceRef",
+    "ScalarShorthand",
     "SecretRef",
     "UnionArm",
     "config_error_from",
+    "element_annotation",
     "extract_references",
     "iter_field_docs",
     "marker_of",

@@ -29,7 +29,7 @@ exceptions a reader can see.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Annotated, Any, Final
+from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Final
 from weakref import WeakKeyDictionary
 
 from pydantic import BaseModel, ConfigDict, Field, RootModel, model_validator
@@ -37,6 +37,7 @@ from pydantic import BaseModel, ConfigDict, Field, RootModel, model_validator
 from agentworks.errors import StateError
 from agentworks.schema._shape import marker_of, model_fields_of, shape_of
 from agentworks.schema.markers import REF_SCHEMA_KEY, RefOwner
+from agentworks.schema.shorthand import ScalarShorthand, shorthand_field_error
 
 if TYPE_CHECKING:
     from pydantic import GetJsonSchemaHandler, ValidationInfo
@@ -85,7 +86,48 @@ class AgwModel(BaseModel):
 
     model_config = _AGW_MODEL_CONFIG
 
+    scalar_shorthand: ClassVar[ScalarShorthand | None] = None
+    """The bare-scalar spelling this model ALSO accepts, or ``None`` for
+    the models that are only ever written as a table.
+
+    One authored fact, three derivations, which is the whole point of
+    declaring it here rather than hand-writing each of them: the
+    before-validator below folds the scalar, the JSON Schema hook below
+    offers it as an arm, and the field-documentation stream widens every
+    annotation naming this model
+    (:func:`~agentworks.schema._shape.accepted_annotation`). See
+    :mod:`agentworks.schema.shorthand` for why a hand-written pair of the
+    first two left the third silently wrong.
+    """
+
     @model_validator(mode="before")
+    @classmethod
+    def _normalized_input(cls, data: Any, info: ValidationInfo) -> Any:
+        """The two rewrites this base makes before any field is validated,
+        in the order they have to happen.
+
+        One validator calling both rather than two validators, because the
+        order is load-bearing and pydantic runs ``mode="before"``
+        validators in REVERSE definition order. Written as two, the fold
+        would have to be declared SECOND to run first, and the day someone
+        tidied that an owner-templated default would silently stop being
+        filled for a value written in its shorthand form. Here the order
+        is the line below.
+        """
+        return cls._fill_owner_templated_defaults(cls._fold_scalar_shorthand(data), info)
+
+    @classmethod
+    def _fold_scalar_shorthand(cls, data: Any) -> Any:
+        """``data`` as the mapping a bare-scalar shorthand stands for, so
+        everything after this point sees one shape.
+
+        First, because the fill below acts only on a mapping: a shorthand
+        value folded after it would skip the fill entirely, and a
+        shorthand model with an owner-templated field would resolve
+        nothing for exactly the operators who wrote the short spelling.
+        """
+        return data if cls.scalar_shorthand is None else cls.scalar_shorthand.folded(data)
+
     @classmethod
     def _fill_owner_templated_defaults(cls, data: Any, info: ValidationInfo) -> Any:
         """Resolve an omitted reference field from its marker's owner
@@ -132,64 +174,104 @@ class AgwModel(BaseModel):
         return filled
 
     @classmethod
+    def __pydantic_init_subclass__(cls, **kwargs: Any) -> None:
+        """Refuse a shorthand that folds into a field the model does not
+        have, at import of the module declaring it.
+
+        Pydantic's own post-build hook rather than ``__init_subclass__``,
+        because ``model_fields`` is what the check reads and it does not
+        exist until the class is built. See
+        :func:`~agentworks.schema.shorthand.shorthand_field_error` for
+        what the author would otherwise see instead.
+        """
+        super().__pydantic_init_subclass__(**kwargs)
+        reason = shorthand_field_error(cls)
+        if reason is not None:
+            raise StateError(reason)
+
+    @classmethod
     def __get_pydantic_json_schema__(
         cls,
         core_schema: CoreSchema,
         handler: GetJsonSchemaHandler,
     ) -> JsonSchemaValue:
-        """Two corrections emitted schema needs and pydantic cannot make.
+        """The corrections emitted schema needs and pydantic cannot make.
 
-        **An owner-templated field is neither required nor non-nullable.**
-        The before-validator above resolves such a field from its marker,
-        and it treats an omitted value and an explicit ``null`` alike, on
-        purpose: reference extraction makes the same call, so the two
-        paths cannot come to name different secrets. Emitted schema has to
-        state BOTH halves of that, and pydantic can state neither, because
-        it computes ``required`` and nullability from the declared field
-        and knows nothing about the validator:
+        **A model with a scalar shorthand accepts that scalar too**, and
+        nothing pydantic can see says so: the fold is a before-validator,
+        which ``model_json_schema`` does not read. Left out, a
+        schema-aware editor flags ``FOO: a value`` in every env table an
+        operator writes. The arm is generated from the shorthand's CORE
+        schema through the caller's own handler rather than written as a
+        literal, so the emitter's YAML-spelling widening still applies to
+        it (see :mod:`agentworks.schema.shorthand`).
 
-        - not required, or an editor red-underlines the very omission the
-          mechanism exists to resolve (``provider: {name: github}`` with
-          no ``token``, which is what every unscoped credential writes);
-        - nullable, or it red-underlines ``token: null``, which is that
-          same instruction spelled out, and which loads today.
-
-        **Every marked field carries its ``x-agw-ref`` on the property
-        itself**, which is the position the marker's whole purpose depends
-        on being readable; see :func:`_ref_at_top_level`. That half runs
-        for every marked field, templated or not, because the widening
-        above is only one of the two ways a marker ends up buried.
-
-        Stated here, on the class that does the filling, rather than in
-        the emitter: both rules are properties of this model's validation
-        behavior, and a consumer correcting for them downstream would be a
-        second place to keep in sync.
+        The rest are corrections to the model's own object schema, and
+        they go INSIDE that arm rather than around the union: they
+        describe the table form's properties.
         """
-        json_schema = handler(core_schema)
-        marked = _marked_fields(cls)
-        if not marked:
+        json_schema = _with_marker_corrections(cls, handler(core_schema), handler)
+        shorthand = cls.scalar_shorthand
+        if shorthand is None:
             return json_schema
-        templated = {name for name, marker in marked if marker.default_template is not None}
-        # The model's schema may arrive as a ``$ref`` into ``$defs``; the
-        # required list and the properties live on the definition it
-        # points at.
-        resolved = handler.resolve_ref_schema(json_schema)
-        if templated:
-            required = [name for name in resolved.get("required", ()) if name not in templated]
-            if required:
-                resolved["required"] = required
-            else:
-                resolved.pop("required", None)
-        properties = resolved.get("properties", {})
-        for name, _marker in marked:
-            # A hidden field (``SkipJsonSchema``) has no property to
-            # correct, which is the same absence the field-reference
-            # stream honors.
-            prop = properties.get(name)
-            if prop is None:
-                continue
-            properties[name] = _ref_at_top_level(_nullable(prop) if name in templated else prop)
+        return {"anyOf": [handler(shorthand.core_schema()), json_schema]}
+
+
+def _with_marker_corrections(
+    model_cls: type[BaseModel],
+    json_schema: JsonSchemaValue,
+    handler: GetJsonSchemaHandler,
+) -> JsonSchemaValue:
+    """``json_schema`` with the two reference-marker corrections applied.
+
+    **An owner-templated field is neither required nor non-nullable.**
+    :func:`_filled_owner_templated_defaults` resolves such a field from
+    its marker, and it treats an omitted value and an explicit ``null``
+    alike, on purpose: reference extraction makes the same call, so the
+    two paths cannot come to name different secrets. Emitted schema has to
+    state BOTH halves of that, and pydantic can state neither, because it
+    computes ``required`` and nullability from the declared field and
+    knows nothing about the validator:
+
+    - not required, or an editor red-underlines the very omission the
+      mechanism exists to resolve (``provider: {name: github}`` with no
+      ``token``, which is what every unscoped credential writes);
+    - nullable, or it red-underlines ``token: null``, which is that same
+      instruction spelled out, and which loads today.
+
+    **Every marked field carries its ``x-agw-ref`` on the property
+    itself**, which is the position the marker's whole purpose depends on
+    being readable; see :func:`_ref_at_top_level`. That half runs for
+    every marked field, templated or not, because the widening above is
+    only one of the two ways a marker ends up buried.
+
+    Stated here, on the class that does the filling, rather than in the
+    emitter: both rules are properties of this model's validation
+    behavior, and a consumer correcting for them downstream would be a
+    second place to keep in sync.
+    """
+    marked = _marked_fields(model_cls)
+    if not marked:
         return json_schema
+    templated = {name for name, marker in marked if marker.default_template is not None}
+    # The model's schema may arrive as a ``$ref`` into ``$defs``; the
+    # required list and the properties live on the definition it points at.
+    resolved = handler.resolve_ref_schema(json_schema)
+    if templated:
+        required = [name for name in resolved.get("required", ()) if name not in templated]
+        if required:
+            resolved["required"] = required
+        else:
+            resolved.pop("required", None)
+    properties = resolved.get("properties", {})
+    for name, _marker in marked:
+        # A hidden field (``SkipJsonSchema``) has no property to correct,
+        # which is the same absence the field-reference stream honors.
+        prop = properties.get(name)
+        if prop is None:
+            continue
+        properties[name] = _ref_at_top_level(_nullable(prop) if name in templated else prop)
+    return json_schema
 
 
 class AgwRootModel[T](RootModel[T]):

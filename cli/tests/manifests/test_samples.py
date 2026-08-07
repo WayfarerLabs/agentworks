@@ -142,6 +142,27 @@ def test_samples_are_fully_commented() -> None:
             assert not line or line.startswith("#"), (kind, line)
 
 
+def test_a_field_that_folds_a_scalar_names_both_spellings_and_shows_the_block() -> None:
+    """The decision this surface makes for a field that takes either a
+    scalar or a table, and the reason for it.
+
+    The type line names both spellings, because that is the fact. What
+    gets a BLOCK is the table form: a skeleton exists to show structure an
+    operator cannot guess, and ``FOO: a value`` has none to show, while
+    ``{secret: <name>}`` is two keys nobody guesses. So the block is
+    rendered and the scalar rides on the line above it, where an operator
+    who wants the short form reads it and writes one line instead of
+    three.
+    """
+    lines = sample_text("vm-template").splitlines()
+    at = lines.index("#  # env:")
+
+    assert lines[at - 1] == "#  # (table of string or table, optional)"
+    assert lines[at + 1 : at + 3] == ["#    # one entry, as an example:", "#    # <key>:"]
+    assert "#      # value: <string>" in lines
+    assert "#      # secret: <string>" in lines
+
+
 def test_commented_samples_are_inert_through_the_loader(tmp_path: Path) -> None:
     """As rendered, a written sample declares nothing."""
     resources = tmp_path / "resources"

@@ -197,6 +197,12 @@ _EDGELESS_BY_DESIGN = {
     "UnmarkedLike": "no marked field at any depth",
     "StringRoot": "a bare scalar root names nothing",
     "StringOrTableRoot": "an undiscriminated root union addresses no arm",
+    # The stream DOES expand this one's model arm, which is what makes the
+    # pairing worth pinning: the two walkers read different attributes of
+    # the same classified shape on purpose, so a marker inside a union's
+    # block is documented and is not a graph edge.
+    "ScalarOrBlockLike": "extraction does not walk a union's model arm, at either depth",
+    "SelfReferentialUnion": "no marked field at any depth",
     "AccountRefLike": "nothing in an account reference names a Resource",
     "UndiscriminatedSite": "no discriminator, so no arm is addressable",
     "OneArmSite": "its one arm is the arm that names nothing",

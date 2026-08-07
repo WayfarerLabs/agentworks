@@ -794,6 +794,36 @@ than editing a file. All three have concrete day-one consumers:
   renderer, and a silently truncated field reference is worse than a loud failure at the moment
   someone tries to render a model that cannot be built.
 
+> **Amended 2026-08-07: `annotation` is what an operator may WRITE, and two more union shapes
+> expand.** An operator rehearsal found `describe-kind vm-template` rendering `env` as a table of
+> tables while the emitted schema beside it offered `{anyOf: [string, object]}` for the same field,
+> because `EnvEntry` folds a bare string through a `mode="before"` validator that an annotation
+> cannot see. Three changes, all in the classifier and the stream rather than anywhere that knows
+> about `EnvEntry`:
+>
+> - **`ScalarShorthand` (`schema/shorthand.py`), declared as a `ClassVar` on the model.** The fold,
+>   the emitted `anyOf` arm, and the type every human surface renders now all derive from it. It
+>   replaces the hand-written pair `kind-spec-models-lld.md` section 5.1 called "the single place
+>   where a schema fact is written by hand": that call was right about the cost and wrong about the
+>   count, because a fact authored twice had a third consumer that could not read either copy.
+> - **`FieldShape.annotation` / `FieldDoc.annotation` are widened** by `accepted_annotation`: a
+>   model declaring a shorthand reads `str | Model` wherever it appears, at any depth. That keeps
+>   the record presentation-free (it is still an annotation, not a string) while making it say what
+>   a document may carry, which is the same move `_SCALAR_RENDERINGS` already makes for `Expiry`.
+> - **`union_model` / `item_union_model`**: a union of some scalars and exactly ONE model offers one
+>   block an operator could write, so the stream expands it, which is what
+>   `describe-kind secret-backend/onepassword` needed to say what is inside its table form. Kept
+>   apart from `nested_model` because a field that MAY be a block is not one: reference extraction
+>   would walk a raw string as a block, and the error bridge would stop reading `union_members` and
+>   start rendering pydantic's per-member name segments as path segments. Two or more model members
+>   stay unexpanded, since nothing addresses an arm from a raw blob.
+>
+> The guard against this recurring is in `tests/manifests/test_accepted_type_parity.py`: for every
+> buildable model in the shipped surface and the fixtures, every JSON type the emitted schema
+> accepts must be a type `FieldDoc.annotation` accepts, at every depth a collection reaches. It
+> reads pydantic's schema and `typing` primitives, never this package's classifier, so it cannot
+> agree with a wrong answer.
+
 ### 6.3 Three presentations, plus emission as a sibling
 
 The plan and the task frame this as "one walker, four presentations": sample renderer, describe,

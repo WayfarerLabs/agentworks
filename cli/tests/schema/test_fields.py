@@ -33,6 +33,7 @@ from ._fixture_models import (
     ALL_FIXTURES,
     AzureLike,
     CatalogLike,
+    CredsLike,
     DiamondLike,
     FieldDiscriminatedSite,
     FieldTaggedCollectionSite,
@@ -45,10 +46,13 @@ from ._fixture_models import (
     OptionalUnionSite,
     RenamedArmSite,
     ResolvesToUnbuildable,
+    ScalarOrBlockLike,
     SelfReferential,
+    SelfReferentialUnion,
     SiteLike,
     TaggedCollectionSite,
     TemplateLike,
+    UndiscriminatedSite,
 )
 
 
@@ -585,6 +589,54 @@ def test_the_element_segment_is_the_one_the_stream_hangs_fields_under() -> None:
 
     assert doc.item_segment is not None
     assert ("vm_sizes", doc.item_segment, "cpus") in paths(CatalogLike)
+
+
+# --- a union of scalars and ONE block ---------------------------------
+
+
+def test_a_scalar_or_block_union_opens_the_block_it_offers() -> None:
+    """The one shape an undiscriminated union CAN address: a union of
+    scalars and one model offers exactly one block, so the block's fields
+    follow it in the stream rather than the field reading as an opaque
+    "table" beside a schema that spells its properties out.
+    """
+    doc = docs(ScalarOrBlockLike)[("mapping",)]
+
+    assert doc.nested_model is CredsLike
+    assert render_type(doc.annotation) == "string or table or null"
+    assert ("mapping", "secret") in paths(ScalarOrBlockLike)
+
+
+def test_a_collection_of_scalar_or_block_elements_opens_its_element() -> None:
+    """The same shape one level down, which no shipped field has and any
+    capability or plugin author can write."""
+    stream = docs(ScalarOrBlockLike)
+    walked = paths(ScalarOrBlockLike)
+
+    assert stream[("mappings",)].item_model is CredsLike
+    assert stream[("mapping_list",)].item_model is CredsLike
+    assert ("mappings", MAPPING_KEY, "secret") in walked
+    assert ("mapping_list", SEQUENCE_ELEMENT, "secret") in walked
+
+
+def test_a_union_of_several_models_still_opens_nothing() -> None:
+    """Two model members and no tag: nothing addresses an arm from a raw
+    blob, so naming one would be a guess and rendering one would tell an
+    operator that the arm the walk met first is the one to write."""
+    doc = docs(UndiscriminatedSite)[("platform",)]
+
+    assert doc.nested_model is None
+    assert paths(UndiscriminatedSite) == [("platform",)]
+
+
+def test_a_block_a_union_offers_stops_when_it_is_reachable_from_itself() -> None:
+    """The stream's own path guard covers the block a union offers, the
+    same way it covers one a field opens outright: the model is already on
+    the current path, so the field is streamed and not descended into."""
+    assert paths(SelfReferentialUnion) == [("name",), ("child",)]
+    # The same answer the shape gets when the block is opened outright,
+    # which is what says the guard is one guard rather than two.
+    assert paths(SelfReferential) == [("secret",), ("child",), ("children",)]
 
 
 # --- render_type ------------------------------------------------------
