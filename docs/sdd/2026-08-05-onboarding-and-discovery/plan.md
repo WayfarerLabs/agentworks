@@ -124,8 +124,9 @@ identifies all wave 2 gates, and has no unresolved review finding.
 - [ ] Roadmap re-review corrective: make authored-content wheel inclusion a normal CI assertion, not
       an integration-only test.
 - [ ] Roadmap re-review corrective: sanitize C0/C1 terminal controls at one render boundary for all
-      authored and projected text; reject shell metacharacters and line breaks anywhere in action
-      tokens; reject or safely frame controls in evidence errors.
+      authored and projected text; accept action tokens only through a closed literal allowlist that
+      excludes shell syntax, expansion, globbing, comments, whitespace, and line breaks; reject or
+      safely frame controls in evidence errors.
 - [ ] Roadmap re-review corrective: keep secret-sanitizer scope narrow and diagnostics useful while
       distrusting every backend-authored field; make verification result fields authoritative rather
       than hard-coded or unread; add malformed-exception adversarial coverage.
