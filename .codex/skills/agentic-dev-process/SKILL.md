@@ -83,7 +83,10 @@ stays out of the weeds on purpose:
   scratchpad, a shared temp or fixture directory) must be subdivided the same way. Charter each
   subagent to create and stay inside its own namespaced subdirectory (for example `<task-slug>/`
   under the shared root), and anything fixture-sensitive (like a tester) to create a fresh temp
-  directory under that.
+  directory under that. Isolation changes where the dev's commits land: git refuses to check out a
+  branch already checked out in another worktree, so an isolated dev branches from the effort's
+  branch, commits there, and reports branch and head SHA; integrating that branch back onto the
+  effort's branch is the lead's step, not the dev's.
 
 ## 4. Choose the model deliberately for each delegation
 
@@ -137,14 +140,16 @@ after a burst of process changes, before locking a roadmap-level effort, or when
 asks, run one comprehensive consistency review over the whole process tree: skills, rules, and
 subagent definitions together, in a single pass.
 
-Run it as an `agentworks-reviewer` subagent in a fresh context, launched explicitly at the top tier
-(section 4 applies here too: name the model, do not inherit). Never use the context that authored
-the changes; the whole point is a reader who has to work the tree out from what it says. It hunts
-pairwise contradictions, rules that silently override one another, gaps where one document assumes
-something another never establishes, and cross-references gone stale. Porting the process docs into
-a separate context and having independent reviewers read them as outsiders is a proven technique
-here: it surfaced four live contradictions that per-change reviews had passed. Findings route like
-any other review; triage them, push back on the wrong ones, and fix the valid ones.
+Run it as an `agentworks-reviewer` subagent in its consistency-review mode (defined in that
+subagent: six categories, composition failures chief among them), in a fresh context, launched
+explicitly at the top tier (section 4 applies here too: name the model, do not inherit). Never use
+the context that authored the changes; the whole point is a reader who has to work the tree out from
+what it says. It hunts pairwise contradictions, rules that silently override one another, gaps where
+one document assumes something another never establishes, and cross-references gone stale. Porting
+the process docs into a separate context and having independent reviewers read them as outsiders is
+a proven technique here: it surfaced four live contradictions that per-change reviews had passed.
+Findings route like any other review; triage them, push back on the wrong ones, and fix the valid
+ones.
 
 ## 6. Commit, push, and PR
 

@@ -39,11 +39,18 @@ below are subagent work; the role itself is not.
 
 ## The review protocol
 
-Scale the depth to the PR's size and blast radius; a doc-only seed gets a single lead pass, a
-subsystem lands the full protocol. For substantive PRs, launch parallel review passes as subagents,
-each in an isolated worktree at the PR head (per the delegation rules in `agentic-dev-process`,
-including explicit model tiers: reviewer at or above the effort's dev tier, top tier for the
-contract and security dimensions):
+This protocol layers on top of the effort's own process, never in place of it: the effort runs its
+own per-step `agentworks-reviewer` reviews per `agentic-dev-process` section 5, and a PR that
+arrives without them goes back to the effort rather than being reviewed harder here. Scale the depth
+to the PR's size and blast radius; a doc-only seed gets a single lead pass, a subsystem lands the
+full protocol. For substantive PRs, launch parallel review passes as subagents, each in an isolated
+worktree at the PR head (per the delegation rules in `agentic-dev-process`, including explicit model
+tiers: reviewer at or above the effort's dev tier, top tier for the contract and security
+dimensions; pass 2 is the sanctioned fresh-eyes exception from `agentic-dev-process` section 7 and
+may run below that floor). Agent types follow what each pass does: the `agentworks-reviewer` persona
+deliberately does not execute changes, so it carries the read-based conformance pass, while passes
+that run gates, probes, or mutations (2, 3, and usually 4) launch as `general-purpose` subagents,
+which is also why the worktree isolation above is load-bearing:
 
 1. **Ruling conformance** (top tier): the one pass only the roadmap lead can charter, verifying the
    work against the recorded contracts and rulings, clause by clause, with file:line evidence, plus
