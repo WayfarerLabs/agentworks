@@ -45,6 +45,14 @@ def _capability_kinds() -> list[str]:
     return [name for name, handler in KIND_REGISTRY.items() if handler.category == "capability"]
 
 
+def _registered_kinds() -> list[str]:
+    """Every kind the registry holds, whatever its category: the set the
+    two partitions above have to add up to."""
+    from agentworks.resources import KIND_REGISTRY
+
+    return list(KIND_REGISTRY)
+
+
 # --- what gets sampled ------------------------------------------------
 
 
@@ -58,12 +66,25 @@ def test_every_declarable_kind_renders() -> None:
         assert sample_text(kind).strip()
 
 
-def test_no_capability_kind_is_sampleable() -> None:
+def test_every_registered_kind_is_declarable_or_a_capability() -> None:
     """A kind is sampleable exactly when a document of it can exist, which
-    is the registry's own per-kind category. Pin that the two stay
-    identical so a future capability kind cannot slip into the set and make
-    ``--all`` fail on a kind with no document."""
-    assert set(declarable_kinds()).isdisjoint(_capability_kinds())
+    is the registry's own per-kind ``category``.
+
+    The assertion that used to stand here was that the two sets are
+    DISJOINT, which no registry contents could ever violate: both are
+    ``KIND_REGISTRY`` filtered on complementary values of one field
+    (``spec_model.declarable_kinds``, and ``_capability_kinds`` above), so
+    an overlap is unrepresentable and the test could only ever pass.
+
+    Coverage is the property that can actually break, and it breaks
+    loudly. ``agw resource kinds`` lists straight from the registry
+    (``cli/commands/resource.py:155``), so a kind whose category is
+    neither value is offered to the operator; ``resource sample`` then
+    misses the capability-kind refusal it falls through
+    (``manifests/samples.py:238``) and answers "unknown kind" about a kind
+    the CLI just listed, and no schema is emitted for it either.
+    """
+    assert set(declarable_kinds()) | set(_capability_kinds()) == set(_registered_kinds())
 
 
 def test_secret_backend_has_no_sample() -> None:
