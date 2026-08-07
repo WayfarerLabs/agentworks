@@ -80,8 +80,10 @@ Planned children, seeded when their prerequisites land (see `phasing.md`):
 - Closeout wave: comprehensive security, test-consolidation, and cleanup review (gates the lock)
 
 Not children of this roadmap (explicitly out of scope, see `target-state.md`): the
-named-console-template selector SDD, the herdr effort, and the companion-shell and resilient-attach
-wins. They proceed standalone.
+named-console-template selector SDD, the herdr effort, the companion-shell and resilient-attach
+wins, and the agentworks.build website (`docs/sdd/2026-08-07-website/`, seeded 2026-08-07; the
+roadmap lead seeds and reviews it like a child, but it does not gate the roadmap lock). They proceed
+standalone.
 
 ## Issue intake (2026-08-05)
 
