@@ -91,10 +91,13 @@ def test_a_non_table_backend_mappings_says_table() -> None:
     )
 
 
-def test_an_unknown_key_names_the_fields_that_are_valid() -> None:
-    assert rejection("secret", "npm-token", {"bogus": 1}, description="d") == (
-        "res.yaml:7: secret/npm-token.bogus: unknown field; expected one of: backend_mappings, hint"
-    )
+# The unknown-key refusal, which for this kind is also the statement that
+# ``backend_mappings`` and ``hint`` are the whole spec surface, is pinned in
+# ``test_loader_and_envelope.py::test_an_unknown_spec_key_is_a_located_error``
+# against the same kind and the same expected-field list, reached through
+# ``load_manifests`` over a real file so it carries the location too. The
+# sibling kinds keep their own copy of this test because each names a
+# DIFFERENT field list.
 
 
 # -- The name cap, which applies only to what an operator wrote ---------------
