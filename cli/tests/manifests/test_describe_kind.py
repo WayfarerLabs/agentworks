@@ -9,6 +9,7 @@ than authored twice.
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING, ClassVar, Literal
 
 import pytest
@@ -49,6 +50,22 @@ def seated() -> Iterator[None]:
 
 def _text(target: str) -> str:
     return "\n".join(reference_lines(reference_for(target)))
+
+
+def _field_entry(text: str, field: str) -> str:
+    """One field's rendered block, unwrapped onto a single line.
+
+    Bounded by the next field heading, so an assertion cannot pass on
+    prose that belongs to the field below. Unwrapped because the renderer
+    fills to a width, which puts the line break wherever it lands.
+    """
+    headings = list(re.finditer(r"^( *)(\S+) {2}\(", text, re.MULTILINE))
+    for index, heading in enumerate(headings):
+        if heading.group(2) != field:
+            continue
+        end = headings[index + 1].start() if index + 1 < len(headings) else len(text)
+        return " ".join(text[heading.start() : end].split())
+    raise AssertionError(f"{field} is not a field in:\n{text}")
 
 
 # --- a declarable kind ------------------------------------------------
@@ -150,6 +167,41 @@ def test_the_target_list_covers_kinds_and_implementations() -> None:
     assert "vm-platform" in targets
     assert "vm-platform/lima" in targets
     assert "vm-platform/never-enabled" not in targets, "the fixture is seated only inside its fixture"
+
+
+# --- the quoted-boolean trap ------------------------------------------
+
+#: Every field whose old TOML loader read it through ``bool(...)``, so a
+#: quoted ``no`` meant TRUE. Named as ``describe-kind`` targets, because
+#: the field reference is the surface every one of those errors points at.
+_INVERTING_BOOLEANS = [
+    ("apt-source", "key_dearmor"),
+    ("admin-template", "mise_activate"),
+    ("admin-template", "mise_allow_unlocked"),
+    ("admin-template", "mise_prune_on_reinit"),
+    ("admin-template", "git_force_safe_directory"),
+    ("agent-template", "mise_activate"),
+    ("agent-template", "mise_allow_unlocked"),
+    ("agent-template", "mise_prune_on_reinit"),
+    ("workspace-template", "tmuxinator"),
+    ("vm-platform/proxmox", "verify_ssl"),
+]
+
+
+@pytest.mark.parametrize(("target", "field"), _INVERTING_BOOLEANS)
+def test_a_boolean_that_used_to_invert_says_so(target: str, field: str) -> None:
+    """``must be a boolean`` is not enough to act on for these.
+
+    Each of these was read through ``bool(...)``, so ``key_dearmor: "no"``
+    meant TRUE: the opposite of what it reads as. An operator meeting the
+    new type error and writing the obvious `false` silently flips the
+    behavior they had, and the error's own remedy is to come here, so the
+    warning has to be here for the whole class rather than for the one
+    field somebody happened to think of.
+    """
+    entry = _field_entry(_text(target), field)
+
+    assert "used to mean TRUE, which is the opposite of what it reads as" in entry, entry
 
 
 # --- the CLI ----------------------------------------------------------

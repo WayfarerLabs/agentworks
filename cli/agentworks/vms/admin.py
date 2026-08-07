@@ -75,7 +75,9 @@ class AdminConfig(DeclaredResource):
     """The command run inside the checkout to install the dotfiles."""
 
     mise_activate: bool = True
-    """Whether to activate mise in the admin user's shell."""
+    """Whether to activate mise in the admin user's shell. A boolean: ``no`` is a string, and a
+    string here used to mean TRUE, which is the opposite of what it
+    reads as."""
 
     mise_packages: list[str] = Field(default_factory=list)
     """Tools to install with mise, each as ``name@version``."""
@@ -84,7 +86,10 @@ class AdminConfig(DeclaredResource):
     """A source reference to a ``mise.lock`` pinning the tool versions."""
 
     mise_allow_unlocked: bool = False
-    """Whether to install ``mise_packages`` with no lockfile present."""
+    """Whether to install ``mise_packages`` with no lockfile present.
+    A boolean: ``no`` is a string, and a
+    string here used to mean TRUE, which is the opposite of what it
+    reads as."""
 
     mise_install_before: str = "7d"
     """How OLD a tool version must be before mise will install it, as
@@ -94,10 +99,16 @@ class AdminConfig(DeclaredResource):
     installs regardless."""
 
     mise_prune_on_reinit: bool = True
-    """Whether re-running init removes mise tools no longer declared."""
+    """Whether re-running init removes mise tools no longer declared.
+    A boolean: ``no`` is a string, and a
+    string here used to mean TRUE, which is the opposite of what it
+    reads as."""
 
     git_force_safe_directory: bool = True
-    """Whether to mark checkouts as git ``safe.directory`` for this user."""
+    """Whether to mark checkouts as git ``safe.directory`` for this user.
+    A boolean: ``no`` is a string, and a
+    string here used to mean TRUE, which is the opposite of what it
+    reads as."""
 
     claude_marketplaces: list[str] = Field(default_factory=list)
     """Claude Code marketplaces to register for the admin user."""

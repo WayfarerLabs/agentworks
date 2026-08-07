@@ -97,7 +97,9 @@ class AptSourceEntry(DeclaredResource):
 
     key_dearmor: bool = False
     """Whether the fetched key is ASCII-armored and must be run through
-    ``gpg --dearmor`` before installation."""
+    ``gpg --dearmor`` before installation. A boolean: ``no`` is a string, and a
+    string here used to mean TRUE, which is the opposite of what it
+    reads as."""
 
 
 class AptPackageEntry(DeclaredResource):

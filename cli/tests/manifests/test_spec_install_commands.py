@@ -48,7 +48,28 @@ def test_two_tests_are_refused_by_name(kind: str, row_cls: type) -> None:
     spec = {"command": "true", "test_exec": "example", "test_dir": "~/example"}
 
     assert rejection(kind, "example", spec) == (
-        f"res.yaml:7: {kind}/example: at most one of test_exec, test_file, test_dir may be set"
+        f"res.yaml:7: {kind}/example: at most one of test_exec, test_file, test_dir may be set; "
+        f"this one sets test_exec, test_dir"
+    )
+
+
+@pytest.mark.parametrize(("kind", "row_cls"), _KINDS)
+def test_an_empty_test_says_which_key_to_delete(kind: str, row_cls: type) -> None:
+    """``test_exec: ""`` beside a real ``test_file`` used to be legal (the
+    empty string normalized away before the count), so this pair is one of
+    the loads this phase newly breaks.
+
+    Naming the rule alone is not enough to act on: nothing in "at most one
+    of test_exec, test_file, test_dir may be set" says the EMPTY one is
+    what newly counts, which makes deleting the meaningful ``test_file``
+    exactly as plausible a reading.
+    """
+    spec = {"command": "true", "test_exec": "", "test_file": "~/example"}
+
+    assert rejection(kind, "example", spec) == (
+        f"res.yaml:7: {kind}/example: at most one of test_exec, test_file, test_dir may be set; "
+        f"this one sets test_exec (empty string), test_file. An empty string counts as set, so "
+        f"delete test_exec rather than blanking it"
     )
 
 

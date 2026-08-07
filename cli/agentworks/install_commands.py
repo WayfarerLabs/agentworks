@@ -101,11 +101,37 @@ class _InstallCommandEntry(DeclaredResource):
         is an error now. That follows from strict mode dropping the
         normalization, but it does not follow from it automatically, so it
         is said here rather than left to be discovered.
+
+        Which is also why the message names the fields it FOUND set, and
+        calls out an empty one. "at most one of test_exec, test_file,
+        test_dir may be set" gives an operator whose file says
+        ``test_exec: ""`` beside a real ``test_file`` no reason to think
+        the empty string is the newly-counted one, so deleting the
+        meaningful field is exactly as plausible a reading.
         """
-        set_count = sum(1 for value in (self.test_exec, self.test_file, self.test_dir) if value is not None)
-        if set_count > 1:
-            raise ValueError("at most one of test_exec, test_file, test_dir may be set")
-        return self
+        found = [
+            (name, value)
+            for name, value in (
+                ("test_exec", self.test_exec),
+                ("test_file", self.test_file),
+                ("test_dir", self.test_dir),
+            )
+            if value is not None
+        ]
+        if len(found) <= 1:
+            return self
+        listed = ", ".join(f"{name} (empty string)" if value == "" else name for name, value in found)
+        message = f"at most one of test_exec, test_file, test_dir may be set; this one sets {listed}"
+        empty = [name for name, value in found if value == ""]
+        if len(empty) < len(found):
+            # An empty one beside a real one: say which to delete, because
+            # that is the whole ambiguity. All-empty has no such answer.
+            message += (
+                f". An empty string counts as set, so delete {' and '.join(empty)} rather than blanking it"
+                if empty
+                else ""
+            )
+        raise ValueError(message)
 
 
 class SystemInstallCommandEntry(_InstallCommandEntry):

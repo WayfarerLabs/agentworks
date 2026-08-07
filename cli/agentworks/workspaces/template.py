@@ -43,7 +43,9 @@ class WorkspaceTemplate(DeclaredResource):
 
     tmuxinator: bool | None = None
     """Whether to write a tmuxinator project for the workspace. ``None``
-    inherits, and defaults to true when nothing in the chain sets it."""
+    inherits, and defaults to true when nothing in the chain sets it. A
+    boolean: ``no`` is a string, and a string here used to mean TRUE,
+    which is the opposite of what it reads as."""
 
     git_user_name: str | None = None
     """``user.name`` for commits made in this workspace's checkout."""
