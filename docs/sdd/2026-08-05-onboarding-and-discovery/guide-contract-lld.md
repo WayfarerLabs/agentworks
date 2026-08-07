@@ -143,7 +143,14 @@ Semantic identity is `(topic, block.id)`, rendered in snapshots as an internal
 `^[a-z][a-z0-9-]{0,62}$` and is unique within its topic. Reordering an unchanged block preserves
 identity. Agent shaping may reposition `AgentContract` records, but the set of block keys and each
 block's source payload must remain identical between modes. Renderer-added headings are not semantic
-content and are normalized in parity snapshots.
+content and are normalized in parity snapshots. Every renderer-owned level-2 section begins with the
+visible `⟦AGW framework⟧` provenance marker. The two marker delimiters are reserved across authored
+titles, summaries, and static markdown after Unicode compatibility normalization and HTML entity
+decoding, so authored content cannot emit the exact literal marker in raw CLI Markdown. This is a
+source-provenance convention for raw output, not an anti-spoof guarantee for presentation by an
+arbitrary downstream Markdown, HTML, CSS, image, or styling renderer. It grants no authority or
+trust to the body that follows. Ordinary authored ATX and setext headings remain valid, retain their
+source text, and never receive the framework marker.
 
 ## Strict construction and catalog errors
 
@@ -156,6 +163,8 @@ closed and recursive. It rejects:
 - unknown anchor or block discriminators;
 - functions, callable objects, import references, renderer names, and object instances;
 - `{{`, `}}`, `${`, `<%`, `%>`, `{%`, or `%}` placeholder delimiters in authored markdown;
+- either reserved `⟦AGW framework⟧` marker delimiter in an authored title, summary, or static
+  markdown block, including an HTML-entity encoding of a delimiter;
 - invalid slugs, IDs, anchor/topic mismatches, duplicate block IDs, and repeated related links;
 - a dynamic block on an anchor that cannot support it;
 - plugin ownership of `concept-*`, a bare kind, another plugin's namespace, or a resource not
@@ -526,6 +535,8 @@ Phase 1 is complete only with these focused proofs:
 - installed-wheel package-data tests load every authored block under the normal CI marker selection;
 - human and agent snapshots have equal semantic block keys and payloads despite allowed heading and
   placement differences;
+- every renderer-owned level-2 section carries the reserved visible provenance marker, ordinary
+  authored headings remain unmarked, and adversarial contributions cannot reproduce the marker;
 - atomic multi-topic lookup emits nothing on any unknown slug and deduplicates repeated valid slugs
   at first position;
 - the public `GuideView` surface and returned-record graph contain no denied power; a default-path

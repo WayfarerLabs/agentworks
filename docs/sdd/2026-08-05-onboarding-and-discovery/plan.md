@@ -141,6 +141,12 @@ identifies all wave 2 gates, and has no unresolved review finding.
       handoff; add contributed-content size bounds; remove or clarify dead and implicit
       discriminators identified by review where doing so improves the forward contract; defer only
       organizational test consolidation that changes no behavior or proof.
+- [x] Roadmap re-review follow-up: give renderer-owned framework headings a visible reserved label,
+      reject that label in authored markdown without restricting ordinary authored headings, and
+      prove a plugin cannot emit the exact literal marker in raw CLI Markdown; document that the
+      marker is provenance syntax, not downstream presentation security or authorization.
+- [x] Roadmap re-review follow-up: make the guide power-import boundary inspect Python files
+      recursively so a future guide subpackage cannot escape the denial proof.
 
 Definition of done: R2, R3, R4, R5, R9, R10, R12, R13, R14, and R15 work for static topics and
 current registry/resource-derived content without any wave 2 surface.

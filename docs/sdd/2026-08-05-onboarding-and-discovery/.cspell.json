@@ -13,6 +13,7 @@
     "rerunnable",
     "rustc",
     "scriptable",
+    "setext",
     "unwired"
   ]
 }
