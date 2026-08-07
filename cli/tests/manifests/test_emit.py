@@ -409,8 +409,13 @@ def _registry() -> dict[str, Any]:
 def test_a_one_arm_union_still_carries_its_discriminator() -> None:
     """``Union[(X,)]`` collapses to ``X``, so a capability kind with one
     registered implementation has no union left in its annotation. It is
-    not a hypothetical: harness-integration and git-credential-provider
-    each ship exactly one.
+    not a hypothetical: with no plugins seated, harness-integration and
+    git-credential-provider each have exactly one BUILT-IN, and that is a
+    real configuration a host can be in. Every shipped plugin set grows
+    them past one (harness-integration to three, git-credential-provider
+    to two), so a registry read with plugins seated will not show you this
+    case. An earlier note in this effort claimed the collapse was live in
+    the shipped registry; it is live in the core-only one.
 
     Emission classifies on DISCRIMINATOR PRESENCE rather than on whether
     the annotation is still a union, and pydantic keeps the tagged-union
