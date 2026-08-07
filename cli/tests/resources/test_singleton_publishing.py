@@ -17,6 +17,8 @@ import pytest
 
 from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
+from agentworks.resources import ALWAYS_MATERIALIZE_SOURCE
+from agentworks.vms.admin import AdminConfig
 from tests.conftest import ManifestDoc, write_manifests
 
 
@@ -47,15 +49,26 @@ def _write_cfg(tmp_path: Path, body: str, ssh_keys: tuple[Path, Path]) -> Path:
 
 
 def test_admin_template_default_present_when_no_admin_sections(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
+    """The loader path end to end: no admin declaration anywhere, and the
+    registry still holds exactly one ``admin-template:default`` carrying
+    the framework's own provenance.
+
+    Everything the row IS, asserted here rather than spread over three
+    files that each built this same config: the type, the name, the
+    auto-declared variant, the always-materialize source, and the count.
+    """
     cfg = _write_cfg(tmp_path, "", ssh_keys)
     r = build_registry(load_config(cfg, warn_issues=False))
 
     admin = r.lookup("admin-template", "default")
+    assert isinstance(admin, AdminConfig)
+    assert admin.name == "default"
     assert admin.origin is not None
     # No [admin.*] sections -> nothing published from TOML; the
     # framework's always-materialize pre-step auto-declares the default,
     # exactly like vm-template/agent-template.
     assert admin.origin.variant == "auto-declared"
+    assert admin.origin.source == ALWAYS_MATERIALIZE_SOURCE
     # And only ONE entry under admin-template kind.
     assert len(list(r.iter_kind("admin-template"))) == 1
 

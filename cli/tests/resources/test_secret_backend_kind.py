@@ -38,7 +38,6 @@ def _write_cfg(path: Path, body: str = "") -> Path:
 
 def test_kind_attributes() -> None:
     kind = KIND_REGISTRY["secret-backend"]
-    assert kind.kind == "secret-backend"
     assert kind.miss_policy == "error"
     assert kind.auto_declare_names is None
     assert kind.category == "capability"

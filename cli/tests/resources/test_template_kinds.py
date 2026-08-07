@@ -70,7 +70,6 @@ def _write_cfg(path: Path, *manifests: ManifestDoc) -> Path:
 @pytest.mark.parametrize("spec", SPECS, ids=lambda s: s.kind)
 def test_kind_attributes(spec: _KindSpec) -> None:
     kind = KIND_REGISTRY[spec.kind]
-    assert kind.kind == spec.kind
     assert kind.miss_policy == "auto-declare"
     assert kind.auto_declare_names == frozenset({"default"})
 

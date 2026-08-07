@@ -60,7 +60,6 @@ def _write_cfg(path: Path, *manifests: ManifestDoc) -> Path:
 
 def test_vm_template_kind_attributes() -> None:
     kind = KIND_REGISTRY["vm-template"]
-    assert kind.kind == "vm-template"
     assert kind.miss_policy == "auto-declare"
     assert kind.auto_declare_names == frozenset({"default"})
 

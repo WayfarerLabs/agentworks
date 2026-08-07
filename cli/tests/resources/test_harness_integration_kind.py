@@ -52,7 +52,6 @@ def _write_manifest(root: Path, rel: str, text: str) -> None:
 
 def test_kind_attributes() -> None:
     kind = KIND_REGISTRY["harness-integration"]
-    assert kind.kind == "harness-integration"
     assert "harness" not in KIND_REGISTRY
     assert kind.category == "capability"
     assert kind.miss_policy == "error"

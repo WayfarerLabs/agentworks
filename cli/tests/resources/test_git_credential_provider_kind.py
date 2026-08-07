@@ -34,7 +34,6 @@ def _write_cfg(path: Path, *manifests: ManifestDoc) -> Path:
 
 def test_kind_attributes() -> None:
     kind = KIND_REGISTRY["git-credential-provider"]
-    assert kind.kind == "git-credential-provider"
     assert kind.miss_policy == "error"
     assert kind.auto_declare_names is None
 

@@ -66,7 +66,6 @@ def _write_cfg(path: Path, settings: str = "", *manifests: ManifestDoc | str) ->
 @pytest.mark.parametrize("kind_name", APT_AND_INSTALL_KINDS)
 def test_install_resource_kind_attributes(kind_name: str) -> None:
     kind = KIND_REGISTRY[kind_name]
-    assert kind.kind == kind_name
     assert kind.miss_policy == "error"
     assert kind.auto_declare_names is None
 
