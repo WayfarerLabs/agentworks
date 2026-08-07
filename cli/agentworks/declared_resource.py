@@ -119,9 +119,13 @@ class EnvelopeMetadata(AgwModel):
 
     name: SkipJsonSchema[str]
     """What this resource is called: the second half of the `kind/name`
-    address every other resource and every command refers to it by.
-    Lowercase alphanumeric with hyphens or underscores, starting and
-    ending with a letter or digit."""
+    address every other resource and every command refers to it by, so
+    `/` is never allowed in one. The convention is lowercase alphanumeric
+    with hyphens or underscores, starting and ending with a letter or
+    digit; every built-in name follows it and it is what reads well
+    everywhere a name is displayed or typed. Not every kind REFUSES a
+    name outside that shape, so treat it as the convention to follow
+    rather than as a guard that will stop you."""
 
     description: SkipJsonSchema[str | None] = None
     """One operator-facing line saying what this resource is for, shown by

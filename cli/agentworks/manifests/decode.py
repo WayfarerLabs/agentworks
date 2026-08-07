@@ -323,6 +323,21 @@ def _check_declared_name(doc: Document, owner: RefOwner, model: type[DeclaredRes
     an operator wrote is checked: auto-declared and synthesized rows carry
     whatever name summoned them and stay tolerant (issue #279). See
     ``DeclaredResource.NAME_MAX_LENGTH``.
+
+    **The character rule rides the cap, so it reaches two kinds of
+    thirteen.** ``validate_name`` checks characters and length together
+    and is only reached when the kind sets ``NAME_MAX_LENGTH``
+    (``secret``, ``vm-site``), so ``vm-template/My Template`` loads,
+    lists, and is addressable. That is not obviously wrong: issue #279
+    settled that a non-conforming name stays tolerant, and issue #308's
+    git-credential warning is the shape that decision takes when a
+    non-conforming name has a downstream cost (a derived secret name),
+    which is an advisory rather than a refusal. Widening the refusal to
+    every kind would reverse both, so it is the operator's call, not a
+    cleanup. What was fixed instead is the over-promise: the ``name``
+    docstring (rendered into every sample and every ``describe-kind``)
+    stated the character rule as a flat rule and now states it as the
+    convention it is.
     """
     if model.NAME_MAX_LENGTH is None:
         return
