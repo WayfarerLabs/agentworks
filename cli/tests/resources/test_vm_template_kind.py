@@ -21,7 +21,6 @@ Test coverage:
 from __future__ import annotations
 
 from pathlib import Path
-from textwrap import dedent
 
 import pytest
 
@@ -35,24 +34,12 @@ from agentworks.resources import (
 )
 from agentworks.resources.graph import FinalizeContext
 from agentworks.vms.template import VMTemplate
-from tests.conftest import ManifestDoc, write_manifests
+from tests.conftest import ManifestDoc, write_cfg
 
 
 def _write_cfg(path: Path, *manifests: ManifestDoc) -> Path:
-    pub = path.parent / "id.pub"
-    priv = path.parent / "id"
-    pub.write_text("ssh-ed25519 AAAA...")
-    priv.write_text("-----BEGIN OPENSSH PRIVATE KEY-----")
-    path.write_text(
-        dedent(f"""\
-        [operator]
-        ssh_public_key = "{pub.as_posix()}"
-        ssh_private_key = "{priv.as_posix()}"
-        """),
-    )
-    if manifests:
-        write_manifests(path.parent, *manifests)
-    return path
+    """``write_cfg`` under this file's path-taking spelling."""
+    return write_cfg(path.parent, *manifests, filename=path.name)
 
 
 # -- Kind shape -------------------------------------------------------------

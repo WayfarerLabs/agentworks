@@ -96,6 +96,45 @@ def write_manifests(
     return resources_dir
 
 
+def write_cfg(
+    config_dir: Path,
+    *manifests: ManifestDoc | str,
+    settings: str = "",
+    filename: str = "config.toml",
+) -> Path:
+    """Write a loadable settings-only config into ``config_dir``, with its
+    ``resources/`` manifests beside it, and return the config path.
+
+    The operator keypair is written here rather than taken as a parameter:
+    ``load_config`` requires the two paths to exist and nothing reads their
+    contents, so every caller wanted the same two throwaway files. A test
+    that cares what is IN a key writes its own and points ``settings`` at
+    it.
+
+    ``settings`` is settings-only TOML appended after the ``[operator]``
+    block (``[secret_config]``, ``[plugins]``, and so on). Resource
+    declarations are ``manifests``, never settings: config.toml carries no
+    resource topics (ADR 0022).
+    """
+    pub = config_dir / "id.pub"
+    priv = config_dir / "id"
+    pub.write_text("ssh-ed25519 AAAA...")
+    priv.write_text("-----BEGIN OPENSSH PRIVATE KEY-----")
+    path = config_dir / filename
+    path.write_text(
+        dedent(f"""\
+        [operator]
+        ssh_public_key = "{pub.as_posix()}"
+        ssh_private_key = "{priv.as_posix()}"
+
+        """)
+        + dedent(settings),
+    )
+    if manifests:
+        write_manifests(config_dir, *manifests)
+    return path
+
+
 @pytest.fixture(autouse=True)
 def _restore_agw_debug() -> Generator[None, None, None]:
     """Snapshot and restore ``AGW_DEBUG`` around every test.

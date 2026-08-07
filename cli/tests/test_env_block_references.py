@@ -12,7 +12,6 @@ surfaces "no active backend resolved" if no backend yields a value.
 
 from __future__ import annotations
 
-from textwrap import dedent
 from typing import TYPE_CHECKING
 
 import pytest
@@ -27,7 +26,7 @@ from agentworks.sessions.template import SessionTemplate
 from agentworks.vms.admin import AdminConfig
 from agentworks.vms.template import VMTemplate
 from agentworks.workspaces.template import WorkspaceTemplate
-from tests.conftest import ManifestDoc, write_manifests
+from tests.conftest import ManifestDoc, write_cfg
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -50,25 +49,12 @@ def _write_cfg(
     settings: str = "",
     manifests: Sequence[ManifestDoc | str] = (),
 ) -> Path:
-    """Write a settings-only config.toml plus its resources/ manifests and
-    return the config path. ``settings`` carries settings-only TOML; the
-    env-block resources under test go in ``manifests``."""
-    pub, priv = ssh_keys
-    p = tmp_path / "c.toml"
-    p.write_text(
-        dedent(
-            f"""\
-            [operator]
-            ssh_public_key = "{pub}"
-            ssh_private_key = "{priv}"
+    """``write_cfg`` under this file's keyword spelling.
 
-            """
-        )
-        + dedent(settings)
-    )
-    if manifests:
-        write_manifests(tmp_path, *manifests)
-    return p
+    ``ssh_keys`` is accepted and ignored: the shared helper writes the
+    operator keypair itself, and no caller here reads the fixture's paths.
+    """
+    return write_cfg(tmp_path, *manifests, settings=settings, filename="c.toml")
 
 
 # -- EnvEntry.referenced_resources --------------------------------------------

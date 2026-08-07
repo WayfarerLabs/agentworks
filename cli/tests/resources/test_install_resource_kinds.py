@@ -19,7 +19,6 @@ Coverage:
 from __future__ import annotations
 
 from pathlib import Path
-from textwrap import dedent
 
 import pytest
 
@@ -27,7 +26,7 @@ from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
 from agentworks.errors import ConfigError
 from agentworks.resources import KIND_REGISTRY, NoUnreferencedDefaultError
-from tests.conftest import ManifestDoc, write_manifests
+from tests.conftest import ManifestDoc, write_cfg
 
 APT_AND_INSTALL_KINDS = (
     "apt-source",
@@ -38,26 +37,8 @@ APT_AND_INSTALL_KINDS = (
 
 
 def _write_cfg(path: Path, settings: str = "", *manifests: ManifestDoc | str) -> Path:
-    """Write a settings-only config.toml plus its resources/ manifests and
-    return the config path. ``settings`` carries settings-only TOML; the apt /
-    install-command resources under test are authored as ``manifests`` beside
-    it (ADR 0022)."""
-    pub = path.parent / "id.pub"
-    priv = path.parent / "id"
-    pub.write_text("ssh-ed25519 AAAA...")
-    priv.write_text("-----BEGIN OPENSSH PRIVATE KEY-----")
-    path.write_text(
-        dedent(f"""\
-        [operator]
-        ssh_public_key = "{pub.as_posix()}"
-        ssh_private_key = "{priv.as_posix()}"
-
-        """)
-        + dedent(settings),
-    )
-    if manifests:
-        write_manifests(path.parent, *manifests)
-    return path
+    """``write_cfg`` under this file's path-taking spelling."""
+    return write_cfg(path.parent, *manifests, settings=settings, filename=path.name)
 
 
 # -- Kind shape -------------------------------------------------------------

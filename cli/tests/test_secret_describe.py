@@ -8,7 +8,6 @@ backend mappings (per-active-backend disposition), resolution preview
 
 from __future__ import annotations
 
-from textwrap import dedent
 from typing import TYPE_CHECKING
 
 import pytest
@@ -16,7 +15,7 @@ import pytest
 from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
 from agentworks.secrets.inspect import describe_secret
-from tests.conftest import ManifestDoc, write_manifests
+from tests.conftest import ManifestDoc, write_cfg
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -49,30 +48,20 @@ def _write_cfg(
     admin_env: dict[str, object] | None = None,
     manifests: Sequence[ManifestDoc | str] = (),
 ) -> Path:
-    """Write a settings-only config.toml plus its resources/ manifests and
-    return the config path. ``settings`` carries settings-only TOML
-    ([secret_config], [plugins]); ``admin_env`` seeds the ``default``
-    admin-template's env block (the operator's secret-referencing env);
-    ``manifests`` carries the remaining resources (secrets, vm-templates)."""
-    pub, priv = ssh_keys
-    p = tmp_path / "c.toml"
-    p.write_text(
-        dedent(
-            f"""\
-            [operator]
-            ssh_public_key = "{pub}"
-            ssh_private_key = "{priv}"
+    """``write_cfg`` plus this file's ``admin_env`` sugar.
 
-            """
-        )
-        + dedent(settings)
-    )
+    Nineteen of the calls below seed the ``default`` admin-template's env
+    block, which is where an operator's secret-referencing env lives, so it
+    is worth a spelling here. It is not shared vocabulary: one file wanting
+    it does not make it everyone's.
+
+    ``ssh_keys`` is accepted and ignored; the shared helper writes the
+    keypair itself.
+    """
     docs: list[ManifestDoc | str] = list(manifests)
     if admin_env is not None:
         docs.append(ManifestDoc("admin-template", "default", {"env": admin_env}))
-    if docs:
-        write_manifests(tmp_path, *docs)
-    return p
+    return write_cfg(tmp_path, *docs, settings=settings, filename="c.toml")
 
 
 # -- Header section ---------------------------------------------------------

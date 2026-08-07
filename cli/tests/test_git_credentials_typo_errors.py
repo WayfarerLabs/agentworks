@@ -7,7 +7,6 @@ named.
 
 from __future__ import annotations
 
-from textwrap import dedent
 from typing import TYPE_CHECKING
 
 import pytest
@@ -15,7 +14,7 @@ import pytest
 from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
 from agentworks.errors import ConfigError
-from tests.conftest import ManifestDoc, write_manifests
+from tests.conftest import ManifestDoc, write_cfg
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -37,23 +36,9 @@ def _write_cfg(
     *,
     manifests: Sequence[ManifestDoc | str] = (),
 ) -> Path:
-    """Write a bare operator config.toml plus its resources/ manifests and
-    return the config path."""
-    pub, priv = ssh_keys
-    p = tmp_path / "c.toml"
-    p.write_text(
-        dedent(
-            f"""\
-            [operator]
-            ssh_public_key = "{pub}"
-            ssh_private_key = "{priv}"
-
-            """
-        )
-    )
-    if manifests:
-        write_manifests(tmp_path, *manifests)
-    return p
+    """``write_cfg`` under this file's keyword spelling. ``ssh_keys`` is
+    accepted and ignored; the shared helper writes the keypair itself."""
+    return write_cfg(tmp_path, *manifests, filename="c.toml")
 
 
 def test_admin_referencing_undeclared_git_credential_errors_at_finalize(

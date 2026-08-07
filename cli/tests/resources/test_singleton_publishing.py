@@ -19,7 +19,7 @@ from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
 from agentworks.resources import ALWAYS_MATERIALIZE_SOURCE
 from agentworks.vms.admin import AdminConfig
-from tests.conftest import ManifestDoc, write_manifests
+from tests.conftest import ManifestDoc, write_cfg, write_manifests
 
 
 @pytest.fixture()
@@ -32,20 +32,9 @@ def ssh_keys(tmp_path: Path) -> tuple[Path, Path]:
 
 
 def _write_cfg(tmp_path: Path, body: str, ssh_keys: tuple[Path, Path]) -> Path:
-    pub, priv = ssh_keys
-    p = tmp_path / "c.toml"
-    p.write_text(
-        dedent(
-            f"""\
-            [operator]
-            ssh_public_key = "{pub}"
-            ssh_private_key = "{priv}"
-
-            """
-        )
-        + dedent(body)
-    )
-    return p
+    """``write_cfg`` under this file's spelling. ``ssh_keys`` is accepted
+    and ignored; the shared helper writes the keypair itself."""
+    return write_cfg(tmp_path, settings=body, filename="c.toml")
 
 
 def test_admin_template_default_present_when_no_admin_sections(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:

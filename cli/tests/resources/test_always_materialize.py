@@ -15,26 +15,15 @@ reserved names that *aren't* in the registry by the time finalize starts.
 from __future__ import annotations
 
 from pathlib import Path
-from textwrap import dedent
 
 from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
-from tests.conftest import ManifestDoc, write_manifests
+from tests.conftest import ManifestDoc, write_cfg, write_manifests
 
 
 def _write_minimal(path: Path) -> Path:
-    pub = path.parent / "id.pub"
-    priv = path.parent / "id"
-    pub.write_text("ssh-ed25519 AAAA...")
-    priv.write_text("-----BEGIN OPENSSH PRIVATE KEY-----")
-    path.write_text(
-        dedent(f"""\
-        [operator]
-        ssh_public_key = "{pub.as_posix()}"
-        ssh_private_key = "{priv.as_posix()}"
-        """),
-    )
-    return path
+    """``write_cfg`` under this file's path-taking spelling."""
+    return write_cfg(path.parent, filename=path.name)
 
 
 # The loader path is not re-asserted here. That a minimal config still

@@ -17,7 +17,7 @@ import pytest
 
 from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
-from tests.conftest import ManifestDoc, write_manifests
+from tests.conftest import ManifestDoc, write_cfg
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -37,14 +37,9 @@ def _write_cfg(
     ssh_keys: tuple[Path, Path],
     *docs: ManifestDoc | str,
 ) -> Path:
-    """Write a settings-only config.toml plus its git-credential manifests and
-    return the config path."""
-    pub, priv = ssh_keys
-    p = tmp_path / "c.toml"
-    p.write_text(f'[operator]\nssh_public_key = "{pub}"\nssh_private_key = "{priv}"\n')
-    if docs:
-        write_manifests(tmp_path, *docs)
-    return p
+    """``write_cfg`` under this file's varargs spelling. ``ssh_keys`` is
+    accepted and ignored; the shared helper writes the keypair itself."""
+    return write_cfg(tmp_path, *docs, filename="c.toml")
 
 
 def test_default_token_secret_auto_declares(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
