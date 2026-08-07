@@ -532,8 +532,9 @@ six categories:
 6. **False claims about the repo**: process statements about tooling, CI, file layout, or behavior
    that the repository contradicts; verify against the tree, not from memory.
 
-Findings use the standard output format below, with the pair (or set) of documents cited per finding
-and, for composition failures, the single actor who cannot satisfy both texts named concretely.
+Findings use the standard output format below (for a whole-tree review, cite the tree state reviewed
+in place of a branch or PR ref), with the pair (or set) of documents cited per finding and, for
+composition failures, the single actor who cannot satisfy both texts named concretely.
 
 ## Output format
 

@@ -86,9 +86,10 @@ stays out of the weeds on purpose:
   subagent to create and stay inside its own namespaced subdirectory (for example `<task-slug>/`
   under the shared root), and anything fixture-sensitive (like a tester) to create a fresh temp
   directory under that. Isolation changes where the dev's commits land: git refuses to check out a
-  branch already checked out in another worktree, so an isolated dev branches from the effort's
-  branch, commits there, and reports branch and head SHA; integrating that branch back onto the
-  effort's branch is the lead's step, not the dev's.
+  branch already checked out in another worktree, so an isolated dev commits on its own branch
+  (usually the one its worktree starts on), pushes it so nothing is hoarded locally, and reports
+  branch and head SHA; integrating that branch back onto the effort's branch is the lead's step, not
+  the dev's, and doing it promptly keeps section 6's no-hoarding rule satisfied end to end.
 
 ## 4. Choose the model deliberately for each delegation
 
@@ -202,7 +203,8 @@ misses.
   pushing), substitute a **vanilla generic review right here**: a `general-purpose` subagent on a
   **lower model (e.g. Sonnet)**, prompted to review the diff as a senior engineer reading it cold,
   no project-specific checklist. Run it in parallel with the `agentworks-reviewer` and triage both
-  together.
+  together. This pass is deliberately exempt from section 4's reviewer-tier floor: it is a
+  complementary lens, not the reviewer of record, which stays bound by that floor.
 
 Either way, apply the same finding stance as section 5 (push back on the wrong, fix the valid).
 Reserve this for **code-heavy** slices; a doc-only or closeout change has little for a fresh-eyes
