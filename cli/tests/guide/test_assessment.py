@@ -314,6 +314,45 @@ def test_cli_rejects_line_break_in_evidence_without_echoing_the_value() -> None:
 
 
 @pytest.mark.parametrize(
+    ("kind", "name"),
+    [
+        ("sec\x1bret", "token"),
+        ("sec\x80ret", "token"),
+        ("secret", "to\x1bken"),
+        ("secret", "to\x80ken"),
+    ],
+)
+def test_service_rejects_control_bytes_in_evidence_identity(
+    kind: str,
+    name: str,
+    db: Database,
+) -> None:
+    registry = Registry.empty()
+    registry.add(
+        "secret",
+        "token",
+        SecretDecl(name="token", description=""),
+        Origin.built_in(source="test"),
+    )
+    registry.finalize()
+    evidence = (_evidence("verify-named-secret", kind, name, VerificationOutcome.VERIFIED),)
+
+    with pytest.raises(ValidationError) as raised:
+        render_guide(
+            ("concept-onboarding",),
+            GuideMode.AGENT,
+            load_config_fn=lambda: cast("Config", SimpleNamespace()),
+            load_registry_fn=lambda config: registry,
+            db=db,
+            verification_evidence=evidence,
+        )
+
+    assert str(raised.value) == "verification evidence has an invalid target or outcome"
+    assert "\x1b" not in str(raised.value)
+    assert "\x80" not in str(raised.value)
+
+
+@pytest.mark.parametrize(
     "evidence",
     [
         [_evidence("verify-named-secret", "secret", "token", VerificationOutcome.VERIFIED)],
