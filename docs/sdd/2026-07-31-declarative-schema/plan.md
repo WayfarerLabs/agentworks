@@ -398,7 +398,16 @@ the derivation sequence are not started.
       2.5 fix pass:** a harness integration's declared secret carries usage text that named
       `harness_integration_config`, a key that can no longer be written; it now reads
       `harness_integration`. The text reaches `agw resource describe`'s "Referenced by:" and doctor,
-      so an operator sees it even though the key it named is gone.
+      so an operator sees it even though the key it named is gone. **CORRECTED 2026-08-06 by the 2.9
+      verification:** that surfacing claim was wrong. The text reaches ONLY the preflight
+      resolvability error, via `HarnessIntegration.config_secret_refs()` into `preflight_all`. It
+      does NOT reach `agw resource describe`'s "Referenced by:" (those edges come from
+      `SessionTemplate.dependencies` and carry the marker's raw usage) and it does NOT reach doctor,
+      which invokes `node.preflight` per row and never sweeps. Since no shipped integration declares
+      a secret, the operator-facing item is "nothing to do". **Also corrected: this list implies
+      broader migrator coverage than exists.** `agw resource     migrate --all` rewrites exactly ONE
+      of the eleven, the retired sibling capability shape. Everything else is a hand edit, and the
+      upgrade note is organized around that fact.
 - [x] Core-driven validation and extraction wired: registry name-to-model maps per capability kind;
       `Capability.validate` / `Capability.dependencies` classmethods and
       `SecretBackend.validate_mapping` retired; per-capability hand-rolled validate code deleted;
@@ -843,10 +852,10 @@ public so the onboarding collector gets the pair without reverse-engineering it.
 
 ### 2.9 Pointer sweep and docs promotion (FR16, FR4 tail)
 
-- [ ] One-time sweep: guides, command help, and remediation text discussing a config shape point at
+- [x] One-time sweep: guides, command help, and remediation text discussing a config shape point at
       the rendered sample / describe surfaces; redundant hand-stated field lists deleted
       (narrative-necessary ones may stay).
-- [ ] Permanent-doc promotion: `capabilities/README.md` rewritten for the declare-schema contract
+- [x] Permanent-doc promotion: `capabilities/README.md` rewritten for the declare-schema contract
       AND the capability-kind descriptor (the single kind-enumeration table, config schemas keyed by
       producer-side config declarations, registration-time conformance, `contract_version`) so the
       contract has a permanent home once the roadmap SDD is gone; the invoked-validation sections
@@ -857,10 +866,33 @@ public so the onboarding collector gets the pair without reverse-engineering it.
       declaration for plugin capability authors; `docs/guides/resources.md` updated; the superseding
       ADR extended or a sibling ADR added for the schema model and the descriptor if the phase 1 ADR
       (0022) did not already cover it.
-- [ ] Dated lockfile entries: resource-manifests (Phase 5.7 invoked-validation contract retired;
+- [x] Dated lockfile entries: resource-manifests (Phase 5.7 invoked-validation contract retired;
       sample machinery replaced) and vm-sites (its "schema-registration is future work" deferral
       resolved).
-- [ ] SDD cspell words promoted to root wherever they now appear in permanent code or docs.
+- [x] SDD cspell words promoted to root wherever they now appear in permanent code or docs.
+
+**Step 2.9 records, closed 2026-08-06 at 4873 tests.** The upgrade note lives in
+`docs/guides/resources.md` because ADR 0022 says in as many words that it does, and that guide
+already carries the TOML-sunset and plugins-are-opt-in notes in the same shape. It is organized by
+what the operator must DO, since only one of the eleven changes has tooling behind it.
+
+**The interaction nobody would guess, now written down:** the migrator preserves quoting faithfully,
+so it will carry a quoted `template_vmid` straight into a file that then fails the new strict type
+check. Two corrections that a fix cannot make, only a rewrite: an operator who followed the old
+`secret: null` error's advice is exactly the person the explicit-null flip lands on.
+
+**Two things that were already wrong at HEAD**, which is the FR16 argument in miniature: the
+resources guide never listed `aws-ec2` or the `aws` plugin in five places while using
+`describe-kind vm-platform/aws-ec2` as a worked example three sections earlier, and
+`mise_install_before`'s docstring described a staleness window when it is mise's supply-chain
+filter. The guide's table was right and the MODEL was wrong, which is the worse direction now that
+the model is what `describe-kind` and editor hover text render.
+
+**Flagged, not swept:** a large pre-existing population of `LLD a/b/c`, `FR<n>`/`R<n>`, and
+`Phase <n>` markers in code comments (roughly 60 LLD sites, 187 requirement-id hits) spans the
+codebase and predates this effort. This step fixed the ones it introduced and the ones that PROMISED
+future behavior; sweeping the rest is its own decision. `topics.py`'s coordination notes with the
+onboarding effort are a real cross-effort agreement, not a dangling pointer, and stay.
 
 ### 2.10 Stretch: settings schema (FR14; descope without renegotiating)
 
