@@ -89,7 +89,7 @@ identifies all wave 2 gates, and has no unresolved review finding.
       capability, resolving upgrade deprecations, and consented doctor-driven troubleshooting.
 - [x] Permanent CLI and contributor documentation shipped with the command. Sample config reviewed;
       either updated for a real new setting or recorded as unaffected in the commit handoff.
-- [ ] Canonical Rulesync sources gain an always-on guide-contribution rule plus matching
+- [x] Canonical Rulesync sources gain an always-on guide-contribution rule plus matching
       `agentworks-dev` completeness and `agentworks-reviewer` drift checks; other roles are audited,
       shared Claude Code, Codex, and Copilot outputs regenerated, and
       `./scripts/rulesync-upgen.sh --check` passes.
