@@ -1,6 +1,6 @@
 Please also reference the following rules as needed. The list below is provided in TOON format, and `@` stands for the project root directory.
 
-rules[11]:
+rules[12]:
   - path: @.codex/memories/always-consider-completions.md
   - path: @.codex/memories/always-consider-docs.md
   - path: @.codex/memories/always-consider-sample-config.md
@@ -13,6 +13,9 @@ rules[11]:
     applyTo[3]: **/agentworks/cli/**/*.py,**/completions/**/*.py,**/agentworks/**/manager.py
   - path: @.codex/memories/code-style.md
     description: General style and formatting guidelines
+    applyTo[1]: **/*
+  - path: @.codex/memories/development-principles.md
+    description: The development principles everyone writing code or docs here holds
     applyTo[1]: **/*
   - path: @.codex/memories/development-process.md
     description: Follow the standard agentic development process on every effort
