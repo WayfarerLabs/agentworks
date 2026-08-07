@@ -562,6 +562,109 @@ never probe an interaction to answer readiness.
 backends); `agw doctor` has a **Secret backends** group (one readiness row per backend) plus one row
 per secret with the runtime outcome.
 
+## Upgrading: manifests are validated against a declared schema
+
+Every kind's spec and every capability's config is now checked against a model the code declares,
+rather than by hand-written per-kind code. That is what makes `agw resource sample`,
+`agw resource describe-kind`, and `agw resource schema` possible, and it is why they cannot be out
+of date. It also means a manifest that used to load can now fail, in ways worth going through before
+you upgrade.
+
+**Start here.** The errors are specific: each one names the file, the line, the resource, the field,
+and what was expected. So the fastest path is to upgrade, run any command, and fix what it names.
+`agw resource describe-kind <kind>` (and `<capability-kind>/<name>`) documents what the field
+accepts, and needs no working config to do it.
+
+**One change has tooling.** The retired sibling capability shape (`platform: lima` beside a
+`platform_config:` table, and likewise `provider` / `provider_config`) is a hard error, and
+`agw resource migrate --all` rewrites it in place, preserving comments and everything else in the
+file:
+
+```bash
+agw resource migrate --all --dry-run --full   # see it first
+agw resource migrate --all
+```
+
+Two limits worth knowing. It refuses, before writing anything, if a capability's config carries its
+own `name` key, because folding that is a judgment call; the error tells you to fold that one by
+hand. And it preserves quoting faithfully, so it will carry a quoted number through into a file that
+then trips the type checking below. Everything else here is a hand edit.
+
+### Types are checked now
+
+Values are no longer coerced. A quoted number is a string, and a string is not a boolean.
+
+- **Proxmox.** `template_vmid: "9000"` used to be converted with `int(str(...))` and now fails.
+  `verify_ssl: "no"` is the sharper one: it used to be read with `bool(...)`, so it meant **true**,
+  the opposite of what it looks like. It now fails rather than doing the opposite of what you wrote.
+  The platform's other fields (`api_url`, `node`, `token_id`, `storage`, `bridge`, `pool`) had no
+  type check at all before and now have one.
+- **apt-source, apt-package, admin-template.** These lost `str()` / `bool()` coercions. Concretely:
+  an apt-source's `key_dearmor: "no"` used to mean **true**; `key_url: 42` used to become the string
+  `"42"`; an apt-package's `apt: [7]` used to become `["7"]`; an admin-template's
+  `mise_activate: "no"` used to mean **true** and `username: 42` used to become `"42"`. Each is now
+  an error. (Adjacent and the same flavor: a vm-template's `cpus: "4"` used to load, and an
+  install-command's `command: 7` used to install the string `"7"`.)
+- **An explicit `null` is a type error** on a field that is not nullable, rather than a synonym for
+  omitting the key. That covers `shell`'s `command`, `resume_command`, and `required_commands`,
+  `extra_args` on `claude-code` and `codex`, `codex`'s `writable_dirs`, a github credential's
+  `repos`, and a `session-template`'s `env`. If you wrote one to mean "no value", delete the line
+  instead.
+
+### Unknown keys are errors now
+
+A key a kind does not declare used to warn and load on, doing nothing. It is now an error naming the
+fields the kind does declare.
+
+- **`agent-template` accepted and silently DROPPED `username` and `git_force_safe_directory`.** They
+  were in the accepted key set but were not fields, so setting either never took effect. Now they
+  stop the load. Deleting them changes no behavior, because they never had any; if you meant them,
+  they belong on the `admin-template`.
+- **`apt-package`, `apt-source`, `system-install-command`, and `user-install-command` had no
+  unknown-key warning at all**, so they go straight from silently accepting a stray key to rejecting
+  it, with no warning release in between. If you have a typo in one of these, this is where you will
+  meet it.
+
+### One meaning changed rather than one shape
+
+**An explicit `null` secret name now means the DEFAULT secret, on `azure-vm`, `aws-ec2`, and
+`proxmox`.** This is the change least likely to announce itself, so read it even if nothing else
+here applies.
+
+Those three platforms each name a secret in their config, defaulting to a well-known name when the
+field is omitted: proxmox's `token_secret` (default `proxmox-token`), an azure site's
+`service_principal.secret` (default `azure-client-secret`), an aws site's
+`credentials.access_key_secret` (default `aws-secret-access-key`). Writing an explicit `null` there
+used to be a hard error whose message told you to OMIT the key instead. The rule is now that absent
+and `null` mean the same thing, so that same input quietly resolves to the default-named secret and
+the site declares a dependency on it.
+
+If you ever hit that old error and worked around it, check what you left behind. Nothing warns you,
+because to the loader an explicit `null` is now simply the ordinary way of taking the default.
+
+### Two smaller ones
+
+- **An install command's `test_exec: ""` beside a `test_file`** used to be legal: the empty string
+  normalized away before the at-most-one-test check counted. It now counts, so the pair is rejected.
+  Delete the empty one.
+- **`{value: x}` is a new accepted env spelling**, alongside a bare string and `{secret: name}`.
+  Additive: nothing you have written stops working, but a config can now say something it could not.
+
+### If you maintain a VM platform outside this tree
+
+`ProvisionRequest` arrives fully resolved. Its `cpus`, `memory_gib`, `disk_gib`, and `swap_gib` are
+required and non-optional, so a platform must use what it is handed rather than re-defaulting a
+missing value. The defaults are declared once, on the template model. `generate_bootstrap_script`'s
+`swap` parameter became required for the same reason.
+
+### Nothing to do
+
+A harness integration's declared secrets carry usage text that used to name
+`harness_integration_config`, a key that can no longer be written; it now reads
+`harness_integration`. The text appears only in the preflight error for a secret that no active
+backend can resolve, and no shipped integration declares a secret, so this is here for completeness
+rather than because it will reach you.
+
 ## Inspecting the whole picture
 
 ```bash
