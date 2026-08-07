@@ -196,14 +196,14 @@ Settled points, each with its reason:
 
 Every core call site in this step passes `facet=None`, meaning "the capability's single config".
 
-The alternative was considered and rejected: naming a facet per hosting surface now (vm-site → `VM`,
-session-template → `SESSION`, git-credential → `USER`, secret-backend → none) would make wave 4's
-session-template call site free. It would also have wave 2 ASSERT a scope-to-facet mapping that the
-ruling gives to core-at-wave-4, on evidence that does not exist yet: a git credential is plausibly
-user-level and a per-secret backend mapping is plausibly no level at all, and neither guess has a
-consumer that would catch it being wrong. Deciding it here on zero evidence is the cheaper-looking
-mistake. `Facet` and `config_for` exist so wave 4 adds both halves (the declaration and the call
-site's facet) in one change; wave 2 supplies the half that has a consumer.
+The alternative was considered and rejected: naming a facet per hosting surface now (vm-site as
+`VM`, session-template as `SESSION`, git-credential as `USER`, secret-backend as none) would make
+wave 4's session-template call site free. It would also have wave 2 ASSERT a scope-to-facet mapping
+that the ruling gives to core-at-wave-4, on evidence that does not exist yet: a git credential is
+plausibly user-level and a per-secret backend mapping is plausibly no level at all, and neither
+guess has a consumer that would catch it being wrong. Deciding it here on zero evidence is the
+cheaper-looking mistake. `Facet` and `config_for` exist so wave 4 adds both halves (the declaration
+and the call site's facet) in one change; wave 2 supplies the half that has a consumer.
 
 ## 4. The descriptor's `config_schema`, and conformance check five
 
