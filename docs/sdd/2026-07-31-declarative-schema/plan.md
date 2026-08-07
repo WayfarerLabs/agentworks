@@ -285,19 +285,21 @@ the derivation sequence are not started.
 
 ### 2.3 Capability config models (the contract flip)
 
-- [ ] `capability-contract-lld.md` written and reviewed: the registration surface, the interim
-      tagged-table synthesis while decode still routes through the phase-1 decoders, the typed-ops
-      migration per capability (the hidden bulk), retirement of the stale tolerate-and-self-disable
-      comment in `manifests/decode.py` (~298-301), which misstates the shipped R9.2 hard-error
-      behavior, and effective-config validation (operator decision 2026-08-02): validation runs on
-      the MERGED blob only, resolved along the graph's `inherits` chain at finalize (chain length
-      one everywhere but session templates), never on a partial declared blob. The LLD settles the
-      per-key provenance the merge tracks for error attribution, the two-stage reference extraction
-      (structural refs per declared blob feed the graph; secret refs read the effective blob), the
-      inheritance edge as a typed, non-dependency edge (FR17: excluded from the secret union,
-      resolvability prediction, and dependency listings; readiness/enablement propagation across it
-      is this LLD's policy call), and the retirement of the session resolver's use-time completeness
-      call (`sessions/templates.py::_validate_merged`) in favor of the finalize pass.
+- [x] `capability-contract-lld.md` written and reviewed: the registration surface, the interim
+      **Written and reviewed in step 2.3** (`capability-contract-lld.md`); ticked at closeout, the
+      box was simply never checked. tagged-table synthesis while decode still routes through the
+      phase-1 decoders, the typed-ops migration per capability (the hidden bulk), retirement of the
+      stale tolerate-and-self-disable comment in `manifests/decode.py` (~298-301), which misstates
+      the shipped R9.2 hard-error behavior, and effective-config validation (operator decision
+      2026-08-02): validation runs on the MERGED blob only, resolved along the graph's `inherits`
+      chain at finalize (chain length one everywhere but session templates), never on a partial
+      declared blob. The LLD settles the per-key provenance the merge tracks for error attribution,
+      the two-stage reference extraction (structural refs per declared blob feed the graph; secret
+      refs read the effective blob), the inheritance edge as a typed, non-dependency edge (FR17:
+      excluded from the secret union, resolvability prediction, and dependency listings;
+      readiness/enablement propagation across it is this LLD's policy call), and the retirement of
+      the session resolver's use-time completeness call (`sessions/templates.py::_validate_merged`)
+      in favor of the finalize pass.
   - **FR17 starting point, surveyed 2026-08-06.** Half the machinery already exists and the LLD must
     not rebuild it: `ResourceReference` (`resources/reference.py:59`) has typed subclasses
     `SecretReference` and `TemplateReference`, and all four template kinds emit `TemplateReference`
@@ -353,7 +355,7 @@ the derivation sequence are not started.
     `BaseModel` at all, so backend mapping models extend the root-model base, not the mapping base.
     Do not model the generic `False` opt-out into a backend's model: it is filtered by the loop
     before any backend sees it (`secrets/base.py:133`).
-- [ ] **Strict-mode tightening is a BREAKING change and ships with an operator note.** The 2.1 base
+- [x] **Strict-mode tightening is a BREAKING change and ships with an operator note.** The 2.1 base
       model is `strict=True`, and while today's hand-rolled validators are almost all
       `isinstance`-strict already, proxmox is not: `plugins/proxmox/platform.py:93` does
       `int(str(config["template_vmid"]))`, so a quoted `template_vmid: "9000"` loads today and
@@ -871,6 +873,27 @@ public so the onboarding collector gets the pair without reverse-engineering it.
       resolved).
 - [x] SDD cspell words promoted to root wherever they now appear in permanent code or docs.
 
+**Closeout record: why `facets.py` stays although it has no production consumer.** The final review
+flagged it as speculative generality: `Facet` is constructed nowhere in production, the `facet`
+parameter threads as always-`None` through nine signatures, and `Capability.config_for` never reads
+it. That is a fair reading of the code alone, and this phase has deleted several things on exactly
+that basis (`capability_fields()` once its filter emptied, `reachable_from` once the gate narrowed,
+`render_validation_error` at closeout).
+
+It stays because the evidence is different in kind, and the distinction is the point. Facets rest on
+a concrete cross-effort commitment: the operator named the axis on 2026-08-06 ("facet it is"), and
+the roadmap's `scope-participation-contract.md` and `capability-descriptor-contract.md` both commit
+to `config_for(facet)` with core owning the scope-to-facet mapping. Wave 4's harness integrations
+are the consumer, and their methods already run at the four levels the enum names. The things this
+phase deleted had only a docstring naming hypothetical consumers; this has another SDD's settled
+contract naming the call. Deleting it would mean wave 4 re-adding the same enum and re-litigating a
+decision already made, and would leave `config_for`'s signature silently disagreeing with the
+contract the roadmap published.
+
+The honest cost, recorded rather than hidden: nine signatures carry a parameter nothing passes, and
+that is a real readability tax until wave 4 arrives. If wave 4 is ever cancelled or re-scoped away
+from per-facet config, this becomes dead and should go.
+
 **Step 2.9 records, closed 2026-08-06 at 4873 tests.** The upgrade note lives in
 `docs/guides/resources.md` because ADR 0022 says in as many words that it does, and that guide
 already carries the TOML-sunset and plugins-are-opt-in notes in the same shape. It is organized by
@@ -896,11 +919,20 @@ onboarding effort are a real cross-effort agreement, not a dangling pointer, and
 
 ### 2.10 Stretch: settings schema (FR14; descope without renegotiating)
 
-- [ ] Settings sections (`[operator]`, `[paths]`, `[plugins]`, `[defaults]`, `[secret_config]`,
-      `[session.config]`) declared as models under the same regime, validated through the bridge
-      with TOML line framing.
-- [ ] config.toml JSON Schema emitted; taplo association documented (draft-4 subset decision made
-      here, not before).
+**DESCOPED 2026-08-06, as this step's own title permits.** FR14 is a stretch in the FRD and both
+boxes are marked `[~]` rather than left open, so the distinction between "not done" and
+"deliberately not done" is visible. The settings layer is the largest remaining cluster of
+consumer-side `.get(key, literal)` re-spellings (step 2.6 enumerated them in
+`config/loaders_core.py`, `loaders_sessions.py`, `ssh_config.py`, and `vms/initializer/mise.py`),
+and `_warn_unexpected_keys` survives with six settings-layer call sites for the same reason: its
+real expiry is this step. A future effort that models the settings sections inherits a foundation
+that is already built and a sweep that is already enumerated.
+
+- [~] Settings sections (`[operator]`, `[paths]`, `[plugins]`, `[defaults]`, `[secret_config]`,
+  `[session.config]`) declared as models under the same regime, validated through the bridge with
+  TOML line framing.
+- [~] config.toml JSON Schema emitted; taplo association documented (draft-4 subset decision made
+  here, not before).
 
 ## Closeout
 
