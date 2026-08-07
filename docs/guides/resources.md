@@ -216,26 +216,88 @@ that render the target shape live from this build's registry, and this section. 
 delegate the work than do it by hand, "Handing the rewrite to an agent" below is the same procedure
 written as a brief.
 
+### First: delete every `[secret_backends.*]` section
+
+Do this before anything else, because it is the one leftover that can stop the commands the rest of
+this section depends on. A `[secret_backends.<name>]` section naming anything other than a built-in
+backend (`env-var`, `prompt`) is a hard error in the **settings** load. That is a separate check
+from the resource-section refusal, and the commands that go on working while `config.toml` still
+carries resource sections do so by skipping the resource check only. They still run the settings
+load, so they still meet this:
+
+```console
+$ agw resource schema --write
+Configuration error: [secret_backends.onepassword] names an unknown secret backend; supported: ['env-var', 'prompt']
+
+$ agw resource sample secret --write secrets.yaml
+Configuration error: [secret_backends.onepassword] names an unknown secret backend; supported: ['env-var', 'prompt']
+```
+
+`agw doctor` is hit by it too, and more quietly: its settings-only retry fails the same way, so the
+report truncates to the resource-section fail row with every later group reporting `skipped`, and
+nothing on screen says a `[secret_backends.*]` section is the reason. `agw resource list` never
+shows this error at all, because the resource-section refusal fires first. So a section you can only
+see by reading `config.toml` takes out the two commands you start with and the one you iterate with.
+
+Plugin state has nothing to do with it. The check runs at config load against the built-in backend
+registry, which no plugin has been loaded into yet at that point, so `[secret_backends.onepassword]`
+fails identically whether or not `onepassword` is listed in `[plugins] system`, and on a host where
+the plugin is enabled and perfectly healthy (delete the section and `agw doctor` will say so:
+`[ok] plugin onepassword`). This is not new in this release: the previous build refuses the same
+section the same way.
+
+A section naming a backend this build does have (`[secret_backends.env-var]`) only warns rather than
+failing, but delete those in the same pass. They never carried configuration, and what replaces them
+is `[secret_config].backends`; "The sections that are not a straight move" below has the detail.
+
 ### What still answers while `config.toml` is refused
 
-Read this before you start, because it decides the order. The refusal happens at config load, so
-every command that builds the registry stops at it:
+Read this before you start, because it decides the order. The resource-section refusal happens at
+config load, so every command that builds the registry meets it, but they do not all react the same
+way:
 
-- **`agw resource describe-kind <kind>` reads no config at all.** It answers on a host whose
+- **`agw resource describe-kind <target>` reads no config at all.** It answers on a host whose
   `config.toml` does not load, and it documents kinds and capability implementations whose plugin is
   not enabled.
 - **`agw resource sample <kind>`, and `--write <file>`, load settings only.** They work against a
   `config.toml` that still carries every section you are about to delete.
-- **`agw resource schema --write` loads settings only too.** Run it first: a schema-aware editor
-  then checks each manifest as you type it, which is the only feedback available until the whole
-  rewrite is finished (see "Editing manifests with schema support" above).
-- **`agw resource list`, `agw secret list`, and `agw doctor` build the registry**, so they cannot
-  answer until the last resource section is gone. They are the finish line, not the feedback loop.
+- **`agw resource schema --write` loads settings only too.** Run it early: a schema-aware editor
+  then checks each manifest as you type it (see "Editing manifests with schema support" above).
+- **`agw doctor` reports the refusal as one fail row and keeps going.** It retries the load
+  settings-only, which skips the resource-section check, and then validates the manifests you have
+  written so far. That makes it a working feedback loop for the whole rewrite, not just the finish
+  line.
+- **`agw resource list` and `agw secret list` do refuse outright.** They print the error and exit,
+  so they only answer once the last resource section is gone.
 
-That last point shapes everything else, so it is worth stating plainly: **there is no partial
-success.** A `config.toml` carrying one leftover section fails exactly like one carrying ten, so you
-cannot rewrite one kind, confirm it loads, and move on to the next. Write every manifest first,
-delete every section in one pass, then verify.
+So there are two different rhythms here, and conflating them is what makes this rewrite feel harder
+than it is:
+
+- **`config.toml` is all-or-nothing.** A file carrying one leftover section fails exactly like one
+  carrying ten, so you cannot delete one kind's sections, confirm it loads, and move on to the next.
+  Every section comes out in one pass, at the end.
+- **Your manifests are checked one at a time, starting now.** `agw doctor` names the file, the line,
+  the resource, the offending field, and the field list that field should have come from, all while
+  `config.toml` is still untouched:
+
+```console
+$ agw doctor    # config.toml still declares every section
+Configuration:
+  [ok]   Config file: /home/you/.config/agentworks/config.toml
+  [FAIL] Config: config.toml declares resources, which config.toml no longer supports (it is
+         settings only now): [secrets.*], [vm_templates.*], [agent_templates.*], ...
+  [FAIL] Manifest: ~/.config/agentworks/resources/vm-templates.yaml:1: vm-template/default.memory_gib:
+         unknown field; expected one of: apt, apt_packages, cpus, disk, env, inherits, memory,
+         snap, swap, system_install_commands, tailscale_auth_key
+         hint: `agw resource sample vm-template` prints this kind's fields
+
+Results: 15 ok, 7 info, 1 warn, 2 fail
+```
+
+Write a manifest, run `agw doctor`, fix what it names, repeat. Once every manifest is clean the
+Config row is the only fail left, and doctor starts rendering the **Secret backends** and
+**Secrets** groups from your manifests, which is a preview of the finished state you get before
+deleting a single section.
 
 ### The inventory is the error message
 
@@ -304,9 +366,49 @@ section header, and `description` is the one key that leaves the section body fo
 `vm-template` is the same move with no surprises at all: `[vm_templates.dev]` with `cpus = 4` and
 `memory = 16` becomes a `vm-template` named `dev` whose `spec` carries `cpus: 4` and `memory: 16`.
 
+**A section whose only key is `description` still needs a `spec`.** Because `description` is the one
+key that leaves for `metadata`, applying the rule to `[secrets.npm-token]` with nothing but a
+`description` empties `spec` out of existence, and a document with no `spec` is refused:
+
+```console
+[FAIL] Manifest: ~/.config/agentworks/resources/secrets.yaml:11: spec is required (an empty mapping {} is fine)
+```
+
+Write `spec: {}` and the document loads. This is the ordinary shape for a secret you only want named
+and described (the value comes from a backend, so there is nothing else to say about it), so expect
+to write it several times:
+
+```yaml
+apiVersion: agentworks/v1
+kind: secret
+metadata:
+  name: npm-token
+  description: npm registry token
+spec: {}
+```
+
 `agw resource describe-kind <kind>` is the authority on what a `spec` accepts, and it is worth
 running per kind rather than assuming: several field names read like something they are not (a
 vm-template sizes memory with `memory`, in GiB, not `memory_gib`).
+
+For the three kinds whose `spec` carries a tagged capability table (`vm-site`'s `platform`,
+`git-credential`'s `provider`, `session-template`'s `harness_integration`), the kind's own output
+documents only ONE implementation's fields inline, the one it shows as an example, and lists the
+rest by name. `agw resource describe-kind <capability-kind>/<name>` is the form that documents a
+specific one:
+
+```bash
+agw resource describe-kind vm-platform/proxmox            # for [proxmox]
+agw resource describe-kind vm-platform/azure-vm           # for [azure]
+agw resource describe-kind git-credential-provider/azdo   # for a git_credentials section with provider = "azdo"
+agw resource describe-kind harness-integration/claude-code
+```
+
+Reach for it whenever the section you are rewriting selects an implementation other than the one
+shown inline. `describe-kind vm-site` renders lima's fields, so a `[proxmox]` section rewritten from
+that output alone will be missing fields; `describe-kind git-credential` renders github's, so azdo's
+required `org` never appears. The kind's output names the form for you at the end of the table's
+entry, and a wrong-fields error carries it as a hint.
 
 ### Where to put the files
 
@@ -416,8 +518,13 @@ resources: YAML manifests" above before editing an appended file.
       required_commands: [htop]
   ```
 
-  A section that already named `harness_integration` (or the older `harness`) moves that value to
-  the table's `name` and lifts its `harness_integration_config` keys in beside it. A section with a
+  A section that already named the harness explicitly moves that value to the table's `name` and
+  lifts its config keys in beside it. Which config key that is depends on which spelling the section
+  used, and the two always came as a pair: `harness_integration` went with a
+  `harness_integration_config` table, and the older `harness` went with a `harness_config` table
+  (`[session_templates.claude]` with `harness = "claude-code"` plus a
+  `[session_templates.claude.harness_config]` carrying `model = "opus"` becomes one
+  `harness_integration` table with `name: claude-code` and `model: opus`). A section with a
   `restart_command` renames it to `resume_command` on the way. See "Harness integrations" above.
 
 - **`[admin.config]` and `[admin.env]`** become one `admin-template` named `default`, with the env
@@ -427,12 +534,12 @@ resources: YAML manifests" above before editing an appended file.
 
 - **`[secret_backends.*]`** becomes nothing at all. Those sections never carried configuration:
   delete them, and list the backends you want in `[secret_config].backends`, which is a setting and
-  stays in `config.toml`. This is the one retired section that is not part of the hard error, so it
-  behaves differently from the rest and can outlive the rewrite: a section naming a backend this
-  build has (`[secret_backends.env-var]`) only warns, while one naming a backend it does not have
-  fails the load outright. A `[secret_backends.onepassword]` section hits that second case on a host
-  where the `onepassword` plugin is not enabled, so delete it whether or not you still use
-  1Password.
+  stays in `config.toml`. These are the sections "First: delete every `[secret_backends.*]` section"
+  above told you to remove before anything else, and that ordering is the point: they are not part
+  of the resource-section error, they are checked by the settings load instead, so one naming a
+  backend that is not built in (`[secret_backends.onepassword]`) breaks the very commands you need
+  to do the rewrite. One naming a built-in backend (`[secret_backends.env-var]`) only warns, but it
+  is dead weight either way.
 
 ### Deleting the sections, and knowing you are done
 
@@ -445,14 +552,40 @@ agw resource list --origin operator   # every resource you declared, and the fil
 agw doctor                            # the full health picture
 ```
 
-`agw resource list --origin operator` is the first real check, and reading it beats trusting it: the
-count should match the number of sections you started with, and every row's origin should name the
-file you expect. A resource that silently failed to move does not appear here.
+`agw resource list --origin operator` is the loss check: a resource that silently failed to move
+does not appear here. Read it against your saved copy of `config.toml` by NAME, not by count. A
+count of section headers will not match, and chasing the difference sends you hunting for resources
+that never existed. Two header shapes are headers but not resources:
 
-Expect to run it more than once. Errors aggregate within a single resource but not across resources,
-because the load stops at the first document that fails, so six broken manifests take six passes
-rather than producing one list of six. That is normal; each pass names a file, a resource, and a
-field.
+- A deeper sub-table belongs to the resource above it. `[vm_templates.default.env]`, `[admin.env]`,
+  and `[session_templates.claude.harness_config]` are each a second header for a resource the family
+  already declared, not a second resource.
+- `[secret_backends.*]` becomes nothing at all, as above.
+
+What does match, family by family, is the set of NAMES. The second path element of a
+`[family.<name>]` header is one resource of that family's kind, and a `--names-only` listing prints
+exactly that, so the two are directly comparable:
+
+```bash
+# the names your old config declared under one family (deeper sub-tables collapse)
+grep -oE '^\[secrets\.[^].]+' config.toml.bak | cut -d. -f2 | sort -u
+# the names the registry has for the kind that family became
+agw resource list --origin operator --kind secret --names-only | cut -d/ -f2
+```
+
+Run that pair once per family in the load error, taking the family's kind from the table above. Four
+sections have no name in the header to compare: `[admin.config]` and `[named_console]` each become
+one resource named `default`, and `[azure]` and `[proxmox]` each become one `vm-site` named after
+the section, so for those just confirm the row is present.
+
+Then read the ORIGIN column: every row should name the file you expect. A resource in the right kind
+but the wrong file usually means a document landed under a heading you did not intend.
+
+If you have been running `agw doctor` as you wrote the manifests, this should pass first time. If
+you skipped that and are meeting the errors now, expect several passes: errors aggregate within a
+single resource but not across resources, because the load stops at the first document that fails,
+so six broken manifests take six passes rather than producing one list of six. Each pass names a
+file, a resource, and a field.
 
 `agw doctor` is the finish line. You are done when its **Configuration** group reports
 `Config is valid` and the run ends with `0 fail`:
@@ -485,18 +618,25 @@ per-resource errors until `agw doctor` is clean.
 Agentworks does not yet ship a command that drives this conversation for you, so give the agent the
 procedure above as its brief. What matters is that it gets the constraints, not just the goal:
 
+- Every `[secret_backends.*]` section comes out first, before anything else is run. One naming a
+  non-built-in backend fails the settings load and takes `sample --write` and `schema --write` down
+  with it, whatever `[plugins] system` says.
 - The work list is the load error from `agw resource list`, and the target shape comes from
   `agw resource describe-kind <kind>` per kind. Field names are to be read from that output, never
-  recalled.
-- `describe-kind`, `sample`, and `schema --write` work while `config.toml` is refused; `list`,
-  `secret list`, and `doctor` do not.
-- Nothing verifies until every resource section is deleted, so all manifests get written before any
-  section is removed.
+  recalled. Where a `spec` selects a capability implementation, the fields come from
+  `agw resource describe-kind <capability-kind>/<name>` (`vm-platform/proxmox`,
+  `git-credential-provider/azdo`), because the kind's own output only details one implementation.
+- `describe-kind`, `sample`, and `schema --write` work while `config.toml` is refused. `list` and
+  `secret list` do not. `agw doctor` DOES: it reports the refusal as one fail row and goes on to
+  validate the manifests written so far, so it is the iteration loop, not just the final check.
+- `config.toml` is all-or-nothing, so every resource section comes out in one pass at the end. That
+  is not a reason to defer verification: run `agw doctor` after each manifest.
 - Settings sections stay in `config.toml`. Only resource sections move.
-- Done means `agw resource list --origin operator` shows every resource with the expected origin,
-  and `agw doctor` reports `Config is valid` with `0 fail`.
+- Done means `agw resource list --origin operator` matches the old config family by family, by name
+  (not by header count), with the expected origin per row, and `agw doctor` reports
+  `Config is valid` with `0 fail`.
 - The original `config.toml` is worth keeping a copy of until `agw doctor` is clean, since nothing
-  in this process rewrites your files for you.
+  in this process rewrites your files for you. The name-by-name check needs that copy.
 
 **Manifests on a retired shape.** Separately from the TOML sections, a manifest that names a
 capability in the old sibling shape (`platform: lima` plus a `platform_config:` table, and likewise
