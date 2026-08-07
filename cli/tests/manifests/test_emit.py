@@ -36,7 +36,7 @@ from agentworks.manifests.emit import (
 )
 from agentworks.manifests.envelope import _ENVELOPE_KEYS, API_VERSION
 from agentworks.manifests.loader import load_manifests
-from agentworks.manifests.samples import SAMPLE_KINDS, sample_text
+from agentworks.manifests.samples import sample_text
 from agentworks.manifests.spec_model import declarable_kinds
 from agentworks.plugins import Plugin, seated_plugin
 from agentworks.resources import KIND_REGISTRY
@@ -95,11 +95,12 @@ def _a_document(kind: str, spec: object, **metadata: object) -> dict[str, Any]:
 def test_every_declarable_kind_is_emittable_and_no_capability_kind_is() -> None:
     """A kind has a schema exactly when a document of it can exist, so the
     emittable set is derived from the registry's per-kind category rather
-    than listed. Same derivation the sample surface uses, so the two
-    surfaces cannot come to describe different kinds."""
+    than listed. Emission and the sample surface now call the SAME
+    derivation (``spec_model.declarable_kinds``), so the two cannot come to
+    describe different kinds; what is left to pin is that the derivation
+    itself is the registry's category and that the written set matches."""
     declarable = {name for name, handler in KIND_REGISTRY.items() if handler.category == "declarable"}
     assert set(declarable_kinds()) == declarable
-    assert set(declarable_kinds()) == set(SAMPLE_KINDS)
     assert sorted(schema_set()) == sorted(
         [ENVELOPE_SCHEMA_FILENAME, *(schema_filename(kind) for kind in declarable_kinds())]
     )
@@ -460,12 +461,12 @@ def test_emitted_schemas_accept_every_document_the_full_load_path_accepts(tmp_pa
 
     resources = tmp_path / "resources"
     resources.mkdir()
-    for kind in SAMPLE_KINDS:
+    for kind in declarable_kinds():
         (resources / f"{kind}.yaml").write_text(_uncomment(sample_text(kind)))
     build_registry(load_config(_a_config(tmp_path), warn_issues=False))
 
     envelope = envelope_schema()
-    for kind in SAMPLE_KINDS:
+    for kind in declarable_kinds():
         per_kind = document_schema(kind)
         for document in _documents((resources / f"{kind}.yaml").read_text()):
             assert _errors(per_kind, document) == [], (kind, document.get("metadata"))

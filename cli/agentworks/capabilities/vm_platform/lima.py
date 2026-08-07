@@ -11,6 +11,8 @@ import textwrap
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
+from pydantic import Field
+
 from agentworks import output
 from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
 from agentworks.capabilities.vm_platform.bootstrap_script import (
@@ -24,6 +26,7 @@ from agentworks.errors import StateError
 from agentworks.schema import AgwModel, NonEmptyStr
 from agentworks.ssh import SSHError, SSHTarget, copy_to
 from agentworks.ssh import run as ssh_run
+from agentworks.topics import TopicProse
 from agentworks.transports import LimaTransport, RemoteLimaTransport, SSHTransport
 
 if TYPE_CHECKING:
@@ -96,7 +99,7 @@ class LimaConfig(AgwModel):
     name: Literal["lima"]
     """The platform this config is for."""
 
-    vm_host: NonEmptyStr | None = None
+    vm_host: NonEmptyStr | None = Field(default=None, examples=["me@gpu-box"])
     """The SSH host running ``limactl`` for a REMOTE-Lima site (e.g.
     ``user@host``). Omit for a local site, which needs ``limactl``
     installed here."""
@@ -109,6 +112,18 @@ class LimaPlatform(VMPlatform):
     name: ClassVar[str] = "lima"
     description: ClassVar[str] = "Lima VMs (local, or on a remote host via SSH)"
     config_model: ClassVar[type[LimaConfig]] = LimaConfig
+    prose: ClassVar[TopicProse | None] = TopicProse(
+        title="Lima",
+        overview="""
+        Lima runs Linux VMs through `limactl`. A site with no `vm_host` runs them on
+        this machine, which is the zero-config starting point and what the built-in
+        `lima-local` site is; a site WITH one runs `limactl` on that host over SSH, so
+        the VMs live on a shared box and nothing but SSH is needed here.
+
+        Local sites need `limactl` installed here and report not-ready without it.
+        Remote sites need nothing locally.
+        """,
+    )
     # No unsupported_reason override: the platform is supported on
     # every host, because remote-Lima sites run limactl on the vm_host
     # over SSH and need nothing locally.

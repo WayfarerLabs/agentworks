@@ -135,8 +135,10 @@ spec:
 | `verify_ssl`    | Set `false` if using a self-signed certificate (common for homelabs) |
 | `token_secret`  | Name of the secret holding the API token (default below)             |
 
-(`agw resource sample vm-site` prints a commented starter. The legacy flat `[proxmox]` section in
-`config.toml` still loads as a deprecated declaration; `agw resource migrate vm-site` converts it.)
+(`agw resource sample vm-site` prints a commented starter, and
+`agw resource describe-kind vm-platform/proxmox` prints these fields with their types. The legacy
+flat `[proxmox]` section in `config.toml` is a hard error at load now;
+`agw resource migrate vm-site` converts it.)
 
 The API token value is an ordinary agentworks secret named `proxmox-token` (auto-declared; rename
 per site via the `token_secret` key). The default env-var backend reads it from:

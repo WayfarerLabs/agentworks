@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from agentworks.resources.reference import ResourceReference
+    from agentworks.topics import TopicProse
 
 
 @dataclass(frozen=True)
@@ -84,7 +85,17 @@ class ResourceKind(Protocol):
       manifests, capability rows via code registration), never new
       kinds.
     - ``description``: one operator-facing line for ``agw resource
-      kinds``.
+      kinds``. It is also the kind's SUMMARY on every schema-derived
+      surface (``agw resource describe-kind``, the generated sample's
+      header, the guide's topic pages), which is why it is not authored a
+      second time as prose.
+    - ``prose``: the authored paragraphs about the kind (``TopicProse``:
+      a display title and a markdown overview), colocated with the kind
+      rather than in a registry. REQUIRED, unlike a capability
+      implementation's, because every kind the app defines is one an
+      operator can be reading about, and a kind that shipped
+      undocumented would be one nobody notices is undocumented. Field
+      facts never appear in it: those come from the model.
     - ``model``: the kind's declared-resource row class, which IS its
       spec model. Optional by CATEGORY rather than per kind, like
       ``instances`` below: every ``declarable`` kind declares one and no
@@ -146,6 +157,9 @@ class ResourceKind(Protocol):
 
     @property
     def description(self) -> str: ...
+
+    @property
+    def prose(self) -> TopicProse: ...
 
     @property
     def builtin_override(self) -> Literal["allow", "reserved"]: ...

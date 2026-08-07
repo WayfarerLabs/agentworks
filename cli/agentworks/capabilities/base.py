@@ -52,6 +52,7 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.resources.graph import Readiness
     from agentworks.resources.reference import ConfigReference
+    from agentworks.topics import TopicProse
     from agentworks.transports import Transport
 
 
@@ -289,7 +290,24 @@ class Capability(ABC):
 
     name: ClassVar[str]
     description: ClassVar[str]
+    """One operator-facing line: what this implementation IS.
+
+    Also its SUMMARY on every schema-derived surface (the implementation
+    list under ``agw resource describe-kind <kind>``, its own field
+    reference, the guide's topic pages), which is why nothing authors a
+    second one-liner beside ``prose``."""
+
     owner_kind: ClassVar[str]
+
+    prose: ClassVar[TopicProse | None] = None
+    """The authored paragraphs about this implementation: what it needs,
+    what it assumes, what an operator should know before choosing it.
+
+    Optional, unlike a resource kind's, and defaulted rather than declared:
+    the topic contract's rule is that a participant with no useful content
+    contributes nothing, and a plugin author must be able to register a
+    capability without writing an essay. Field facts never go here; those
+    come from ``config_model``."""
 
     contract_version: ClassVar[int]
     """The capability contract version this implementation is written

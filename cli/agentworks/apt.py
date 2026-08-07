@@ -37,6 +37,7 @@ from agentworks.resource_loading import (
 )
 from agentworks.resources.kind import KIND_REGISTRY, synthesize_no_default
 from agentworks.schema import ResourceRef
+from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -70,16 +71,26 @@ class AptSourceEntry(DeclaredResource):
     pass from the apt_packages that name it).
     """
 
-    key_url: str
+    # The examples on these four are what a generated sample writes on the
+    # lines an operator MUST fill in: no default and no placeholder could
+    # be right for a URL, a path, or a stanza, and `source_file`'s pattern
+    # means a generic stand-in would not even load.
+    key_url: str = Field(examples=["https://apt.example.com/key.gpg"])
     """Where to fetch the repository's signing key from."""
 
-    key_path: str
+    key_path: str = Field(examples=["/etc/apt/keyrings/my-repo.gpg"])
     """Absolute path the fetched key is installed to on the VM."""
 
-    source: str
-    """The apt source-list stanza, verbatim (``deb [signed-by=...] ...``)."""
+    source: str = Field(
+        examples=[
+            "deb [arch={arch} signed-by=/etc/apt/keyrings/my-repo.gpg] https://apt.example.com/debian bookworm main"
+        ]
+    )
+    """The apt source-list stanza, verbatim (``deb [signed-by=...] ...``).
 
-    source_file: SimpleFilename
+    ``{arch}`` stands for the VM's architecture (``amd64`` or ``arm64``)."""
+
+    source_file: SimpleFilename = Field(examples=["my-repo.list"])
     """Name of the file under ``/etc/apt/sources.list.d/`` the stanza is
     written to. A simple filename: no directory separators and no shell
     metacharacters, because it is interpolated into a shell command."""
@@ -218,6 +229,18 @@ class _AptSourceKind:
 
     kind: str = "apt-source"
     description: str = "3rd party apt repository definitions (key, source line)"
+    prose: TopicProse = TopicProse(
+        title="Apt sources",
+        overview="""
+        An apt-source is a third-party apt repository: where to fetch its signing key,
+        where to install that key, and the source-list stanza that points at it. VM init
+        writes the key and the stanza before installing anything that needs them.
+
+        Apt packages reference a source by name; nothing installs a source on its own.
+        In the stanza, `{arch}` stands for the VM's architecture (`amd64` or `arm64`).
+        Several sources ship built in; declaring one under a built-in's name replaces it.
+        """,
+    )
     model: type[DeclaredResource] = AptSourceEntry
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None
@@ -234,6 +257,18 @@ class _AptPackageKind:
 
     kind: str = "apt-package"
     description: str = "Named apt packages, optionally tied to apt-sources"
+    prose: TopicProse = TopicProse(
+        title="Apt packages",
+        overview="""
+        An apt-package is a named SET of apt packages, plus the apt-sources they need.
+        A vm-template refers to it by name through `apt_packages`, and VM init installs
+        the sources first and the packages after.
+
+        The indirection is what lets a template say `gh` without also knowing which
+        repository provides it. Several packages ship built in; declaring one under a
+        built-in's name replaces it.
+        """,
+    )
     model: type[DeclaredResource] = AptPackageEntry
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None

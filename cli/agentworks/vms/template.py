@@ -79,25 +79,25 @@ class VMTemplate(DeclaredResource):
     # infer/prompt model) is host/operator-scoped, and a shared
     # template must not smuggle a per-host placement decision,
     # especially with bundled sites publishing per-host.
-    cpus: int | None = None
+    cpus: int | None = Field(default=None, examples=[8])
     """Virtual CPUs to provision."""
 
-    memory: int | None = None
+    memory: int | None = Field(default=None, examples=[16])
     """Memory to provision, in GiB."""
 
-    disk: int | None = None
+    disk: int | None = Field(default=None, examples=[100])
     """Root disk size to provision, in GiB."""
 
-    swap: int | None = None
+    swap: int | None = Field(default=None, examples=[4])
     """Swap to configure, in GiB."""
 
-    apt: list[str] | None = None
+    apt: list[str] | None = Field(default=None, examples=[["zsh", "ripgrep"]])
     """Apt packages installed directly, without an ``apt-package`` row."""
 
     apt_packages: list[Annotated[str, ResourceRef(kind="apt-package", usage="an apt package")]] | None = None
     """Names of ``apt-package`` resources installed during VM init."""
 
-    snap: list[str] | None = None
+    snap: list[str] | None = Field(default=None, examples=[["go"]])
     """Snap packages installed during VM init."""
 
     system_install_commands: (

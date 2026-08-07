@@ -18,10 +18,10 @@ import pytest
 import yaml
 from jsonschema import Draft202012Validator
 
-import agentworks.plugins  # noqa: F401  (see below)
 from agentworks.config import load_config
 from agentworks.manifests.emit import ENVELOPE_SCHEMA_FILENAME, SCHEMA_DIRNAME
-from agentworks.manifests.samples import SAMPLE_KINDS, write_sample
+from agentworks.manifests.samples import write_sample
+from agentworks.manifests.spec_model import declarable_kinds
 from agentworks.migrate import execute_plan, plan_migration
 
 if TYPE_CHECKING:
@@ -29,13 +29,14 @@ if TYPE_CHECKING:
 
 MODELINE_PREFIX = "# yaml-language-server: $schema="
 
-# The ``agentworks.plugins`` import above is load-bearing rather than
-# incidental: its module body registers every shipped plugin, and an
-# emitted schema describes the capabilities THIS HOST has registered. The
-# bundled samples declare azure, aws, and proxmox sites, the claude-code
-# and codex harnesses, and an azdo credential, so without it this file
-# would be checking those documents against a schema that has never heard
-# of them. Any real invocation has loaded it long before reaching here.
+# This file used to import ``agentworks.plugins`` for its side effect,
+# because an emitted schema describes the capabilities THIS HOST has
+# registered and a sample that named a plugin's capability would otherwise
+# be checked against a schema that had never heard of it. The seating is
+# the emitter's own responsibility now
+# (``plugins.registration.seat_installed_plugins``, called by the shared
+# spec-model assembly), so the import is gone rather than left as a
+# precondition a test has to remember.
 
 
 def _schema_an_editor_would_load(manifest: Path) -> dict[str, Any]:
@@ -59,7 +60,7 @@ def _uncommented_documents(manifest: Path) -> list[dict[str, Any]]:
 # -- agw resource sample --write -------------------------------------------
 
 
-@pytest.mark.parametrize("kind", SAMPLE_KINDS)
+@pytest.mark.parametrize("kind", declarable_kinds())
 def test_a_written_sample_is_checked_by_the_schema_it_points_at(tmp_path: Path, kind: str) -> None:
     """The whole feature in one assertion per kind: write a sample, follow
     its modeline the way an editor would, and check the sample's own
@@ -115,7 +116,7 @@ def test_writing_a_sample_writes_the_schemas_it_refers_to(tmp_path: Path) -> Non
     write_sample(resources, "secrets.yaml", "secret")
     written = {path.name for path in (resources / SCHEMA_DIRNAME).iterdir()}
     assert ENVELOPE_SCHEMA_FILENAME in written
-    assert {f"{kind}.schema.json" for kind in SAMPLE_KINDS} <= written
+    assert {f"{kind}.schema.json" for kind in declarable_kinds()} <= written
 
 
 def test_a_stamped_sample_is_still_inert_through_the_loader(tmp_path: Path) -> None:

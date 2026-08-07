@@ -226,9 +226,9 @@ def render_type(annotation: object) -> str:
     if annotation in _SCALAR_RENDERINGS:
         return _SCALAR_RENDERINGS[annotation]
     if get_origin(annotation) is Literal:
-        return "one of: " + ", ".join(str(value) for value in get_args(annotation))
+        return "one of: " + ", ".join(_choice_label(value) for value in get_args(annotation))
     if isinstance(annotation, type) and issubclass(annotation, Enum):
-        return "one of: " + ", ".join(str(member.value) for member in annotation)
+        return "one of: " + ", ".join(_choice_label(member.value) for member in annotation)
     if isinstance(annotation, type) and issubclass(annotation, BaseModel):
         return "table"
     origin = get_origin(annotation)
@@ -379,6 +379,19 @@ def _class_summary(model_cls: type[BaseModel]) -> str | None:
         return None
     first = inspect.cleandoc(doc).split("\n\n", 1)[0]
     return " ".join(first.split())
+
+
+def _choice_label(value: object) -> str:
+    """One closed-field value as a DOCUMENT spells it.
+
+    ``str()`` is Python's spelling, and for the two literals whose
+    spellings differ it is the wrong one: a secret's opt-out is written
+    ``false`` in YAML, and telling an operator "one of: False" hands them a
+    value the loader rejects.
+    """
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return "null" if value is None else str(value)
 
 
 def _name_of(annotation: object) -> str:

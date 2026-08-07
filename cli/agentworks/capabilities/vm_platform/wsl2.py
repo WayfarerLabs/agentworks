@@ -17,6 +17,7 @@ from agentworks.capabilities.vm_platform.base import ProvisionRequest, Provision
 from agentworks.db import VMStatus
 from agentworks.errors import StateError
 from agentworks.schema import AgwModel
+from agentworks.topics import TopicProse
 from agentworks.transports import WSL2Transport
 
 if TYPE_CHECKING:
@@ -491,6 +492,16 @@ class WSL2Platform(VMPlatform):
     name: ClassVar[str] = "wsl2"
     description: ClassVar[str] = "WSL2 Debian distributions on Windows"
     config_model: ClassVar[type[Wsl2Config]] = Wsl2Config
+    prose: ClassVar[TopicProse | None] = TopicProse(
+        title="WSL2",
+        overview="""
+        WSL2 runs each VM as a Debian distribution on the Windows machine agentworks is
+        running on. It takes no configuration beyond selecting it: the built-in `wsl2`
+        site is all most hosts need.
+
+        It is supported only on Windows, and reports not-ready everywhere else.
+        """,
+    )
 
     @property
     def config(self) -> Wsl2Config:

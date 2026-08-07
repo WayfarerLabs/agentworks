@@ -35,14 +35,12 @@ import os.path
 from pathlib import PurePath
 from typing import TYPE_CHECKING, Annotated, Any, Final, Literal, Union, cast
 
-from pydantic import Field, StringConstraints, create_model
-from pydantic.fields import FieldInfo
-from pydantic.json_schema import GenerateJsonSchema, SkipJsonSchema
+from pydantic import Field, create_model
+from pydantic.json_schema import GenerateJsonSchema
 
-from agentworks.declared_resource import METADATA_FIELDS, DeclaredResource
 from agentworks.errors import ValidationError
 from agentworks.manifests.envelope import API_VERSION
-from agentworks.manifests.spec_model import built_model, class_name, declarable_kinds, row_model, spec_model
+from agentworks.manifests.spec_model import class_name, declarable_kinds, metadata_model, spec_model
 from agentworks.resources import KIND_REGISTRY
 from agentworks.schema import AgwModel, AgwRootModel
 
@@ -186,7 +184,6 @@ def _document_model(kind: str) -> type[BaseModel]:
     fact this model does own is the top-level key set, which
     ``tests/manifests/test_emit.py`` pins against the envelope's own.
     """
-    row = row_model(kind)
     return create_model(
         f"{class_name(kind)}Document",
         __base__=AgwModel,
@@ -201,7 +198,7 @@ def _document_model(kind: str) -> type[BaseModel]:
             Field(description=KIND_REGISTRY[kind].description),
         ),
         metadata=(
-            _metadata_model(kind, row),
+            metadata_model(kind),
             Field(description="The fields every declared resource carries, whatever its kind."),
         ),
         spec=(
@@ -214,69 +211,6 @@ def _document_model(kind: str) -> type[BaseModel]:
             Field(description=f"The {kind} kind's own fields."),
         ),
     )
-
-
-def _metadata_model(kind: str, row: type[DeclaredResource]) -> type[BaseModel]:
-    """The model describing a ``kind`` document's ``metadata`` block.
-
-    Built from THE KIND's row rather than from ``EnvelopeMetadata``,
-    because a kind may re-declare a metadata field: ``secret`` makes
-    ``description`` required and ``admin-template`` defaults ``name``, and
-    reading the row is what makes both differences show up here for free.
-
-    Each field's ``SkipJsonSchema`` marker is dropped, and only that.
-    The marker is what keeps these fields out of the SPEC surface (they
-    are real fields of the row, and decode refuses one written inside
-    ``spec``); here we are describing the block they DO belong to, so it
-    is the one place the marker should not apply.
-    """
-    fields: dict[str, Any] = {name: _metadata_field(row, name) for name in sorted(METADATA_FIELDS)}
-    return built_model(
-        f"{class_name(kind)}Metadata",
-        base=AgwModel,
-        doc=f"The metadata block of a {kind} manifest document.",
-        fields=fields,
-    )
-
-
-def _metadata_field(row: type[DeclaredResource], name: str) -> tuple[Any, FieldInfo]:
-    """One metadata field as ``create_model`` wants it: the row's own
-    annotation and a ``FieldInfo`` with ``SkipJsonSchema`` removed.
-
-    A copy of the row's own ``FieldInfo`` with one entry filtered out of
-    its metadata, rather than a fresh one built from the parts we happen
-    to care about: a constraint a kind puts on a metadata field it
-    overrides has to survive, and rebuilding would drop it silently.
-
-    ``name`` picks up the kind's ``NAME_MAX_LENGTH`` where it declares
-    one. That cap is applied by ``decode._check_declared_name`` to
-    exactly the names a manifest carries (operator-written ones), so
-    stating it here is faithful rather than an approximation. The
-    CHARACTER rule is deliberately not emitted; see the LLD.
-
-    The cap joins the metadata list rather than arriving as a second
-    ``merge_field_infos`` argument, because merging resets every attribute
-    the later ``FieldInfo`` does not set: verified, and it silently took
-    the field's description with it, which is the hover text an operator
-    reads on the one block every document carries.
-    """
-    field = row.model_fields[name]
-    visible = FieldInfo.merge_field_infos(field)
-    visible.metadata = [entry for entry in field.metadata if not _is_skip_marker(entry)]
-    if name == "name" and row.NAME_MAX_LENGTH is not None:
-        visible.metadata.append(StringConstraints(max_length=row.NAME_MAX_LENGTH))
-    return field.annotation, visible
-
-
-def _is_skip_marker(entry: object) -> bool:
-    """Whether ``entry`` is the ``SkipJsonSchema`` annotation.
-
-    The ignore is pydantic's shape, not a shortcut: ``SkipJsonSchema`` is
-    an ``Annotated`` alias to a type checker and a dataclass to the
-    interpreter, so there is no spelling of the name that is both a class
-    to ``isinstance`` and a type to mypy.
-    """
-    return isinstance(entry, SkipJsonSchema)  # type: ignore[misc]
 
 
 def _require_emittable(kind: str) -> None:

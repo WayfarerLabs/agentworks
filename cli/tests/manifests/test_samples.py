@@ -1,4 +1,15 @@
-"""Tests for the bundled sample manifests and ``agw resource sample``."""
+"""``agw resource sample``: the CLI contract, and the rendered output.
+
+The CLI-contract tests here predate the renderer (kind selection, ``--all``,
+the capability-kind refusal, ``--write``'s create-then-append behavior) and
+are carried through the swap unchanged: what the command DOES did not
+change, only where its text comes from.
+
+What is new is what replaced the bundled-file pins. The old suite proved a
+curated corpus was honest by stripping one ``#`` per line and loading it;
+these prove the same property of GENERATED text, which is a stronger claim,
+because a curated file could be fixed by hand and a renderer cannot.
+"""
 
 from __future__ import annotations
 
@@ -10,48 +21,18 @@ import pytest
 from agentworks.errors import ValidationError
 from agentworks.manifests.decode import KIND_SECTIONS
 from agentworks.manifests.loader import load_manifests
-from agentworks.manifests.samples import (
-    SAMPLE_KINDS,
-    sample_text,
-    write_sample,
-)
+from agentworks.manifests.samples import sample_text, write_sample
+from agentworks.manifests.spec_model import declarable_kinds
 
 
 def _uncomment(text: str) -> str:
     """The documented uncomment rule: strip one leading ``#`` per line.
 
-    Document lines become YAML; ``## `` prose lines become ordinary
-    YAML comments.
+    Document lines become YAML; ``##`` prose lines become ordinary YAML
+    comments.
     """
-    lines = []
-    for line in text.splitlines():
-        lines.append(line[1:] if line.startswith("#") else line)
+    lines = [line[1:] if line.startswith("#") else line for line in text.splitlines()]
     return "\n".join(lines) + "\n"
-
-
-def test_every_kind_has_a_sample() -> None:
-    # secret-backend is a capability descriptor post-collapse
-    # (2026-07-07): in KIND_SECTIONS for the migrator's drop table, not
-    # declarable, no sample.
-    assert "secret-backend" not in SAMPLE_KINDS
-    assert set(SAMPLE_KINDS) | {"secret-backend"} == set(KIND_SECTIONS)
-    for kind in SAMPLE_KINDS:
-        assert sample_text(kind).strip()
-
-
-def test_sample_kinds_are_exactly_the_registry_declarable_kinds() -> None:
-    """SAMPLE_KINDS (the set `resource sample --all` emits and the guard
-    treats as sampleable) is derived from the kind registry's per-kind
-    category, the same source of truth the capability guard keys off.
-    Pin that they stay identical so a future capability kind can't slip
-    into the sampleable set (and make `--all` crash on a missing sample
-    file), and a declarable kind can't fall out of it."""
-    from agentworks.resources import KIND_REGISTRY
-
-    declarable = {name for name, handler in KIND_REGISTRY.items() if handler.category == "declarable"}
-    assert set(SAMPLE_KINDS) == declarable
-    # No capability kind is ever sampleable.
-    assert set(SAMPLE_KINDS).isdisjoint(_capability_kinds())
 
 
 def _capability_kinds() -> list[str]:
@@ -62,38 +43,58 @@ def _capability_kinds() -> list[str]:
     return [name for name, handler in KIND_REGISTRY.items() if handler.category == "capability"]
 
 
+# --- what gets sampled ------------------------------------------------
+
+
+def test_every_declarable_kind_renders() -> None:
+    # secret-backend is a capability descriptor post-collapse
+    # (2026-07-07): in KIND_SECTIONS for the migrator's drop table, not
+    # declarable, no sample.
+    assert "secret-backend" not in declarable_kinds()
+    assert set(declarable_kinds()) | {"secret-backend"} == set(KIND_SECTIONS)
+    for kind in declarable_kinds():
+        assert sample_text(kind).strip()
+
+
+def test_no_capability_kind_is_sampleable() -> None:
+    """A kind is sampleable exactly when a document of it can exist, which
+    is the registry's own per-kind category. Pin that the two stay
+    identical so a future capability kind cannot slip into the set and make
+    ``--all`` fail on a kind with no document."""
+    assert set(declarable_kinds()).isdisjoint(_capability_kinds())
+
+
 def test_secret_backend_has_no_sample() -> None:
-    """The declarable secret-backend kind died in the Phase 5.5
-    collapse; it survives only as a capability descriptor, so sampling
-    it reports the capability-kind error rather than crashing."""
+    """The declarable secret-backend kind died in the Phase 5.5 collapse;
+    it survives only as a capability, so sampling it reports the
+    capability-kind error rather than crashing."""
     with pytest.raises(ValidationError, match="capability kind"):
         sample_text("secret-backend")
 
 
 @pytest.mark.parametrize("kind", _capability_kinds())
 def test_capability_kinds_report_no_sample(kind: str) -> None:
-    """Every capability kind `resource kinds` lists (harness-integration,
-    secret-backend, vm-platform, git-credential-provider) is a valid
-    click.Choice value, so it reaches the service layer instead of
-    dying as a raw parse error (issue #276). The service layer rejects
-    it with a typed domain error that names the kind and lists the
-    declarable kinds that do have samples."""
+    """Every capability kind `resource kinds` lists is a valid argument
+    value, so it reaches the service layer instead of dying as a raw parse
+    error (issue #276). The service layer rejects it with a typed domain
+    error that names the kind, offers the declarable set, and (new with the
+    renderer) points at the surface that DOES document a capability."""
     with pytest.raises(ValidationError) as excinfo:
         sample_text(kind)
     err = excinfo.value
     assert kind in str(err)
     assert "capability kind" in str(err)
     assert "no sample manifest" in str(err)
-    # The declarable set is offered as remediation, matching --all.
     assert err.hint is not None
-    for declarable in SAMPLE_KINDS:
+    assert f"describe-kind {kind}" in err.hint
+    for declarable in declarable_kinds():
         assert declarable in err.hint
 
 
 def test_all_kinds_concatenation_and_unknown_kind() -> None:
     everything = sample_text(all_kinds=True)
-    for kind in SAMPLE_KINDS:
-        # Every sample opens with a semantic kind header; prose punctuation may vary.
+    for kind in declarable_kinds():
+        # Every sample opens with a semantic kind header.
         assert re.search(rf"^## kind: {re.escape(kind)}(?=[:\s])", everything, re.MULTILINE)
     with pytest.raises(ValidationError, match="unknown kind"):
         sample_text("nope")
@@ -108,41 +109,69 @@ def test_bare_sample_requires_kind_or_all() -> None:
         sample_text("secret", all_kinds=True)
 
 
+# --- the rendered text is inert, and true -----------------------------
+
+
 def test_samples_are_fully_commented() -> None:
-    """Every non-blank line starts with ``#`` -- written samples are inert."""
-    for kind in SAMPLE_KINDS:
+    """Every non-blank line starts with ``#``: written samples are inert."""
+    for kind in declarable_kinds():
         for line in sample_text(kind).splitlines():
             assert not line or line.startswith("#"), (kind, line)
 
 
-def test_uncommented_samples_load_through_the_real_loader(tmp_path: Path) -> None:
-    """The teaching surface must be true: stripping one ``#`` per line
-    yields documents the real loader accepts. Carve-out (maintainer
-    ruling, 2026-07-05): the secret-backend sample is prose-only until
-    a config-bearing provider ships, so uncommenting it yields zero
-    documents by design."""
+def test_commented_samples_are_inert_through_the_loader(tmp_path: Path) -> None:
+    """As rendered, a written sample declares nothing."""
     resources = tmp_path / "resources"
     resources.mkdir()
-    for kind in SAMPLE_KINDS:
+    (resources / "all.yaml").write_text(sample_text(all_kinds=True))
+    manifests = load_manifests(resources)
+    assert not manifests.entries
+    assert not manifests.issues
+
+
+def test_uncommented_samples_load_through_the_real_loader(tmp_path: Path) -> None:
+    """The teaching surface must be true: stripping one ``#`` per line
+    yields documents the real loader accepts.
+
+    This is what makes "only required fields are live lines" a property
+    rather than a preference. A renderer that emitted an optional field as
+    a document line would have to invent a value for it, and this test is
+    where an invented value fails.
+    """
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    for kind in declarable_kinds():
         (resources / f"{kind}.yaml").write_text(_uncomment(sample_text(kind)))
     manifests = load_manifests(resources)
-    loaded_kinds = {entry.kind for entry in manifests.entries}
-    assert loaded_kinds == set(SAMPLE_KINDS) - {"secret-backend"}
+
+    assert {entry.kind for entry in manifests.entries} == set(declarable_kinds())
+    assert not manifests.issues, manifests.issues
+
+
+def test_the_whole_set_uncomments_as_one_file(tmp_path: Path) -> None:
+    """``--all`` is a real multi-document file, not a pile of documents
+    YAML reads as one: the renderer separates them with a commented
+    ``---``, which the same one-``#`` strip turns into a separator. The
+    per-file corpus this replaces never proved that."""
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    (resources / "everything.yaml").write_text(_uncomment(sample_text(all_kinds=True)))
+    manifests = load_manifests(resources)
+
+    assert {entry.kind for entry in manifests.entries} == set(declarable_kinds())
     assert not manifests.issues, manifests.issues
 
 
 def test_uncommented_samples_build_a_registry(tmp_path: Path) -> None:
-    """Beyond the loader: the ENTIRE uncommented sample set builds a
-    full registry -- its cross-references (admin-template ->
-    git-credential github, apt-package -> apt-source my-repo, secrets
-    auto-declare) resolve at finalize. No exclusions: the prose-only
-    secret-backend sample contributes zero documents by design.
+    """Beyond the loader: the whole uncommented set builds a full registry,
+    so every reference a rendered document makes resolves at finalize and
+    every capability config block validates against its own model.
 
-    The azure, aws, and proxmox plugins are enabled here so the vm-site
-    sample's `platform_config` blocks reach their platform's `validate`
-    (a disabled platform's site never does), which is what makes the
-    sample's field names and shapes actually checked rather than merely
-    parsed as YAML."""
+    The azure, aws, and proxmox plugins are enabled so a vm-site sample's
+    platform block reaches its platform's validation (a disabled platform's
+    site never does), which is what makes the rendered field names and
+    shapes actually checked rather than merely parsed as YAML.
+    """
     from agentworks.bootstrap import build_registry
     from agentworks.config import load_config
 
@@ -163,20 +192,13 @@ system = ["azure", "aws", "proxmox"]
     )
     resources = tmp_path / "resources"
     resources.mkdir()
-    for kind in SAMPLE_KINDS:
+    for kind in declarable_kinds():
         (resources / f"{kind}.yaml").write_text(_uncomment(sample_text(kind)))
     config = load_config(cfg, warn_issues=False)
     build_registry(config)
 
 
-def test_commented_samples_are_inert_through_the_loader(tmp_path: Path) -> None:
-    """As shipped (commented), a written sample declares nothing."""
-    resources = tmp_path / "resources"
-    resources.mkdir()
-    (resources / "all.yaml").write_text(sample_text(all_kinds=True))
-    manifests = load_manifests(resources)
-    assert not manifests.entries
-    assert not manifests.issues
+# --- --write ----------------------------------------------------------
 
 
 def test_write_sample_creates_and_appends(tmp_path: Path) -> None:

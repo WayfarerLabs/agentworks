@@ -68,6 +68,23 @@ delete one leading `#` from each DOCUMENT line to activate the parts you want. A
 opens with a `# yaml-language-server:` line, which is an ordinary comment and stays one;
 uncommenting that would turn it into a key the loader rejects.
 
+The sample is rendered from the same declaration the loader validates against, so it always matches
+what the kind actually accepts. The fields you MUST write are live document lines; every optional
+field is a commented suggestion at its own indent, carrying its type, its default or an example, and
+what it is for. Uncomment the ones you want. Where a field selects a capability (a vm-site's
+`platform`), one implementation is written out and the rest are named beside it.
+
+`agw resource describe-kind` is the same information without a document to edit:
+
+```bash
+agw resource describe-kind vm-site               # every field of a kind
+agw resource describe-kind vm-platform           # the platforms this build has
+agw resource describe-kind vm-platform/aws-ec2   # one platform's own config
+```
+
+It reads no config and builds no registry, so it answers on a host whose `config.toml` does not
+load, and it documents a capability whose plugin is not enabled yet.
+
 `agw resource edit KIND/NAME` opens the manifest declaring a resource in `$EDITOR`.
 
 ## Editing manifests with schema support
@@ -232,11 +249,11 @@ spec:
   in which case its `tenant_id` / `client_id` are plain config and its `secret` field names the
   secret holding the client secret (default `azure-client-secret`). A site with a service principal
   uses that identity and only that one: a rejected or expired client secret fails the command rather
-  than falling back to ambient credentials. `agw resource sample vm-site` shows the block. The
-  `proxmox` platform ships as the opt-in `proxmox` system plugin, so a proxmox site (declared or
-  legacy) is not-ready with an "enable plugin `proxmox`" hint and refused at use until you set
-  `[plugins] system = ["proxmox"]`. The `azure-vm` platform likewise ships as the opt-in `azure`
-  system plugin (which also provides the `azdo` git-credential provider and the `az-cli`
+  than falling back to ambient credentials. `agw resource describe-kind vm-platform/azure-vm` shows
+  the block. The `proxmox` platform ships as the opt-in `proxmox` system plugin, so a proxmox site
+  (declared or legacy) is not-ready with an "enable plugin `proxmox`" hint and refused at use until
+  you set `[plugins] system = ["proxmox"]`. The `azure-vm` platform likewise ships as the opt-in
+  `azure` system plugin (which also provides the `azdo` git-credential provider and the `az-cli`
   install-command), so the `azure-dev` example above is not-ready with an "enable plugin `azure`"
   hint until you set `[plugins] system = ["azure"]`.
 - The legacy flat `[azure]` / `[proxmox]` TOML sections no longer load: like every resource section,

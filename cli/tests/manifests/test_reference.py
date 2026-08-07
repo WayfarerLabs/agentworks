@@ -1,0 +1,285 @@
+"""The collector and the skeleton renderer, over FIXTURE schemas.
+
+The shipped kinds are covered end to end by ``test_samples.py`` (every
+kind renders, uncomments, loads, and builds a registry). What that cannot
+cover is a shape no shipped model happens to have, or a shape whose
+handling is right today by luck. So the shapes are pinned here against
+models the app does not ship: requiredness, defaults, examples, a nested
+block, a collection of blocks, a discriminated union with one arm
+rendered, an owner-templated field, and a root model.
+
+``skeleton_lines`` renders a fixture model as a kind's spec, which is what
+lets a fixture shape be asserted without registering a kind for it.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Annotated, Literal
+
+import pytest
+from pydantic import Discriminator, Field
+
+from agentworks.errors import ValidationError
+from agentworks.manifests.reference import (
+    FieldEntry,
+    SchemaReference,
+    reference_for,
+    worth_showing,
+)
+from agentworks.manifests.skeleton import skeleton_text
+from agentworks.schema import UNSET, AgwModel, AgwRootModel, SecretRef
+from tests.schema._fixture_models import AzureLike, CatalogLike, GithubLike, SiteLike, TemplateLike
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+
+class Exampled(AgwModel):
+    """A model whose author wrote example values."""
+
+    host: str = Field(examples=["me@gpu-box"])
+    packages: list[str] = Field(default_factory=list, examples=[["zsh", "ripgrep"]])
+    mode: Literal["fast", "safe"] = "safe"
+    replicas: int = 3
+    tags: list[str] = Field(default_factory=list)
+    note: str | None = None
+    enabled: bool = False
+
+
+class RootValued(AgwRootModel[str]):
+    """A config that IS a value: a secret backend's mapping shape."""
+
+
+def _reference(model: type[AgwModel]) -> SchemaReference:
+    """``model`` as a documented spec, with no kind registered for it."""
+    from agentworks.manifests.reference import _entries
+
+    return SchemaReference(
+        target="fixture",
+        kind="fixture",
+        implementation=None,
+        category="declarable",
+        title="Fixtures",
+        summary="a fixture kind",
+        overview="What a fixture is.",
+        metadata=(),
+        spec=_entries(model),
+        alternatives=(),
+        root_value=None,
+    )
+
+
+def _spec_lines(model: type[AgwModel]) -> list[str]:
+    """The rendered spec block, one line per entry, prose dropped."""
+    text = skeleton_text(_reference(model))
+    body = text.split("#spec:\n", 1)[1]
+    return body.splitlines()
+
+
+def _entries_by_name(reference: SchemaReference) -> dict[str, FieldEntry]:
+    return {entry.name: entry for entry in reference.spec}
+
+
+def _walk(entries: tuple[FieldEntry, ...]) -> Iterator[FieldEntry]:
+    for entry in entries:
+        yield entry
+        yield from _walk(entry.children)
+
+
+# --- what a value is -------------------------------------------------------
+
+
+def test_an_authored_example_is_what_the_sample_writes() -> None:
+    assert "#  host: me@gpu-box" in _spec_lines(Exampled)
+
+
+def test_a_closed_field_writes_the_value_it_can_hold() -> None:
+    """``mode`` has two, so the first is written; a union arm's tag has
+    exactly one, which is what makes a rendered arm's ``name`` correct
+    rather than guessed."""
+    assert "#  # mode: fast" in _spec_lines(Exampled)
+
+
+def test_a_default_worth_showing_is_shown_and_an_empty_one_is_not() -> None:
+    """``replicas: 3`` says what omitting the field does. ``tags: []`` does
+    not, so the placeholder says what may go in it instead."""
+    lines = _spec_lines(Exampled)
+
+    assert "#  # replicas: 3" in lines
+    assert "#  # tags: [<string>]" in lines
+    assert "#  # enabled: false" in lines, "false is a value, not an absence"
+
+
+def test_a_field_with_no_default_and_no_example_gets_a_typed_placeholder() -> None:
+    assert "#  # note: <string>" in _spec_lines(Exampled)
+
+
+@pytest.mark.parametrize(
+    ("default", "shown"),
+    [(3, True), (0, True), (False, True), ("", False), ([], False), ({}, False), (None, False), (UNSET, False)],
+)
+def test_worth_showing_keeps_falsy_scalars_and_drops_empty_containers(default: object, shown: bool) -> None:
+    assert worth_showing(default) is shown
+
+
+# --- required versus optional ----------------------------------------------
+
+
+def test_only_required_fields_are_live_document_lines() -> None:
+    """The property the whole design rests on: an uncommented skeleton
+    carries exactly the fields an operator must write, so it loads."""
+    lines = _spec_lines(Exampled)
+    live = [line for line in lines if line.startswith("#  ") and not line.startswith("#  #")]
+
+    assert live == ["#  host: me@gpu-box"]
+
+
+def test_an_owner_templated_field_is_not_the_operators_to_write() -> None:
+    """``token`` is required to pydantic and optional to the operator: the
+    model fills it from its owner. The skeleton says so, and says what the
+    omission resolves to."""
+    lines = _spec_lines(GithubLike)
+
+    assert "#  # token: <string>" in lines
+    # Rejoined, because the explanation wraps: what is pinned is the text,
+    # not where the wrap lands.
+    flowed = " ".join(line.removeprefix("#").strip(" #") for line in lines)
+    assert "defaults to the resource named `git-token-<this resource's name>`" in flowed
+
+
+def test_a_reference_field_says_what_it_names() -> None:
+    assert any("names a vm-template" in line for line in _spec_lines(TemplateLike))
+
+
+# --- nesting ---------------------------------------------------------------
+
+
+def test_a_nested_block_renders_as_a_block() -> None:
+    lines = _spec_lines(AzureLike)
+
+    assert "#  # service_principal:" in lines
+    assert "#    # tenant_id: <string>" in lines
+
+
+def test_a_collection_of_blocks_renders_one_element() -> None:
+    """A model says a list holds tables without saying how many, so the
+    element is rendered once under a placeholder. Leaving it out is what
+    made FR10's "complete skeleton" promise false for a catalog field."""
+    lines = _spec_lines(CatalogLike)
+
+    assert "#  # vm_sizes:" in lines
+    assert "#    # one element, as an example:" in lines
+    assert "#    # -:" in lines
+    assert "#      # cpus: <integer>" in lines
+
+
+def test_a_table_of_blocks_renders_one_entry_under_a_placeholder_key() -> None:
+    lines = _spec_lines(CatalogLike)
+
+    assert "#    # one entry, as an example:" in lines
+    assert "#    # <key>:" in lines
+
+
+# --- unions ----------------------------------------------------------------
+
+
+def test_one_arm_is_rendered_and_the_rest_are_listed() -> None:
+    """A document holds one arm, so rendering them all would produce a
+    sample that cannot be uncommented."""
+    lines = _spec_lines(SiteLike)
+
+    assert any("One of: lima, proxmox. Shown here: lima." in line for line in lines)
+    assert "#    name: lima" in lines
+    assert not any("proxmox" in line and "name:" in line for line in lines)
+
+
+def test_the_rendered_arm_is_the_first_registered_one() -> None:
+    entry = _entries_by_name(_reference(SiteLike))["platform"]
+
+    assert entry.rendered == "lima"
+    assert [alt.name for alt in entry.alternatives] == ["lima", "proxmox"]
+    assert {child.name for child in entry.children} == {"name", "vm_host"}
+
+
+def test_a_union_that_is_not_a_capability_offers_no_pointer() -> None:
+    """The ``describe-kind`` pointer is only right when the arms ARE
+    capability implementations, which is what the collector is told."""
+    entry = _entries_by_name(_reference(SiteLike))["platform"]
+
+    assert [alt.target for alt in entry.alternatives] == [None, None]
+
+
+# --- root models -----------------------------------------------------------
+
+
+class WrappedSite(AgwModel):
+    """A field whose type is a root model wrapping a union: the shape the
+    capability config union actually has."""
+
+    platform: RootUnion
+
+
+class LimaArmed(AgwModel):
+    name: Literal["lima"]
+    vm_host: str | None = None
+
+
+class ProxmoxArmed(AgwModel):
+    name: Literal["proxmox"]
+    token: Annotated[str, SecretRef(usage="the token")] | None = None
+
+
+class RootUnion(AgwRootModel[Annotated[LimaArmed | ProxmoxArmed, Discriminator("name")]]):
+    """The generated union wrapper, as ``capability_config_union`` builds it."""
+
+
+WrappedSite.model_rebuild()
+
+
+def test_a_root_model_wrapper_contributes_no_path_segment() -> None:
+    """``root`` is the wrapper's mechanism and never a key an operator
+    writes. Without the collapse, every capability block would render an
+    imaginary ``root:`` line between the field and its config."""
+    entry = _entries_by_name(_reference(WrappedSite))["platform"]
+
+    assert entry.rendered == "lima"
+    assert {child.name for child in entry.children} == {"name", "vm_host"}
+    assert "root" not in {found.name for found in _walk((entry,))}
+
+
+# --- the real surface ------------------------------------------------------
+
+
+def test_a_capability_kind_lists_its_implementations() -> None:
+    reference = reference_for("vm-platform")
+
+    assert reference.category == "capability"
+    assert {alt.name for alt in reference.alternatives} >= {"lima", "wsl2"}
+    assert reference.spec == ()
+
+
+def test_an_implementation_documents_the_model_it_declares() -> None:
+    reference = reference_for("vm-platform/lima")
+
+    assert reference.implementation == "lima"
+    assert {entry.name for entry in reference.spec} == {"name", "vm_host"}
+
+
+def test_a_root_model_config_is_described_as_a_value() -> None:
+    """A secret backend's per-secret mapping may be a bare string, which no
+    mapping-shaped model can be, so its config is a root model and there is
+    no field list to print."""
+    reference = reference_for("secret-backend/env-var")
+
+    assert reference.spec == ()
+    assert reference.root_value is not None
+    assert reference.root_value.type_label == "string"
+
+
+def test_an_unknown_kind_and_an_unknown_implementation_are_typed_refusals() -> None:
+    with pytest.raises(ValidationError, match="unknown kind"):
+        reference_for("nope")
+    with pytest.raises(ValidationError, match="no vm-platform named 'nope'"):
+        reference_for("vm-platform/nope")
+    with pytest.raises(ValidationError, match="has no implementations"):
+        reference_for("secret/npm-token")

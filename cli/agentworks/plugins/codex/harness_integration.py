@@ -105,6 +105,7 @@ from agentworks.capabilities.harness_integration.base import HarnessIntegration,
 from agentworks.errors import StateError
 from agentworks.plugins.codex.recorder import home_word, notify_value_word, provision_fragment, thread_tail
 from agentworks.schema import AgwModel
+from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -349,6 +350,21 @@ class CodexIntegration(HarnessIntegration):
     name: ClassVar[str] = "codex"
     description: ClassVar[str] = "Run Codex, resuming its session when one exists"
     config_model: ClassVar[type[CodexConfig]] = CodexConfig
+    prose: ClassVar[TopicProse | None] = TopicProse(
+        title="Codex",
+        overview="""
+        Runs Codex as the session's workload, resuming its conversation when one exists
+        and launching fresh when none does.
+
+        Codex records its sessions per working directory rather than per name, so
+        matching one to an agentworks session is a heuristic. When it adopts a
+        conversation it says which one, so the choice can be checked rather than
+        assumed.
+
+        Ships as the opt-in `codex` system plugin, and needs the `codex` CLI on the
+        session's target.
+        """,
+    )
 
     # Set by start / _resume_or_launch on each op; drives launch_note().
     # None until the op runs (nothing decided yet).

@@ -16,6 +16,7 @@ from pydantic import model_validator
 
 from agentworks import output
 from agentworks.schema import AgwRootModel
+from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
     from agentworks.resources.graph import Readiness
@@ -58,6 +59,19 @@ class PromptBackend:
     config_model: type[AgwRootModel[Any]] = PromptMapping
     name = "prompt"
     description = "prompts interactively at resolution time"
+    prose = TopicProse(
+        title="Interactive prompt",
+        overview="""
+        Asks the operator for the value, at the moment a command needs it. It is the
+        last backend in the default chain: whatever nothing else could resolve is what
+        you get asked for, with the secret's description and hint as the prompt text.
+
+        It needs no mapping and takes no configuration. Opting a secret out with
+        `backend_mappings.prompt: false` is mostly a testing tool: it proves another
+        backend really resolves the secret instead of quietly falling through to a
+        prompt. With no TTY (or under `--non-interactive`) prompting is skipped anyway.
+        """,
+    )
     interactive = True
 
     def not_ready(self) -> Readiness:

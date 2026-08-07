@@ -212,6 +212,39 @@ def resource_describe(
     render_resource_description(desc)
 
 
+@resource_app.command("describe-kind")
+def resource_describe_kind(
+    target: Annotated[
+        str,
+        typer.Argument(
+            help=(
+                "What to document: a kind (secret, vm-site, vm-platform) or "
+                "one implementation of a capability kind "
+                "(vm-platform/azure-vm)."
+            ),
+        ),
+    ],
+) -> None:
+    """Show what a kind (or one capability implementation) accepts.
+
+    The field reference: every field an operator may write, with its type,
+    whether it is required, its default, and what it means, rendered from
+    the same declaration the loader validates against and the editor
+    schema is emitted from. A capability kind lists its implementations;
+    naming one documents its config.
+
+    Reads no config and builds no registry, so it answers on a host whose
+    config is broken, and it documents a capability whose plugin is not
+    enabled. `agw resource sample KIND` prints the same fields as a
+    document to edit; `agw resource describe KIND/NAME` describes a
+    declared resource rather than a kind.
+    """
+    from agentworks.manifests.describe import render_reference
+    from agentworks.manifests.reference import reference_for
+
+    render_reference(reference_for(target))
+
+
 @resource_app.command("edit")
 def resource_edit(
     ref: Annotated[

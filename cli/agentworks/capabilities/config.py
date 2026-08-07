@@ -272,6 +272,34 @@ def capability_config_union(kind: str, facet: Facet | None = None) -> type[BaseM
     return union
 
 
+def registered_implementations(kind: str) -> dict[str, type]:
+    """Every implementation of ``kind`` this build has, keyed by the name
+    that selects it, in registration order.
+
+    The enumeration the DOCUMENTATION surfaces need: the sample renderer
+    lists a capability's alternatives and the field reference documents one
+    of them, and both have to answer for an implementation whose plugin is
+    not enabled, because enablement is a property of a published row rather
+    than of the registry.
+
+    It lives here, beside the other reads of a capability registry, rather
+    than in the renderer, and that is the same consolidation the four
+    consuming resources made in step 2.3: the sanctioned registry read
+    stays one call site instead of becoming two. Availability is never what
+    it asks (see the module docstring); it asks what exists to describe.
+    """
+    return {name: impl_class(seated) for name, seated in descriptor_for(kind).registry().items()}
+
+
+def registered_implementation(kind: str, name: str) -> type | None:
+    """The implementation CLASS registered as ``kind``/``name``, or ``None``.
+
+    Nothing is constructed: the declaration a documentation surface reads
+    (``config_model``, ``description``, ``prose``) is class-level.
+    """
+    return _seated_impl(descriptor_for(kind), name)
+
+
 def offered_model(impl: type, facet: Facet | None = None) -> type[BaseModel]:
     """The config model ``impl`` offers at ``facet``.
 
@@ -297,7 +325,7 @@ def offered_model(impl: type, facet: Facet | None = None) -> type[BaseModel]:
 def _seated_impl(descriptor: CapabilityKindDescriptor, name: str) -> type | None:
     """The implementation CLASS seated under ``name``, or ``None``."""
     seated = descriptor.registry().get(name)
-    return None if seated is None else _impl_class(seated)
+    return None if seated is None else impl_class(seated)
 
 
 def _arms(descriptor: CapabilityKindDescriptor, facet: Facet | None) -> dict[str, type[BaseModel]]:
@@ -307,7 +335,7 @@ def _arms(descriptor: CapabilityKindDescriptor, facet: Facet | None) -> dict[str
     Both the cache key and the union's arms come from this one read, so the
     key cannot describe a union different from the one it would build.
     """
-    return {name: offered_model(_impl_class(seated), facet) for name, seated in descriptor.registry().items()}
+    return {name: offered_model(impl_class(seated), facet) for name, seated in descriptor.registry().items()}
 
 
 def _build_union(
@@ -336,7 +364,7 @@ def _build_union(
     )
 
 
-def _impl_class(seated: object) -> type:
+def impl_class(seated: object) -> type:
     """What a registry holds, as the CLASS that carries the declaration.
 
     One kind's registry holds a constructed instance rather than the class

@@ -17,6 +17,7 @@ from pydantic import Field
 
 from agentworks.capabilities.harness_integration.base import HarnessIntegration, require_commands
 from agentworks.schema import AgwModel
+from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -47,7 +48,7 @@ class ShellConfig(AgwModel):
     name: Literal["shell"]
     """The harness integration this config is for."""
 
-    command: str = ""
+    command: str = Field(default="", examples=["htop"])
     """The command the session's pane runs. Empty (the default) is a bare
     login shell."""
 
@@ -55,7 +56,7 @@ class ShellConfig(AgwModel):
     """The command a resumed session's pane runs. Empty (the default)
     reruns ``command``."""
 
-    required_commands: list[str] = Field(default_factory=list)
+    required_commands: list[str] = Field(default_factory=list, examples=[["htop"]])
     """Commands that must exist on the session's target before it starts.
     Inherited templates UNION this list rather than replacing it, so a
     child adding one never silently drops the parent's."""
@@ -101,6 +102,23 @@ class ShellIntegration(HarnessIntegration):
     contract_version: ClassVar[int] = 1
     name: ClassVar[str] = "shell"
     description: ClassVar[str] = "Run an operator command or a login shell"
+    prose: ClassVar[TopicProse | None] = TopicProse(
+        title="Shell sessions",
+        overview="""
+        Runs whatever you tell it to. With no `command`, the session is a bare login
+        shell, which is what a session-template that selects no integration gets.
+
+        `resume_command` is what `agw session resume` runs instead, falling back to
+        `command` when it is empty. That pair is enough to drive a harness with no
+        dedicated integration of its own: launch it one way, reattach another. A real
+        integration is more robust (it knows whether a session exists to resume), but
+        the shell escape hatch is always there.
+
+        `required_commands` are checked on the target before the session starts, which
+        turns a missing binary into a clear message instead of a pane that dies
+        immediately.
+        """,
+    )
 
     config_model: ClassVar[type[ShellConfig]] = ShellConfig
 

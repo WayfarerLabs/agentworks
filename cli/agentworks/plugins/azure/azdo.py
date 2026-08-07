@@ -16,6 +16,7 @@ from agentworks.capabilities.git_credential.base import (
     HelperEntry,
     TokenSourcedConfig,
 )
+from agentworks.topics import TopicProse
 
 AzDOOrg = Annotated[str, Field(pattern=r"^[A-Za-z0-9._-]+$")]
 """An Azure DevOps organization name. Constrained because it is
@@ -29,7 +30,7 @@ class AzDOConfig(TokenSourcedConfig):
     name: Literal["azdo"]
     """The provider this config is for."""
 
-    org: AzDOOrg
+    org: AzDOOrg = Field(examples=["my-org"])
     """The Azure DevOps organization this credential serves."""
 
 
@@ -40,6 +41,18 @@ class AzDOCredentialProvider(GitCredentialProvider):
     name: ClassVar[str] = "azdo"
     description: ClassVar[str] = "Azure DevOps personal access token"
     config_model: ClassVar[type[AzDOConfig]] = AzDOConfig
+    prose: ClassVar[TopicProse | None] = TopicProse(
+        title="Azure DevOps",
+        overview="""
+        Authenticates git operations against Azure DevOps with a personal access token,
+        taken from the secret this credential names.
+
+        Azure DevOps scopes tokens per organization, so the credential has to name the
+        organization it belongs to. Declare one credential per organization.
+
+        Ships as part of the opt-in `azure` system plugin.
+        """,
+    )
 
     @property
     def config(self) -> AzDOConfig:

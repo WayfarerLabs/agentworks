@@ -26,11 +26,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from pydantic import create_model
+from pydantic import StringConstraints, create_model
+from pydantic.fields import FieldInfo
+from pydantic.json_schema import SkipJsonSchema
 
-from agentworks.declared_resource import DeclaredResource
+from agentworks.declared_resource import DeclaredResource, EnvelopeMetadata
 from agentworks.errors import ValidationError
 from agentworks.resources import KIND_REGISTRY
+from agentworks.schema import AgwModel
 from agentworks.schema._shape import unwrap_optional
 
 if TYPE_CHECKING:
@@ -100,6 +103,76 @@ def spec_model(kind: str) -> type[BaseModel]:
         # survive onto the spliced field.
         fields={field_name: (union, field)},
     )
+
+
+def metadata_model(kind: str) -> type[BaseModel]:
+    """The model describing a ``kind`` document's ``metadata`` block.
+
+    Built from THE KIND's row rather than from ``EnvelopeMetadata``,
+    because a kind may re-declare a metadata field: ``secret`` makes
+    ``description`` required and ``admin-template`` defaults ``name``, and
+    reading the row is what makes both differences show up here for free,
+    in the emitted schema and in the rendered sample alike.
+
+    Each field's ``SkipJsonSchema`` marker is dropped, and only that. The
+    marker is what keeps these fields out of the SPEC surface (they are
+    real fields of the row, and decode refuses one written inside
+    ``spec``); here we are describing the block they DO belong to, so it is
+    the one place the marker should not apply.
+    """
+    row = row_model(kind)
+    # Declaration order, not sorted: ``name`` is what a document opens its
+    # metadata block with, and a rendered sample that led with ``expires``
+    # would be teaching an order nobody writes. ``METADATA_FIELDS`` is a
+    # frozenset (it answers membership questions elsewhere), so the order
+    # comes from the class that declares them.
+    fields: dict[str, Any] = {name: _metadata_field(row, name) for name in EnvelopeMetadata.model_fields}
+    return built_model(
+        f"{class_name(kind)}Metadata",
+        base=AgwModel,
+        doc=f"The metadata block of a {kind} manifest document.",
+        fields=fields,
+    )
+
+
+def _metadata_field(row: type[DeclaredResource], name: str) -> tuple[Any, FieldInfo]:
+    """One metadata field as ``create_model`` wants it: the row's own
+    annotation and a ``FieldInfo`` with ``SkipJsonSchema`` removed.
+
+    A copy of the row's own ``FieldInfo`` with one entry filtered out of
+    its metadata, rather than a fresh one built from the parts we happen to
+    care about: a constraint a kind puts on a metadata field it overrides
+    has to survive, and rebuilding would drop it silently.
+
+    ``name`` picks up the kind's ``NAME_MAX_LENGTH`` where it declares one.
+    That cap is applied by ``decode._check_declared_name`` to exactly the
+    names a manifest carries (operator-written ones), so stating it here is
+    faithful rather than an approximation. The CHARACTER rule is
+    deliberately not expressed; see ``emission-lld.md``.
+
+    The cap joins the metadata list rather than arriving as a second
+    ``merge_field_infos`` argument, because merging resets every attribute
+    the later ``FieldInfo`` does not set: verified, and it silently took
+    the field's description with it, which is the hover text an operator
+    reads on the one block every document carries.
+    """
+    field = row.model_fields[name]
+    visible = FieldInfo.merge_field_infos(field)
+    visible.metadata = [entry for entry in field.metadata if not _is_skip_marker(entry)]
+    if name == "name" and row.NAME_MAX_LENGTH is not None:
+        visible.metadata.append(StringConstraints(max_length=row.NAME_MAX_LENGTH))
+    return field.annotation, visible
+
+
+def _is_skip_marker(entry: object) -> bool:
+    """Whether ``entry`` is the ``SkipJsonSchema`` annotation.
+
+    The ignore is pydantic's shape, not a shortcut: ``SkipJsonSchema`` is
+    an ``Annotated`` alias to a type checker and a dataclass to the
+    interpreter, so there is no spelling of the name that is both a class
+    to ``isinstance`` and a type to mypy.
+    """
+    return isinstance(entry, SkipJsonSchema)  # type: ignore[misc]
 
 
 def hosted_capability(kind: str) -> CapabilityKindDescriptor | None:

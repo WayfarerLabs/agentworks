@@ -28,6 +28,7 @@ from agentworks.resources.kind import (
     InstanceRef,
 )
 from agentworks.sessions.template import NamedConsoleConfig, SessionTemplate
+from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
@@ -45,6 +46,25 @@ class _SessionTemplateKind:
     kind: str = "session-template"
     model: type[DeclaredResource] = SessionTemplate
     description: str = "Session configuration (command, resume, env)"
+    prose: TopicProse = TopicProse(
+        title="Session templates",
+        overview="""
+        A session is a workload running as an agent (or as the admin) in a workspace on
+        a VM, and a session-template says which workload. `spec.harness_integration`
+        selects the integration that owns starting and resuming it; a template that
+        selects none gets `shell`, a plain login shell, so a field-less template is
+        still useful.
+
+        Templates compose through `inherits`, nearest last: `env` tables merge key by
+        key and the integration's `required_commands` union rather than replacing, so a
+        child adding one never silently drops the parent's.
+
+        Commands may use the `{{session_name}}` and `{{workspace_name}}` variables. A
+        harness with no dedicated integration can often be driven through `shell` alone
+        by pairing `command` with `resume_command`, though a real integration is more
+        robust.
+        """,
+    )
     miss_policy: Literal["auto-declare", "error"] = "auto-declare"
     auto_declare_names: frozenset[str] | None = frozenset({"default"})
     category: Literal["declarable", "capability"] = "declarable"
@@ -81,6 +101,27 @@ class _NamedConsoleTemplateKind:
     kind: str = "named-console-template"
     model: type[DeclaredResource] = NamedConsoleConfig
     description: str = "Named console configuration (layout, ...)"
+    prose: TopicProse = TopicProse(
+        title="Named console templates",
+        overview="""
+        A named console is a tmux window holding one session pane plus helper shells,
+        created by `agw console create`. This kind configures the layout those panes are
+        arranged in.
+
+        There is exactly one, named `default`: no command can select a named
+        instance yet, so a declaration under any other name would be dead config and is
+        refused. The layout is re-read on every build, recreate, add-shell, and
+        restore-session, so changing it and running
+        `agw console attach <name> --recreate` is enough to switch.
+
+        Most layout values map one to one onto tmux's own `select-layout` names, so the
+        same value can be applied live from a tmux key binding.
+        `aw-session-vertical` is agentworks' own: a single column with the session pane
+        on top and the shells stacked below it, computed per window from live tmux
+        dimensions. The `main-` layouts treat the session pane as the primary and stack
+        the shells beside it. The workspace-console generator does not read any of this.
+        """,
+    )
     miss_policy: Literal["auto-declare", "error"] = "auto-declare"
     auto_declare_names: frozenset[str] | None = frozenset({"default"})
     category: Literal["declarable", "capability"] = "declarable"

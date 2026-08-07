@@ -238,6 +238,13 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("resource.list", "kind"): "resource_kinds",
     ("resource.describe", "ref"): "resource_refs",
     ("resource.edit", "ref"): "resource_refs",
+    # `resource describe-kind` takes KIND or KIND/NAME, and completes from
+    # the config-free kinds completer: every kind is a valid target, and
+    # the KIND/NAME form addresses a capability implementation, which the
+    # kind's own output lists. Completing implementations too would mean a
+    # completer that builds a registry (so it would go quiet on a broken
+    # config, which is exactly when this command is worth reaching for).
+    ("resource.describe-kind", "target"): "resource_kinds",
     # Resource migration + authoring. `resource sample`'s kind argument
     # is a plain string (no click.Choice: any typed kind must reach the
     # service layer for a clean domain error, issue #276), so it

@@ -56,6 +56,7 @@ from agentworks.errors import (
     SecretMappingError,
 )
 from agentworks.schema import AgwModel, AgwRootModel, NonEmptyStr
+from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
     from agentworks.resources.graph import Readiness
@@ -259,6 +260,25 @@ class OnePasswordBackend:
     config_model: type[AgwRootModel[Any]] = OnePasswordMapping
     name = "onepassword"
     description = "resolves via the 1Password CLI (op read op://vault/item/field)"
+    prose = TopicProse(
+        title="1Password",
+        overview="""
+        Reads a secret's value through the `op` CLI. There is no naming convention to
+        fall back on, so a secret is resolvable here only if it declares an explicit
+        `backend_mappings.onepassword` address: the `op://vault/item/field` reference
+        1Password's "Copy Secret Reference" produces (a `.../section/field` segment is
+        allowed too).
+
+        The string form reads through whichever account `op` is signed in to, or the one
+        `OP_ACCOUNT` names. The table form pins a specific account beside the same
+        reference, for a host signed in to several.
+
+        Ships as the opt-in `onepassword` system plugin, and needs the `op` CLI on this
+        host; a mapping stays dormant until both are true. Resolution may trigger a
+        biometric or re-auth prompt, so inspection surfaces report it optimistically
+        rather than probing it.
+        """,
+    )
 
     # interactive = True: resolving a onepassword secret may involve
     # operator interaction, because `op read` can trigger a biometric or

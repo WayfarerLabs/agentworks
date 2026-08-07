@@ -37,6 +37,7 @@ from agentworks.resource_loading import (
     _require_list,
 )
 from agentworks.resources.kind import KIND_REGISTRY, synthesize_no_default
+from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -58,13 +59,18 @@ class _InstallCommandEntry(DeclaredResource):
     with separate miss policies.
     """
 
-    command: str
-    """The shell command to run."""
+    # The example is what a generated sample writes on the one line an
+    # operator MUST fill in here, and it is the shape worth teaching: a
+    # fetch piped to a shell, which is what most vendor installers are.
+    command: str = Field(examples=["curl -fsSL https://example.com/install.sh | bash"])
+    """The shell command to run.
+
+    Run at VM init and again at reinit, so write it to be idempotent."""
 
     path: list[str] = Field(default_factory=list)
     """Directories prepended to ``PATH`` for the duration of the command."""
 
-    test_exec: str | None = None
+    test_exec: str | None = Field(default=None, examples=["my-tool"])
     """Skip the install when this command is already on ``PATH``. At most
     one of the three ``test_*`` fields may be set."""
 
@@ -199,6 +205,19 @@ class _SystemInstallCommandKind:
 
     kind: str = "system-install-command"
     description: str = "System-level (root) install commands for VM init"
+    prose: TopicProse = TopicProse(
+        title="System install commands",
+        overview="""
+        A system-install-command installs system-wide tooling that apt cannot: a vendor
+        install script, a binary release, anything that ends up outside a package. It
+        runs as root during `agw vm create` and again on `agw vm reinit`, so write it to
+        be safe to run twice.
+
+        A vm-template refers to it by name through `system_install_commands`. Give it
+        exactly one of `test_exec`, `test_file`, or `test_dir` and init skips the
+        command when the tool is already there.
+        """,
+    )
     model: type[DeclaredResource] = SystemInstallCommandEntry
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None
@@ -215,6 +234,20 @@ class _UserInstallCommandKind:
 
     kind: str = "user-install-command"
     description: str = "Per-user install commands for admin/agent init"
+    prose: TopicProse = TopicProse(
+        title="User install commands",
+        overview="""
+        A user-install-command installs per-user tooling: something that belongs in one
+        user's home rather than on the whole machine. It runs unprivileged, once for the
+        admin user and once for each agent user whose template names it, and it re-runs
+        on reinit, so write it to be safe to run twice.
+
+        An admin-template or agent-template refers to it by name through
+        `user_install_commands`. Give it exactly one of `test_exec`, `test_file`, or
+        `test_dir` to make it skippable; in `test_file` and `test_dir`, `~` is the
+        target user's home, not the operator's.
+        """,
+    )
     model: type[DeclaredResource] = UserInstallCommandEntry
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None

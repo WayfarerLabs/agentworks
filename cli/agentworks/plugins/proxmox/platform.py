@@ -8,6 +8,8 @@ import time
 import urllib.parse
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal
 
+from pydantic import Field
+
 from agentworks import output
 from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
 from agentworks.capabilities.vm_platform.bootstrap_script import generate_bootstrap_script
@@ -21,6 +23,7 @@ from agentworks.plugins.proxmox.teardown import (
     stop_and_delete_vm,
 )
 from agentworks.schema import AgwModel, NonEmptyStr, SecretRef
+from agentworks.topics import TopicProse
 from agentworks.transports import SSHTransport
 
 if TYPE_CHECKING:
@@ -36,16 +39,16 @@ class ProxmoxConfig(AgwModel):
     name: Literal["proxmox"]
     """The platform this config is for."""
 
-    api_url: NonEmptyStr
+    api_url: NonEmptyStr = Field(examples=["https://pve.example.net:8006"])
     """The cluster's API endpoint (e.g. ``https://pve.example:8006``)."""
 
-    node: NonEmptyStr
+    node: NonEmptyStr = Field(examples=["pve1"])
     """The cluster node new VMs are cloned on."""
 
-    token_id: NonEmptyStr
+    token_id: NonEmptyStr = Field(examples=["agentworks@pam!agw"])
     """The API token's id (``user@realm!tokenname``)."""
 
-    template_vmid: int
+    template_vmid: int = Field(examples=[9000])
     """The VMID of the template new VMs clone from. An integer: a quoted
     number is an operator mistake, not a value to convert."""
 
@@ -80,6 +83,25 @@ class ProxmoxPlatform(VMPlatform):
     name: ClassVar[str] = "proxmox"
     description: ClassVar[str] = "Proxmox VE cluster VMs (clone + cloud-init)"
     config_model: ClassVar[type[ProxmoxConfig]] = ProxmoxConfig
+    prose: ClassVar[TopicProse | None] = TopicProse(
+        title="Proxmox VE",
+        overview="""
+        Clones a prepared template VM on a Proxmox VE cluster and configures it through
+        cloud-init. The template (`template_vmid`) has to exist on the node already;
+        agentworks does not build it.
+
+        The API token value is a secret, `proxmox-token` unless the site names another,
+        resolved through the backend chain like any other secret. The token id is not a
+        secret and is written in the document.
+
+        There is no native interactive transport: the QEMU guest agent's exec interface
+        is one-shot and non-interactive, so the Proxmox web UI's serial console is the
+        equivalent escape hatch.
+
+        Ships as the opt-in `proxmox` system plugin, so a site stays not-ready until
+        `[plugins] system` lists it.
+        """,
+    )
     no_native_transport_hint: ClassVar[str] = (
         "The QEMU guest agent exec interface is one-shot and "
         "non-interactive, so use the Proxmox web UI's serial console "

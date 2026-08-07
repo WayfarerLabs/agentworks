@@ -33,6 +33,7 @@ from agentworks.capabilities.vm_platform.base import VMPlatform
 from agentworks.resources.graph import Readiness
 from agentworks.resources.kind import KIND_REGISTRY
 from agentworks.schema import AgwModel
+from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -48,6 +49,20 @@ class _VMPlatformKind:
 
     kind: str = "vm-platform"
     description: str = "Capability for running VMs on one backend kind (lima, wsl2, azure-vm, aws-ec2, proxmox)"
+    prose: TopicProse = TopicProse(
+        title="VM platforms",
+        overview="""
+        A vm-platform knows how to create, start, stop, and delete VMs on one backend,
+        and how to reach them over SSH once they exist.
+
+        Platforms are code, not config: a vm-site selects one by writing its name inside
+        `spec.platform`, and the keys allowed beside that name are the platform's own,
+        which is why each documents its own config. Every registered platform publishes
+        a row whether or not this host can run it, and a platform that needs a tool or a
+        plugin the host lacks reports itself not-ready rather than disappearing, so
+        `agw doctor` can say why.
+        """,
+    )
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None
     category: Literal["declarable", "capability"] = "capability"

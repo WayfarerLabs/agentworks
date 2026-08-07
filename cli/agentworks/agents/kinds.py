@@ -31,6 +31,7 @@ from agentworks.resources.kind import (
     KIND_REGISTRY,
     InstanceRef,
 )
+from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
@@ -48,6 +49,20 @@ class _AgentTemplateKind:
     kind: str = "agent-template"
     model: type[DeclaredResource] = AgentTemplate
     description: str = "Agent user environment configuration (shell, tools, dotfiles, mise, ...)"
+    prose: TopicProse = TopicProse(
+        title="Agent templates",
+        overview="""
+        An agent-template configures an agent USER on a VM: the shell it logs in with,
+        the dotfiles it clones, the per-user install commands it runs, the mise packages
+        it activates, and the git credentials it may use. `agw agent create --template`
+        selects one.
+
+        An agent gets nothing it is not given. Every field here defaults to inheriting
+        rather than to a concrete value, so a template that says nothing configures
+        nothing, and `inherits` composes templates nearest-last with `env` tables
+        merging key by key.
+        """,
+    )
     miss_policy: Literal["auto-declare", "error"] = "auto-declare"
     auto_declare_names: frozenset[str] | None = frozenset({"default"})
     category: Literal["declarable", "capability"] = "declarable"

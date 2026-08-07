@@ -24,6 +24,7 @@ from agentworks.capabilities.git_credential.base import (
     HelperEntry,
     TokenSourcedConfig,
 )
+from agentworks.topics import TopicProse
 
 # GitHub owner/repo name charset. Interpolated verbatim into gitconfig
 # section headers and store URLs, so anything outside this set (quotes,
@@ -50,12 +51,12 @@ class GitHubConfig(TokenSourcedConfig):
     name: Literal["github"]
     """The provider this config is for."""
 
-    repos: list[GitHubRepo] = Field(default_factory=list)
+    repos: list[GitHubRepo] = Field(default_factory=list, examples=[["my-org/my-repo"]])
     """The repositories a fine-grained PAT covers, as "owner/name". A
     list even for one repository, because a fine-grained PAT may select
     several. Empty (the default) is unscoped."""
 
-    owner: GitHubName | None = None
+    owner: GitHubName | None = Field(default=None, examples=["my-org"])
     """The user or organization an owner-scoped PAT covers, including
     repositories cloned ad hoc that no workspace declared. ``None`` is
     the one field here with nothing to default to: there is no owner
@@ -95,6 +96,21 @@ class GitHubCredentialProvider(GitCredentialProvider):
     name: ClassVar[str] = "github"
     description: ClassVar[str] = "GitHub personal access token"
     config_model: ClassVar[type[GitHubConfig]] = GitHubConfig
+    prose: ClassVar[TopicProse | None] = TopicProse(
+        title="GitHub",
+        overview="""
+        Authenticates git operations against GitHub with a personal access token, taken
+        from the secret this credential names.
+
+        A classic token needs no scoping. A fine-grained token does: `repos` pins the
+        credential to specific repositories, and `owner` covers everything under one
+        user or organization, including repositories cloned ad hoc that no workspace
+        declared. The two are alternatives, not a pair.
+
+        Declaring several credentials is normal. The managed credential helper picks the
+        one whose scope matches each remote, and an unscoped credential is the fallback.
+        """,
+    )
 
     @property
     def config(self) -> GitHubConfig:

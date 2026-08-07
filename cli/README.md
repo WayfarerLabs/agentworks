@@ -162,9 +162,9 @@ registers on every host and reports not-ready when this host lacks what it needs
 Windows-only; a local Lima site needs `limactl`; a platform may simply not be installed, or its
 plugin not enabled): a not-ready site still lists and describes, using it is an error naming the
 requirement, and `agw doctor` shows each platform's and site's state with the reason. Run
-`agw resource sample vm-site` for commented, ready-to-edit examples (an Azure site, a remote-Lima
-site with a `vm_host` key). The former `agw vm-host` registry is gone: a remote Lima host is now
-just a vm-site.
+`agw resource sample vm-site` for a commented, ready-to-edit document, and
+`agw resource describe-kind vm-platform/azure-vm` (or any other platform) for that platform's own
+fields. The former `agw vm-host` registry is gone: a remote Lima host is now just a vm-site.
 
 > **Note on WSL2:** WSL2 distros share the Windows workstation's lifecycle. They idle-shut after
 > ~60s of no `wsl.exe` activity (`vmIdleTimeout` in `.wslconfig`) and do not survive workstation
@@ -739,6 +739,7 @@ mappings, template inheritance chains, resolution previews), reach for the per-k
 | `agw resource list`                  | List every resource in the registry across all kinds                  |
 | `agw resource kinds`                 | List every kind: category (declarable/capability), counts, purpose    |
 | `agw resource describe KIND/NAME`    | Show the per-resource detail view (header + Referenced by + Used by)  |
+| `agw resource describe-kind TARGET`  | Show what a KIND (or a KIND/NAME capability) accepts, field by field  |
 | `agw resource edit KIND/NAME`        | Open the declaring YAML manifest in $EDITOR                           |
 | `agw resource migrate [SELECTOR]...` | Move TOML resources to YAML, and upgrade manifests on a retired shape |
 | `agw resource sample KIND [--write]` | Print (or save) a kind's commented sample manifest (--all for all)    |
@@ -793,6 +794,20 @@ the YAML teaching surface, mirroring `agw config sample` for the settings file. 
 saves under the resources directory instead (relative `.yaml`/`.yml` path; appends if the file
 exists). Written samples are inert until you uncomment them (delete one leading `#` per line), so
 `--write` can never create a live resource or a duplicate.
+
+Samples are RENDERED from the same declarations the loader validates against, so they cannot drift
+from what a kind actually accepts, and a capability a plugin contributed appears on the same terms
+as a first-party one. Every field is there: the ones you must write are live document lines, and
+every optional field is a commented suggestion at its own indent with its type, its default, and
+what it means. Where a field selects a capability (a vm-site's `platform`), one implementation is
+rendered and the rest are named.
+
+`resource describe-kind` answers the same question without producing a document to edit:
+`agw resource describe-kind vm-site` lists every field of the kind,
+`agw resource describe-kind vm-platform` lists the platforms this build has, and
+`agw resource describe-kind vm-platform/aws-ec2` documents one platform's config. It reads no config
+and builds no registry, so it works on a host whose `config.toml` does not load, and it documents a
+capability whose plugin is not enabled yet.
 
 ## Configuration
 

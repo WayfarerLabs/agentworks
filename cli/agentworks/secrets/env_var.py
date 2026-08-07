@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from agentworks.errors import ConfigError
 from agentworks.schema import AgwRootModel, NonEmptyStr
+from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
     from agentworks.resources.graph import Readiness
@@ -53,6 +54,18 @@ class EnvVarBackend:
     config_model: type[AgwRootModel[Any]] = EnvVarMapping
     name = "env-var"
     description = "resolves from AW_SECRET_<NAME> environment variables"
+    prose = TopicProse(
+        title="Environment variables",
+        overview="""
+        Reads a secret's value from an environment variable. Every secret has one by
+        convention, `AW_SECRET_` plus its name upper-cased with hyphens as underscores,
+        so a secret needs no mapping at all to be resolvable this way.
+
+        A `backend_mappings.env-var` entry overrides that name with the variable you
+        actually have. An unset variable is a soft miss, not an error: resolution falls
+        through to the next backend in the chain.
+        """,
+    )
     interactive = False
 
     def not_ready(self) -> Readiness:

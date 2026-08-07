@@ -30,6 +30,7 @@ from agentworks.capabilities.harness_integration.base import HarnessIntegration
 from agentworks.resources.graph import Readiness
 from agentworks.resources.kind import KIND_REGISTRY, NoUnreferencedDefaultError
 from agentworks.schema import AgwModel
+from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -62,6 +63,19 @@ class _HarnessIntegrationKind:
 
     kind: str = "harness-integration"
     description: str = "Capability for running a session workload (shell, claude-code)"
+    prose: TopicProse = TopicProse(
+        title="Harness integrations",
+        overview="""
+        A harness-integration owns a session's workload: what starts in the pane, what a
+        resume does differently, and which commands have to exist on the target before
+        either is attempted.
+
+        Integrations are code, and a session-template selects one by writing its name
+        inside `spec.harness_integration`. The keys allowed beside that name are the
+        integration's own, which is why each documents its own config. A template that
+        selects none gets `shell`.
+        """,
+    )
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None
     category: Literal["declarable", "capability"] = "capability"

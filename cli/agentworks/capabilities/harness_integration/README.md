@@ -532,8 +532,9 @@ authority on the descriptor, registration mechanics, and the enablement model; t
 
 The checklist beyond code, per the repo rules: the `[plugins]` block comment in
 `cli/agentworks/sample-config.toml`, the harness-integration section of `docs/guides/resources.md`,
-the sample manifest (`cli/agentworks/manifests/samples/session-template.yaml`) if it should
-demonstrate the new integration, the harness-integration material in `cli/README.md` (under "Session
+the integration's own `prose` (a `TopicProse` beside its class, which is what
+`agw resource describe-kind harness-integration/<name>` prints; there is no sample manifest to edit,
+because samples are rendered), the harness-integration material in `cli/README.md` (under "Session
 Templates"), `.cspell.json` for harness names, and a completions check (today no completer
 enumerates integration names, so there is nothing to regenerate unless the change also adds CLI
 surface; the rule still requires the check).

@@ -41,6 +41,7 @@ from agentworks.git_credentials.credential import GitCredentialConfig
 from agentworks.resources.graph import Readiness
 from agentworks.resources.kind import KIND_REGISTRY, NoUnreferencedDefaultError
 from agentworks.schema import AgwModel
+from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -76,6 +77,24 @@ class _GitCredentialKind:
     kind: str = "git-credential"
     model: type[DeclaredResource] = GitCredentialConfig
     description: str = "Declared git credentials"
+    prose: TopicProse = TopicProse(
+        title="Git credentials",
+        overview="""
+        A git-credential is how a VM obtains a git token. `spec.provider` selects the
+        provider capability and carries its config; admin and agent templates refer to
+        the credential by name through `git_credentials`.
+
+        The token itself is a SECRET, named by the provider's `token` field and
+        defaulting to `git-token-<this credential's name>`. It resolves through the
+        backend chain at VM-init time, so nothing is stored on the VM. Because that
+        default secret name is derived from this resource's name, a name that breaks the
+        standard naming rules still loads but warns at config load.
+
+        Declare several: the managed credential helper picks the right one per remote,
+        which is what makes a fine-grained token scoped to one repository usable
+        alongside a broader one.
+        """,
+    )
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None  # ignored under "error"
     category: Literal["declarable", "capability"] = "declarable"
@@ -104,6 +123,18 @@ class _GitCredentialProviderKind:
 
     kind: str = "git-credential-provider"
     description: str = "Capability for provisioning git credentials based on the provider (github, azdo)"
+    prose: TopicProse = TopicProse(
+        title="Git credential providers",
+        overview="""
+        A git-credential-provider knows how one forge's tokens work: what scoping a
+        credential may declare, and how to check that a token is live before a VM
+        depends on it.
+
+        Providers are code, and a git-credential document selects one by writing its
+        name inside `spec.provider`. The keys allowed beside that name are the
+        provider's own, which is why each documents its own config.
+        """,
+    )
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None
     category: Literal["declarable", "capability"] = "capability"

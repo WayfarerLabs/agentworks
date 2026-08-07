@@ -53,6 +53,7 @@ from agentworks.plugins.aws.network import (
 )
 from agentworks.schema import AgwModel, NonEmptyStr, PositiveInt, SecretRef
 from agentworks.ssh import SSHError
+from agentworks.topics import TopicProse
 from agentworks.transports import SSHTransport
 
 if TYPE_CHECKING:
@@ -117,10 +118,10 @@ class AwsEC2Config(AgwModel):
     name: Literal["aws-ec2"]
     """The platform this config is for."""
 
-    region: NonEmptyStr
+    region: NonEmptyStr = Field(examples=["us-east-1"])
     """The region new instances are created in."""
 
-    subnet_id: NonEmptyStr | None = None
+    subnet_id: NonEmptyStr | None = Field(default=None, examples=["subnet-00000000000000000"])
     """The subnet new instances attach to. Omit for the region's default
     VPC."""
 
@@ -244,6 +245,32 @@ class EC2Platform(VMPlatform):
     name: ClassVar[str] = "aws-ec2"
     description: ClassVar[str] = "Amazon EC2 instances (region + optional VPC subnet)"
     config_model: ClassVar[type[AwsEC2Config]] = AwsEC2Config
+    prose: ClassVar[TopicProse | None] = TopicProse(
+        title="Amazon EC2",
+        overview="""
+        Launches EC2 instances in one region. Declare one vm-site per region you target.
+        Omit the subnet to use the region's default VPC; naming one puts instances there
+        and creates the security group in its VPC.
+
+        The image is always the current Debian 12 (bookworm) release for the instance
+        type's architecture, resolved from the public SSM release parameter at create
+        time; there is no image override. Instance types come from a built-in Graviton
+        catalog unless the site overrides it, and `vm create` picks the smallest entry
+        that satisfies the vm-template's request.
+
+        An instance keeps a permanent public IP. SSH exposure is not permanent: the
+        security group denies all inbound except ephemeral rules scoped to your detected
+        egress IP (plus `operator.ssh_allow_cidrs`) during bootstrap and each native
+        route.
+
+        Authentication is the ambient AWS credential chain by default (environment,
+        shared config, instance profile, SSO). Declaring an access key replaces that
+        chain for this site; add `assume_role_arn` to layer an STS AssumeRole on top.
+
+        Ships as the opt-in `aws` system plugin, so a site stays not-ready until
+        `[plugins] system` lists it.
+        """,
+    )
 
     # Warned by the transports factory when every reachability probe fails: the
     # ephemeral SSH allow is scoped to the DETECTED egress IP, so an operator

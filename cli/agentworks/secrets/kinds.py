@@ -44,6 +44,7 @@ from agentworks.resources.walk import collect_secrets_for
 from agentworks.schema import AgwRootModel
 from agentworks.secrets.backends import SecretBackend
 from agentworks.secrets.base import SecretDecl
+from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
@@ -89,6 +90,25 @@ class _SecretKind:
     kind: str = SECRET_KIND_NAME
     model: type[DeclaredResource] = SecretDecl
     description: str = "Declared secrets and their backend mappings"
+    prose: TopicProse = TopicProse(
+        title="Secrets",
+        overview="""
+        A secret is a NAME, not a value. Declaring one says a value by that name exists,
+        what it is for, and (optionally) what each backend calls it; the value itself is
+        produced by a secret-backend at command time and never stored by agentworks.
+
+        Anything that needs a secret refers to it by name: an `env` table writes
+        `{secret: npm-token}`, and a capability config field that names a secret (a git
+        credential's token, a platform's client secret) takes the name too. A referenced
+        secret that nothing declared is auto-declared, so declaring one is how you give
+        it a description and a hint, which are the text an operator reads when they are
+        asked to type the value in.
+
+        `backend_mappings` overrides what one backend calls this secret, or opts out of
+        that backend entirely with `false`. Run
+        `agw resource describe-kind secret-backend` to see which backends this host has.
+        """,
+    )
     miss_policy: Literal["auto-declare", "error"] = "auto-declare"
     auto_declare_names: frozenset[str] | None = None  # None = any name accepted
     category: Literal["declarable", "capability"] = "declarable"
@@ -219,6 +239,19 @@ class _SecretBackendKind:
 
     kind: str = "secret-backend"
     description: str = "Capability for resolving secret values"
+    prose: TopicProse = TopicProse(
+        title="Secret backends",
+        overview="""
+        A secret-backend produces a secret's VALUE at command time. Backends are tried
+        in order, and the first one that has a value for the secret wins, so a host can
+        read most secrets from a vault and fall back to prompting for the rest.
+
+        A backend is code, not config: it registers itself, and a secret opts one in or
+        out through `backend_mappings.<backend>` in the secret's own document. What that
+        mapping may hold differs per backend (an env var name, an `op://` reference),
+        which is why each backend documents its own.
+        """,
+    )
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None
     category: Literal["declarable", "capability"] = "capability"

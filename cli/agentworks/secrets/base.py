@@ -73,16 +73,19 @@ class SecretDecl(DeclaredResource):
     # auto-declared ones in afterwards. What has to be non-empty is what an
     # OPERATOR wrote, which decode checks against this field's
     # requiredness (``_check_declared_description``).
-    description: SkipJsonSchema[str]
+    description: SkipJsonSchema[str] = Field(examples=["npm registry token"])
     """What this secret is, in one line. Required on a secret where it is
     optional on every other kind, because this is the text an operator
     reads when they are being asked to type the value in."""
 
-    hint: str | None = None
+    hint: str | None = Field(default=None, examples=["Generate at https://www.npmjs.com/settings/<user>/tokens"])
     """Operator-facing text shown when the secret has to be entered by
     hand: where to generate it, which account it belongs to."""
 
-    backend_mappings: dict[str, MappingValue] = Field(default_factory=dict)
+    backend_mappings: dict[str, MappingValue] = Field(
+        default_factory=dict,
+        examples=[{"env-var": "NPM_TOKEN"}],
+    )
     """Per-backend identifier overrides, keyed by backend name."""
 
     def dependencies(self, context: FinalizeContext) -> list[ResourceReference]:

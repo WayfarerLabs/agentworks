@@ -1,61 +1,49 @@
-"""Bundled sample manifests behind ``agw resource sample``.
+"""``agw resource sample``: the generated sample manifest.
 
-One fully-commented-out sample file per manifest-declarable kind, in
-``agentworks/manifests/samples/``. Fully commented means every line
-starts with ``#``: document lines are ``#`` + the YAML line (uncomment
-in place by deleting one ``#``), prose lines are ``## `` (stripping one
-``#`` leaves them as ordinary YAML comments). Written samples are
-therefore inert text the loader ignores: ``--write`` can never create a
-duplicate or a live resource, and running it twice just appends more
-comments. The loader guarantee stays real rather than vacuous -- the
-test suite mechanically strips one ``#`` per line and loads the result
-through the real loader, and the whole uncommented set builds a full
-registry. One deliberate exception: the secret-backend sample is
-prose-only (no document to uncomment) until a config-bearing provider
-ships -- there is nothing real to declare yet, and an uncommentable
-document would teach a lie.
+A sample is RENDERED, live, from the same models the loader validates
+against (``manifests/reference.py`` collects, ``manifests/skeleton.py``
+presents). There are no bundled sample files, and that is the point: a
+checked-in sample is a second description of a kind, and the moment a field
+is added, renamed, or defaulted differently, it is a wrong one. A generated
+one cannot drift, and it covers a capability a plugin contributed on the
+same terms as a first-party kind, which no curated file ever did.
+
+The output is fully commented, so a written sample is inert text the loader
+ignores: ``--write`` can never create a duplicate or a live resource, and
+running it twice just appends more comments. The uncomment rule is one
+leading ``#`` per line, which turns document lines into YAML and prose
+lines into ordinary YAML comments; ``manifests/skeleton.py`` owns it.
 """
 
 from __future__ import annotations
 
-from importlib import resources as importlib_resources
 from typing import TYPE_CHECKING
 
 from agentworks.errors import ValidationError
+from agentworks.manifests.reference import kind_reference
+from agentworks.manifests.skeleton import skeleton_text
+from agentworks.manifests.spec_model import declarable_kinds
 from agentworks.resources import KIND_REGISTRY
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-_SAMPLES_PACKAGE = "agentworks.manifests"
-_SAMPLES_DIR = "samples"
-
-# The declarable kinds, sorted, straight from the kind registry's
-# per-kind category (ADR 0016). This is the single source of truth the
-# capability guard in `_validated_kinds` also keys off, so the two can
-# never disagree: a kind is sampleable exactly when its handler is
-# declarable. Sorted for a stable order that matches `agw resource
-# kinds`, insulated from KIND_REGISTRY's import-order churn. The
-# samples-exist test pins that every declarable kind ships a bundled
-# sample file as new kinds are added.
-SAMPLE_KINDS: tuple[str, ...] = tuple(
-    sorted(name for name, handler in KIND_REGISTRY.items() if handler.category == "declarable")
-)
-
 _SUFFIXES = {".yaml", ".yml"}
 
 
 def sample_text(kind: str | None = None, *, all_kinds: bool = False) -> str:
-    """The bundled sample for ``kind``, or (with ``all_kinds``) every
-    kind concatenated.
+    """The rendered sample for ``kind``, or (with ``all_kinds``) every kind.
 
     Dumping every kind requires the explicit ``all_kinds`` opt-in
-    (``--all``), mirroring ``agw resource migrate``: a bare invocation
-    is an error, never a wall of thirteen samples by accident.
+    (``--all``), mirroring ``agw resource migrate``: a bare invocation is an
+    error, never a wall of thirteen samples by accident.
     """
     kinds = _validated_kinds(kind, all_kinds)
-    parts = [_read_sample(k) for k in kinds]
-    return "\n".join(part.rstrip("\n") for part in parts) + "\n"
+    parts = [skeleton_text(kind_reference(k)).rstrip("\n") for k in kinds]
+    # A commented document separator between kinds, so the concatenation is
+    # a real multi-document file once uncommented rather than a pile of
+    # documents YAML would read as one.
+    return "\n#---\n".join(parts) + "\n"
 
 
 def write_sample(
@@ -81,8 +69,8 @@ def write_sample(
 
     The modeline is NOT part of :func:`sample_text`, which stays fully
     commented under its own uncomment rule. It is a file header, so the
-    rule ("delete one leading ``#`` from the document lines") is still
-    true of the body.
+    rule ("delete one leading ``#`` from the document lines") is still true
+    of the body.
     """
     from agentworks.manifests.emit import SCHEMA_DIRNAME, modeline, write_schema_set
 
@@ -105,34 +93,37 @@ def write_sample(
 
 
 def _validated_kinds(kind: str | None, all_kinds: bool) -> tuple[str, ...]:
+    # The kinds a document can exist for, which is the same derivation
+    # emission uses for what it may describe.
+    known_kinds = declarable_kinds()
     if all_kinds and kind is not None:
         raise ValidationError(
             "pass a kind or --all, not both",
             hint="A kind prints one sample; --all prints every kind's.",
         )
     if all_kinds:
-        return SAMPLE_KINDS
+        return known_kinds
+    known = ", ".join(known_kinds)
     if kind is None:
-        known = ", ".join(SAMPLE_KINDS)
         raise ValidationError(
             "indicate a kind to sample, or pass --all",
             hint=f"Example: `agw resource sample secret`. Kinds: {known}.",
         )
-    if kind not in SAMPLE_KINDS:
-        known = ", ".join(SAMPLE_KINDS)
+    if kind not in known_kinds:
         handler = KIND_REGISTRY.get(kind)
         if handler is not None and handler.category == "capability":
-            # Capability kinds (harness-integration, secret-backend, vm-platform,
-            # git-credential-provider) are code-backed and carry no
-            # manifest, so there is nothing to sample. `resource kinds`
-            # lists them alongside the declarable kinds, so a curious
-            # operator will ask for one here; name the kind and point at
-            # the declarable set that does have samples, matching --all.
+            # Capability kinds (harness-integration, secret-backend,
+            # vm-platform, git-credential-provider) are code-backed and
+            # carry no manifest of their own, so there is nothing to
+            # sample. `resource kinds` lists them alongside the declarable
+            # kinds, so a curious operator will ask for one here: name the
+            # kind, point at the declarable set that does have samples, and
+            # point at the surface that DOES document a capability's config.
             raise ValidationError(
                 f"{kind!r} is a capability kind; it has no sample manifest",
                 entity_kind="resource",
                 entity_name=kind,
-                hint=f"declarable kinds: {known}",
+                hint=f"`agw resource describe-kind {kind}` documents it. Declarable kinds: {known}",
             )
         raise ValidationError(
             f"unknown kind {kind!r}",
@@ -141,11 +132,6 @@ def _validated_kinds(kind: str | None, all_kinds: bool) -> tuple[str, ...]:
             hint=f"known kinds: {known}",
         )
     return (kind,)
-
-
-def _read_sample(kind: str) -> str:
-    bundle = importlib_resources.files(_SAMPLES_PACKAGE) / _SAMPLES_DIR / f"{kind}.yaml"
-    return bundle.read_text(encoding="utf-8")
 
 
 def _validated_target(resources_dir: Path, filename: str) -> Path:

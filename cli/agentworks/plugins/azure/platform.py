@@ -42,6 +42,7 @@ from agentworks.plugins.azure.network import (
 )
 from agentworks.schema import AgwModel, NonEmptyStr, PositiveInt, SecretRef
 from agentworks.ssh import SSHError
+from agentworks.topics import TopicProse
 from agentworks.transports import SSHTransport
 
 if TYPE_CHECKING:
@@ -263,13 +264,13 @@ class AzureVMConfig(AgwModel):
     name: Literal["azure-vm"]
     """The platform this config is for."""
 
-    subscription_id: NonEmptyStr
+    subscription_id: NonEmptyStr = Field(examples=["00000000-0000-0000-0000-000000000000"])
     """The subscription new VMs are created in."""
 
-    resource_group: NonEmptyStr
+    resource_group: NonEmptyStr = Field(examples=["agw-dev"])
     """The resource group new VMs are created in."""
 
-    region: NonEmptyStr
+    region: NonEmptyStr = Field(examples=["eastus"])
     """The Azure region new VMs are created in."""
 
     vm_sizes: Annotated[list[AzureVMSize], Field(min_length=1)] | None = None
@@ -368,6 +369,27 @@ class AzureVMPlatform(VMPlatform):
     name: ClassVar[str] = "azure-vm"
     description: ClassVar[str] = "Azure Virtual Machines (subscription + resource group)"
     config_model: ClassVar[type[AzureVMConfig]] = AzureVMConfig
+    prose: ClassVar[TopicProse | None] = TopicProse(
+        title="Azure VMs",
+        overview="""
+        Creates Azure Virtual Machines in one subscription and resource group. Declare
+        one vm-site per subscription and group you target.
+
+        The resource group must already exist: `vm create` checks it at runup, with an
+        authenticated read-only probe, and fails cleanly before provisioning anything.
+        Sizes come from a built-in B-series catalog unless the site overrides it, and
+        `vm create` picks the smallest entry that satisfies the vm-template's request
+        (an off-ratio request rounds up and warns).
+
+        Authentication is the ambient Azure credential chain by default (`az login`,
+        `AZURE_*` variables, managed identity). Declaring a service principal replaces
+        that chain entirely for this site: a rejected client secret then fails the
+        command rather than falling back.
+
+        Ships as the opt-in `azure` system plugin, so a site stays not-ready until
+        `[plugins] system` lists it.
+        """,
+    )
 
     # Warned by the transports factory when every reachability probe
     # fails: the ephemeral NSG allow is scoped to the DETECTED egress

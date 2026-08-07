@@ -30,6 +30,7 @@ from pydantic import Field
 from agentworks.capabilities.harness_integration.base import HarnessIntegration, require_commands
 from agentworks.errors import StateError
 from agentworks.schema import AgwModel
+from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
@@ -73,6 +74,18 @@ class ClaudeCodeIntegration(HarnessIntegration):
     name: ClassVar[str] = "claude-code"
     description: ClassVar[str] = "Run Claude Code, resuming its session when one exists"
     config_model: ClassVar[type[ClaudeCodeConfig]] = ClaudeCodeConfig
+    prose: ClassVar[TopicProse | None] = TopicProse(
+        title="Claude Code",
+        overview="""
+        Runs Claude Code as the session's workload. Starting a session that already has
+        on-disk state resumes that conversation; starting a fresh one launches fresh, so
+        `agw session resume` and a reattach after a reboot behave the way an operator
+        expects without either being configured.
+
+        Ships as the opt-in `claude` system plugin, and needs the `claude` CLI on the
+        session's target.
+        """,
+    )
 
     # Set by _resume_or_launch on each start/restart; drives launch_note().
     # None until the op runs (nothing decided yet).
