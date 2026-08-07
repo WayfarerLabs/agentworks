@@ -32,15 +32,11 @@ dependencies = [
     # upper bound excludes a v3, which would be a re-litigation of that design
     # rather than a drop-in upgrade.
     "pydantic>=2.13.4,<3",
+    # PyYAML reads manifests. Nothing round-trips YAML any more: ruamel
+    # was here only for the migrator's in-place rewrites, and tomlkit only
+    # for its comment-preserving config.toml edits. Both went with it
+    # (operator ruling, 2026-08-07). Settings parse through stdlib tomllib.
     "pyyaml>=6.0.3",
-    # PyYAML reads manifests; ruamel round-trips the ones the migrator
-    # REWRITES (agentworks/migrate/manifest_upgrade.py), which PyYAML
-    # cannot do without discarding comments, quote style, and key order.
-    # Pinned exactly: its round-trip emitter's whitespace and comment
-    # placement are the observable output of that path, so a patch bump
-    # can change files we hand back to operators.
-    "ruamel-yaml==0.19.1",
-    "tomlkit>=0.15.0",
 ]
 
 [project.urls]
