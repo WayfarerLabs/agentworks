@@ -292,21 +292,20 @@ the derivation sequence are not started.
 
 ### 2.3 Capability config models (the contract flip)
 
-- [x] `capability-contract-lld.md` written and reviewed: the registration surface, the interim
-      **Written and reviewed in step 2.3** (`capability-contract-lld.md`); ticked at closeout, the
-      box was simply never checked. tagged-table synthesis while decode still routes through the
-      phase-1 decoders, the typed-ops migration per capability (the hidden bulk), retirement of the
-      stale tolerate-and-self-disable comment in `manifests/decode.py` (~298-301), which misstates
-      the shipped R9.2 hard-error behavior, and effective-config validation (operator decision
-      2026-08-02): validation runs on the MERGED blob only, resolved along the graph's `inherits`
-      chain at finalize (chain length one everywhere but session templates), never on a partial
-      declared blob. The LLD settles the per-key provenance the merge tracks for error attribution,
-      the two-stage reference extraction (structural refs per declared blob feed the graph; secret
-      refs read the effective blob), the inheritance edge as a typed, non-dependency edge (FR17:
-      excluded from the secret union, resolvability prediction, and dependency listings;
-      readiness/enablement propagation across it is this LLD's policy call), and the retirement of
-      the session resolver's use-time completeness call (`sessions/templates.py::_validate_merged`)
-      in favor of the finalize pass.
+- [x] `capability-contract-lld.md` written and reviewed (ticked at closeout; the box was simply
+      never checked): the registration surface, the interim tagged-table synthesis while decode
+      still routes through the phase-1 decoders, the typed-ops migration per capability (the hidden
+      bulk), retirement of the stale tolerate-and-self-disable comment in `manifests/decode.py`
+      (~298-301), which misstates the shipped R9.2 hard-error behavior, and effective-config
+      validation (operator decision 2026-08-02): validation runs on the MERGED blob only, resolved
+      along the graph's `inherits` chain at finalize (chain length one everywhere but session
+      templates), never on a partial declared blob. The LLD settles the per-key provenance the merge
+      tracks for error attribution, the two-stage reference extraction (structural refs per declared
+      blob feed the graph; secret refs read the effective blob), the inheritance edge as a typed,
+      non-dependency edge (FR17: excluded from the secret union, resolvability prediction, and
+      dependency listings; readiness/enablement propagation across it is this LLD's policy call),
+      and the retirement of the session resolver's use-time completeness call
+      (`sessions/templates.py::_validate_merged`) in favor of the finalize pass.
   - **FR17 starting point, surveyed 2026-08-06.** Half the machinery already exists and the LLD must
     not rebuild it: `ResourceReference` (`resources/reference.py:59`) has typed subclasses
     `SecretReference` and `TemplateReference`, and all four template kinds emit `TemplateReference`
@@ -321,47 +320,50 @@ the derivation sequence are not started.
     template. FR17 must not be implemented as `isinstance(ref, TemplateReference)`: that filter
     really means "points at a template" and would silently misclassify any future uses-a-template
     edge as inheritance, reintroducing the same conflation one level down. The LLD names the
-    explicit relationship marker instead. - [x] Per-capability config offered per FACET (operator
-    ruling, 2026-08-06, roadmap note 4; settles the contract after two superseded designs, schema
-    slots and `config_model_for(consuming_kind)`). A facet is the level a capability is driven at
-    (`vm`, `user`, `workspace`, `session`), pairing that level's methods with its config. A
-    capability offers a fixed set of facet configs the way it offers a fixed set of API methods, and
-    consumers choose which facet they drive, so producers never know their consumers; core asks
-    `config_for(facet)` (names indicative). **The ordinary case stays invisible:** every capability
-    today has one config shared by all its operations, so it writes `config_model = X` and names no
-    facet. Only harness-integration declares per-facet configs, in wave 4. **Facets are NOT scopes
-    and core owns the mapping:** admin and agent both resolve to `user`, session start and resume
-    share `session`, so a vm-template admin attachment and an agent-template agree by construction
-    rather than by each capability encoding it. **Readable at finalize:** core reads the
-    facet-config association before any method runs, so it must be declared data, not merely a
-    signature annotation. Asking for a facet a capability does not offer is a hard error naming what
-    it does offer; pin it with a test. **Config presence is NOT the support claim** and must not
-    become one, or this is the rescinded slot mechanism under a new name: support is carried by the
-    implementation, and accepting no config at a facet just means emitting no schema there. "Facet"
-    is a plain noun here; the machinery meaning retired on 2026-08-05 (declaration contracts,
-    support-by-presence, grants) stays dead. The descriptor's deferred `config_schema` field (the
-    kind's model contract) is created here, and union assembly is per `(kind, facet)`, reducing to
-    today's per-kind union while every capability declares one config and no facet. Registration
-    carries `contract_version` (day-one, operator ruling) and passes the registration-time
-    conformance checks from 2.0 (implementation-contract, metadata, constructibility, required ops,
-    plus config model conformance added here) that replace the retired type-and-cast seam. The
-    secret-backend `mapping_model` registers as that kind's config model; its constructed-singleton
-    instance policy stays the descriptor-carried interim exception (wave 3 re-homes it, not this
-    effort). Empty-config capabilities register the shared empty model. Inventory re-enumerated
-    2026-08-02, still re-check at implementation: vm-platform lima, wsl2, azure-vm (including the
-    nested `service_principal` model), proxmox, aws-ec2 (new, renamed from ec2 by PR #363; nested
-    `credentials` model with `access_key_secret` as a `SecretRef` defaulting to the well-known name,
-    plus the `instance_types` catalog); git-credential-provider github (scope union: repos/owner
-    mutual exclusion as a model validator; `token` as `SecretRef` with the `git-token-{owner_name}`
-    template), azdo; harness-integration (the kind renamed by PR #383) shell (config: command,
-    resume_command, required_commands; the `restart_command` alias was removed by the session-resume
-    SDD before wave 2, so shell's config is just those three fields), claude-code, codex
-    (`extra_args` list plus flag fields); secret backends env-var, prompt (no mapping), onepassword
-    (mapping is itself a union: `op://` string or account/reference table). **Modeling consequence
-    (2.1 LLD):** a mapping whose root is a bare string or a string-or-table union cannot be a
-    `BaseModel` at all, so backend mapping models extend the root-model base, not the mapping base.
-    Do not model the generic `False` opt-out into a backend's model: it is filtered by the loop
-    before any backend sees it (`secrets/base.py:133`).
+    explicit relationship marker instead.
+
+- [x] Per-capability config offered per FACET (operator ruling, 2026-08-06, roadmap note 4; settles
+      the contract after two superseded designs, schema slots and
+      `config_model_for(consuming_kind)`). A facet is the level a capability is driven at (`vm`,
+      `user`, `workspace`, `session`), pairing that level's methods with its config. A capability
+      offers a fixed set of facet configs the way it offers a fixed set of API methods, and
+      consumers choose which facet they drive, so producers never know their consumers; core asks
+      `config_for(facet)` (names indicative). **The ordinary case stays invisible:** every
+      capability today has one config shared by all its operations, so it writes `config_model = X`
+      and names no facet. Only harness-integration declares per-facet configs, in wave 4. **Facets
+      are NOT scopes and core owns the mapping:** admin and agent both resolve to `user`, session
+      start and resume share `session`, so a vm-template admin attachment and an agent-template
+      agree by construction rather than by each capability encoding it. **Readable at finalize:**
+      core reads the facet-config association before any method runs, so it must be declared data,
+      not merely a signature annotation. Asking for a facet a capability does not offer is a hard
+      error naming what it does offer; pin it with a test. **Config presence is NOT the support
+      claim** and must not become one, or this is the rescinded slot mechanism under a new name:
+      support is carried by the implementation, and accepting no config at a facet just means
+      emitting no schema there. "Facet" is a plain noun here; the machinery meaning retired on
+      2026-08-05 (declaration contracts, support-by-presence, grants) stays dead. The descriptor's
+      deferred `config_schema` field (the kind's model contract) is created here, and union assembly
+      is per `(kind, facet)`, reducing to today's per-kind union while every capability declares one
+      config and no facet. Registration carries `contract_version` (day-one, operator ruling) and
+      passes the registration-time conformance checks from 2.0 (implementation-contract, metadata,
+      constructibility, required ops, plus config model conformance added here) that replace the
+      retired type-and-cast seam. The secret-backend `mapping_model` registers as that kind's config
+      model; its constructed-singleton instance policy stays the descriptor-carried interim
+      exception (wave 3 re-homes it, not this effort). Empty-config capabilities register the shared
+      empty model. Inventory re-enumerated 2026-08-02, still re-check at implementation: vm-platform
+      lima, wsl2, azure-vm (including the nested `service_principal` model), proxmox, aws-ec2 (new,
+      renamed from ec2 by PR #363; nested `credentials` model with `access_key_secret` as a
+      `SecretRef` defaulting to the well-known name, plus the `instance_types` catalog);
+      git-credential-provider github (scope union: repos/owner mutual exclusion as a model
+      validator; `token` as `SecretRef` with the `git-token-{owner_name}` template), azdo;
+      harness-integration (the kind renamed by PR #383) shell (config: command, resume_command,
+      required_commands; the `restart_command` alias was removed by the session-resume SDD before
+      wave 2, so shell's config is just those three fields), claude-code, codex (`extra_args` list
+      plus flag fields); secret backends env-var, prompt (no mapping), onepassword (mapping is
+      itself a union: `op://` string or account/reference table). **Modeling consequence (2.1
+      LLD):** a mapping whose root is a bare string or a string-or-table union cannot be a
+      `BaseModel` at all, so backend mapping models extend the root-model base, not the mapping
+      base. Do not model the generic `False` opt-out into a backend's model: it is filtered by the
+      loop before any backend sees it (`secrets/base.py:133`).
 - [x] **Strict-mode tightening is a BREAKING change and ships with an operator note.** The 2.1 base
       model is `strict=True`, and while today's hand-rolled validators are almost all
       `isinstance`-strict already, proxmox is not: `plugins/proxmox/platform.py:93` does
