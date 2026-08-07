@@ -179,10 +179,24 @@ def seat_installed_plugins() -> None:
     three platform plugins ship in-tree.
 
     So those surfaces call this instead of importing the package with a
-    comment explaining why, and the requirement has a name. Idempotent (the
-    second call is a module-table hit) and enablement-independent: a plugin's
-    implementations seat whether or not config opts into the plugin, because
-    enablement is a property of the published ROW, not of the registry.
+    comment explaining why, and the requirement has a name.
+    Enablement-independent: a plugin's implementations seat whether or not
+    config opts into the plugin, because enablement is a property of the
+    published ROW, not of the registry.
+
+    **Read the body before relying on this.** The import IS the seating, so
+    a CALLER that imports this function has already seated by the time it
+    calls it, and this function body is a module-table hit. Two consequences
+    worth stating rather than discovering:
+
+    - it cannot RE-seat. If a registry is ever cleared (nothing does today;
+      ``seated_plugin`` restores what it took), this has to become a real
+      operation over ``SYSTEM_PLUGINS`` rather than an import.
+    - it cannot be pinned in-process. A test that neuters it still passes
+      as soon as anything in the same interpreter imports
+      ``agentworks.plugins`` for ``Plugin`` or ``seated_plugin``, which
+      three test modules do at module scope. The pin that means something
+      is ``tests/manifests/test_spec_model.py``'s fresh interpreter.
     """
     import agentworks.plugins  # noqa: F401  (importing IS the seating)
 

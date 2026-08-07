@@ -249,15 +249,16 @@ def test_the_capability_union_replaces_the_open_block_at_the_host_field() -> Non
 
 
 def test_the_union_carries_the_platforms_shipped_plugins_contribute() -> None:
-    """The command's own help says a plugin's capability appears in the
-    schema once the plugin is installed. It did not: seating is an import
-    side effect of ``agentworks.plugins``, whose only importer was
-    ``build_registry``, so a surface that never builds a registry emitted
-    lima and wsl2 and silently dropped the three in-tree platform plugins.
+    """A plugin's capability reaches the emitted schema, by name.
 
     Named plugins rather than a count, and rather than the live registry
     (which is what ``_platform_names`` reads, so it would have agreed with
-    a truncated union): the assertion has to fail if seating regresses."""
+    a truncated union). What this does NOT prove is that the seating step
+    is doing it: three test modules import ``agentworks.plugins`` at module
+    scope for their own fixtures, so by the time this runs, the process is
+    seated whatever ``spec_model`` does. That guard has to run in a fresh
+    interpreter and lives in ``tests/manifests/test_spec_model.py``; this
+    one is about the emitted SHAPE carrying the names."""
     mapping = _vm_platform_union()["discriminator"]["mapping"]
     assert {"azure-vm", "aws-ec2", "proxmox"} <= set(mapping)
 

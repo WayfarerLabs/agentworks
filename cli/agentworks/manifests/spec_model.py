@@ -228,6 +228,15 @@ def _seat_plugin_capabilities() -> None:
     seats a plugin's implementations. Before this call, ``agw resource
     schema vm-site`` emitted lima and wsl2 and silently omitted the three
     platform plugins that ship in-tree.
+
+    **The IMPORT below is what seats**, because importing any submodule of
+    ``agentworks.plugins`` runs the package body, and the package body
+    registers every shipped plugin. The call that follows is therefore
+    always a no-op, and it is here anyway for two reasons: it gives the
+    requirement a name a reader can follow, and it is where a real re-seat
+    would go if one is ever needed. What makes this LAZY is the placement,
+    not the call: the import lives inside a function, so importing this
+    module does not drag in every plugin.
     """
     from agentworks.plugins.registration import seat_installed_plugins
 
