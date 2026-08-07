@@ -13,6 +13,7 @@ from agentworks.guide.contract import (
     ImplementationAnchor,
     KindAnchor,
     ResourceAnchor,
+    Sample,
     TopicContribution,
     UnknownGuideTopicError,
     parse_topic_contribution,
@@ -91,6 +92,18 @@ def _taxonomy_error(candidate: _GuideContributionCandidate, topic: TopicContribu
     else:
         valid = True
     if valid:
+        if (
+            isinstance(anchor, KindAnchor)
+            and handler is not None
+            and handler.category == "capability"
+            and any(isinstance(block, Sample) for block in topic.blocks)
+        ):
+            return GuideContributionError(
+                f"invalid guide contribution from {candidate.source}: sample block requires a declarable kind",
+                source=candidate.source,
+                topic=str(topic.topic),
+                field_path="blocks",
+            )
         return None
     return GuideContributionError(
         f"invalid guide contribution from {candidate.source}: anchor does not match a registered kind category",

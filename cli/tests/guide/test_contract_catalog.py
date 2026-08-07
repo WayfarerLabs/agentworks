@@ -7,6 +7,7 @@ import pytest
 from agentworks.guide import (
     ActionId,
     ActionInput,
+    ActionList,
     BlockId,
     BrokenTopicLinkError,
     ConceptAnchor,
@@ -66,6 +67,42 @@ def test_expression_payloads_are_rejected_without_execution(payload: str) -> Non
     with pytest.raises(GuideContributionError):
         parse_topic_contribution(_topic("concept-safe", markdown=danger), "plugin:bad")
     assert not called
+
+
+@pytest.mark.parametrize(
+    "markdown",
+    [
+        "Use `{{literal_name}}` exactly.",
+        "Use `${literal}` exactly.",
+        "Use `<% literal %>` exactly.",
+        "```text\nordinary fenced code\n```\nUse `{{literal_after_fence}}` exactly.",
+    ],
+)
+def test_expression_markers_inside_closed_literal_code_are_allowed(markdown: str) -> None:
+    parsed = parse_topic_contribution(_topic("concept-safe", markdown=markdown), "core")
+
+    assert cast("Overview", parsed.blocks[0]).markdown == markdown
+
+
+@pytest.mark.parametrize(
+    "markdown",
+    [
+        "Use `{{unclosed}} exactly.",
+        r"Use \`{{escaped}}\` exactly.",
+        "```text\n{{unclosed}}",
+        "```text\n{{fenced}}\n```",
+        "```text\n`{{inline-inside-fence}}`\n```",
+        "Use ``{{multi-backtick}}`` exactly.",
+        "Use `` `{{inline-inside-multi}}` `` exactly.",
+        "Use `{{multiline}}\n` exactly.",
+        "## {{heading}}",
+        "<code>{{html-is-not-a-code-span}}</code>",
+        "`safe` then {{prose}}",
+    ],
+)
+def test_expression_markers_outside_closed_literal_code_are_rejected(markdown: str) -> None:
+    with pytest.raises(InvalidBlockError):
+        parse_topic_contribution(_topic("concept-safe", markdown=markdown), "core")
 
 
 @pytest.mark.parametrize(
@@ -316,6 +353,112 @@ def _action() -> GuideAction:
         ("agw", "resource", "$NAME"),
         "Inspect manually.",
     )
+
+
+def _action_value(*, action_id: str = "verify", manual: bool = False) -> dict[str, object]:
+    value: dict[str, object] = {
+        "id": action_id,
+        "precondition": "Needs verification.",
+        "required_inputs": [{"name": "NAME", "description": "Resource name.", "required": True, "sensitive": False}],
+        "consent": "read-configured-state",
+        "expected_state": "Verified.",
+        "verification": ["agw", "resource", "$NAME"],
+        "refusal_alternative": "Inspect manually.",
+    }
+    if manual:
+        value["manual_steps"] = "Inspect only NAME and record the result."
+    else:
+        value["command"] = ["agw", "resource", "$NAME"]
+    return value
+
+
+def _action_topic(actions: list[dict[str, object]]) -> dict[str, object]:
+    topic = _topic("concept-actions")
+    topic["blocks"] = [{"type": "action-list", "id": "actions", "actions": actions}]
+    return topic
+
+
+def test_action_list_recursively_parses_commands_and_manual_steps_without_retaining_inputs() -> None:
+    command = _action_value()
+    manual = _action_value(action_id="inspect", manual=True)
+    parsed = parse_topic_contribution(_action_topic([command, manual]), "core")
+
+    block = parsed.blocks[0]
+    assert isinstance(block, ActionList)
+    assert block.actions[0].command == ("agw", "resource", "$NAME")
+    assert block.actions[1].manual_steps == "Inspect only NAME and record the result."
+    command["command"] = ["changed"]
+    assert block.actions[0].command == ("agw", "resource", "$NAME")
+
+
+@pytest.mark.parametrize(
+    ("mutation", "path"),
+    [
+        (lambda action: action.update(extra="no"), "blocks[0].actions[0].extra"),
+        (
+            lambda action: action["required_inputs"][0].update(extra="no"),
+            "blocks[0].actions[0].required_inputs[0].extra",
+        ),
+        (lambda action: action.update(manual_steps="also manual"), "blocks[0].actions[0]"),
+        (lambda action: action.pop("command"), "blocks[0].actions[0]"),
+    ],
+)
+def test_action_list_nested_shape_and_exact_one_operation_fail_closed(mutation, path: str) -> None:
+    action = _action_value()
+    mutation(action)
+    with pytest.raises(GuideContributionError) as raised:
+        parse_topic_contribution(_action_topic([action]), "plugin:z")
+    assert raised.value.field_path == path
+
+
+def test_action_ids_are_unique_across_action_blocks() -> None:
+    topic = _action_topic([_action_value()])
+    topic["blocks"] = [
+        {"type": "action-list", "id": "first", "actions": [_action_value()]},
+        {"type": "action-list", "id": "second", "actions": [_action_value()]},
+    ]
+    with pytest.raises(InvalidBlockError, match="duplicate action IDs"):
+        parse_topic_contribution(topic, "core")
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "path"),
+    [
+        ("required_inputs", [{}] * 33, "blocks[0].actions[0].required_inputs"),
+        ("command", ["agw"] * 65, "blocks[0].actions[0].command"),
+        ("verification", ["agw"] * 65, "blocks[0].actions[0].verification"),
+        ("precondition", "x" * (8 * 1024 + 1), "blocks[0].actions[0].precondition"),
+    ],
+)
+def test_action_list_nested_bounds_fail_closed(field: str, value: object, path: str) -> None:
+    action = _action_value()
+    action[field] = value
+    with pytest.raises(GuideContributionError) as raised:
+        parse_topic_contribution(_action_topic([action]), "core")
+    assert raised.value.field_path == path
+
+
+def test_action_list_never_interpolates_sensitive_inputs() -> None:
+    action = _action_value()
+    inputs = action["required_inputs"]
+    assert isinstance(inputs, list)
+    assert isinstance(inputs[0], dict)
+    inputs[0]["sensitive"] = True
+    with pytest.raises(GuideContributionError, match="sensitive input"):
+        parse_topic_contribution(_action_topic([action]), "core")
+
+
+def test_action_list_count_and_cumulative_byte_bounds_fail_closed() -> None:
+    with pytest.raises(InvalidBlockError, match="32-action limit"):
+        parse_topic_contribution(
+            _action_topic([_action_value(action_id=f"action-{index}") for index in range(33)]),
+            "core",
+        )
+    actions = [_action_value(action_id=f"action-{index}", manual=True) for index in range(17)]
+    for action in actions:
+        action["manual_steps"] = "x" * (8 * 1024)
+    with pytest.raises(InvalidBlockError, match="131072-byte action-data limit"):
+        parse_topic_contribution(_action_topic(actions), "core")
 
 
 @pytest.mark.parametrize(
