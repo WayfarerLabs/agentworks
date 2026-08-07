@@ -154,8 +154,11 @@ any other review; triage them, push back on the wrong ones, and fix the valid on
   commits keep the work reviewable and recoverable. Follow the project's Conventional Commits
   convention (`CONTRIBUTING.md`) for message shape.
 - **One PR per feature is the default, with a size ceiling.** Put the whole feature in a single PR,
-  SDD artifacts included. Split into multiple PRs only when there is a good reason, the usual one
-  being legitimate SDD phases that each carry independent, standalone value. A phase that only has
+  SDD artifacts included. Split into multiple PRs only when there is a good reason. The usual one is
+  legitimate SDD phases that each carry independent, standalone value; another is cross-effort
+  visibility, per the `sdd` skill's merge-artifacts-early guidance: when another effort could build
+  against your design (under an active roadmap, assume one can), the SDD artifacts land on `main`
+  ahead of the implementation instead of riding the feature branch to the end. A phase that only has
   value once a later phase lands is not a reason to split; it is a commit within the one PR.
   Always-green phased commits give reviewers a natural commit-by-commit reading order inside a
   single large PR. The ceiling: when a feature's projected diff grows past what one reviewer can
