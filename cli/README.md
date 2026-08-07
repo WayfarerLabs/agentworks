@@ -692,7 +692,8 @@ description merge as usual.
 **TOML session-template sections are removed.** `config.toml` is settings only, so
 `[session_templates.<name>]` no longer loads: any resource-declaring section is now a hard error at
 config load. Declare session templates as YAML manifests (`agw resource sample session-template`),
-and run `agw resource migrate session-template` to move any that still live in `config.toml`.
+and rewrite any that still live in `config.toml`; the [resources guide](../docs/guides/resources.md)
+walks through it.
 
 ### Config
 
@@ -714,16 +715,15 @@ secret backends, etc. The two commands below stop at the framework-uniform field
 mappings, template inheritance chains, resolution previews), reach for the per-kind command (e.g.
 `agw secret describe`).
 
-| Command                              | Description                                                           |
-| ------------------------------------ | --------------------------------------------------------------------- |
-| `agw resource list`                  | List every resource in the registry across all kinds                  |
-| `agw resource kinds`                 | List every kind: category (declarable/capability), counts, purpose    |
-| `agw resource describe KIND/NAME`    | Show the per-resource detail view (header + Referenced by + Used by)  |
-| `agw resource describe-kind TARGET`  | Show what a KIND (or a KIND/NAME capability) accepts, field by field  |
-| `agw resource edit KIND/NAME`        | Open the declaring YAML manifest in $EDITOR                           |
-| `agw resource migrate [SELECTOR]...` | Move TOML resources to YAML, and upgrade manifests on a retired shape |
-| `agw resource sample KIND [--write]` | Print (or save) a kind's commented sample manifest (--all for all)    |
-| `agw resource schema [KIND]`         | Print the manifest JSON Schema (`--write` saves the whole set)        |
+| Command                              | Description                                                          |
+| ------------------------------------ | -------------------------------------------------------------------- |
+| `agw resource list`                  | List every resource in the registry across all kinds                 |
+| `agw resource kinds`                 | List every kind: category (declarable/capability), counts, purpose   |
+| `agw resource describe KIND/NAME`    | Show the per-resource detail view (header + Referenced by + Used by) |
+| `agw resource describe-kind TARGET`  | Show what a KIND (or a KIND/NAME capability) accepts, field by field |
+| `agw resource edit KIND/NAME`        | Open the declaring YAML manifest in $EDITOR                          |
+| `agw resource sample KIND [--write]` | Print (or save) a kind's commented sample manifest (--all for all)   |
+| `agw resource schema [KIND]`         | Print the manifest JSON Schema (`--write` saves the whole set)       |
 
 `resource list` accepts `--kind <csv>` (e.g. `--kind secret,vm-template`) and `--origin <variant>`
 where variant is `operator`, `auto`, `builtin`, or `plugin`. Disabled rows (a not-enabled system
@@ -731,7 +731,7 @@ plugin's capabilities and bundled resources) are hidden by default; pass `--incl
 reveal them (combine with `--origin plugin` to see just a not-enabled plugin's rows). `--names-only`
 emits `kind/name` per line and backs shell completion (`/` cannot appear in resource names, so the
 split is unambiguous). The `kind/name` token is the one grammar across the resource group:
-`resource describe secret/npm-token` and `resource migrate vm-template/dev` take the same shape.
+`resource describe secret/npm-token` and `resource edit vm-template/dev` take the same shape.
 
 `resource schema` emits JSON Schema (draft 2020-12) for manifests: one document schema per kind plus
 an any-kind one, derived from the same models the loader validates against, so it cannot describe a
@@ -740,34 +740,11 @@ that kind's. `--write` saves the whole set under `resources/.schema/`, which is 
 `# yaml-language-server: $schema=...` line in written manifests refers to. See
 [the resources guide](../docs/guides/resources.md) for the editor setup.
 
-`resource migrate` is a recurring, incremental migration command. It moves resources (or a subset)
-from TOML to YAML manifests. Selectors scope the TOML path: `KIND` selects one kind, `KIND/NAME` one
-resource (overlaps union), and `--all` selects everything migratable; a bare invocation errors
-rather than migrating the whole config by accident. `--layout per-kind|single|per-resource` picks
-the file mapping for TOML-derived documents (default one multi-document file per kind, e.g.
-`resources/vm-templates.yaml`).
-
-TOML-derived documents append after a `---` separator without rewriting the existing YAML content.
-Every run also upgrades manifests that still name a capability in the retired sibling shape
-(`platform: lima` plus a `platform_config:` table, and likewise `provider`/`provider_config`) to the
-tagged table `platform: {name: lima, ...}`, rewriting those files in place with their comments,
-quoting, key order, and unrelated documents intact. That half ignores the selectors: the retired
-shape no longer loads at all, so leaving one document behind would leave the whole resources
-directory unloadable.
-
-Before any write, the command backs up `config.toml` and stores recovery copies of existing YAML
-files it will append to or rewrite under `paths.backups`. Digest checks refuse to replace a TOML or
-YAML file changed since planning. Writes are atomic, and rollback restores only files that still
-match this run's output digest, so a concurrent operator edit is never overwritten; an incomplete
-rollback reports the recovery copy for manual repair.
-
-Migrated TOML sections are commented out in place with a `# migrated to resources/<file>` marker
-(default) or removed with `--toml delete`. Deprecated `[secret_backends.*]` sections are dropped
-(with a note) by any run, including a bare run with nothing else to migrate. Every real run finishes
-by verifying that each migrated resource still decodes to exactly what it declared in TOML; on
-mismatch the run rolls back and reports. `--dry-run` prints a summary of what would migrate or be
-rewritten and writes nothing; add `--full` for complete YAML documents, YAML diffs, and the
-`config.toml` diff.
+Agentworks ships no migration command. A `config.toml` that still declares resources is a hard error
+naming every offending section, and the rewrite is the operator's, walked through by
+[the resources guide](../docs/guides/resources.md). `resource sample --write` and
+`resource describe-kind` are what that walkthrough leans on, and both read no config (or settings
+only), so they answer while `config.toml` is still failing.
 
 `resource sample` prints a kind's fully-commented-out sample manifest (`--all` for every kind) --
 the YAML teaching surface, mirroring `agw config sample` for the settings file. `--write <file>`
@@ -802,8 +779,8 @@ Configuration splits into two surfaces:
   declared as YAML manifests under `~/.config/agentworks/resources/`, auto-loaded whenever a command
   needs them. `agw resource sample <kind>` prints a commented starter (`--all` for every kind). The
   classic TOML resource sections are no longer supported: a `config.toml` that still declares
-  resources is a hard error at load (they were previously deprecated with a warning). Run
-  `agw resource migrate` to move any legacy TOML declarations to YAML. See
+  resources is a hard error at load (they were previously deprecated with a warning). Rewriting
+  those sections as manifests is a manual step, walked through by
   [docs/guides/resources.md](../docs/guides/resources.md).
 
 Settings sections (`config.toml`, permanent):
@@ -822,7 +799,7 @@ and purpose, and `agw resource describe-kind KIND` documents what one accepts, f
 
 The table below exists for one thing this repository is otherwise the only record of: which removed
 legacy TOML section used to declare each kind. Those sections no longer load; the mapping is a
-reference for reading an old `config.toml` and for `agw resource migrate`.
+reference for reading an old `config.toml` and for rewriting it as manifests.
 
 | Kind                                                                          | Removed TOML section                        |
 | ----------------------------------------------------------------------------- | ------------------------------------------- |

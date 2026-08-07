@@ -10,7 +10,7 @@
 # prints a commented starter; --all for every kind). Legacy TOML resource
 # sections are no longer supported: a config.toml that still declares
 # resources is a hard error at load now (they were previously deprecated
-# with a warning). Run `agw resource migrate` to move them to YAML. This
+# with a warning); the resources guide walks through rewriting them. This
 # file is the permanent home for SETTINGS: operator identity, paths,
 # defaults, enabled plugins, and the secret backend chain.
 #
@@ -60,7 +60,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # admin and agent homes there are kept private (mode 0750). Use a data volume path.
 #vm_workspaces = "/opt/agentworks/workspaces"  # workspace directory on VMs
 #vscode_workspaces = "~/aw-vscode-workspaces"   # .code-workspace file directory
-#backups = "~/.config/agentworks/backups"       # backup directory (vm backups, config.toml backups from `agw resource migrate`)
+#backups = "~/.config/agentworks/backups"       # backup directory (vm backups)
 
 # --- System plugins ---
 # `[plugins]` is the plugin-subsystem namespace, and `system` is its list of

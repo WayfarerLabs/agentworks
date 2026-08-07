@@ -178,8 +178,11 @@ a config resource or a live instance.
 > Superseded by [ADR 0022](0022-single-resource-declaration-frontend.md) (2026-08-05): the dual-path
 > stance in this section is retired. YAML manifests are now the single resource-declaration
 > frontend; config.toml is settings only and hard-errors on any resource-declaring section. ADR 0022
-> supersedes ONLY this section; the rest of this ADR still stands. `agw resource migrate` remains
-> the escape hatch that moves legacy TOML declarations to YAML.
+> supersedes ONLY this section; the rest of this ADR still stands.
+>
+> Amended 2026-08-07 (operator ruling): `agw resource migrate` is deleted and Agentworks maintains
+> no automated migration tooling. References to it in this ADR read as history; see the status note
+> on ADR 0022 for what replaced it.
 
 TOML resource sections remain fully supported publishers into the same registry, with deprecation
 warnings at load. As originally accepted, removal was deferred to a future major release and the

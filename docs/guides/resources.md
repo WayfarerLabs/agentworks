@@ -111,9 +111,9 @@ line:
 # yaml-language-server: $schema=.schema/vm-template.schema.json
 ```
 
-Both `agw resource sample --write` and `agw resource migrate` stamp it on the files they CREATE, and
-write the schemas alongside so the reference resolves. Writing into a file that already exists never
-INSERTS a line, and what happens depends on whether one is there already:
+`agw resource sample --write` stamps it on the files it CREATES, and writes the schemas alongside so
+the reference resolves. Writing into a file that already exists never INSERTS a line, and what
+happens depends on whether one is there already:
 
 - **No modeline?** Nothing is added. A modeline has to be the first line, and inserting one would
   shift every line number you already know. To get the association on a manifest you wrote by hand,
@@ -171,8 +171,8 @@ hold:
 A `git-credential`'s `spec.provider` is one tagged table: its `name` key selects the provider
 capability and the remaining keys are that provider's configuration, which
 `agw resource describe-kind git-credential-provider/<name>` documents. (The old sibling shape, a
-`provider:` string plus a `provider_config:` table, is no longer accepted;
-`agw resource migrate --all` folds the pair into the tagged table.)
+`provider:` string plus a `provider_config:` table, is no longer accepted; fold the pair into the
+tagged table, which the load error spells out for your own document.)
 
 A github credential may carry a scope there, and the choice is the part worth explaining:
 `repos: ["owner/name", ...]` pins the credential to specific repositories (always a list, even for
@@ -205,46 +205,55 @@ store lines and in provider-side logs; remotes are never rewritten.
 Declaring resources in `config.toml` is no longer supported. `config.toml` is settings only. The
 classic TOML resource sections (`[secrets.*]`, `[vm_templates.*]`, `[git_credentials.*]`, the legacy
 flat `[azure]` / `[proxmox]` vm-site sections, `[apt_sources.*]`, and the rest) no longer load: a
-`config.toml` that still carries any of them is a hard error at load, naming the offending sections
-and pointing you at `agw resource migrate`. This was deprecated with a load-time warning in an
-earlier release and is now removed. Resources are declared as YAML manifests (see "Declaring
-resources" above); settings sections load exactly as before.
+`config.toml` that still carries any of them is a hard error at load, naming the offending sections.
+This was deprecated with a load-time warning in an earlier release and is now removed. Resources are
+declared as YAML manifests (see "Declaring resources" above); settings sections load exactly as
+before.
 
-**Upgrading.** This is a breaking change. If your `config.toml` still declares resources, migrate
-them to YAML manifests before (or right after) upgrading, so no command hits the hard error:
+**Upgrading.** This is a breaking change, and the rewrite is yours to make. Agentworks does not ship
+a migration command: what it ships instead is an error that names every offending section, and the
+two commands that show you what each one becomes.
+
+The shape of the work is the same for most kinds. One TOML section becomes one YAML document: the
+section's name becomes `metadata.name`, its `description` moves to `metadata.description`, and every
+other key moves into `spec` under the same name. So `[secrets.npm-token]` becomes a `secret`
+document named `npm-token`, `[vm_templates.dev]` a `vm-template` named `dev`, and so on.
 
 ```bash
-agw resource migrate --all             # move every TOML resource declaration to YAML
-agw resource migrate secret            # or one kind at a time
-agw resource migrate vm-template/dev   # or one resource
-agw resource migrate --all --dry-run   # see the plan first (--full for the diff)
+agw resource describe-kind vm-template            # every field, its type, whether it is required
+agw resource sample vm-template --write vms.yaml  # a commented starter to edit
+agw doctor                                        # confirms the result loads and resolves
 ```
 
-`agw resource migrate` still reads the legacy TOML directly and can run even against a `config.toml`
-the app would otherwise refuse to load (it loads with resources skipped, the settings-only escape
-hatch), so you can migrate on either side of the upgrade. Once every resource section is moved, the
-hard error is gone. Any section you have not moved stays a hard error until you migrate or delete
-it.
+Work one kind at a time, deleting each `config.toml` section once its manifest loads. Both commands
+above read no config, so they answer while `config.toml` is still failing, and `--write` loads
+settings only, so it works against a config that still carries the sections.
 
-The migrator handles TOML-declared resources, which become new YAML documents appended without
-rewriting existing YAML content; migrated TOML sections are commented out in place with a
-`# migrated to ...` marker (or removed with `--toml delete`).
+These sections are the exceptions:
 
-**Manifests on a retired shape.** Every run also upgrades manifests that still name a capability in
-the old sibling shape (`platform: lima` plus a `platform_config:` table, and likewise
-`provider`/`provider_config`) to the tagged table `platform: {name: lima, ...}`. Those files are
-rewritten in place, preserving comments, quoting, key order, and every unrelated document. This half
-is not scoped by the selectors: the old shape no longer loads at all, so leaving one document behind
-would leave the whole resources directory unloadable. A run with nothing else to do (`--all` with no
-TOML resources left) does exactly this and nothing more.
+- `[azure]` becomes a `vm-site` named `azure` whose `spec.platform` is `{name: azure-vm, ...}`, and
+  `[proxmox]` a `vm-site` named `proxmox` whose platform is `{name: proxmox, ...}`. The section's
+  keys sit inside that table beside the name. See "VM sites and platforms" above for the shape.
+- `[git_credentials.*]`: the section's `provider` (or the older `type`) and its `token` both move
+  inside one tagged `spec.provider` table, along with anything else the provider owns such as `org`.
+  See "Scoped GitHub credentials" above.
+- `[session_templates.*]`: a flat `command` / `resume_command` / `required_commands` trio belongs to
+  the `shell` harness integration, so it becomes
+  `spec.harness_integration: {name: shell, command: ...}`. A section that already names
+  `harness_integration` moves that name and its `harness_integration_config` keys into the same
+  tagged table. See "Harness integrations" above.
+- `[admin.config]` and `[admin.env]` become one `admin-template` named `default`, with the env table
+  nested as `spec.env`.
+- `[named_console]` becomes a `named-console-template` named `default`.
+- `[secret_backends.*]` becomes nothing. Those sections never carried configuration; delete them and
+  list the backends you want in `[secret_config].backends`, which is a setting and stays in
+  `config.toml`.
 
-Every real run backs up `config.toml`; a run that modifies an existing YAML file also stores its
-original as a recovery copy under `paths.backups`. Digest guards refuse to replace files changed
-after planning, writes are atomic, and rollback restores only outputs that still match the run's
-digest, so concurrent edits are not overwritten. Finally, the command verifies that the migrated
-resources still decode to exactly what they declared in TOML, rolling back on a mismatch and
-reporting any recovery copy needed for manual repair. Use `--dry-run --full` to inspect generated
-documents, in-place YAML diffs, and the TOML diff before writing.
+**Manifests on a retired shape.** A manifest that still names a capability in the old sibling shape
+(`platform: lima` plus a `platform_config:` table, and likewise `provider`/`provider_config`) does
+not load either. The error prints the exact tagged table that replaces it, built from what your own
+document says, so the fix is to paste that line in place of the pair. Every document on the old
+shape has to move: one left behind leaves the whole resources directory unloadable.
 
 ## VM sites and platforms
 
@@ -272,8 +281,8 @@ spec:
   `agw resource describe-kind vm-platform/<name>` documents one platform's own fields. A platform
   needing no config is just `platform: {name: wsl2}`. Remote Lima is just a lima site with a
   `vm_host: user@host` key. The old sibling shape (`platform: azure-vm` as a string plus a
-  `platform_config:` table) is no longer accepted; `agw resource migrate --all` folds the pair into
-  the tagged table.
+  `platform_config:` table) is no longer accepted; fold the pair into the tagged table, which the
+  load error spells out for your own document.
 - The `lima-local` and `wsl2` sites ship built in with empty config. Like every site they register
   on every host and report not-ready where this host lacks what they need (wsl2 is Windows-only; a
   local Lima site needs `limactl`); a not-ready site still lists and describes with its reason, and
@@ -298,8 +307,8 @@ spec:
   enabled, and `agw resource describe-kind vm-platform/<name>` says which plugin a platform arrives
   with.
 - The legacy flat `[azure]` / `[proxmox]` TOML sections no longer load: like every resource section,
-  they are a hard error in `config.toml` now. Run `agw resource migrate vm-site` to move them to
-  vm-site manifests (they migrate as vm-site, unchanged).
+  they are a hard error in `config.toml` now. Each becomes a `vm-site` manifest whose platform table
+  is named after the section and carries the section's keys unchanged.
 
 ## Harness integrations
 
@@ -607,20 +616,15 @@ rather than by hand-written per-kind code. That is what makes `agw resource samp
 of date. It also means a manifest that used to load can now fail, in ways worth going through before
 you upgrade.
 
-### Hand edits first, the migrator last
+### How to work through it
 
-That order is not a preference. `agw resource migrate` proves its own work by rebuilding the
-registry, and rebuilding loads your WHOLE resources directory, so it refuses to run while anything
-in there does not load, including documents it would never touch. It says so instead of starting,
-and it writes nothing when it refuses. So:
-
-1. Upgrade, run any command, and fix what it names. Repeat until commands stop complaining.
-2. Then run the migrator, for the one change below that has tooling.
+Upgrade, run any command, and fix what it names. Repeat until commands stop complaining, then run
+`agw doctor` for the full health picture.
 
 **Expect one resource per pass.** Errors aggregate WITHIN a resource: a document with three problems
 reports all three at once. They do not aggregate ACROSS resources, because the load stops at the
-first resource that fails. `agw resource list`, `agw doctor`, and the migrator all behave this way,
-so six broken resources is six passes rather than one list of six.
+first resource that fails. `agw resource list` and `agw doctor` both behave this way, so six broken
+resources is six passes rather than one list of six.
 
 **The line number is the document's, not the mistake's.** Each error names the file, the resource,
 the field, and what was expected, and the `file:line` is where that DOCUMENT starts. Look for the
@@ -631,28 +635,17 @@ named field inside the document at that line rather than at the line itself.
 prints the same fields as a document to edit. Neither reads your config, so both answer while it is
 unloadable. That is why every error points at them.
 
-### The one change with tooling
+### The retired sibling capability shape
 
-The retired sibling capability shape (`platform: lima` beside a `platform_config:` table, and
-likewise `provider` / `provider_config`) is a hard error, and `agw resource migrate --all` rewrites
-it in place, preserving comments and everything else in the file:
+`platform: lima` beside a `platform_config:` table (and likewise `provider` / `provider_config`) is
+a hard error. The error prints the exact replacement, built from what your document says: the
+capability you named plus the keys you wrote, folded into one tagged table. Paste that in place of
+the pair.
 
-```bash
-agw resource migrate --all --dry-run --full   # see it first
-agw resource migrate --all
-```
-
-Run this AFTER the hand edits below, for the reason above. The dry run is held to the same
-precondition as the real run, so a dry run that prints its diff and ends "nothing was written" tells
-you the real run gets that far too. The one thing it does not do is the final check that the rebuilt
-registry MATCHES the one it replaced, which needs the files on disk; that check is on the migrator,
-not on your config, and a failure there rolls everything back.
-
-Three limits worth knowing. It refuses, before writing anything, if a capability's config carries
-its own `name` key, or if it is not a table at all: folding either would mean guessing which half
-you meant, so the error tells you to do that one by hand. And it preserves quoting faithfully, so it
-will carry a quoted number through into a file that then trips the type checking below. Everything
-else here is a hand edit.
+Two documents get no printed replacement, because no honest one exists. If the `*_config` table
+carries its own `name` key, two keys claim to select the capability and which one wins is yours to
+decide. If it holds something that is not a table, there are no keys to fold and printing the tag
+alone would discard what you wrote. Both errors say so and name the field.
 
 ### Types are checked now
 
@@ -732,8 +725,8 @@ Then decide, per hit:
   now declared as a dependency, which `agw resource describe secret/proxmox-token` will show and
   `agw doctor` will check.
 
-The migrator does not take this evidence away from you: an explicit `null` (or `~`) comes back out
-spelled the way you wrote it, so the line is still there to find after a migration run.
+Nothing rewrites your files, so the evidence stays where you left it: that `grep` answers the same
+before and after every other fix here.
 
 ### Two smaller ones
 
