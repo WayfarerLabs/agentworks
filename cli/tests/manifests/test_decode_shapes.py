@@ -1,14 +1,17 @@
-"""Decode parity: the same resource declared as flat TOML and as a tagged
-manifest must produce the same Resource.
+"""What a manifest document decodes to, and which spellings it refuses.
 
-config.toml no longer loads resources on the normal path (ADR 0022), so
-the two sides fork: the flat TOML is read by the migrator's pre-side
-oracle (``agentworks.migrate.toml_resources``, where those loaders now
-live), the tagged YAML by the manifest decoders. Comparing the two is a
-real test of the emission mapping rather than a tautology, and pins the
-metadata.description mapping, the git-credential provider vocabulary, and
-the admin flattening. Source-dependent fields are normalized with the
-migrator's own ``strip_source_fields`` so the two cannot drift.
+The spec shapes that are easy to get subtly wrong across kinds: the
+git-credential provider vocabulary, the flattened admin-template spec, a
+metadata field written inside ``spec``, the capability-config caps, and
+the description handling every declarable kind shares. Per-kind field
+coverage lives in the ``test_spec_*`` modules; this one is the cross-kind
+decode behavior.
+
+This file used to hold a parity suite comparing each shape against the
+same resource declared as flat TOML, read by the migrator's frozen
+pre-side oracle. Both sides of that comparison are gone with the migrator
+(operator ruling, 2026-08-07): config.toml declares no resources, so
+there is no pre-side left to compare against.
 """
 
 from __future__ import annotations
@@ -23,7 +26,6 @@ from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
 from agentworks.errors import ConfigError
 from agentworks.manifests import ManifestSet, load_manifests
-from agentworks.migrate.toml_resources import toml_resource_rows
 
 _BASE_TOML = """
 [operator]
@@ -44,280 +46,6 @@ def _manifest(tmp_path: Path, text: str, rel: str = "res.yaml") -> None:
     path = tmp_path / "resources" / rel
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(dedent(text))
-
-
-def _strip(resource: Any) -> Any:
-    """Drop the source-dependent fields so TOML- and manifest-decoded
-    Resources compare equal. Shared with the migrate tool's per-run
-    registry-equivalence verification so the two cannot drift."""
-    from agentworks.migrate.verify import strip_source_fields
-
-    return strip_source_fields(resource)
-
-
-@pytest.mark.parametrize(
-    ("kind", "name", "toml_body", "manifest_doc"),
-    [
-        (
-            "secret",
-            "npm-token",
-            """
-            [secrets.npm-token]
-            description = "npm registry token"
-            hint = "generate at npmjs.com"
-            backend_mappings.env-var = "NPM_TOKEN"
-            """,
-            """
-            apiVersion: agentworks/v1
-            kind: secret
-            metadata:
-              name: npm-token
-              description: npm registry token
-            spec:
-              hint: generate at npmjs.com
-              backend_mappings:
-                env-var: NPM_TOKEN
-            """,
-        ),
-        (
-            "vm-template",
-            "dev",
-            """
-            [vm_templates.dev]
-            description = "dev box"
-            cpus = 8
-            apt = ["zsh"]
-            apt_packages = ["gh"]
-
-            [vm_templates.dev.env]
-            HTTP_PROXY = "http://proxy:3128"
-            NPM_TOKEN = { secret = "npm-token" }
-            """,
-            """
-            apiVersion: agentworks/v1
-            kind: vm-template
-            metadata:
-              name: dev
-              description: dev box
-            spec:
-              cpus: 8
-              apt: [zsh]
-              apt_packages: [gh]
-              env:
-                HTTP_PROXY: http://proxy:3128
-                NPM_TOKEN: {secret: npm-token}
-            """,
-        ),
-        (
-            "agent-template",
-            "dev",
-            """
-            [agent_templates.dev]
-            description = "dev agent"
-            shell = "zsh"
-            """,
-            """
-            apiVersion: agentworks/v1
-            kind: agent-template
-            metadata:
-              name: dev
-              description: dev agent
-            spec:
-              shell: zsh
-            """,
-        ),
-        (
-            # Flat TOML command fields and the canonical tagged YAML
-            # harness-integration table decode to the same row.
-            "session-template",
-            "claude",
-            """
-            [session_templates.claude]
-            command = "claude"
-            description = "Claude session"
-            required_commands = ["claude"]
-            """,
-            """
-            apiVersion: agentworks/v1
-            kind: session-template
-            metadata:
-              name: claude
-              description: Claude session
-            spec:
-              harness_integration:
-                name: shell
-                command: claude
-                required_commands: [claude]
-            """,
-        ),
-        (
-            "workspace-template",
-            "proj",
-            """
-            [workspace_templates.proj]
-            description = "the proj workspace"
-            repo = "https://github.com/org/proj.git"
-            tmuxinator = false
-            """,
-            """
-            apiVersion: agentworks/v1
-            kind: workspace-template
-            metadata:
-              name: proj
-              description: the proj workspace
-            spec:
-              repo: https://github.com/org/proj.git
-              tmuxinator: false
-            """,
-        ),
-        (
-            "named-console-template",
-            "default",
-            """
-            [named_console]
-            description = "the default console"
-            tmux_layout = "aw-session-vertical"
-            """,
-            """
-            apiVersion: agentworks/v1
-            kind: named-console-template
-            metadata:
-              name: default
-              description: the default console
-            spec:
-              tmux_layout: aw-session-vertical
-            """,
-        ),
-        (
-            "git-credential",
-            "github",
-            """
-            [git_credentials.github]
-            type = "github"
-            description = "gh access"
-            """,
-            """
-            apiVersion: agentworks/v1
-            kind: git-credential
-            metadata:
-              name: github
-              description: gh access
-            spec:
-              provider:
-                name: github
-            """,
-        ),
-        (
-            # The deliberate shape divergence: flat TOML (org top-level)
-            # and nested YAML (org under provider_config) decode to the
-            # same row -- provider-owned config nests in manifests.
-            "git-credential",
-            "ado",
-            """
-            [git_credentials.ado]
-            type = "azdo"
-            org = "my-org"
-            token = "git-token-ado"
-            """,
-            """
-            apiVersion: agentworks/v1
-            kind: git-credential
-            metadata:
-              name: ado
-            spec:
-              provider:
-                name: azdo
-                org: my-org
-                token: git-token-ado
-            """,
-        ),
-        (
-            "apt-package",
-            "my-tool",
-            """
-            [apt_packages.my-tool]
-            description = "my tool"
-            apt = ["my-tool"]
-            """,
-            """
-            apiVersion: agentworks/v1
-            kind: apt-package
-            metadata:
-              name: my-tool
-              description: my tool
-            spec:
-              apt: [my-tool]
-            """,
-        ),
-    ],
-)
-def test_round_trip_parity(tmp_path: Path, kind: str, name: str, toml_body: str, manifest_doc: str) -> None:
-    # Pre-side oracle: the flat TOML declaration, read by the migrator's
-    # TOML reader (config.toml no longer loads resources on the normal
-    # path, ADR 0022; that reader now lives in the oracle).
-    toml_cfg = tmp_path / "source.toml"
-    toml_cfg.write_text(dedent(toml_body))
-    oracle_row = toml_resource_rows(toml_cfg)[(kind, name)]
-
-    # Post-side: the tagged YAML manifest, decoded through build_registry.
-    manifest_dir = tmp_path / "manifest"
-    manifest_dir.mkdir()
-    _manifest(manifest_dir, manifest_doc)
-    manifest_row = build_registry(_config(manifest_dir)).lookup(kind, name)
-
-    assert _strip(oracle_row) == _strip(manifest_row)
-
-
-def test_admin_template_flat_spec(tmp_path: Path) -> None:
-    # Pre-side oracle: the flat [admin.config] + [admin.env] TOML.
-    toml_cfg = tmp_path / "source.toml"
-    toml_cfg.write_text(
-        dedent(
-            """
-            [admin.config]
-            description = "the admin user"
-            username = "ops"
-            shell = "zsh"
-            git_credentials = ["github"]
-
-            [admin.env]
-            EDITOR = "nvim"
-            """
-        )
-    )
-    oracle_admin = toml_resource_rows(toml_cfg)[("admin-template", "default")]
-
-    # Post-side: the flattened admin manifest (plus the git-credential its
-    # git_credentials list references, so the finalize walk resolves).
-    manifest_dir = tmp_path / "manifest"
-    manifest_dir.mkdir()
-    _manifest(
-        manifest_dir,
-        """
-        apiVersion: agentworks/v1
-        kind: admin-template
-        metadata:
-          name: default
-          description: the admin user
-        spec:
-          username: ops
-          shell: zsh
-          git_credentials: [github]
-          env:
-            EDITOR: nvim
-        ---
-        apiVersion: agentworks/v1
-        kind: git-credential
-        metadata:
-          name: github
-        spec:
-          provider:
-            name: github
-        """,
-    )
-    manifest_admin = build_registry(_config(manifest_dir)).lookup("admin-template", "default")
-
-    assert _strip(oracle_admin) == _strip(manifest_admin)
 
 
 def test_git_credential_type_key_rejected(tmp_path: Path) -> None:

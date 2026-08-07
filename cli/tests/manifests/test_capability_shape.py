@@ -5,8 +5,7 @@ session-template's harness_integration) takes the capability as one
 tagged table whose ``name`` key selects it and whose remaining keys are
 its config. The legacy sibling shape (a naming string plus a ``*_config``
 table) was accepted with a deprecation warning through 0.14 and is a hard
-error now, naming the exact rewrite; ``agw resource migrate`` is the
-remediation.
+error now, naming the exact rewrite the operator applies by hand.
 """
 
 from __future__ import annotations
@@ -18,7 +17,6 @@ import pytest
 
 from agentworks.errors import ConfigError
 from agentworks.manifests import load_manifests
-from agentworks.migrate.manifest_upgrade import _LEGACY_SIBLING_SHAPES
 
 _SURFACES = [
     (
@@ -371,21 +369,6 @@ def test_tagged_table_requires_a_string_name_key(tmp_path: Path, name_line: str,
         )
 
 
-def test_migrator_tagged_table_refuses_name_config_key() -> None:
-    """The migrator's emission guard: a config key literally named
-    'name' would collide with the tagged table's discriminator. Known
-    capabilities reject it via pre-write validation; this guard is the
-    backstop for capabilities the run cannot validate, so it is pinned
-    directly."""
-    from agentworks.migrate.planning import _tagged_capability_table
-
-    with pytest.raises(ConfigError, match="collides with the tagged table's discriminator"):
-        _tagged_capability_table("vm-site", "weird", "future-platform", {"name": "sneaky"})
-    # Without the collision the table folds name-first.
-    table = _tagged_capability_table("vm-site", "ok", "lima", {"vm_host": "me@box"})
-    assert table == {"name": "lima", "vm_host": "me@box"}
-
-
 def test_tagged_shape_reaches_finalize_validation(tmp_path: Path) -> None:
     """The tagged config keys land on the row's config mapping, so the
     finalize capability validation sees them exactly as with the old
@@ -661,22 +644,22 @@ def test_an_empty_sibling_is_offered_the_migrator_rather_than_a_by_hand_fix(tmp_
     assert excinfo.value.hint == "`agw resource migrate --all` rewrites your manifests in place."
 
 
-def test_the_migrator_covers_every_surface_whose_error_names_it() -> None:
-    """The invariant behind the hint: a remedy an error names has to do
-    something for the document that just refused to load.
+def test_decode_refuses_exactly_the_three_retired_sibling_shapes() -> None:
+    """The retired shapes, pinned by hand against the derived table.
 
-    Decode attaches the migrate hint from ONE generic guard over every
-    host surface, so every host surface has to be one the migrator's
-    upgrade covers. A fourth hosting kind would get the hint for free and
-    would need an entry there for it to be true; session-template already
-    did, and the hint pointed at a command that printed "nothing to
-    migrate" for the exact document that had just failed to load.
+    Decode refuses the sibling pair from ONE generic guard driven by
+    ``HostSurface``, so what it refuses is whatever the descriptor table
+    says: nothing in the refusal path would notice a renamed
+    ``config_field``, because both halves would move together. That field
+    exists only so the refusal can name a spelling operators have already
+    typed, and renaming it would leave the guard looking for a key nobody
+    ever wrote.
 
-    The FIELD NAMES are compared too, not just the kinds. The migrator is
-    a deliberately independent oracle so it hand-writes its own pairs
-    rather than deriving them from ``HostSurface``, and a hand-written
-    copy that has drifted would leave the upgrade looking for a key decode
-    never refuses."""
+    Hand-written expectations for that reason, field names included. A
+    fourth hosting kind lands here as a failure, which is the point: it
+    inherits the refusal and the hint automatically, and this is where
+    someone decides whether the sibling pair was ever a spelling for it.
+    """
     from agentworks.manifests.decode import _hosting_descriptors
 
     core = {
@@ -685,4 +668,8 @@ def test_the_migrator_covers_every_surface_whose_error_names_it() -> None:
         if descriptor.manifest_section is not None
     }
 
-    assert core == _LEGACY_SIBLING_SHAPES
+    assert core == {
+        "vm-site": ("platform", "platform_config"),
+        "git-credential": ("provider", "provider_config"),
+        "session-template": ("harness_integration", "harness_integration_config"),
+    }

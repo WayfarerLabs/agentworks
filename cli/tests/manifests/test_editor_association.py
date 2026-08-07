@@ -1,9 +1,9 @@
 """The editor association: what a written manifest points at, and whether
 what it points at actually checks it.
 
-FR9's second half. Both writers the plan names stamp the modeline (``agw
-resource sample --write`` and ``agw resource migrate``), and the end-to-end
-test here is the automated counterpart of the manual check documented in
+FR9's second half. ``agw resource sample --write`` is the writer that
+stamps the modeline, and the end-to-end test here is the automated
+counterpart of the manual check documented in
 ``docs/guides/resources.md``: it resolves the modeline the way a
 schema-aware editor would (relative to the file), loads the schema it
 finds, and validates the file's own documents against it.
@@ -12,18 +12,15 @@ finds, and validates the file's own documents against it.
 from __future__ import annotations
 
 import json
-from textwrap import dedent
 from typing import TYPE_CHECKING, Any
 
 import pytest
 import yaml
 from jsonschema import Draft202012Validator
 
-from agentworks.config import load_config
 from agentworks.manifests.emit import ENVELOPE_SCHEMA_FILENAME, MODELINE_PREFIX, SCHEMA_DIRNAME
 from agentworks.manifests.samples import write_sample
 from agentworks.manifests.spec_model import declarable_kinds
-from agentworks.migrate import execute_plan, plan_migration
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -54,9 +51,6 @@ def _uncommented_documents(manifest: Path) -> list[dict[str, Any]]:
     lines = manifest.read_text().splitlines()[1:]  # past the modeline
     body = "\n".join(line[1:] if line.startswith("#") else line for line in lines)
     return [doc for doc in yaml.safe_load_all(body) if isinstance(doc, dict)]
-
-
-# -- agw resource sample --write -------------------------------------------
 
 
 @pytest.mark.parametrize("kind", declarable_kinds())
@@ -136,43 +130,6 @@ def test_appending_a_second_kind_restamps_the_modeline(tmp_path: Path) -> None:
     assert (resources / SCHEMA_DIRNAME / ENVELOPE_SCHEMA_FILENAME).is_file()
 
 
-def test_a_migration_append_restamps_a_stale_modeline(tmp_path: Path) -> None:
-    """The migrator appends to files it did not create, so it hits the
-    same staleness, and worse: these are LIVE documents rather than
-    commented-out samples, so the editor really does underline resources
-    that load.
-
-    `--layout single` targets one file for every kind, which is the shape
-    that reaches an existing single-kind file with documents of another
-    kind.
-    """
-    (tmp_path / "id.pub").write_text("ssh-ed25519 AAAA")
-    (tmp_path / "id").write_text("-----BEGIN OPENSSH PRIVATE KEY-----")
-    config_path = tmp_path / "config.toml"
-    config_path.write_text(
-        dedent(f"""\
-        [operator]
-        ssh_public_key = "{(tmp_path / "id.pub").as_posix()}"
-        ssh_private_key = "{(tmp_path / "id").as_posix()}"
-
-        [paths]
-        backups = "{(tmp_path / "backups").as_posix()}"
-
-        [vm_templates.dev]
-        cpus = 4
-        """)
-    )
-    resources = tmp_path / "resources"
-    manifest, _ = write_sample(resources, "resources.yaml", "secret")
-    assert manifest.read_text().splitlines()[0].endswith("secret.schema.json")
-
-    config = load_config(config_path, warn_issues=False, resources=False)
-    execute_plan(plan_migration(config, [], all_resources=True, layout="single"), config)
-
-    assert manifest.read_text().splitlines()[0] == (f"{MODELINE_PREFIX}{SCHEMA_DIRNAME}/{ENVELOPE_SCHEMA_FILENAME}")
-    assert "kind: vm-template" in manifest.read_text(), "the append itself still happened"
-
-
 def test_appending_the_same_kind_leaves_the_modeline_alone(tmp_path: Path) -> None:
     """The single-kind schema localizes an error far better than the
     thirteen-arm envelope, so a file that is still about one kind keeps
@@ -208,92 +165,3 @@ def test_a_stamped_sample_is_still_inert_through_the_loader(tmp_path: Path) -> N
     manifests = load_manifests(resources)
     assert not manifests.entries
     assert not manifests.issues
-
-
-# -- agw resource migrate --------------------------------------------------
-
-_TOML = """\
-[secrets.npm-token]
-description = "npm registry token"
-backend_mappings.env-var = "NPM_TOKEN"
-
-[vm_templates.dev]
-cpus = 8
-"""
-
-
-def _config(tmp_path: Path) -> Path:
-    pub, priv = tmp_path / "id.pub", tmp_path / "id"
-    pub.write_text("ssh-ed25519 AAAA...")
-    priv.write_text("-----BEGIN OPENSSH PRIVATE KEY-----")
-    cfg = tmp_path / "config.toml"
-    cfg.write_text(
-        f"""\
-[operator]
-ssh_public_key = "{pub.as_posix()}"
-ssh_private_key = "{priv.as_posix()}"
-
-[paths]
-backups = "{(tmp_path / "backups").as_posix()}"
-
-{_TOML}
-"""
-    )
-    return cfg
-
-
-def _migrate(tmp_path: Path, layout: str = "per-kind") -> Path:
-    cfg = _config(tmp_path)
-    config = load_config(cfg, warn_issues=False, resources=False)
-    plan = plan_migration(config, [], all_resources=True, layout=layout)
-    execute_plan(plan, config)
-    return tmp_path / "resources"
-
-
-def test_a_migrated_per_kind_file_is_checked_by_its_own_schema(tmp_path: Path) -> None:
-    resources = _migrate(tmp_path)
-    manifest = resources / "secrets.yaml"
-    assert manifest.read_text().splitlines()[0] == f"{MODELINE_PREFIX}{SCHEMA_DIRNAME}/secret.schema.json"
-
-    validator = Draft202012Validator(_schema_an_editor_would_load(manifest))
-    for document in yaml.safe_load_all(manifest.read_text()):
-        assert [error.message for error in validator.iter_errors(document)] == [], document
-
-
-def test_a_migrated_single_layout_file_points_at_the_any_kind_schema(tmp_path: Path) -> None:
-    resources = _migrate(tmp_path, layout="single")
-    manifest = resources / "resources.yaml"
-    assert manifest.read_text().splitlines()[0] == f"{MODELINE_PREFIX}{SCHEMA_DIRNAME}/{ENVELOPE_SCHEMA_FILENAME}"
-
-    validator = Draft202012Validator(_schema_an_editor_would_load(manifest))
-    for document in yaml.safe_load_all(manifest.read_text()):
-        assert [error.message for error in validator.iter_errors(document)] == [], document
-
-
-def test_migrating_leaves_the_schemas_beside_the_manifests(tmp_path: Path) -> None:
-    resources = _migrate(tmp_path)
-    assert (resources / SCHEMA_DIRNAME / ENVELOPE_SCHEMA_FILENAME).is_file()
-
-
-def test_migrating_into_an_existing_file_leaves_its_first_line_alone(tmp_path: Path) -> None:
-    """The append path, which is what a second migration run hits."""
-    resources = tmp_path / "resources"
-    resources.mkdir(parents=True)
-    existing = resources / "secrets.yaml"
-    existing.write_text("# hand-written header\n")
-
-    _migrate(tmp_path)
-    lines = existing.read_text().splitlines()
-    assert lines[0] == "# hand-written header"
-    assert MODELINE_PREFIX not in existing.read_text()
-
-
-def test_the_dry_run_shows_the_modeline_it_would_write(tmp_path: Path) -> None:
-    """What a dry run prints has to be what lands, header included."""
-    from agentworks.migrate.render import render_dry_run
-
-    cfg = _config(tmp_path)
-    config = load_config(cfg, warn_issues=False, resources=False)
-    plan = plan_migration(config, [], all_resources=True)
-    lines = render_dry_run(plan, full=True)
-    assert f"{MODELINE_PREFIX}{SCHEMA_DIRNAME}/secret.schema.json" in lines

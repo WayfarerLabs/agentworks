@@ -610,14 +610,13 @@ class TestStaticChoiceCompletion:
     every Choice-typed option silently loses static completion (the
     generators' choices branches were dead code)."""
 
-    def test_migrate_option_choices_extracted(self) -> None:
+    def test_shell_option_choices_extracted(self) -> None:
         from agentworks.cli import app
         from agentworks.completions.spec import build_spec
 
-        migrate = build_spec(app).subcommands["resource"].subcommands["migrate"]
-        by_name = {p.name: p.choices for p in migrate.params}
-        assert by_name["layout"] == ["per-kind", "single", "per-resource"]
-        assert by_name["toml"] == ["comment", "delete"]
+        show = build_spec(app).subcommands["completion"].subcommands["show"]
+        by_name = {p.name: p.choices for p in show.params}
+        assert by_name["shell"] == ["bash", "zsh", "powershell", "pwsh"]
 
     def test_sample_kind_completes_dynamically(self) -> None:
         # The sample-kind argument is a plain string (no click.Choice: any
