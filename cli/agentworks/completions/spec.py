@@ -250,7 +250,8 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     # service layer for a clean domain error, issue #276), so it
     # completes via the same config-free kinds completer `resource list
     # --kind` uses. Capability kinds complete too, then fail with a
-    # kind-aware domain error (they have no bundled sample).
+    # kind-aware domain error pointing at `describe-kind` (a capability is
+    # not a document an operator writes, so there is nothing to sample).
     ("resource.sample", "kind"): "resource_kinds",
     # `resource schema`'s kind argument completes from the same config-free
     # kinds completer for the same reason `resource sample`'s does: it is a

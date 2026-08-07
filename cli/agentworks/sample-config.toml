@@ -136,8 +136,10 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 #   prompt      : interactive prompt. Always applies; you are never asked for
 #                 the same secret twice in one command, and all prompting
 #                 happens before the command starts changing anything.
-# Backends are registered code capabilities (agw resource list --kind
-# secret-backend); their names are the valid chain entries here.
+# Backends are registered code capabilities; their names are the valid chain
+# entries here. `agw resource describe-kind secret-backend` lists the ones this
+# build has (it reads no config, so it answers while you are still editing
+# this file), and naming one documents the per-secret mapping it expects.
 
 #[secret_config]
 #backends = ["env-var", "onepassword", "prompt"]    # example chain; the default is ["env-var", "prompt"].
