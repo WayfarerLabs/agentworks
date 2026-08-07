@@ -78,17 +78,22 @@ class GuideTraversalError(ValidationError):
     """The current guide anchor does not permit a requested traversal."""
 
 
+def is_valid_topic_segment(value: object) -> bool:
+    """Return whether ``value`` is one strict bare guide topic segment."""
+    return type(value) is str and _TOPIC_SEGMENT_RE.fullmatch(value) is not None
+
+
 def is_valid_topic_slug(value: object) -> bool:
     """Return whether ``value`` is one requestable guide topic identity."""
     if type(value) is not str:
         return False
     parts = value.split("/")
     if len(parts) == 1:
-        return _TOPIC_SEGMENT_RE.fullmatch(parts[0]) is not None
+        return is_valid_topic_segment(parts[0])
     if len(parts) == 2:
         kind, name = parts
         return (
-            _TOPIC_SEGMENT_RE.fullmatch(kind) is not None
+            is_valid_topic_segment(kind)
             and len(name) <= MAX_RESOURCE_NAME_LENGTH
             and RESOURCE_NAME_RE.fullmatch(name) is not None
         )
@@ -96,8 +101,8 @@ def is_valid_topic_slug(value: object) -> bool:
         namespace, plugin, topic = parts
         return (
             namespace == "plugin"
-            and _TOPIC_SEGMENT_RE.fullmatch(plugin) is not None
-            and _TOPIC_SEGMENT_RE.fullmatch(topic) is not None
+            and is_valid_topic_segment(plugin)
+            and is_valid_topic_segment(topic)
         )
     return False
 

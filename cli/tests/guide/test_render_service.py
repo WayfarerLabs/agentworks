@@ -11,7 +11,9 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
+from typer.testing import CliRunner
 
+from agentworks.cli import app
 from agentworks.errors import ConfigError
 from agentworks.guide import (
     AgentContract,
@@ -822,3 +824,78 @@ def test_authored_catalog_accepts_only_plugin_bundled_declarable_topics(monkeypa
     assert [(issue.error.topic, issue.error.field_path) for issue in catalog.issues] == [
         ("vm-template/plugin-template", "topic")
     ]
+
+
+@pytest.mark.parametrize(
+    "manifest_anchor",
+    [
+        "tests.plugins._manifest_no_subdir_fixture",
+        "tests.plugins._manifest_dirty_fixture",
+    ],
+)
+def test_authored_catalog_isolates_plugin_manifest_inventory_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    manifest_anchor: str,
+) -> None:
+    resource_topic = TopicContribution(
+        TopicSlug("vm-template/plugin-template"),
+        "Plugin VM template",
+        "A resource whose ownership requires the broken manifest package.",
+        ResourceAnchor("vm-template", "plugin-template"),
+        (Overview(BlockId("overview"), "Plugin resource guidance."),),
+    )
+    related_topic = TopicContribution(
+        TopicSlug("plugin/broken/overview"),
+        "Broken plugin overview",
+        "Authored content independent of the manifest package.",
+        ConceptAnchor("plugin/broken/overview"),
+        (Overview(BlockId("overview"), "Independent plugin guidance."),),
+    )
+    healthy_topic = TopicContribution(
+        TopicSlug("plugin/healthy/overview"),
+        "Healthy plugin overview",
+        "Authored content from an unrelated plugin.",
+        ConceptAnchor("plugin/healthy/overview"),
+        (Overview(BlockId("overview"), "Healthy plugin guidance."),),
+    )
+    broken = Plugin(
+        "broken",
+        manifests=manifest_anchor,
+        guide_topics=(resource_topic, related_topic),
+    )
+    healthy = Plugin("healthy", guide_topics=(healthy_topic,))
+    monkeypatch.setattr("agentworks.plugins.SYSTEM_PLUGINS", {broken.name: broken, healthy.name: healthy})
+
+    catalog = build_authored_catalog()
+
+    assert "concept-onboarding" in catalog.names()
+    assert "plugin/broken/overview" in catalog.names()
+    assert "plugin/healthy/overview" in catalog.names()
+    assert "vm-template/plugin-template" not in catalog.names()
+    assert [
+        (issue.error.source, issue.error.topic, issue.error.field_path, str(issue.error))
+        for issue in catalog.issues
+    ] == [
+        (
+            "system-plugin:broken",
+            "vm-template/plugin-template",
+            "topic",
+            "invalid guide contribution from system-plugin:broken: resource ownership is unavailable "
+            "for plugin 'broken'",
+        )
+    ]
+
+    response = render_guide((), GuideMode.AGENT, load_config_fn=_broken)
+    assert response.exit_code == 1
+    assert "`concept-onboarding`" in response.markdown
+    assert "`plugin/broken/overview`" in response.markdown
+    assert "`plugin/healthy/overview`" in response.markdown
+    assert "resource ownership is unavailable for plugin 'broken'" in response.markdown
+
+    names_only = CliRunner().invoke(app, ["guide", "--names-only"])
+    assert names_only.exit_code == 0
+    assert "concept-onboarding\n" in names_only.stdout
+    assert "plugin/broken/overview\n" in names_only.stdout
+    assert "plugin/healthy/overview\n" in names_only.stdout
+    assert "vm-template/plugin-template\n" not in names_only.stdout
+    assert "resource ownership is unavailable" not in names_only.stdout

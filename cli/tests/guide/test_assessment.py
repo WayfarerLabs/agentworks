@@ -353,6 +353,49 @@ def test_service_rejects_control_bytes_in_evidence_identity(
 
 
 @pytest.mark.parametrize(
+    ("kind", "name"),
+    [
+        ("plugin/guide", "topic"),
+        ("plugin", "guide/topic"),
+    ],
+)
+def test_service_rejects_evidence_with_slash_outside_selector_boundary(
+    kind: str,
+    name: str,
+    db: Database,
+) -> None:
+    registry = Registry.empty()
+    registry.add(
+        "secret",
+        "token",
+        SecretDecl(name="token", description=""),
+        Origin.built_in(source="test"),
+    )
+    registry.finalize()
+    evidence = (_evidence("verify-named-secret", kind, name, VerificationOutcome.VERIFIED),)
+
+    with pytest.raises(ValidationError) as raised:
+        render_guide(
+            ("concept-onboarding",),
+            GuideMode.AGENT,
+            load_config_fn=lambda: cast("Config", SimpleNamespace()),
+            load_registry_fn=lambda config: registry,
+            db=db,
+            verification_evidence=evidence,
+        )
+
+    assert str(raised.value) == "verification evidence has an invalid target or outcome"
+    baseline = render_guide(
+        ("concept-onboarding",),
+        GuideMode.AGENT,
+        load_config_fn=lambda: cast("Config", SimpleNamespace()),
+        load_registry_fn=lambda config: registry,
+        db=db,
+    )
+    assert "### `verify-named-secret`" in baseline.markdown
+
+
+@pytest.mark.parametrize(
     "evidence",
     [
         [_evidence("verify-named-secret", "secret", "token", VerificationOutcome.VERIFIED)],

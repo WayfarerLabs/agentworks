@@ -30,6 +30,7 @@ class _GuideContributionCandidate:
     trusted: bool
     plugin: str | None = None
     owned_topics: frozenset[str] = frozenset()
+    resource_ownership_unavailable: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,6 +59,14 @@ def _ownership_error(candidate: _GuideContributionCandidate, topic: TopicContrib
     plugin = candidate.plugin
     valid_prefix = f"plugin/{plugin}/" if plugin else ""
     slug = str(topic.topic)
+    if candidate.resource_ownership_unavailable and isinstance(topic.anchor, ResourceAnchor):
+        return GuideContributionError(
+            f"invalid guide contribution from {candidate.source}: resource ownership is unavailable "
+            f"for plugin {plugin!r}",
+            source=candidate.source,
+            topic=slug,
+            field_path="topic",
+        )
     if not plugin or not (slug.startswith(valid_prefix) or slug in candidate.owned_topics):
         return GuideContributionError(
             f"invalid guide contribution from {candidate.source}: topic is not owned by plugin {plugin!r}",
@@ -101,6 +110,7 @@ def _build_guide_catalog(
     plugin_resource_owners: tuple[tuple[str, str, str], ...] = (),
     *,
     strict_trusted_taxonomy: bool = False,
+    unavailable_plugin_resource_owners: frozenset[str] = frozenset(),
 ) -> GuideCatalog:
     """Build one catalog, with an opt-in CI gate for trusted taxonomy errors."""
     resource_owners: dict[str, set[str]] = {}
@@ -118,6 +128,7 @@ def _build_guide_catalog(
                 for kind, implementations in plugin.capabilities.items()
                 for implementation in implementations
             ),
+            plugin.name in unavailable_plugin_resource_owners,
         )
         for plugin, values in system_plugins
         for value in values
