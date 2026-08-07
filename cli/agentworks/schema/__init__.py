@@ -32,10 +32,10 @@ capability module could not be imported on its own at all.
 That is why the model layer's own reference records (``RefRelationship``
 and ``ConfigReference``) live here in ``schema/reference.py`` and are
 re-exported by ``resources/reference.py`` rather than the other way
-round, and why the top-level home replaced the original
-``resources/schema/`` one (step 2.3, on contact with the first capability
-models). It is the same constraint ``declared_resource.py`` and
-``source_location.py`` already sit at top level for.
+round, and why this package sits at top level rather than under
+``resources/``, which is where the first draft put it. It is the same
+constraint ``declared_resource.py`` and ``source_location.py`` already
+sit at top level for.
 """
 
 from __future__ import annotations

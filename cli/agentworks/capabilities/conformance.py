@@ -12,8 +12,8 @@ seating stays all-or-nothing.
 
 The check is STRUCTURAL and never constructs the impl. That is deliberate:
 it must say the same thing for every kind regardless of registry policy, so
-that when wave 3 ends ``secret-backend``'s constructed-singleton exception
-the check does not change. (``secret-backend``'s ``impl()`` call is the
+that ending ``secret-backend``'s constructed-singleton exception will not
+change the check. (``secret-backend``'s ``impl()`` call is the
 adapter's ``prepare`` step building the registry payload, a separate,
 already-fallible-and-caught concern.)
 """

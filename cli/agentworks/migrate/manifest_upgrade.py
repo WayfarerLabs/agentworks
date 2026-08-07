@@ -70,8 +70,8 @@ _LEGACY_SIBLING_SHAPES: dict[str, tuple[str, str]] = {
 """Declarable kind -> (naming field, retired sibling config field).
 
 The first two are the surfaces that ever ACCEPTED the sibling pair. A
-session template's ``harness_integration`` was born tagged (wave 1
-renamed the field and rejected the string form in the same release), so
+session template's ``harness_integration`` was born tagged (the field
+rename and the rejection of the string form shipped in one release), so
 no manifest a shipped release EMITTED can carry the pair. It is here
 anyway, because the shape is what an operator TYPES from ``harness:``
 muscle memory, and decode's refusal names ``agw resource migrate`` as the

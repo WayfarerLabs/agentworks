@@ -284,8 +284,8 @@ def registered_implementations(kind: str) -> dict[str, type]:
 
     It lives here, beside the other reads of a capability registry, rather
     than in the renderer, and that is the same consolidation the four
-    consuming resources made in step 2.3: the sanctioned registry read
-    stays one call site instead of becoming two. Availability is never what
+    consuming resources already made: the sanctioned registry read stays
+    one call site instead of becoming two. Availability is never what
     it asks (see the module docstring); it asks what exists to describe.
     """
     return {name: impl_class(seated) for name, seated in descriptor_for(kind).registry().items()}
@@ -368,8 +368,8 @@ def impl_class(seated: object) -> type:
     """What a registry holds, as the CLASS that carries the declaration.
 
     One kind's registry holds a constructed instance rather than the class
-    (secret-backend, the descriptor-carried interim exception that wave 3
-    removes), and the declaration is class-level either way.
+    (secret-backend, the descriptor-carried interim exception), and the
+    declaration is class-level either way.
     """
     return seated if isinstance(seated, type) else type(seated)
 

@@ -24,8 +24,10 @@ would mean writing a second schema generator. The reference markers' own
 emitted schema, so the two derivations cannot disagree about what a field
 means.
 
-See ``docs/sdd/2026-07-31-declarative-schema/emission-lld.md`` for the
-design record, including what is deliberately not expressed and why.
+The operator-facing half of the soundness contract (what an editor checks
+versus what loading checks, and why that gap leans the way it does) is in
+``docs/guides/resources.md`` under "Editing manifests with schema
+support".
 """
 
 from __future__ import annotations

@@ -25,12 +25,13 @@ a facet while offering no config there. Wiring the two together would
 rebuild the declaration-contract mechanism that was rescinded on
 2026-08-05, under a new name.
 
-Wave 2 names no facet: every shipped capability offers one config shared
-by all of its operations, so it declares ``config_model`` and every core
-call site passes ``None``. The vocabulary exists so that the first
-capability whose methods run at several levels (a harness integration,
-wave 4) adds its per-facet declaration and its consumers' facets in one
-change, rather than needing a framework change first.
+No shipped capability names a facet: every one of them offers a single
+config shared by all of its operations, so it declares ``config_model``
+and every core call site passes ``None``. The vocabulary exists so that
+the first capability whose methods run at several levels (a harness
+integration is the expected one) adds its per-facet declaration and its
+consumers' facets in one change, rather than needing a framework change
+first.
 """
 
 from __future__ import annotations

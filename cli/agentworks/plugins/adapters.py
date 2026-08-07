@@ -103,8 +103,9 @@ class _DescriptorAdapter:
 
     Every method reads a descriptor field. Only the class-vs-instance
     asymmetry branches, on ``registry_policy``, and only in ``matches`` and
-    ``prepare``: wave 3 retires ``CONSTRUCTED_SINGLETON`` by flipping
-    ``secret-backend``'s field and deleting each branch's second arm.
+    ``prepare``. Retiring ``CONSTRUCTED_SINGLETON`` is therefore a matter of
+    flipping ``secret-backend``'s field and deleting each branch's second
+    arm.
     """
 
     def __init__(self, descriptor: CapabilityKindDescriptor) -> None:

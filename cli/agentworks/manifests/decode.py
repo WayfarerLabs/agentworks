@@ -65,10 +65,10 @@ def _sample_hint(kind: str) -> str:
     """Where an operator goes to see the shape they got wrong.
 
     One hint for every kind, built from the kind rather than written per
-    kind: the sample surface renders the fields live, and a hand-kept
-    per-kind steer is exactly the drift FR13 exists to kill. It is what
-    pays for the hand-written steers this step dropped (the vm-site
-    platform enumeration, the git-credential provider list).
+    kind: the sample surface renders the fields live, so a hand-kept
+    per-kind steer would be a second description of the same shape, free to
+    drift. It is what pays for the hand-written steers it replaced (the
+    vm-site platform enumeration, the git-credential provider list).
     """
     return f"`agw resource sample {kind}` prints this kind's fields"
 

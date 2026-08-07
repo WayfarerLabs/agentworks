@@ -289,9 +289,9 @@ SECRET_BACKEND_DESCRIPTOR = CapabilityKindDescriptor(
     contract_version=1,
     implementation_contract=SecretBackend,
     # The interim exception, and the only place it is recorded: this kind's
-    # registry holds a constructed instance rather than the class. Wave 3
-    # flips it to CLASS_BY_NAME once the graph stamping and the resolve loop
-    # stop consuming constructed backends.
+    # registry holds a constructed instance rather than the class. It flips
+    # to CLASS_BY_NAME once the graph stamping and the resolve loop stop
+    # consuming constructed backends.
     registry_policy=RegistryPolicy.CONSTRUCTED_SINGLETON,
     registry=_backend_registry,
     required_operations=frozenset(

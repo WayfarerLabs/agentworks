@@ -1,13 +1,13 @@
 """The capability-kind descriptor table: one frozen record per kind.
 
-Today seven sites independently enumerate the four capability kinds
+This table IS the enumeration of the four capability kinds
 (``vm-platform``, ``harness-integration``, ``git-credential-provider``,
-``secret-backend``): the adapter table, the graph's kind set and readiness
-dispatch, the per-kind registry loaders, bootstrap publication, the plugin
-snapshot/restore tuple, and manifest decode's capability-field map. Step 2.0
-of the declarative-schema SDD collapses that switchboard onto this one table,
-one site at a time. This module introduces the table; the sites derive from
-it in later commits.
+``secret-backend``). Seven sites used to enumerate them independently: the
+adapter table, the graph's kind set and readiness dispatch, the per-kind
+registry loaders, bootstrap publication, the plugin snapshot/restore tuple,
+and manifest decode's capability-field map. Each derives from here now, so a
+kind is described once and a fifth would be added in one place rather than
+found in seven.
 
 Two structural rules make the table safe to consume from anywhere:
 
@@ -67,9 +67,10 @@ class RegistryPolicy(Enum):
     """One constructed INSTANCE, built at seating time. The interim
     exception, carried by ``secret-backend`` alone: the graph stamping and
     the resolve loop consume constructed backends today, so ending it means
-    choosing a construction point and touching the resolve machinery. Wave 3
-    owns that flip; until then this field is where the asymmetry lives, so
-    nothing else has to special-case ``secret-backend``."""
+    choosing a construction point and touching the resolve machinery. That
+    is a change of its own; until it happens this field is where the
+    asymmetry lives, so nothing else has to special-case
+    ``secret-backend``."""
 
 
 @dataclass(frozen=True)
@@ -108,7 +109,7 @@ class HostSurface:
     rather than one per host, and the row carries the table as written.
 
     The record carried a ``legacy_string_shape`` field while the two folds
-    differed (session-template hardened in wave 1, ahead of its siblings).
+    differed, because session-template hardened ahead of its siblings.
     Nothing distinguishes the surfaces now, so the field is gone rather
     than left describing a difference that no longer exists.
     """
@@ -220,19 +221,18 @@ class CapabilityKindDescriptor:
 
     The framework never asks an implementation for "its schema"; it asks
     for the config it offers at a FACET (``Capability.config_for``), and
-    every model that comes back has to satisfy this contract. Wave 4's
-    harness-integration, whose methods run at several levels with
-    different config, is then a per-capability declaration rather than a
-    framework change."""
+    every model that comes back has to satisfy this contract. A capability
+    whose methods run at several levels with different config is then a
+    per-capability declaration rather than a framework change."""
 
-    # Deferred fields, recorded with the trigger that creates each so wave 2
-    # neither builds them early nor reinvents them later:
+    # Fields deliberately NOT added yet, each recorded with the trigger that
+    # would create it, so neither is built early nor reinvented later:
     #
     #   consumer_gating         -> the first NEW consuming surface that
-    #                              consolidates gating derivation (waves 3
-    #                              and 4). Wave 2 changes no gating
-    #                              behavior, so there is nothing to carry.
-    #   migration_participation -> only if wave 2 rules that
+    #                              consolidates gating derivation. Nothing
+    #                              here changes gating behavior today, so
+    #                              there is nothing to carry.
+    #   migration_participation -> only if a later effort rules that
     #                              ``agw resource migrate`` both survives
     #                              AND should derive from the live
     #                              descriptor. The counterargument stands:

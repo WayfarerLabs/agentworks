@@ -1,11 +1,10 @@
 """``iter_field_docs``: the ordered field-reference stream.
 
 One walker over a model's declared fields, feeding every HUMAN
-presentation of it: the generated config sample, ``agw resource
-describe``, and the roadmap's ``agw guide`` topic pages, which the
-onboarding effort owns. That last one makes :class:`FieldDoc` a shared
-source rather than a CLI-layer detail, so its shape is a cross-effort
-coordination point: widen it deliberately, not incidentally.
+presentation of it: the generated sample manifest and ``agw resource
+describe-kind`` today, and any later prose surface that documents a
+field. :class:`FieldDoc` is therefore a shared source rather than a
+CLI-layer detail, so widen its shape deliberately, not incidentally.
 
 Machine consumption is the SIBLING derivation, not a consumer of this
 stream: emitted JSON Schema comes from ``model_json_schema`` over the

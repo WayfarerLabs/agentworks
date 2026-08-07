@@ -181,7 +181,7 @@ def load_config(
     config_path = path or CONFIG_PATH
     if not config_path.exists():
         print(f"Configuration file not found: {config_path}", file=sys.stderr)
-        print("Create it to get started. See the documentation for the schema.", file=sys.stderr)
+        print("Run `agw config init` to create one from the commented sample.", file=sys.stderr)
         raise SystemExit(1)
 
     raw_text = config_path.read_text()
