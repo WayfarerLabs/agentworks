@@ -108,36 +108,36 @@ identifies all wave 2 gates, and has no unresolved review finding.
 - [x] Unit, integration, CLI, completion, packaging, typing, and lint gates pass.
 - [x] Step reviewed by `agentworks-reviewer` and a fresh-eyes reviewer; valid findings resolved.
 - [x] Always-green ready-to-merge implementation PR opened and roadmap-lead review requested.
-- [ ] Roadmap re-review corrective: restore sanitized SSH warning diagnostics; make verification
+- [x] Roadmap re-review corrective: restore sanitized SSH warning diagnostics; make verification
       exception sanitization fail closed for malformed plugin exceptions; audit every secret-bearing
       logger construction now that redactions are immutable; and document the CodeQL-recognized sink
       constraint without weakening runtime error propagation or descriptor cleanup.
-- [ ] Roadmap re-review corrective: prove the guide database is opened read-only with an actual
+- [x] Roadmap re-review corrective: prove the guide database is opened read-only with an actual
       rejected write and service-construction assertion; frame any escaped read-only database error.
-- [ ] Roadmap re-review corrective: extend probe, secret, capability, filesystem-write, and mutation
+- [x] Roadmap re-review corrective: extend probe, secret, capability, filesystem-write, and mutation
       denials across end-to-end `render_guide` on a live registry, recording this corrective item
       without altering the earlier checked no-power claim.
-- [ ] Roadmap re-review corrective: exercise taxonomy ownership, untrusted collision, and
+- [x] Roadmap re-review corrective: exercise taxonomy ownership, untrusted collision, and
       broken-link fixpoint behavior with fixtures that reach those gates; make trusted-core taxonomy
       mistakes fail CI while runtime catalog construction remains fail-soft, align the HLA and LLD
       with that split, and isolate invalid contributions from valid topics at runtime.
-- [ ] Roadmap re-review corrective: make authored-content wheel inclusion a normal CI assertion, not
+- [x] Roadmap re-review corrective: make authored-content wheel inclusion a normal CI assertion, not
       an integration-only test.
-- [ ] Roadmap re-review corrective: sanitize C0/C1 terminal controls at one render boundary for all
+- [x] Roadmap re-review corrective: sanitize C0/C1 terminal controls at one render boundary for all
       authored and projected text; accept action tokens only through a closed literal allowlist that
       excludes shell syntax, expansion, globbing, comments, whitespace, and line breaks; reject or
       safely frame controls in evidence errors.
-- [ ] Roadmap re-review corrective: keep secret-sanitizer scope narrow and diagnostics useful while
+- [x] Roadmap re-review corrective: keep secret-sanitizer scope narrow and diagnostics useful while
       distrusting every backend-authored field; make verification result fields authoritative rather
       than hard-coded or unread; add malformed-exception adversarial coverage.
-- [ ] Roadmap re-review corrective: make view construction and exit status fail soft for missing
+- [x] Roadmap re-review corrective: make view construction and exit status fail soft for missing
       plugin roots, missing resources, unsupported concept instance lists, and unrelated invalid
       topics; derive probe suppression from one shared policy until the descriptor owns it.
-- [ ] Roadmap re-review corrective: pin registry validation, materialization, deferred targets,
+- [x] Roadmap re-review corrective: pin registry validation, materialization, deferred targets,
       finalized-state gating, empty inventory, no-topic live rendering, first-run config framing, VM
       verification CLI behavior, every block renderer, and unsupported-block refusal with meaningful
       non-vacuous tests.
-- [ ] Roadmap re-review corrective: record sample config as unaffected in a repository-visible
+- [x] Roadmap re-review corrective: record sample config as unaffected in a repository-visible
       handoff; add contributed-content size bounds; remove or clarify dead and implicit
       discriminators identified by review where doing so improves the forward contract; defer only
       organizational test consolidation that changes no behavior or proof.
