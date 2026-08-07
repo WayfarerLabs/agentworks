@@ -570,25 +570,52 @@ rather than by hand-written per-kind code. That is what makes `agw resource samp
 of date. It also means a manifest that used to load can now fail, in ways worth going through before
 you upgrade.
 
-**Start here.** The errors are specific: each one names the file, the line, the resource, the field,
-and what was expected. So the fastest path is to upgrade, run any command, and fix what it names.
-`agw resource describe-kind <kind>` (and `<capability-kind>/<name>`) documents what the field
-accepts, and needs no working config to do it.
+### Hand edits first, the migrator last
 
-**One change has tooling.** The retired sibling capability shape (`platform: lima` beside a
-`platform_config:` table, and likewise `provider` / `provider_config`) is a hard error, and
-`agw resource migrate --all` rewrites it in place, preserving comments and everything else in the
-file:
+That order is not a preference. `agw resource migrate` proves its own work by rebuilding the
+registry, and rebuilding loads your WHOLE resources directory, so it refuses to run while anything
+in there does not load, including documents it would never touch. It says so instead of starting,
+and it writes nothing when it refuses. So:
+
+1. Upgrade, run any command, and fix what it names. Repeat until commands stop complaining.
+2. Then run the migrator, for the one change below that has tooling.
+
+**Expect one resource per pass.** Errors aggregate WITHIN a resource: a document with three problems
+reports all three at once. They do not aggregate ACROSS resources, because the load stops at the
+first resource that fails. `agw resource list`, `agw doctor`, and the migrator all behave this way,
+so six broken resources is six passes rather than one list of six.
+
+**The line number is the document's, not the mistake's.** Each error names the file, the resource,
+the field, and what was expected, and the `file:line` is where that DOCUMENT starts. Look for the
+named field inside the document at that line rather than at the line itself.
+
+**Two commands keep working when nothing else does.** `agw resource describe-kind <kind>` (and
+`<capability-kind>/<name>`) documents every field the kind accepts, and `agw resource sample <kind>`
+prints the same fields as a document to edit. Neither reads your config, so both answer while it is
+unloadable. That is why every error points at them.
+
+### The one change with tooling
+
+The retired sibling capability shape (`platform: lima` beside a `platform_config:` table, and
+likewise `provider` / `provider_config`) is a hard error, and `agw resource migrate --all` rewrites
+it in place, preserving comments and everything else in the file:
 
 ```bash
 agw resource migrate --all --dry-run --full   # see it first
 agw resource migrate --all
 ```
 
-Two limits worth knowing. It refuses, before writing anything, if a capability's config carries its
-own `name` key, because folding that is a judgment call; the error tells you to fold that one by
-hand. And it preserves quoting faithfully, so it will carry a quoted number through into a file that
-then trips the type checking below. Everything else here is a hand edit.
+Run this AFTER the hand edits below, for the reason above. The dry run is held to the same
+precondition as the real run, so a dry run that prints its diff and ends "nothing was written" tells
+you the real run gets that far too. The one thing it does not do is the final check that the rebuilt
+registry MATCHES the one it replaced, which needs the files on disk; that check is on the migrator,
+not on your config, and a failure there rolls everything back.
+
+Three limits worth knowing. It refuses, before writing anything, if a capability's config carries
+its own `name` key, or if it is not a table at all: folding either would mean guessing which half
+you meant, so the error tells you to do that one by hand. And it preserves quoting faithfully, so it
+will carry a quoted number through into a file that then trips the type checking below. Everything
+else here is a hand edit.
 
 ### Types are checked now
 
@@ -605,11 +632,24 @@ Values are no longer coerced. A quoted number is a string, and a string is not a
   `mise_activate: "no"` used to mean **true** and `username: 42` used to become `"42"`. Each is now
   an error. (Adjacent and the same flavor: a vm-template's `cpus: "4"` used to load, and an
   install-command's `command: 7` used to install the string `"7"`.)
+
 - **An explicit `null` is a type error** on a field that is not nullable, rather than a synonym for
   omitting the key. That covers `shell`'s `command`, `resume_command`, and `required_commands`,
   `extra_args` on `claude-code` and `codex`, `codex`'s `writable_dirs`, a github credential's
   `repos`, and a `session-template`'s `env`. If you wrote one to mean "no value", delete the line
   instead.
+
+**Every quoted boolean meant `true`.** That is the whole class, not just the three named above:
+`key_dearmor`, `tmuxinator`, and `mise_activate` / `mise_allow_unlocked` / `mise_prune_on_reinit` /
+`git_force_safe_directory` on both template kinds, plus proxmox's `verify_ssl`. `describe-kind` says
+so on each of them. Writing the `false` that the line looks like it asked for silently INVERTS the
+behavior you have been running; writing `true` preserves it.
+
+**`verify_ssl` is the one where that is a decision rather than a correction.** `true` preserves what
+you have actually been running: verification on, and passing, or the cluster would not have worked.
+`false` is what the line looks like it was asking for, and is right only if you know the cluster's
+certificate is self-signed. If your setup has been working, `true` is the answer and `false` would
+be loosening something that did not need loosening.
 
 ### Unknown keys are errors now
 
@@ -639,14 +679,31 @@ used to be a hard error whose message told you to OMIT the key instead. The rule
 and `null` mean the same thing, so that same input quietly resolves to the default-named secret and
 the site declares a dependency on it.
 
-If you ever hit that old error and worked around it, check what you left behind. Nothing warns you,
-because to the loader an explicit `null` is now simply the ordinary way of taking the default.
+**If one of those lines is still in your file, you are the person this affects.** Nothing warns you,
+because to the loader an explicit `null` is now simply the ordinary way of taking the default. Go
+looking for one; a bare key with no value counts too, because that is a null as well:
+
+```bash
+grep -rnE '(token_secret|access_key_secret|secret): *(null|~)? *$' ~/.config/agentworks/resources
+```
+
+Then decide, per hit:
+
+- If you meant "no secret here", **delete the line instead**. That is the same answer as the other
+  null fields above, and it is now the only spelling that means it.
+- If you meant the default all along, leave it. Nothing changes for you except that the default is
+  now declared as a dependency, which `agw resource describe secret/proxmox-token` will show and
+  `agw doctor` will check.
+
+The migrator does not take this evidence away from you: an explicit `null` (or `~`) comes back out
+spelled the way you wrote it, so the line is still there to find after a migration run.
 
 ### Two smaller ones
 
 - **An install command's `test_exec: ""` beside a `test_file`** used to be legal: the empty string
   normalized away before the at-most-one-test check counted. It now counts, so the pair is rejected.
-  Delete the empty one.
+  Delete the empty one; the error names which key that is, and says to delete it rather than blank
+  it.
 - **`{value: x}` is a new accepted env spelling**, alongside a bare string and `{secret: name}`.
   Additive: nothing you have written stops working, but a config can now say something it could not.
 
