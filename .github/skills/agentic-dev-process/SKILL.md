@@ -151,11 +151,17 @@ any other review; triage them, push back on the wrong ones, and fix the valid on
 - **Commit and push at regular intervals.** Do not hoard work in a local branch; frequent, honest
   commits keep the work reviewable and recoverable. Follow the project's Conventional Commits
   convention (`CONTRIBUTING.md`) for message shape.
-- **One PR per feature is the default.** Put the whole feature in a single PR, SDD artifacts
-  included. Split into multiple PRs only when there is a good reason, the usual one being legitimate
-  SDD phases that each carry independent, standalone value. A phase that only has value once a later
-  phase lands is not a reason to split; it is a commit within the one PR. Always-green phased
-  commits give reviewers a natural commit-by-commit reading order inside a single large PR.
+- **One PR per feature is the default, with a size ceiling.** Put the whole feature in a single PR,
+  SDD artifacts included. Split into multiple PRs only when there is a good reason, the usual one
+  being legitimate SDD phases that each carry independent, standalone value. A phase that only has
+  value once a later phase lands is not a reason to split; it is a commit within the one PR.
+  Always-green phased commits give reviewers a natural commit-by-commit reading order inside a
+  single large PR. The ceiling: when a feature's projected diff grows past what one reviewer can
+  actually hold (as a rough guide, a few thousand lines of substantive change), the default flips
+  and the effort ships as a PR series of always-green phases, each merged before the next builds on
+  it. Plan the split at plan-writing time, not when the branch is already huge; review depth decays
+  faster than diff size grows, and a monster PR forces the review to happen after the design has
+  hardened, when findings are most expensive to act on.
 - **Open a PR when the work is close to merge-ready**, not before. A PR signals "this is ready for
   eyes," so open it when that is true.
 - **Non-draft by default.** Avoid draft PRs unless specifically asked for one. The single routine
