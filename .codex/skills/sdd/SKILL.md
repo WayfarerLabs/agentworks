@@ -327,7 +327,8 @@ Work driven via SDD should be done in one or more feature branches. The general 
    yet: the PR is a pure review vehicle while the artifacts churn. It is not draft because the
    content is partial. See [PR Review](#pr-review) for the merge-intent rule this follows from.
 4. The first push of work should use that existing branch.
-5. SDD artifacts will naturally get merged with the work itself.
+5. SDD artifacts merge with the work itself, or ahead of it when other efforts need visibility (see
+   [Merge artifacts early](#merge-artifacts-early-when-other-efforts-need-visibility)).
 6. If additional work remains per the specs, it should be done in additional feature branches,
    tracking the work via the existing plan files. It is entirely permissible (encouraged) to modify
    the artifacts if the requirements, architecture, plan, etc. has changed.
@@ -353,3 +354,20 @@ common pattern is FRD first (to confirm we agree on what we're building), then H
 design holds up), then plan and any LLDs. Each phased review is cheaper to consume than a single
 sprawling PR, and it limits how far the work can drift down the wrong path before someone catches
 it.
+
+### Merge artifacts early when other efforts need visibility
+
+A branch is private state; `main` is the coordination plane. That is why message passing delivers
+via `main`, and the same logic applies to the artifacts themselves: a sibling effort designing
+against your FRD, HLA, or plan can only see what has landed on `main`, and "read my feature branch"
+is not a coordination mechanism (branches rebase, drift, and can vanish, and nothing notifies a
+sibling when they do). So whenever any other effort runs concurrently, merge SDD artifacts ahead of
+the implementation: the seeding PR is the first instance, the reviewed pre-implementation artifacts
+are the second (once the draft review converges, promote and merge rather than letting the artifacts
+ride the feature branch to the end), and material in-flight artifact revisions keep flowing to
+`main` promptly as small PRs rather than accumulating. Two consequences to hold: a checked box that
+merges early becomes immutable at that merge (the carve-out under Artifact Mutability keys to the
+box landing on `main`), and merged-early artifacts describe intent rather than shipped behavior,
+which is exactly what SDD artifacts are for; permanent docs stay bound to behavior at HEAD per SDDs
+Are Not Permanent. This is a sanctioned exception to the one-PR-per-feature default in the
+`agentic-dev-process` skill, which cross-references it.
