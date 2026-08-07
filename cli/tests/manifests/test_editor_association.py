@@ -14,7 +14,6 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any
 
-import pytest
 import yaml
 from jsonschema import Draft202012Validator
 
@@ -53,19 +52,28 @@ def _uncommented_documents(manifest: Path) -> list[dict[str, Any]]:
     return [doc for doc in yaml.safe_load_all(body) if isinstance(doc, dict)]
 
 
-@pytest.mark.parametrize("kind", declarable_kinds())
-def test_a_written_sample_is_checked_by_the_schema_it_points_at(tmp_path: Path, kind: str) -> None:
-    """The whole feature in one assertion per kind: write a sample, follow
-    its modeline the way an editor would, and check the sample's own
-    documents against what is found there."""
-    resources = tmp_path / "resources"
-    manifest, outcome = write_sample(resources, f"{kind}.yaml", kind)
-    assert outcome == "created"
+def test_a_written_sample_is_checked_by_the_schema_it_points_at(tmp_path: Path) -> None:
+    """The whole feature, over every declarable kind: write a sample,
+    follow its modeline the way an editor would, and check the sample's
+    own documents against what is found there.
 
-    schema = _schema_an_editor_would_load(manifest)
-    validator = Draft202012Validator(schema)
-    for document in _uncommented_documents(manifest):
-        assert [error.message for error in validator.iter_errors(document)] == [], (kind, document)
+    One pass reporting every offending ``(kind, document, message)``
+    rather than one case per kind. What breaks this is emission or the
+    renderer, and both are shared: a widening that regresses puts a red
+    underline on every kind at once, and reading that as one list beats
+    reading it as thirteen tracebacks.
+    """
+    resources = tmp_path / "resources"
+    red: list[str] = []
+    for kind in declarable_kinds():
+        manifest, outcome = write_sample(resources, f"{kind}.yaml", kind)
+        assert outcome == "created", (kind, outcome)
+
+        validator = Draft202012Validator(_schema_an_editor_would_load(manifest))
+        for document in _uncommented_documents(manifest):
+            name = document.get("metadata", {}).get("name")
+            red.extend(f"{kind}/{name}: {error.message}" for error in validator.iter_errors(document))
+    assert not red, "\n".join(red)
 
 
 def test_a_single_kind_file_points_at_that_kinds_schema(tmp_path: Path) -> None:

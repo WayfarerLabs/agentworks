@@ -937,8 +937,12 @@ def test_write_schema_set_writes_readable_json_the_loader_ignores(tmp_path: Path
     assert {path.name for path in written} == set(schema_set())
     for path in written:
         Draft202012Validator.check_schema(json.loads(path.read_text()))
-    # Dot-prefixed on purpose: the manifest walk prunes dot-directories,
-    # so a generated artifact can never be read as a declaration.
+    # A generated artifact is never read as a declaration. Two independent
+    # reasons in ``loader._iter_manifest_files``, and this assertion pins
+    # only the second: the walk prunes dot-names (``SCHEMA_DIRNAME`` is
+    # dot-prefixed on purpose) AND it takes only ``.yaml`` / ``.yml``.
+    # Spelling the directory without its dot fails nothing in this suite,
+    # because the suffix filter alone still excludes every ``.schema.json``.
     assert not load_manifests(resources).entries
 
 
