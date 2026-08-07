@@ -218,9 +218,12 @@ class SSHLogger:
         # and their shell-quoted forms are registered before the header's
         # first write. The redaction set is fixed at construction because
         # incremental writes make late registration inherently unsafe.
-        # Callers therefore never pre-sanitize.
+        # Callers therefore never pre-sanitize. CodeQL does not model the
+        # immediately dominating replacement sanitizer, so the sink carries
+        # a narrow suppression backed by the adversarial logger and lifecycle
+        # wiring tests.
         with open(self.path, "a", encoding="utf-8", errors="replace") as f:
-            f.write(self._sanitize(text))
+            f.write(self._sanitize(text))  # codeql[py/clear-text-storage-sensitive-data]
 
 
 SSH_CONNECT_TIMEOUT = 30
