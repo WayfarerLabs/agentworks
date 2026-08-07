@@ -4,10 +4,20 @@ a hard error at load, not a deprecation nudge.
 These tests pin the flip from the old aggregated warning to
 ``_raise_for_resource_sections`` (fires with resource sections present at
 ``resources=True``; no error at ``resources=False`` or for a settings-only
-config), the remaining deprecation-channel content (the ``[secret_backends]``
-no-op), and the exempted commands that
-load ``resources=False`` so they can still read a config carrying resource
-sections.
+config), and the exempted commands that load ``resources=False`` so they can
+still read a config carrying resource sections.
+
+``[secret_backends.*]`` is swept by that same refusal now. It used to be the
+one exception, judged by the settings load against the BUILT-IN backend
+registry, which warned for a built-in name and refused everything else,
+including every plugin backend. Its cases are here rather than with the
+secrets tests because what it is now is a retired resource section, and the
+only thing that makes it special is its remediation.
+
+The deprecation channel these tests are named for currently carries nothing:
+every config.toml deprecation became a hard error. The ``deprecation_issues
+== ()`` assertions below are load-is-clean assertions, and they stay honest
+if a future nudge is added, because none of these configs would raise it.
 """
 
 from __future__ import annotations
@@ -147,23 +157,84 @@ def test_shipped_sample_config_loads_clean(tmp_path: Path) -> None:
     assert config.deprecation_issues == ()
 
 
-def test_secret_backends_keeps_its_no_op_deprecation(tmp_path: Path) -> None:
-    """[secret_backends.*] is NOT a resource section (it is a capability-kind
-    no-op), so it stays a deprecation on the channel rather than a hard
-    error. The remedy is a deletion the operator makes, plus the one place
-    activation actually happens."""
+@pytest.mark.parametrize("backend", ["env-var", "onepassword", "envvar"])
+def test_secret_backends_is_a_resource_section_whatever_it_names(backend: str, tmp_path: Path) -> None:
+    """[secret_backends.*] fails hard and identically for every name.
+
+    It IS a resource-declaring section (it is in ``KIND_SECTIONS``, keyed by
+    the ``secret-backend`` kind), so it goes through the same refusal as the
+    rest. The three names are the three answers the old split gave: a
+    built-in name only warned, and everything else, including a
+    correctly-spelled plugin backend that is enabled and healthy
+    (``onepassword``) as well as a genuine typo (``envvar``), was refused as
+    "an unknown secret backend". The name is not what makes the section
+    wrong, so it must not change the answer.
+    """
+    cfg = _config(tmp_path, f"[secret_backends.{backend}]\n")
+    with pytest.raises(ConfigError) as excinfo:
+        load_config(cfg, warn_issues=False)
+    message = str(excinfo.value)
+    assert "[secret_backends.*]" in message
+    assert "settings only" in message
+    # The old refusal's message, which judged the NAME. Nothing should be
+    # telling an operator that `onepassword` is an unknown backend.
+    assert "unknown secret backend" not in message
+
+
+def test_secret_backends_is_told_to_delete_not_to_write_a_manifest(tmp_path: Path) -> None:
+    """The one section whose remediation is not "rewrite it as a manifest".
+
+    It carried no configuration, so there is nothing to move, and
+    ``secret-backend`` is a capability kind with no declarable form: the
+    generic advice would send the operator to write a manifest that cannot
+    exist. The remedy is a deletion, plus the one place activation actually
+    happens.
+    """
+    cfg = _config(tmp_path, "[secret_backends.env-var]\n")
+    with pytest.raises(ConfigError) as excinfo:
+        load_config(cfg, warn_issues=False)
+    message = str(excinfo.value)
+    assert "nothing to rewrite: delete it" in message
+    assert "Rewrite" not in message
+    assert "[secret_config].backends" in (excinfo.value.hint or "")
+
+
+def test_mixed_sections_get_both_remediations_in_one_read(tmp_path: Path) -> None:
+    """A config carrying both kinds of section names all of them, but tells
+    the operator to REWRITE only the ones that become manifests. Lumping
+    ``[secret_backends.*]`` into the rewrite clause would send them looking
+    for a manifest shape for a section that has none."""
     cfg = _config(
         tmp_path,
         """
         [secret_backends.env-var]
+
+        [secrets.npm-token]
+        description = "npm token"
         """,
     )
-    config = load_config(cfg, warn_issues=False)
-    assert len(config.deprecation_issues) == 1
-    assert config.deprecation_issues[0].startswith("[secret_backends.env-var]")
-    assert "Delete the section" in config.deprecation_issues[0]
-    assert "[secret_config].backends" in config.deprecation_issues[0]
-    assert config.noop_secret_backend_sections == ("[secret_backends.env-var]",)
+    with pytest.raises(ConfigError) as excinfo:
+        load_config(cfg, warn_issues=False)
+    message = str(excinfo.value)
+    assert "[secrets.*]" in message
+    assert "[secret_backends.*]" in message
+    # The rewrite clause names the rewritable section and only that one.
+    assert "Rewrite [secrets.*] as YAML manifests" in message
+    assert "nothing to rewrite: delete it" in message
+
+
+def test_secret_backends_is_behind_the_resources_false_escape_hatch(tmp_path: Path) -> None:
+    """The point of moving the check: the commands that ARE the remediation
+    can now read a config carrying ``[secret_backends.*]``.
+
+    It used to be refused by the SETTINGS load, which no escape hatch covers,
+    so a section carrying no configuration took down ``resource sample
+    --write`` and ``resource schema --write``, the two commands an operator
+    needs to do the rewrite at all.
+    """
+    cfg = _config(tmp_path, "[secret_backends.onepassword]\n")
+    config = load_config(cfg, warn_issues=False, resources=False)
+    assert config.operator is not None
 
 
 def test_defaults_platform_is_a_hard_error(tmp_path: Path) -> None:

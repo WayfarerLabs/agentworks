@@ -33,8 +33,7 @@ def _write_config(
     the doctor tests assert on) and the ``default`` admin-template
     (shell=zsh). ``admin_env`` seeds that admin-template's env block,
     ``manifests`` adds further resources (secrets, sites), and ``settings``
-    carries settings-only TOML ([plugins], [secret_config], the no-op
-    [secret_backends.*] sections)."""
+    carries settings-only TOML ([plugins], [secret_config])."""
     pub = tmp_path / "id.pub"
     priv = tmp_path / "id"
     pub.write_text("ssh-ed25519 AAAA...")
@@ -393,16 +392,26 @@ def test_doctor_resource_sections_fail_row_and_continues(tmp_path: Path, monkeyp
     assert registry is not None
 
 
-def test_doctor_shows_noop_secret_backend_sections(tmp_path: Path, monkeypatch) -> None:
-    # [secret_backends.*] is a settings-side no-op section (it does not
-    # hard-error like the resource sections); it stays in config.toml.
+def test_doctor_reports_secret_backends_as_a_fail_row_and_keeps_reporting(tmp_path: Path, monkeypatch) -> None:
+    """``[secret_backends.*]`` is a resource section now, so doctor renders
+    it as the Config FAIL row and the settings-only retry carries the rest of
+    the report.
+
+    Both halves matter. It used to be refused by the SETTINGS load, which the
+    retry cannot skip, so this section truncated the whole report to one fail
+    row with every later group reporting `skipped`, and nothing on screen said
+    a ``[secret_backends.*]`` section was the reason. That is the operator
+    doctor helps most, mid-migration, so the row-plus-report shape is the
+    point of the move, not a side effect of it.
+    """
     cfg = _write_config(tmp_path, settings="[secret_backends.env-var]\n")
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
-    g, _, _ = _check_config()
-    warns = [(c.name, c.message or "") for c in g.checks if c.status == Status.WARN]
-    assert any("[secret_backends.env-var]" in name and "delete the section" in message for name, message in warns), (
-        warns
-    )
+    g, config, _ = _check_config()
+    fails = [(c.name, c.message or "") for c in g.checks if c.status == Status.FAIL]
+    assert any(name == "Config" and "[secret_backends.*]" in message for name, message in fails), fails
+    # The retry succeeded, so the report goes on rather than truncating.
+    assert config is not None
+    assert any(c.name.startswith("SSH") for c in g.checks), [c.name for c in g.checks]
 
 
 def test_manifest_issues_surface_as_doctor_rows(tmp_path: Path, monkeypatch, capsys) -> None:

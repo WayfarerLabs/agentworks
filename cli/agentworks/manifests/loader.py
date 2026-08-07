@@ -99,8 +99,10 @@ class ManifestSet:
     that ever rode one (the sibling capability-config shape) is a hard
     error now, so the channel would have been a field that is always
     empty, a warn loop that never fires, and a bundle gate that always
-    passes. ``Config.deprecation_issues`` is a separate thing and stays:
-    config.toml still carries a deprecated section to nudge about.
+    passes. ``Config.deprecation_issues`` is a separate thing and stays,
+    though it is empty for the same reason since ``[secret_backends.*]``
+    became a hard error too; see the note on that field for what its
+    eventual retirement would have to take with it.
     """
 
     entries: tuple[ManifestEntry, ...]

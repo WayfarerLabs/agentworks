@@ -55,8 +55,8 @@ def _write_base(
 ) -> None:
     """Write a settings-only config.toml plus its resources/ manifests.
 
-    ``settings`` carries settings-only TOML ([secret_config], [plugins],
-    [secret_backends]); every resource under test goes in ``manifests``.
+    ``settings`` carries settings-only TOML ([secret_config], [plugins]);
+    every resource under test goes in ``manifests``.
     """
     pub = config_path.parent / "id.pub"
     priv = config_path.parent / "id"
@@ -581,16 +581,19 @@ def test_unreachable_secret_error_message_and_hint(tmp_path: Path) -> None:
     assert "remove" in exc.value.hint
 
 
-def test_unknown_backend_kind_in_secret_backends_errors(
+def test_secret_backends_section_errors_whatever_it_names(
     tmp_path: Path,
 ) -> None:
-    """A typo in [secret_backends.<kind>] (e.g. 'env_var' or 'envvar'
-    for 'env-var') errors at config-load time. Phase 2b.2 elevated this
-    from a soft warning to a hard error so it matches the framework's
-    treatment of the git-credential provider typos.
+    """``[secret_backends.*]`` is a retired resource section, refused at load
+    regardless of the name it carries.
 
-    ``[secret_backends.*]`` stays a config.toml section (a no-op capability
-    hint, not a declarable resource), so this check remains at load_config.
+    This used to assert that a TYPO ('env_var' for 'env-var') was caught by a
+    name check against the built-in backend registry. That check is gone: it
+    could not tell a typo from a plugin backend, so it refused correctly
+    spelled ones too. The section is wrong whatever it names, which catches
+    the typo as a side effect and stops mis-reporting the plugin case (see
+    tests/test_config_deprecation_warnings.py for the three names side by
+    side).
     """
     cfg_file = tmp_path / "config.toml"
     _write_base(
@@ -600,7 +603,7 @@ def test_unknown_backend_kind_in_secret_backends_errors(
         # typo: kind is 'env-var' (kebab), not 'env_var' (snake)
         """,
     )
-    with pytest.raises(ConfigError, match="unknown secret backend"):
+    with pytest.raises(ConfigError, match="settings only"):
         load_config(cfg_file, warn_issues=False)
 
 

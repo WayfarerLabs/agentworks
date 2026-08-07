@@ -306,3 +306,47 @@ SDD designed:
 The vm-site / vm-platform model itself, the readiness and enablement axes, the bundled-site
 mechanism, the reserved names, and the exposure and rollback contracts recorded above are all
 unchanged.
+
+## Addendum: 2026-08-07 (`defaults.site` checking moved out of the vm subsystem)
+
+`vms.validate_sites(config, registry)`, which this SDD's HLA specifies by name as the composition-
+boundary check that `defaults.site` resolves, is gone. The check itself is not: it is now one row in
+`agentworks/config/references.py`'s table of settings that name resources, run from
+`bootstrap.build_registry` at the same point in the same order. Nothing about it was vm-specific (it
+looked a name up in the registry), and it was one of three hand-written answers to a single
+question, so the declarative-schema effort collapsed it per the operator ruling of 2026-08-07 that
+config errors are hard errors.
+
+**The severity did not change, and the SDD's recorded behavior did not need reversing.** The ruling
+that prompted this work was written believing that a `defaults.site` naming a nonexistent site was
+only a `doctor` warning and that this SDD had recorded that degradation deliberately. It had not.
+`validate_sites` has hard-errored on an unknown name since it landed in `fd69f8a0`, exactly as the
+HLA specifies. The misreading is worth recording because the wording that caused it is still in this
+SDD: the FRD and the plan both say references to a site (VM rows, `defaults.site`) "are doctor
+WARNINGS, never command failures", and in context that is about a site that EXISTS but is DISABLED
+or NOT-READY. It was never about a name that resolves to nothing. Those two cases still have the two
+different answers this SDD gave them:
+
+- A name that resolves to NOTHING is a hard `ConfigError` at registry build. Unchanged in severity.
+- A name that resolves to a site that cannot run HERE stays loadable: `agw doctor` warns on the
+  reference (`defaults.site: names 'lima-local', which is not ready: limactl not installed`) and
+  using it is a typed `StateError` at `resolve_site`. Unchanged entirely, and now pinned by a test
+  that fails if the reference check is tightened to require availability.
+
+What DID change is the operator-facing text, which no longer uses site-specific vocabulary:
+
+```console
+# before
+Configuration error: defaults.site names an unknown site 'lima-locale'
+  Hint: declare a vm-site named 'lima-locale' (see `agw resource sample vm-site`) or point
+        defaults.site at a declared site (`agw resource list --kind vm-site`)
+
+# after
+Configuration error: defaults.site references unknown vm-site 'lima-locale'
+  Hint: declared vm-site resources: ['lima-local', 'wsl2']. Point defaults.site at one of them,
+        or declare 'lima-locale' (`agw resource sample vm-site --write vm-sites.yaml`).
+```
+
+"references unknown vm-site" is the wording a dangling reference from a MANIFEST already gets at
+finalize, which is the point of the collapse: one mistake, one phrasing, wherever it is made. The
+hint gained the declared set, since for this setting the mistake is nearly always a typo.

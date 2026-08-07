@@ -527,19 +527,14 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
             g.warn("Manifest", issue)
     if not config_load_failed and not config.config_issues and manifests is not None and not manifests.issues:
         g.ok("Config is valid")
-    # Deprecation nudges ride their own channel (so --no-deprecations
-    # can silence the ambient per-command warning), but doctor is the
-    # explicit full-health surface. Doctor rows are scannable one-liners
-    # (maintainer ruling, 2026-07-06): render the FACT with one next
-    # step; the full teaching text stays on the ambient command warning.
-    # (The old TOML-resource-declaration nudge and the sibling
-    # capability-config shape are hard errors now, rendered as the Config
-    # or Manifest fail rows above, so neither has a warn row here.)
-    for section in config.noop_secret_backend_sections:
-        g.warn(
-            f"Config has a no-op {section} section",
-            "deprecated and ignored; delete the section, and set [secret_config].backends instead",
-        )
+    # No deprecation rows here: every config.toml deprecation doctor used to
+    # render is a hard error now (the TOML resource declarations, the sibling
+    # capability-config shape, and the ``[secret_backends.*]`` no-op that was
+    # the last of them), so each arrives as the Config or Manifest fail row
+    # above instead. If a nudge is added back to ``Config.deprecation_issues``,
+    # render it here as a scannable one-liner (maintainer ruling, 2026-07-06):
+    # the FACT plus one next step, with the teaching text left on the ambient
+    # per-command warning.
 
     # SSH keys
     _check_ssh_key(g, config.operator.ssh_public_key, "public")

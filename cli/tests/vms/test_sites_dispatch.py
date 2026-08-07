@@ -1,5 +1,5 @@
-"""Site resolution: the only constructor of bound platform instances,
-plus the stranded-site ConfigError and validate_sites.
+"""Site resolution: the only constructor of bound platform instances, plus
+the stranded-site ConfigError.
 """
 
 from __future__ import annotations
@@ -18,7 +18,6 @@ from agentworks.vms.sites import (
     VMSiteDecl,
     resolve_site,
     site_manifest_hint,
-    validate_sites,
 )
 
 
@@ -127,19 +126,13 @@ def test_ops_read_the_token_through_the_context() -> None:
         bare._api(RunContext(secrets=ScopedSecrets({}, ("other-name",))))
 
 
-def test_validate_sites_accepts_declared_and_absent() -> None:
-    registry = _registry()
-    config = SimpleNamespace(defaults=SimpleNamespace(site=None))
-    validate_sites(config, registry)  # type: ignore[arg-type]
-    config = SimpleNamespace(defaults=SimpleNamespace(site="lima-local"))
-    validate_sites(config, registry)  # type: ignore[arg-type]
-
-
-def test_validate_sites_rejects_unknown_with_config_vocabulary() -> None:
-    registry = _registry()
-    config = SimpleNamespace(defaults=SimpleNamespace(site="nope"))
-    with pytest.raises(ConfigError, match="defaults.site names an unknown site"):
-        validate_sites(config, registry)  # type: ignore[arg-type]
+# The two ``validate_sites`` cases that lived here moved to
+# tests/test_config_setting_references.py when that check became the generic
+# settings-reference pass. They are not lost: the new module parametrizes the
+# same two assertions (a declared or absent name builds, an unknown one is a
+# ConfigError) over every settings value that names a resource, and it drives
+# them through a real load_config + build_registry rather than the
+# SimpleNamespace stub config they used here.
 
 
 def test_site_manifest_hint_carries_the_vm_host() -> None:

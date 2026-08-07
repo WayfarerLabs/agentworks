@@ -13,6 +13,7 @@ import pytest
 
 from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
+from agentworks.errors import ConfigError
 from agentworks.resources import KIND_REGISTRY, NoUnreferencedDefaultError
 from tests.conftest import write_cfg
 
@@ -100,19 +101,24 @@ def test_capability_descriptors_published(tmp_path: Path) -> None:
         assert row.origin.source == "agentworks.secrets"
 
 
-def test_legacy_toml_backend_section_does_not_override_built_in(tmp_path: Path) -> None:
-    """``[secret_backends.env-var]`` is a deprecated no-op: it publishes
-    nothing (it warns at load), and the descriptor row survives
-    untouched."""
-    cfg = load_config(
-        _write_cfg(
-            tmp_path / "config.toml",
-            """
-            [secret_backends.env-var]
-            """,
-        ),
-        warn_issues=False,
-    )
-    registry = build_registry(cfg)
+def test_no_config_section_can_declare_a_secret_backend(tmp_path: Path) -> None:
+    """``secret-backend`` is a capability kind: its rows come from the
+    descriptor and from plugins, and config.toml cannot contribute one.
+
+    ``[secret_backends.env-var]`` was the section that looked like it might,
+    and it is refused at load now rather than publishing a no-op, so the
+    built-in row is the only ``env-var`` there can be.
+    """
+    with pytest.raises(ConfigError, match="settings only"):
+        load_config(
+            _write_cfg(
+                tmp_path / "config.toml",
+                """
+                [secret_backends.env-var]
+                """,
+            ),
+            warn_issues=False,
+        )
+    registry = build_registry(load_config(_write_cfg(tmp_path / "clean.toml", ""), warn_issues=False))
     env_var = registry.lookup("secret-backend", "env-var")
     assert env_var.origin.variant == "built-in"

@@ -85,9 +85,18 @@ def active_backends(config: Config, registry: Registry) -> list[ActiveBackend]:
     (``[secret_config].backends``, a setting), and each opted-in name is
     resolved to its ``secret-backend`` graph node, off which this reads the
     backend IMPL and its stored readiness verdict (LLD d; no
-    ``SECRET_BACKEND_REGISTRY`` probe, R11). An unknown chain name gets the
-    operator's vocabulary (the chain is config, so the error is a config
-    error), and the hint enumerates the registered backends.
+    ``SECRET_BACKEND_REGISTRY`` probe, R11).
+
+    The unknown-name ``ConfigError`` is a BACKSTOP, not the primary check.
+    On every registry built by ``bootstrap.build_registry`` the generic
+    settings-reference pass has already refused an unknown chain name with a
+    better-framed message, so this branch is unreachable there. It is kept
+    because this function is public and takes any registry: a caller that
+    assembles one by hand (``Registry.empty()`` + ``publish_to`` +
+    ``finalize``, which the tests and multi-source orchestration do) skips
+    that pass, and without this branch a typo would surface as a bare
+    ``KeyError`` out of ``impl_of``. A precise config error at the layer that
+    can still tell what went wrong beats a traceback, so it stays.
 
     The chain is filtered to ``present`` (a node exists) and ``enabled`` (its
     opt-in axis, LLD d): a present-but-DISABLED opted-in backend is dormant,
@@ -181,10 +190,11 @@ def validate_chain(config: Config, registry: Registry) -> None:
     """
     from agentworks.resources.access import secret_decls
 
-    # Validate the chain names are known backends (config vocabulary) by
-    # building the active chain; the returned backends are not otherwise used
-    # here (reachability reads the frozen edges, not a live would_attempt).
-    active_backends(config, registry)
+    # The chain's NAMES are already settled: ``build_registry`` runs the
+    # generic settings-reference check immediately before this, so every name
+    # in ``backends`` resolves to a secret-backend row by the time we get
+    # here. This used to call ``active_backends`` purely for that side effect
+    # and throw the result away.
     opted_in = set(config.secret_config_data.backends)
 
     graph = registry.graph
