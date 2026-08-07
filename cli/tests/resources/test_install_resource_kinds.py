@@ -76,9 +76,16 @@ def test_install_resource_kind_synthesize_raises(kind_name: str) -> None:
     """These kinds have ``miss_policy == "error"``; ``synthesize`` is
     never called by the framework in practice but the empty-requirements
     contract still applies (Phase 2a). Raises ``NoUnreferencedDefaultError``.
+
+    The message has to NAME the kind, which is the only thing separating
+    these four cases: all four bodies are one line handing ``self.kind``
+    to the shared ``synthesize_no_default``, and four near-identical
+    one-line methods are exactly where a copy-paste passes the kind next
+    door. Without the match, one handler could answer for another and
+    every case would still be green.
     """
     kind = KIND_REGISTRY[kind_name]
-    with pytest.raises(NoUnreferencedDefaultError):
+    with pytest.raises(NoUnreferencedDefaultError, match=f"the {kind_name} kind has no reserved default name"):
         kind.synthesize(())
 
 

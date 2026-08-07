@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from enum import Enum
-from typing import Annotated, Literal
+from typing import TYPE_CHECKING, Annotated, Literal
 
 import pytest
 from pydantic import AfterValidator, Field, StringConstraints
@@ -28,6 +28,9 @@ from agentworks.schema import (
     render_type,
 )
 from tests._emitted_schema import ref_extension
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 from ._fixture_models import (
     ALL_FIXTURES,
@@ -676,12 +679,7 @@ def test_the_stream_and_the_emitted_schema_report_the_same_marker() -> None:
     assert stream.ref.schema_extension() == ref_extension(GithubLike.model_json_schema()["properties"]["token"])
 
 
-@pytest.mark.parametrize(
-    "model_cls",
-    [model for model in ALL_FIXTURES if model_is_complete(model)],
-    ids=lambda model: model.__name__,
-)
-def test_the_stream_offers_every_arm_the_emitted_schema_does(model_cls: type[AgwModel]) -> None:
+def test_the_stream_offers_every_arm_the_emitted_schema_does() -> None:
     """No arm a document may name is missing from the field stream, at
     either depth, for any model shape.
 
@@ -695,15 +693,37 @@ def test_the_stream_offers_every_arm_the_emitted_schema_does(model_cls: type[Agw
 
     Equality, not containment: a stream naming an arm nothing dispatches
     on would send an operator to write a document the loader refuses.
+
+    Every buildable fixture in one sweep, reporting EVERY disagreement
+    rather than one model per case. The two derivations move together, so
+    a change that breaks the correspondence breaks it for a whole class of
+    shapes at once, and the useful failure is the list of them: a case per
+    model tells you the first that broke and hides the other twelve.
     """
+    disagreements = [
+        report for model_cls in ALL_FIXTURES if model_is_complete(model_cls) for report in _arm_disagreements(model_cls)
+    ]
+    assert disagreements == [], "the stream and the emitted schema offer different arms:\n" + "\n".join(disagreements)
+
+
+def _arm_disagreements(model_cls: type[AgwModel]) -> Iterator[str]:
+    """Every way ``model_cls``'s stream and emitted schema disagree about
+    what a document may name, each addressed by model and field."""
     emitted = model_cls.model_json_schema()
     stream = docs(model_cls)
     for name, prop in emitted.get("properties", {}).items():
+        where = f"  {model_cls.__name__}.{name}"
         doc = stream.get((name,))
-        assert doc is not None, f"{name} is in the emitted schema and not in the stream"
+        if doc is None:
+            yield f"{where}: in the emitted schema and not in the stream"
+            continue
         field = _peeled_schema(prop)
-        assert _tags_offered(field, emitted) == {arm.tag for arm in doc.union_arms}
-        assert _tags_offered(_element_schema(field), emitted) == {arm.tag for arm in doc.item_union_arms}
+        for depth, offered, streamed in (
+            ("the field", _tags_offered(field, emitted), {arm.tag for arm in doc.union_arms}),
+            ("one element", _tags_offered(_element_schema(field), emitted), {arm.tag for arm in doc.item_union_arms}),
+        ):
+            if offered != streamed:
+                yield (f"{where}: {depth} dispatches on {sorted(offered)} and the stream offers {sorted(streamed)}")
 
 
 def _peeled_schema(schema: dict[str, object]) -> dict[str, object]:

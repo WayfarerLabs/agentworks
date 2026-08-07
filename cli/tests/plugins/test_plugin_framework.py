@@ -25,7 +25,6 @@ import agentworks.plugins as plugins_pkg
 from agentworks.capabilities.descriptor import capability_descriptors
 from agentworks.capabilities.vm_platform.base import VMPlatform
 from agentworks.errors import StateError
-from agentworks.manifests.decode import _hosting_descriptors
 from agentworks.origin import Origin
 from agentworks.plugins import (
     SYSTEM_PLUGINS,
@@ -42,7 +41,6 @@ from agentworks.resources.graph import (
     _capability_kinds,
     _capability_registry_loaders,
 )
-from agentworks.resources.kind import KIND_REGISTRY
 from agentworks.schema import AgwModel, AgwRootModel
 from tests.plugins._fixtures import (
     ConformingSecretBackend,
@@ -565,21 +563,13 @@ def test_every_capability_switchboard_site_derives_from_the_descriptor() -> None
     kinds = {d.kind for d in descriptors}
 
     # Non-vacuity first: a table read too early, or a contributor that
-    # stopped being imported, must fail loudly here rather than satisfy
-    # every assertion below trivially.
-    assert tuple(d.kind for d in descriptors) == (
-        "vm-platform",
-        "harness-integration",
-        "git-credential-provider",
-        "secret-backend",
-    )
-
-    # The original assertion, kept: a new capability kind added without its
-    # record fails here. Plus the identity that lets the four
-    # ``KIND_REGISTRY[...] = ...`` lines stay co-located with their kinds.
-    assert kinds == {kind for kind, handler in KIND_REGISTRY.items() if handler.category == "capability"}
-    for descriptor in descriptors:
-        assert descriptor.kind_strategy is KIND_REGISTRY[descriptor.kind], descriptor.kind
+    # stopped being imported, would satisfy every set equality below
+    # trivially. WHICH kinds the table carries, and that each one's record
+    # points at the live strategy object, are the table's own facts and are
+    # pinned where the table is, in ``tests/test_capability_descriptors.py``;
+    # restating them here made this file an owner of something it only
+    # consumes.
+    assert kinds, "the descriptor table is empty, so nothing below proves anything"
 
     # Site: the plugin framework's adapter table. One generic adapter per
     # kind, each a view of that kind's record.
@@ -604,13 +594,12 @@ def test_every_capability_switchboard_site_derives_from_the_descriptor() -> None
     for registry, descriptor in zip(snapshot, descriptors, strict=True):
         assert registry is descriptor.registry(), descriptor.kind
 
-    # Site: manifest decode's fold dispatch, keyed by HOST kind (the
-    # declarable kind whose spec names the capability) rather than by the
-    # capability kind. Membership is the dispatch: a kind in this map gets
-    # the tagged-table fold. Named as a literal, not recomputed from the
-    # same descriptors: the comprehension would only prove a comprehension
-    # runs.
-    assert set(_hosting_descriptors()) == {"vm-site", "git-credential", "session-template"}
+    # The sixth site, manifest decode's fold dispatch, is NOT here. Keyed
+    # by HOST kind rather than by capability kind, it is the one site whose
+    # keys are not ``kinds``, so there is no set equality to make against
+    # the table; what pins it is the literal host-to-field map in
+    # ``test_capability_descriptors.py::test_manifest_sections_match_the_decoders_host_surfaces``,
+    # and that it reads the table is line 5 of the source-level twin below.
 
 
 _DERIVED_SITES = {

@@ -235,15 +235,22 @@ def _elements_of(collection: Collection | None, value: object) -> tuple[object, 
 def _arm_block(arms: tuple[UnionArmType, ...], discriminator: str, value: object) -> Iterator[_Block]:
     """The arm the RAW tag names, as a block to descend into.
 
-    An absent or unrecognized tag contributes nothing; the arm is
-    selected from the blob and the union type alone, never from a
+    An absent, unrecognized, or non-string tag contributes nothing; the
+    arm is selected from the blob and the union type alone, never from a
     registry, which is what keeps this walk a pure function of the model.
+
+    The match below is the whole check, and deliberately: every
+    ``arm.tag`` is a string, because
+    :func:`~agentworks.schema._shape._tags_of` keeps only string tags when
+    it classifies the union. So a tag an operator wrote as anything else
+    simply matches no arm, and screening for its type here would be the
+    same rule stated twice, in the one place it cannot be true and the
+    match false. That rule belongs where it is: on the MODEL, computed
+    once, saying which arms a document can address by name at all.
     """
     if not isinstance(value, Mapping):
         return
     tag = value.get(discriminator)
-    if not isinstance(tag, str):
-        return
     for arm in arms:
         if arm.tag == tag:
             yield _Block(model=arm.model, blob=value)
