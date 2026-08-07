@@ -20,6 +20,7 @@ import pytest
 
 from agentworks.errors import ValidationError
 from agentworks.manifests.decode import KIND_SECTIONS
+from agentworks.manifests.emit import MODELINE_PREFIX
 from agentworks.manifests.loader import load_manifests
 from agentworks.manifests.samples import sample_text, write_sample
 from agentworks.manifests.spec_model import declarable_kinds
@@ -223,6 +224,70 @@ def test_write_sample_creates_and_appends(tmp_path: Path) -> None:
     # Still inert after the append.
     manifests = load_manifests(resources)
     assert not manifests.entries
+
+
+def _activate(path: Path) -> None:
+    """The activation the guide documents, applied to a WRITTEN file.
+
+    The same one-``#`` strip as :func:`_uncomment`, except that the
+    modeline is left alone: it is a file header rather than a document
+    line, and uncommenting it would make it a key the loader rejects.
+    """
+    lines = path.read_text(encoding="utf-8").splitlines()
+    activated = [
+        line if index == 0 and line.startswith(MODELINE_PREFIX) else line.removeprefix("#")
+        for index, line in enumerate(lines)
+    ]
+    path.write_text("\n".join(activated) + "\n", encoding="utf-8")
+
+
+def test_appended_samples_activate_as_separate_documents(tmp_path: Path) -> None:
+    """Appending a second kind and activating the result declares BOTH.
+
+    The append emits the commented ``---`` that ``--all`` always emitted,
+    so the same one-``#`` strip separates the documents. Without it the
+    second document's keys merge into the first and the load dies on a
+    duplicate ``apiVersion``, which names neither the missing separator nor
+    the command that skipped it.
+    """
+    resources = tmp_path / "resources"
+    write_sample(resources, "repro.yaml", "vm-template")
+    write_sample(resources, "repro.yaml", "secret")
+
+    _activate(resources / "repro.yaml")
+    manifests = load_manifests(resources)
+
+    assert {(entry.kind, entry.name) for entry in manifests.entries} == {
+        ("vm-template", "my-vm-template"),
+        ("secret", "my-secret"),
+    }
+
+
+def test_appending_to_a_hand_written_manifest_keeps_it_declaring(tmp_path: Path) -> None:
+    """The case that costs an operator something they already had.
+
+    Appending to a live hand-written manifest and activating the addition
+    used to fold the new document's keys into the resource already in the
+    file, so a working resource stopped loading because a DIFFERENT one was
+    added next to it.
+    """
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    manifest = resources / "mine.yaml"
+    manifest.write_text(
+        "apiVersion: agentworks/v1\nkind: vm-template\nmetadata:\n  name: dev\nspec:\n  cpus: 4\n",
+        encoding="utf-8",
+    )
+
+    write_sample(resources, "mine.yaml", "secret")
+    # Inert as written: the hand-written resource is untouched.
+    assert [(entry.kind, entry.name) for entry in load_manifests(resources).entries] == [("vm-template", "dev")]
+
+    _activate(manifest)
+    assert {(entry.kind, entry.name) for entry in load_manifests(resources).entries} == {
+        ("vm-template", "dev"),
+        ("secret", "my-secret"),
+    }
 
 
 def test_sample_capability_kind_is_a_clean_cli_error(

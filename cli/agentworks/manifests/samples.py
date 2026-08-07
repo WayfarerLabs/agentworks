@@ -30,6 +30,18 @@ if TYPE_CHECKING:
 
 _SUFFIXES = {".yaml", ".yml"}
 
+_SEPARATOR = "#---"
+"""A YAML document separator, commented like every other document line.
+
+It is a DOCUMENT line, not prose, so the skeleton's one rule ("delete one
+leading ``#``") turns it into a real ``---`` at the same moment it turns
+the lines around it into real YAML. Anything that concatenates a sample
+onto content that is already there has to emit one: without it the
+appended document's keys merge into the preceding document, and the load
+fails on the duplicate ``apiVersion`` rather than on anything the operator
+can see.
+"""
+
 
 def sample_text(kind: str | None = None, *, all_kinds: bool = False) -> str:
     """The rendered sample for ``kind``, or (with ``all_kinds``) every kind.
@@ -43,7 +55,7 @@ def sample_text(kind: str | None = None, *, all_kinds: bool = False) -> str:
     # A commented document separator between kinds, so the concatenation is
     # a real multi-document file once uncommented rather than a pile of
     # documents YAML would read as one.
-    return "\n#---\n".join(parts) + "\n"
+    return f"\n{_SEPARATOR}\n".join(parts) + "\n"
 
 
 def write_sample(
@@ -55,9 +67,15 @@ def write_sample(
 ) -> tuple[Path, bool]:
     """Write (or append) the sample under the resources directory.
 
-    Returns ``(path, appended)``. The content is fully commented, so no
-    document separator is involved: appending comments to an existing
-    manifest file cannot change what it declares.
+    Returns ``(path, appended)``. An append is separated from what is
+    already in the file by a commented ``---`` (:data:`_SEPARATOR`). What
+    this command writes is inert either way, so the separator changes
+    nothing about the file it hands back; it matters at the operator's
+    NEXT step, which is the whole point of writing the sample. Uncomment a
+    sample appended without one and its keys land in the preceding
+    document, which takes down a resource that was already working and
+    reports it as a duplicate ``apiVersion`` rather than as a missing
+    separator.
 
     A file this CREATES opens with the yaml-language-server modeline, and
     the schema set it refers to is written alongside, because a modeline
@@ -87,10 +105,8 @@ def write_sample(
     appended = target.exists()
     target.parent.mkdir(parents=True, exist_ok=True)
     if appended:
-        existing = target.read_text(encoding="utf-8")
-        separator = "" if existing.endswith("\n") or not existing else "\n"
         body, restamped = restamped_modeline(
-            f"{existing}{separator}\n{text}",
+            _joined(target.read_text(encoding="utf-8"), text),
             manifest_path=target,
             resources_dir=resources_dir,
             kinds=_validated_kinds(kind, all_kinds),
@@ -105,6 +121,24 @@ def write_sample(
         target.write_text(f"{header}\n{text}", encoding="utf-8")
         write_schema_set(resources_dir / SCHEMA_DIRNAME)
     return target, appended
+
+
+def _joined(existing: str, text: str) -> str:
+    """``text`` appended to ``existing`` as a NEW document.
+
+    Nothing here parses ``existing``, for the reason
+    ``emit.restamped_modeline`` does not either: an append is a text
+    operation on a file the operator owns. The separator is emitted
+    whenever there is any content to separate FROM, which is the question
+    a parse would answer anyway, and it is cheap to be wrong in the
+    harmless direction. A file holding only a modeline (or only comments)
+    gets one it did not strictly need, and a leading ``---`` is how a YAML
+    stream may open, so it costs a line rather than a meaning.
+    """
+    if not existing.strip():
+        return text
+    newline = "" if existing.endswith("\n") else "\n"
+    return f"{existing}{newline}\n{_SEPARATOR}\n{text}"
 
 
 def _validated_kinds(kind: str | None, all_kinds: bool) -> tuple[str, ...]:

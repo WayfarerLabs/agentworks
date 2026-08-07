@@ -545,7 +545,12 @@ def resource_sample(
     verb = "Appended sample to" if appended else "Wrote sample to"
     output.info(f"{verb} {path}")
     output.info("Uncomment the document lines (delete one leading '#') to activate.")
-    if not appended:
+    if appended:
+        output.detail(
+            "The '#---' above the new sample is one of those document lines: it separates it from what was already "
+            "in the file, so uncomment it too."
+        )
+    else:
         output.detail(
             "The first line associates a schema, so a schema-aware editor checks the file as you type. Leave it as a "
             "comment."
