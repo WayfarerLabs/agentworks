@@ -200,24 +200,6 @@ def test_normal_command_errors_against_a_resource_declaring_config(tmp_path: Pat
     assert "settings only" in str(result.exception)
 
 
-def test_resource_migrate_runs_against_a_resource_declaring_config(tmp_path: Path, monkeypatch) -> None:
-    from typer.testing import CliRunner
-
-    from agentworks.cli import app
-
-    cfg = _config(
-        tmp_path,
-        """
-        [secrets.npm-token]
-        description = "npm token"
-        """,
-    )
-    monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
-    dry = CliRunner().invoke(app, ["resource", "migrate", "secret", "--dry-run"])
-    assert dry.exit_code == 0, dry.output
-    assert "secret/npm-token" in dry.output
-
-
 def test_resource_sample_write_runs_against_a_resource_declaring_config(tmp_path: Path, monkeypatch) -> None:
     from typer.testing import CliRunner
 
