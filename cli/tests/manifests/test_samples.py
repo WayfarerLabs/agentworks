@@ -25,16 +25,7 @@ from agentworks.manifests.emit import MODELINE_PREFIX
 from agentworks.manifests.loader import load_manifests
 from agentworks.manifests.samples import _SEPARATOR, sample_text, write_sample
 from agentworks.manifests.spec_model import declarable_kinds
-
-
-def _uncomment(text: str) -> str:
-    """The documented uncomment rule: strip one leading ``#`` per line.
-
-    Document lines become YAML; ``##`` prose lines become ordinary YAML
-    comments.
-    """
-    lines = [line[1:] if line.startswith("#") else line for line in text.splitlines()]
-    return "\n".join(lines) + "\n"
+from tests.manifests.conftest import activate, uncomment
 
 
 def _capability_kinds() -> list[str]:
@@ -185,7 +176,7 @@ def test_uncommented_samples_load_through_the_real_loader(tmp_path: Path) -> Non
     resources = tmp_path / "resources"
     resources.mkdir()
     for kind in declarable_kinds():
-        (resources / f"{kind}.yaml").write_text(_uncomment(sample_text(kind)))
+        (resources / f"{kind}.yaml").write_text(uncomment(sample_text(kind)))
     manifests = load_manifests(resources)
 
     assert {entry.kind for entry in manifests.entries} == set(declarable_kinds())
@@ -199,7 +190,7 @@ def test_the_whole_set_uncomments_as_one_file(tmp_path: Path) -> None:
     per-file corpus this replaces never proved that."""
     resources = tmp_path / "resources"
     resources.mkdir()
-    (resources / "everything.yaml").write_text(_uncomment(sample_text(all_kinds=True)))
+    (resources / "everything.yaml").write_text(uncomment(sample_text(all_kinds=True)))
     manifests = load_manifests(resources)
 
     assert {entry.kind for entry in manifests.entries} == set(declarable_kinds())
@@ -241,21 +232,6 @@ def test_write_sample_creates_and_appends(tmp_path: Path) -> None:
     assert not manifests.entries
 
 
-def _activate(path: Path) -> None:
-    """The activation the guide documents, applied to a WRITTEN file.
-
-    The same one-``#`` strip as :func:`_uncomment`, except that the
-    modeline is left alone: it is a file header rather than a document
-    line, and uncommenting it would make it a key the loader rejects.
-    """
-    lines = path.read_text(encoding="utf-8").splitlines()
-    activated = [
-        line if index == 0 and line.startswith(MODELINE_PREFIX) else line.removeprefix("#")
-        for index, line in enumerate(lines)
-    ]
-    path.write_text("\n".join(activated) + "\n", encoding="utf-8")
-
-
 def test_appended_samples_activate_as_separate_documents(tmp_path: Path) -> None:
     """Appending a second kind and activating the result declares BOTH.
 
@@ -269,7 +245,7 @@ def test_appended_samples_activate_as_separate_documents(tmp_path: Path) -> None
     write_sample(resources, "repro.yaml", "vm-template")
     write_sample(resources, "repro.yaml", "secret")
 
-    _activate(resources / "repro.yaml")
+    activate(resources / "repro.yaml")
     manifests = load_manifests(resources)
 
     assert {(entry.kind, entry.name) for entry in manifests.entries} == {
@@ -298,7 +274,7 @@ def test_appending_to_a_hand_written_manifest_keeps_it_declaring(tmp_path: Path)
     # Inert as written: the hand-written resource is untouched.
     assert [(entry.kind, entry.name) for entry in load_manifests(resources).entries] == [("vm-template", "dev")]
 
-    _activate(manifest)
+    activate(manifest)
     assert {(entry.kind, entry.name) for entry in load_manifests(resources).entries} == {
         ("vm-template", "dev"),
         ("secret", "my-secret"),
@@ -326,7 +302,7 @@ def test_appending_to_a_file_with_no_trailing_newline_still_separates(tmp_path: 
 
     assert outcome == "appended"
     assert "\n  cpus: 4\n\n#---\n" in manifest.read_text()
-    _activate(manifest)
+    activate(manifest)
     assert {(entry.kind, entry.name) for entry in load_manifests(resources).entries} == {
         ("vm-template", "dev"),
         ("secret", "my-secret"),
@@ -348,7 +324,7 @@ def test_a_third_append_separates_from_the_second(tmp_path: Path) -> None:
 
     manifest = resources / "many.yaml"
     assert manifest.read_text().count(f"\n{_SEPARATOR}\n") == 2
-    _activate(manifest)
+    activate(manifest)
     assert {(entry.kind, entry.name) for entry in load_manifests(resources).entries} == {
         ("vm-template", "my-vm-template"),
         ("secret", "my-secret"),
@@ -428,7 +404,7 @@ def test_writing_into_a_file_that_exists_and_is_blank_emits_no_separator(tmp_pat
     text = manifest.read_text()
     assert _SEPARATOR not in text
     assert MODELINE_PREFIX not in text
-    _activate(manifest)
+    activate(manifest)
     assert [(entry.kind, entry.name) for entry in load_manifests(resources).entries] == [("secret", "my-secret")]
 
 
