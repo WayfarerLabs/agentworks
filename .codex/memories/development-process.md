@@ -1,22 +1,16 @@
 # Development Process
 
-Every development effort, large or small, follows the same shape. Hold it in mind from the first
-step, not only when you remember to.
+All development here runs through one process, and the `agentic-dev-process` skill is its single
+authoritative home; this rule exists only to point you there. Do not treat any summary (including
+past versions of this rule) as the process.
 
-- **Size up the work first.** Large or significant efforts (new subsystems, contract or schema
-  changes, wide or hard-to-reverse work) go through the `sdd` skill. The lead authors and owns the
-  FRD, HLA, and plan (writing the plan is how the lead pressure-tests the upstream docs); the LLDs
-  and the implementation of each plan step are delegated to `agentworks-dev` subagents, so the lead
-  keeps a concise context and holds the overall picture. Small, well-patterned changes skip SDD and
-  are done directly.
-- **Review every step** with the `agentworks-reviewer` subagent, using a model at least as capable
-  as the dev that produced the work. Push back on incorrect findings; otherwise fix anything valid,
-  and iterate until everyone is happy.
-- **Commit and push at regular intervals**, and open a non-draft PR when close to merge-ready,
-  triaging Copilot's automated review of new pushes. Default to one PR per feature (SDD artifacts
-  included); split only when phases carry independent standalone value.
-- **Escalate the significant** (necessary redesigns, wrong requirements, decisions that are the
-  operator's) and otherwise keep pushing while the road is clear.
+Which part applies depends on your role:
 
-The `agentic-dev-process` skill is the full playbook, including deliberate model-tier selection and
-the commit/PR details; load it when running a real effort.
+- **If you are driving work** (you decide what happens next, own a plan, or launch subagents), load
+  the `agentic-dev-process` skill before starting and follow it end to end: sizing, SDD, delegation,
+  review, PRs, and escalation. This applies to small direct changes too; the skill says which steps
+  collapse.
+- **If you were delegated a bounded task**, your invoking prompt and your persona define your lane;
+  process decisions that reach beyond that lane route to your invoking lead, not to this rule.
+
+Either way, the `development-principles` rule governs how you build, and nothing here waives it.

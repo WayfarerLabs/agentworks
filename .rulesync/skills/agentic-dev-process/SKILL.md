@@ -9,11 +9,13 @@ targets: ["*"]
 # Agentic Development Process
 
 This is the top-level playbook for how a development effort runs, from a standing start to a
-merge-ready PR. It ties three things together: the `sdd` skill (how we spec significant work), the
-`agentworks-dev` subagent (who implements), and the `agentworks-reviewer` subagent (who checks). The
-always-on rules in `.rulesync/rules/` and the repo's `CONTRIBUTING.md` cover the mechanics (code
-style, linting, conventional commits); the `development-principles` rule covers _how_ to write the
-code. This skill covers the flow that sits above both.
+merge-ready PR. It is written for whoever is **driving** the effort; a delegated subagent gets its
+lane from its persona and its invoking prompt, not from here. The playbook ties three things
+together: the `sdd` skill (how we spec significant work), the `agentworks-dev` subagent (who
+implements), and the `agentworks-reviewer` subagent (who checks). The always-on rules (already in
+your context) and the repo's `CONTRIBUTING.md` cover the mechanics (code style, linting,
+conventional commits); the `development-principles` rule covers _how_ to write the code. This skill
+covers the flow that sits above both.
 
 The process scales with the work. A large effort walks every step below; a small change collapses
 several of them, but review, regular commits, and escalation still apply. Hold the whole picture,
