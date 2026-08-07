@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import builtins
 import io
+import os
 import shutil
 import sqlite3
 import subprocess
@@ -35,7 +36,7 @@ from agentworks.guide import (
 )
 from agentworks.guide.agent_mode import select_guide_mode
 from agentworks.guide.contributions import guide_contributions
-from agentworks.guide.render import _dynamic, render_index, render_topic
+from agentworks.guide.render import _dynamic, render_index, render_topic, sanitize_terminal_output
 from agentworks.guide.service import _dynamic_topic, _EmptyInventory, render_guide
 from agentworks.guide.view import build_guide_view
 from agentworks.plugins.base import Plugin
@@ -150,10 +151,11 @@ def test_live_render_guide_denies_probes_secrets_capabilities_writes_and_mutatio
     import agentworks.output as output
     import agentworks.secrets.resolve as secrets
     import agentworks.transports as transports
-    from agentworks.bootstrap import load_guide_registry
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
     from agentworks.config import load_config
     from agentworks.db import Database
+    from agentworks.resources import Registry
+    from agentworks.secrets import SECRET_BACKEND_REGISTRY
 
     public_key = tmp_path / "id.pub"
     private_key = tmp_path / "id"
@@ -162,14 +164,29 @@ def test_live_render_guide_denies_probes_secrets_capabilities_writes_and_mutatio
     config_path = tmp_path / "config.toml"
     config_path.write_text(f'[operator]\nssh_public_key = "{public_key}"\nssh_private_key = "{private_key}"\n')
     config = load_config(config_path, warn_issues=False)
-    registry = load_guide_registry(config)
+    config_load_calls: list[bool] = []
+    finalize_probe_values: list[bool] = []
+
+    def load_default_config(*, raise_errors: bool = False) -> Config:
+        config_load_calls.append(raise_errors)
+        return config
+
+    real_finalize = Registry.finalize
+
+    def track_finalize(
+        registry: Registry,
+        enablement_sources: object = (),
+        *,
+        probe_host_readiness: bool = True,
+    ) -> None:
+        finalize_probe_values.append(probe_host_readiness)
+        real_finalize(registry, enablement_sources, probe_host_readiness=probe_host_readiness)  # type: ignore[arg-type]
 
     def denied(*args: object, **kwargs: object) -> None:
         raise AssertionError("guide rendering invoked denied power")
 
-    monkeypatch.setattr(registry, "finalize", denied)
-    monkeypatch.setattr(registry, "add", denied)
-    monkeypatch.setattr(type(registry.graph), "impl_of", denied)
+    monkeypatch.setattr("agentworks.config.load_config", load_default_config)
+    monkeypatch.setattr(Registry, "finalize", track_finalize)
     monkeypatch.setattr(shutil, "which", denied)
     monkeypatch.setattr(subprocess, "run", denied)
     monkeypatch.setattr(output, "prompt", denied)
@@ -178,12 +195,15 @@ def test_live_render_guide_denies_probes_secrets_capabilities_writes_and_mutatio
     monkeypatch.setattr(secrets, "resolve_secrets_quiet", denied)
     monkeypatch.setattr(transports, "transport", denied)
     monkeypatch.setattr(LimaPlatform, "unsupported_reason", denied)
+    for backend in SECRET_BACKEND_REGISTRY.values():
+        monkeypatch.setattr(backend, "not_ready", denied)
     for name in dir(Database):
         if name.startswith(("insert_", "update_", "delete_", "set_", "remove_")):
             monkeypatch.setattr(Database, name, denied)
 
     real_open = cast("Any", builtins.open)
     real_io_open = cast("Any", io.open)
+    real_os_open = os.open
 
     def no_write_open(file: object, mode: str = "r", *args: object, **kwargs: object):
         if any(flag in mode for flag in "wax+"):
@@ -195,8 +215,15 @@ def test_live_render_guide_denies_probes_secrets_capabilities_writes_and_mutatio
             raise AssertionError(f"guide rendering opened {file!r} for writing")
         return real_io_open(file, mode, *args, **kwargs)
 
+    def no_write_os_open(file: object, flags: int, *args: object, **kwargs: object):
+        write_flags = os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC | os.O_APPEND
+        if flags & write_flags:
+            raise AssertionError(f"guide rendering opened {file!r} for writing")
+        return real_os_open(file, flags, *args, **kwargs)
+
     monkeypatch.setattr(builtins, "open", no_write_open)
     monkeypatch.setattr(io, "open", no_write_io_open)
+    monkeypatch.setattr(os, "open", no_write_os_open)
     monkeypatch.setattr(Path, "write_text", denied)
     monkeypatch.setattr(Path, "write_bytes", denied)
     monkeypatch.setattr(Path, "touch", denied)
@@ -204,11 +231,11 @@ def test_live_render_guide_denies_probes_secrets_capabilities_writes_and_mutatio
     response = render_guide(
         ("concept-onboarding",),
         GuideMode.AGENT,
-        load_config_fn=lambda: config,
-        load_registry_fn=lambda loaded: registry,
         db=cast("Database", _EmptyInventory()),
     )
 
+    assert config_load_calls == [True]
+    assert finalize_probe_values and set(finalize_probe_values) == {False}
     assert response.exit_code == 0
     assert "Derived onboarding plan" in response.markdown
 
@@ -315,6 +342,23 @@ def test_terminal_controls_are_stripped_from_authored_projected_and_framework_ou
         assert not any(ord(character) < 32 and character not in "\n\t" for character in markdown)
         assert not any(0x7F <= ord(character) <= 0x9F for character in markdown)
     assert "line one\n\tline two" in rendered.markdown
+
+
+_DISALLOWED_TERMINAL_CODEPOINTS = (
+    *range(0x00, 0x09),
+    *range(0x0B, 0x20),
+    0x7F,
+    *range(0x80, 0xA0),
+)
+
+
+@pytest.mark.parametrize("codepoint", _DISALLOWED_TERMINAL_CODEPOINTS)
+def test_terminal_sanitizer_strips_every_disallowed_control(codepoint: int) -> None:
+    assert sanitize_terminal_output(f"before{chr(codepoint)}after") == "beforeafter"
+
+
+def test_terminal_sanitizer_preserves_line_feed_and_tab() -> None:
+    assert sanitize_terminal_output("before\n\tafter") == "before\n\tafter"
 
 
 def test_every_block_renderer_and_unsupported_block_refusal_are_explicit() -> None:
@@ -445,7 +489,7 @@ def test_missing_resource_and_unsupported_concept_inventory_fail_soft_per_topic(
     assert "Authored teaching survives." in response.markdown
     assert "Plugin teaching survives." in response.markdown
     assert response.markdown.count("this topic's live projection is unavailable") == 2
-    assert "a referenced live resource is missing" in response.markdown
+    assert "guide resource vm-template/missing is absent from the finalized registry" in response.markdown
     assert "does not match a registered inventory resolver plan" in response.markdown
 
 

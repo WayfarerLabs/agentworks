@@ -233,7 +233,12 @@ def build_guide_view(contribution: TopicContribution, registry: Registry, db: Da
             and handler.category != "capability"
         ):
             raise GuideTraversalError("guide anchor category does not match its registered kind")
-        resource = registry.lookup(anchor.kind, anchor.name)
+        try:
+            resource = registry.lookup(anchor.kind, anchor.name)
+        except KeyError:
+            raise GuideTraversalError(
+                f"guide resource {anchor.kind}/{anchor.name} is absent from the finalized registry"
+            ) from None
         me = _resource_fact(registry, anchor.kind, anchor.name, resource)
         kind_fact = _kind_fact(anchor.kind, handler)
         hook = getattr(handler, "instances", None)

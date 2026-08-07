@@ -16,6 +16,7 @@ from agentworks.guide import (
     GuideCatalog,
     GuideContributionError,
     InvalidBlockError,
+    InvalidTopicSlugError,
     Overview,
     TopicContribution,
     TopicSlug,
@@ -181,7 +182,7 @@ def test_plugin_ownership_gate_rejects_another_plugin_namespace() -> None:
     assert [(issue.error.topic, issue.error.field_path) for issue in catalog.issues] == [("plugin/y/topic", "topic")]
 
 
-def test_taxonomy_gate_is_ci_fatal_for_trusted_content_and_fail_soft_for_plugin_content(
+def test_taxonomy_gate_is_runtime_fail_soft_and_ci_strict_for_trusted_content(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     handler = _TestKind()
@@ -189,17 +190,28 @@ def test_taxonomy_gate_is_ci_fatal_for_trusted_content_and_fail_soft_for_plugin_
     topic = _topic("guide-test/demo")
     object.__setattr__(handler, "category", "capability")
 
+    catalog = _build_guide_catalog(
+        (("core:bad-taxonomy", topic), ("core:safe", _topic("concept-safe"))),
+    )
+    assert catalog.names() == ("concept-safe",)
+    assert [(issue.error.topic, issue.error.field_path) for issue in catalog.issues] == [
+        ("guide-test/demo", "anchor")
+    ]
+
     with pytest.raises(GuideContributionError) as raised:
-        _build_guide_catalog((("core:bad-taxonomy", topic),))
+        _build_guide_catalog((("core:bad-taxonomy", topic),), strict_trusted_taxonomy=True)
     assert raised.value.field_path == "anchor"
 
-    catalog = _build_guide_catalog(
+    plugin_catalog = _build_guide_catalog(
         (),
         ((Plugin("z"), (topic,)),),
         (("z", "guide-test", "demo"),),
+        strict_trusted_taxonomy=True,
     )
-    assert catalog.names() == ()
-    assert [(issue.error.topic, issue.error.field_path) for issue in catalog.issues] == [("guide-test/demo", "anchor")]
+    assert plugin_catalog.names() == ()
+    assert [(issue.error.topic, issue.error.field_path) for issue in plugin_catalog.issues] == [
+        ("guide-test/demo", "anchor")
+    ]
 
 
 def test_registered_plugin_implementation_and_owner_adapter_resource_topics_are_accepted() -> None:
@@ -313,6 +325,38 @@ def test_contribution_volume_bounds_fail_closed(field: str, value: object, path:
     with pytest.raises(GuideContributionError) as raised:
         parse_topic_contribution(topic, "plugin:z")
     assert raised.value.field_path == path
+
+
+@pytest.mark.parametrize(
+    ("section", "path"),
+    [
+        ([f"field-{index}" for index in range(33)], "blocks[0].section"),
+        (["x" * 257], "blocks[0].section[0]"),
+        (["   "], "blocks[0].section[0]"),
+        ([object()], "blocks[0].section[0]"),
+    ],
+)
+def test_field_reference_section_bounds_are_nested_and_typed(section: list[object], path: str) -> None:
+    topic = _topic("concept-safe")
+    topic["blocks"] = [{"type": "field-reference", "id": "fields", "section": section}]
+
+    with pytest.raises(InvalidBlockError) as raised:
+        parse_topic_contribution(topic, "plugin:z")
+    assert raised.value.field_path == path
+
+
+@pytest.mark.parametrize("related", ["Not-Valid", "concept/a/b/c", "concept_bad"])
+def test_related_topics_apply_the_canonical_slug_grammar(related: str) -> None:
+    with pytest.raises(InvalidTopicSlugError) as raised:
+        parse_topic_contribution(_topic("concept-safe", related=[related]), "plugin:z")
+    assert raised.value.field_path == "related_topics[0]"
+
+
+def test_related_topic_values_have_an_explicit_byte_bound() -> None:
+    with pytest.raises(InvalidTopicSlugError) as raised:
+        parse_topic_contribution(_topic("concept-safe", related=["a" * 192]), "plugin:z")
+    assert raised.value.field_path == "related_topics[0]"
+    assert "191-byte limit" in str(raised.value)
 
 
 def test_contribution_total_markdown_volume_is_bounded() -> None:

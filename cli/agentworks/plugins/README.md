@@ -61,8 +61,10 @@ Guide contributions are data, not callbacks. Authored markdown cannot contain ex
 terminal control bytes in rendered output, and action records accept only literal argument tokens or
 registered input placeholders. Each title is limited to 256 UTF-8 bytes, each summary to 2 KiB, each
 authored block to 64 KiB, and one topic to 64 blocks, 64 related links, and 256 KiB of authored
-markdown. Keep authored files under the owning package's `guide-content/` directory so the wheel
-package-data assertion exercises them.
+markdown. Every related link must be a canonical topic slug no larger than 191 UTF-8 bytes. A
+field-reference section accepts at most 32 path items of 256 UTF-8 bytes each. Keep authored files
+under the owning package's `guide-content/` directory so the wheel package-data assertion exercises
+them.
 
 ## Shipping a plugin
 
