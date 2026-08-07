@@ -134,17 +134,28 @@ def test_extraction_total_on_malformed_config() -> None:
     assert _refs({"repos": "not-a-list"}, owner_name="gh") == [("secret", "git-token-gh")]
 
 
-# One case per RULE, not one per way of breaking it: the three `repos`
-# spellings that used to be listed here (`no-slash`, `a/b/c`, `/leading`)
-# all violate the one ``GitHubRepo`` pattern and produce the one message,
-# as do the two `owner` spellings against ``GitHubName``, and `repo` and
-# `org` against closed-world.
+# One case per RULE, not one per way of breaking it. Counting the rules is
+# the part that needs care: ``^[A-Za-z0-9._-]+$`` is TWO rules wearing one
+# regex, a charset and a non-emptiness quantifier, so it needs two cases.
+# An earlier pass read it as one and dropped the emptiness pair; relaxing
+# `+` to `*` then survived the entire suite. That is not a cosmetic hole.
+# ``store_username`` tests ``if self.config.repos or self.config.owner``,
+# so an empty-string owner is FALSY and a credential the operator wrote as
+# owner-scoped would silently fall through to the unscoped github.com
+# token. Scope-widening in the credential system, arrived at silently.
+#
+# The genuinely one-per-rule collapses stand: `no-slash` and `a/b/c` both
+# violate the single ``GitHubRepo`` shape and produce the one message, and
+# `repo` / `org` both hit closed-world.
 @pytest.mark.parametrize(
     ("blob", "match"),
     [
         ({"repos": ["acme/widgets"], "owner": "acme"}, "mutually exclusive"),
         ({"repos": ["no-slash"]}, "must match `"),
         ({"owner": "acme/"}, "must match `"),
+        # The quantifier, not the charset. See the note above.
+        ({"owner": ""}, "must match `"),
+        ({"repos": ["/leading"]}, "must match `"),
         ({"repos": "acme/widgets"}, "repos: must be a list"),
         ({"repo": "acme/widgets"}, "unknown field; expected one of: name, owner, repos, token"),
         ({"repos": [123]}, r"repos\[0\]: must be a string"),
