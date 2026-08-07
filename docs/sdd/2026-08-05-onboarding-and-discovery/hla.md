@@ -192,6 +192,12 @@ immediately after the summary, expand their heading, and foreground the R12 disc
 consent rules. It may not add, remove, or alter factual content. Snapshot tests normalize headings
 and prove both modes contain the same semantic block identifiers.
 
+`concept-migration` is the exceptional remediation topic for breaking resource-model changes. It is
+not a general upgrade guide: ordinary upgrades should remain routine. The topic carries authored
+rewrite sequencing and, once wave 2 lands on `main`, composes its live sample and field-reference
+services so an operator or agent works against the installed model rather than a frozen migration
+oracle. `concept-onboarding` and `concept-management` link to it without duplicating its teaching.
+
 `concept-onboarding` does not persist a second onboarding ledger. Done and not-yet-done status is a
 pure assessment over sanitized facts already available through `GuideView`: resource identity and
 description from registry rows, finalized enablement and readiness verdicts from graph nodes,
@@ -362,8 +368,9 @@ then regenerates and commits the Claude Code, Codex, and Copilot projections wit
 Rulesync drift check.
 
 `agw guide` and JSON v1 are additive. Bootstrap packages state their minimum compatible CLI.
-Machine-contract breaking changes follow the repository's normal warn-and-migrate then reject
-policy.
+Breaking changes follow the repository's warn-then-reject runway where one exists. Remediation is
+precise errors plus `concept-migration`, not an automated migrator. Machine-contract changes keep
+their own explicit versioning and compatibility rules.
 
 ## Key risks
 

@@ -227,7 +227,9 @@ surfaces, dynamic content) adopts wave 2's surfaces as they land rather than blo
 - **D1 (plan A).** The vanilla-harness plugin model is settled (operator ruling recorded in the
   roadmap's user perspective and target-state); this FRD does not reopen it.
 - **D2 (parallel to wave 2).** This effort seeds now, consumes wave 2's surfaces as they land, and
-  must not block on them nor duplicate them.
+  must not block on them nor duplicate them. D7 narrowly supersedes this historical sequencing rule
+  for PR #428's Phase 1 release boundary: the migration-remediation topic waits for authoritative
+  wave 2 services on `main` because the same release deletes the migrator it replaces.
 - **D3 (both harnesses, no ordering).** Claude Code and Codex plugins are both required deliverables
   with equivalent content (R1, R11, AC7). Build order is the effort lead's call; neither is an
   afterthought.
@@ -239,6 +241,11 @@ surfaces, dynamic content) adopts wave 2's surfaces as they land rather than blo
   first-class bootstrap beside the plugins, which are kept primarily for advertising and
   discoverability. Agentworks never probes the operator's machine; agents probe (consent-first per
   guide content) and `agw` verifies.
+- **D7 (migration remediation; operator ruling, 2026-08-07).** Automated resource migrators do not
+  ship. Precise load errors name the offending input, and `agw guide concept-migration` teaches the
+  exceptional operator-led rewrite using live sample, field-reference, and verification surfaces.
+  Migration is deliberately narrower than upgrading: ordinary upgrades should remain routine and do
+  not imply a guide workflow.
 - **D5 (the guide command; operator rulings, 2026-08-05).** The teaching command is `agw guide`,
   deliberately not `skill` (wave 6 needs "skill" as an artifact noun). Output is markdown only. Meta
   topics carry the `concept-` prefix. Teaching content lives in the CLI with thin plugin bootstraps,
