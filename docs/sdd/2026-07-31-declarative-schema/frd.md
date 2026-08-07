@@ -157,10 +157,13 @@ Derived surfaces:
   registry's finalize order, which this effort preserves: dependencies are extracted first, totally
   and never raising (a blob the extractor cannot make sense of just contributes no edges);
   enablement and readiness are then computed without validating (the fold is non-constructing); and
-  the throwing validate pass runs on the resources that emerge READY and ENABLED. A resource that
-  emerges disabled or not-ready skips hard validation at load, so a broken blob on a disabled-plugin
-  resource can never sink the whole config; its problems become hard errors the moment it is enabled
-  or used, when finalize validates it like any other. Validation operates on the EFFECTIVE config:
+  the throwing validate pass then runs on EVERY declared resource, with no readiness or enablement
+  gate (revised 2026-08-07, review finding 16). What config is valid is the declared model's answer
+  alone, so it cannot vary by host: an unexpected key is an error everywhere unless the capability's
+  own model accepts it, and openness is a declared property of that model rather than an accident of
+  environment. The earlier READY-and-ENABLED scope let a typo decide its own fate, because readiness
+  is computed from config the validate pass had not yet checked, so a misspelled key read as an
+  absent one and suppressed the error that named it. Validation operates on the EFFECTIVE config:
   where a surface supports inheritance (session templates), declared blobs merge along the graph's
   declared chain first and the merged blob is what validates, because a declared blob may be
   legitimately partial (completed by a PARENT) and has no completeness of its own to check.

@@ -474,7 +474,10 @@ the caller is a registry lookup that returns `None` on a miss.
 The gating each consuming resource performs is UNCHANGED. In particular `SecretDecl.validate` keeps
 its enabled-backend filter (R9.9: a mapping addressed to a present-but-disabled backend stays inert)
 and its `False` opt-out skip; only the line that reaches into the backend changes. The finalize pass
-keeps its READY-and-ENABLED scope (R3/R9.4) untouched: this step changes WHO validates, never WHEN.
+kept its READY-and-ENABLED scope (R3/R9.4) untouched at this step, which changed WHO validates and
+never WHEN. That scope was removed outright later in the effort (2026-08-07, review finding 16):
+validation is now unconditional, because readiness is computed from config the validate pass has not
+yet checked, so gating the pure check on the environmental one let a typo suppress its own error.
 
 ### 7.5 What is deleted, and what survives
 

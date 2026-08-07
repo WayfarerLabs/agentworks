@@ -264,12 +264,14 @@ tolerance. For everything registered, hard validation keys on the finalize fold'
 as the registry's shipped pass order already works: dependencies are extracted first (the total
 walker, enablement-blind by construction), the fold computes enablement and readiness without
 validating (non-constructing, total over unvalidated config), and the throwing validate pass then
-runs over the resources that emerged READY and ENABLED. A disabled or not-ready resource skips hard
-validation at load; its blob is validated the moment it is enabled or used, and doctor/describe
-already mark such rows with their reasons, so nothing is silent. This preserves the secrets
-contract's disabled-backend seam as a consequence of the general rule rather than a special case.
-Samples and describe render for disabled capabilities too: rendering reads the model, not the
-operator's blob.
+runs over EVERY declared resource, with no readiness or enablement gate (revised 2026-08-07, review
+finding 16): what config is valid is the declared model's answer alone, so it cannot vary by host.
+The fold stays non-constructing, which is what keeps it total over unvalidated config; that contract
+never required this pass to be gated, and the two were only ever coupled by accident. doctor and
+describe still mark not-ready and disabled rows with their reasons. The secrets contract's
+disabled-backend seam (R9.9) now survives as the one remaining enablement-keyed suppression,
+recorded as an explicit exception rather than as an instance of a general rule. Samples and describe
+render for disabled capabilities too: rendering reads the model, not the operator's blob.
 
 Validation operates on effective config (FR12): the finalize pass resolves each inheritance chain
 through the graph (session templates' `inherits` edges; every other surface is a chain of length
