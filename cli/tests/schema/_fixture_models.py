@@ -196,9 +196,10 @@ class TaggedCollectionSite(AgwModel):
 
     Not a shape the framework ships (all four discriminated unions are
     top-level capability configs), and one any capability or plugin author
-    can write. Classified as an undiscriminated union, its elements are a
-    shape no walker expands, so a secret named inside one would be absent
-    from the dependency graph with nothing reported.
+    can write. Left unclassified, its elements read as an undiscriminated
+    union, which no walker expands: a secret named inside one would be
+    absent from the dependency graph with nothing reported, and every
+    human surface would render the field as an opaque list of tables.
     """
 
     platforms: list[Annotated[LimaArm | ProxmoxArm, Discriminator("name")]] = Field(default_factory=list)

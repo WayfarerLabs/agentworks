@@ -107,7 +107,10 @@ def _field_lines(entry: FieldEntry, *, depth: int, commented: bool) -> Iterator[
         yield from _comment([f"one {noun}, as an example:"], depth=depth)
     else:
         yield from _comment(_annotation_of(entry), depth=depth)
-        yield from _comment(_alternatives_of(entry), depth=depth)
+    # Outside the branch: an ELEMENT may be a tagged union too (a list of
+    # blocks each naming which kind of block it is), and an operator
+    # writing one needs the same list of what else may go there.
+    yield from _comment(_alternatives_of(entry), depth=depth)
     yield from _value_lines(entry, depth=depth, commented=commented)
     yield from _block(entry.children, depth=depth + 1, commented=commented)
 
@@ -161,7 +164,12 @@ def _alternatives_of(entry: FieldEntry) -> list[str]:
     if not entry.alternatives:
         return []
     names = ", ".join(alt.name for alt in entry.alternatives)
-    lines = [f"One of: {names}. Shown here: {entry.rendered}."]
+    # No arm is expanded when the one that would be is already open above
+    # this point (a group whose members are groups). Naming what is shown
+    # would then print the word "None" at an operator, so the line stops
+    # at what may go here, which is the half that is still true.
+    shown = "" if entry.rendered is None else f" Shown here: {entry.rendered}."
+    lines = [f"One of: {names}.{shown}"]
     other = next((alt for alt in entry.alternatives if alt.name != entry.rendered and alt.target), None)
     if other is not None:
         lines.append(f"`agw resource describe-kind {other.target}` prints another one's fields.")

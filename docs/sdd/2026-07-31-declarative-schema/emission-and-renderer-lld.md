@@ -210,7 +210,12 @@ Two things the tree needs that the stream does not carry:
   `env.<key>.value`, with nothing at `env.<key>`: rightly, since the element is not a field anyone
   declared. A tree has to have it or the element's fields hang off the collection and render one
   indent too shallow, which in YAML is a different document. The collector synthesizes that node
-  when a doc arrives whose parent path ends in a placeholder segment.
+  when a doc arrives whose parent path ends in a placeholder segment. **Amended 2026-08-07:** a
+  collection whose elements are a discriminated union of models streams no such child, because which
+  arm's fields those would be is the presenter's choice, so its element node is synthesized from the
+  HOLDER's doc (`item_union_arms`) instead. One synthesizer either way, and the arm it expands goes
+  through the same path-scoped expansion guard every other union does (section 10), which is what
+  keeps a group whose members are groups from expanding forever.
 - **an alternative's summary.** The arm's `ModelDoc.description` describes the CONFIG MODEL ("Where
   a Lima site's `limactl` runs"); what an operator choosing between platforms wants is what the
   IMPLEMENTATION is ("Lima VMs, local or on a remote host via SSH"), which is its `description`. The
@@ -429,7 +434,10 @@ through the swap unchanged; what is REPLACED is only what pinned file content.
   an enum-typed field with a default; and a union arm reachable from itself, which stops with its
   alternatives still named rather than recurring until the interpreter gives up (`field_tree`
   threads the expansion guard along the current PATH, so two sibling fields sharing an arm each
-  still expand it);
+  still expand it). **Added 2026-08-07** with finding 5's documentation half: a collection whose
+  ELEMENTS are a discriminated union, on all three surfaces, including a required one that
+  uncomments and validates (it used to render `[<value>]`, a list holding a string where the loader
+  wants a tagged table) and an element arm reachable from itself, which takes the same guard;
 - a DISABLED capability renders, pinned against a fixture plugin that is not enabled in config;
 - `test_declare_once_end_to_end.py` gains the two arms it reserved: the fixture platform's field
   reaches the rendered sample and the field reference with no edit anywhere else. The sample arm is

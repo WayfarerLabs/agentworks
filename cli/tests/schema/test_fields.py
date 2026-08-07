@@ -24,15 +24,18 @@ from agentworks.schema import (
     SecretRef,
     iter_field_docs,
     model_doc,
+    model_is_complete,
     render_type,
 )
 from tests._emitted_schema import ref_extension
 
 from ._fixture_models import (
+    ALL_FIXTURES,
     AzureLike,
     CatalogLike,
     DiamondLike,
     FieldDiscriminatedSite,
+    FieldTaggedCollectionSite,
     FrameworkFielded,
     GithubLike,
     LimaArm,
@@ -44,6 +47,7 @@ from ._fixture_models import (
     ResolvesToUnbuildable,
     SelfReferential,
     SiteLike,
+    TaggedCollectionSite,
     TemplateLike,
 )
 
@@ -452,6 +456,67 @@ def test_an_arm_is_recursed_into_by_the_presenter_not_the_walker() -> None:
     assert paths(arm.doc.model) == [("name",), ("token_secret",)]
 
 
+# --- a collection whose ELEMENTS are a union --------------------------
+
+
+def test_a_collection_of_tagged_blocks_carries_its_element_arms() -> None:
+    """The arms ride one level down, where the elements are.
+
+    Read off ``union_arms``, a presenter would render the collection
+    ITSELF as one arm: the arm's fields would land beside the collection
+    rather than inside an element of it, which in a document is a
+    different shape entirely.
+    """
+    doc = docs(TaggedCollectionSite)[("platforms",)]
+
+    assert [arm.tag for arm in doc.item_union_arms] == ["lima", "proxmox"]
+    assert doc.union_arms == ()
+    # Not a collection of ONE model, so there is no block to expand under
+    # the placeholder: which arm's fields to show is the presenter's.
+    assert doc.item_model is None
+    assert paths(TaggedCollectionSite) == [("platforms",), ("platforms_by_name",)]
+
+
+@pytest.mark.parametrize("model_cls", [TaggedCollectionSite, FieldTaggedCollectionSite])
+def test_every_element_tag_spelling_yields_the_same_arms(model_cls: type[AgwModel]) -> None:
+    # The same lookup asymmetry as the union spellings one level up:
+    # pydantic accepts both, so a stream that read only one would describe
+    # a shape it can validate as an opaque list of tables.
+    assert [arm.tag for arm in docs(model_cls)[("platforms",)].item_union_arms] == ["lima", "proxmox"]
+
+
+def test_each_element_arm_carries_its_own_identity() -> None:
+    arms = {arm.tag: arm.doc for arm in docs(TaggedCollectionSite)[("platforms",)].item_union_arms}
+
+    assert arms["proxmox"].title == "ProxmoxArm"
+    assert arms["proxmox"].description == "The union arm that names a secret."
+
+
+def test_the_element_segment_says_how_an_element_is_addressed() -> None:
+    """A presenter has to place an element before it can render one, and
+    the model is what knows whether it hangs under a position or a key."""
+    tagged = docs(TaggedCollectionSite)
+
+    assert tagged[("platforms",)].item_segment == SEQUENCE_ELEMENT
+    assert tagged[("platforms_by_name",)].item_segment == MAPPING_KEY
+    # Every collection reports it, whatever its elements are, and a field
+    # holding a single value reports none.
+    assert docs(CatalogLike)[("templates",)].item_segment == SEQUENCE_ELEMENT
+    assert docs(CatalogLike)[("extra_secrets",)].item_segment == MAPPING_KEY
+    assert docs(SiteLike)[("platform",)].item_segment is None
+
+
+def test_the_element_segment_is_the_one_the_stream_hangs_fields_under() -> None:
+    # One fact, not two: a collection of plain blocks streams its
+    # element's fields under exactly the segment the doc names, so a
+    # presenter placing a node and the stream placing a field cannot
+    # disagree about where an element lives.
+    doc = docs(CatalogLike)[("vm_sizes",)]
+
+    assert doc.item_segment is not None
+    assert ("vm_sizes", doc.item_segment, "cpus") in paths(CatalogLike)
+
+
 # --- render_type ------------------------------------------------------
 
 
@@ -499,6 +564,82 @@ def test_the_stream_and_the_emitted_schema_report_the_same_marker() -> None:
     stream = docs(GithubLike)[("token",)]
     assert stream.ref is not None
     assert stream.ref.schema_extension() == ref_extension(GithubLike.model_json_schema()["properties"]["token"])
+
+
+@pytest.mark.parametrize(
+    "model_cls",
+    [model for model in ALL_FIXTURES if model_is_complete(model)],
+    ids=lambda model: model.__name__,
+)
+def test_the_stream_offers_every_arm_the_emitted_schema_does(model_cls: type[AgwModel]) -> None:
+    """No arm a document may name is missing from the field stream, at
+    either depth, for any model shape.
+
+    The oracle is the SIBLING derivation: pydantic writes a
+    ``discriminator.mapping`` naming every tag it will dispatch on, and it
+    does so without consulting anything in this package. An arm in the
+    mapping and absent from the stream is a value an editor offers, the
+    loader accepts, and ``describe-kind`` never mentions, which is how a
+    collection of tagged blocks read as an opaque list of tables for as
+    long as it did.
+
+    Equality, not containment: a stream naming an arm nothing dispatches
+    on would send an operator to write a document the loader refuses.
+    """
+    emitted = model_cls.model_json_schema()
+    stream = docs(model_cls)
+    for name, prop in emitted.get("properties", {}).items():
+        doc = stream.get((name,))
+        assert doc is not None, f"{name} is in the emitted schema and not in the stream"
+        field = _peeled_schema(prop)
+        assert _tags_offered(field, emitted) == {arm.tag for arm in doc.union_arms}
+        assert _tags_offered(_element_schema(field), emitted) == {arm.tag for arm in doc.item_union_arms}
+
+
+def _peeled_schema(schema: dict[str, object]) -> dict[str, object]:
+    """A property's schema with the ``| None`` wrapper removed.
+
+    Pydantic spells an optional field as an ``anyOf`` of the type and
+    ``null``, so the union under it is one level down.
+    """
+    members = schema.get("anyOf")
+    if not isinstance(members, list):
+        return schema
+    present = [member for member in members if member != {"type": "null"}]
+    return present[0] if len(present) == 1 and isinstance(present[0], dict) else schema
+
+
+def _element_schema(schema: dict[str, object]) -> dict[str, object] | None:
+    """What ONE element of a collection property validates against."""
+    for key in ("items", "additionalProperties"):
+        element = schema.get(key)
+        if isinstance(element, dict):
+            return element
+    return None
+
+
+def _tags_offered(schema: dict[str, object] | None, emitted: dict[str, object]) -> set[str]:
+    """Every tag ``schema``'s discriminated union dispatches on, as a
+    DOCUMENT spells it.
+
+    A union tagged by something other than a name is excluded rather than
+    stringified: JSON Schema keys a numeric tag as ``"1"``, an operator
+    writes ``1``, and the stream declines to address such an arm at all
+    (see :func:`agentworks.schema._shape._tags_of`).
+    """
+    discriminator = schema.get("discriminator") if schema else None
+    if not isinstance(discriminator, dict):
+        return set()
+    mapping = discriminator["mapping"]
+    return {tag for tag, ref in mapping.items() if _tag_type(ref, discriminator["propertyName"], emitted) == "string"}
+
+
+def _tag_type(ref: str, tag_field: str, emitted: dict[str, object]) -> object:
+    """The JSON type of one arm's discriminator field."""
+    definitions = emitted["$defs"]
+    assert isinstance(definitions, dict)
+    arm = definitions[ref.removeprefix("#/$defs/")]
+    return arm["properties"][tag_field].get("type")
 
 
 def test_the_stream_and_the_emitted_schema_agree_inside_a_nested_block() -> None:

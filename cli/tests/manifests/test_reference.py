@@ -26,8 +26,16 @@ from agentworks.errors import ValidationError
 from agentworks.manifests.field_tree import FieldEntry, field_tree, worth_showing
 from agentworks.manifests.reference import SchemaReference, reference_for
 from agentworks.manifests.skeleton import skeleton_text
-from agentworks.schema import UNSET, AgwModel, AgwRootModel, SecretRef
-from tests.schema._fixture_models import AzureLike, CatalogLike, GithubLike, SiteLike, TemplateLike
+from agentworks.schema import MAPPING_KEY, UNSET, AgwModel, AgwRootModel, SecretRef
+from tests.schema._fixture_models import (
+    AzureLike,
+    CatalogLike,
+    FieldTaggedCollectionSite,
+    GithubLike,
+    SiteLike,
+    TaggedCollectionSite,
+    TemplateLike,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -285,6 +293,26 @@ def test_a_union_that_is_not_a_capability_offers_no_pointer() -> None:
     assert [alt.target for alt in entry.alternatives] == [None, None]
 
 
+def test_an_alternative_gets_an_address_only_when_the_address_exists() -> None:
+    """Being collected UNDER a capability kind does not make every union in
+    the tree a union of its implementations.
+
+    A kind's whole spec is collected under the capability it hosts, arms
+    included, so any other tagged block an author writes inside one was
+    handed `agw resource describe-kind vm-platform/leaf`: a printed command
+    that fails. The registry decides, since it is what the command asks.
+    """
+    (element,) = field_tree(Nodes, "vm-platform")[0].children
+
+    assert [alt.name for alt in element.alternatives] == ["group", "leaf"]
+    assert [alt.target for alt in element.alternatives] == [None, None]
+    # The counterpart, over the real registry: an arm that IS an
+    # implementation keeps its address.
+    platform = _entries_by_name(reference_for("vm-site"))["platform"]
+    assert platform.alternatives
+    assert all(alt.target == f"vm-platform/{alt.name}" for alt in platform.alternatives)
+
+
 class SelfReachingArm(AgwModel):
     """A union arm reachable from itself, which a plugin's config model
     may be: a group whose members are groups."""
@@ -319,6 +347,120 @@ def test_a_union_arm_reachable_from_itself_stops_rather_than_recurring() -> None
     assert [alt.name for alt in inner.alternatives] == ["group"]
     assert inner.children == ()
     assert inner.rendered is None
+
+
+# --- a collection whose ELEMENTS are a union -------------------------------
+
+
+class LeafNode(AgwModel):
+    """The arm that holds a value."""
+
+    name: Literal["leaf"]
+    value: str
+
+
+class GroupNode(AgwModel):
+    """An arm whose members are arms: a tagged collection reachable from
+    itself, which is the shape a plugin author writes for a tree."""
+
+    name: Literal["group"]
+    members: list[Annotated[GroupNode | LeafNode, Discriminator("name")]] = Field(default_factory=list)
+
+
+class Nodes(AgwModel):
+    """A REQUIRED collection of tagged blocks.
+
+    Required, because that is what asks the skeleton its headline
+    question: an optional block renders commented, and a commented line is
+    not YAML that anything has to read.
+    """
+
+    nodes: list[Annotated[GroupNode | LeafNode, Discriminator("name")]]
+
+
+GroupNode.model_rebuild()
+Nodes.model_rebuild()
+
+
+def test_a_collection_of_tagged_blocks_renders_an_element_naming_its_arms() -> None:
+    """The element is where the arms belong.
+
+    Read one level up, the arm's fields would land beside the collection
+    rather than inside an element of it. Read nowhere, which is what
+    happened until the stream carried them, the whole field rendered as an
+    opaque "list of table" and an operator was never told that a member
+    says which kind of member it is.
+    """
+    lines = _spec_lines(Nodes)
+
+    assert "#  nodes:" in lines
+    assert "#    # one element, as an example:" in lines
+    assert any("One of: group, leaf. Shown here: group." in line for line in lines)
+    assert "#    -" in lines
+    assert "#      name: group" in lines
+
+
+def test_an_uncommented_required_list_of_tagged_blocks_loads_and_validates() -> None:
+    """The same headline promise as the plain list of tables, over the
+    shape that used to render as ``[<value>]``: a placeholder shaped like
+    a list, holding a string where the loader wants a tagged table."""
+    spec = _uncommented_spec(Nodes)
+
+    assert spec == {"nodes": [{"name": "group"}]}
+    assert Nodes.model_validate(spec).nodes[0].name == "group"
+
+
+def test_a_table_of_tagged_blocks_hangs_its_element_under_a_placeholder_key() -> None:
+    entries = _entries_by_name(_reference(TaggedCollectionSite))
+    (element,) = entries["platforms_by_name"].children
+
+    assert element.name == MAPPING_KEY
+    assert element.rendered == "lima"
+    assert {child.name for child in element.children} == {"name", "vm_host"}
+
+
+@pytest.mark.parametrize("model_cls", [TaggedCollectionSite, FieldTaggedCollectionSite, Nodes])
+def test_the_tree_offers_every_element_arm_the_stream_does(model_cls: type[AgwModel]) -> None:
+    """The presenter drops no arm the stream carries, at any depth of any
+    model: one element node, listing every alternative in the order the
+    author declared them."""
+    offered = 0
+    for entry in _walk(field_tree(model_cls)):
+        if not entry.doc.item_union_arms:
+            continue
+        offered += 1
+        (element,) = entry.children
+        assert [alt.name for alt in element.alternatives] == [arm.tag for arm in entry.doc.item_union_arms]
+
+    assert offered, "this model has no tagged collection, so it proves nothing"
+
+
+def test_a_tagged_collection_arm_reachable_from_itself_stops_rather_than_recurring() -> None:
+    """The element goes through the tree's own path guard, not around it.
+
+    A group whose members are groups is finite as a model and unbounded as
+    a document, so one level is expanded and the next says what may go
+    there without opening it. Expanding the element outside the guard
+    would run until the interpreter gave up and take ``describe-kind``,
+    ``sample``, and the guide's field reference down together.
+    """
+    (element,) = _entries_by_name(_reference(Nodes))["nodes"].children
+    inner = {child.name: child for child in element.children}["members"]
+    (deeper,) = inner.children
+
+    assert element.rendered == "group"
+    assert [alt.name for alt in deeper.alternatives] == ["group", "leaf"]
+    assert deeper.children == ()
+    assert deeper.rendered is None, "nothing was expanded here, and the record says so"
+
+
+def test_an_unexpanded_arm_does_not_name_what_is_shown() -> None:
+    """``rendered`` is None there, and "Shown here: None." is Python
+    talking to an operator."""
+    flowed = " ".join(_spec_lines(Nodes))
+
+    assert "One of: group, leaf." in flowed
+    assert "Shown here: None" not in flowed
 
 
 def test_two_sibling_fields_sharing_an_arm_each_expand_it() -> None:
