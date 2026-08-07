@@ -60,15 +60,15 @@ identifies all wave 2 gates, and has no unresolved review finding.
 - [x] Broken-config fixtures prove authored content and the framed config error still render, every
       affected dynamic block reports unavailable, full guide requests attempt the normal registry
       build, and `GuideView` construction cannot prompt for a secret.
-- [ ] Core concept topics and initial kind topics colocated with their owning packages, including
+- [x] Core concept topics and initial kind topics colocated with their owning packages, including
       security disclosure, consent-first behavior, progressive onboarding, management, secrets, and
       troubleshooting. `concept-reporting-bugs` covers redacted reproduction, existing-issue search,
       the repository bug template, and explicit operator authorization before external submission;
       it does not solicit general feedback.
-- [ ] `concept-onboarding` assessment derives done, not-ready, disabled, and unverifiable status
+- [x] `concept-onboarding` assessment derives done, not-ready, disabled, and unverifiable status
       only from registry rows, finalized graph verdicts and relationships, and stored instance rows,
       with no raw-config reach-around, doctor execution, or persistent onboarding ledger.
-- [ ] Guided and replayable modes consume the same ordered action records; fixture scenarios prove
+- [x] Guided and replayable modes consume the same ordered action records; fixture scenarios prove
       equal registry, graph, stored-row, and explicit verification outcomes for equal inputs,
       including equal `unverifiable` outcomes after refusal.
 - [x] Verification-surface inventory is rechecked against HEAD in the guide LLD: secret describe and
@@ -85,9 +85,9 @@ identifies all wave 2 gates, and has no unresolved review finding.
       `concept-` discovery and resource/capability `kind/name` topics.
 - [ ] Golden-path acceptance is step-bounded in automation and timed manually on a clean machine;
       the evidence records time to first working session and every operator interaction.
-- [ ] A management coverage matrix proves topics cover creating and changing resources, adopting a
+- [x] A management coverage matrix proves topics cover creating and changing resources, adopting a
       capability, resolving upgrade deprecations, and consented doctor-driven troubleshooting.
-- [ ] Permanent CLI and contributor documentation shipped with the command. Sample config reviewed;
+- [x] Permanent CLI and contributor documentation shipped with the command. Sample config reviewed;
       either updated for a real new setting or recorded as unaffected in the commit handoff.
 - [ ] Canonical Rulesync sources gain an always-on guide-contribution rule plus matching
       `agentworks-dev` completeness and `agentworks-reviewer` drift checks; other roles are audited,
