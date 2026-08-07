@@ -99,11 +99,7 @@ def is_valid_topic_slug(value: object) -> bool:
         )
     if len(parts) == 3:
         namespace, plugin, topic = parts
-        return (
-            namespace == "plugin"
-            and is_valid_topic_segment(plugin)
-            and is_valid_topic_segment(topic)
-        )
+        return namespace == "plugin" and is_valid_topic_segment(plugin) and is_valid_topic_segment(topic)
     return False
 
 

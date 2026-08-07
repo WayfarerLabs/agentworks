@@ -873,8 +873,7 @@ def test_authored_catalog_isolates_plugin_manifest_inventory_failure(
     assert "plugin/healthy/overview" in catalog.names()
     assert "vm-template/plugin-template" not in catalog.names()
     assert [
-        (issue.error.source, issue.error.topic, issue.error.field_path, str(issue.error))
-        for issue in catalog.issues
+        (issue.error.source, issue.error.topic, issue.error.field_path, str(issue.error)) for issue in catalog.issues
     ] == [
         (
             "system-plugin:broken",
