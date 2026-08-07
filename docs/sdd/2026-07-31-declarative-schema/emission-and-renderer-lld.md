@@ -295,9 +295,21 @@ The VALUE a line carries is, in order: the field's first `examples` entry, the o
 field can hold (a union arm's tag), its declared default where that default says anything, and
 finally a type-shaped placeholder (`<string>`, `[<string>]`, `{<key>: <string>}`). A required field
 with no example and no sensible placeholder is caught by the load test, which is what turns "author
-an example" from advice into a gate. Values are YAML-dumped in FLOW style, so a short list or table
-sits on the key's own line (`apt: [zsh, ripgrep]`), which is how the hand-written samples wrote one
-and what an operator edits in place.
+an example" from advice into a gate. `sample_value` carries that as a PYTHON value; turning it into
+text is `manifests/yaml_value.render_value`, one function serving every surface that shows a value,
+the skeleton's key lines and the field reference's parentheticals alike. Three renderings of the
+same question drifted before it existed: the reference printed Python `repr`, so a boolean default
+read `True` where a document carries `true`, and enum members were converted by hand in the one
+branch that noticed, leaving an enum DEFAULT to reach pyyaml and raise `RepresenterError`. Values
+are YAML-dumped in FLOW style, so a short list or table sits on the key's own line
+(`apt: [zsh, ripgrep]`), which is how the hand-written samples wrote one and what an operator edits
+in place.
+
+Two shapes have no key to write, and they open their lines differently. A table entry writes the
+placeholder key (`<key>:`); a sequence element writes a bare `-`, with its fields at the next
+indent. Writing `-:` instead is a mapping under a key literally named `-`, which is a document the
+loader rejects. That stayed invisible only because no shipped kind has a REQUIRED list of tables, so
+the line was always commented and nothing ever read it as YAML.
 
 An EMPTY default is skipped in favor of the placeholder, and `false` and `0` are not: `repos: []` is
 the honest default and teaches nothing, while `repos: [<string>]` says what may go there, and
@@ -412,6 +424,12 @@ through the swap unchanged; what is REPLACED is only what pinned file content.
 - fixture-schema unit tests over models the app does not ship: requiredness, defaults, examples,
   nested blocks, collections, a discriminated union with one arm rendered and the rest listed, an
   owner-templated field, and a root-model config;
+- the shapes no shipped kind has, which is exactly where a defect can hide behind a commented line:
+  a REQUIRED list of tables, uncommented and read back through `yaml.safe_load` and its own model;
+  an enum-typed field with a default; and a union arm reachable from itself, which stops with its
+  alternatives still named rather than recurring until the interpreter gives up (`field_tree`
+  threads the expansion guard along the current PATH, so two sibling fields sharing an arm each
+  still expand it);
 - a DISABLED capability renders, pinned against a fixture plugin that is not enabled in config;
 - `test_declare_once_end_to_end.py` gains the two arms it reserved: the fixture platform's field
   reaches the rendered sample and the field reference with no edit anywhere else. The sample arm is
