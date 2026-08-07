@@ -20,7 +20,6 @@ class VMConnectionVerification:
     """Result of one canonical transport no-op."""
 
     name: str
-    connected: bool
     transport: str
 
 
@@ -53,6 +52,5 @@ def verify_vm_connection(
     kind, separator, _endpoint = description.partition(":")
     return VMConnectionVerification(
         name=name,
-        connected=True,
         transport=kind if separator else description,
     )

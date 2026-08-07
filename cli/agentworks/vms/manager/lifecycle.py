@@ -642,6 +642,10 @@ def reinit_vm(
         # Build Tailscale SSH target with logging
         from agentworks.ssh import SSHLogger
 
+        # The activation gate and any conditional Tailscale rejoin finish
+        # before this logger exists. The rejoin path separately enforces that
+        # its auth-key-bearing transport has no logger, so this operation log's
+        # complete secret set is exactly the git tokens used by initialization.
         logger = SSHLogger(name, "vm-reinit", redactions=tuple(git_tokens.values()))
         ts_target = transport(vm, config, default_timeout=60, logger=logger)
 
