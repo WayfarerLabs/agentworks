@@ -60,10 +60,27 @@ builds against a single declaration frontend.
   `docs/guides/resources.md` walks the rewrite. The agent-oriented `agw guide` command (owned by the
   onboarding effort) is the intended vehicle, and it is why this effort ships `describable_targets`,
   `implementation_reference`, and `capability_kind_reference` with no in-tree caller: an agent walks
-  the operator through the rewrite against live registry state rather than against prose. The
-  ruling's rationale is recorded in the roadmap's `target-state.md`: the migrator required a frozen
-  re-implementation of the old shapes as a verification oracle, and every divergence between oracle
-  and model surfaced to the operator as a self-blaming failure.
+  the operator through the rewrite against live registry state rather than against prose.
+
+**`agw guide` is NOT built at this effort's merge, and the guide does not name it.** Verified at
+HEAD: no command module, no registration, every Phase 1 box in
+`docs/sdd/2026-08-05-onboarding-and-discovery/plan.md` unchecked, `guide-contract-lld.md` unwritten,
+and no migration or upgrading TOPIC contracted by name anywhere. Its surface is contracted
+(`agw guide [topic ...]`, `--agent`/`--human`, `--names-only`) but its content is not. So what ships
+here is the human path plus an agent-led route written against surfaces that exist today, as a brief
+the operator pastes to their agent. The service API above is the seam `agw guide` consumes when it
+arrives; until then it has no caller, which is a real cost and is recorded rather than hidden.
+
+**Sequencing risk, for the roadmap to own.** `phasing.md` gates the 0.14.0 cut on the guide's first
+slice, but that slice as planned ships `concept-onboarding`, not a migration topic. If the TOML
+sunset reaches operators before a topic covering it, the vehicle this requirement names is absent at
+exactly the moment it is needed, and the human path in `docs/guides/resources.md` is carrying the
+break alone. That is survivable, because the human path is written to stand on its own, but it
+should be a decision rather than a discovery. The ruling's rationale is recorded in the roadmap's
+`target-state.md`: the migrator required a frozen re-implementation of the old shapes as a
+verification oracle, and every divergence between oracle and model surfaced to the operator as a
+self-blaming failure.
+
 - **FR3.** Settings sections (`[operator]`, `[paths]`, `[plugins]`, `[defaults]`, `[secret_config]`,
   `[session.config]`) are unaffected. config.toml remains the settings file.
 - **FR4.** The permanent record moves with the change: a superseding ADR replaces ADR 0016's
