@@ -217,14 +217,14 @@ def render_guide(
     if names_only:
         return GuideResponse("".join(f"{name}\n" for name in all_names), 0, all_names)
 
-    selected: list[TopicContribution] = []
+    validated_slots: list[tuple[str, TopicContribution | str | None]] = []
     if requested:
         rejected_topics = frozenset(
             issue.error.topic for issue in authored.issues if issue.error.topic is not None
         )
         for slug in requested:
             if slug in authored_names:
-                selected.append(authored.lookup(slug))
+                validated_slots.append((slug, authored.lookup(slug)))
                 continue
             kind = slug.split("/", 1)[0]
             valid_dynamic = (
@@ -232,26 +232,30 @@ def render_guide(
             )
             if not valid_dynamic:
                 if slug in rejected_topics:
+                    validated_slots.append((slug, None))
                     continue
                 raise _unknown(slug, all_names)
-            selected.append(_dynamic_topic(registry, slug))
+            validated_slots.append((slug, slug))
+
+    requested_slots = tuple(
+        (slug, _dynamic_topic(registry, value) if isinstance(value, str) else value)
+        for slug, value in validated_slots
+    )
+
+    selected_topics = tuple(topic for _slug, topic in requested_slots if topic is not None)
 
     visible_issues = authored.issues
     if requested:
         visible_issues = tuple(issue for issue in authored.issues if issue.error.topic in requested)
     runtime_issues: list[str] = []
-    if not selected and requested:
-        markdown = "\n\n---\n\n".join(
-            f"# {slug}\n\nThis guide topic is unavailable." for slug in requested
-        ) + "\n"
-    elif not selected:
+    if not requested_slots:
         index_topics = tuple((*authored.topics, *(_dynamic_topic(registry, name) for name in dynamic_only_names)))
         markdown = render_index(index_topics, mode)
     else:
         from agentworks.db import DatabaseDriverError
 
         owned_db = False
-        if registry is not None and db is None:
+        if selected_topics and registry is not None and db is None:
             from agentworks.db import DB_PATH, Database
 
             if DB_PATH.exists():
@@ -269,11 +273,11 @@ def render_guide(
             if (
                 registry is not None
                 and system_error is None
-                and any(topic.topic == "concept-onboarding" for topic in selected)
+                and any(topic.topic == "concept-onboarding" for topic in selected_topics)
             ):
                 if db is None:
                     raise RuntimeError("guide database was not constructed")
-                onboarding_topic = next(topic for topic in selected if topic.topic == "concept-onboarding")
+                onboarding_topic = next(topic for topic in selected_topics if topic.topic == "concept-onboarding")
                 try:
                     onboarding_snapshot = build_onboarding_snapshot(registry, db)
                 except AgentworksError as error:
@@ -290,7 +294,10 @@ def render_guide(
                     raise ValidationError("verification evidence requires available onboarding facts")
             elif verification_evidence != ():
                 raise ValidationError("verification evidence requires available onboarding facts")
-            for topic in selected:
+            for slug, topic in requested_slots:
+                if topic is None:
+                    documents.append(f"# {slug}\n\nThis guide topic is unavailable.")
+                    continue
                 view = None
                 unavailable = None
                 if registry is not None and system_error is None:
@@ -327,14 +334,18 @@ def render_guide(
                 hint="Run a normal Agentworks command to inspect or repair the state database.",
             )
             documents = [
-                render_topic(
-                    topic,
-                    None,
-                    mode,
-                    unavailable="see the system failure below",
-                    verification_evidence=verification_evidence,
-                ).markdown.rstrip()
-                for topic in selected
+                (
+                    f"# {slug}\n\nThis guide topic is unavailable."
+                    if topic is None
+                    else render_topic(
+                        topic,
+                        None,
+                        mode,
+                        unavailable="see the system failure below",
+                        verification_evidence=verification_evidence,
+                    ).markdown.rstrip()
+                )
+                for slug, topic in requested_slots
             ]
         finally:
             if owned_db and db is not None:
