@@ -439,6 +439,25 @@ Three settlements:
   the exception that proves it: here the authored place is the type, and both the validator and the
   schema hook are its two faces.
 
+  **SUPERSEDED 2026-08-07. The exception is gone, and the reasoning above is the part worth
+  correcting.** "The authored place is the type, and the validator and the schema hook are its two
+  faces" reads well and is false: two faces of one fact are two authored copies, and nothing made
+  them agree. A third consumer arrived that could read neither. `iter_field_docs` classifies from
+  the annotation, so it saw the table form alone, and `agw resource describe-kind vm-template`
+  rendered `env` as `table of table` while the emitted schema and the loader both accepted a bare
+  string. An independent operator rehearsal caught it, on the guide's own claim that describe-kind
+  is "the authority on what a `spec` accepts": an operator trusting it rewrites every plaintext env
+  value into `{value: ...}` for nothing. Five shipped spec fields were affected.
+
+  What shipped instead: `ScalarShorthand` (`agentworks/schema/shorthand.py`), a `ClassVar` on
+  `AgwModel` declaring the shorthand ONCE, from which the fold, the emitted `anyOf` arm, and the
+  rendered type all derive. `EnvEntry` lost both hand-written halves. FR13 now has no exception in
+  this step, which is the outcome FR13 asked for; the exception was never proving the rule, it was
+  the rule being quietly broken with a good sentence attached. The guard is a parity test asserting
+  that every JSON type the emitted schema accepts is one `FieldDoc.annotation` accepts, for every
+  buildable model at every collection depth, with its expectation derived from pydantic rather than
+  from our classifier so it cannot agree with a wrong answer.
+
 ### 5.2 Name and length caps
 
 `validate_name` (`config/validation.py:83`) stays the single naming rule, wrapped for the model
