@@ -337,8 +337,14 @@ def test_env_referencing_undeclared_secret_does_not_error(
 def test_secret_declared_with_all_mapping_forms(tmp_path: Path) -> None:
     """All three backend_mappings value shapes (string, inline table, false) parse
     onto SecretDecl. The chain uses prompt-only so even token-c (which opts out
-    of env-var) and token-b (mapping for a future backend) stay reachable through
-    the prompt backend."""
+    of env-var) and token-b (which maps a backend outside the chain) stay
+    reachable through the prompt backend.
+
+    token-b's inline table is a WELL-FORMED onepassword mapping (the pinned
+    ``{account, reference}`` form), and it has to be: the finalize validate pass
+    checks every declared mapping against its backend's model whether or not
+    that backend is opted in or enabled, so a placeholder table would fail the
+    build here rather than parsing."""
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
@@ -353,8 +359,8 @@ def test_secret_declared_with_all_mapping_forms(tmp_path: Path) -> None:
             ManifestDoc(
                 "secret",
                 "token-b",
-                {"backend_mappings": {"onepassword": {"vault": "Shared", "item": "Tok", "field": "key"}}},
-                description="structured mapping (for future backend)",
+                {"backend_mappings": {"onepassword": {"account": "acme", "reference": "op://Shared/Tok/key"}}},
+                description="structured mapping for a backend outside the chain",
             ),
             ManifestDoc("secret", "token-c", {"backend_mappings": {"env-var": False}}, description="opt-out mapping"),
         ],
@@ -362,7 +368,7 @@ def test_secret_declared_with_all_mapping_forms(tmp_path: Path) -> None:
     registry = _load(cfg_file)
     assert registry.lookup("secret", "token-a").backend_mappings == {"env-var": "OVERRIDE_NAME"}
     assert registry.lookup("secret", "token-b").backend_mappings == {
-        "onepassword": {"vault": "Shared", "item": "Tok", "field": "key"}
+        "onepassword": {"account": "acme", "reference": "op://Shared/Tok/key"}
     }
     assert registry.lookup("secret", "token-c").backend_mappings == {"env-var": False}
 

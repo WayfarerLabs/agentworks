@@ -77,15 +77,15 @@ eight of them behind in one change, which is why the check exists.
   BUILDER's own exempt code relocated beside the kind it serves (the builder's
   per-kind loaders and its readiness fold derive from the descriptor table), so
   this is the same exemption at a new address, not a new bypass.
-- ``vms/sites.py`` / ``git_credentials/credential.py`` / ``sessions/template.py``:
-  edge production. A resource's own ``dependencies(context)`` fetches its
-  capability CLASS from the code registry (a host-agnostic type lookup, not an
-  availability probe; there is no graph node to read during the build that
-  produces the graph) and asks it for the config-implied edges; the finalize
-  ``validate`` pass fetches the same class to validate the owned blob. This is
-  the builder's edge-production primitive, invoked during the build.
-- ``secrets/base.py``: the secret's finalize ``validate`` fetches each present
-  backend to validate its mapping (R9.9).
+- ``vms/sites.py`` / ``git_credentials/credential.py`` / ``sessions/template.py``
+  / ``secrets/base.py``: NOT exempt, since declarative-schema step 2.3. Edge
+  production (``dependencies(context)``) and the finalize ``validate_config``
+  pass no longer fetch a capability class at all; each asks the core
+  (``capability_config_references`` / ``validate_capability_config``), which
+  reaches the registry once, in ``capabilities/config.py``. A registry read
+  reappearing in any of the four would be the probe this pattern bans, which is
+  why the allow-list below records their absence as deliberate rather than
+  simply omitting them.
 - ``git_credentials/__init__.py`` / ``vms/initializer/credentials.py``: op-time
   CONSTRUCTION of a capability instance to run an operation, not a graph query.
 - ``manifests/decode.py``: a decode-time shadow check (a code-registry

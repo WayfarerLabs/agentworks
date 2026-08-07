@@ -158,10 +158,9 @@ class SessionTemplate(DeclaredResource):
             )
         return refs
 
-    def validate_config(self, enabled_backends: frozenset[str], context: FinalizeContext) -> None:
+    def validate_config(self, context: FinalizeContext) -> None:
         """Throwing shape check for the EFFECTIVE harness config block,
-        run by the finalize validate pass (``enabled_backends`` is the
-        secret-only R9.9 input, ignored here). Mirrors ``dependencies``:
+        run by the finalize validate pass. Mirrors ``dependencies``:
         the CORE validates the blob against the named integration's declared
         model, and no integration code runs. An unknown integration name is
         a no-op here (the miss policy already reported it).

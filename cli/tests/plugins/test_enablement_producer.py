@@ -11,7 +11,8 @@ Coverage, kind by kind through the ACTUAL consumer (R9 capability side, R14):
 - vm-platform: a ``vm-site`` on a disabled plugin platform is not-ready with the
   enable-plugin hint (existing fold), and ``resolve_site`` refuses it.
 - secret-backend: a disabled plugin backend is excluded from ``active_backends``
-  and from secret-mapping validation.
+  but NOT from secret-mapping validation, which is unconditional over
+  enablement (inert for resolution and validated are separate properties).
 - git-credential-provider: a ``git-credential`` on a disabled plugin provider is
   not-ready (new propagate hook), ``resolve_git_credential_providers`` refuses
   it, and ``remote_advisories`` skips it.
@@ -292,23 +293,97 @@ def test_disabled_plugin_backend_excluded_from_active_backends() -> None:
         assert chain == ["prompt"]  # fixture-backend excluded (disabled)
 
 
-def test_disabled_plugin_backend_mapping_validation_is_inert_until_enabled() -> None:
-    def _build(*, enabled: bool) -> Registry:
-        registry = Registry.empty()
-        _publish_capability(registry, "secret-backend", "fixture-backend")
-        registry.add(
-            "secret",
-            "vaulted",
-            SecretDecl(name="vaulted", description="a vaulted key", backend_mappings={"fixture-backend": "bad"}),
-            _operator("c.toml"),
-        )
-        registry.finalize(enablement_sources=[_plugin_source(*([PLUGIN] if enabled else []))])
-        return registry
+def _registry_mapping_fixture_backend(mapping: MappingValue, *, publish_backend: bool = True) -> Registry:
+    """A registry with one secret mapping ``fixture-backend``, unfinalized.
 
+    ``publish_backend=False`` omits the backend row, which is what makes the
+    backend ABSENT rather than merely disabled: the distinction the two cases
+    below turn on.
+    """
+    registry = Registry.empty()
+    if publish_backend:
+        _publish_capability(registry, "secret-backend", "fixture-backend")
+    registry.add(
+        "secret",
+        "vaulted",
+        SecretDecl(name="vaulted", description="a vaulted key", backend_mappings={"fixture-backend": mapping}),
+        _operator("c.toml"),
+    )
+    return registry
+
+
+@pytest.mark.parametrize("enabled", [False, True], ids=["disabled", "enabled"])
+def test_mapping_to_a_disabled_plugin_backend_is_validated_like_any_other(enabled: bool) -> None:
+    """A mapping addressed to a PRESENT-but-DISABLED backend is validated
+    exactly as one addressed to an enabled backend.
+
+    The invariant is that the verdict does not move when enablement does:
+    ``"bad"`` is not in the fixture backend's vocabulary, so it is refused on
+    both branches. Validity is the model's answer, and an operator must not be
+    able to bank a mapping no model would accept and have it detonate at the
+    moment they enable the backend.
+
+    The backend row is PUBLISHED on both branches (only the plugin opt-in
+    moves), so neither branch can pass through the absent-backend path below,
+    which would raise a different error for a different reason. The disabled
+    branch also PROVES it is disabled rather than assuming the opt-in plumbing
+    fired: it finalizes the same shape with a valid mapping first and reads the
+    axis off the graph. Without that, a source that silently stopped disabling
+    would leave this test green for the wrong reason.
+    """
+    sources = [_plugin_source(*([PLUGIN] if enabled else []))]
     with seated_plugin(_capable_plugin()):
-        _build(enabled=False)  # disabled: malformed mapping inert, build succeeds
+        precondition = _registry_mapping_fixture_backend("good")
+        precondition.finalize(enablement_sources=sources)
+        assert precondition.graph.enablement_of("secret-backend", "fixture-backend") is (
+            Enablement.enabled if enabled else Enablement.disabled
+        )
+
+        registry = _registry_mapping_fixture_backend("bad")
         with pytest.raises(ConfigError, match="backend_mappings.fixture-backend: must be one of"):
-            _build(enabled=True)  # enabled: the same mapping fails validation
+            registry.finalize(enablement_sources=sources)
+
+
+def test_a_valid_mapping_to_a_disabled_backend_builds_and_stays_inert() -> None:
+    """The other half of the same seam: validating a disabled backend's mapping
+    does NOT make that backend live.
+
+    A WELL-FORMED mapping to a disabled backend builds (validation had nothing
+    to complain about), and the backend is still dropped from the resolution
+    chain, so the mapping is never selected or resolved through. Being
+    validated and being live are separate properties, and only the second one
+    tracks enablement.
+    """
+    with seated_plugin(_capable_plugin()):
+        registry = _registry_mapping_fixture_backend("good")
+        _publish_builtin_backend(registry, "prompt")
+        registry.finalize(enablement_sources=[_plugin_source()])  # PLUGIN not opted in
+
+        assert registry.graph.enablement_of("secret-backend", "fixture-backend") is Enablement.disabled
+        config = cast(
+            "Config",
+            SimpleNamespace(secret_config_data=SimpleNamespace(backends=("fixture-backend", "prompt"))),
+        )
+        assert [b.capability.name for b in active_backends(config, registry)] == ["prompt"]
+
+
+def test_mapping_to_an_absent_backend_reports_the_dangling_edge_not_a_shape_error() -> None:
+    """An ABSENT backend is a different case from a disabled one and keeps its
+    own answer.
+
+    No row and no seated impl means no declared model, so there is nothing the
+    mapping could be checked against; ``validate_capability_config`` no-ops.
+    The mapping is not silently accepted, though: the secret's dangling
+    ``secret-backend`` edge reports it once as a hard finalize miss (R9.11),
+    in the "no such backend" vocabulary rather than a shape complaint about a
+    model that does not exist here. The mapping used is one the fixture
+    backend's model would REJECT, so a shape error would surface if the absent
+    path had been folded into the validated one.
+    """
+    registry = _registry_mapping_fixture_backend("bad", publish_backend=False)
+    with pytest.raises(ConfigError, match="references unknown secret-backend 'fixture-backend'") as exc:
+        registry.finalize(enablement_sources=[_plugin_source()])
+    assert "must be one of" not in str(exc.value)
 
 
 # -- git-credential-provider ----------------------------------------------------
