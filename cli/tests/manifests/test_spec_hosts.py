@@ -120,7 +120,16 @@ def test_a_site_named_after_a_platform_must_declare_it() -> None:
 
 def test_a_site_name_takes_the_freeform_cap() -> None:
     """Site names hit no OS identifier limit: they are a registry key and
-    a display surface only."""
+    a display surface only, NOT derived into hostnames or SSH aliases (VM
+    names are), so the bound is the freeform 64 rather than the tighter
+    VM-name cap.
+
+    Both directions, because either alone leaves the number unpinned from
+    one side: a name AT the cap decodes, and the first one past it is
+    refused with the cap in the message.
+    """
+    at_the_cap = "a" * MAX_FREEFORM_NAME_LENGTH
+    assert decode("vm-site", at_the_cap, {"platform": {"name": "lima"}}).name == at_the_cap
     assert rejection("vm-site", "a" * (MAX_FREEFORM_NAME_LENGTH + 1), {"platform": {"name": "lima"}}).endswith(
         f"max {MAX_FREEFORM_NAME_LENGTH})"
     )

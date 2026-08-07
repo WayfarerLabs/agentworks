@@ -178,14 +178,23 @@ def test_unknown_kind_gets_kebab_hint(tmp_path: Path) -> None:
     assert "vm-template" in exc.value.hint
 
 
+#: The mise fields' TYPE rejections, which nothing else pins: a table and a
+#: number where a string belongs.
+#:
+#: The four VALUE rejections that stood beside them are gone. Each was a
+#: substring match on a message the per-kind spec suites already assert
+#: WHOLE, through the same ``decode_document`` this path calls, so every
+#: mutation they caught (dropping the check, rewording it) reddens those
+#: too: ``test_spec_admin_and_console.py::test_a_bad_mise_package_says_what
+#: _the_syntax_is`` and ``::test_a_bad_mise_install_before_says_what_it
+#: _accepts`` and ``::test_a_bad_mise_lockfile_carries_the_source_refs_own
+#: _message``, plus ``test_spec_templates.py``'s agent-template twin. That
+#: a decode error surfaces THROUGH the loader with its location is pinned
+#: once, by ``test_an_unknown_spec_key_is_a_located_error`` below.
 @pytest.mark.parametrize(
     ("kind", "field", "value", "match"),
     [
-        ("admin-template", "mise_packages", "[terraform]", "name@version"),
-        ("admin-template", "mise_packages", '["bad\\"name@1"]', "name@version"),
-        ("agent-template", "mise_lockfile", "git::http://example.com/lock.git", "mise_lockfile is invalid"),
         ("admin-template", "mise_lockfile", "{path: lock}", "mise_lockfile: must be a string"),
-        ("agent-template", "mise_install_before", "yesterday", "mise_install_before"),
         ("agent-template", "mise_install_before", "7", "mise_install_before: must be a string"),
     ],
 )
@@ -208,41 +217,37 @@ def test_mise_inputs_fail_at_manifest_decode(tmp_path: Path, kind: str, field: s
         load_manifests(root)
 
 
-def test_secret_backend_kind_rejected(tmp_path: Path) -> None:
-    """Post-collapse (2026-07-07): secret-backend is a capability
-    descriptor kind; declaring it gets the permanent R3 envelope
-    error."""
-    root = tmp_path / "resources"
-    _write(
-        root,
-        "a.yaml",
-        """
-        apiVersion: agentworks/v1
-        kind: secret-backend
-        metadata:
-          name: my-backend
-        spec: {}
-        """,
-    )
-    with pytest.raises(ConfigError, match="provided by the app"):
-        load_manifests(root)
+def test_no_capability_kind_can_be_declared(tmp_path: Path) -> None:
+    """A capability kind is code the app provides, so a document of one
+    gets the permanent R3 envelope error.
 
+    Over EVERY capability kind the registry holds rather than the two that
+    happened to have a test each (``secret-backend``, which became a
+    capability in the 2026-07-07 collapse, and
+    ``git-credential-provider``): the rule is the category's, so a new
+    capability kind is covered the day it is registered rather than the
+    day someone remembers to add a case.
+    """
+    from agentworks.resources import KIND_REGISTRY
 
-def test_descriptor_kind_rejected(tmp_path: Path) -> None:
+    capability_kinds = [kind for kind, handler in KIND_REGISTRY.items() if handler.category == "capability"]
+    assert len(capability_kinds) >= 4, "non-vacuity: an empty list would pass the loop below"
+
     root = tmp_path / "resources"
-    _write(
-        root,
-        "a.yaml",
-        """
-        apiVersion: agentworks/v1
-        kind: git-credential-provider
-        metadata:
-          name: github
-        spec: {}
-        """,
-    )
-    with pytest.raises(ConfigError, match="provided by the app"):
-        load_manifests(root)
+    for kind in capability_kinds:
+        _write(
+            root,
+            "a.yaml",
+            f"""
+            apiVersion: agentworks/v1
+            kind: {kind}
+            metadata:
+              name: whatever
+            spec: {{}}
+            """,
+        )
+        with pytest.raises(ConfigError, match="provided by the app"):
+            load_manifests(root)
 
 
 def test_singleton_kind_rejects_non_default_name(tmp_path: Path) -> None:

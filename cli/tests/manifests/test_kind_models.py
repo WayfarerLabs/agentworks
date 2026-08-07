@@ -24,12 +24,6 @@ def _kinds(category: str) -> list[str]:
     return sorted(kind for kind, handler in KIND_REGISTRY.items() if handler.category == category)
 
 
-def _modeled_kinds() -> list[str]:
-    """Every declarable kind, because every one of them declares a model.
-    Kept as its own name so the sweeps below read as what they check."""
-    return _kinds("declarable")
-
-
 def test_the_registry_has_kinds_of_both_categories() -> None:
     """Non-vacuity for the two sweeps below, which would pass on an empty
     registry."""
@@ -38,11 +32,34 @@ def test_the_registry_has_kinds_of_both_categories() -> None:
 
 
 @pytest.mark.parametrize("kind", _kinds("declarable"))
-def test_a_declarable_kind_declares_its_row_as_its_model(kind: str) -> None:
+def test_a_declarable_kinds_model_is_a_row_whose_spec_surface_is_its_own(kind: str) -> None:
+    """The three properties every declarable kind's ``model`` has, over
+    one sweep of the registry rather than three.
+
+    They are one subject (the kind's model) checked once, and each keeps
+    its own assertion so a failure still names which property broke:
+
+    - it is a ``DeclaredResource`` subclass, which is what makes decode's
+      switchboard derived rather than a table in the manifest layer;
+    - its spec surface offers no envelope field. A kind that re-declares
+      ``name`` or ``description`` (``secret`` makes it required,
+      ``admin-template`` defaults it) has to carry ``SkipJsonSchema`` on
+      the override too, or the field re-enters that kind's spec surface
+      and every rendered sample invites an operator to write a key decode
+      refuses;
+    - that surface is not EMPTY, which is the non-vacuity twin of the
+      line above: a model whose fields all vanished would satisfy it
+      trivially, and both surfaces derive from this one stream.
+    """
     model = KIND_REGISTRY[kind].model  # type: ignore[attr-defined]
 
     assert isinstance(model, type)
     assert issubclass(model, DeclaredResource)
+
+    streamed = {doc.path[0] for doc in iter_field_docs(model)}
+    assert streamed, "an empty spec surface would satisfy the envelope-field check trivially"
+    assert not METADATA_FIELDS & streamed
+    assert not METADATA_FIELDS & set(model.model_json_schema()["properties"])
 
 
 @pytest.mark.parametrize("kind", _kinds("capability"))
@@ -50,30 +67,6 @@ def test_a_capability_kind_declares_no_model(kind: str) -> None:
     """Optional by CATEGORY, not per kind: a capability kind has no
     declared row at all, so a model on one would mean nothing."""
     assert not hasattr(KIND_REGISTRY[kind], "model")
-
-
-@pytest.mark.parametrize("kind", _modeled_kinds())
-def test_no_kinds_spec_surface_offers_an_envelope_field(kind: str) -> None:
-    """A kind that re-declares ``name`` or ``description`` (``secret``
-    makes it required, ``admin-template`` defaults it) has to carry
-    ``SkipJsonSchema`` on the override too. Without it the field re-enters
-    that kind's spec surface, and every rendered sample would invite an
-    operator to write a key decode refuses."""
-    model = KIND_REGISTRY[kind].model  # type: ignore[attr-defined]
-    emitted = set(model.model_json_schema()["properties"])
-    streamed = {doc.path[0] for doc in iter_field_docs(model)}
-
-    assert not METADATA_FIELDS & emitted
-    assert not METADATA_FIELDS & streamed
-
-
-@pytest.mark.parametrize("kind", _modeled_kinds())
-def test_a_kinds_spec_surface_is_not_empty(kind: str) -> None:
-    """Non-vacuity for the test above: a model whose fields all vanished
-    would satisfy it trivially."""
-    model = KIND_REGISTRY[kind].model  # type: ignore[attr-defined]
-
-    assert list(iter_field_docs(model))
 
 
 # -- metadata.expires, which every kind inherits (FR20) ------------------------
@@ -101,7 +94,7 @@ def test_an_expiry_is_modeled_once_for_every_kind() -> None:
     """On the shared row base rather than per kind, so a kind cannot lack
     it and the envelope derives the key from the same place."""
     assert "expires" in METADATA_FIELDS
-    for kind in _modeled_kinds():
+    for kind in _kinds("declarable"):
         assert "expires" in KIND_REGISTRY[kind].model.model_fields  # type: ignore[attr-defined]
 
 

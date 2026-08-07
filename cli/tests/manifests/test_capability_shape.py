@@ -174,91 +174,42 @@ def test_session_template_canonical_selector_decodes_to_the_internal_pair(tmp_pa
     assert not manifests.issues
 
 
-def test_legacy_session_harness_config_without_selector_is_rejected(tmp_path: Path) -> None:
-    with pytest.raises(
-        ConfigError,
-        match="harness_config: unknown field; expected one of: ",
-    ):
+#: The two retired session-template selector keys, and the spellings that
+#: used to be pinned one test each. The VALUE cannot matter: both keys are
+#: gone from the row, so ``extra="forbid"`` refuses the key before anything
+#: looks at what is under it. Four separate tests spelled `harness` as an
+#: empty string, a number, a valid name, and a valid name beside the
+#: canonical selector; re-admitting `harness` as a field is the only
+#: mutation any of them catches, and it reddens all four at once. So the
+#: spellings that differ only in the unread value are gone, and what is
+#: left is one case per distinct claim: each retired KEY, and the mixture
+#: that might have been thought to rescue one.
+_RETIRED_SELECTORS = [
+    pytest.param("harness_config:\n    command: htop", "harness_config", id="config-without-a-selector"),
+    pytest.param("harness: shell", "harness", id="a-name-that-used-to-work"),
+    # A canonical selector beside it does not rescue the retired one.
+    pytest.param("harness: shell\n  harness_integration:\n    name: shell", "harness", id="old-and-canonical-mixed"),
+]
+
+
+@pytest.mark.parametrize(("spec_body", "key"), _RETIRED_SELECTORS)
+def test_a_retired_session_selector_is_an_unknown_field_at_its_own_location(
+    tmp_path: Path, spec_body: str, key: str
+) -> None:
+    """The retired keys read as what they are, with the document's
+    ``file:line`` on the front so an operator with several templates knows
+    which one to open."""
+    with pytest.raises(ConfigError, match=rf"res\.yaml:2:.*{key}: unknown field; expected one of: "):
         _load_one(
             tmp_path,
-            "ownerless-config",
-            """
+            "retired-selector",
+            f"""
             apiVersion: agentworks/v1
             kind: session-template
             metadata:
               name: htop
             spec:
-              harness_config:
-                command: htop
-            """,
-        )
-
-
-def test_legacy_session_harness_empty_scalar_is_rejected(tmp_path: Path) -> None:
-    with pytest.raises(ConfigError, match="harness: unknown field; expected one of: "):
-        _load_one(
-            tmp_path,
-            "empty-selector",
-            """
-            apiVersion: agentworks/v1
-            kind: session-template
-            metadata:
-              name: htop
-            spec:
-              harness: ""
-            """,
-        )
-
-
-def test_legacy_session_harness_non_string_scalar_is_rejected(tmp_path: Path) -> None:
-    with pytest.raises(ConfigError, match="harness: unknown field; expected one of: "):
-        _load_one(
-            tmp_path,
-            "non-string-selector",
-            """
-            apiVersion: agentworks/v1
-            kind: session-template
-            metadata:
-              name: htop
-            spec:
-              harness: 42
-            """,
-        )
-
-
-def test_legacy_session_harness_is_rejected_with_location(tmp_path: Path) -> None:
-    with pytest.raises(
-        ConfigError,
-        match=r"res.yaml:2:.*harness: unknown field; expected one of: ",
-    ):
-        _load_one(
-            tmp_path,
-            "valid-selector",
-            """
-            apiVersion: agentworks/v1
-            kind: session-template
-            metadata:
-              name: htop
-            spec:
-              harness: shell
-            """,
-        )
-
-
-def test_session_template_old_and_canonical_selectors_cannot_mix(tmp_path: Path) -> None:
-    with pytest.raises(ConfigError, match="harness: unknown field; expected one of: "):
-        _load_one(
-            tmp_path,
-            "mixed-selector",
-            """
-            apiVersion: agentworks/v1
-            kind: session-template
-            metadata:
-              name: htop
-            spec:
-              harness: shell
-              harness_integration:
-                name: shell
+              {spec_body}
             """,
         )
 

@@ -48,22 +48,38 @@ def _manifest(tmp_path: Path, text: str, rel: str = "res.yaml") -> None:
     path.write_text(dedent(text))
 
 
-def test_git_credential_type_key_rejected(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        pytest.param("type", "github", id="the-retired-selector"),
+        pytest.param("org", "my-org", id="a-provider-owned-field"),
+    ],
+)
+def test_a_stray_top_level_key_names_the_one_field_this_kind_has(tmp_path: Path, key: str, value: str) -> None:
+    """Both mistakes an operator brings from the flat TOML shape land on
+    the same message, and that IS the design: the hand-written "use
+    provider, not type" steer is gone, and provider-owned fields like
+    ``org`` never rode the spec top level in YAML. Naming the kind's one
+    field says both things without a second place to keep either.
+
+    (``token`` is the exception that keeps its own steer, because the
+    field list alone does not say WHERE the token goes; see
+    ``test_spec_hosts.py::test_a_top_level_token_keeps_its_steer``.)
+    """
     _manifest(
         tmp_path,
-        """
+        f"""
         apiVersion: agentworks/v1
         kind: git-credential
         metadata:
           name: github
         spec:
-          type: github
+          provider:
+            name: github
+          {key}: {value}
         """,
     )
-    # The hand-written "use provider, not type" steer is gone: the
-    # unknown-key message names the one field this kind has, which says
-    # the same thing without a second place to keep it.
-    with pytest.raises(ConfigError, match="type: unknown field; expected one of: provider"):
+    with pytest.raises(ConfigError, match=f"{key}: unknown field; expected one of: provider"):
         load_manifests(tmp_path / "resources")
 
 
@@ -132,27 +148,6 @@ def test_provider_must_be_a_tagged_table(tmp_path: Path) -> None:
         load_manifests(tmp_path / "resources")
 
 
-def test_git_credential_org_must_nest_under_provider_config(tmp_path: Path) -> None:
-    """Provider-owned fields do not ride the spec top level in YAML: a
-    stray ``org`` is an unknown key on a kind whose only field is
-    ``provider``, which is the pointer."""
-    _manifest(
-        tmp_path,
-        """
-        apiVersion: agentworks/v1
-        kind: git-credential
-        metadata:
-          name: ado
-        spec:
-          provider:
-            name: azdo
-          org: my-org
-        """,
-    )
-    with pytest.raises(ConfigError, match="org: unknown field; expected one of: provider"):
-        load_manifests(tmp_path / "resources")
-
-
 @pytest.mark.parametrize("field", ["description", "name"])
 def test_a_metadata_field_written_in_spec_is_refused(tmp_path: Path, field: str) -> None:
     """The metadata fields ARE fields of the row, so ``extra="forbid"``
@@ -175,109 +170,31 @@ def test_a_metadata_field_written_in_spec_is_refused(tmp_path: Path, field: str)
         load_manifests(tmp_path / "resources")
 
 
-def test_secret_over_username_cap_decodes_and_registers(tmp_path: Path) -> None:
-    """Issue #275: a >30 secret name decodes and lands in the registry; the
-    raised cap applies to the secret kind."""
-    long_name = "git-token-github-fg-wf-agw-tester"  # 33 chars
-    assert len(long_name) > 30
-    _manifest(
-        tmp_path,
-        f"""
-        apiVersion: agentworks/v1
-        kind: secret
-        metadata:
-          name: {long_name}
-          description: d
-        spec: {{}}
-        """,
-    )
-    manifests = load_manifests(tmp_path / "resources")
-    assert [e.name for e in manifests.entries] == [long_name]
-    registry = build_registry(_config(tmp_path))
-    assert registry.lookup("secret", long_name).name == long_name
-
-
-def test_vm_site_uses_freeform_cap(tmp_path: Path) -> None:
-    """vm-site names hit no OS identifier limit (registry key + display only;
-    they are NOT derived into hostnames or SSH aliases, VM names are), so they
-    use the freeform cap (64), not the tighter VM-name cap. A 40-char name that
-    the old 30-char cap rejected now decodes and registers."""
-    from agentworks.naming import MAX_FREEFORM_NAME_LENGTH
-
-    name = "a" * 40
-    assert MAX_FREEFORM_NAME_LENGTH == 64 and len(name) > 30
-    _manifest(
-        tmp_path,
-        f"""
-        apiVersion: agentworks/v1
-        kind: vm-site
-        metadata:
-          name: {name}
-        spec:
-          platform:
-            name: lima
-        """,
-    )
-    manifests = load_manifests(tmp_path / "resources")
-    assert [e.name for e in manifests.entries] == [name]
-
-
-def test_vm_site_over_freeform_cap_rejected(tmp_path: Path) -> None:
-    """A vm-site name past the freeform cap (64) is still rejected."""
-    from agentworks.naming import MAX_FREEFORM_NAME_LENGTH
-
-    _manifest(
-        tmp_path,
-        f"""
-        apiVersion: agentworks/v1
-        kind: vm-site
-        metadata:
-          name: {"a" * (MAX_FREEFORM_NAME_LENGTH + 1)}
-        spec:
-          platform:
-            name: lima
-        """,
-    )
-    with pytest.raises(ConfigError) as exc:
-        load_manifests(tmp_path / "resources")
-    assert "is too long" in str(exc.value)
-    assert f"max {MAX_FREEFORM_NAME_LENGTH}" in str(exc.value)
-
-
-def test_description_stored_for_template_kind_without_warning(tmp_path: Path) -> None:
-    """The formerly template-shaped kinds now store metadata.description
-    like every other declarable kind: it round-trips onto the Resource
-    and the retired "not yet stored" warning does not fire."""
-    _manifest(
-        tmp_path,
-        """
-        apiVersion: agentworks/v1
-        kind: vm-template
-        metadata:
-          name: dev
-          description: a dev box
-        spec: {}
-        """,
-    )
-    manifests = load_manifests(tmp_path / "resources")
-    assert not manifests.issues
-    registry = build_registry(_config(tmp_path))
-    assert registry.lookup("vm-template", "dev").description == "a dev box"
+# The per-kind NAME CAPS were pinned here three times over and are not any
+# more. Both the tightened-cap and the removed-cap mutations are caught by
+# ``test_spec_hosts.py::test_a_site_name_takes_the_freeform_cap`` (vm-site,
+# both directions, with the number in the message), by
+# ``test_spec_secret.py::test_the_secret_cap_is_the_larger_one`` (the secret
+# kind's larger cap, both directions), and through the whole loader by
+# ``test_loader_and_envelope.py::test_long_secret_name_over_username_cap_loads``
+# and ``::test_secret_name_over_secret_cap_errors``.
 
 
 @pytest.mark.parametrize(
-    ("kind", "spec_body"),
-    [
-        ("vm-template", "spec: {}"),
-        ("agent-template", "spec: {}"),
-        ("workspace-template", "spec: {}"),
-        ("admin-template", "spec: {}"),
-        ("named-console-template", "spec: {}"),
-    ],
+    "kind",
+    ["vm-template", "agent-template", "workspace-template", "admin-template", "named-console-template"],
 )
-def test_description_never_warns_for_declarable_kind(tmp_path: Path, kind: str, spec_body: str) -> None:
-    """No declarable kind emits the retired "not yet stored" warning:
-    description is framework-uniform, so every kind stores it."""
+def test_a_description_is_stored_by_every_formerly_template_shaped_kind(tmp_path: Path, kind: str) -> None:
+    """description is framework-uniform now, so no declarable kind emits
+    the retired "not yet stored" warning and every one of them keeps the
+    value.
+
+    All the way to the REGISTRY, not just onto the decoded row: what the
+    retired warning said was that the value went nowhere, and a row that
+    carries it into a registry nothing can look it up in would be the same
+    defect one layer along. A separate vm-template-only test made that
+    second half of the claim; it is the same claim for every kind here.
+    """
     _manifest(
         tmp_path,
         f"""
@@ -286,12 +203,14 @@ def test_description_never_warns_for_declarable_kind(tmp_path: Path, kind: str, 
         metadata:
           name: default
           description: uniform description
-        {spec_body}
+        spec: {{}}
         """,
     )
     manifests = load_manifests(tmp_path / "resources")
+
     assert not manifests.issues
     assert manifests.entries[0].resource.description == "uniform description"
+    assert build_registry(_config(tmp_path)).lookup(kind, "default").description == "uniform description"
 
 
 def test_install_command_kind_decode_error_carries_location(tmp_path: Path) -> None:

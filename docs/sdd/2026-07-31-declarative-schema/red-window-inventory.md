@@ -188,7 +188,10 @@ Files: `tests/agents/` (`test_agent_home_permissions.py`, `test_create_reinit_or
   strings); the two flat-hoist tests trade the gone `config.deprecation_issues` assertion for the
   row's `restart_command_compat` flag (the restart_command deprecation content stays covered by the
   manifest channel and the migrator golden). The build-time pins
-  (`test_unknown_shell_field_errors_at_build`, `test_multi_parent_silent_parent_does_not_wipe`,
+  (`test_unknown_shell_field_errors_at_build`, since renamed to
+  `test_an_unknown_key_in_the_harness_block_errors_at_build` when it absorbed
+  `test_yaml_restart_command_is_rejected` as a second parameter,
+  `test_multi_parent_silent_parent_does_not_wipe`,
   `test_harness_integration_row_lists_its_declaring_template`) re-point to `session-template`
   manifests (the source location assertion moves from `config.toml` to the manifest file).
 

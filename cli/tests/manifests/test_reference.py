@@ -212,10 +212,17 @@ def test_a_nested_block_renders_as_a_block() -> None:
     assert "#    # tenant_id: <string>" in lines
 
 
-def test_a_collection_of_blocks_renders_one_element() -> None:
-    """A model says a list holds tables without saying how many, so the
-    element is rendered once under a placeholder. Leaving it out is what
-    made FR10's "complete skeleton" promise false for a catalog field."""
+def test_a_collection_of_blocks_renders_one_element_under_a_placeholder() -> None:
+    """A model says a collection holds tables without saying how many, so
+    ONE element is rendered under a placeholder that says so. Leaving it
+    out is what made FR10's "complete skeleton" promise false for a
+    catalog field.
+
+    Both shapes of collection, over the one fixture that has each: a
+    sequence, whose element has no key, and a table, whose element hangs
+    under a placeholder key. They were two tests reading the same rendered
+    document for the same rule.
+    """
     lines = _spec_lines(CatalogLike)
 
     assert "#  # vm_sizes:" in lines
@@ -224,6 +231,9 @@ def test_a_collection_of_blocks_renders_one_element() -> None:
     # literally named `-`, which is a different document.
     assert "#    # -" in lines
     assert "#      # cpus: <integer>" in lines
+
+    assert "#    # one entry, as an example:" in lines
+    assert "#    # <key>:" in lines
 
 
 def _uncommented_spec(model: type[AgwModel]) -> object:
@@ -257,13 +267,6 @@ def test_an_enum_default_renders_as_the_value_a_document_carries() -> None:
     assert "#  # layout: vertical" in _spec_lines(Enumed)
 
 
-def test_a_table_of_blocks_renders_one_entry_under_a_placeholder_key() -> None:
-    lines = _spec_lines(CatalogLike)
-
-    assert "#    # one entry, as an example:" in lines
-    assert "#    # <key>:" in lines
-
-
 # --- unions ----------------------------------------------------------------
 
 
@@ -285,12 +288,13 @@ def test_the_rendered_arm_is_the_first_registered_one() -> None:
     assert {child.name for child in entry.children} == {"name", "vm_host"}
 
 
-def test_a_union_that_is_not_a_capability_offers_no_pointer() -> None:
-    """The ``describe-kind`` pointer is only right when the arms ARE
-    capability implementations, which is what the collector is told."""
-    entry = _entries_by_name(_reference(SiteLike))["platform"]
-
-    assert [alt.target for alt in entry.alternatives] == [None, None]
+# "a union that is not a capability offers no pointer" stood here and was
+# VACUOUS: :func:`_reference` builds its tree with ``field_tree(model)``,
+# no capability kind, and ``field_tree`` can only address an arm it was
+# given a kind for (``field_tree.py:409``), so every ``target`` was None
+# by construction. Neither mutation of that line (address every arm,
+# address none) could fail it. The test below is the one that catches
+# both, because it drives the case that can actually go wrong.
 
 
 def test_an_alternative_gets_an_address_only_when_the_address_exists() -> None:
