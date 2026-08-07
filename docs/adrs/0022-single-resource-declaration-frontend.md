@@ -27,9 +27,9 @@ That stance has done its job, and the cost of keeping it has come due:
    keeps the abstraction honest; the plugin origins do.
 2. **Two frontends is a standing tax.** Every resource kind carried two decode surfaces (a flat TOML
    loader and a YAML decoder) that had to stay behavior-identical, and every reader had to learn
-   both spellings plus the unwritten rule about which applied where. The declarative-schema effort
-   (`docs/sdd/2026-07-31-declarative-schema/`) wants to model each kind's spec once; two frontends
-   would mean modeling it twice.
+   both spellings plus the unwritten rule about which applied where. The follow-on work that models
+   each kind's spec once ([ADR 0023](0023-declared-schemas-and-the-kind-descriptor.md)) would have
+   had to model it twice with two frontends.
 3. **The deprecation runway has shipped.** Declaring resources in `config.toml` was marked
    deprecated for removal at load time in 0.13.0 (PR #315, the aggregated load-time warning), and
    the tagged-capability-config pre-support landed in the same release (PR #349). The FRD's
@@ -74,9 +74,10 @@ config the app would otherwise refuse to load.
 - **The runway is spent.** With the TOML resource path gone, the aggregated TOML-section deprecation
   warning and its `--no-deprecations` channel entry retire. The tagged-capability-config shape
   deprecation (PR #349) and the settings-side deprecations are unaffected and remain on the channel.
-- **Follow-on modeling is unblocked.** With a single frontend, the declarative-schema effort can
-  model each kind's spec once rather than reconciling a TOML loader against a YAML decoder for every
-  kind.
+- **Follow-on modeling is unblocked.** With a single frontend, each kind's spec is modeled once
+  rather than reconciled between a TOML loader and a YAML decoder. That is
+  [ADR 0023](0023-declared-schemas-and-the-kind-descriptor.md), which this ADR is the precondition
+  for.
 
 ## Relationship to ADR 0016
 
