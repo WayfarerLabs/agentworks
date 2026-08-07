@@ -750,6 +750,15 @@ appear in BOTH the stream and the emitted schema. See section 11 for the HLA wor
 
 ## 7. The error bridge (step 2.2), and the fold decision
 
+> **RETIRED at closeout (2026-08-06): `render_validation_error` no longer exists.** This section
+> specifies it alongside `config_error_from`, and it shipped that way, but it acquired no production
+> caller: `doctor` and `describe`, the two surfaces its own docstring named, both reach errors
+> through the throwing path. `_problems` is the real shared core (both functions called it
+> independently), so retiring the public wrapper cost nothing architecturally and the reusable-text
+> property this section argues for is intact. Read every `render_validation_error` below as
+> describing a rendering that still happens, through `_problems`, without a public entry point of
+> its own. A future diagnostic surface re-adds a four-line wrapper or calls `_problems` directly.
+
 ### 7.1 The call: FOLD it into this LLD
 
 The plan permits it if small (`plan.md:247`). It is small, and more importantly it is not separable

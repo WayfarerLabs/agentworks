@@ -276,8 +276,15 @@ the derivation sequence are not started.
       machinery that ALREADY exists. `Registry.finalize` pass 7 (`resources/registry.py:466`)
       already scopes the throwing validate to the READY + ENABLED set, with the R3/R9.4 reasoning in
       its docstring. Step 2.2 builds no severity mechanism; the real requirement behind the phrase
-      is a PURE rendering entry point (`render_validation_error`) beside the throwing one, so the
-      same text is reusable as diagnostic output.
+      is a PURE rendering entry point beside the throwing one, so the same text is reusable as
+      diagnostic output. **RETIRED at closeout, 2026-08-06.** `render_validation_error` shipped,
+      acquired zero production callers, and was deleted. The property this box actually required,
+      that the same TEXT be reusable as diagnostic output, lives in `_problems`, which both the
+      throwing path and any future diagnostic surface can call; a public wrapper with no consumer
+      was not the requirement, it was one possible spelling of it. Its ~12 tests were re-pointed
+      rather than dropped, and two that would have lost a distinction under the framed form were
+      strengthened to pin the batch header instead. Kept: `MAX_ERROR_LINES`' export, which the tests
+      read so the cap assertions do not hard-code a presentation choice.
 - [x] Bridge implemented with the FRD's representative-mistakes corpus as a pinned test: unknown
       key, wrong type, missing required field, bad capability name, each asserting owner framing and
       file/position context at least as good as today's. (The old-sibling-shape corpus entry lands
