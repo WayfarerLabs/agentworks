@@ -612,11 +612,11 @@ def _load_git_credentials(
 ) -> dict[str, GitCredentialConfig]:
     """The flat ``[git_credentials.*]`` reader.
 
-    Relocated here with the other resource loaders (ADR 0022). The two
-    nonconforming-secret-name helpers it calls stay shared in
-    ``config.loaders_core``, so the git-credential manifest decoder (which
-    owns its per-kind validation after the fork) can call the same derived
-    -secret helper directly and keep warning parity with this oracle.
+    Relocated here with the other resource loaders (ADR 0022). It emits no
+    nonconforming-secret-name nudge: the two helpers it used to call for
+    that are gone, and the manifest side derives the same warning
+    structurally from the ``SecretRef`` edges the models declare
+    (``manifests.decode.advisory_issues``).
     """
     raw = data.get("git_credentials", {})
     if not isinstance(raw, dict):

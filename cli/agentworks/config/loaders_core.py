@@ -60,6 +60,23 @@ def _warn_unexpected_keys(
     commented out and its keys land in the previous section, as well as
     typos and version mismatches. Issues are collected on the Config object
     so that doctor can report all of them without short-circuiting.
+
+    **The declarative schema did not retire this, against planning text
+    that says it did.** FR12 flipped an unknown key in a KIND's spec from
+    a soft issue to a hard pydantic error, and the kind callers went with
+    the decoders they lived in. Every caller left was always something
+    else:
+
+    - three settings sections ([operator], [secret_config],
+      [session.config]), where the soft convention is the deliberate one
+      (doctor wants every issue in the file, not the first). [plugins]
+      departs from it on purpose and says why at ``_load_plugins``;
+    - the migrator's TOML oracle (``migrate.toml_resources``), which
+      reads the ORIGINAL flat shape through the loaders as they were and
+      then discards the issues it collects (``toml_resource_rows``).
+
+    So this expires when the settings sections themselves become models
+    (FR14), which is its own effort, not with the last kind decoder.
     """
     unexpected = set(raw.keys()) - known
     if unexpected:
