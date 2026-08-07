@@ -179,9 +179,28 @@ class _Problem:
     is one member's report of an undiscriminated union's failure.
     Pydantic reports such a failure as an error per member, all at the
     same address, and :func:`_collapsed` folds the run back into the
-    single problem the operator actually has. Empty for every problem
-    that is not a union member's, and for a member whose failure names no
-    shape."""
+    single problem the operator actually has.
+
+    Non-empty means the member rejected the value on its SHAPE ALONE and
+    got no further, which is what makes the phrase an alternative in the
+    first place. Empty covers both a problem that is not a union
+    member's, and a member that ACCEPTED the shape and failed on the
+    value's content: :func:`_collapsed` reads the distinction that way."""
+
+    union_path: str | None = None
+    """The address of the OUTERMOST undiscriminated union this problem
+    arose at or inside, or ``None`` when no union is involved.
+
+    A member's shape rejection and a failure deep inside a sibling
+    member are one union's report at two different addresses. This is
+    what lets :func:`_collapsed` see them as one group, which
+    :attr:`path` cannot: there, the two differ by construction.
+
+    Outermost rather than innermost because the grouping question is
+    "which single mistake is this a report of", and for a union nested
+    inside another member's field, that is the outer one. Keying on the
+    inner union would leave the outer union's own arm noise in a group
+    by itself, with nothing in it to reveal the arm noise as noise."""
 
     def render(self) -> str:
         text = f"{self.path}: {self.message}" if self.path else self.message
@@ -209,26 +228,55 @@ def _problem(
         message=_message(detail, address.container),
         inherited_from=_inherited_from(address.path, owner, provenance),
         alternatives=_alternatives(detail) if address.at_union else (),
+        union_path=address.union_path,
     )
 
 
 def _collapsed(problems: list[_Problem]) -> list[_Problem]:
-    """One problem per union whose value matched no alternative.
+    """One union's failure as the ONE problem the operator has.
 
     Pydantic tries every member of an undiscriminated union and reports a
-    failure per member, so ``backend_mappings: {b: 3}`` arrives as three
-    problems at one address. The operator made ONE mistake and has ONE
-    thing to fix, so a run of problems sharing an address and standing at
-    the union position folds into a line naming the alternatives.
+    failure per member, so the operator's single mistake arrives as
+    several problems. Which of them are worth showing depends on how far
+    the members got, and there are exactly two cases.
 
-    Deliberately narrow in two ways. A problem DEEPER than the union
-    position (``account.reference: is required``, inside a model member)
-    is not part of a run and stays: those are the informative ones, and
-    collapsing them would throw away the only useful thing in the batch.
-    And a run whose members do not all name a SHAPE keeps its lines, so
-    this never has to invent a phrase for an alternative it cannot
-    describe.
+    **No member accepted the value's shape.** Every report is a shape
+    rejection, and none of them is more right than the others, so they
+    fold into one line naming the alternatives: ``backend_mappings.b: 3``
+    arrives as three problems and reads as "must be a string, a table, or
+    False".
+
+    **A member accepted the shape and failed on the content.** That
+    member is the arm the operator meant, and its report is the only one
+    worth reading. The other members' shape rejections are noise, and
+    loud noise: a ``{account}`` table missing its ``reference`` led with
+    "must be a string" (the ``op://`` arm's rejection) before saying
+    anything true, and a malformed ``op://`` string trailed with "must be
+    a table". Those lines are dropped here, which is what
+    :attr:`_Problem.union_path` exists to make possible: the surviving
+    report sits at a DEEPER address than the rejections, so ``path``
+    alone cannot tell that they are the same union's.
+
+    A shape rejection is exactly a problem carrying
+    :attr:`_Problem.alternatives`, so "some member got past the shape" is
+    read off the batch rather than re-derived: see that attribute.
+
+    One narrowness is deliberate. A collapse only ever merges problems at
+    ONE address, so a union nested inside another union's member keeps
+    its own line rather than having its alternatives merged into the
+    outer union's. Its arm noise is still dropped when an outer member
+    got further, which is the case that matters.
     """
+    entered = {
+        problem.union_path for problem in problems if problem.union_path is not None and not problem.alternatives
+    }
+    answered = [problem for problem in problems if not problem.alternatives or problem.union_path not in entered]
+    return _merged_alternatives(answered)
+
+
+def _merged_alternatives(problems: list[_Problem]) -> list[_Problem]:
+    """A run of shape rejections at one address as a single line naming
+    every shape the value could have taken."""
     collapsed: list[_Problem] = []
     for problem in problems:
         previous = collapsed[-1] if collapsed else None
@@ -245,6 +293,7 @@ def _collapsed(problems: list[_Problem]) -> list[_Problem]:
             message="must be " + _one_of(merged),
             inherited_from=previous.inherited_from,
             alternatives=merged,
+            union_path=previous.union_path,
         )
     return collapsed
 
@@ -582,6 +631,11 @@ class _Address:
     inside one of its members: the mark that this error is one member's
     report of a single failure the operator sees once."""
 
+    union_path: str | None
+    """The address of the OUTERMOST undiscriminated union the walk passed
+    through, whether it ended there or carried on into a member. ``None``
+    when it passed through none. See :attr:`_Problem.union_path`."""
+
 
 def _resolve_path(model_cls: type[BaseModel], loc: tuple[int | str, ...]) -> _Address:
     """``loc`` as the address the operator can act on.
@@ -595,6 +649,7 @@ def _resolve_path(model_cls: type[BaseModel], loc: tuple[int | str, ...]) -> _Ad
     cursor: _Cursor = _initial_cursor(model_cls)
     container: type[BaseModel] | None = None
     at_union = False
+    union_path: str | None = None
     after_mapping_key = False
     last = len(loc) - 1
     for index, segment in enumerate(loc):
@@ -607,6 +662,12 @@ def _resolve_path(model_cls: type[BaseModel], loc: tuple[int | str, ...]) -> _Ad
             continue
         container = cursor.model if isinstance(cursor, _AtModel) else None
         at_union = isinstance(cursor, _AtUnion)
+        if at_union and union_path is None:
+            # The segment about to be consumed is a member LABEL, so the
+            # path built so far is the union's own address, whether this
+            # error stops here or continues inside the member. First one
+            # wins: see ``_Problem.union_path`` for why outermost.
+            union_path = ".".join(parts)
         after_mapping_key = isinstance(cursor, _AtElement) and cursor.mapping
         keep, cursor = _advance(cursor, segment)
         if not keep:
@@ -615,7 +676,7 @@ def _resolve_path(model_cls: type[BaseModel], loc: tuple[int | str, ...]) -> _Ad
             _append_index(parts, segment)
         else:
             parts.append(segment)
-    return _Address(path=".".join(parts), container=container, at_union=at_union)
+    return _Address(path=".".join(parts), container=container, at_union=at_union, union_path=union_path)
 
 
 def _initial_cursor(model_cls: type[BaseModel]) -> _Cursor:
