@@ -15,13 +15,15 @@ import textwrap
 from typing import TYPE_CHECKING
 
 from agentworks import output
-from agentworks.manifests.reference import plain_text, worth_showing
+from agentworks.manifests.field_tree import worth_showing
+from agentworks.manifests.reference import plain_text
 from agentworks.schema import MAPPING_KEY, SEQUENCE_ELEMENT
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-    from agentworks.manifests.reference import FieldEntry, SchemaReference
+    from agentworks.manifests.field_tree import FieldEntry
+    from agentworks.manifests.reference import SchemaReference
 
 #: Terminal width to wrap descriptions at. Fixed rather than detected: the
 #: output is as often piped or pasted as read live, and a reference whose

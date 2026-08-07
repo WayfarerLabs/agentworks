@@ -31,13 +31,15 @@ from typing import TYPE_CHECKING
 import yaml
 
 from agentworks.manifests.envelope import API_VERSION
-from agentworks.manifests.reference import plain_text, worth_showing
+from agentworks.manifests.field_tree import worth_showing
+from agentworks.manifests.reference import plain_text
 from agentworks.schema import MAPPING_KEY, SEQUENCE_ELEMENT, UNSET
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-    from agentworks.manifests.reference import FieldEntry, SchemaReference
+    from agentworks.manifests.field_tree import FieldEntry
+    from agentworks.manifests.reference import SchemaReference
 
 #: Where prose wraps. Narrower than the code line limit because every line
 #: carries a `## ` prefix and lands in an editor beside a manifest.

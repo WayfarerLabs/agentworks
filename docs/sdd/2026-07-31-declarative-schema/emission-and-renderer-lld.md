@@ -167,9 +167,14 @@ to promote it.
 ## 5. One collector, two presenters
 
 ```text
-iter_field_docs ->  reference.py  ->  SchemaReference  ->  skeleton.py  (commented YAML)
-                                                       ->  describe.py  (terminal)
+iter_field_docs -> field_tree.py -> reference.py -> skeleton.py  (commented YAML)
+                   (the tree)       (the record)   describe.py  (terminal)
 ```
+
+`field_tree.py` turns the flat stream into the tree and derives the per-field facts;
+`reference.py` names things, finds their models, and attaches their prose. Two modules rather than
+one because the collector crossed 500 lines, and this is where it splits cleanly: everything below
+the line knows about fields and nothing else, and everything above it knows about kinds.
 
 `SchemaReference` is the service record BOTH presenters and the guide read:
 

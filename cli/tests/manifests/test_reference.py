@@ -8,8 +8,9 @@ models the app does not ship: requiredness, defaults, examples, a nested
 block, a collection of blocks, a discriminated union with one arm
 rendered, an owner-templated field, and a root model.
 
-``skeleton_lines`` renders a fixture model as a kind's spec, which is what
-lets a fixture shape be asserted without registering a kind for it.
+``skeleton_text`` over a hand-built record renders a fixture model as a
+kind's spec, which is what lets a fixture shape be asserted without
+registering a kind for it.
 """
 
 from __future__ import annotations
@@ -20,12 +21,8 @@ import pytest
 from pydantic import Discriminator, Field
 
 from agentworks.errors import ValidationError
-from agentworks.manifests.reference import (
-    FieldEntry,
-    SchemaReference,
-    reference_for,
-    worth_showing,
-)
+from agentworks.manifests.field_tree import FieldEntry, field_tree, worth_showing
+from agentworks.manifests.reference import SchemaReference, reference_for
 from agentworks.manifests.skeleton import skeleton_text
 from agentworks.schema import UNSET, AgwModel, AgwRootModel, SecretRef
 from tests.schema._fixture_models import AzureLike, CatalogLike, GithubLike, SiteLike, TemplateLike
@@ -46,14 +43,8 @@ class Exampled(AgwModel):
     enabled: bool = False
 
 
-class RootValued(AgwRootModel[str]):
-    """A config that IS a value: a secret backend's mapping shape."""
-
-
 def _reference(model: type[AgwModel]) -> SchemaReference:
     """``model`` as a documented spec, with no kind registered for it."""
-    from agentworks.manifests.reference import _entries
-
     return SchemaReference(
         target="fixture",
         kind="fixture",
@@ -63,7 +54,7 @@ def _reference(model: type[AgwModel]) -> SchemaReference:
         summary="a fixture kind",
         overview="What a fixture is.",
         metadata=(),
-        spec=_entries(model),
+        spec=field_tree(model),
         alternatives=(),
         root_value=None,
     )
