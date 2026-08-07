@@ -11,10 +11,10 @@ module retains the small set of bare-``SSHTarget`` helpers that aren't
   shared data shapes still used across the codebase (and by
   ``SSHTransport`` itself).
 - ``SSHLogger`` / ``LOG_DIR``: the unified command logger.
-- Module-level ``run`` / ``copy_to``: called from
-  ``capabilities/vm_platform/lima.py`` (the ssh-placed Lima control plane)
-  where the caller has a bare ``SSHTarget`` and doesn't want to
-  construct a full ``SSHTransport``.
+- Module-level ``run``: called from ``capabilities/vm_platform/lima.py``
+  (the SSH-placed Lima control plane), where the caller has a bare
+  ``SSHTarget`` and doesn't want to construct a full ``SSHTransport``.
+- Module-level ``copy_to``: retained as the bare-``SSHTarget`` scp primitive.
 """
 
 from __future__ import annotations
@@ -345,6 +345,7 @@ def run(
     on_retry: Callable[[int, int], None] | None = None,
     logger: SSHLogger | None = None,
     env: dict[str, str] | None = None,
+    input_text: str | None = None,
 ) -> SSHResult:
     """Execute a command on a remote host via SSH.
 
@@ -363,10 +364,18 @@ def run(
             into a single ``-o SetEnv="K1=V1" "K2=V2" ...`` argument (see
             ``_set_env_args``); agentworks-managed VMs accept these via
             the ``AcceptEnv *`` directive deployed by VM init.
+        input_text: Optional text streamed to the remote command on stdin.
+            Cannot be combined with ``logger``. The input value is never
+            serialized into argv or an error diagnostic. The returned stdout
+            and stderr are empty because an arbitrary command may reflect the
+            input through either stream.
 
     Returns:
         SSHResult with exit code, stdout, and stderr.
     """
+    if input_text is not None and logger is not None:
+        raise ValueError("SSH stdin input cannot be combined with command logging")
+
     args = _ssh_base_args(target, env=env)
     # Fence the remote command from ssh's option parser. See
     # ``SSHTransport.run`` in ``transports/ssh.py`` for the rationale.
@@ -383,6 +392,7 @@ def run(
         try:
             result = subprocess.run(
                 args,
+                input=input_text,
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -391,12 +401,16 @@ def run(
             )
             ssh_result = SSHResult(
                 returncode=result.returncode,
-                stdout=result.stdout,
-                stderr=result.stderr,
+                stdout="" if input_text is not None else result.stdout,
+                stderr="" if input_text is not None else result.stderr,
             )
             if logger is not None:
                 logger.log_command(command, ssh_result)
             if check and not ssh_result.ok:
+                if input_text is not None:
+                    # Remote stderr can reflect stdin for an arbitrary command.
+                    # Omit it at this sensitive-input boundary.
+                    raise SSHError(f"SSH stdin command failed (exit {result.returncode}): {command}")
                 raise SSHError(
                     f"SSH command failed (exit {result.returncode}): {command}\nstderr: {result.stderr.strip()}"
                 )
