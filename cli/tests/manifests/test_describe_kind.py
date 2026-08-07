@@ -10,9 +10,10 @@ than authored twice.
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING, ClassVar, Literal
+from typing import TYPE_CHECKING, Annotated, ClassVar, Literal
 
 import pytest
+from pydantic import Discriminator, Field
 
 from agentworks.errors import ConfigError
 from agentworks.manifests.describe import reference_lines
@@ -27,12 +28,28 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
+class LocalDisk(AgwModel):
+    """A disk carved out of the host's own storage."""
+
+    kind: Literal["local"]
+    size_gb: int = 40
+
+
+class NetworkDisk(AgwModel):
+    """A disk attached over the network."""
+
+    kind: Literal["network"]
+    volume: str
+
+
 class DisabledConfig(AgwModel):
     """A fixture platform's config."""
 
     name: Literal["never-enabled"]
     region: str = "westus2"
     """Where this fixture platform creates its VMs."""
+    disks: list[Annotated[LocalDisk | NetworkDisk, Discriminator("kind")]] = Field(default_factory=list)
+    """The disks every VM gets, each saying which kind of disk it is."""
 
 
 class DisabledPlatform(ConformingVMPlatform):
@@ -159,6 +176,34 @@ def test_a_capability_no_config_enables_still_documents_itself(seated: None) -> 
     assert "a fixture platform no config opts into" in text
     assert "region  (string, optional, default westus2)" in text
     assert "Where this fixture platform creates its VMs." in text
+
+
+def test_a_collection_of_tagged_blocks_names_its_arms_and_expands_one(seated: None) -> None:
+    """The surface an operator actually reads, over the shape no shipped
+    config has.
+
+    A list whose elements each say which kind of element they are was
+    rendered as "list of table" and nothing else: the tags were
+    undiscoverable from the CLI, from the generated sample, and from the
+    guide, though the loader dispatched on them and the dependency graph
+    walked them.
+    """
+    block = _field_entry(_text("vm-platform/never-enabled"), "disks")
+
+    assert "disks (list of table, optional)" in block
+    assert "The disks every VM gets, each saying which kind of disk it is." in block
+    assert "- (each element) (table, required)" in block
+    assert "- local (shown below): A disk carved out of the host's own storage." in block
+    assert "- network: A disk attached over the network." in block
+
+
+def test_an_expanded_element_arm_shows_that_arms_own_fields(seated: None) -> None:
+    """One arm's fields, at the element's indent: what an operator writes
+    under the ``-``, rather than a table of everything every arm takes."""
+    text = _text("vm-platform/never-enabled")
+
+    assert "size_gb  (integer, optional, default 40)" in text
+    assert "volume" not in text, "the arm that was not expanded contributes no fields"
 
 
 def test_a_seated_capability_is_addressable_and_an_unseated_one_is_not(seated: None) -> None:
