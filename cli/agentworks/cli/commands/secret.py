@@ -80,3 +80,27 @@ def secret_describe(
     db = get_db()
     desc = describe_secret(config, registry, name, db=db)
     render_secret_description(desc)
+
+
+@secret_app.command("verify")
+def secret_verify(
+    name: str = typer.Argument(..., help="Secret name to verify."),
+    allow_interactive: bool = typer.Option(
+        False,
+        "--allow-interactive",
+        help="Allow backends that may prompt, authenticate, or require operator presence.",
+    ),
+) -> None:
+    """Prove that one declared secret resolves without displaying its value."""
+    from agentworks import output
+    from agentworks.bootstrap import load_request_registry
+    from agentworks.config import load_config
+    from agentworks.errors import ValidationError
+    from agentworks.secrets.verification import verify_named_secret
+
+    if allow_interactive and output.non_interactive():
+        raise ValidationError("--allow-interactive cannot be used with --non-interactive")
+    config = load_config()
+    registry = load_request_registry(config)
+    result = verify_named_secret(config, registry, name, allow_interactive=allow_interactive)
+    output.result(f"Secret '{result.name}' verified.")

@@ -74,10 +74,10 @@ identifies all wave 2 gates, and has no unresolved review finding.
 - [x] Verification-surface inventory is rechecked against HEAD in the guide LLD: secret describe and
       doctor prediction, doctor and readiness tool checks, and lifecycle-only SSH checks are marked
       existing; actual secret proof and a non-mutating named-VM connection check are marked gaps.
-- [ ] A named-secret verification operation resolves through the normal boundary and reports only
+- [x] A named-secret verification operation resolves through the normal boundary and reports only
       success or framed failure, never returns or emits the value, and never invokes an interactive
       backend without explicit consent.
-- [ ] A non-mutating named-VM connection verification operation uses the standard transport and
+- [x] A non-mutating named-VM connection verification operation uses the standard transport and
       reports success or framed failure without repair, rekey, or implicit power-state change.
 - [x] `agw guide [topic ...]`, `--agent/--human`, and `--names-only` implemented with atomic
       multi-topic validation, exact lookup, deterministic ordering, and markdown-only output.

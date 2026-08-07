@@ -179,6 +179,7 @@ fields. The former `agw vm-host` registry is gone: a remote Lima host is now jus
 | `agw vm create <name>`                              | Create a new VM (provision + initialize)                      |
 | `agw vm list`                                       | List VMs with status and resources                            |
 | `agw vm describe <name>`                            | Show VM details, workspaces, and event log                    |
+| `agw vm verify-connection <name>`                   | Test the canonical admin connection without starting the VM   |
 | `agw vm shell <name> [--workspace <ws>]`            | Admin shell on a VM (optionally rooted in a workspace)        |
 | `agw vm exec <name> [--workspace <ws>] -- <cmd...>` | Run a one-shot command as admin (optionally from a workspace) |
 | `agw vm start <name>`                               | Start a stopped VM and clear its manual-stop intent           |
@@ -958,6 +959,26 @@ agw secret describe tailscale-auth-key
 ```
 
 `describe` reports state -- it does not prompt and does not resolve the secret's value.
+
+To prove that a declared secret resolves through the configured backend chain, use `verify`:
+
+```bash
+agw secret verify tailscale-auth-key
+# Secret 'tailscale-auth-key' verified.
+```
+
+Verification performs one real ordered resolution pass, but prints only the one-line success result
+and never returns or displays the secret value. By default it skips interactive backends, so the
+command cannot unexpectedly prompt or initiate provider authentication. Opt in explicitly when an
+interactive backend is required:
+
+```bash
+agw secret verify tailscale-auth-key --allow-interactive
+```
+
+`--allow-interactive` is rejected when the global `--non-interactive` flag is set. Missing secrets,
+unavailable mappings, backend connectivity failures, and configuration failures use the normal
+framed CLI error categories with backend-authored details sanitized at this verification boundary.
 
 `agw doctor`'s Secrets group emits exactly one row per registry secret -- operator-declared and
 auto-declared alike (auto-declared rows, e.g. `tailscale-auth-key` and the `git-token-*` family,

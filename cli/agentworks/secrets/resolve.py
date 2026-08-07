@@ -11,10 +11,10 @@ feature with different security properties.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Protocol, cast
 
 from agentworks import output
-from agentworks.errors import AgentworksError, ConfigError, SecretUnavailableError
+from agentworks.errors import AgentworksError, ConfigError, ExternalError, SecretUnavailableError
 
 if TYPE_CHECKING:
     from agentworks.config import Config
@@ -76,6 +76,31 @@ class ActiveBackend:
         if not wants:
             return {}
         return self.capability.batch_get(wants)
+
+
+class _ResolutionReporter(Protocol):
+    """Receive value-free events from the ordered resolution loop."""
+
+    def skipped(self, secret: str, backend: str, reason: str | None) -> None: ...
+
+    def resolved(self, secret: str, backend: str, identifier: str | None) -> None: ...
+
+
+class _OutputResolutionReporter:
+    def skipped(self, secret: str, backend: str, reason: str | None) -> None:
+        output.warn(f"secret {secret}: skipping {backend}, not ready: {reason}")
+
+    def resolved(self, secret: str, backend: str, identifier: str | None) -> None:
+        suffix = f" ({identifier})" if identifier else ""
+        output.info(f"Resolved {secret} via {backend}{suffix}")
+
+
+class _QuietResolutionReporter:
+    def skipped(self, secret: str, backend: str, reason: str | None) -> None:
+        del secret, backend, reason
+
+    def resolved(self, secret: str, backend: str, identifier: str | None) -> None:
+        del secret, backend, identifier
 
 
 def active_backends(config: Config, registry: Registry) -> list[ActiveBackend]:
@@ -347,6 +372,74 @@ def resolve_secrets(
     resolution path passes the registry it already holds; defaulted to ``None``
     (no hint), so callers that pass only backends (tests) are unaffected.
     """
+    return _resolve_secrets_ordered(
+        secrets,
+        backends,
+        errors=errors,
+        registry=registry,
+        reporter=_OutputResolutionReporter(),
+        interactive_available=output.is_interactive(),
+    )
+
+
+def resolve_secrets_quiet(
+    secrets: list[SecretDecl],
+    backends: list[ActiveBackend],
+    *,
+    registry: Registry | None = None,
+    interactive_available: bool,
+) -> dict[str, str]:
+    """Resolve through the canonical ordered loop without progress output."""
+    sanitized: AgentworksError | None = None
+    try:
+        return _resolve_secrets_ordered(
+            secrets,
+            backends,
+            errors=None,
+            registry=registry,
+            reporter=_QuietResolutionReporter(),
+            interactive_available=interactive_available,
+        )
+    except AgentworksError as exc:
+        # A third-party backend controls its own exception text and hint. At
+        # this proof boundary neither is trusted: a badly behaved backend can
+        # include the fetched bytes in either field. Preserve the typed error
+        # category and entity framing, but replace all backend-authored prose.
+        sanitized = _sanitize_verification_exception(exc)
+    except Exception as exc:
+        # Provider code is not required to use Agentworks' exception hierarchy.
+        # Do not chain an untyped exception: its message, attributes, and
+        # traceback can all retain provider-controlled secret material.
+        sanitized = _sanitize_verification_exception(exc)
+
+    # Raise after leaving the provider exception's handler. ``raise ... from
+    # None`` suppresses display of implicit context, but raising inside the
+    # handler still retains the original exception on ``__context__``.
+    assert sanitized is not None
+    raise sanitized from None
+
+
+def _sanitize_verification_exception(exc: Exception) -> AgentworksError:
+    """Replace provider-controlled exception state with safe typed framing."""
+    if isinstance(exc, AgentworksError):
+        return type(exc)(
+            "secret verification failed",
+            entity_kind=exc.entity_kind,
+            entity_name=exc.entity_name,
+        )
+    return ExternalError("secret verification failed")
+
+
+def _resolve_secrets_ordered(
+    secrets: list[SecretDecl],
+    backends: list[ActiveBackend],
+    *,
+    errors: dict[str, str] | None,
+    registry: Registry | None,
+    reporter: _ResolutionReporter,
+    interactive_available: bool,
+) -> dict[str, str]:
+    """Shared value-resolution algorithm with caller-selected reporting."""
     resolved: dict[str, str] = {}
     deduped: list[SecretDecl] = []
     seen: set[str] = set()
@@ -368,7 +461,7 @@ def resolve_secrets(
         if not backend.readiness.is_ready:
             for s in missing:
                 if backend.would_attempt(s):
-                    output.warn(f"secret {s.name}: skipping {backend.name}, not ready: {backend.readiness.reason}")
+                    reporter.skipped(s.name, backend.name, backend.readiness.reason)
             continue
         # Fail before an interactive backend prompts (issue #202). Once
         # the non-interactive backends ahead of it have run, their soft
@@ -390,7 +483,7 @@ def resolve_secrets(
         # never runs interactive backends, and in --non-interactive mode
         # the prompt backend no-ops, so there is no prompt to get ahead
         # of and the end-of-loop raise stands.
-        if errors is None and backend.interactive and output.is_interactive():
+        if errors is None and backend.interactive and interactive_available:
             remaining = [b for b in backends[index:] if b.readiness.is_ready]
             doomed = [s for s in missing if not any(b.would_attempt(s) for b in remaining)]
             if doomed:
@@ -418,8 +511,7 @@ def resolve_secrets(
         decl_by_name = {s.name: s for s in attemptable}
         for name in sorted(got):
             ident = backend.describe_lookup(decl_by_name[name])
-            suffix = f" ({ident})" if ident else ""
-            output.info(f"Resolved {name} via {backend.name}{suffix}")
+            reporter.resolved(name, backend.name, ident)
         for name, value in got.items():
             # ADR 0014: embedded newlines would corrupt SSH
             # `-o SetEnv=KEY=VALUE` arguments. The env-var backend
