@@ -291,14 +291,99 @@ def test_remote_interrupt_kills_the_detached_limactl_before_deleting(
     # PRECEDES the delete.
     kill_cmd = "kill $(cat /tmp/agentworks-lima-myvm.pid)"
     (kill_index,) = [i for i, (kind, cmd) in enumerate(events) if kind == "host" and kill_cmd in cmd]
+    artifact_cleanup = (
+        "rm -f /tmp/agentworks-lima-myvm.out /tmp/agentworks-lima-myvm.sh "
+        "/tmp/agentworks-lima-myvm.pid /tmp/agentworks-lima-myvm.status"
+    )
+    (artifact_cleanup_index,) = [
+        i for i, (kind, cmd) in enumerate(events) if kind == "host" and cmd == artifact_cleanup
+    ]
     (delete_index,) = [
         i for i, (kind, cmd) in enumerate(events) if kind == "lima" and cmd == "limactl delete --force myvm"
     ]
-    assert kill_index < delete_index
+    assert kill_index < artifact_cleanup_index < delete_index
     # The interrupt no longer skips the remote template cleanup (the
     # widened finally): the host-side rm of the copied YAML still runs.
     assert ("ssh", "rm -f /tmp/agentworks-myvm.yaml") in events
     assert any("Ctrl-C again to abandon" in w for w in captured_output.warnings)
+
+
+def test_remote_copy_failure_removes_partial_secret_template_and_preserves_error(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A failed scp may have created a partial remote YAML before raising.
+
+    The unwind removes that secret-bearing path even when cleanup also fails,
+    and neither failure path records the embedded value.
+    """
+    secret = "tskey-copy-only"
+    copy_failure = SSHError("copy failed")
+    copied_from: list[Path] = []
+    cleanup_commands: list[str] = []
+
+    def _fail_copy(target: object, source: str, destination: str) -> None:
+        del target, destination
+        copied_from.append(Path(source))
+        raise copy_failure
+
+    def _fail_cleanup(target: object, command: str, **kwargs: object) -> None:
+        del target, kwargs
+        cleanup_commands.append(command)
+        raise SSHError("cleanup failed")
+
+    monkeypatch.setattr(lima_mod, "copy_to", _fail_copy)
+    monkeypatch.setattr(lima_mod, "ssh_run", _fail_cleanup)
+
+    with pytest.raises(SSHError) as caught:
+        LimaPlatform("lima", {"vm_host": "user@host"})._create_remote(
+            "myvm",
+            f"embedded: {secret}",
+            redactions=(secret,),
+        )
+
+    assert caught.value is copy_failure
+    assert cleanup_commands == ["rm -f /tmp/agentworks-myvm.yaml"]
+    assert len(copied_from) == 1
+    assert not copied_from[0].exists()
+    assert secret not in caplog.text
+    assert secret not in repr(caught.value)
+
+
+def test_remote_interrupt_preserves_original_when_artifact_cleanup_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """Detached artifact cleanup is best-effort on the interrupt unwind."""
+    interrupt = KeyboardInterrupt("first")
+    ran = _wire(monkeypatch)
+    events: list[tuple[str, str]] = []
+
+    class _FailingCleanupHost(_FakeHostTransport):
+        def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:
+            if cmd.startswith("rm -f") and ".sh" in cmd:
+                self._events.append(("host", cmd))
+                raise SSHError("artifact cleanup exposed swordfish")
+            return super().run(cmd, **kwargs)
+
+    monkeypatch.setattr(
+        LimaPlatform,
+        "_host_transport",
+        lambda self, logger=None: _FailingCleanupHost(events),
+    )
+    monkeypatch.setattr(
+        LimaPlatform,
+        "_create_remote",
+        lambda self, name, yaml, *, redactions: (_ for _ in ()).throw(interrupt),
+    )
+
+    with pytest.raises(KeyboardInterrupt) as caught:
+        LimaPlatform("lima", {"vm_host": "user@host"}).create(_request(), RunContext())
+
+    assert caught.value is interrupt
+    assert any(kind == "host" and cmd.startswith("rm -f") and ".sh" in cmd for kind, cmd in events)
+    assert _deletes(ran) == ["limactl delete --force myvm"]
+    assert "swordfish" not in "\n".join(captured_output.warnings)
 
 
 def test_remote_provision_failure_redacts_log_and_raised_error(

@@ -10,7 +10,7 @@ feature with different security properties.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol, cast
 
 from agentworks import output
@@ -401,20 +401,21 @@ def resolve_secrets_quiet(
     """Resolve through the canonical ordered loop without progress output."""
     allowed_secret_names = frozenset(secret.name for secret in secrets)
     safe_backends = tuple(
-        _VerificationBackend.capture(backend, allowed_secret_names=allowed_secret_names) for backend in backends
-    )
-    permitted_backends = (
-        safe_backends
-        if interactive_available
-        else tuple(backend for backend in safe_backends if not backend.interactive)
+        _VerificationBackend.wrap(
+            backend,
+            allowed_secret_names=allowed_secret_names,
+            allow_interactive=interactive_available,
+        )
+        for backend in backends
     )
     return _resolve_secrets_ordered(
         secrets,
-        permitted_backends,
+        safe_backends,
         errors=None,
         registry=registry,
         reporter=_QuietResolutionReporter(),
         interactive_available=interactive_available,
+        exclude_interactive=not interactive_available,
     )
 
 
@@ -499,37 +500,84 @@ def _verification_backend_call[T](
 
 @dataclass(frozen=True)
 class _VerificationBackend:
-    """Sanitized, stable backend snapshot for named-secret verification."""
+    """Sanitized, lazy backend snapshot for named-secret verification.
+
+    Provider-authored policy is read only when the ordered resolver reaches
+    this backend. Each property is then cached so a stateful provider cannot
+    change the decision between filtering and resolution.
+    """
 
     backend: ActiveBackend
     allowed_secret_names: frozenset[str]
-    readiness: Readiness
     name: str
-    interactive: bool
+    allow_interactive: bool
+    _readiness: Readiness | None = field(default=None, init=False, repr=False)
+    _interactive: bool | None = field(default=None, init=False, repr=False)
 
     @classmethod
-    def capture(
+    def wrap(
         cls,
         backend: ActiveBackend,
         *,
         allowed_secret_names: frozenset[str],
+        allow_interactive: bool,
     ) -> _VerificationBackend:
-        """Read provider properties once through the sanitizing boundary."""
-        interactive = _verification_backend_call(
-            lambda: backend.interactive,
-            allowed_secret_names=allowed_secret_names,
-        )
-        if type(interactive) is not bool:
-            raise ExternalError("secret verification failed")
+        """Wrap a backend without evaluating provider-authored policy."""
         return cls(
             backend=backend,
             allowed_secret_names=allowed_secret_names,
-            readiness=backend.readiness,
             name=backend.registered_name,
-            interactive=interactive,
+            allow_interactive=allow_interactive,
         )
 
+    @property
+    def readiness(self) -> Readiness:
+        """Return one exact-type-validated, value-safe readiness snapshot."""
+        from agentworks.resources.graph import Readiness
+
+        cached = self._readiness
+        if cached is None:
+            readiness = _verification_backend_call(
+                lambda: self.backend.readiness,
+                allowed_secret_names=self.allowed_secret_names,
+            )
+            if (
+                type(readiness) is not Readiness
+                or (readiness.reason is not None and type(readiness.reason) is not str)
+                or type(readiness.is_available) is not bool
+            ):
+                raise ExternalError("secret verification failed")
+            # Quiet verification never reports provider-authored readiness
+            # prose. Copy only its decision axes so later property access is
+            # guaranteed first-party and cannot expose provider state.
+            safe_readiness = Readiness(
+                reason=None if readiness.reason is None else "backend unavailable",
+                is_available=readiness.is_available,
+            )
+            object.__setattr__(self, "_readiness", safe_readiness)
+            cached = safe_readiness
+        return cached
+
+    @property
+    def interactive(self) -> bool:
+        """Return the provider policy after one sanitized, cached read."""
+        cached = self._interactive
+        if cached is None:
+            interactive = _verification_backend_call(
+                lambda: self.backend.interactive,
+                allowed_secret_names=self.allowed_secret_names,
+            )
+            if type(interactive) is not bool:
+                raise ExternalError("secret verification failed")
+            object.__setattr__(self, "_interactive", interactive)
+            cached = interactive
+        return cached
+
     def would_attempt(self, secret: SecretDecl) -> bool:
+        # Failure attribution revisits every backend after the ordered loop.
+        # Keep a backend excluded by verification policy fully inert there too.
+        if not self.allow_interactive and self.interactive:
+            return False
         attempted = _verification_backend_call(
             lambda: self.backend.would_attempt(secret),
             allowed_secret_names=self.allowed_secret_names,
@@ -566,6 +614,7 @@ def _resolve_secrets_ordered(
     registry: Registry | None,
     reporter: _ResolutionReporter,
     interactive_available: bool,
+    exclude_interactive: bool = False,
 ) -> dict[str, str]:
     """Shared value-resolution algorithm with caller-selected reporting."""
     resolved: dict[str, str] = {}
@@ -580,6 +629,11 @@ def _resolve_secrets_ordered(
     for index, backend in enumerate(backends):
         if not missing:
             break
+        # Named-secret verification defaults to a strict non-interactive
+        # policy. Evaluate that policy only when ordered resolution reaches
+        # this backend, then skip before readiness or provider execution.
+        if exclude_interactive and backend.interactive:
+            continue
         # R9.6: a not-ready opted-in backend is SKIPPED WITH A WARNING (never
         # silent) and the chain falls through to the next candidate. Delta vs
         # today: a mapped-but-unavailable store (e.g. onepassword with no `op`)
