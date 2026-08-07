@@ -125,6 +125,16 @@ def render_validation_error(
     ``provenance`` for the same reason it takes ``owner``: the two forms
     are one rendering, and a diagnostic surface showing a different
     attribution from the error would be its own bug.
+
+    **No production caller yet.** The module docstring names doctor rows
+    and ``describe`` as the surfaces this exists for, and neither reaches
+    it: every error an operator sees today comes through
+    :func:`config_error_from`. So this is a shipped API exercised only by
+    tests, which is worth knowing before treating it as load-bearing. It
+    is not dead code that can simply go, either: the declarative-schema
+    plan names the pure entry point as a deliverable, so whether to wire
+    it into doctor or retire it (with ``MAX_ERROR_LINES``' export) is the
+    plan owner's call rather than a cleanup.
     """
     return [_owner_framed(owner, problem) for problem in _problems(exc, model_cls, owner, provenance)]
 
