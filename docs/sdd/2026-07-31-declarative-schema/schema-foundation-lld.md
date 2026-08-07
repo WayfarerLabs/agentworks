@@ -589,11 +589,11 @@ Fixed in both halves, because neither is sufficient alone:
 
 - **Recognize the abstract spellings.** `_collection_element` now asks what an origin IS
   (`issubclass(origin, Mapping)`, then `Sequence`/`Set`) rather than matching a list of concrete
-  classes, which is how the neighbouring `accepts_table` already answers. `Sequence[X]` and
-  `list[X]` are the same shape to pydantic and to every reader of a `FieldShape`, and the raw value
-  a frontend produces is a list either way, so this closes a SPELLING gap rather than adding a
-  capability. Mapping is asked first because every mapping is also a `Collection`, and it addresses
-  its values rather than its elements.
+  classes, which is how the neighboring `accepts_table` already answers. `Sequence[X]` and `list[X]`
+  are the same shape to pydantic and to every reader of a `FieldShape`, and the raw value a frontend
+  produces is a list either way, so this closes a SPELLING gap rather than adding a capability.
+  Mapping is asked first because every mapping is also a `Collection`, and it addresses its values
+  rather than its elements.
 - **Fail closed on everything else.** `reference_marker_error` now also refuses a marker the
   classifier could not PLACE: `_shape.markers_in` reports every marker written in a field's
   annotation tree (stopping at a model, whose markers are its own fields'), and any marker that is
