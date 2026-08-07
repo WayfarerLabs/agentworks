@@ -512,6 +512,19 @@ Per field of `model_cls.model_fields`, in declaration order:
   otherwise.
 - **Discriminated union field**: read the raw tag; when it names an arm, recurse into that arm's
   model; an absent or unknown tag contributes nothing.
+- **UNtagged scalar-or-block union field** (`str | Model`, the shipped onepassword mapping): **GAP,
+  closed 2026-08-07, the third instance of this defect family.** Nothing tags such a union, so as
+  first built the enumeration had no branch for it and a marker inside the model arm produced no
+  edge at all, silently. `iter_field_docs` expanded the same arm (section 6.2's amendment), so the
+  two derivations disagreed about one declaration. What addresses the arm here is the value's own
+  SHAPE: a table is the block, and a scalar is one of the scalar members, which have nothing to
+  walk. That is a fact rather than a guess only while the block is the one member a table could
+  satisfy, so a union offering a bare table beside the model (`dict[str, str] | Model`) addresses no
+  arm and contributes nothing, for the same reason a union of two models does not; selecting the
+  block there would invent an edge for a value pydantic validates as the table. Applies at both
+  depths, field and collection element. The shape test is explicit rather than left to the
+  nested-model rule above, because a ROOT model arm reads the blob directly: `str | RootModel` would
+  otherwise extract the operator's plain string as the root's own marked value.
 - **Unmarked field**: nothing, at any depth.
 - **Collection OF MODELS** (`list[Model]`, `tuple[Model, ...]`, `dict[str, Model]`): **GAP, added
   2026-08-06 after implementation surfaced it.** The enumeration above covers a marked list of
@@ -817,6 +830,15 @@ than editing a file. All three have concrete day-one consumers:
 >   would walk a raw string as a block, and the error bridge would stop reading `union_members` and
 >   start rendering pydantic's per-member name segments as path segments. Two or more model members
 >   stay unexpanded, since nothing addresses an arm from a raw blob.
+>
+> **Amended 2026-08-07: extraction reads `union_model` too, through a selector of its own.** The
+> bullet above left extraction with no branch for the shape at all, which section 4.3 now records as
+> the third instance of the vanishing-arm family. Both hazards it cites are real and were verified
+> by execution before the fix: folding `union_model` into `nested_model` breaks four pinned
+> error-bridge lines (`must be a string or a table` becomes two lines led by `constrained-str:`),
+> and it makes `str | RootModel` extract a plain string as the root model's marked value. So the
+> attributes stay apart and extraction asks its own question, which the stream must not ask: the
+> stream documents every block an operator MAY write, extraction decides which one they DID.
 >
 > The guard against this recurring is in `tests/manifests/test_accepted_type_parity.py`: for every
 > buildable model in the shipped surface and the fixtures, every JSON type the emitted schema

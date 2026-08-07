@@ -11,7 +11,7 @@ from typing import Annotated
 
 import pytest
 
-from agentworks.schema import AgwModel, RefOwner, SecretRef, extract_references
+from agentworks.schema import AgwModel, AgwRootModel, RefOwner, SecretRef, extract_references
 from agentworks.schema.reference import ConfigReference, RefRelationship
 
 from ._fixture_models import (
@@ -29,7 +29,9 @@ from ._fixture_models import (
     ProxmoxLike,
     RenamedArmSite,
     ResolvesToUnbuildable,
+    ScalarOrBlockLike,
     SelfReferential,
+    SelfReferentialUnion,
     SiteLike,
     StringRoot,
     TemplateLike,
@@ -271,6 +273,72 @@ def test_a_marker_inside_a_multi_arm_union_is_still_found() -> None:
 def test_a_union_with_no_discriminator_has_no_addressable_arm() -> None:
     blob = {"platform": {"name": "proxmox", "token_secret": "lab-token"}}
     assert extract_references(UndiscriminatedSite, blob, OWNER) == ()
+
+
+# --- untagged scalar-or-block unions ----------------------------------
+#
+# No tag addresses these, so the value's own shape does: a table is the
+# block, a scalar is one of the scalar members. The last two cases are
+# the two edges of that rule, one per direction: a table stops naming the
+# block once another member could accept one, and a scalar never names it
+# even where the block would read a bare value.
+
+
+def test_a_union_written_as_a_table_walks_its_block() -> None:
+    blob = {"mapping": {"secret": "named-in-the-arm"}}
+    assert names(extract_references(ScalarOrBlockLike, blob, OWNER)) == ["named-in-the-arm"]
+
+
+def test_a_union_written_as_a_scalar_contributes_nothing() -> None:
+    # The other arm entirely, and the operator wrote a name that belongs
+    # to the backend rather than to agentworks.
+    assert extract_references(ScalarOrBlockLike, {"mapping": "op://vault/item"}, OWNER) == ()
+
+
+def test_an_untagged_union_held_by_a_collection_is_read_per_element() -> None:
+    blob = {
+        "mappings": {"a": {"secret": "in-a-table"}, "b": "a scalar element"},
+        "mapping_list": ["another scalar", {"secret": "in-a-list"}],
+    }
+    assert names(extract_references(ScalarOrBlockLike, blob, OWNER)) == ["in-a-table", "in-a-list"]
+
+
+def test_a_union_block_reachable_from_itself_terminates() -> None:
+    blob: dict[str, object] = {"name": "anchored"}
+    blob["child"] = blob
+
+    assert extract_references(SelfReferentialUnion, blob, OWNER) == ()
+
+
+def test_a_union_that_also_offers_a_bare_table_addresses_no_arm() -> None:
+    """A table is ambiguous the moment a non-model member accepts one.
+
+    Pydantic settles it by trying the arms, which this walker runs before
+    and cannot do. Naming the block anyway would invent an edge: the blob
+    below validates as the plain table, so ``git-token-prod`` would be a
+    secret the operator never asked for, and finalize would refuse the
+    config over a resource nobody wrote.
+    """
+
+    class Ambiguous(AgwModel):
+        thing: dict[str, str] | GithubLike | None = None
+
+    assert extract_references(Ambiguous, {"thing": {"api_url": "https://example"}}, OWNER) == ()
+
+
+def test_a_scalar_is_not_read_as_a_root_model_arm() -> None:
+    """The reason the walk tests the value's shape itself rather than
+    leaving it to the block: an ordinary model reads its fields out of a
+    mapping and a ROOT model reads the blob directly, so the string below
+    would be extracted as the root model's own marked value."""
+
+    class Rooted(AgwRootModel[Annotated[str, SecretRef(usage="a rooted secret")]]):
+        """A root model whose root IS the marked scalar."""
+
+    class HoldsRooted(AgwModel):
+        thing: str | Rooted | None = None
+
+    assert extract_references(HoldsRooted, {"thing": "a plain string"}, OWNER) == ()
 
 
 # --- surfaces that are not mapping-shaped -----------------------------
