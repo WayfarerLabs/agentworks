@@ -512,6 +512,8 @@ def test_remote_template_uses_private_random_directory_not_predictable_fifo(
 
     def _ssh_run(target: object, command: str, **kwargs: object) -> SimpleNamespace:
         del target
+        input_text = kwargs.get("input_text")
+        assert input_text is None or isinstance(input_text, str)
         if command.startswith("rm -rf"):
             (private_dir,) = remote_root.glob("agentworks-lima-template.*")
             template = private_dir / "template.yaml"
@@ -524,7 +526,7 @@ def test_remote_template_uses_private_random_directory_not_predictable_fifo(
             )
         completed = subprocess.run(
             ["sh", "-c", command],
-            input=kwargs.get("input_text"),
+            input=input_text,
             capture_output=True,
             text=True,
             timeout=2,
