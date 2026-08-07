@@ -49,8 +49,9 @@ class PathsConfig:
 @dataclass(frozen=True)
 class DefaultsConfig:
     # Default vm-site name for `agw vm create` (validated against the
-    # finalized registry by vms.validate_sites at the composition
-    # boundary).
+    # finalized registry by config.references.validate_setting_references
+    # at the composition boundary, with every other setting that names a
+    # row).
     site: str | None = None
     # Run the git-credential runup stage: authenticate each token against
     # its provider API before it is written. Definitive rejection (401)

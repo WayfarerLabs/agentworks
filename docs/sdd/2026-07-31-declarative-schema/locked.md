@@ -126,12 +126,14 @@ inventing a dependency on a resource the operator never wrote, which finalize wo
   not relaxing `required`, which would delete a real diagnostic from standalone templates.
 - **FR14 (settings-section models and a config.toml schema) is descoped**, as the plan permitted.
   The settings layer is the largest remaining cluster of consumer-side re-defaulting, and
-  `_warn_unexpected_keys` survives with EIGHT call sites for the same reason. Settings that NAME
-  resources are references, and a dangling one is a hard error (operator ruling, 2026-08-07: config
-  errors are hard errors, full stop). There are exactly two: `[secret_config].backends` and
-  `defaults.site`. They are shape-checked at settings load, because the registry does not exist yet,
-  and their names are resolved once at the composition boundary after finalize, raising the same
-  shape a dangling MANIFEST reference already does (`registry.py:655`). That boundary is in
+  `_warn_unexpected_keys` survives with THREE call sites for the same reason (`operator`,
+  `secret_config`, `session.config`; earlier counts in this effort said six and eight, both of which
+  had counted imports and an `__all__` entry as call sites). Settings that NAME resources are
+  references, and a dangling one is a hard error (operator ruling, 2026-08-07: config errors are
+  hard errors, full stop). There are exactly two: `[secret_config].backends` and `defaults.site`.
+  They are shape-checked at settings load, because the registry does not exist yet, and their names
+  are resolved once at the composition boundary after finalize, raising the same shape a dangling
+  MANIFEST reference already does (`registry.py:655`). That boundary is in
   `bootstrap.build_registry`, deliberately NOT in `Registry.finalize`: the Registry is
   config-agnostic by construction, and making it finalize against settings would force every
   hand-built test registry to carry a Config or opt out. Settings stay strings checked at a boundary

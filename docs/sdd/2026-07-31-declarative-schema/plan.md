@@ -940,7 +940,7 @@ boxes are marked `[~]` rather than left open, so the distinction between "not do
 "deliberately not done" is visible. The settings layer is the largest remaining cluster of
 consumer-side `.get(key, literal)` re-spellings (step 2.6 enumerated them in
 `config/loaders_core.py`, `loaders_sessions.py`, `ssh_config.py`, and `vms/initializer/mise.py`),
-and `_warn_unexpected_keys` survives with six settings-layer call sites for the same reason: its
+and `_warn_unexpected_keys` survives with three settings-layer call sites for the same reason: its
 real expiry is this step. A future effort that models the settings sections inherits a foundation
 that is already built and a sweep that is already enumerated.
 
@@ -1041,8 +1041,10 @@ BUILT, including the migrator; they stay as written. These are the boxes for wha
 - [x] The test estate pared from 5341 to 4970, each removal proven by executing the mutation it was
       claimed to be covered by, with a 22-mutation regression re-run after every change. Three
       guards were then added back for holes the paring and the re-review exposed (a GitHub scope
-      quantifier, `_merge_pair`'s provenance restriction, and the shipped `x-agw-ref` placement), so
-      the estate settles slightly above that floor.
+      quantifier, `_merge_pair`'s provenance restriction, and the shipped `x-agw-ref` placement),
+      and the parametrized suites the later rounds added put the estate at 5140, well above that
+      floor. The floor is the honest number for what the PARING removed; the total moved again
+      afterwards because closing the re-review's findings needed new cover.
 - [x] `red-window-inventory.md` retired, its bounded window having closed.
 - [x] Final review pass at the finished state, run twice: an internal closeout review and the
       roadmap lead's re-review at `9b4a9e93`. Both verdicts were approve-pending-a-list; the lists

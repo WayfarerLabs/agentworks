@@ -223,8 +223,8 @@ def _load_defaults(data: dict[str, object]) -> DefaultsConfig:
     _raise_unexpected_keys(raw, _DEFAULTS_KEYS, "defaults")
 
     # `site` names a vm-site resource; existence is validated at the
-    # composition boundary (vms.validate_sites), where the finalized
-    # registry knows every declared site.
+    # composition boundary (config.references.validate_setting_references),
+    # where the finalized registry knows every declared site.
     site = raw.get("site")
     if site is not None and (not isinstance(site, str) or not site):
         raise ConfigError("defaults.site must be a non-empty site name")
