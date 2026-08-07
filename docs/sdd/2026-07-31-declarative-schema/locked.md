@@ -8,16 +8,16 @@ sanctioned change is a dated entry appended to this file.
 ## What shipped
 
 **Phase 1 (merged separately, PR #316, 2026-08-05).** TOML resource declarations are gone.
-`config.toml` is settings-only and hard-errors on any resource-declaring section; the TOML loaders
-were relocated into `migrate/` rather than deleted, so migration verification has a pre-side
-independent of the emission mapping. ADR 0022 supersedes ADR 0016's dual-path stance.
+`config.toml` is settings-only and hard-errors on any resource-declaring section. ADR 0022
+supersedes ADR 0016's dual-path stance.
 
 **Phase 2 (this PR).** Every schema fact is authored once, in a model, and every other surface is
 derived from it.
 
-- **The capability-kind switchboard collapsed onto one table.** Seven sites independently enumerated
-  the four capability kinds; each is now a derived view of one frozen, core-owned
-  `CapabilityKindDescriptor`. Registration-time conformance replaced a type-and-cast seam.
+- **The capability-kind switchboard collapsed onto one table.** Seven modules independently
+  enumerated the four capability kinds; each is now a derived view of one frozen, core-owned
+  `CapabilityKindDescriptor`, through five cached accessors. Registration conformance replaced a
+  type-and-cast seam.
 - **`agentworks/schema/`** owns the model vocabulary: a strict, frozen, closed-world base;
   `SecretRef`/`ResourceRef` markers with an `x-agw-ref` encoding that survives into emitted schema;
   a total `extract_references`; and `iter_field_docs`, the one field-documentation stream that the
@@ -34,17 +34,46 @@ derived from it.
   yaml-language-server modeline on written manifests.
 - **The bundled sample corpus is deleted.** `agw resource sample` renders live from the registry,
   and `agw resource describe-kind KIND[/NAME]` renders the field reference from the same stream.
+- **`agw resource migrate` is deleted, both halves**, along with the frozen TOML oracle it needed,
+  the `ruamel-yaml` and `tomlkit` dependencies it dragged in, and the `agw resource migrate`
+  completion providers. The upgrade path is `docs/guides/upgrading-to-0.14.md`.
 
 ## The decisions worth keeping
 
-**Config is declared per FACET, producer-side.** A capability declares the config it offers the way
-it declares its API methods, and consumers choose which facet they drive; producers never know their
-consumers. A facet is the level a capability is driven at (`vm`, `user`, `workspace`, `session`).
-Facets are deliberately NOT scopes, and core owns the mapping, so admin and agent both resolve to
-`user` by construction rather than by each capability encoding that they mean the same thing. Two
-designs were rescinded before any model registered through them: schema slots, and
-`config_model_for(consuming_kind)`, which made every producer enumerate its consumers. **Config
-presence is not the support claim**, or facets become slots under a new name.
+**Remediation is precise errors plus guide content, not automated migration tooling** (operator
+ruling, 2026-08-07, mid-effort, recorded in the roadmap's `target-state.md`). The migrator required
+a frozen re-implementation of the old shapes as a verification oracle, and every divergence between
+oracle and model surfaced to the operator as a self-blaming failure ("this is a migrate-tool bug,
+report this error") on valid input. Its deliberate deletability, enforced by a separability guard
+that let nothing outside `migrate/` import it, is what let it be removed before release rather than
+maintained to a scheduled expiry. The guard retired with it, having done exactly its job.
+
+**Config is declared per FACET, producer-side, and the mechanism is not built yet.** A capability
+declares the config it offers the way it declares its API methods; consumers choose which facet they
+drive; producers never know their consumers. Facets are deliberately NOT scopes, and core owns the
+mapping, so admin and agent both resolve to `user` by construction. **Config presence is not the
+support claim**, or facets become the rescinded slot mechanism under a new name. Two designs were
+rescinded before any model registered: schema slots, and `config_model_for(consuming_kind)`, which
+made every producer enumerate its consumers. `capabilities/facets.py` and the `facet` parameter on
+nine signatures shipped and were then REMOVED (2026-08-07): no mechanism without a consumer. The
+contract stays settled here and in the roadmap; wave 4 reintroduces the parameter additively when
+the harness-integration kind actually offers per-facet configs. The reasoning survives in
+`capabilities/base.py`, which is the point: what was deleted was the unused parameter, not the
+design.
+
+**Validation is unconditional.** No readiness verdict, enablement verdict, or property of the host
+decides whether a declaration is well-formed; the declared model is the only authority, and a model
+that legitimately accepts open keys keeps accepting them. Openness is a fact about the model, never
+an accident of environment. The finalize pass used to skip not-ready and disabled rows, which
+inverted two questions: validation is pure and answerable from the document alone, readiness is
+environmental and is computed from config the validate pass had not yet checked. That let a typo
+decide its own fate. A misspelled `vm_host` read as an absent one, which made a remote lima site
+look local, which made it not-ready for want of `limactl`, which suppressed the very error that
+named the typo, while the same document was correctly refused on a host that happened to have
+`limactl` installed. Closed-world config that is closed only on some hosts is not closed. R9.9's
+enablement-keyed skip of a disabled backend's mapping closed for the same reason (operator ruling):
+deferring validation to enablement time surfaces the error at the worst moment, when the operator is
+trying to turn something on.
 
 **Inheritance is not a dependency, and the requirement has two halves.** The FRD originally
 specified only the excluding half, which would have been a regression on its own: the edges that
@@ -54,15 +83,24 @@ the edge alone makes a child stop reporting its inherited env secrets. Every inh
 produces the runtime needs of its EFFECTIVE declaration, and only then is the edge excluded. The
 relationship is typed on the EDGE, never inferred from the target's kind: filtering on
 `isinstance(ref, TemplateReference)` means "points at a template" and would misclassify a future
-uses-a-template edge. Inbound listings deliberately still cross, because a parent genuinely is
-referenced by its children.
+uses-a-template edge. Inbound listings deliberately still cross.
 
-**`agw resource migrate` survives with a scheduled expiry.** It is the remediation for the breaking
-changes this phase ships, which is runway, not capability. It should retire a release or two after
-they land, like every other compatibility surface here. `cli/tests/test_migrate_separability.py`
-enforces that removal stays a deletion: nothing outside `agentworks/migrate/` may import it except
-the one CLI command that fronts it. The two halves (TOML conversion, manifest upgrade) can retire
-independently.
+**Inheritance resolution folds ONE accumulator over the chain's declarations.** Each resolver used
+to resolve every parent to a fully defaulted template and merge those, so a parent that declared
+nothing overwrote an earlier parent's real values with built-in defaults, order-dependently and
+silently, and `VMTemplate.dependencies` then built the secret edge from the wrong value: the graph
+gated one secret while the VM provisioned with another. All four resolvers now flatten the chain to
+its declarations, and `_merge_template` is the only writer, so the fully-defaulted-parent state is
+unrepresentable rather than guarded against. A misspelled parent name was a second entrance to the
+same defect and is closed by the same change. Diamonds linearize: the naive chain re-applied a
+grandparent on top of the parent that overrode it.
+
+**Traversals of operator-controlled input go through shared, cycle-safe helpers** (roadmap ruling,
+`target-state.md`). `agentworks/traversal.py` holds two iterative walks, split on whether reaching a
+node twice by a different route means something: reference extraction says yes (two sibling blocks
+of one model are two blocks an operator wrote), the inheritance chain says no. Bounded walks over
+code-shaped structures, a model class's own fields, may stay recursive; the discipline applies where
+the input's size or shape is the operator's to choose.
 
 **The schema must never reject what the loader accepts.** Under-reporting is sanctioned;
 over-reporting underlines valid configuration in the operator's editor. This bit four times: an
@@ -70,7 +108,8 @@ owner-templated field emitted as required, a dropped nullable arm, and the YAML 
 booleans and integers. The loader is PyYAML (1.1) and yaml-language-server is 1.2, so emitted
 booleans and integers accept both spellings, derived from pyyaml's own resolver rather than
 hand-listed. `010` is unfixable by any schema (same JSON type, different value) and is recorded as
-such.
+such. The same direction governs extraction: an ambiguous union extracts nothing rather than
+inventing a dependency on a resource the operator never wrote, which finalize would then refuse.
 
 ## Known gaps, deliberate
 
@@ -78,21 +117,32 @@ such.
   where a map-keyed capability is hosted, so emission would have to hard-code
   `secret`/`backend_mappings` and reinstate the switchboard the descriptor exists to have killed.
   This needs a change to the roadmap's descriptor contract. Today's emission there is
-  under-constrained but never wrong. The trigger has already fired: `onepassword` ships with a fully
-  modeled mapping, so an operator writing it gets no completion, no `op://` check, and no key
-  checking.
+  under-constrained but never wrong. The trigger has fired: `onepassword` ships with a fully modeled
+  mapping, so an operator writing it gets no completion, no `op://` check, and no key checking.
 - **Inherited capability config**: the loader validates the merged blob while the schema validates
   the child's fragment, so a child partially restating an inherited config is legal at load and
   rejected by the schema. Nil exposure today (no shipped arm requires a field beyond its tag),
   carried as a tripwire test. The fix when it fires is conditional (`if: {required: [inherits]}`),
   not relaxing `required`, which would delete a real diagnostic from standalone templates.
 - **FR14 (settings-section models and a config.toml schema) is descoped**, as the plan permitted.
-  The settings layer is the largest remaining cluster of consumer-side re-defaulting, already
-  enumerated, and `_warn_unexpected_keys` survives with nine call sites for the same reason.
-- **`capabilities/facets.py` has no production consumer yet.** It is kept because the operator named
-  the axis and two roadmap contracts commit to `config_for(facet)`, with wave 4's harness
-  integrations as the named consumer. The cost is real: nine signatures carry a parameter nothing
-  passes. If wave 4 is cancelled or re-scoped, this becomes dead and should go.
+  The settings layer is the largest remaining cluster of consumer-side re-defaulting, and
+  `_warn_unexpected_keys` survives with EIGHT call sites for the same reason. It is also where the
+  name-validation discipline has not been applied: `[secret_config].backends` accepts any list of
+  strings with no registry check, so a typo there silently misroutes secret resolution, while
+  `[secret_backends.<plugin>]`, a section that does nothing, hard-fails the load with a message
+  naming only the built-ins. The strictness is inverted relative to which setting matters. The shape
+  the successor should take: settings values that NAME things (`[secret_config].backends`,
+  `defaults.site`, `defaults.runup_git_credentials`) are references, and should get shape validation
+  at load and reference resolution at finalize through the machinery manifests already use, rather
+  than a growing pile of bespoke checks in `doctor`.
+- **Two union shapes extract no edges, by design.** An undiscriminated union of two or more models
+  addresses no arm without guessing which; a union tagged by non-string literals is outside the
+  framework's rule that every discriminator is a capability or kind NAME. Both are fixture-only; no
+  shipped field has either shape.
+- `agw guide` **is not built.** It is named in FR2 as the vehicle that fills the migrator's role,
+  and the roadmap gates the 0.14.0 cut on the guide's first slice, but that slice ships
+  `concept-onboarding` and no migration topic is contracted by name. If the sunset reaches operators
+  first, `docs/guides/upgrading-to-0.14.md` carries the break alone, which it is written to do.
 - No surface shows a resource's parsed spec values, and `cpus: 0` is accepted by both layers.
 - The name-charset rule the samples state is enforced only on some kinds. Issues #279 and #308
   settled that tolerance deliberately, so the documentation was corrected rather than the behavior.
@@ -100,54 +150,91 @@ such.
 ## Deliberately unused, do not delete as dead code
 
 `describable_targets`, `implementation_reference`, and `capability_kind_reference` have no in-tree
-caller by design: they are the service API the onboarding effort's `agw guide` consumes. That
-coordination is recorded in `cli/agentworks/topics.py`, which is a live cross-effort agreement
-rather than a dangling pointer.
+caller by design: they are the service API the onboarding effort's `agw guide` consumes, and FR2
+names that command as the remediation vehicle for this effort's breaking changes. The coordination
+is recorded in `cli/agentworks/topics.py`, which is a live cross-effort agreement rather than a
+dangling pointer.
 
 ## Where the concepts now live permanently
 
 Per the SDD-is-not-permanent rule, nothing load-bearing lives only here. The descriptor and
 declared-config contracts are in `cli/agentworks/capabilities/README.md`; plugin-author guidance is
-in `cli/agentworks/plugins/README.md`; the operator-facing model and the upgrade note are in
-`docs/guides/resources.md`; and **ADR 0023** records the schema model and the kind descriptor. Dated
-entries were appended to `docs/sdd/2026-07-01-resource-manifests/locked.md` and
-`docs/sdd/2026-07-01-vm-sites/locked.md`, whose recorded stances this effort revised.
+in `cli/agentworks/plugins/README.md`; the operator-facing model is in `docs/guides/resources.md`;
+the release-scoped upgrade path is in `docs/guides/upgrading-to-0.14.md`, split out so it can be
+deleted rather than unpicked, with the hard error that points at it carrying a comment naming
+everything its retirement must take; and **ADR 0023** records the schema model and the kind
+descriptor. Dated entries were appended to the lockfiles of `2026-07-01-resource-manifests`,
+`2026-07-01-vm-sites`, and `2026-07-27-registry-readiness-refactor`, whose recorded stances this
+effort revised.
 
 ## Deviations from the plan as written
 
 - The schema package shipped at `agentworks/schema/`, not `resources/schema/`: a package under
   `resources/` cannot be the import leaf the design requires, since importing anything there loads
   every capability package.
-- `render_validation_error` shipped and was retired at closeout with no production caller; the
-  reusable-text property lives in `_problems`.
-- Step 2.3's finalize work was deferred into its own step 2.3b rather than folded into 2.4 or 2.5.
-- Step 2.4 shipped without an LLD, which is recorded as a waiver rather than an omission: it was a
-  flip of a mechanism step 2.0 had already designed.
+- `render_validation_error` shipped and was retired at closeout with no production caller.
+- Step 2.3's finalize work was deferred into its own step 2.3b.
+- Step 2.4 shipped without an LLD, recorded as a waiver: it was a flip of a mechanism step 2.0 had
+  already designed.
+- `red-window-inventory.md` was retired once the window it bounded had closed; see the 1.2f section
+  of the plan.
+- The effort re-opened after review. See below.
+
+## The rework round
+
+The roadmap lead's review returned request-changes on three blockers and a long should-fix list, and
+an operator ruling deleting the migrator landed alongside it. Both blockers that survived the
+deletion were silent wrong answers, and the round found more than the review did: the diamond
+linearization, the misspelled-parent entrance to B2, a third instance of the vanishing-union-arm
+family, an upgrade guide whose lead-off step could not run, and 371 tests that were not earning
+their place.
+
+**Two operator rehearsals bracketed it, and both were load-bearing.** The migrator-era rehearsal
+took 13 hand-edit rounds against a guide whose CONTENT was entirely correct and whose ORDER could
+not work. After the rewrite, an independent rehearsal walked the replacement in 9 rounds with 2
+refusals and diffed the migrated registry against a real pre-sunset build: byte-identical resource
+set across 28 rows, zero field loss. It still found the same class of defect one more time, in a
+narrower population: the guide led with a step that dies on any `[secret_backends.<plugin>]`
+section, while telling the operator 199 lines later that such a section could outlive the rewrite.
 
 ## What this effort learned that outlived it
 
-Recorded because the guards that came out of it are now load-bearing, and because the same mistakes
+Recorded because the guards that came out of it are load-bearing, and because the same mistakes
 recur.
 
-**A silent wrong answer is worse than a crash**, and this phase produced one at nearly every step: a
-discriminator that vanished on optional unions, a guard that stopped guarding while its comment
-claimed otherwise, an FR17 implementation that would have dropped inherited secrets, an empty
-`tailscale_auth_key` replacing a resolved default, a migrator that dropped operator config and
-reported that it had verified nothing changed.
+**A silent wrong answer is worse than a crash**, and this effort produced one at nearly every step:
+a discriminator that vanished on optional unions, a guard that stopped guarding while its comment
+claimed otherwise, an FR17 implementation that would have dropped inherited secrets, a migrator that
+dropped operator config and reported it had verified nothing changed, a diamond that resolved to its
+grandparent's value, and a typo that suppressed the error naming it.
 
-**Tests that pass for the wrong reason are the recurring failure.** Three separate cases derived an
-expectation from the same source as the thing under test. The worst was self-referential: a fix for
-a tautology was itself pinned tautologically, and the whole suite passed with the fix removed. The
-guards that survive assert INVARIANTS rather than current answers:
-`test_every_exemption_is_load_bearing`, `test_every_relationship_has_a_closure`, the
-`_LEGACY_SIBLING_SHAPES` equality, the separability guard with its non-vacuity twin, and the
-fresh-interpreter seating pins.
+**Tests that pass for the wrong reason are the recurring failure.** The worst was self-referential:
+a fix for a tautology was itself pinned tautologically, and the whole suite passed with the fix
+removed. The paring pass found more of the same by asking one question of every test, what mutation
+does this catch that nothing else catches: an assertion disjoint by construction, a `"-" in stdout`
+check that was true twice over because the header rule is dashes and `secret-backend` has a hyphen,
+a backend-extraction test that bypassed the entry point it existed to verify, and a
+marked-collection test pointed at a field where no mutation could change the answer. The guards that
+survive assert INVARIANTS rather than current answers.
+
+**Two faces of one fact are two authored copies.** An LLD justified a hand-written schema fragment
+as "the exception that proves" the author-once rule, reasoning that the authored place was the type
+and the validator and the schema hook were its two faces. That sentence reads well and is false.
+Nothing made them agree, and a third consumer arrived that could read neither, so `describe-kind`
+told operators to rewrite every plaintext env value for nothing. The exception was never proving the
+rule.
 
 **Verify by execution, not recall.** A table of pydantic error types written from memory had four
-wrong entries. Claims about registry state ("this is the shipped case", "the trigger has not fired")
-were wrong twice at lead level. Prose review cannot find an ordering defect: the operator upgrade
-rehearsal took 13 hand-edit rounds against a guide whose content was entirely correct.
+wrong entries. Claims about registry state were wrong repeatedly at lead level, and the tell is
+always the same: a registry read with plugins seated cannot show you the sparse case, so a check has
+to name which registry it read. Prose review cannot find an ordering defect.
 
 **Independence must be bought on the right axis.** Migration verification was independent by using a
 different PARSER (YAML 1.1 vs 1.2, which leaked) and later by using the same fold on both sides
 (blind to fold-semantics bugs). Both shipped as bugs whose whole point was to catch bugs.
+
+**Deleting a thing means deleting what it dragged in.** The migrator's removal also took a 744-line
+frozen oracle, two runtime dependencies whose justifying comment named a file that no longer
+existed, four completion providers, a settings overlay, and five newly-dead helpers. What made that
+a deletion rather than an excavation was a guard written a day earlier for exactly this, which is
+the case for building deletability into anything shipped as runway.
