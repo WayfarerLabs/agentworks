@@ -108,9 +108,60 @@ identifies all wave 2 gates, and has no unresolved review finding.
 - [x] Unit, integration, CLI, completion, packaging, typing, and lint gates pass.
 - [x] Step reviewed by `agentworks-reviewer` and a fresh-eyes reviewer; valid findings resolved.
 - [x] Always-green ready-to-merge implementation PR opened and roadmap-lead review requested.
+- [ ] Roadmap re-review corrective: restore sanitized SSH warning diagnostics; make verification
+      exception sanitization fail closed for malformed plugin exceptions; audit every secret-bearing
+      logger construction now that redactions are immutable; and document the CodeQL-recognized sink
+      constraint without weakening runtime error propagation or descriptor cleanup.
+- [ ] Roadmap re-review corrective: prove the guide database is opened read-only with an actual
+      rejected write and service-construction assertion; frame any escaped read-only database error.
+- [ ] Roadmap re-review corrective: extend probe, secret, capability, filesystem-write, and mutation
+      denials across end-to-end `render_guide` on a live registry, recording this corrective item
+      without altering the earlier checked no-power claim.
+- [ ] Roadmap re-review corrective: exercise taxonomy ownership, untrusted collision, and
+      broken-link fixpoint behavior with fixtures that reach those gates; make trusted-core taxonomy
+      mistakes fail CI while runtime catalog construction remains fail-soft, align the HLA and LLD
+      with that split, and isolate invalid contributions from valid topics at runtime.
+- [ ] Roadmap re-review corrective: make authored-content wheel inclusion a normal CI assertion, not
+      an integration-only test.
+- [ ] Roadmap re-review corrective: sanitize C0/C1 terminal controls at one render boundary for all
+      authored and projected text; reject shell metacharacters and line breaks anywhere in action
+      tokens; reject or safely frame controls in evidence errors.
+- [ ] Roadmap re-review corrective: keep secret-sanitizer scope narrow and diagnostics useful while
+      distrusting every backend-authored field; make verification result fields authoritative rather
+      than hard-coded or unread; add malformed-exception adversarial coverage.
+- [ ] Roadmap re-review corrective: make view construction and exit status fail soft for missing
+      plugin roots, missing resources, unsupported concept instance lists, and unrelated invalid
+      topics; derive probe suppression from one shared policy until the descriptor owns it.
+- [ ] Roadmap re-review corrective: pin registry validation, materialization, deferred targets,
+      finalized-state gating, empty inventory, no-topic live rendering, first-run config framing, VM
+      verification CLI behavior, every block renderer, and unsupported-block refusal with meaningful
+      non-vacuous tests.
+- [ ] Roadmap re-review corrective: record sample config as unaffected in a repository-visible
+      handoff; add contributed-content size bounds; remove or clarify dead and implicit
+      discriminators identified by review where doing so improves the forward contract; defer only
+      organizational test consolidation that changes no behavior or proof.
 
 Definition of done: R2, R3, R4, R5, R9, R10, R12, R13, R14, and R15 work for static topics and
 current registry/resource-derived content without any wave 2 surface.
+
+### Release-gate adoption after wave 2
+
+The 2026-08-07 remediation-posture ruling supersedes Phase 1's originally dependency-free merge
+boundary. PR #428 addresses all wave-2-independent review findings first, then waits for wave 2's
+service contracts to merge to `main` and rebases once. It must not depend on provisional branch
+content.
+
+- [ ] After wave 2 merges, add `concept-migration` as the exceptional resource-model remediation
+      topic, distinct from ordinary upgrading, using authoritative live sample and field-reference
+      service APIs rather than copied shapes or rendered CLI output.
+- [ ] Link migration from onboarding and management without duplicating its teaching; cover TOML to
+      manifest rewrites, tagged capability configuration, strict validation changes, and the precise
+      null-secret discovery and decision path settled by wave 2.
+- [ ] Prove the topic remains available when operator config does not load, names exact live
+      remediation surfaces, and verifies results through normal loading and doctor rather than a
+      frozen migration oracle.
+- [ ] Review the cross-SDD adapter and migration teaching after the wave 2 rebase, then rerun the
+      full Phase 1 and CI gates before requesting roadmap-lead re-review.
 
 ## Phase 2: machine-readable operational output
 
