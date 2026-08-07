@@ -80,13 +80,12 @@ def _backend_chain() -> list[ActiveBackend]:
 # -- would_attempt -----------------------------------------------------------
 
 
-def test_would_attempt_only_for_mapped_secret() -> None:
-    backend = OnePasswordBackend()
-    mapped = _decl("s1", backend_mappings={"onepassword": "op://Work/npm/token"})
-    unmapped = _decl("s2")
-    assert backend.would_attempt(mapped, mapped.backend_mappings["onepassword"])
-    # Unmapped secrets soft-skip (no derive-from-name convention).
-    assert not backend.would_attempt(unmapped, None)
+# That this backend attempts a mapped secret and soft-skips an unmapped one
+# (no derive-from-name convention) is pinned in
+# ``tests/secrets/test_backends.py::test_would_attempt_is_pure_of_secret_and_mapping``,
+# which makes the same two calls with ``is True`` / ``is False`` and sets
+# them beside env-var's and prompt's answers, where the contrast is the
+# point.
 
 
 # -- mapping resolution / describe_lookup ------------------------------------
@@ -186,13 +185,15 @@ def _validate(mapping: object) -> None:
     [
         pytest.param("op://Work/npm/token", id="string"),
         pytest.param({"account": "my.1password.com", "reference": "op://Work/npm/token"}, id="table"),
-        # A section segment (4 parts) is allowed, in both forms.
-        pytest.param("op://Work/npm/section/token", id="string-with-section"),
+        # A section segment (4 parts) is allowed. Only the TABLE form here:
+        # the bare-string spelling is validated on the way in by
+        # ``test_section_bearing_reference_validates_and_resolves``, which
+        # goes on to read it.
         pytest.param({"account": "acct", "reference": "op://Work/npm/section/token"}, id="table-with-section"),
     ],
 )
 def test_mapping_accepts_valid_forms(mapping: Any) -> None:
-    """Parametrized rather than four calls in one body: the four are
+    """Parametrized rather than three calls in one body: the three are
     independent claims, and unrolled they stop at the first failure, so a
     regression in the table form hid behind one in the string form."""
     _validate(mapping)
@@ -203,27 +204,28 @@ def test_mapping_accepts_valid_forms(mapping: Any) -> None:
     [
         pytest.param(123, id="wrong-type"),
         pytest.param("", id="empty-string"),
-        pytest.param("Work/npm/token", id="missing-scheme"),
         pytest.param("op://Work/token", id="too-few-segments"),
         pytest.param("op://Work//token", id="blank-segment"),
-        pytest.param({"reference": "op://Work/npm/token"}, id="table-missing-account"),
         pytest.param(
             {"account": "", "reference": "op://Work/npm/token"},
             id="table-blank-account",
         ),
-        pytest.param({"account": "acct"}, id="table-missing-reference"),
         pytest.param({"account": "acct", "reference": ""}, id="table-blank-reference"),
         pytest.param(
             {"account": "acct", "reference": "not-a-ref"},
             id="table-bad-reference",
         ),
-        pytest.param(
-            {"account": "acct", "reference": "op://Work/npm/token", "x": 1},
-            id="table-unknown-key",
-        ),
     ],
 )
 def test_mapping_rejects_bad_forms(mapping: Any) -> None:
+    """The malformed spellings whose only claim is THAT they are refused.
+
+    Four more used to sit here (a schemeless string, a table missing
+    ``account``, a table missing ``reference``, a table with an extra key)
+    and are gone rather than kept: ``_BAD_MAPPINGS`` below carries the same
+    four inputs and asserts the whole message at both producing sites, so
+    each of them raised twice over and said less the first time.
+    """
     with pytest.raises(ConfigError):
         _validate(mapping)
 
@@ -382,14 +384,11 @@ def test_valid_mapping_passes_build_registry(tmp_path: Path) -> None:
 
 
 # -- batch_get: miss / failure semantics -------------------------------------
-
-
-def test_batch_get_returns_found_value(monkeypatch: pytest.MonkeyPatch) -> None:
-    _install_runner(monkeypatch, _fake_op(values={"op://Work/npm/token": "the-token"}))
-    backend = OnePasswordBackend()
-    secret = _decl("npm", backend_mappings={"onepassword": "op://Work/npm/token"})
-    got = backend.batch_get([(secret, secret.backend_mappings["onepassword"])])
-    assert got == {"npm": "the-token"}
+#
+# The HIT is ``test_bare_string_resolves_without_account_flag`` above: same
+# fake, same bare-string mapping, same ``{name: value}`` assertion, and it
+# goes on to pin the argv the value came out of. What is left for this
+# section is what happens when the read does not find one.
 
 
 def test_batch_get_absent_item_raises_secret_mapping_error(
@@ -566,15 +565,13 @@ def test_preview_returns_none_for_unmapped_secret(
 # -- registry ----------------------------------------------------------------
 
 
-def test_onepassword_seated_by_plugin() -> None:
-    """The onepassword backend ships as the ``onepassword`` system plugin,
-    whose adapter seats the backend instance into the code registry at import
-    (so ``_impl_for`` can stamp it onto the graph node)."""
-    from agentworks.plugins import SYSTEM_PLUGINS
-    from agentworks.secrets.backends import SECRET_BACKEND_REGISTRY
-
-    assert "onepassword" in SYSTEM_PLUGINS
-    assert "onepassword" in SECRET_BACKEND_REGISTRY
+# That the backend ships as the ``onepassword`` system plugin and that its
+# adapter seats the instance into the code registry at import are both
+# preconditions of the row test below (an unseated backend publishes no row
+# to look up, and a row cannot carry ``origin.plugin == "onepassword"``
+# without the plugin), so neither needs a membership assertion of its own.
+# ``test_plugin_framework.py::test_shipped_index_ships_migrated_plugins``
+# pins the index entry and what it declares.
 
 
 def test_onepassword_descriptor_row_is_disabled_system_plugin_by_default(

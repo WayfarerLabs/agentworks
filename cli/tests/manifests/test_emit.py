@@ -219,13 +219,12 @@ def _every_ref(node: object) -> Iterator[str]:
             yield from _every_ref(item)
 
 
-def test_unknown_and_capability_kinds_are_clean_domain_errors() -> None:
-    from agentworks.errors import ValidationError
-
-    with pytest.raises(ValidationError, match="unknown kind"):
-        document_schema("nope")
-    with pytest.raises(ValidationError, match="capability kind"):
-        document_schema("vm-platform")
+# The two refusals ``document_schema`` makes (an unknown kind, and a
+# capability kind, which is declared in code and carries no manifest) are
+# pinned one layer up, in
+# ``test_schema_command.py::test_a_bad_kind_is_a_clean_domain_error``: same
+# two inputs, and it reaches these raise sites through the real CLI, so it
+# also pins that they arrive as one clean ``Error:`` line with a hint.
 
 
 # -- The document envelope -------------------------------------------------
@@ -337,15 +336,14 @@ def _platform_names() -> set[str]:
     return set(descriptor_for("vm-platform").registry())
 
 
-def test_a_typo_inside_a_capability_config_is_a_schema_error() -> None:
-    """What the splice buys: without it the block is ``extra="allow"`` and
-    an editor would accept anything. The finalize pass catches this
-    either way; the schema is what catches it while the operator types."""
-    schema = document_schema("vm-site")
-    good = _a_document("vm-site", {"platform": {"name": "lima", "vm_host": "me@box"}})
-    assert _errors(schema, good) == []
-    typo = _a_document("vm-site", {"platform": {"name": "lima", "vmhost": "me@box"}})
-    assert _errors(schema, typo)
+# What the splice buys (without it the block is ``extra="allow"`` and an
+# editor would accept anything) is pinned by the two halves of the
+# soundness contract further down rather than by a test of its own:
+# ``test_a_capability_key_the_schema_rejects_is_rejected_on_every_host``
+# opens on the same misspelled ``vm_host`` inside the same ``lima`` block
+# and goes on to prove the LOADER agrees, and
+# ``test_emitted_schemas_accept_every_document_the_full_load_path_accepts``
+# validates the shipped vm-site sample, capability block and all.
 
 
 def test_an_unknown_spec_key_is_a_schema_error() -> None:

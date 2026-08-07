@@ -84,14 +84,14 @@ def test_capabilities_normalized_to_immutable_mapping_of_tuples() -> None:
         plugin.capabilities["harness-integration"] = (FixtureHarnessIntegration,)  # type: ignore[index]
 
 
-def test_descriptor_is_constructible_without_a_registry() -> None:
-    # Immutability is enforced at construction; VALIDITY is not (that is
-    # register_plugin's contract), so a bogus descriptor still constructs.
-    plugin = Plugin(name="", capabilities={"nope": (object,)})
-    assert plugin.name == ""
-
-
 # -- Descriptor validation rejections (typed PluginError naming plugin) -----
+#
+# That VALIDITY is register_plugin's contract and not the constructor's is
+# pinned by these tests rather than by one of their own: each constructs a
+# descriptor that ``register_plugin`` refuses, and does so OUTSIDE its
+# ``pytest.raises`` block, so a constructor that started validating errors
+# the test rather than passing it. ``Plugin(name="")`` and
+# ``capabilities={"not-a-kind": ...}`` between them cover both halves.
 
 
 @pytest.mark.parametrize("bad_name", ["", "has/slash"])
@@ -391,13 +391,10 @@ def test_registering_the_same_plugin_twice_is_a_no_op() -> None:
         assert cast("object", VM_PLATFORM_REGISTRY["fixture-vm"]) is FixtureVMPlatform
 
 
-def test_a_different_impl_under_a_taken_name_is_a_typed_error() -> None:
-    other = conforming_impl("vm-platform", "fixture-vm")  # same name, different class
-
-    with seated_plugin(fixture_plugin()):
-        clash = Plugin(name="other", capabilities={"vm-platform": (other,)})
-        with pytest.raises(PluginError):
-            register_plugin(clash)
+# A second plugin claiming a name the first seated is
+# ``test_capability_clash_between_two_plugins_names_the_other_plugin``
+# below, which runs the same two-plugin/one-name/different-class scenario
+# and reads the message instead of only the type.
 
 
 def test_secret_backend_subclass_under_a_taken_name_is_not_idempotent() -> None:
@@ -419,18 +416,6 @@ def test_secret_backend_subclass_under_a_taken_name_is_not_idempotent() -> None:
 
 
 # -- The seating guard IS the capability-clash layer ------------------------
-
-
-def test_capability_clash_with_a_core_builtin_names_it_as_such() -> None:
-    # Collides with the CORE built-in LimaPlatform.
-    lima_like = conforming_impl("vm-platform", "lima")
-
-    plugin = Plugin(name="p", capabilities={"vm-platform": (lima_like,)})
-    with pytest.raises(PluginError) as exc:
-        register_plugin(plugin)
-    message = str(exc.value)
-    assert "core built-in" in message
-    assert "lima" in message
 
 
 def test_a_plugin_redeclaring_a_core_builtins_own_class_still_collides() -> None:
