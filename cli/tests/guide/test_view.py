@@ -154,6 +154,17 @@ def test_concept_roots_must_match_validated_block_plan() -> None:
         build_guide_view(topic, _Registry(), SimpleNamespace())  # type: ignore[arg-type]
 
 
+def test_view_refuses_registry_before_finalization() -> None:
+    registry = _Registry()
+    registry.is_finalized = False
+    with pytest.raises(GuideTraversalError, match="already-finalized registry"):
+        build_guide_view(
+            _topic_for(ResourceAnchor("vm-template", "demo")),
+            registry,  # type: ignore[arg-type]
+            SimpleNamespace(),
+        )
+
+
 def test_real_finalized_registry_relationships_and_instance_hook_are_eager(monkeypatch: pytest.MonkeyPatch) -> None:
     exhausted = False
 

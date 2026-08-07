@@ -40,10 +40,29 @@ Fields:
 - **`manifests`** (optional): an importlib-resources package anchor whose `manifests/` subdirectory
   holds the plugin's bundled YAML resource manifests (the same envelope operators write; see
   `docs/guides/resources.md`). `None` when the plugin ships no manifests.
+- **`guide_topics`**: an inert tuple of `TopicContribution` records consumed only while building an
+  `agw guide` catalog. It does not execute during plugin registration or ordinary commands.
 - **`required_scopes`** and **`commands`**: reserved, inert placeholders (see below).
 
 The descriptor depends on nothing in the capability or registry machinery, so it is constructible in
 a test without a registry. It becomes valid or rejected only when the installed index registers it.
+
+### Guide contribution boundaries
+
+A plugin may contribute an implementation topic it owns, a declarable resource topic registered
+through its owner adapter, or a `plugin/<plugin>/<topic>` concept. It cannot claim core `concept-*`
+topics, bare kind topics, another plugin's namespace, or another owner's resource. The guide catalog
+isolates an invalid plugin topic while retaining valid core and plugin topics. The full index
+reports rejected content and exits 1, while an unrelated valid topic remains a clean response. A
+retained topic whose live projection is unavailable keeps its authored teaching, reports the scoped
+issue, and exits 1.
+
+Guide contributions are data, not callbacks. Authored markdown cannot contain expression markers or
+terminal control bytes in rendered output, and action records accept only literal argument tokens or
+registered input placeholders. Each title is limited to 256 UTF-8 bytes, each summary to 2 KiB, each
+authored block to 64 KiB, and one topic to 64 blocks, 64 related links, and 256 KiB of authored
+markdown. Keep authored files under the owning package's `guide-content/` directory so the wheel
+package-data assertion exercises them.
 
 ## Shipping a plugin
 

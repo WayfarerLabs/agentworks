@@ -14,6 +14,7 @@ from agentworks.guide.assessment import OnboardingSnapshot
 from agentworks.guide.catalog import GuideCatalog, _build_guide_catalog
 from agentworks.guide.contract import (
     BlockId,
+    GuideTraversalError,
     ImplementationAnchor,
     InstanceList,
     KindAnchor,
@@ -25,7 +26,7 @@ from agentworks.guide.contract import (
     UnknownGuideTopicError,
 )
 from agentworks.guide.contributions import guide_contributions
-from agentworks.guide.render import render_index, render_topic
+from agentworks.guide.render import render_index, render_topic, sanitize_terminal_output
 from agentworks.guide.view import build_guide_view
 from agentworks.resources import KIND_REGISTRY
 
@@ -154,6 +155,17 @@ def _framed_error(error: AgentworksError) -> str:
     return message
 
 
+def _view_failure(topic: TopicContribution, error: AgentworksError | GuideTraversalError | KeyError) -> str:
+    """Frame a bounded per-topic projection failure without leaking raw resource objects."""
+    if isinstance(error, KeyError):
+        detail = "a referenced live resource is missing"
+    elif isinstance(error, AgentworksError):
+        detail = _framed_error(error)
+    else:
+        detail = str(error)
+    return f"live facts for {topic.topic} are unavailable: {detail}"
+
+
 def _unknown(slug: str, names: tuple[str, ...]) -> UnknownGuideTopicError:
     return UnknownGuideTopicError(slug, tuple(difflib.get_close_matches(slug, names, n=3)))
 
@@ -216,13 +228,10 @@ def render_guide(
                 raise _unknown(slug, all_names)
             selected.append(_dynamic_topic(registry, slug))
 
-    issue_markdown = ""
     visible_issues = authored.issues
     if requested:
         visible_issues = tuple(issue for issue in authored.issues if issue.error.topic in requested)
-    if visible_issues:
-        details = "\n".join(f"- {issue.error.source}: {issue.error}" for issue in visible_issues)
-        issue_markdown = f"\n\n## Guide content unavailable\n\n{details}"
+    runtime_issues: list[str] = []
     if not selected:
         index_topics = tuple((*authored.topics, *(_dynamic_topic(registry, name) for name in dynamic_names)))
         markdown = render_index(index_topics, mode)
@@ -250,14 +259,21 @@ def render_guide(
             ):
                 if db is None:
                     raise RuntimeError("guide database was not constructed")
-                onboarding_snapshot = build_onboarding_snapshot(registry, db)
+                onboarding_topic = next(topic for topic in selected if topic.topic == "concept-onboarding")
+                try:
+                    onboarding_snapshot = build_onboarding_snapshot(registry, db)
+                except (AgentworksError, GuideTraversalError, KeyError) as error:
+                    runtime_issues.append(_view_failure(onboarding_topic, error))
+                    onboarding_snapshot = None
                 # Validate the complete replay log against current projected
                 # targets before rendering any selected document. This keeps
                 # multi-topic output atomic even when onboarding is not first.
-                if verification_evidence != ():
+                if onboarding_snapshot is not None and verification_evidence != ():
                     from agentworks.guide.assessment import assess_onboarding
 
                     assess_onboarding(onboarding_snapshot, verification_evidence=verification_evidence)
+                elif verification_evidence != ():
+                    raise ValidationError("verification evidence requires available onboarding facts")
             elif verification_evidence != ():
                 raise ValidationError("verification evidence requires available onboarding facts")
             for topic in selected:
@@ -266,7 +282,14 @@ def render_guide(
                 if registry is not None and system_error is None:
                     if db is None:
                         raise RuntimeError("guide database was not constructed")
-                    view = build_guide_view(topic, registry, db)
+                    if topic.topic == "concept-onboarding" and onboarding_snapshot is None:
+                        unavailable = "this topic's live projection is unavailable"
+                    else:
+                        try:
+                            view = build_guide_view(topic, registry, db)
+                        except (AgentworksError, GuideTraversalError, KeyError) as error:
+                            runtime_issues.append(_view_failure(topic, error))
+                            unavailable = "this topic's live projection is unavailable"
                 else:
                     unavailable = "see the system failure below"
                 documents.append(
@@ -303,6 +326,13 @@ def render_guide(
             if owned_db and db is not None:
                 db.close()
         markdown = "\n\n---\n\n".join(documents) + "\n"
+    issue_details = [f"- {issue.error.source}: {issue.error}" for issue in visible_issues]
+    issue_details.extend(f"- {issue}" for issue in dict.fromkeys(runtime_issues))
+    issue_markdown = ""
+    if issue_details:
+        details = "\n".join(issue_details)
+        issue_markdown = f"\n\n## Guide content unavailable\n\n{details}"
     error_markdown = f"\n\n## Live facts unavailable\n\n{_framed_error(system_error)}" if system_error else ""
-    exit_code = 1 if authored.issues or system_error is not None else 0
-    return GuideResponse(markdown.rstrip() + issue_markdown + error_markdown + "\n", exit_code, all_names)
+    exit_code = 1 if visible_issues or runtime_issues or system_error is not None else 0
+    output = sanitize_terminal_output(markdown.rstrip() + issue_markdown + error_markdown + "\n")
+    return GuideResponse(output, exit_code, all_names)

@@ -498,6 +498,12 @@ def _capability_kinds() -> frozenset[str]:
     return frozenset(descriptor.kind for descriptor in capability_descriptors())
 
 
+# These capability kinds invoke host-readiness code. Guide registry builds
+# consult this shared policy to suppress every such invocation. Keep the set
+# next to the dispatch below until capability descriptors own the policy.
+HOST_PROBING_CAPABILITY_KINDS = frozenset({"vm-platform", "secret-backend"})
+
+
 @runtime_checkable
 class _ReadinessResource(Protocol):
     """A consuming resource that self-determines its readiness from its
@@ -580,7 +586,7 @@ def node_readiness(
         return Readiness.ready()  # placeholder; enablement answers for a disabled node
     kind, name = key
     if kind in _capability_kinds():
-        if not probe_host and kind in {"vm-platform", "secret-backend"}:
+        if not probe_host and kind in HOST_PROBING_CAPABILITY_KINDS:
             return Readiness.unavailable("host readiness unavailable: guide does not inspect the workstation")
         return _capability_node_readiness(kind, name)
     resource = resources[kind][name]

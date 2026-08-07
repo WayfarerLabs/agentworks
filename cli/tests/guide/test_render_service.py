@@ -1,18 +1,42 @@
 from __future__ import annotations
 
+import builtins
+import io
+import shutil
 import sqlite3
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
 from agentworks.errors import ConfigError
-from agentworks.guide import GuideMode, UnknownGuideTopicError
+from agentworks.guide import (
+    AgentContract,
+    BlockId,
+    ConceptAnchor,
+    FieldReference,
+    GuideCatalog,
+    GuideCatalogIssue,
+    GuideContributionError,
+    GuideMode,
+    InstanceList,
+    Overview,
+    Relationships,
+    ResourceAnchor,
+    Sample,
+    State,
+    Teaching,
+    TopicContribution,
+    TopicLinks,
+    TopicSlug,
+    UnknownGuideTopicError,
+)
 from agentworks.guide.agent_mode import select_guide_mode
 from agentworks.guide.contributions import guide_contributions
-from agentworks.guide.render import render_index, render_topic
-from agentworks.guide.service import _dynamic_topic, render_guide
+from agentworks.guide.render import _dynamic, render_index, render_topic
+from agentworks.guide.service import _dynamic_topic, _EmptyInventory, render_guide
 from agentworks.guide.view import build_guide_view
 from agentworks.plugins.base import Plugin
 from agentworks.resources import ResourceReference
@@ -74,23 +98,6 @@ def test_names_only_degrades_to_authored_and_code_owned_kinds() -> None:
     assert "Guide content unavailable" not in response.markdown
 
 
-def test_rendering_has_no_power(monkeypatch: pytest.MonkeyPatch) -> None:
-    def denied(*args: object, **kwargs: object) -> None:
-        raise AssertionError("power invoked")
-
-    import agentworks.output as output
-    import agentworks.secrets.resolve as secrets
-    import agentworks.transports as transports
-    from agentworks.db import Database
-
-    monkeypatch.setattr(output, "prompt", denied)
-    monkeypatch.setattr(secrets, "resolve_secrets", denied)
-    monkeypatch.setattr(transports, "transport", denied)
-    monkeypatch.setattr(Database, "insert_vm", denied)
-    response = render_guide(("concept-onboarding",), GuideMode.AGENT, load_config_fn=_broken)
-    assert response.markdown
-
-
 class _LiveRegistry:
     is_finalized = True
 
@@ -122,7 +129,7 @@ def test_successful_live_rendering_uses_no_denied_power(monkeypatch: pytest.Monk
     monkeypatch.setattr(secrets, "resolve_secrets", denied)
     monkeypatch.setattr(transports, "transport", denied)
     monkeypatch.setattr(Database, "_migrate", denied)
-    registry = _LiveRegistry()
+    registry = _ExactRegistry()
     config = cast("Config", object())
     typed_registry = cast("Registry", registry)
     database = cast("Database", object())
@@ -137,8 +144,77 @@ def test_successful_live_rendering_uses_no_denied_power(monkeypatch: pytest.Monk
     assert "vm-template/demo" in response.markdown
 
 
+def test_live_render_guide_denies_probes_secrets_capabilities_writes_and_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import agentworks.output as output
+    import agentworks.secrets.resolve as secrets
+    import agentworks.transports as transports
+    from agentworks.bootstrap import load_guide_registry
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+    from agentworks.config import load_config
+    from agentworks.db import Database
+
+    public_key = tmp_path / "id.pub"
+    private_key = tmp_path / "id"
+    public_key.write_text("ssh-ed25519 test")
+    private_key.write_text("private test key")
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(f'[operator]\nssh_public_key = "{public_key}"\nssh_private_key = "{private_key}"\n')
+    config = load_config(config_path, warn_issues=False)
+    registry = load_guide_registry(config)
+
+    def denied(*args: object, **kwargs: object) -> None:
+        raise AssertionError("guide rendering invoked denied power")
+
+    monkeypatch.setattr(registry, "finalize", denied)
+    monkeypatch.setattr(registry, "add", denied)
+    monkeypatch.setattr(type(registry.graph), "impl_of", denied)
+    monkeypatch.setattr(shutil, "which", denied)
+    monkeypatch.setattr(subprocess, "run", denied)
+    monkeypatch.setattr(output, "prompt", denied)
+    monkeypatch.setattr(output, "prompt_secret", denied)
+    monkeypatch.setattr(secrets, "resolve_secrets", denied)
+    monkeypatch.setattr(secrets, "resolve_secrets_quiet", denied)
+    monkeypatch.setattr(transports, "transport", denied)
+    monkeypatch.setattr(LimaPlatform, "unsupported_reason", denied)
+    for name in dir(Database):
+        if name.startswith(("insert_", "update_", "delete_", "set_", "remove_")):
+            monkeypatch.setattr(Database, name, denied)
+
+    real_open = cast("Any", builtins.open)
+    real_io_open = cast("Any", io.open)
+
+    def no_write_open(file: object, mode: str = "r", *args: object, **kwargs: object):
+        if any(flag in mode for flag in "wax+"):
+            raise AssertionError(f"guide rendering opened {file!r} for writing")
+        return real_open(file, mode, *args, **kwargs)
+
+    def no_write_io_open(file: object, mode: str = "r", *args: object, **kwargs: object):
+        if any(flag in mode for flag in "wax+"):
+            raise AssertionError(f"guide rendering opened {file!r} for writing")
+        return real_io_open(file, mode, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "open", no_write_open)
+    monkeypatch.setattr(io, "open", no_write_io_open)
+    monkeypatch.setattr(Path, "write_text", denied)
+    monkeypatch.setattr(Path, "write_bytes", denied)
+    monkeypatch.setattr(Path, "touch", denied)
+
+    response = render_guide(
+        ("concept-onboarding",),
+        GuideMode.AGENT,
+        load_config_fn=lambda: config,
+        load_registry_fn=lambda loaded: registry,
+        db=cast("Database", _EmptyInventory()),
+    )
+
+    assert response.exit_code == 0
+    assert "Derived onboarding plan" in response.markdown
+
+
 def test_live_dynamic_block_payloads_have_semantic_parity() -> None:
-    registry = _LiveRegistry()
+    registry = _ExactRegistry()
     topic = _dynamic_topic(registry, "vm-template")  # type: ignore[arg-type]
     view = build_guide_view(topic, registry, object())  # type: ignore[arg-type]
     human = render_topic(topic, view, GuideMode.HUMAN)
@@ -215,6 +291,72 @@ def test_config_descriptions_are_labeled_and_markdown_escaped() -> None:
         assert "**now**" not in markdown
 
 
+def test_terminal_controls_are_stripped_from_authored_projected_and_framework_output() -> None:
+    controls = "\x00\x07\x08\x1b\x7f\x80\x9f"
+    topic = TopicContribution(
+        TopicSlug("concept-controls"),
+        f"Safe{controls} title",
+        f"Safe{controls} summary",
+        ConceptAnchor("concept-controls"),
+        (Overview(BlockId("overview"), f"line one{controls}\n\tline two"),),
+    )
+    rendered = render_topic(topic, None, GuideMode.AGENT)
+    index = render_index((topic,), GuideMode.AGENT)
+    registry = _ExactRegistry()
+    registry.resource.description = f"projected{controls} description"
+    dynamic = _dynamic_topic(registry, "vm-template/demo")  # type: ignore[arg-type]
+    projected = render_topic(
+        dynamic,
+        build_guide_view(dynamic, registry, _ExactDatabase()),  # type: ignore[arg-type]
+        GuideMode.AGENT,
+    )
+
+    for markdown in (rendered.markdown, rendered.blocks[0].source_payload or "", index, projected.markdown):
+        assert not any(ord(character) < 32 and character not in "\n\t" for character in markdown)
+        assert not any(0x7F <= ord(character) <= 0x9F for character in markdown)
+    assert "line one\n\tline two" in rendered.markdown
+
+
+def test_every_block_renderer_and_unsupported_block_refusal_are_explicit() -> None:
+    registry = _ExactRegistry()
+    topic = TopicContribution(
+        TopicSlug("vm-template/demo"),
+        "All blocks",
+        "Every renderer.",
+        ResourceAnchor("vm-template", "demo"),
+        (
+            Overview(BlockId("overview"), "Overview body."),
+            Teaching(BlockId("teaching"), "Teaching body."),
+            AgentContract(BlockId("agent-contract"), "Agent body."),
+            InstanceList(BlockId("instances")),
+            State(BlockId("state")),
+            Relationships(BlockId("relationships")),
+            FieldReference(BlockId("fields")),
+            Sample(BlockId("sample")),
+            TopicLinks(BlockId("links")),
+        ),
+        (TopicSlug("concept-management"),),
+    )
+    view = build_guide_view(topic, registry, _ExactDatabase())  # type: ignore[arg-type]
+    rendered = render_topic(topic, view, GuideMode.AGENT)
+
+    assert {block.key.block_id for block in rendered.blocks} == {
+        "overview",
+        "teaching",
+        "agent-contract",
+        "instances",
+        "state",
+        "relationships",
+        "fields",
+        "sample",
+        "links",
+    }
+    assert rendered.markdown.count("available after schema services are installed") == 2
+    assert "`concept-management`" in rendered.markdown
+    with pytest.raises(TypeError, match="unsupported dynamic guide block object"):
+        _dynamic(object(), view)  # type: ignore[arg-type]
+
+
 @pytest.mark.parametrize("malformed", [False, True])
 def test_unusable_state_database_fails_soft(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, malformed: bool) -> None:
     import agentworks.db as db_package
@@ -260,6 +402,143 @@ def test_broken_finalization_discards_partial_registry() -> None:
     assert response.exit_code == 1
     assert "Current facts for vm-template/demo" in response.markdown
     assert "finalization failed" in response.markdown
+
+
+def test_missing_resource_and_unsupported_concept_inventory_fail_soft_per_topic(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    missing = TopicContribution(
+        TopicSlug("vm-template/missing"),
+        "Missing resource",
+        "Authored summary.",
+        ResourceAnchor("vm-template", "missing"),
+        (Overview(BlockId("overview"), "Authored teaching survives."), State(BlockId("state"))),
+    )
+    unsupported = TopicContribution(
+        TopicSlug("plugin/z/inventory"),
+        "Plugin inventory",
+        "Authored plugin summary.",
+        ConceptAnchor("plugin/z/inventory"),
+        (Overview(BlockId("overview"), "Plugin teaching survives."), InstanceList(BlockId("inventory"))),
+    )
+    catalog = GuideCatalog((missing, unsupported))
+    monkeypatch.setattr("agentworks.guide.service.build_authored_catalog", lambda: catalog)
+
+    class MissingRegistry(_ExactRegistry):
+        def lookup(self, kind: str, name: str) -> object:
+            if (kind, name) == ("vm-template", "missing"):
+                raise KeyError((kind, name))
+            return super().lookup(kind, name)
+
+    registry = MissingRegistry()
+    config = cast("Config", object())
+
+    response = render_guide(
+        ("vm-template/missing", "plugin/z/inventory"),
+        GuideMode.AGENT,
+        load_config_fn=lambda: config,
+        load_registry_fn=lambda loaded: cast("Registry", registry),
+        db=cast("Database", _EmptyInventory()),
+    )
+
+    assert response.exit_code == 1
+    assert "Authored teaching survives." in response.markdown
+    assert "Plugin teaching survives." in response.markdown
+    assert response.markdown.count("this topic's live projection is unavailable") == 2
+    assert "a referenced live resource is missing" in response.markdown
+    assert "does not match a registered inventory resolver plan" in response.markdown
+
+
+def test_unrelated_catalog_issue_does_not_change_clean_requested_topic_exit_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    valid = TopicContribution(
+        TopicSlug("concept-valid"),
+        "Valid",
+        "Valid summary.",
+        ConceptAnchor("concept-valid"),
+        (Overview(BlockId("overview"), "Valid teaching."),),
+    )
+    issue = GuideCatalogIssue(
+        GuideContributionError(
+            "invalid unrelated plugin topic",
+            source="system-plugin:z",
+            topic="plugin/z/broken",
+            field_path="topic",
+        )
+    )
+    monkeypatch.setattr("agentworks.guide.service.build_authored_catalog", lambda: GuideCatalog((valid,), (issue,)))
+    registry = _ExactRegistry()
+    config = cast("Config", object())
+
+    selected = render_guide(
+        ("concept-valid",),
+        GuideMode.AGENT,
+        load_config_fn=lambda: config,
+        load_registry_fn=lambda loaded: cast("Registry", registry),
+        db=cast("Database", _EmptyInventory()),
+    )
+    index = render_guide(
+        (),
+        GuideMode.AGENT,
+        load_config_fn=lambda: config,
+        load_registry_fn=lambda loaded: cast("Registry", registry),
+    )
+
+    assert selected.exit_code == 0
+    assert "Guide content unavailable" not in selected.markdown
+    assert index.exit_code == 1
+    assert "invalid unrelated plugin topic" in index.markdown
+
+
+def test_no_topic_live_rendering_includes_authored_and_dynamic_entries() -> None:
+    registry = _ExactRegistry()
+    config = cast("Config", object())
+    response = render_guide(
+        (),
+        GuideMode.HUMAN,
+        load_config_fn=lambda: config,
+        load_registry_fn=lambda loaded: cast("Registry", registry),
+    )
+
+    assert response.exit_code == 0
+    assert "Run `agw guide concept-onboarding --agent`" in response.markdown
+    assert "`concept-onboarding`" in response.markdown
+    assert "`vm-template/demo`" in response.markdown
+
+
+def test_fresh_install_uses_empty_inventory_without_creating_state_database(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("agentworks.db.DB_PATH", SimpleNamespace(exists=lambda: False))
+    registry = _ExactRegistry()
+    config = cast("Config", object())
+    response = render_guide(
+        ("concept-onboarding",),
+        GuideMode.AGENT,
+        load_config_fn=lambda: config,
+        load_registry_fn=lambda loaded: cast("Registry", registry),
+    )
+
+    assert response.exit_code == 0
+    assert "Derived onboarding plan" in response.markdown
+    assert "The supplied guide view exposes no assessable facts." not in response.markdown
+
+
+def test_default_config_loader_uses_first_run_error_framing(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[bool] = []
+
+    def fail_load(*, raise_errors: bool = False) -> object:
+        calls.append(raise_errors)
+        raise ConfigError("[operator] section is required", hint="Create the operator settings first.")
+
+    monkeypatch.setattr("agentworks.config.load_config", fail_load)
+    response = render_guide(("concept-onboarding",), GuideMode.AGENT)
+
+    assert calls == [True]
+    assert response.exit_code == 1
+    assert "Configuration error: [operator] section is required" in response.markdown
+    assert "Hint: Create the operator settings first." in response.markdown
 
 
 def test_plugin_guide_topics_are_normalized_to_an_inert_tuple() -> None:

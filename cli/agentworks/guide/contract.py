@@ -16,6 +16,12 @@ ActionId = NewType("ActionId", str)
 _ID_RE = re.compile(r"^[a-z][a-z0-9-]{0,62}$")
 _TOPIC_RE = re.compile(r"^[a-z][a-z0-9-]{0,62}(?:/[a-z][a-z0-9-]{0,62}){0,2}$")
 _EXPRESSION_MARKERS = ("{{", "}}", "${", "<%", "%>", "{%", "%}")
+_MAX_TITLE_BYTES = 256
+_MAX_SUMMARY_BYTES = 2 * 1024
+_MAX_MARKDOWN_BYTES = 64 * 1024
+_MAX_TOPIC_MARKDOWN_BYTES = 256 * 1024
+_MAX_BLOCKS = 64
+_MAX_RELATED_TOPICS = 64
 
 
 class GuideContributionError(ValidationError):
@@ -218,6 +224,21 @@ def _string(value: object, *, source: str, topic: str | None, path: str, blank: 
     return value
 
 
+def _bounded_string(
+    value: object,
+    *,
+    source: str,
+    topic: str | None,
+    path: str,
+    max_bytes: int,
+    blank: bool = False,
+) -> str:
+    result = _string(value, source=source, topic=topic, path=path, blank=blank)
+    if len(result.encode("utf-8")) > max_bytes:
+        raise _error(GuideContributionError, source, topic, path, f"exceeds the {max_bytes}-byte limit")
+    return result
+
+
 def _parse_anchor(value: object, source: str, topic: str) -> TopicAnchor:
     data = _mapping(value, {"type", "name", "kind"}, {"type"}, source=source, topic=topic, path="anchor")
     discriminator = data["type"]
@@ -263,7 +284,14 @@ def _parse_block(value: object, source: str, topic: str, index: int) -> GuideBlo
         exact = _mapping(
             value, {"type", "id", "markdown"}, {"type", "id", "markdown"}, source=source, topic=topic, path=path
         )
-        markdown = _string(exact["markdown"], source=source, topic=topic, path=f"{path}.markdown", blank=True)
+        markdown = _bounded_string(
+            exact["markdown"],
+            source=source,
+            topic=topic,
+            path=f"{path}.markdown",
+            max_bytes=_MAX_MARKDOWN_BYTES,
+            blank=True,
+        )
         if any(marker in markdown for marker in _EXPRESSION_MARKERS):
             raise _error(InvalidBlockError, source, topic, f"{path}.markdown", "contains an expression delimiter")
         if discriminator == "overview":
@@ -372,13 +400,26 @@ def parse_topic_contribution(value: object, source: str) -> TopicContribution:
     raw_blocks = data["blocks"]
     if type(raw_blocks) not in {tuple, list}:
         raise _error(InvalidBlockError, source, topic, "blocks", "must be a sequence")
-    blocks = tuple(
-        _parse_block(block, source, topic, index)
-        for index, block in enumerate(cast("list[object] | tuple[object, ...]", raw_blocks))
-    )
+    block_values = cast("list[object] | tuple[object, ...]", raw_blocks)
+    if len(block_values) > _MAX_BLOCKS:
+        raise _error(InvalidBlockError, source, topic, "blocks", f"exceeds the {_MAX_BLOCKS}-block limit")
+    blocks = tuple(_parse_block(block, source, topic, index) for index, block in enumerate(block_values))
     ids = [block.id for block in blocks]
     if len(ids) != len(set(ids)):
         raise _error(InvalidBlockError, source, topic, "blocks", "contains duplicate block IDs")
+    markdown_bytes = sum(
+        len(block.markdown.encode("utf-8"))
+        for block in blocks
+        if isinstance(block, (Overview, Teaching, AgentContract))
+    )
+    if markdown_bytes > _MAX_TOPIC_MARKDOWN_BYTES:
+        raise _error(
+            InvalidBlockError,
+            source,
+            topic,
+            "blocks",
+            f"exceeds the {_MAX_TOPIC_MARKDOWN_BYTES}-byte authored-content limit",
+        )
     permitted: dict[type[object], tuple[type[object], ...]] = {
         InstanceList: (ConceptAnchor, KindAnchor, ResourceAnchor, ImplementationAnchor),
         State: (ResourceAnchor, ImplementationAnchor),
@@ -391,24 +432,45 @@ def parse_topic_contribution(value: object, source: str) -> TopicContribution:
     raw_related = data.get("related_topics", ())
     if type(raw_related) not in {tuple, list}:
         raise _error(GuideContributionError, source, topic, "related_topics", "must be a sequence")
+    related_values = cast("list[object] | tuple[object, ...]", raw_related)
+    if len(related_values) > _MAX_RELATED_TOPICS:
+        raise _error(
+            GuideContributionError,
+            source,
+            topic,
+            "related_topics",
+            f"exceeds the {_MAX_RELATED_TOPICS}-link limit",
+        )
     related = tuple(
         TopicSlug(_string(item, source=source, topic=topic, path=f"related_topics[{index}]"))
-        for index, item in enumerate(cast("list[object] | tuple[object, ...]", raw_related))
+        for index, item in enumerate(related_values)
     )
     if len(related) != len(set(related)):
         raise _error(GuideContributionError, source, topic, "related_topics", "contains a repeated link")
     return TopicContribution(
         TopicSlug(topic),
-        _string(data["title"], source=source, topic=topic, path="title"),
-        _string(data["summary"], source=source, topic=topic, path="summary"),
+        _bounded_string(data["title"], source=source, topic=topic, path="title", max_bytes=_MAX_TITLE_BYTES),
+        _bounded_string(data["summary"], source=source, topic=topic, path="summary", max_bytes=_MAX_SUMMARY_BYTES),
         anchor,
         blocks,
         related,
     )
 
 
-_SHELL_META = re.compile(r"(?:^|\s)(?:[|&;<>]|\w+=)|[`]|\$\(|\$\{")
+_SHELL_META = re.compile(r"[|&;<>'\"`\\]|\$\(|\$\{|(?:^|\s)[A-Za-z_][A-Za-z0-9_]*=")
 _INPUT_NAME = re.compile(r"^[A-Z][A-Z0-9_]*$")
+
+
+def _is_literal_action_token(token: object, input_names: set[str]) -> bool:
+    if type(token) is not str or not token or any(character.isspace() for character in token):
+        return False
+    if any(ord(character) < 32 or 0x7F <= ord(character) <= 0x9F for character in token):
+        return False
+    if _SHELL_META.search(token):
+        return False
+    if "$" not in token:
+        return True
+    return token.startswith("$") and token.count("$") == 1 and token[1:] in input_names
 
 
 def validate_guide_action(action: GuideAction, source: str) -> GuideAction:
@@ -450,16 +512,8 @@ def validate_guide_action(action: GuideAction, source: str) -> GuideAction:
         raise _error(GuideContributionError, source, None, "command", "must be a non-empty tuple")
     command = action.command
     for index, token in enumerate(command):
-        if (
-            type(token) is not str
-            or not token
-            or _SHELL_META.search(token)
-            or "$" in token
-            and not token.startswith("$")
-        ):
+        if not _is_literal_action_token(token, names):
             raise _error(GuideContributionError, source, None, f"command[{index}]", "is not a literal command token")
-        if token.startswith("$") and token[1:] not in names:
-            raise _error(GuideContributionError, source, None, f"command[{index}]", "uses an unregistered input")
     if action.verification is not None and type(action.verification) is not tuple:
         raise _error(GuideContributionError, source, None, "verification", "must be a tuple or None")
     verification = action.verification
@@ -467,23 +521,13 @@ def validate_guide_action(action: GuideAction, source: str) -> GuideAction:
         if not verification:
             raise _error(GuideContributionError, source, None, "verification", "must be non-empty or None")
         for index, token in enumerate(verification):
-            if (
-                type(token) is not str
-                or not token
-                or _SHELL_META.search(token)
-                or "$" in token
-                and not token.startswith("$")
-            ):
+            if not _is_literal_action_token(token, names):
                 raise _error(
                     GuideContributionError,
                     source,
                     None,
                     f"verification[{index}]",
                     "is not a literal command token",
-                )
-            if token.startswith("$") and token[1:] not in names:
-                raise _error(
-                    GuideContributionError, source, None, f"verification[{index}]", "uses an unregistered input"
                 )
     return GuideAction(
         ActionId(action.id),

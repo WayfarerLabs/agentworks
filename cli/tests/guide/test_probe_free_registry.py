@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import shutil
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from agentworks.bootstrap import build_registry, load_guide_registry
 from agentworks.config import load_config
+from agentworks.resources import KIND_REGISTRY, Origin, Registry, ResourceReference
+from agentworks.resources.graph import HOST_PROBING_CAPABILITY_KINDS, Readiness
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -61,3 +64,69 @@ def test_path_cannot_change_guide_readiness_facts(tmp_path: Path, monkeypatch) -
     )
     assert not ordinary_without_tool.graph.readiness_of("vm-site", "lima-local").is_ready
     assert ordinary_with_tool.graph.readiness_of("vm-site", "lima-local").is_ready
+
+
+def test_shared_host_probe_policy_covers_every_current_probing_capability() -> None:
+    assert frozenset({"vm-platform", "secret-backend"}) == HOST_PROBING_CAPABILITY_KINDS
+
+
+def test_probe_free_finalize_preserves_unavailable_validation_and_deferred_materialization(
+    monkeypatch,
+) -> None:
+    validated: list[str] = []
+
+    @dataclass(frozen=True)
+    class Source:
+        name: str
+        origin: Origin | None = None
+
+        def dependencies(self, context: object) -> tuple[ResourceReference, ...]:
+            return (ResourceReference("generated", "guide-target", "required target", ("guide-source", self.name)),)
+
+        def not_ready(self, deps: object) -> Readiness:
+            raise AssertionError("probe-dependent readiness hook was invoked")
+
+        def validate(self, enabled_backends: frozenset[str]) -> None:
+            validated.append(self.name)
+
+    @dataclass(frozen=True)
+    class Target:
+        name: str
+        origin: Origin | None = None
+
+        def dependencies(self, context: object) -> tuple[()]:
+            return ()
+
+    class SourceKind:
+        kind = "guide-source"
+        miss_policy = "error"
+        auto_declare_names = None
+        category = "declarable"
+        description = "Probe-free source."
+        builtin_override = "allow"
+
+        def synthesize(self, references: object) -> object:
+            raise AssertionError("source is not auto-declared")
+
+    class TargetKind:
+        kind = "guide-target"
+        miss_policy = "auto-declare"
+        auto_declare_names = None
+        category = "declarable"
+        description = "Deferred target."
+        builtin_override = "allow"
+
+        def synthesize(self, references: object) -> Target:
+            return Target("generated", Origin.auto_declared(source=("guide-source", "source")))
+
+    monkeypatch.setitem(KIND_REGISTRY, SourceKind.kind, SourceKind())
+    monkeypatch.setitem(KIND_REGISTRY, TargetKind.kind, TargetKind())
+    registry = Registry.empty()
+    registry.add("guide-source", "source", Source("source"), Origin.built_in(source="test"))
+
+    registry.finalize(probe_host_readiness=False)
+
+    assert registry.lookup("guide-target", "generated").name == "generated"
+    readiness = registry.graph.readiness_of("guide-source", "source")
+    assert not readiness.is_available
+    assert validated == ["source"]

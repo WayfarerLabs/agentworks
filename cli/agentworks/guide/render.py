@@ -49,6 +49,12 @@ class RenderedTopic:
 
 
 _MARKDOWN_PUNCTUATION_RE = re.compile(r"([\\`*_{}\[\]()<>#!|])")
+_TERMINAL_CONTROL_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+
+
+def sanitize_terminal_output(value: str) -> str:
+    """Remove terminal controls while preserving Markdown newlines and tabs."""
+    return _TERMINAL_CONTROL_RE.sub("", value)
 
 
 def _plain_description(value: str) -> str:
@@ -206,7 +212,15 @@ def render_topic(
     document = f"# {contribution.title}\n\n{contribution.summary}"
     if rendered:
         document += "\n\n" + "\n\n".join(block.markdown for block in rendered)
-    return RenderedTopic(str(contribution.topic), document + "\n", tuple(rendered))
+    safe_blocks = tuple(
+        RenderedBlock(
+            block.key,
+            None if block.source_payload is None else sanitize_terminal_output(block.source_payload),
+            sanitize_terminal_output(block.markdown),
+        )
+        for block in rendered
+    )
+    return RenderedTopic(str(contribution.topic), sanitize_terminal_output(document + "\n"), safe_blocks)
 
 
 def render_index(topics: tuple[TopicContribution, ...], mode: GuideMode) -> str:
@@ -224,4 +238,4 @@ def render_index(topics: tuple[TopicContribution, ...], mode: GuideMode) -> str:
         intro += f"\n\n## Security and consent\n\n{contract}"
     golden_path = "## Start here\n\nRun `agw guide concept-onboarding --agent` and follow its consent-aware steps."
     rows = "\n".join(f"- `{topic.topic}`: {topic.summary}" for topic in topics)
-    return f"{intro}\n\n{golden_path}\n\n## Topics\n\n{rows or 'No topics are available.'}\n"
+    return sanitize_terminal_output(f"{intro}\n\n{golden_path}\n\n## Topics\n\n{rows or 'No topics are available.'}\n")
