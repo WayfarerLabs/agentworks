@@ -1,0 +1,119 @@
+"""VM connection verification is exactly one non-activating no-op."""
+
+from __future__ import annotations
+
+from types import SimpleNamespace
+from typing import cast
+
+import pytest
+
+from agentworks.config import Config
+from agentworks.db import Database
+from agentworks.errors import ConnectivityError, NotFoundError, StateError
+from agentworks.resources.registry import Registry
+from agentworks.vms.manager.verification import verify_vm_connection
+
+
+def test_verify_connection_uses_one_canonical_no_op(monkeypatch: pytest.MonkeyPatch) -> None:
+    vm = SimpleNamespace(name="worker", site="local")
+    calls: list[tuple[object, ...]] = []
+
+    class Target:
+        def run(self, command: str, **kwargs: object) -> None:
+            calls.append((command, kwargs))
+
+        def describe(self) -> str:
+            return "ssh:100.64.0.2"
+
+    monkeypatch.setattr("agentworks.vms.sites.resolve_site", lambda site, registry: calls.append(("site", site)))
+    monkeypatch.setattr("agentworks.transports.transport", lambda candidate, config: Target())
+
+    result = verify_vm_connection(
+        SimpleNamespace(get_vm=lambda name: vm),  # type: ignore[arg-type]
+        SimpleNamespace(),  # type: ignore[arg-type]
+        SimpleNamespace(),  # type: ignore[arg-type]
+        "worker",
+    )
+
+    assert calls == [("site", "local"), ("true", {"sudo": False, "tty": False, "env": None})]
+    assert result.connected is True
+    assert result.transport == "ssh"
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        StateError("VM is stopped"),
+        ConnectivityError("VM is unreachable"),
+        StateError("unsupported transport"),
+    ],
+    ids=["stopped", "unreachable", "bad-transport"],
+)
+def test_verify_connection_surfaces_failure_without_activation_or_mutation(
+    monkeypatch: pytest.MonkeyPatch,
+    failure: Exception,
+) -> None:
+    vm = SimpleNamespace(name="worker", site="local")
+    calls: list[tuple[object, ...]] = []
+
+    class DatabaseSpy:
+        def get_vm(self, name: str) -> object:
+            calls.append(("get_vm", name))
+            return vm
+
+        def __getattr__(self, name: str) -> object:
+            if name.startswith(("add_", "update_", "delete_", "set_", "record_")):
+                raise AssertionError(f"database mutation attempted: {name}")
+            raise AttributeError(name)
+
+    class FailingTarget:
+        def run(self, command: str, **kwargs: object) -> None:
+            calls.append(("run", command, kwargs))
+            raise failure
+
+        def describe(self) -> str:
+            raise AssertionError("failed transport must not be described")
+
+    forbidden = {
+        "gated_vm_boundary",
+        "start_vm",
+        "_query_live_resources",
+        "_ensure_tailscale",
+        "rekey_vm",
+        "reinit_vm",
+        "_resolve_vm_admin_env_scopes",
+    }
+
+    def forbidden_call(*args: object, **kwargs: object) -> None:
+        raise AssertionError("verification crossed an activation, repair, secret, or mutation boundary")
+
+    for name in forbidden:
+        monkeypatch.setattr(f"agentworks.vms.manager.{name}", forbidden_call)
+    monkeypatch.setattr("agentworks.output.prompt", forbidden_call)
+    monkeypatch.setattr("agentworks.secrets.resolve.resolve_secrets", forbidden_call)
+    monkeypatch.setattr("agentworks.vms.sites.resolve_site", lambda site, registry: calls.append(("site", site)))
+    monkeypatch.setattr("agentworks.transports.transport", lambda candidate, config: FailingTarget())
+
+    with pytest.raises(type(failure), match=str(failure)):
+        verify_vm_connection(
+            cast("Database", DatabaseSpy()),
+            cast("Config", SimpleNamespace()),
+            cast("Registry", SimpleNamespace()),
+            "worker",
+        )
+
+    assert calls == [
+        ("get_vm", "worker"),
+        ("site", "local"),
+        ("run", "true", {"sudo": False, "tty": False, "env": None}),
+    ]
+
+
+def test_verify_connection_missing_vm() -> None:
+    with pytest.raises(NotFoundError, match="VM 'missing' not found"):
+        verify_vm_connection(
+            cast("Database", SimpleNamespace(get_vm=lambda name: None)),
+            cast("Config", SimpleNamespace()),
+            cast("Registry", SimpleNamespace()),
+            "missing",
+        )

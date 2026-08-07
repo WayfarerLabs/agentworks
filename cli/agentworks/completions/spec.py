@@ -141,6 +141,7 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("vm.rekey", "name"): "vms",
     ("vm.backup", "name"): "vms",
     ("vm.describe", "name"): "vms",
+    ("vm.verify-connection", "name"): "vms",
     ("vm.reinit", "name"): "vms",
     ("vm.exec", "name"): "vms",
     ("vm.exec", "workspace"): "workspaces",
@@ -225,6 +226,7 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("console.restore-session", "session"): "sessions",
     # Secret inspection
     ("secret.describe", "name"): "secrets",
+    ("secret.verify", "name"): "secrets",
     # Resource inspection (describe took the single KIND/NAME
     # grammar in the display-syntax unification)
     ("resource.list", "kind"): "resource_kinds",
