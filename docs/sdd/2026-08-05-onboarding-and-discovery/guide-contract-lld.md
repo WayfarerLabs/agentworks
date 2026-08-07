@@ -173,7 +173,8 @@ closed and recursive. It rejects:
   blank titles or summaries, and non-string markdown;
 - unknown anchor or block discriminators;
 - functions, callable objects, import references, renderer names, and object instances;
-- `{{`, `}}`, `${`, `<%`, `%>`, `{%`, or `%}` placeholder delimiters in authored markdown;
+- `{{`, `}}`, `${`, `<%`, `%>`, `{%`, or `%}` placeholder delimiters outside the exact inline-code
+  form below;
 - either reserved `⟦AGW framework⟧` marker delimiter in an authored title, summary, or static
   markdown block, including an HTML-entity encoding of a delimiter;
 - invalid slugs, IDs, anchor/topic mismatches, duplicate block IDs, and repeated related links;
@@ -181,9 +182,15 @@ closed and recursive. It rejects:
 - plugin ownership of `concept-*`, a bare kind, another plugin's namespace, or a resource not
   contributed through its registered owner adapter.
 
-Markdown code fences and ordinary braces are allowed. The ban is deliberately syntactic and does not
-attempt to evaluate or sanitize markdown. Renderers concatenate inert strings and never call
-`format`, `format_map`, a template engine, markdown extensions, `eval`, or `exec`.
+The only exemption is a marker between a same-line pair of single backticks. Each delimiter is one
+unescaped backtick not adjacent to another backtick. Multi-backtick runs, fenced blocks, multiline
+spans, backslash-escaped backticks, and unmatched openers grant no exemption. The scanner runs on
+the final authored Markdown given to `parse_topic_contribution`, identically for trusted and plugin
+contributions. `SchemaReference.overview` is already normalized by `TopicProse` and maps unchanged;
+the adapter does not pass it through `plain_text`. The validator recognizes the narrow boundaries
+only to exclude their literal contents from the delimiter scan and never evaluates or sanitizes
+them. Ordinary braces are allowed. Renderers concatenate inert strings and never call `format`,
+`format_map`, a template engine, markdown extensions, `eval`, or `exec`.
 
 Errors use a guide-specific hierarchy under `ValidationError`:
 
@@ -555,10 +562,10 @@ mutation call.
 
 Phase 1 is complete only with these focused proofs:
 
-- contract parsing rejects every unknown field, executable object, expression delimiter, invalid
-  taxonomy claim, duplicate block ID, duplicate topic, broken link, overlong authored field,
-  over-count block/link/selector collection, overlong selector component or related slug, and
-  malformed related slug;
+- contract parsing rejects every unknown field, executable object, expression delimiter outside the
+  exact same-line single-backtick form, invalid taxonomy claim, duplicate block ID, duplicate topic,
+  broken link, overlong authored field, over-count block/link/selector collection, overlong selector
+  component or related slug, and malformed related slug;
 - trusted taxonomy, ownership, duplicate, and broken-link contradictions fail strict CI
   construction; runtime construction isolates taxonomy drift as a visible issue and retains
   unaffected topics while the other trusted contradictions remain hard startup failures; a full
