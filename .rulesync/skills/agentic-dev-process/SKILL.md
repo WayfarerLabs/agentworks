@@ -160,10 +160,19 @@ any other review; triage them, push back on the wrong ones, and fix the valid on
   Always-green phased commits give reviewers a natural commit-by-commit reading order inside a
   single large PR. The ceiling: when a feature's projected diff grows past what one reviewer can
   actually hold (as a rough guide, a few thousand lines of substantive change), the default flips
-  and the effort ships as a PR series of always-green phases, each merged before the next builds on
-  it. Plan the split at plan-writing time, not when the branch is already huge; review depth decays
-  faster than diff size grows, and a monster PR forces the review to happen after the design has
-  hardened, when findings are most expensive to act on.
+  and the effort ships as a PR series of always-green phases. Plan the split at plan-writing time,
+  not when the branch is already huge; review depth decays faster than diff size grows, and a
+  monster PR forces the review to happen after the design has hardened, when findings are most
+  expensive to act on.
+- **Within a PR series, stack dependent phases; don't wait for merge.** The expensive deltas come
+  from review, not from merge, so the gate for building phase N+1 on phase N is the dust settling on
+  N: its major review findings incorporated and re-review clean, not its merge. Before that gate,
+  stacking bets against exactly the reshaping a review can force; after it, the remaining churn is
+  mechanical and stacking is preferred for parallel-yet-dependent work. Keep the stack shallow (one
+  not-yet-merged layer at a time; a stack of unreviewed PRs is the big PR wearing a disguise), and
+  the stack's owner carries the rebases and retargets the base branch as predecessors merge. Work
+  that does not actually depend on the unmerged phase branches off `main` as a sibling instead, and
+  design-time work (LLDs, content, research) needs no branch gate at all: paper does not rebase.
 - **Open a PR when the work is close to merge-ready**, not before. A PR signals "this is ready for
   eyes," so open it when that is true.
 - **Non-draft by default.** Avoid draft PRs unless specifically asked for one. The single routine
