@@ -1003,8 +1003,10 @@ BUILT, including the migrator; they stay as written. These are the boxes for wha
 - [x] Two shared components replacing seven local patches: `agentworks/traversal.py` and
       `manifests/yaml_value.py` (findings 3, 5, 17, 19, 20, 21).
 - [x] `capabilities/facets.py` and the `facet` parameter removed until there is a consumer; the
-      contract stays settled in the roadmap docs (findings 25, 28).
-- [x] `ruamel-yaml` and `tomlkit` removed, orphaned by the deletion.
+      contract stays settled in the roadmap docs and in the reasoning kept at
+      `capabilities/base.py`. (The two test defects fixed in the same change, findings 25 and 28,
+      are unrelated to the removal.)
+
 - [x] FRD and HLA reconciled with the ruling; dated entry on the readiness refactor's lockfile,
       which is on `main` and therefore locked.
 - [x] R9.9's enablement-keyed validation suppression closed (operator ruling: an operator should not
@@ -1015,7 +1017,17 @@ BUILT, including the migrator; they stay as written. These are the boxes for wha
 - [x] INDEPENDENT operator rehearsal of the rewritten guide. Not optional and not the writer's to
       run: the migrator-era rehearsal took 13 rounds against a guide whose content was correct and
       whose order could not work, and prose review cannot find an ordering defect.
-- [ ] Unknown-key posture applied uniformly across config.toml, kind specs, and capability blobs.
+- [x] Unknown-key posture settled and applied. **Config errors are hard errors, full stop**
+      (operator ruling, 2026-08-07), and a second ruling settles what each surface is:
+      `[secret_backends.*]` is a resource DECLARATION with no place in `config.toml`, so it fails
+      hard uniformly rather than warning for built-in names and erroring for plugin ones;
+      `[secret_config]` is genuine config, so it is shape-checked at load and its resource
+      references are resolved after the graph is finalized, which is what the chicken and egg
+      forces. Settings that NAME resources (`[secret_config].backends`, `defaults.site`,
+      `defaults.runup_git_credentials`) are references, and a dangling one is a hard error, matching
+      what a dangling MANIFEST reference already does. That reverses `vms/sites.py`'s recorded
+      decision that such references degrade to doctor warnings, so the vm-sites lockfile takes a
+      dated entry.
 - [x] `locked.md` rewritten to describe what ships. The lock binds at `main`, so pre-merge this is
       an ordinary edit rather than a dated superseding entry.
 - [x] The upgrade material split into `docs/guides/upgrading-to-0.14.md`, release-scoped so its
@@ -1027,9 +1039,20 @@ BUILT, including the migrator; they stay as written. These are the boxes for wha
       fragment.
 - [x] `ruamel-yaml` and `tomlkit` removed, orphaned by the migrator deletion.
 - [x] The test estate pared from 5341 to 4970, each removal proven by executing the mutation it was
-      claimed to be covered by, with a 22-mutation regression re-run after every change.
+      claimed to be covered by, with a 22-mutation regression re-run after every change. Three
+      guards were then added back for holes the paring and the re-review exposed (a GitHub scope
+      quantifier, `_merge_pair`'s provenance restriction, and the shipped `x-agw-ref` placement), so
+      the estate settles slightly above that floor.
 - [x] `red-window-inventory.md` retired, its bounded window having closed.
-- [ ] Final review pass at the finished state.
+- [x] Final review pass at the finished state, run twice: an internal closeout review and the
+      roadmap lead's re-review at `9b4a9e93`. Both verdicts were approve-pending-a-list; the lists
+      are the boxes above and below.
+- [ ] The re-review's blocker closed: `extract_references` emits no edges for a marker under an
+      abstract collection ABC or a nested collection, silently, which is a gating bypass because the
+      graph is built before validation. Reproduced at HEAD.
+- [ ] `_marker_error` extended to the shapes the walkers now reach (`item_arms` arm models,
+      `union_model`, `item_union_model`), so its docstring's claim becomes true.
+- [ ] Branch brought current with `main` and re-review requested.
 
 ## Pressure-test notes (what writing this plan surfaced)
 
