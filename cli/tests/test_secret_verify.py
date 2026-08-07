@@ -68,6 +68,25 @@ def _active(backend: object, *, ready: bool = True) -> ActiveBackend:
     )
 
 
+class _PoisonReadinessActiveBackend:
+    """Active-backend shape whose readiness must remain unreachable."""
+
+    registered_name = "test"
+
+    def __init__(self, capability: _Backend) -> None:
+        self.capability = capability
+        self.readiness_reads = 0
+
+    @property
+    def readiness(self) -> Readiness:
+        self.readiness_reads += 1
+        raise RuntimeError("poison readiness exposed swordfish")
+
+    @property
+    def interactive(self) -> bool:
+        return self.capability.interactive
+
+
 def test_verify_filters_interactive_and_returns_no_value(monkeypatch: pytest.MonkeyPatch) -> None:
     interactive = _Backend(interactive=True)
     regular = _Backend()
@@ -95,6 +114,7 @@ def test_verify_never_invokes_excluded_interactive_backend_on_failure(
             raise RuntimeError("excluded backend exposed swordfish")
 
     interactive = InertInteractiveBackend(interactive=True)
+    guarded = _PoisonReadinessActiveBackend(interactive)
     registry = SimpleNamespace(
         lookup=lambda kind, name: SecretDecl(name=name, description=""),
         graph=SimpleNamespace(),
@@ -102,13 +122,14 @@ def test_verify_never_invokes_excluded_interactive_backend_on_failure(
     )
     monkeypatch.setattr(
         "agentworks.secrets.resolve.active_backends",
-        lambda config, candidate_registry: [_active(interactive)],
+        lambda config, candidate_registry: [guarded],
     )
 
     with pytest.raises(SecretUnavailableError) as caught:
         verify_named_secret(SimpleNamespace(), registry, "token")  # type: ignore[arg-type]
 
     assert interactive.calls == 0
+    assert guarded.readiness_reads == 0
     assert "swordfish" not in repr(caught.value)
 
 
@@ -240,10 +261,11 @@ def test_verify_stops_before_reading_later_backend_policy(monkeypatch: pytest.Mo
 
     winner = _Backend()
     unreached = UnreachedBackend()
+    guarded_unreached = _PoisonReadinessActiveBackend(unreached)
     registry = SimpleNamespace(lookup=lambda kind, name: SecretDecl(name=name, description=""))
     monkeypatch.setattr(
         "agentworks.secrets.resolve.active_backends",
-        lambda config, registry: [_active(winner), _active(unreached)],
+        lambda config, registry: [_active(winner), guarded_unreached],
     )
 
     result = verify_named_secret(SimpleNamespace(), registry, "token")  # type: ignore[arg-type]
@@ -252,24 +274,26 @@ def test_verify_stops_before_reading_later_backend_policy(monkeypatch: pytest.Mo
     assert winner.calls == 1
     assert unreached.property_reads == 0
     assert unreached.calls == 0
+    assert guarded_unreached.readiness_reads == 0
 
 
 def test_verify_rejects_provider_authored_readiness_without_accessing_it(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    class SecretBearingReadiness:
+    class SecretBearingReadiness(Readiness):
         property_reads = 0
 
-        def __getattribute__(self, name: str) -> object:
-            if name in {"is_ready", "reason", "is_available"}:
-                type(self).property_reads += 1
-                raise RuntimeError("readiness exposed swordfish")
-            return super().__getattribute__(name)
+        @property
+        def reason(self) -> str | None:
+            type(self).property_reads += 1
+            raise RuntimeError("readiness exposed swordfish")
 
     backend = _Backend()
+    readiness = object.__new__(SecretBearingReadiness)
+    assert isinstance(readiness, Readiness)
     active = ActiveBackend(
         capability=backend,  # type: ignore[arg-type]
-        readiness=SecretBearingReadiness(),  # type: ignore[arg-type]
+        readiness=readiness,
         registered_name="test",
     )
     registry = SimpleNamespace(lookup=lambda kind, name: SecretDecl(name=name, description=""))
