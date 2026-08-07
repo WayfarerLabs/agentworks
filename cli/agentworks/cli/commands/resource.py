@@ -421,9 +421,11 @@ def resource_migrate(
 
     # This command IS the remediation for the resource-section hard error, so
     # it loads settings-only (resources=False) to read a config that still
-    # carries resource sections. Planning is pure over the config text (no
-    # registry build); the post-run verification builds its own registry from
-    # the rewritten config.
+    # carries resource sections. Planning is no longer pure over the config
+    # text: the preflight builds a registry over the tree this run WOULD
+    # produce, which is what lets a dry run reach the real run's verdict. The
+    # property that mattered survives, because the migrator still works on a
+    # config no other command can load (see migrate/preflight.py).
     config = load_config(resources=False)
     plan = plan_migration(
         config,

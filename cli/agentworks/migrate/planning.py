@@ -526,9 +526,11 @@ def _check_declaration_shapes(
 
     "Commented out in place" has no faithful rendering for a key buried
     in a shared table; the operator migrates those by hand. Errors carry
-    the declaration's file:line from a text scan for the section (planning
-    is pure over text now, so there is no registry row to source a more
-    precise line from; a minor precision loss on this one error, noted).
+    the declaration's file:line from a text scan for the section. Planning
+    reads the TOML directly, and the one registry it does build is the
+    preflight's, over the tree this run WOULD produce rather than the TOML
+    being read here, so there is still no row to source a more precise
+    line from; a minor precision loss on this one error, noted.
     """
     wanted: dict[str, set[str]] = {}
     singleton_sections: dict[str, MigrationUnit] = {}
