@@ -547,6 +547,11 @@ class _AtElement:
     walk can step into :class:`_AtUnion` rather than losing track and
     rendering pydantic's member labels (``backend_mappings.b.str``)."""
 
+    item_arms: tuple[UnionArmType, ...] = ()
+    """What one element may BE when it is a discriminated union, so the
+    walk can step into :class:`_AtTag` and drop the tag pydantic inserts,
+    exactly as it does for a tagged union written directly on a field."""
+
     mapping: bool = False
     """Whether the elements are addressed by an operator-written KEY.
     Only a mapping can produce pydantic's ``[key]`` marker, so this is
@@ -650,6 +655,8 @@ def _advance(cursor: _Cursor, segment: int | str) -> tuple[bool, _Cursor]:
     if isinstance(cursor, _AtElement):
         if cursor.item_model is not None:
             return True, _AtModel(cursor.item_model)
+        if cursor.item_arms:
+            return True, _AtTag(cursor.item_arms)
         return True, _AtUnion(cursor.item_union_members) if cursor.item_union_members else None
     if isinstance(cursor, _AtModel) and isinstance(segment, str):
         fields = model_fields_of(cursor.model)
@@ -666,6 +673,7 @@ def _cursor_for(shape: FieldShape) -> _Cursor:
         return _AtElement(
             shape.item_model,
             item_union_members=shape.item_union_members,
+            item_arms=shape.item_arms,
             mapping=shape.collection is Collection.MAPPING,
         )
     if shape.arms:

@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from agentworks.errors import inheritance_cycle_error, unknown_template_error
+from agentworks.errors import unknown_template_error
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -82,49 +82,21 @@ def effective_template(templates: Mapping[str, AgentTemplate], name: str) -> Res
         return ResolvedAgentTemplate(name=name)
 
 
-def _layers(
-    templates: Mapping[str, AgentTemplate],
-    name: str,
-    _visiting: tuple[str, ...] = (),
-) -> list[AgentTemplate]:
-    """The DECLARATIONS ``name`` merges from, in merge order: each
-    parent's own chain first (left to right), then the row itself. See
-    ``vms.templates._layers`` for the shape all four resolvers share and
-    why it matches ``resources.inheritance.merge_layers``.
-
-    ``_visiting`` carries the chain of in-progress walks so cycles raise
-    a clean ``InheritanceCycleError`` instead of crashing with
-    ``RecursionError``. The framework's ``Registry.finalize`` cycle pass
-    is the canonical check at build_registry time; this resolver-internal
-    guard is the safety net for the load-time eager-resolve path (Phase
-    2a.2; mirrors the vm_template resolver guard), and
-    :func:`effective_template` keys on the type to stay total.
-    """
-    if name in _visiting:
-        raise inheritance_cycle_error("agent-template", (*_visiting, name))
-
-    if name not in templates:
-        return []
-
-    tmpl = templates[name]
-    next_visiting = (*_visiting, name)
-    layers = [layer for parent in tmpl.inherits for layer in _layers(templates, parent, next_visiting)]
-    layers.append(tmpl)
-    return layers
-
-
 def _resolve(
     templates: Mapping[str, AgentTemplate],
     name: str,
-    _visiting: tuple[str, ...] = (),
 ) -> ResolvedAgentTemplate:
     """Resolve ``name``'s chain, defaults applied: one accumulator folded
     over the chain's declarations. See ``vms.templates._resolve_from_dict``
     for why the fold reads the DECLARATIONS rather than each parent's
     resolved template.
     """
+    # Imported here, not at module level: ``agentworks.resources``'s package
+    # init loads every kind module, and every kind module reaches this one.
+    from agentworks.resources.inheritance import resolution_layers
+
     result = ResolvedAgentTemplate(name=name)
-    for layer in _layers(templates, name, _visiting):
+    for layer in resolution_layers(templates, name, "agent-template"):
         _merge_template(result, layer)
     return result
 

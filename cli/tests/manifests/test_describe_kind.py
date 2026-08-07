@@ -89,7 +89,9 @@ def test_a_kind_shows_its_prose_then_its_two_blocks() -> None:
 def test_a_field_carries_its_type_requiredness_and_description() -> None:
     text = _text("secret")
 
-    assert "  hint  (string or null, optional, e.g. 'Generate at https://" in text
+    # The example renders as YAML, not as Python `repr`: this reader is
+    # about to write it into a document.
+    assert "  hint  (string or null, optional, e.g. Generate at https://" in text
     assert "Operator-facing text shown when the secret has to be entered by hand" in text
 
 
@@ -114,7 +116,7 @@ def test_an_implementation_shows_the_config_it_declares() -> None:
 
     assert text.startswith("Lima (vm-platform/lima, vm-platform implementation)")
     assert "config:" in text
-    assert "vm_host  (string or null, optional, min length 1, e.g. 'me@gpu-box')" in text
+    assert "vm_host  (string or null, optional, min length 1, e.g. me@gpu-box)" in text
 
 
 def test_a_host_kind_lists_the_arms_and_marks_the_one_shown() -> None:
@@ -155,7 +157,7 @@ def test_a_capability_no_config_enables_still_documents_itself(seated: None) -> 
     text = _text("vm-platform/never-enabled")
 
     assert "a fixture platform no config opts into" in text
-    assert "region  (string, optional, default 'westus2')" in text
+    assert "region  (string, optional, default westus2)" in text
     assert "Where this fixture platform creates its VMs." in text
 
 

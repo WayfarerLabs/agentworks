@@ -28,11 +28,10 @@ from __future__ import annotations
 import textwrap
 from typing import TYPE_CHECKING
 
-import yaml
-
 from agentworks.manifests.envelope import API_VERSION
 from agentworks.manifests.field_tree import worth_showing
 from agentworks.manifests.reference import plain_text
+from agentworks.manifests.yaml_value import render_value
 from agentworks.schema import MAPPING_KEY, SEQUENCE_ELEMENT, UNSET
 
 if TYPE_CHECKING:
@@ -114,17 +113,31 @@ def _field_lines(entry: FieldEntry, *, depth: int, commented: bool) -> Iterator[
 
 
 def _value_lines(entry: FieldEntry, *, depth: int, commented: bool) -> Iterator[str]:
-    """The field's own key line, live or commented."""
-    key = "<key>" if entry.name == MAPPING_KEY else "-" if entry.name == SEQUENCE_ELEMENT else entry.name
+    """The field's own line, live or commented: what opens the value, and
+    the value itself when it fits on one line."""
+    opener = _opener(entry)
     value = entry.sample_value
     if value is UNSET or entry.children:
-        yield _line(f"{key}:", depth=depth, commented=commented)
+        yield _line(opener, depth=depth, commented=commented)
         return
-    # Flow style, so a list or a table sits on the key's own line
-    # (`apt: [zsh, ripgrep]`) rather than opening a block. That is how the
-    # hand-written samples wrote a short collection, it is what an operator
-    # edits in place, and it keeps one field to one commented line.
-    yield _line(f"{key}: {_inline(value)}", depth=depth, commented=commented)
+    yield _line(f"{opener} {render_value(value)}", depth=depth, commented=commented)
+
+
+def _opener(entry: FieldEntry) -> str:
+    """What the field's line starts with: the key an operator writes, the
+    placeholder standing for a key they choose, or a sequence dash.
+
+    A sequence element has no key at all. Writing one produced ``-:``, a
+    mapping under a key literally named ``-``, so an uncommented skeleton
+    carrying a required list of tables was a document the loader rejected:
+    exactly the promise this module leads with. A bare ``-`` opens the
+    element, and its fields follow at the next indent.
+    """
+    if entry.name == MAPPING_KEY:
+        return "<key>:"
+    if entry.name == SEQUENCE_ELEMENT:
+        return "-"
+    return f"{entry.name}:"
 
 
 def _annotation_of(entry: FieldEntry) -> list[str]:
@@ -134,7 +147,7 @@ def _annotation_of(entry: FieldEntry) -> list[str]:
     if entry.doc.default_template is not None:
         facts.append(f"defaults to the resource named `{_template(entry.doc.default_template)}`")
     elif not entry.writable and not entry.children and worth_showing(entry.doc.default):
-        facts.append(f"default: {_inline(entry.doc.default)}")
+        facts.append(f"default: {render_value(entry.doc.default)}")
     if entry.doc.ref is not None:
         facts.append(f"names a {entry.doc.ref.kind}")
     lines = [] if entry.doc.description is None else [entry.doc.description]
@@ -199,21 +212,3 @@ def _wrap(text: str, width: int) -> list[str]:
     if text.lstrip().startswith(("- ", "* ", "1. ", "```")):
         return text.splitlines()
     return textwrap.wrap(collapsed, width=width)
-
-
-#: Wide enough that pyyaml never folds a scalar. A folded line would not
-#: carry the leading `#` that makes the file inert, and an apt source
-#: stanza is long enough to hit any realistic limit.
-_NO_FOLDING = 1 << 30
-
-
-def _yaml_lines(value: object) -> list[str]:
-    """``value`` as the YAML an operator would write."""
-    dumped = yaml.safe_dump(value, default_flow_style=False, sort_keys=False, width=_NO_FOLDING).rstrip("\n")
-    return dumped.removesuffix("...").strip("\n").splitlines()
-
-
-def _inline(value: object) -> str:
-    """``value`` as a one-liner, for a key line or a parenthetical."""
-    dumped = yaml.safe_dump(value, default_flow_style=True, sort_keys=False, width=_NO_FOLDING)
-    return dumped.strip().removesuffix("...").strip()

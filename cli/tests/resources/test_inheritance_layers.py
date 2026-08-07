@@ -14,6 +14,7 @@ would only pin this module against itself.
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Callable
 from typing import Any
 
@@ -22,7 +23,8 @@ import pytest
 from agentworks.agents.template import AgentTemplate
 from agentworks.agents.templates import effective_template as agent_effective
 from agentworks.env.entry import EnvEntry
-from agentworks.resources.inheritance import declarers, merge_layers
+from agentworks.errors import InheritanceCycleError
+from agentworks.resources.inheritance import declarers, merge_layers, resolution_layers
 from agentworks.sessions.template import SessionTemplate
 from agentworks.sessions.templates import effective_template as session_effective
 from agentworks.vms.template import VMTemplate
@@ -94,6 +96,66 @@ def test_a_cyclic_chain_stops_rather_than_raising() -> None:
     assert [layer.name for layer in merge_layers(rows, "a")] == ["b", "a"]
 
 
+def test_the_resolver_path_refuses_the_same_cycle() -> None:
+    """The one difference between the two layer functions, and the reason
+    both exist: a resolve has a caller that can be told."""
+    rows = {
+        "a": VMTemplate(name="a", inherits=["b"]),
+        "b": VMTemplate(name="b", inherits=["a"]),
+    }
+    with pytest.raises(InheritanceCycleError, match="a -> b -> a"):
+        resolution_layers(rows, "a", "vm-template")
+
+
 def test_an_unresolved_parent_contributes_nothing() -> None:
     rows = {"kid": VMTemplate(name="kid", inherits=["missing"])}
     assert [layer.name for layer in merge_layers(rows, "kid")] == ["kid"]
+
+
+def test_a_layer_reached_twice_appears_once_and_before_everything_that_reaches_it() -> None:
+    """The diamond, which is where a replay of the routes goes wrong twice
+    over.
+
+    ``root`` re-applied after ``left`` put a grandparent's value back on
+    top of the parent that had overridden it, so ``kid`` resolved to
+    ``root``'s ``cpus`` even though ``left`` declared its own. That is the
+    same class of silent defect as a defaulted parent overwriting a
+    declaring one, and it is inseparable from the size: replaying a route
+    is what doubles the layer list per diamond.
+    """
+    rows = {
+        "root": VMTemplate(name="root", cpus=2),
+        "left": VMTemplate(name="left", inherits=["root"], cpus=16),
+        "right": VMTemplate(name="right", inherits=["root"]),
+        "kid": VMTemplate(name="kid", inherits=["left", "right"]),
+    }
+
+    assert [layer.name for layer in merge_layers(rows, "kid")] == ["root", "left", "right", "kid"]
+    assert vm_effective(rows, "kid").cpus == 16
+
+
+def test_a_diamond_ladder_produces_one_layer_per_row() -> None:
+    """The measured symptom: 55 rows produced 1,048,573 layers, in the
+    finalize pass that runs before the cycle detector meant to protect
+    it."""
+    levels = 18
+    rows = {"root": VMTemplate(name="root")}
+    for level in range(levels):
+        parent = "root" if level == 0 else f"kid{level - 1}"
+        rows[f"left{level}"] = VMTemplate(name=f"left{level}", inherits=[parent])
+        rows[f"right{level}"] = VMTemplate(name=f"right{level}", inherits=[parent])
+        rows[f"kid{level}"] = VMTemplate(name=f"kid{level}", inherits=[f"left{level}", f"right{level}"])
+
+    assert len(merge_layers(rows, f"kid{levels - 1}")) == len(rows)
+
+
+def test_a_chain_deeper_than_the_recursion_limit_resolves() -> None:
+    """Chain depth is the operator's to choose, and the finalize pass may
+    not raise, so ``RecursionError`` is not an available answer."""
+    depth = sys.getrecursionlimit() * 2
+    rows = {"t0": VMTemplate(name="t0", cpus=99)}
+    for level in range(1, depth):
+        rows[f"t{level}"] = VMTemplate(name=f"t{level}", inherits=[f"t{level - 1}"])
+
+    assert len(merge_layers(rows, f"t{depth - 1}")) == depth
+    assert vm_effective(rows, f"t{depth - 1}").cpus == 99

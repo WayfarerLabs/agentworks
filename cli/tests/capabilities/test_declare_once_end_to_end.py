@@ -280,7 +280,7 @@ def test_the_field_reference_reads_the_same_one_declaration(seated: None) -> Non
     assert region.doc.description == REGION_DESCRIPTION
 
     rendered = "\n".join(reference_lines(reference))
-    assert f"region  (string, optional, default '{REGION_DEFAULT}', min length 1)" in rendered
+    assert f"region  (string, optional, default {REGION_DEFAULT}, min length 1)" in rendered
     assert REGION_DESCRIPTION in rendered
 
 

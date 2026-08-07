@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from agentworks.errors import inheritance_cycle_error, unknown_template_error
+from agentworks.errors import unknown_template_error
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -68,53 +68,9 @@ def resolve_from_dict(
     return ResolvedVMTemplate(name="default")
 
 
-def _layers(
-    templates: Mapping[str, VMTemplate],
-    name: str,
-    _visiting: tuple[str, ...] = (),
-) -> list[VMTemplate]:
-    """The DECLARATIONS ``name`` merges from, in merge order: each
-    parent's own chain first (left to right), then the row itself.
-
-    The same chain, and deliberately the same order, as
-    :func:`agentworks.resources.inheritance.merge_layers`, because a
-    provenance answer read off those layers has to name the layer whose
-    value this resolver's fold actually kept. It differs in exactly one
-    way: a cycle RAISES here. A resolve has a caller that can be told,
-    whereas ``merge_layers`` runs inside the finalize build walk, which
-    may not raise.
-
-    A name with no row contributes NO layer, matching ``merge_layers``:
-    an unresolved parent is the miss policy's to report, and a template
-    that stood in for it would be a fabricated declaration whose every
-    field says "the built-in default".
-
-    ``_visiting`` carries the chain of in-progress walks so a cycle
-    raises a clean ``InheritanceCycleError`` (matching the framework's
-    cycle-pass error shape) instead of crashing with ``RecursionError``.
-    This is the resolver's internal safety net; the canonical cycle check
-    lives in ``Registry.finalize`` at build_registry time, but this
-    resolver is also called eagerly by ``load_config`` before any registry
-    is built, so it needs its own guard, and :func:`effective_template`
-    keys on the type to stay total.
-    """
-    if name in _visiting:
-        raise inheritance_cycle_error("vm-template", (*_visiting, name))
-
-    if name not in templates:
-        return []
-
-    tmpl = templates[name]
-    next_visiting = (*_visiting, name)
-    layers = [layer for parent in tmpl.inherits for layer in _layers(templates, parent, next_visiting)]
-    layers.append(tmpl)
-    return layers
-
-
 def _resolve_from_dict(
     templates: Mapping[str, VMTemplate],
     name: str,
-    _visiting: tuple[str, ...] = (),
 ) -> ResolvedVMTemplate:
     """Resolve ``name``'s chain, defaults applied.
 
@@ -130,8 +86,12 @@ def _resolve_from_dict(
     A name with no row resolves to the built-in defaults, via an empty
     chain.
     """
+    # Imported here, not at module level: ``agentworks.resources``'s package
+    # init loads every kind module, and every kind module reaches this one.
+    from agentworks.resources.inheritance import resolution_layers
+
     result = ResolvedVMTemplate(name=name)
-    for layer in _layers(templates, name, _visiting):
+    for layer in resolution_layers(templates, name, "vm-template"):
         _merge_template(result, layer)
     return result
 

@@ -191,6 +191,31 @@ class RenamedArmSite(AgwModel):
     platform: Annotated[LimaArm | RenamedArm, Discriminator("name")]
 
 
+class TaggedCollectionSite(AgwModel):
+    """Collections whose ELEMENTS are a discriminated union of models.
+
+    Not a shape the framework ships (all four discriminated unions are
+    top-level capability configs), and one any capability or plugin author
+    can write. Classified as an undiscriminated union, its elements are a
+    shape no walker expands, so a secret named inside one would be absent
+    from the dependency graph with nothing reported.
+    """
+
+    platforms: list[Annotated[LimaArm | ProxmoxArm, Discriminator("name")]] = Field(default_factory=list)
+    platforms_by_name: dict[str, Annotated[LimaArm | ProxmoxArm, Discriminator("name")]] = Field(default_factory=dict)
+
+
+class FieldTaggedCollectionSite(AgwModel):
+    """The same shape with the element's tag spelled ``Field(discriminator=)``.
+
+    Pydantic accepts both spellings on an element exactly as it accepts
+    both on a field, so a lookup that read only one would be a silently
+    wrong graph rather than an error.
+    """
+
+    platforms: list[Annotated[LimaArm | ProxmoxArm, Field(discriminator="name")]] = Field(default_factory=list)
+
+
 class NumericallyTaggedSite(AgwModel):
     """A union tagged by something other than a name."""
 
@@ -362,6 +387,8 @@ ALL_FIXTURES = (
     NumericallyTaggedSite,
     UndiscriminatedSite,
     OneArmSite,
+    TaggedCollectionSite,
+    FieldTaggedCollectionSite,
     MultiArmMarked,
     SelfReferential,
     UnmarkedLike,
