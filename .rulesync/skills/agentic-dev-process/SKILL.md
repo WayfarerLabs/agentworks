@@ -156,16 +156,17 @@ any other review; triage them, push back on the wrong ones, and fix the valid on
 - **One PR per feature is the default, with a size ceiling.** Put the whole feature in a single PR,
   SDD artifacts included. Split into multiple PRs only when there is a good reason. The usual one is
   legitimate SDD phases that each carry independent, standalone value; another is cross-effort
-  visibility, per the `sdd` skill's merge-artifacts-early guidance: when sibling efforts build
-  against your design, the SDD artifacts land on `main` ahead of the implementation instead of
-  riding the feature branch to the end. A phase that only has value once a later phase lands is not
-  a reason to split; it is a commit within the one PR. Always-green phased commits give reviewers a
-  natural commit-by-commit reading order inside a single large PR. The ceiling: when a feature's
-  projected diff grows past what one reviewer can actually hold (as a rough guide, a few thousand
-  lines of substantive change), the default flips and the effort ships as a PR series of
-  always-green phases. Plan the split at plan-writing time, not when the branch is already huge;
-  review depth decays faster than diff size grows, and a monster PR forces the review to happen
-  after the design has hardened, when findings are most expensive to act on.
+  visibility, per the `sdd` skill's merge-artifacts-early guidance: when another effort could build
+  against your design (under an active roadmap, assume one can), the SDD artifacts land on `main`
+  ahead of the implementation instead of riding the feature branch to the end. A phase that only has
+  value once a later phase lands is not a reason to split; it is a commit within the one PR.
+  Always-green phased commits give reviewers a natural commit-by-commit reading order inside a
+  single large PR. The ceiling: when a feature's projected diff grows past what one reviewer can
+  actually hold (as a rough guide, a few thousand lines of substantive change), the default flips
+  and the effort ships as a PR series of always-green phases. Plan the split at plan-writing time,
+  not when the branch is already huge; review depth decays faster than diff size grows, and a
+  monster PR forces the review to happen after the design has hardened, when findings are most
+  expensive to act on.
 - **Within a PR series, stack dependent phases; don't wait for merge.** The expensive deltas come
   from review, not from merge, so the gate for building phase N+1 on phase N is the dust settling on
   N: its major review findings incorporated and re-review clean, not its merge. Before that gate,
