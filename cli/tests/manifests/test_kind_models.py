@@ -31,13 +31,13 @@ def test_the_registry_has_kinds_of_both_categories() -> None:
     assert len(_kinds("capability")) >= 4
 
 
-@pytest.mark.parametrize("kind", _kinds("declarable"))
-def test_a_declarable_kinds_model_is_a_row_whose_spec_surface_is_its_own(kind: str) -> None:
+def test_a_declarable_kinds_model_is_a_row_whose_spec_surface_is_its_own() -> None:
     """The three properties every declarable kind's ``model`` has, over
     one sweep of the registry rather than three.
 
     They are one subject (the kind's model) checked once, and each keeps
-    its own assertion so a failure still names which property broke:
+    its own message so a failure still names which property broke on which
+    kind:
 
     - it is a ``DeclaredResource`` subclass, which is what makes decode's
       switchboard derived rather than a table in the manifest layer;
@@ -50,23 +50,34 @@ def test_a_declarable_kinds_model_is_a_row_whose_spec_surface_is_its_own(kind: s
     - that surface is not EMPTY, which is the non-vacuity twin of the
       line above: a model whose fields all vanished would satisfy it
       trivially, and both surfaces derive from this one stream.
+
+    Looped over the registry rather than parametrized over it because
+    every kind's row descends from one base: the leak this guards is a
+    ``SkipJsonSchema`` that goes missing on ``DeclaredResource`` itself,
+    which is thirteen kinds at once, and the list of all thirteen is the
+    useful report.
     """
-    model = KIND_REGISTRY[kind].model  # type: ignore[attr-defined]
+    faults: list[str] = []
+    for kind in _kinds("declarable"):
+        model = KIND_REGISTRY[kind].model  # type: ignore[attr-defined]
+        if not (isinstance(model, type) and issubclass(model, DeclaredResource)):
+            faults.append(f"{kind}: model {model!r} is not a DeclaredResource subclass")
+            continue
+        streamed = {doc.path[0] for doc in iter_field_docs(model)}
+        if not streamed:
+            faults.append(f"{kind}: empty spec surface, which satisfies the envelope-field check trivially")
+        if leaked := METADATA_FIELDS & streamed:
+            faults.append(f"{kind}: envelope fields {sorted(leaked)} reach the field stream")
+        if leaked := METADATA_FIELDS & set(model.model_json_schema()["properties"]):
+            faults.append(f"{kind}: envelope fields {sorted(leaked)} reach the emitted spec schema")
+    assert not faults, "\n".join(faults)
 
-    assert isinstance(model, type)
-    assert issubclass(model, DeclaredResource)
 
-    streamed = {doc.path[0] for doc in iter_field_docs(model)}
-    assert streamed, "an empty spec surface would satisfy the envelope-field check trivially"
-    assert not METADATA_FIELDS & streamed
-    assert not METADATA_FIELDS & set(model.model_json_schema()["properties"])
-
-
-@pytest.mark.parametrize("kind", _kinds("capability"))
-def test_a_capability_kind_declares_no_model(kind: str) -> None:
+def test_a_capability_kind_declares_no_model() -> None:
     """Optional by CATEGORY, not per kind: a capability kind has no
     declared row at all, so a model on one would mean nothing."""
-    assert not hasattr(KIND_REGISTRY[kind], "model")
+    declaring = [kind for kind in _kinds("capability") if hasattr(KIND_REGISTRY[kind], "model")]
+    assert not declaring
 
 
 # -- metadata.expires, which every kind inherits (FR20) ------------------------

@@ -45,7 +45,6 @@ from datetime import date, datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Final, Literal, Union, get_args, get_origin
 
-import pytest
 from pydantic import BaseModel
 
 from agentworks.capabilities.config import capability_config_model, registered_implementations
@@ -234,8 +233,7 @@ def _subjects() -> list[type[BaseModel]]:
     )
 
 
-@pytest.mark.parametrize("model", _subjects(), ids=lambda model: model.__qualname__)
-def test_the_field_stream_accepts_every_type_the_emitted_schema_does(model: type[BaseModel]) -> None:
+def test_the_field_stream_accepts_every_type_the_emitted_schema_does() -> None:
     """Every buildable model, both derivations, one question.
 
     The shipped failure this pins: ``EnvEntry`` accepts a bare string
@@ -243,7 +241,26 @@ def test_the_field_stream_accepts_every_type_the_emitted_schema_does(model: type
     documented the table form alone, so ``agw resource describe-kind
     vm-template`` told operators to rewrite every plaintext env value into
     a table.
+
+    One loop over the eighty-odd subjects rather than one parametrized
+    case per model, because the failure mode is a SHARED base or a shared
+    classifier rule: those disagree on many models at once, and a sweep
+    reports that as eighty tracebacks you read one at a time where the
+    loop reports it as one list of every field that drifted.
+    ``_disagreement`` names its subject (``Model.field``), so nothing about
+    which model broke is lost.
     """
+    drifted = [
+        reason
+        for model in _subjects()
+        for reason in _disagreements_of(model)  # noqa: PD011  (not a pandas frame)
+    ]
+    assert not drifted, "\n".join(drifted)
+
+
+def _disagreements_of(model: type[BaseModel]) -> Iterator[str]:
+    """Every field of ``model`` whose emitted schema offers a type the
+    field stream does not, at the depth this model owns."""
     schema = model.model_json_schema()
     defs = schema.get("$defs", {})
     properties = _dereferenced(schema, defs).get("properties", {})
@@ -260,13 +277,14 @@ def test_the_field_stream_accepts_every_type_the_emitted_schema_does(model: type
         if node is None:
             continue
         reason = _disagreement(doc.annotation, node, defs, f"{model.__qualname__}.{'.'.join(doc.path)}")
-        assert reason is None, reason
+        if reason is not None:
+            yield reason
 
 
 def test_the_shipped_surface_is_actually_being_walked() -> None:
-    """The parametrization above is computed, so an empty or truncated
-    subject list would make every case above pass by having nothing to
-    check. These three are the ones the defect and its siblings live in."""
+    """The subject list above is computed, so an empty or truncated one
+    would make the loop pass by having nothing to check. These three are
+    the ones the defect and its siblings live in."""
     subjects = _subjects()
     from agentworks.env.entry import EnvEntry
     from agentworks.plugins.onepassword.backend import OnePasswordAccountRef
