@@ -967,7 +967,7 @@ carry an `(auto)` marker; they are exactly the secrets most likely to prompt at 
 
 Backend-applicability detail (per-backend soft-skip reasons, inactive mappings, per-secret
 references) lives in `agw secret list` and `agw secret describe`. `AGENTWORKS_*` identity overrides
-surface in the Configuration group (they're a config-load warning). Broken `{ secret = "..." }`
+surface in the Configuration group (they're a config-load warning). Broken `{ secret: ... }`
 references are caught earlier as a hard config-load error before doctor runs. Git-credential tokens
 are just secrets: their _resolvability_ reports as ordinary `git-token-<name>` rows in the Secrets
 group, like any other secret. Doctor is preflight-only and never prompts, so it does not
