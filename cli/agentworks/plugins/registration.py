@@ -165,6 +165,28 @@ def plugin_seated_names(kind: str) -> frozenset[str]:
     return frozenset(name for (seated_kind, name) in _PLUGIN_SEATED if seated_kind == kind)
 
 
+def seat_installed_plugins() -> None:
+    """Make sure every INSTALLED plugin's capability implementations are in
+    the core code registries.
+
+    Seating is an import side effect: ``agentworks.plugins`` builds its
+    installed index at import and registers each shipped plugin, so anything
+    that has reached the resource machinery through ``build_registry`` has
+    already paid for it. The surfaces that describe a host WITHOUT building a
+    registry (schema emission, the rendered sample, the field reference) had
+    not, and silently described a host missing every plugin-contributed
+    capability: ``agw resource schema vm-site`` emitted lima and wsl2 while
+    three platform plugins ship in-tree.
+
+    So those surfaces call this instead of importing the package with a
+    comment explaining why, and the requirement has a name. Idempotent (the
+    second call is a module-table hit) and enablement-independent: a plugin's
+    implementations seat whether or not config opts into the plugin, because
+    enablement is a property of the published ROW, not of the registry.
+    """
+    import agentworks.plugins  # noqa: F401  (importing IS the seating)
+
+
 def _occupant_origin(kind: str, name: str) -> str:
     """Describe the current occupant of ``(kind, name)`` for a collision
     message, distinguishing a core built-in from another system plugin."""

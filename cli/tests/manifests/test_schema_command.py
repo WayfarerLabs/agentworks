@@ -15,8 +15,9 @@ from typing import TYPE_CHECKING
 import pytest
 from jsonschema import Draft202012Validator
 
-from agentworks.manifests.emit import ENVELOPE_SCHEMA_FILENAME, SCHEMA_DIRNAME, emittable_kinds
+from agentworks.manifests.emit import ENVELOPE_SCHEMA_FILENAME, SCHEMA_DIRNAME
 from agentworks.manifests.loader import RESOURCES_DIRNAME
+from agentworks.manifests.spec_model import declarable_kinds
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -89,7 +90,7 @@ def test_write_lands_where_the_modeline_says(
     assert _run(monkeypatch, "--write") == 0
     schema_dir = configured / RESOURCES_DIRNAME / SCHEMA_DIRNAME
     written = {path.name for path in schema_dir.iterdir()}
-    assert written == {ENVELOPE_SCHEMA_FILENAME, *(f"{kind}.schema.json" for kind in emittable_kinds())}
+    assert written == {ENVELOPE_SCHEMA_FILENAME, *(f"{kind}.schema.json" for kind in declarable_kinds())}
     assert str(schema_dir) in capsys.readouterr().out
 
 

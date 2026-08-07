@@ -62,6 +62,17 @@ class Document:
         return f"{self.location.file}:{self.location.line}"
 
 
+def only_default_name(kind: str) -> bool:
+    """Whether ``kind`` accepts only ``metadata.name: default``.
+
+    Exposed rather than left as a set the validator reads, because the
+    rendered sample has to write a name that LOADS: a skeleton naming a
+    named-console-template ``my-named-console-template`` would be refused by
+    the very check below. One authority for the rule, two readers.
+    """
+    return kind in _NO_SELECTOR_KINDS
+
+
 def _err(location: SourceLocation, message: str, *, hint: str | None = None) -> ConfigError:
     return ConfigError(f"{location.file}:{location.line}: {message}", hint=hint)
 
@@ -124,7 +135,7 @@ def validate_envelope(raw: object, location: SourceLocation) -> Document:
     if description is not None and not isinstance(description, str):
         raise _err(location, "metadata.description must be a string")
 
-    if kind in _NO_SELECTOR_KINDS and name != "default":
+    if only_default_name(kind) and name != "default":
         raise _err(
             location,
             f'{kind} accepts only metadata.name "default" for now: no '

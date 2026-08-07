@@ -7,11 +7,12 @@ those are two derivations from one authored marker.
 
 from __future__ import annotations
 
+from datetime import date, datetime
 from enum import Enum
 from typing import Annotated, Literal
 
 import pytest
-from pydantic import Field
+from pydantic import Field, StringConstraints
 
 from agentworks.errors import StateError
 from agentworks.schema import (
@@ -257,6 +258,36 @@ def test_no_annotated_types_object_leaks_into_the_record() -> None:
             assert isinstance(value, int | str | float)
 
 
+# --- authored examples ------------------------------------------------
+
+
+class Exemplified(AgwModel):
+    """A model whose author wrote example values."""
+
+    host: str = Field(examples=["me@gpu-box"])
+    sizes: list[str] = Field(default_factory=list, examples=[["small", "large"]])
+    plain: str = "unremarkable"
+
+
+def test_examples_reach_the_stream_in_the_shape_a_document_carries() -> None:
+    """A list example stays a list: the generated sample writes the value
+    into YAML, so an example spelled as anything else would render as
+    something the loader then refuses."""
+    assert docs(Exemplified)[("host",)].examples == ("me@gpu-box",)
+    assert docs(Exemplified)[("sizes",)].examples == (["small", "large"],)
+
+
+def test_a_field_with_no_authored_example_reports_none() -> None:
+    assert docs(Exemplified)[("plain",)].examples == ()
+
+
+def test_the_stream_and_the_emitted_schema_report_the_same_examples() -> None:
+    """One declaration, two derivations, as with the reference marker: the
+    value a sample writes is the value an editor offers."""
+    emitted = Exemplified.model_json_schema()["properties"]["host"]["examples"]
+    assert list(docs(Exemplified)[("host",)].examples) == emitted
+
+
 # --- reference semantics ----------------------------------------------
 
 
@@ -374,6 +405,16 @@ def test_an_arm_is_recursed_into_by_the_presenter_not_the_walker() -> None:
         (Arch, "one of: arm64, x86_64"),
         (LimaArm, "table"),
         (Annotated[str, SecretRef(usage="u")], "string"),
+        # A constraint is not a type an operator writes, so the Annotated
+        # wrapper it rides in is dropped rather than named. Before this,
+        # a constrained field rendered as the literal word "Annotated".
+        (Annotated[str, StringConstraints(min_length=1)], "string"),
+        (Annotated[str, StringConstraints(min_length=1)] | None, "string or null"),
+        (list[Annotated[str, StringConstraints(pattern="^a")]], "list of string"),
+        # What the operator writes for a moment in time, not the class
+        # validation produces.
+        (datetime, "timestamp"),
+        (date, "date"),
     ],
 )
 def test_render_type(annotation: object, expected: str) -> None:

@@ -296,11 +296,17 @@ running it, not by reading the code: the shipped plugins seat their implementati
 side effect of `agentworks.plugins`, and the only importer is `bootstrap.build_registry`, which a
 registry-free surface never calls.
 
-So both surfaces call one named step (`plugins.registration.seat_installed_plugins()`) before
-reading a capability registry. It is import-idempotent, costs nothing on a path that already built a
-registry, and it is what makes "live from the registry, plugins included" true for the sample, the
-field reference, AND the emitted schema. Emission's test expectations widen accordingly: five
-vm-platform arms, three harness integrations, two git-credential providers.
+So the shared spec-model assembly calls one named step
+(`plugins.registration.seat_installed_plugins()`) before reading a capability registry. It is
+import-idempotent, costs nothing on a path that already built a registry, and it is what makes "live
+from the registry, plugins included" true for the sample, the field reference, AND the emitted
+schema.
+
+**No emission test changed, and that is the finding.** Every one of them derived its expectation
+from the same live registry the emitter read, so a union missing three platforms agreed with a set
+of platform names missing the same three. Whether they passed depended on whether some earlier test
+in the run had imported `agentworks.plugins`. The new pin names the three plugins literally, so it
+fails if seating regresses instead of agreeing with the regression.
 
 ## 9. FR19: contributed manifests validate through the one regime
 

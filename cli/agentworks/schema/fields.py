@@ -25,6 +25,7 @@ from __future__ import annotations
 import inspect
 import types
 from dataclasses import dataclass
+from datetime import date, datetime
 from enum import Enum
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Final, Literal, Union, get_args, get_origin
@@ -40,6 +41,7 @@ from agentworks.schema._shape import (
     model_fields_of,
     shape_of,
     spine_metadata,
+    split_annotated,
     strip_markers,
     unwrap_optional,
 )
@@ -85,6 +87,12 @@ _SCALAR_RENDERINGS: Final[dict[object, str]] = {
     type(None): "null",
     dict: "table",
     list: "list",
+    # What an operator WRITES, not what validation yields: both spellings
+    # reach a `datetime` field through a before-validator (see
+    # ``declared_resource.Expiry``), so naming the Python class here would
+    # tell them to write something YAML has no syntax for.
+    date: "date",
+    datetime: "timestamp",
 }
 
 
@@ -142,6 +150,17 @@ class FieldDoc:
     constraints: Mapping[str, object]
     """Normalized to plain keys and plain values (``{"min_length": 1}``)."""
 
+    examples: tuple[object, ...]
+    """Values the field's author wrote as ``Field(examples=[...])``, in
+    declaration order, empty when none were.
+
+    An authored fact about the field, not a rendering of one: each value is
+    spelled the way a DOCUMENT carries it (a list stays a list, a table
+    stays a mapping), because that is what a presenter has to show and what
+    the same declaration puts into emitted JSON Schema. The generated
+    sample writes the first one where it has one, which is what makes a
+    skeleton teach a real value rather than ``<string>``."""
+
     ref: RefMarker | None
     """The field's reference semantics, verbatim. For a marked list this
     is the ELEMENT's marker: it is what each element names."""
@@ -197,7 +216,13 @@ def render_type(annotation: object) -> str:
     A presenter may use this or ignore it; nothing in :class:`FieldDoc`
     depends on it.
     """
-    annotation = strip_markers(annotation)
+    # ``strip_markers`` removes OUR markers and keeps every other
+    # ``Annotated`` entry, since they are part of what the field is. None of
+    # them is a type an operator writes, so the wrapper is dropped here:
+    # without this, a constrained field (``Annotated[str,
+    # StringConstraints(...)]``) rendered as the word "Annotated", which is
+    # the framework's vocabulary leaking into an operator's sample.
+    annotation, _metadata = split_annotated(strip_markers(annotation))
     if annotation in _SCALAR_RENDERINGS:
         return _SCALAR_RENDERINGS[annotation]
     if get_origin(annotation) is Literal:
@@ -283,6 +308,7 @@ def _field_doc(path: tuple[str, ...], field: FieldInfo, shape: FieldShape) -> Fi
         description=field.description,
         choices=_choices_of(shape.annotation),
         constraints=_constraints_of(field),
+        examples=tuple(field.examples or ()),
         ref=marker,
         nested_model=shape.nested_model,
         item_model=shape.item_model,

@@ -145,11 +145,11 @@ def spine_metadata(field: FieldInfo) -> list[object]:
     elements means many.
     """
     items = list(field.metadata)
-    base, metadata = _split_annotated(field.annotation)
+    base, metadata = split_annotated(field.annotation)
     items.extend(metadata)
     if _is_union(base):
         for arg in get_args(base):
-            _arm, arm_metadata = _split_annotated(arg)
+            _arm, arm_metadata = split_annotated(arg)
             items.extend(arm_metadata)
     return items
 
@@ -158,12 +158,12 @@ def element_metadata(field: FieldInfo) -> list[object]:
     """Every ``Annotated`` metadata item on the elements of a collection
     field, or nothing when the field holds a single value."""
     inner, _optional = unwrap_optional(field.annotation)
-    inner, _metadata = _split_annotated(inner)
+    inner, _metadata = split_annotated(inner)
     found = _collection_element(inner)
     if found is None:
         return []
     _kind, element = found
-    _element, metadata = _split_annotated(element)
+    _element, metadata = split_annotated(element)
     return metadata
 
 
@@ -176,7 +176,7 @@ def marker_of(field: FieldInfo) -> RefMarker | None:
 def shape_of(field: FieldInfo) -> FieldShape:
     """Classify ``field``. Reads annotations only; runs no user code."""
     inner, optional = unwrap_optional(field.annotation)
-    inner, _inner_metadata = _split_annotated(inner)
+    inner, _inner_metadata = split_annotated(inner)
     marker = marker_of(field)
 
     collection: Collection | None = None
@@ -191,11 +191,11 @@ def shape_of(field: FieldInfo) -> FieldShape:
     found = _collection_element(inner)
     if found is not None:
         collection, element = found
-        element, element_meta = _split_annotated(element)
+        element, element_meta = split_annotated(element)
         item_marker = _first_marker(element_meta)
         item_model = element if _is_model(element) else None
         if item_model is None and _is_union(element):
-            item_union_members = tuple(_split_annotated(arg)[0] for arg in get_args(element))
+            item_union_members = tuple(split_annotated(arg)[0] for arg in get_args(element))
     elif _is_model(inner) or _is_union(inner):
         discriminator = _discriminator_of(field)
         if discriminator is not None:
@@ -211,7 +211,7 @@ def shape_of(field: FieldInfo) -> FieldShape:
         elif _is_model(inner):
             nested_model = inner
         else:
-            union_members = tuple(_split_annotated(arg)[0] for arg in get_args(inner))
+            union_members = tuple(split_annotated(arg)[0] for arg in get_args(inner))
 
     return FieldShape(
         annotation=strip_markers(field.annotation),
@@ -337,7 +337,7 @@ def strip_markers(annotation: object) -> object:
     Annotations this cannot rebuild (a ``Literal``, a callable) are
     returned unchanged, since a marker cannot appear inside one anyway.
     """
-    base, metadata = _split_annotated(annotation)
+    base, metadata = split_annotated(annotation)
     kept = [item for item in metadata if not isinstance(item, RefMarker)]
     stripped = _strip_arguments(base)
     if kept:
@@ -360,7 +360,7 @@ def _strip_arguments(annotation: object) -> object:
     return annotation
 
 
-def _split_annotated(annotation: object) -> tuple[object, list[object]]:
+def split_annotated(annotation: object) -> tuple[object, list[object]]:
     """``Annotated[X, a, b]`` to ``(X, [a, b])``; anything else unchanged."""
     metadata = getattr(annotation, "__metadata__", None)
     if metadata is None:
@@ -414,7 +414,7 @@ def _arms_of(annotation: object, discriminator: str) -> tuple[UnionArmType, ...]
     # annotation itself.
     members = get_args(annotation) or (annotation,)
     for arg in members:
-        arm, _metadata = _split_annotated(arg)
+        arm, _metadata = split_annotated(arg)
         if _is_model(arm):
             arms.extend(UnionArmType(tag=tag, model=arm) for tag in _tags_of(arm, discriminator))
     return tuple(arms)
@@ -439,7 +439,7 @@ def _tags_of(arm: type[BaseModel], discriminator: str) -> tuple[str, ...]:
         # cannot be built at all.
         return ()
     annotation, _optional = unwrap_optional(fields[discriminator].annotation)
-    annotation, _metadata = _split_annotated(annotation)
+    annotation, _metadata = split_annotated(annotation)
     if get_origin(annotation) is not typing.Literal:
         return ()
     return tuple(value for value in get_args(annotation) if isinstance(value, str))

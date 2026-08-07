@@ -28,7 +28,6 @@ from agentworks.manifests.emit import (
     ENVELOPE_SCHEMA_FILENAME,
     SCHEMA_DIRNAME,
     document_schema,
-    emittable_kinds,
     envelope_schema,
     modeline,
     schema_filename,
@@ -38,6 +37,7 @@ from agentworks.manifests.emit import (
 from agentworks.manifests.envelope import _ENVELOPE_KEYS, API_VERSION
 from agentworks.manifests.loader import load_manifests
 from agentworks.manifests.samples import SAMPLE_KINDS, sample_text
+from agentworks.manifests.spec_model import declarable_kinds
 from agentworks.plugins import Plugin, seated_plugin
 from agentworks.resources import KIND_REGISTRY
 from agentworks.schema import AgwModel
@@ -98,10 +98,10 @@ def test_every_declarable_kind_is_emittable_and_no_capability_kind_is() -> None:
     than listed. Same derivation the sample surface uses, so the two
     surfaces cannot come to describe different kinds."""
     declarable = {name for name, handler in KIND_REGISTRY.items() if handler.category == "declarable"}
-    assert set(emittable_kinds()) == declarable
-    assert set(emittable_kinds()) == set(SAMPLE_KINDS)
+    assert set(declarable_kinds()) == declarable
+    assert set(declarable_kinds()) == set(SAMPLE_KINDS)
     assert sorted(schema_set()) == sorted(
-        [ENVELOPE_SCHEMA_FILENAME, *(schema_filename(kind) for kind in emittable_kinds())]
+        [ENVELOPE_SCHEMA_FILENAME, *(schema_filename(kind) for kind in declarable_kinds())]
     )
 
 
@@ -195,7 +195,7 @@ def test_every_metadata_field_of_every_kind_carries_hover_text() -> None:
     """
     blank = [
         (kind, field)
-        for kind in emittable_kinds()
+        for kind in declarable_kinds()
         for field, prop in _metadata_properties(kind).items()
         if not prop.get("description")
     ]
@@ -224,8 +224,8 @@ def test_a_name_cap_the_decoder_applies_reaches_the_schema() -> None:
 def test_the_envelope_schema_discriminates_on_kind() -> None:
     schema = envelope_schema()
     assert schema["discriminator"]["propertyName"] == "kind"
-    assert set(schema["discriminator"]["mapping"]) == set(emittable_kinds())
-    assert len(schema["oneOf"]) == len(emittable_kinds())
+    assert set(schema["discriminator"]["mapping"]) == set(declarable_kinds())
+    assert len(schema["oneOf"]) == len(declarable_kinds())
 
 
 # -- The capability splice -------------------------------------------------
@@ -245,6 +245,28 @@ def test_the_capability_union_replaces_the_open_block_at_the_host_field() -> Non
     assert set(union["discriminator"]["mapping"]) == _platform_names()
     # The open block is gone entirely, not merely shadowed.
     assert "CapabilityBlock" not in schema["$defs"]
+
+
+def test_the_union_carries_the_platforms_shipped_plugins_contribute() -> None:
+    """The command's own help says a plugin's capability appears in the
+    schema once the plugin is installed. It did not: seating is an import
+    side effect of ``agentworks.plugins``, whose only importer was
+    ``build_registry``, so a surface that never builds a registry emitted
+    lima and wsl2 and silently dropped the three in-tree platform plugins.
+
+    Named plugins rather than a count, and rather than the live registry
+    (which is what ``_platform_names`` reads, so it would have agreed with
+    a truncated union): the assertion has to fail if seating regresses."""
+    mapping = _vm_platform_union()["discriminator"]["mapping"]
+    assert {"azure-vm", "aws-ec2", "proxmox"} <= set(mapping)
+
+
+def _vm_platform_union() -> dict[str, Any]:
+    schema = document_schema("vm-site")
+    platform = schema["$defs"]["VmSiteSpec"]["properties"]["platform"]
+    union = schema["$defs"][platform["$ref"].rsplit("/", 1)[-1]]
+    assert isinstance(union, dict)
+    return union
 
 
 def _platform_names() -> set[str]:
