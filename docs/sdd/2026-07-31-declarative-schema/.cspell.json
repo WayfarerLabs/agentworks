@@ -38,6 +38,7 @@
     "ruamel",
     "schemars",
     "steampunk",
+    "strippable",
     "subclassing",
     "subschema",
     "tamasfe",
