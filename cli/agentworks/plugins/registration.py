@@ -43,11 +43,16 @@ _PLUGIN_SEATED: dict[tuple[str, str], str] = {}
 
 def register_plugin(plugin: Plugin) -> None:
     """Validate ``plugin`` wholesale, then seat its capability impls
-    atomically. Idempotent per impl name; a cross-origin impl-name
-    collision (built-in or another plugin) is a ``PluginError`` naming the
-    plugin and the occupant's actual origin. Returns nothing and does not
-    touch the index or publish rows; it only seats impls into the four code
-    registries, exactly as core impls populate them at import.
+    atomically. Idempotent per impl name FOR THIS PLUGIN; every other
+    occupant of a name it declares (a core built-in or another plugin, and
+    whether or not the impl class is the same one) is a ``PluginError``
+    naming the plugin and the occupant's actual origin. Returns nothing and
+    does not touch the index or publish rows; it only seats impls into the
+    four code registries, exactly as core impls populate them at import.
+
+    Returning therefore means every name in the descriptor is attributed to
+    this plugin in :data:`_PLUGIN_SEATED`, which is what lets
+    :func:`plugin_seated_names` decide who publishes each row.
     """
     planned = _validate_descriptor(plugin)
     to_seat = _precheck_and_prepare(plugin, planned)
@@ -125,16 +130,27 @@ def _precheck_and_prepare(
 
     A ``None`` occupant needs seating: its payload is prepared here (the
     fallible ``secret-backend`` construction included), so pass 3 is a pure
-    write. A same-impl occupant is an idempotent no-op, skipped (not
-    re-prepared, so it is never re-instantiated). A different occupant
+    write. An occupant THIS PLUGIN seated is an idempotent no-op, skipped
+    (not re-prepared, so it is never re-instantiated). Any other occupant
     raises here, before any impl is seated.
+
+    Idempotency is a property of the SEATER, not of the class, and reading
+    it off ``_PLUGIN_SEATED`` rather than off ``adapter.matches`` alone is
+    what makes that true. A plugin declaring a core built-in's own impl
+    class matches by identity, so it used to skip seating and, because
+    only the seat loop records provenance, never appear in
+    ``plugin_seated_names``. The built-in publisher then published the row
+    it always publishes AND ``publish_plugins`` published the plugin's, and
+    the operator got ``Registry.add``'s collision, which names the kind and
+    the name but not the plugin that caused it. Same collision, one bootstrap
+    phase later, with the one fact they needed removed.
     """
     to_seat: list[tuple[CapabilityAdapter, str, object]] = []
     for adapter, name, impl in planned:
         occupant = adapter.peek(name)
         if occupant is not None:
-            if adapter.matches(occupant, impl):
-                continue  # idempotent re-registration: a true no-op
+            if _PLUGIN_SEATED.get((adapter.kind, name)) == plugin.name and adapter.matches(occupant, impl):
+                continue  # this plugin re-registering its own impl: a true no-op
             raise PluginError(
                 f"system plugin {plugin.name!r} cannot seat {adapter.kind} {name!r}: "
                 f"{_occupant_origin(adapter.kind, name)}"
