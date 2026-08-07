@@ -480,7 +480,13 @@ def resource_migrate(
         output.detail(f"Editor schemas: {result.schema_dir} (created files reference them)")
     if result.dropped_secret_backends:
         output.detail("Dropped deprecated [secret_backends.*] sections.")
-    output.result(f"verified: registry unchanged ({result.verified_rows} resources)")
+    # Phrased as what the operator just watched happen, not as the
+    # internal comparison. "registry unchanged" was true and read as
+    # "it did nothing" straight after a list of files it had rewritten,
+    # which is the opposite of the reassurance this line exists to give.
+    output.result(
+        f"verified: the {result.verified_rows} migrated resource(s) load from the new files exactly as before"
+    )
 
 
 @resource_app.command("sample")

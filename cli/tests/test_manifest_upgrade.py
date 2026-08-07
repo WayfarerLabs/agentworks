@@ -473,8 +473,8 @@ def test_a_non_table_retired_config_is_refused_rather_than_dropped(
     drops the operator's value, in a file they never named (the upgrade
     is whole-tree, so any run reaches it). Verification is structurally
     blind to it, because the pre-side folds through the same function and
-    loses the key too, so the run reported "verified: registry unchanged"
-    over a file it had just edited down. The refusal is the only thing
+    loses the key too, so the run reported the resources as verified over
+    a file it had just edited down. The refusal is the only thing
     that covers this class, and decode's message for the same shape says
     in as many words that the migrator refuses it.
     """
