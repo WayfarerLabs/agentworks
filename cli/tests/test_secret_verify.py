@@ -36,10 +36,14 @@ class _Backend:
         failure: Exception | None = None,
         value: str = "swordfish",
     ) -> None:
-        self.interactive = interactive
+        self._interactive = interactive
         self.failure = failure
         self.value = value
         self.calls = 0
+
+    @property
+    def interactive(self) -> bool:
+        return self._interactive
 
     def would_attempt(self, secret: SecretDecl, mapping: object) -> bool:
         del secret, mapping
@@ -55,10 +59,11 @@ class _Backend:
         return {secret.name: self.value for secret, _mapping in wants}
 
 
-def _active(backend: _Backend, *, ready: bool = True) -> ActiveBackend:
+def _active(backend: object, *, ready: bool = True) -> ActiveBackend:
     return ActiveBackend(
         capability=backend,  # type: ignore[arg-type]
         readiness=SimpleNamespace(is_ready=ready, reason="swordfish unavailable"),  # type: ignore[arg-type]
+        registered_name="test",
     )
 
 
@@ -144,6 +149,104 @@ def test_verify_sanitizer_fails_closed_for_malformed_agentworks_error(
     assert caught.value.__context__ is None
     assert getattr(caught.value, "entity_kind", None) is None
     assert getattr(caught.value, "entity_name", None) is None
+    assert "swordfish" not in repr(caught.value)
+
+
+def test_verify_sanitizes_malformed_interactive_property(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class MalformedProviderError(AgentworksError):
+        def __init__(self) -> None:
+            Exception.__init__(self, "interactive property exposed swordfish")
+
+    class RaisingInteractiveBackend(_Backend):
+        @property
+        def interactive(self) -> bool:
+            raise MalformedProviderError
+
+    backend = RaisingInteractiveBackend()
+    registry = SimpleNamespace(lookup=lambda kind, name: SecretDecl(name=name, description=""))
+    monkeypatch.setattr("agentworks.secrets.resolve.active_backends", lambda config, registry: [_active(backend)])
+
+    with pytest.raises(ExternalError) as caught:
+        verify_named_secret(SimpleNamespace(), registry, "token")  # type: ignore[arg-type]
+
+    assert str(caught.value) == "secret verification failed"
+    assert caught.value.__context__ is None
+    assert "swordfish" not in repr(caught.value)
+    assert backend.calls == 0
+
+
+def test_verify_snapshots_interactive_decision_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FlippingInteractiveBackend(_Backend):
+        property_reads = 0
+
+        @property
+        def interactive(self) -> bool:
+            self.property_reads += 1
+            return self.property_reads == 1
+
+    flipping = FlippingInteractiveBackend()
+    regular = _Backend()
+    registry = SimpleNamespace(lookup=lambda kind, name: SecretDecl(name=name, description=""))
+    monkeypatch.setattr(
+        "agentworks.secrets.resolve.active_backends",
+        lambda config, registry: [_active(flipping), _active(regular)],
+    )
+
+    result = verify_named_secret(SimpleNamespace(), registry, "token")  # type: ignore[arg-type]
+
+    assert result.name == "token"
+    assert flipping.property_reads == 1
+    assert flipping.calls == 0
+    assert regular.calls == 1
+
+
+def test_verify_never_reads_provider_name_after_secret_soft_miss(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FetchedValueNameBackend:
+        interactive = False
+
+        def __init__(self) -> None:
+            self.fetched_value = ""
+            self.name_reads = 0
+            self.calls = 0
+
+        @property
+        def name(self) -> str:
+            self.name_reads += 1
+            return self.fetched_value
+
+        def would_attempt(self, secret: SecretDecl, mapping: object) -> bool:
+            del secret, mapping
+            return True
+
+        def describe_lookup(self, secret: SecretDecl, mapping: object) -> None:
+            del secret, mapping
+
+        def batch_get(self, wants: list[tuple[SecretDecl, object]]) -> dict[str, str]:
+            del wants
+            self.calls += 1
+            self.fetched_value = "swordfish"
+            return {}
+
+    backend = FetchedValueNameBackend()
+    registry = SimpleNamespace(
+        lookup=lambda kind, name: SecretDecl(name=name, description=""),
+        graph=SimpleNamespace(),
+        iter_kind_items=lambda kind: iter(()),
+    )
+    monkeypatch.setattr("agentworks.secrets.resolve.active_backends", lambda config, registry: [_active(backend)])
+
+    with pytest.raises(SecretUnavailableError) as caught:
+        verify_named_secret(SimpleNamespace(), registry, "token")  # type: ignore[arg-type]
+
+    assert backend.calls == 1
+    assert backend.name_reads == 0
+    assert "tried test" in str(caught.value.hint)
+    assert "swordfish" not in str(caught.value)
+    assert "swordfish" not in str(caught.value.hint)
     assert "swordfish" not in repr(caught.value)
 
 

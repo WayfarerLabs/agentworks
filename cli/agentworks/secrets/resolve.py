@@ -34,6 +34,11 @@ class ActiveBackend:
     resolution loop and inspection surfaces share so the opt-out is enforced
     structurally in one place (a ``False`` mapping never reaches the capability).
 
+    ``registered_name`` is the config and registry-owned key used to select the
+    implementation. Resolution never asks provider code to restate its own
+    identity, so diagnostics and mapping lookup cannot be influenced by a
+    stateful or secret-bearing provider property.
+
     ``readiness`` is the verdict the fold stored on the backend's graph node
     (read by :func:`active_backends`, never recomputed, R11). Resolution gates
     on it (R9.6): a not-ready backend is skipped with a warning.
@@ -41,10 +46,11 @@ class ActiveBackend:
 
     capability: SecretBackend
     readiness: Readiness
+    registered_name: str
 
     @property
     def name(self) -> str:
-        return self.capability.name
+        return self.registered_name
 
     @property
     def interactive(self) -> bool:
@@ -159,6 +165,7 @@ def active_backends(config: Config, registry: Registry) -> list[ActiveBackend]:
             ActiveBackend(
                 capability=cast("SecretBackend", impl),
                 readiness=graph.readiness_of("secret-backend", name),
+                registered_name=name,
             )
         )
     return backends
@@ -394,11 +401,16 @@ def resolve_secrets_quiet(
     """Resolve through the canonical ordered loop without progress output."""
     allowed_secret_names = frozenset(secret.name for secret in secrets)
     safe_backends = tuple(
-        _VerificationBackend(backend, allowed_secret_names=allowed_secret_names) for backend in backends
+        _VerificationBackend.capture(backend, allowed_secret_names=allowed_secret_names) for backend in backends
+    )
+    permitted_backends = (
+        safe_backends
+        if interactive_available
+        else tuple(backend for backend in safe_backends if not backend.interactive)
     )
     return _resolve_secrets_ordered(
         secrets,
-        safe_backends,
+        permitted_backends,
         errors=None,
         registry=registry,
         reporter=_QuietResolutionReporter(),
@@ -487,34 +499,35 @@ def _verification_backend_call[T](
 
 @dataclass(frozen=True)
 class _VerificationBackend:
-    """Value-sanitizing adapter used only by named-secret verification."""
+    """Sanitized, stable backend snapshot for named-secret verification."""
 
     backend: ActiveBackend
     allowed_secret_names: frozenset[str]
+    readiness: Readiness
+    name: str
+    interactive: bool
 
-    @property
-    def readiness(self) -> Readiness:
-        return self.backend.readiness
-
-    @property
-    def name(self) -> str:
-        name = _verification_backend_call(
-            lambda: self.backend.name,
-            allowed_secret_names=self.allowed_secret_names,
-        )
-        if type(name) is not str:
-            raise ExternalError("secret verification failed")
-        return name
-
-    @property
-    def interactive(self) -> bool:
+    @classmethod
+    def capture(
+        cls,
+        backend: ActiveBackend,
+        *,
+        allowed_secret_names: frozenset[str],
+    ) -> _VerificationBackend:
+        """Read provider properties once through the sanitizing boundary."""
         interactive = _verification_backend_call(
-            lambda: self.backend.interactive,
-            allowed_secret_names=self.allowed_secret_names,
+            lambda: backend.interactive,
+            allowed_secret_names=allowed_secret_names,
         )
         if type(interactive) is not bool:
             raise ExternalError("secret verification failed")
-        return interactive
+        return cls(
+            backend=backend,
+            allowed_secret_names=allowed_secret_names,
+            readiness=backend.readiness,
+            name=backend.registered_name,
+            interactive=interactive,
+        )
 
     def would_attempt(self, secret: SecretDecl) -> bool:
         attempted = _verification_backend_call(

@@ -18,6 +18,7 @@ from agentworks.ssh import SSHLogger, SSHResult
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from typing import Any
 
 
 @pytest.fixture
@@ -82,7 +83,10 @@ def test_write_error_propagates_and_closes_handler(
     transient descriptor must close on the exceptional path."""
     from agentworks import ssh
 
+    captured: list[tuple[Any, Any]] = []
+
     def failing_emit(handler: object, record: object) -> None:
+        captured.append((handler, handler.stream))  # type: ignore[attr-defined]
         try:
             raise OSError("disk full")
         except OSError:
@@ -94,6 +98,9 @@ def test_write_error_propagates_and_closes_handler(
         logger.output("payload")
 
     assert logger._active_handler is None
+    [(handler, stream)] = captured
+    assert handler.stream is None
+    assert stream.closed is True
 
 
 def test_write_sink_sanitizes_every_persistent_surface(
