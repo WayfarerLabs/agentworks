@@ -311,6 +311,9 @@ The settled rules for the species:
   from merged PRs. Child leads flag inconsistencies they notice to the operator instead (see
   Artifact Mutability's ownership rule).
 - Terminology: roadmap SDD, roadmap lead, child SDD, effort lead. Not "program".
+- The `roadmap-lead` skill is the operating manual for the role itself: watching child efforts, the
+  multi-pass review protocol for their PRs, and the lead's after-round duties. This section defines
+  the artifact form; that skill defines how the lead runs it.
 
 ## Branching Model
 
