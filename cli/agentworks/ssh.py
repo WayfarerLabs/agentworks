@@ -228,6 +228,10 @@ class SSHLogger:
             lines.append(f"# Warnings: {len(self._warnings)}")
         self._write("\n".join(lines) + "\n")
 
+    # Registered raw and shell-quoted secrets are removed before this function's
+    # only filesystem write. CodeQL does not model the replacement sanitizer;
+    # adversarial sink tests and lifecycle wiring tests enforce the boundary.
+    # codeql[py/clear-text-storage-sensitive-data]
     def _write(self, text: str) -> None:
         # The single sanitizing choke point: every byte that reaches the
         # log file passes through redaction HERE, so the no-secrets-in-
