@@ -49,7 +49,7 @@ from agentworks.schema.markers import RefMarker
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
 
-    from agentworks.schema._shape import FieldShape
+    from agentworks.schema._shape import FieldShape, UnionArmType
 
 #: A field with no declared default, distinct from a declared default of
 #: ``None``.
@@ -180,18 +180,45 @@ class FieldDoc:
     item_model: type[BaseModel] | None
     """Set when this field holds MANY blocks (a list of tables, a table
     of tables). The element's fields follow this one in the stream, once,
-    under a :data:`SEQUENCE_ELEMENT` or :data:`MAPPING_KEY` path
-    segment."""
+    under this field's :attr:`item_segment`."""
+
+    item_segment: str | None
+    """How ONE element of this field is addressed, as the path segment
+    standing for it: :data:`SEQUENCE_ELEMENT` for a list, tuple, or set,
+    :data:`MAPPING_KEY` for a table, ``None`` when the field holds a
+    single value.
+
+    Set for every collection, whatever its elements are. A presenter that
+    has to place an element (in a path, in an indent, or as the ``-`` that
+    opens a YAML sequence entry) reads it here rather than deciding for
+    itself what kind of collection a rendered type string describes."""
 
     union_arms: tuple[UnionArm, ...]
     """The alternatives, when this field is a discriminated union. Not
     expanded inline: the presenter decides whether to render one arm, all
     of them, or a table, by recursing with ``iter_field_docs``."""
 
+    item_union_arms: tuple[UnionArm, ...]
+    """:attr:`union_arms` one level down: the alternatives ONE ELEMENT of
+    a collection may be, when the elements are a discriminated union of
+    models (``list[Annotated[A | B, Discriminator("kind")]]``).
+
+    Kept apart from :attr:`union_arms` for the reason :attr:`item_model`
+    is kept apart from :attr:`nested_model`: one says what the FIELD is,
+    the other what one value inside it is. A presenter that read these off
+    ``union_arms`` would render the collection itself as one arm, which in
+    a document is a whole indent level too shallow.
+
+    Left as handles, and not expanded under a placeholder segment the way
+    :attr:`item_model` is, because an arm is a choice rather than a
+    structure: the presenter decision ``union_arms`` leaves open is the
+    one an element leaves open too."""
+
 
 def iter_field_docs(model_cls: type[BaseModel]) -> Iterator[FieldDoc]:
     """``model_cls``'s fields in declaration order, nested blocks expanded
-    inline depth-first, union arms left as handles.
+    inline depth-first, union arms left as handles (a COLLECTION's element
+    arms as much as a field's own).
 
     A field marked ``SkipJsonSchema`` is not in the stream: it is
     framework surface rather than the operator's, and the same one marker
@@ -296,13 +323,25 @@ def _expandable(shape: FieldShape) -> tuple[type[BaseModel] | None, tuple[str, .
     holds tables without saying how many: rendering the element ONCE is
     what makes a generated sample complete, and leaving it out is what
     made FR10's "complete skeleton" promise false for a catalog field.
+
+    A collection whose elements are a TAGGED union opens nothing here.
+    Its element is a choice among models rather than one model, so the
+    arms ride on the doc (``FieldDoc.item_union_arms``) and the presenter
+    picks, exactly as it does for a union written on the field itself.
     """
     if shape.nested_model is not None:
         return shape.nested_model, ()
-    if shape.item_model is not None:
-        segment = MAPPING_KEY if shape.collection is Collection.MAPPING else SEQUENCE_ELEMENT
+    if shape.item_model is not None and (segment := _segment_of(shape)) is not None:
         return shape.item_model, (segment,)
     return None, ()
+
+
+def _segment_of(shape: FieldShape) -> str | None:
+    """The path segment standing for ONE element of this field, or
+    ``None`` when the field holds a single value."""
+    if shape.collection is None:
+        return None
+    return MAPPING_KEY if shape.collection is Collection.MAPPING else SEQUENCE_ELEMENT
 
 
 def _field_doc(path: tuple[str, ...], field: FieldInfo, shape: FieldShape) -> FieldDoc:
@@ -320,8 +359,17 @@ def _field_doc(path: tuple[str, ...], field: FieldInfo, shape: FieldShape) -> Fi
         ref=marker,
         nested_model=shape.nested_model,
         item_model=shape.item_model,
-        union_arms=tuple(UnionArm(tag=arm.tag, doc=model_doc(arm.model)) for arm in shape.arms),
+        item_segment=_segment_of(shape),
+        union_arms=_documented(shape.arms),
+        item_union_arms=_documented(shape.item_arms),
     )
+
+
+def _documented(arms: tuple[UnionArmType, ...]) -> tuple[UnionArm, ...]:
+    """Classified arms, each carrying the identity a presenter lists it
+    by. One conversion for both depths, so a field's arms and its
+    elements' cannot come to different answers about the same model."""
+    return tuple(UnionArm(tag=arm.tag, doc=model_doc(arm.model)) for arm in arms)
 
 
 def _default_of(field: FieldInfo) -> object:
