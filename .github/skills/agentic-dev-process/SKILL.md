@@ -7,11 +7,13 @@ description: >-
 # Agentic Development Process
 
 This is the top-level playbook for how a development effort runs, from a standing start to a
-merge-ready PR. It ties three things together: the `sdd` skill (how we spec significant work), the
-`agentworks-dev` subagent (who implements), and the `agentworks-reviewer` subagent (who checks). The
-always-on rules in `.rulesync/rules/` and the repo's `CONTRIBUTING.md` cover the mechanics (code
-style, linting, conventional commits); the `development-principles` rule covers _how_ to write the
-code. This skill covers the flow that sits above both.
+merge-ready PR. It is written for whoever is **driving** the effort; a delegated subagent gets its
+lane from its persona and its invoking prompt, not from here. The playbook ties three things
+together: the `sdd` skill (how we spec significant work), the `agentworks-dev` subagent (who
+implements), and the `agentworks-reviewer` subagent (who checks). The always-on rules (already in
+your context) and the repo's `CONTRIBUTING.md` cover the mechanics (code style, linting,
+conventional commits); the `development-principles` rule covers _how_ to write the code. This skill
+covers the flow that sits above both.
 
 The process scales with the work. A large effort walks every step below; a small change collapses
 several of them, but review, regular commits, and escalation still apply. Hold the whole picture,
@@ -158,8 +160,11 @@ ones.
   commits keep the work reviewable and recoverable. Follow the project's Conventional Commits
   convention (`CONTRIBUTING.md`) for message shape.
 - **One PR per feature is the default, with a size ceiling.** Put the whole feature in a single PR,
-  SDD artifacts included. Split into multiple PRs only when there is a good reason, the usual one
-  being legitimate SDD phases that each carry independent, standalone value. A phase that only has
+  SDD artifacts included. Split into multiple PRs only when there is a good reason. The usual one is
+  legitimate SDD phases that each carry independent, standalone value; another is cross-effort
+  visibility, per the `sdd` skill's merge-artifacts-early guidance: when another effort could build
+  against your design (under an active roadmap, assume one can), the SDD artifacts land on `main`
+  ahead of the implementation instead of riding the feature branch to the end. A phase that only has
   value once a later phase lands is not a reason to split; it is a commit within the one PR.
   Always-green phased commits give reviewers a natural commit-by-commit reading order inside a
   single large PR. The ceiling: when a feature's projected diff grows past what one reviewer can
