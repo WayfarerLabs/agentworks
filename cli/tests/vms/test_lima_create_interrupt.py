@@ -386,6 +386,60 @@ def test_remote_interrupt_preserves_original_when_artifact_cleanup_fails(
     assert "swordfish" not in "\n".join(captured_output.warnings)
 
 
+def test_remote_exception_kills_cleans_artifacts_then_deletes_without_masking(
+    monkeypatch: pytest.MonkeyPatch,
+    captured_output: CapturedOutput,
+) -> None:
+    """An ordinary provisioning failure gets the full remote rollback."""
+    original = SSHError("ordinary provisioning failure")
+    events: list[tuple[str, str]] = []
+    _wire(monkeypatch)
+
+    class _FailingCleanupHost(_FakeHostTransport):
+        def run(self, cmd: str, **kwargs: object) -> SimpleNamespace:
+            if cmd.startswith("rm -f") and ".sh" in cmd:
+                self._events.append(("host", cmd))
+                raise SSHError("artifact cleanup exposed swordfish")
+            return super().run(cmd, **kwargs)
+
+    monkeypatch.setattr(
+        LimaPlatform,
+        "_host_transport",
+        lambda self, logger=None: _FailingCleanupHost(events),
+    )
+    monkeypatch.setattr(
+        LimaPlatform,
+        "_create_remote",
+        lambda self, name, yaml, *, redactions: (_ for _ in ()).throw(original),
+    )
+    monkeypatch.setattr(
+        LimaPlatform,
+        "_run_lima",
+        lambda self, cmd, **kwargs: events.append(("lima", cmd)) or "",
+    )
+
+    with pytest.raises(SSHError) as caught:
+        LimaPlatform("lima", {"vm_host": "user@host"}).create(_request(), RunContext())
+
+    assert caught.value is original
+    kill_cmd = "kill $(cat /tmp/agentworks-lima-myvm.pid)"
+    (kill_index,) = [i for i, (kind, cmd) in enumerate(events) if kind == "host" and kill_cmd in cmd]
+    (cleanup_index,) = [
+        i
+        for i, (kind, cmd) in enumerate(events)
+        if kind == "host"
+        and cmd.startswith("rm -f")
+        and all(f".{suffix}" in cmd for suffix in ("out", "sh", "pid", "status"))
+    ]
+    (delete_index,) = [
+        i for i, (kind, cmd) in enumerate(events) if kind == "lima" and cmd == "limactl delete --force myvm"
+    ]
+    assert kill_index < cleanup_index < delete_index
+    surfaced = "\n".join([*captured_output.detail, *captured_output.warnings])
+    assert "swordfish" not in surfaced
+    assert "swordfish" not in repr(caught.value)
+
+
 def test_remote_provision_failure_redacts_log_and_raised_error(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
