@@ -2,7 +2,9 @@
 
 Pins the fold's verdicts (LLD c), the B1 property (the fold is total over a
 malformed ``platform_config`` because ``not_ready`` never constructs), the
-readiness gating of the finalize ``validate`` pass (R9.4) and of
+INDEPENDENCE of the finalize ``validate`` pass from readiness (a not-ready
+resource's block is validated like any other; what config is valid is the
+declared model's answer, not the host's), the readiness gating of
 materialization (R12, for both the not-ready and the disabled referrer), the
 enablement-axis DISTRIBUTION through the fold end to end via the injected
 enablement-source seam (R7/R13), and that readiness is independent of validity
@@ -304,14 +306,16 @@ def test_r9_9_mapping_to_disabled_backend_is_inert_until_enabled() -> None:
 def test_fold_does_not_throw_on_malformed_platform_config() -> None:
     """B1 (the ready side): a READY site with a malformed ``platform_config``
     surfaces the bad block as a clean ConfigError from the finalize VALIDATE
-    pass (R5), carrying that pass's origin framing (``sites.yaml``). This alone
-    cannot fully pin B1: if the fold DID construct, construction would raise the
-    SAME validate ConfigError. The load-bearing B1 pin is
-    ``test_r9_4_not_ready_site_malformed_block_is_deferred`` below, where a
-    not-ready site's malformed block is folded WITHOUT validating (a
-    constructing fold would throw there, but the non-constructing one does
-    not). Here we additionally assert the origin framing to prove the error
-    came from the validate pass, not from a mid-fold construction."""
+    pass (R5), carrying that pass's origin framing (``sites.yaml``).
+
+    The origin framing is what carries the B1 signal here: a constructing fold
+    would raise from construction, which attaches no origin, so ``sites.yaml``
+    in the message proves the error came from the validate pass at 7 and not
+    from a mid-fold construction at 4. The direct pin on the fold's totality is
+    ``test_not_ready_is_total_over_malformed_config`` below, which hands
+    ``not_ready`` blocks no model would accept; end-to-end deferral can no
+    longer pin it, because validation is unconditional now and every malformed
+    block raises somewhere."""
     # vm_host as an int: lima.not_ready sees it truthy -> ready (no throw, no
     # construction); validate then rejects the non-string.
     site = VMSiteDecl(name="bad", platform=CapabilityBlock.of("lima", **{"vm_host": 123}))
@@ -330,16 +334,55 @@ def test_r5_ready_site_with_unknown_field_fails_validation() -> None:
         _finalized(site)
 
 
-def test_r9_4_not_ready_site_malformed_block_is_deferred(monkeypatch: pytest.MonkeyPatch) -> None:
-    """R9.4: a NOT-ready site's malformed block is deferred, not validated.
-    With no local ``limactl`` the local-lima site is not-ready, so its unknown
-    config field is never validated and finalize does not raise (it would if
-    the block were validated: see R5 above). Exercises the real
-    non-constructing ``not_ready`` returning blocked."""
-    monkeypatch.setattr("shutil.which", lambda name: None)  # no limactl -> not-ready
+def test_not_ready_site_malformed_block_is_still_validated(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Validation does not depend on readiness. With no local ``limactl`` the
+    local-lima site is NOT-ready, and its unknown config field is refused all
+    the same, with the same message a ready site gets (compare R5 above).
+
+    This is the direction R9.4 originally had backwards. Deferring validation
+    until a resource was ready meant a not-ready host silently accepted config
+    that a ready host refused, so what "valid" meant depended on the machine
+    reading the document."""
+    monkeypatch.setattr("shutil.which", lambda name: None)  # no limactl
     site = VMSiteDecl(name="local", platform=CapabilityBlock.of("lima", **{"bogus": "x"}))
-    registry = _finalized(site)  # no raise: the block is deferred
-    assert registry.graph.readiness_of("vm-site", "local").reason == "limactl not installed"
+    with pytest.raises(ConfigError, match="bogus: unknown field"):
+        _finalized(site)
+
+
+def test_typo_in_vm_host_is_refused_rather_than_changing_readiness(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The defect this ungating fixes, end to end: a REMOTE lima site whose
+    ``vm_host`` key is misspelled.
+
+    ``lima.not_ready`` reads ``config.get("vm_host")`` off UNVALIDATED config,
+    so ``vm_hst`` is invisible to it and the site folds as local, hence
+    not-ready for want of ``limactl``. While the validate pass was
+    readiness-gated, that verdict suppressed the very error naming the typo:
+    the operator was told ``limactl not installed``, a problem they do not
+    have, and their host setting silently did not apply. Worse, the identical
+    document WAS refused on a host that happened to have ``limactl``, so the
+    closed world was only closed on some machines.
+
+    Both hosts must now refuse it, and name the key."""
+    for limactl in (None, "/usr/bin/limactl"):
+        monkeypatch.setattr("shutil.which", lambda name, found=limactl: found)
+        site = VMSiteDecl(name="gpu", platform=CapabilityBlock.of("lima", **{"vm_hst": "me@gpu-box"}))
+        with pytest.raises(ConfigError, match="vm_hst: unknown field"):
+            _finalized(site)
+
+
+def test_not_ready_is_total_over_malformed_config() -> None:
+    """B1, pinned directly on the hook the fold calls: ``not_ready`` returns a
+    verdict for blocks no model would accept, rather than raising.
+
+    It is a classmethod over best-effort config and never constructs, so it
+    cannot re-run the throwing construct-time validator. That is what keeps the
+    fold total (R1/R4) and what stops a malformed block from becoming a
+    permanent readiness reason (the R9.4 loop). Independent of the validate
+    pass, which is why ungating that pass leaves this contract untouched."""
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+
+    for config in ({"bogus": "x"}, {"vm_host": 123}, {"vm_host": {"nested": "junk"}}, {}):
+        assert LimaPlatform.not_ready(config).reason in (None, "limactl not installed")
 
 
 def test_r5_not_ready_site_with_valid_block_stays_not_ready(monkeypatch: pytest.MonkeyPatch) -> None:

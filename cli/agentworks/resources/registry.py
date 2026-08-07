@@ -349,12 +349,13 @@ class Registry:
         6. **attach**: build the retained frozen ``DependencyGraph``
            (inbound references + fold verdicts on the node), then synthesize
            descriptions for auto-declared rows from the graph's inbound refs.
-        7. **validate**: run each READY + ENABLED Resource's ``validate_config()``
-           (throwing, ``file:line``-framed). A not-ready or disabled row's
-           block is deferred, not validated (R9.4). Distinct from graph
-           construction (R3): the build passes never throw on a malformed
-           block, so a config with both a malformed block and a cycle
-           reports the cycle first (R9.3).
+        7. **validate**: run EVERY present Resource's ``validate_config()``
+           (throwing, ``file:line``-framed), with no readiness or enablement
+           gate: what config is valid is the declared model's answer alone,
+           so it cannot vary by host. Distinct from graph construction (R3):
+           the build passes never throw on a malformed block, so a config
+           with both a malformed block and a cycle reports the cycle first
+           (R9.3).
         8. **freeze**.
 
         Semantic checks that need CONFIG alongside the finalized graph
@@ -457,7 +458,9 @@ class Registry:
                 inbound = self._graph.dependents_of(kind, name)
                 self._resources[kind][name] = _polish_auto_declared_description(existing, kind, inbound)
 
-        # 7: validate the ready + enabled set only (R3, R9.4).
+        # 7: validate every present resource's capability config (R3). No
+        # readiness or enablement gate: the declared model is the only
+        # authority on what config is valid.
         self._validate_resources(enablement, context)
 
         # 8: freeze.
@@ -468,17 +471,50 @@ class Registry:
         enablement: Mapping[tuple[str, str], Enablement],
         context: FinalizeContext,
     ) -> None:
-        """Run each READY + ENABLED Resource's ``validate_config()`` (the
-        throwing correctness check for its capability config sub-block),
-        raising on the first malformed block.
+        """Run EVERY present Resource's ``validate_config()`` (the throwing
+        correctness check for its capability config sub-block), raising on
+        the first malformed block.
 
-        Scoped to the READY + ENABLED set (R3, R9.4): a not-ready or disabled
-        resource's block is DEFERRED, not validated (there is nothing to run,
-        and its capability may be unavailable), so a malformed platform config
-        on a site the host cannot run does not abort every command; it is
-        validated when the resource becomes ready. A disabled node's stored
-        readiness is a placeholder (enablement answers for it), so the gate
-        checks enablement explicitly rather than leaning on ``is_ready``.
+        UNCONDITIONAL, and that is the point: no readiness verdict, no
+        enablement verdict, and no property of the host may decide whether
+        a declaration is well-formed. The declared model is the only
+        authority on what config is valid, so a key that model does not
+        accept is an error on every host, and a model that legitimately
+        accepts open keys keeps accepting them. Openness is a fact about
+        the model, never an accident of environment.
+
+        The pass used to skip not-ready and disabled resources (R3, R9.4,
+        "there is nothing to run, and its capability may be unavailable").
+        That inverted the two questions. Validation is pure, cheap, and
+        answerable from the document alone; readiness is the environmental
+        question, and it is computed at pass 4 from config this pass has
+        not yet checked. Gating the pure check on the environmental one let
+        a typo decide its own fate: an operator's misspelled ``vm_host``
+        read as an absent one, which made a remote lima site look local,
+        which made it not-ready for want of ``limactl``, which suppressed
+        the very error that named the typo. The operator was told
+        ``limactl not installed``, and the same document was correctly
+        refused on a host that happened to have ``limactl``. Closed-world
+        config that is only closed on some hosts is not closed.
+
+        What the old scope was protecting is served without it. "Its
+        capability may be unavailable" is already
+        :func:`~agentworks.capabilities.config.validate_capability_config`'s
+        answer: an implementation this host has not seated selects no
+        model, so the call is a no-op and the resource's dangling
+        capability edge reports it once, as the hard finalize miss (R9.2).
+        Blast radius is the real cost and it is the intended one: a
+        malformed block aborts the build rather than lurking on a row
+        nobody looked at. A wrong or unreachable host VALUE is untouched
+        by any of this, because a value the model accepts is valid; that
+        site stays ready, and it fails at use with a live error.
+
+        Totality of the READINESS fold is a separate contract and still
+        holds: ``not_ready`` never constructs and never validates (LLD c),
+        so the fold at pass 4 stays total over unvalidated config. That
+        contract is what avoids the R9.4 loop (a malformed block becoming a
+        permanent readiness reason); it never required this pass to be
+        gated, and the two were only ever coupled by accident.
 
         This pass adds NO framing of its own, and that is the whole story
         now: every error reaching it comes from the schema error bridge,
@@ -500,6 +536,16 @@ class Registry:
         backend (R9.9); a mapping to a disabled backend stays inert until
         enabled. Every non-secret resource ignores the set.
 
+        That set is the LAST enablement-keyed suppression of validation left
+        in this pass, and it is the same shape as the gate removed above:
+        a mapping to a present-but-disabled backend is accepted because
+        validation never runs on it, not because the backend's model
+        accepts it. Its scope is much smaller (one field of one kind, and
+        the mapping is inert for resolution too), which is why it is
+        recorded here rather than changed alongside the pass-level gate:
+        retiring it is a decision about R9.9, not about this loop. A reader
+        adding a new suppression should read it as the exception it is.
+
         It is also handed the build walk's own ``context``, so an INHERITING
         resource validates the same merged declaration its edges came from
         (FR12: validation runs on the effective config, because a child's
@@ -508,16 +554,11 @@ class Registry:
         """
         from agentworks.resources.graph import Enablement
 
-        assert self._graph is not None  # built in pass 6, before this pass
         enabled_backends = frozenset(
             name for (kind, name), axis in enablement.items() if kind == "secret-backend" and axis is Enablement.enabled
         )
         for kind in list(self._resources.keys()):
             for name in list(self._resources[kind].keys()):
-                if enablement.get((kind, name), Enablement.enabled) is Enablement.disabled:
-                    continue
-                if not self._graph.is_ready(kind, name):
-                    continue
                 resource = self._resources[kind][name]
                 validate_config = getattr(resource, "validate_config", None)
                 if validate_config is None:

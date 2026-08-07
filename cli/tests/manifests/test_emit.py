@@ -547,6 +547,42 @@ def test_emitted_schemas_accept_every_document_the_full_load_path_accepts(tmp_pa
             assert _errors(envelope, document) == [], (kind, document.get("metadata"))
 
 
+@pytest.mark.parametrize("limactl", [None, "/usr/bin/limactl"])
+def test_a_capability_key_the_schema_rejects_is_rejected_on_every_host(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, limactl: str | None
+) -> None:
+    """The soundness contract in the REJECTS direction, which is the one the
+    statement in ``emit.py`` actually makes and the one that was false.
+
+    A misspelled ``vm_host`` is underlined by the emitted schema on any host,
+    because ``LimaConfig`` is closed and the splice carries that into the
+    document schema. The loader has to agree on any host too, or an operator
+    fixes a squiggle their machine never would have complained about, and a
+    teammate on a different machine gets the opposite advice from the same two
+    tools.
+
+    ``limactl`` is what made the two disagree. The finalize validate pass was
+    readiness-gated, and ``lima.not_ready`` reads ``vm_host`` off unvalidated
+    config, so the typo made the site look local, a local site without
+    ``limactl`` is not-ready, and a not-ready site was not validated. The
+    schema said no and the loader said yes, but only on hosts without Lima
+    installed. Both spellings of the host are pinned here so the parametrize
+    fails loudly if validation is ever gated on the environment again."""
+    from agentworks.bootstrap import build_registry
+    from agentworks.config import load_config
+    from agentworks.errors import ConfigError
+
+    monkeypatch.setattr("shutil.which", lambda name, found=limactl: found if name == "limactl" else None)
+    typo = _a_document("vm-site", {"platform": {"name": "lima", "vm_hst": "me@box"}})
+    assert _errors(document_schema("vm-site"), typo), "premise: the schema must reject this document"
+
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    (resources / "sites.yaml").write_text(yaml.safe_dump(typo))
+    with pytest.raises(ConfigError, match="vm_hst: unknown field"):
+        build_registry(load_config(_a_config(tmp_path), warn_issues=False))
+
+
 def _a_config(root: Path) -> Path:
     """A config whose plugins are enabled, so the sample's azure, aws, and
     proxmox sites reach their platform's own model at finalize rather than

@@ -163,50 +163,63 @@ def test_unknown_provider_defers_to_miss_policy(tmp_path: Path) -> None:
         build_registry(config)
 
 
-# -- Fold-gated severity: WHO validates changed, WHEN did not ----------------
+# -- Validity is the model's answer, not the host's --------------------------
 #
-# The gate itself is the finalize fold's and predates this effort
-# (``Registry.finalize`` pass 7 runs the throwing check over the READY and
-# ENABLED set only). What the flip changed is that the CORE does the
-# validating instead of the capability, so what these pin is that the
-# gating survived that change. The property they protect is the reason the
-# gate exists: a malformed ``platform_config`` on a site the host cannot
-# run must not abort every command.
+# ``Registry.finalize`` pass 7 runs the throwing check over EVERY present
+# resource. It once ran over the READY and ENABLED set only (R3, R9.4), on
+# the reasoning that a malformed block on a resource the host cannot run
+# should not abort every command. The cost of that was worse than the
+# benefit: the same document was accepted on one host and refused on
+# another, and a typo big enough to change a resource's readiness thereby
+# suppressed its own error message. These pin the split that replaced it.
+# What a resource's config MEANS is the declared model's answer and is the
+# same everywhere; whether the resource can RUN is the fold's answer and is
+# a property of the host.
 
 
-def _azure_site(tmp_path: Path, *, enabled: bool) -> Any:
-    """A vm-site on the opt-in azure plugin's platform, with a blob that
-    is malformed whatever the plugin's state (``regions`` is not a field)."""
-    _manifest(
-        tmp_path,
-        ManifestDoc(
-            "vm-site",
-            "lab",
-            {"platform": {"name": "azure-vm", "subscription_id": "s", "resource_group": "g", "regions": "eastus"}},
-        ),
-    )
+def _azure_site(tmp_path: Path, *, enabled: bool, blob: dict[str, Any]) -> Any:
+    """A vm-site on the opt-in azure plugin's platform, carrying ``blob``."""
+    _manifest(tmp_path, ManifestDoc("vm-site", "lab", {"platform": {"name": "azure-vm", **blob}}))
     return _config(tmp_path, enabled=enabled)
 
 
-def test_a_broken_blob_on_a_disabled_plugins_resource_loads_with_the_row_marked(tmp_path: Path) -> None:
-    """R9.4, the headline property: the config loads, so every command
-    that has nothing to do with this site still works, and the row says
-    why it is unusable rather than going silent."""
-    registry = build_registry(_azure_site(tmp_path, enabled=False))
+#: Rejected by the azure-vm model on any host: ``regions`` is not a field.
+_BROKEN_BLOB = {"subscription_id": "s", "resource_group": "g", "regions": "eastus"}
 
-    reason = registry.graph.readiness_of("vm-site", "lab").reason
-    assert reason is not None, "a deferred row must carry its reason, not just fail quietly later"
-    assert "azure-vm" in reason
+#: Accepted by the same model, so only the plugin's state can mark this row.
+_VALID_BLOB = {"subscription_id": "s", "resource_group": "g", "region": "eastus"}
 
 
-def test_the_same_broken_blob_is_a_load_error_once_the_plugin_is_enabled(tmp_path: Path) -> None:
-    """The other half of the same property, and the enabled + ready case
-    the box names: enabling is what makes the resource's config this
-    host's problem, and the error is the ordinary owner-framed one."""
+@pytest.mark.parametrize("enabled", [False, True])
+def test_a_broken_blob_is_refused_whatever_the_plugins_state(tmp_path: Path, *, enabled: bool) -> None:
+    """The headline property: an unknown key is a config error on every host.
+
+    The azure plugin's state decides whether this site can RUN; it has no say
+    in whether ``regions`` is a field, because that is the declared model's
+    answer. Both branches must produce the identical owner-framed error, since
+    a message that varies by plugin opt-in would send an operator hunting for a
+    difference between hosts that has nothing to do with their mistake."""
     with pytest.raises(ConfigError, match="regions: unknown field") as exc:
-        build_registry(_azure_site(tmp_path, enabled=True))
+        build_registry(_azure_site(tmp_path, enabled=enabled, blob=_BROKEN_BLOB))
 
     assert "res.yaml" in str(exc.value)
+
+
+def test_a_valid_blob_on_a_disabled_plugin_loads_with_the_row_marked(tmp_path: Path) -> None:
+    """The half of the old deferral that was right, and is kept: a WELL-FORMED
+    resource on a plugin the operator has not opted into still loads, so every
+    command that has nothing to do with this site works, and the row carries
+    the reason it is unusable rather than going silent.
+
+    Nothing here is a config error. Not-ready is the correct verdict for a
+    resource whose plugin is off, exactly as it stays the correct verdict for a
+    site whose ``region`` names somewhere unreachable. Refusing to load either
+    one would be the opposite mistake to the one the ungating fixed."""
+    registry = build_registry(_azure_site(tmp_path, enabled=False, blob=_VALID_BLOB))
+
+    reason = registry.graph.readiness_of("vm-site", "lab").reason
+    assert reason is not None, "a not-ready row must carry its reason, not just fail quietly later"
+    assert "azure-vm" in reason
 
 
 # An unregistered capability name staying a HARD finalize error (R9.2 /
