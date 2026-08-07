@@ -32,7 +32,7 @@ from agentworks.schema import (
     validation_context,
 )
 from agentworks.schema.errors import _problems
-from agentworks.source_location import SourceLocation
+from agentworks.source_location import SourceLocation, synthesized
 
 from ._fixture_models import (
     CatalogLike,
@@ -177,6 +177,35 @@ def test_one_error_without_a_location_is_just_the_owner_framed_line() -> None:
     error = _raised(PrincipalLike, {"client_id": 8, "tenant_id": "t"}, location=None)
 
     assert str(error) == "vm-site/lab.client_id: must be a string"
+
+
+def test_a_synthesized_location_frames_nothing() -> None:
+    """``SourceLocation`` carries its own sentinels, and ``_located``
+    honors them rather than rendering them. A framework-constructed row
+    (``source_location.synthesized()``) has no file an operator could
+    open, so prefixing ``<synthesized>:`` would offer them a path that
+    does not exist. Identical to passing no location at all, which is what
+    "no location an operator can navigate to" means.
+    """
+    error = _raised(PrincipalLike, {"client_id": 8, "tenant_id": "t"}, location=synthesized())
+
+    assert str(error) == "vm-site/lab.client_id: must be a string"
+
+
+def test_a_location_with_no_line_still_names_the_file() -> None:
+    """The other sentinel, and it is NOT the same answer. ``line == 0``
+    means the row was not introduced by a specific declaration site, but
+    the file is real and worth sending the operator to; only the position
+    is missing. Rendering it would put them on line 0, which no editor
+    has.
+    """
+    error = _raised(
+        PrincipalLike,
+        {"client_id": 8, "tenant_id": "t"},
+        location=SourceLocation(file=Path("sites.yaml"), line=0),
+    )
+
+    assert str(error) == "sites.yaml: vm-site/lab.client_id: must be a string"
 
 
 def test_the_owner_rides_along_as_the_errors_entity() -> None:
@@ -463,19 +492,33 @@ def test_a_failure_inside_a_union_member_is_not_collapsed_away() -> None:
     assert "  platform.vm_host: must be a string" in lines
 
 
-def test_alternatives_that_name_no_shape_keep_their_own_lines() -> None:
-    """A union member that fails on a LENGTH rather than on a shape has
-    no phrase to contribute to an alternatives list, so the run is left
-    uncollapsed rather than described with a phrase this module would
-    have to invent.
-
-    The header's count is what says "uncollapsed": one problem would have
-    rendered as a single line with no header at all.
+def test_the_arm_that_got_past_the_shape_answers_for_the_whole_union() -> None:
+    """The table arm accepted the value and failed on a field of it, so
+    it is the arm the operator meant. The string arm's "must be a string"
+    is a report about a value nobody wrote, and it used to LEAD the batch:
+    the first thing an operator saw about their ``{account}`` table was
+    that it should have been a string.
     """
-    header, *body = _lines(StringOrTableRoot, "")
+    assert _lines(StringOrTableRoot, {"account": "work"}) == ["vm-site/lab.reference: is required"]
 
-    assert header == "vm-site/lab: 2 problems"
-    assert "  must not be empty" in body
+
+def test_a_shape_rejection_is_noise_whichever_end_of_the_batch_it_lands_on() -> None:
+    """The mirror of the case above, and the reason the rule is about
+    which arm got FURTHEST rather than about position: here the string
+    arm is the one that matched, so the table arm's "must be a table"
+    trails the real message instead of leading it. Same noise, and the
+    same single line survives.
+    """
+    assert _lines(StringOrTableRoot, "") == ["vm-site/lab: must not be empty"]
+
+
+def test_a_union_no_arm_could_enter_still_lists_every_alternative() -> None:
+    """The other half of the rule, which the dropping must not eat: when
+    NO arm accepted the value's shape, every rejection is equally right
+    and the operator is owed all of them. A scalar that is neither a
+    string nor a table is that case.
+    """
+    assert _lines(StringOrTableRoot, 5) == ["vm-site/lab: must be a string or a table"]
 
 
 def test_an_undiscriminated_root_models_scalar_arm_renders_unprefixed() -> None:
@@ -483,9 +526,7 @@ def test_an_undiscriminated_root_models_scalar_arm_renders_unprefixed() -> None:
     name leaves the message alone at the document level, which is where a
     root model's problems belong anyway: ``must not be empty``, not
     ``str: must not be empty``."""
-    lines = _lines(StringOrTableRoot, "")
-
-    assert "  must not be empty" in lines
+    assert _lines(StringOrTableRoot, "") == ["vm-site/lab: must not be empty"]
 
 
 # -- Normalization ------------------------------------------------------------

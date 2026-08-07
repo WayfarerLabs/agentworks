@@ -90,9 +90,9 @@ def test_describe_says_an_inherited_reference_was_inherited() -> None:
     registry = _child_first(parent, child)
 
     lines = [format_reference_entry(entry) for entry in registry.graph.dependents_of("secret", "base-secret")]
-    assert "vm-template/kid -- the BASE env var (inherited from vm-template/base)" in lines
+    assert "vm-template/kid: the BASE env var (inherited from vm-template/base)" in lines
     # The parent's own edge is not dressed up as inherited.
-    assert "vm-template/base -- the BASE env var" in lines
+    assert "vm-template/base: the BASE env var" in lines
 
 
 def test_a_row_that_declared_the_name_itself_is_blamed_for_it() -> None:

@@ -260,6 +260,49 @@ def test_the_backends_own_revalidation_says_what_the_finalize_pass_says(mapping:
     assert str(revalidated.value) == str(at_load.value)
 
 
+@pytest.mark.parametrize(
+    ("mapping", "expected"),
+    [
+        pytest.param(
+            {"account": "acct"},
+            "secret/s.backend_mappings.onepassword.reference: is required",
+            id="table-the-string-arm-rejected",
+        ),
+        pytest.param(
+            {"account": "acct", "reference": "op://Work/npm/token", "x": 1},
+            "secret/s.backend_mappings.onepassword.x: unknown field; expected one of: account, reference",
+            id="table-unknown-key",
+        ),
+        pytest.param(
+            "Work/npm/token",
+            "secret/s.backend_mappings.onepassword: onepassword reference 'Work/npm/token' "
+            "must start with 'op://' (an 'op://vault/item/field' reference, optionally "
+            "with a section: 'op://vault/item/section/field')",
+            id="string-the-table-arm-rejected",
+        ),
+    ],
+)
+def test_only_the_arm_the_operator_meant_reports_on_a_bad_mapping(mapping: Any, expected: str) -> None:
+    """The mapping is the framework's one undiscriminated union, so it is
+    where an arm's shape rejection reaches an operator as noise.
+
+    Pinned as the WHOLE message rather than a substring, because the
+    defect this guards was never a wrong line, it was a true line with an
+    irrelevant one stapled to it: a malformed table led with "must be a
+    string" (the ``op://`` arm's report) and a malformed string trailed
+    with "must be a table". A substring assertion passes with either
+    still present, which is how the framing fix shipped over a batch that
+    still read wrong.
+
+    Through ``validate_capability_config``, so this is the path an
+    operator actually reaches at load, not the model in isolation.
+    """
+    with pytest.raises(ConfigError) as excinfo:
+        _validate(mapping)
+
+    assert str(excinfo.value) == expected
+
+
 def test_an_absent_mapping_is_framed_like_a_malformed_one() -> None:
     """The other exit from ``_resolved_ref``. Same owner framing, and the
     two accepted forms ride the ConfigError's ``hint`` rather than being

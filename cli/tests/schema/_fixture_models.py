@@ -245,11 +245,17 @@ class CatalogEntryLike(AgwModel):
 class CatalogLike(AgwModel):
     """A platform carrying collections of tables and of names.
 
-    ``vm_sizes`` is the shipped shape (azure's ``vm_sizes``, aws's
-    ``instance_types``): a list of tables, which a field reference that
-    could not expand it would render as an opaque "list". The credential
+    ``vm_sizes`` is a list of tables, which a field reference that could
+    not expand it would render as an opaque "list". The credential
     collections are the same shape with a marked field inside, where a
     dropped element is a dropped graph edge.
+
+    NOT a stand-in for the shipped catalogs, though it is named after
+    them: azure's ``vm_sizes`` and aws's ``instance_types`` are spelled
+    ``Annotated[list[X], Field(min_length=1)] | None = None``, which the
+    walker reaches through two peels this plainer spelling never
+    exercises. Those two are pinned directly, in
+    ``test_fields.test_the_shipped_optional_catalog_shape_expands_its_element``.
     """
 
     vm_sizes: list[CatalogEntryLike] = Field(default_factory=list)

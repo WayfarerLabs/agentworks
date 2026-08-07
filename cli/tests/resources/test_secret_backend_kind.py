@@ -49,6 +49,51 @@ def test_kind_attributes() -> None:
     assert "secret-provider" not in KIND_REGISTRY  # collapsed 2026-07-07
 
 
+#: The three members every capability kind is checked for by NAME rather
+#: than through its descriptor's per-kind sets: ``_metadata_error`` reads
+#: ``name`` and ``description`` (``capabilities/conformance.py:120-125``)
+#: and ``_version_error`` reads ``contract_version``
+#: (``capabilities/conformance.py:256-257``). They are named here because
+#: they are named there; everything else must come off the descriptor.
+_UNIVERSALLY_CHECKED = frozenset({"name", "description", "contract_version"})
+
+
+def test_the_descriptor_declares_every_secret_backend_protocol_member() -> None:
+    """``secret-backend`` is the one kind whose contract is a Protocol, so
+    ``issubclass`` cannot check it (``conformance.py:96-97`` returns early)
+    and ``inspect.isabstract`` has nothing to find. The descriptor's
+    ``required_operations`` and ``required_attributes`` ARE the enforcement,
+    and only for the members they happen to list: add a member to
+    ``SecretBackend`` without adding it there and a backend omitting it
+    seats cleanly, then raises ``AttributeError`` in the resolve loop, at
+    runtime, on the operator.
+
+    So this asserts the INVARIANT, that the declared sets partition the
+    Protocol, rather than pinning today's names. Both sets are derived from
+    ``SecretBackend`` itself: a Protocol member that is a function is an
+    operation, and everything else is an attribute. The split matters as
+    much as the coverage, because the two checks are not equally strong:
+    an operation is checked for being CALLABLE
+    (``conformance.py:164``) and an attribute only for being PRESENT
+    (``conformance.py:138``), so a new method filed under attributes would
+    let a backend seat with a non-callable of the same name.
+    """
+    import inspect
+
+    from agentworks.secrets.backends import SecretBackend
+    from agentworks.secrets.kinds import SECRET_BACKEND_DESCRIPTOR as descriptor
+
+    # `typing` computes this when a Protocol class is created; the stubs do
+    # not declare it. Read unguarded on purpose: if a future Python stops
+    # publishing it, this test has to fail rather than quietly check nothing.
+    members = set(SecretBackend.__protocol_attrs__)  # type: ignore[attr-defined]
+    operations = {name for name in members if inspect.isfunction(getattr(SecretBackend, name, None))}
+
+    assert members >= _UNIVERSALLY_CHECKED
+    assert descriptor.required_operations == operations
+    assert descriptor.required_attributes == members - operations - _UNIVERSALLY_CHECKED
+
+
 def test_synthesize_raises() -> None:
     kind = KIND_REGISTRY["secret-backend"]
     with pytest.raises(NoUnreferencedDefaultError):

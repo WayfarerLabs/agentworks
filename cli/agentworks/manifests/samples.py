@@ -17,16 +17,17 @@ lines into ordinary YAML comments; ``manifests/skeleton.py`` owns it.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal
+import os
+import stat
+import tempfile
+from pathlib import Path
+from typing import Literal
 
 from agentworks.errors import ValidationError
 from agentworks.manifests.reference import kind_reference
 from agentworks.manifests.skeleton import skeleton_text
 from agentworks.manifests.spec_model import declarable_kinds
 from agentworks.resources import KIND_REGISTRY
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 _SUFFIXES = {".yaml", ".yml"}
 
@@ -135,7 +136,7 @@ def write_sample(
             resources_dir=resources_dir,
             kinds=_validated_kinds(kind, all_kinds),
         )
-        target.write_text(body, encoding="utf-8")
+        _replace_atomically(target, body)
         if restamped:
             # The line now names the envelope schema, so that file has to
             # be there for the same reason a created file's does.
@@ -145,6 +146,56 @@ def write_sample(
     target.write_text(f"{header}\n{text}", encoding="utf-8")
     write_schema_set(resources_dir / SCHEMA_DIRNAME)
     return target, "created"
+
+
+def _replace_atomically(target: Path, text: str) -> None:
+    """Put ``text`` in ``target``, or leave ``target`` exactly as it was.
+
+    An append is a read-then-write over a manifest the OPERATOR wrote, and
+    a plain write truncates before it writes. An interrupt between the two
+    (a Ctrl-C, a full disk, a killed terminal) leaves the operator with an
+    empty or half-written file whose original content is now nowhere:
+    this command read it into memory and is the only thing that still has
+    it. So the new content goes to a temp file that is fully on disk
+    before anything replaces the original, and the replacement itself is
+    one rename.
+
+    Three details carry the guarantee, and none of them is optional:
+
+    - the temp file is made in the TARGET'S directory, because
+      ``os.replace`` is only atomic within a filesystem, and a resources
+      directory can be a mount of its own;
+    - it is flushed AND fsynced, so the rename cannot expose a file whose
+      bytes are still in the page cache after a power loss;
+    - it is dot-prefixed, so the one residue a ``SIGKILL`` can leave (a
+      temp file with no rename after it) is a name the manifest loader
+      skips, exactly as it skips the generated schema directory. See
+      :func:`_validated_target`.
+
+    The target's permission bits are carried over, because ``mkstemp``
+    creates 0600 and appending to a manifest must not quietly narrow a
+    file the operator chose to share. Ownership is not carried over, and
+    does not need to be: this writes under the operator's own resources
+    directory, as the operator.
+
+    Only the replacing path uses this. A file being CREATED has no
+    content to lose, and routing it through here would hand it 0600
+    rather than the mode the operator's umask asks for.
+    """
+    fd, tmp_name = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.", suffix=".tmp")
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        tmp.chmod(stat.S_IMODE(target.stat().st_mode))
+        os.replace(tmp, target)
+    finally:
+        # A no-op on the success path: the rename consumed the temp file.
+        # On every failing one, including an interrupt, this is what keeps
+        # the residue from accumulating in the operator's directory.
+        tmp.unlink(missing_ok=True)
 
 
 def _joined(existing: str, text: str) -> str:

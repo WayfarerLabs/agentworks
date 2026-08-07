@@ -14,6 +14,7 @@ because a curated file could be fixed by hand and a renderer cannot.
 from __future__ import annotations
 
 import re
+import stat
 from pathlib import Path
 
 import pytest
@@ -44,6 +45,14 @@ def _capability_kinds() -> list[str]:
     return [name for name, handler in KIND_REGISTRY.items() if handler.category == "capability"]
 
 
+def _registered_kinds() -> list[str]:
+    """Every kind the registry holds, whatever its category: the set the
+    two partitions above have to add up to."""
+    from agentworks.resources import KIND_REGISTRY
+
+    return list(KIND_REGISTRY)
+
+
 # --- what gets sampled ------------------------------------------------
 
 
@@ -57,12 +66,25 @@ def test_every_declarable_kind_renders() -> None:
         assert sample_text(kind).strip()
 
 
-def test_no_capability_kind_is_sampleable() -> None:
+def test_every_registered_kind_is_declarable_or_a_capability() -> None:
     """A kind is sampleable exactly when a document of it can exist, which
-    is the registry's own per-kind category. Pin that the two stay
-    identical so a future capability kind cannot slip into the set and make
-    ``--all`` fail on a kind with no document."""
-    assert set(declarable_kinds()).isdisjoint(_capability_kinds())
+    is the registry's own per-kind ``category``.
+
+    The assertion that used to stand here was that the two sets are
+    DISJOINT, which no registry contents could ever violate: both are
+    ``KIND_REGISTRY`` filtered on complementary values of one field
+    (``spec_model.declarable_kinds``, and ``_capability_kinds`` above), so
+    an overlap is unrepresentable and the test could only ever pass.
+
+    Coverage is the property that can actually break, and it breaks
+    loudly. ``agw resource kinds`` lists straight from the registry
+    (``cli/commands/resource.py:155``), so a kind whose category is
+    neither value is offered to the operator; ``resource sample`` then
+    misses the capability-kind refusal it falls through
+    (``manifests/samples.py:238``) and answers "unknown kind" about a kind
+    the CLI just listed, and no schema is emitted for it either.
+    """
+    assert set(declarable_kinds()) | set(_capability_kinds()) == set(_registered_kinds())
 
 
 def test_secret_backend_has_no_sample() -> None:
@@ -339,6 +361,59 @@ def test_a_third_append_separates_from_the_second(tmp_path: Path) -> None:
         ("secret", "my-secret"),
         ("apt-package", "my-apt-package"),
     }
+
+
+def test_an_append_that_dies_at_the_commit_point_leaves_the_manifest_whole(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An append is a read-then-write over a file the OPERATOR authored,
+    and this command holds the only copy of the old content between the
+    two. A plain write truncates first, so anything that stops it (a
+    Ctrl-C, a full disk) used to leave the operator with an empty or
+    half-written manifest and nowhere to get the original back from.
+
+    The failure is induced at ``os.replace``, because that is the only
+    moment the target is touched at all: everything before it happens to a
+    temp file. A write that truncates in place has no such moment, which
+    is why this fails against one (nothing raises, and the manifest comes
+    back appended-to rather than untouched).
+    """
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    manifest = resources / "mine.yaml"
+    original = "apiVersion: agentworks/v1\nkind: vm-template\nmetadata:\n  name: dev\nspec:\n  cpus: 4\n"
+    manifest.write_text(original, encoding="utf-8")
+
+    def _interrupted(*_args: object, **_kwargs: object) -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("agentworks.manifests.samples.os.replace", _interrupted)
+
+    with pytest.raises(KeyboardInterrupt):
+        write_sample(resources, "mine.yaml", "secret")
+
+    assert manifest.read_text(encoding="utf-8") == original
+    # And no residue: the temp file is dot-prefixed, so a leftover would
+    # be invisible to the loader AND to the operator listing the directory.
+    assert [path.name for path in resources.iterdir()] == ["mine.yaml"]
+
+
+def test_an_append_keeps_the_permission_bits_the_operator_chose(tmp_path: Path) -> None:
+    """Writing through a temp file means the mode comes from ``mkstemp``
+    (0600) unless it is carried over deliberately, so an append could
+    silently narrow a manifest the operator had made group-readable.
+    Nothing about appending a sample is a reason to change who can read
+    the file."""
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    manifest = resources / "mine.yaml"
+    manifest.write_text("apiVersion: agentworks/v1\nkind: secret\n", encoding="utf-8")
+    manifest.chmod(0o640)
+
+    write_sample(resources, "mine.yaml", "secret")
+
+    assert stat.S_IMODE(manifest.stat().st_mode) == 0o640
 
 
 def test_writing_into_a_file_that_exists_and_is_blank_emits_no_separator(tmp_path: Path) -> None:

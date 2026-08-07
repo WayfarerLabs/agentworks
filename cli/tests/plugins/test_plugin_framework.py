@@ -433,6 +433,61 @@ def test_capability_clash_with_a_core_builtin_names_it_as_such() -> None:
     assert "lima" in message
 
 
+def test_a_plugin_redeclaring_a_core_builtins_own_class_still_collides() -> None:
+    """Idempotency is a property of the SEATER, not of the class.
+
+    ``LimaPlatform`` is a core built-in, so a plugin declaring the class
+    ITSELF matched the seated occupant by identity and skipped seating as
+    an "idempotent re-registration". Nothing recorded the plugin, because
+    only the seat loop records provenance, so ``plugin_seated_names``
+    never learned about it, the built-in publisher published the row it
+    always publishes, and ``publish_plugins`` published the plugin's row
+    on top. The operator got ``Registry.add``'s collision at bootstrap,
+    which names the kind and the name and NOT the plugin that caused it.
+
+    Same collision either way; what this restores is the one fact the
+    operator needs and the phase early enough to carry it.
+    """
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+
+    plugin = Plugin(name="p", capabilities={"vm-platform": (LimaPlatform,)})
+    before = _snapshot_registries()
+
+    with pytest.raises(PluginError) as exc:
+        register_plugin(plugin)
+
+    message = str(exc.value)
+    assert "'p'" in message
+    assert "core built-in" in message
+    assert "lima" in message
+    assert _snapshot_registries() == before
+
+
+def test_a_shipped_plugin_owns_every_capability_name_it_declares() -> None:
+    """The invariant the collision message protects, over the real
+    inventory: publication routes on ``plugin_seated_names``, so a name a
+    plugin declares but did not SEAT is published twice, once by the
+    built-in publisher that still thinks it owns the name and once by
+    ``publish_plugins``, which reads the descriptor.
+
+    Asserted as "every declared name is attributed to its declarer"
+    rather than against a list of today's names, so a plugin that adopts
+    a built-in's class in future fails here rather than at an operator's
+    bootstrap.
+    """
+    from agentworks.plugins.publish import _NamedImpl
+    from agentworks.plugins.registration import _PLUGIN_SEATED
+
+    for plugin in SYSTEM_PLUGINS.values():
+        for kind, impls in plugin.capabilities.items():
+            for impl in impls:
+                # The same narrowing publication itself does: the descriptor
+                # types impls as bare ``type``, and ``register_plugin`` has
+                # already validated that ``name`` is a usable str.
+                name = cast("_NamedImpl", impl).name
+                assert _PLUGIN_SEATED.get((kind, name)) == plugin.name, (plugin.name, kind, name)
+
+
 def test_capability_clash_between_two_plugins_names_the_other_plugin() -> None:
     first_impl = conforming_impl("vm-platform", "x")
     second_impl = conforming_impl("vm-platform", "x")  # same name, different class
