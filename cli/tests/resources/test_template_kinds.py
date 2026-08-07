@@ -27,6 +27,7 @@ from agentworks.resources import (
 )
 from agentworks.resources.graph import FinalizeContext
 from agentworks.sessions.template import SessionTemplate
+from agentworks.vms.template import VMTemplate
 from agentworks.workspaces.template import WorkspaceTemplate
 from tests.conftest import ManifestDoc, write_cfg
 
@@ -39,7 +40,12 @@ class _KindSpec:
     expected_type: type
 
 
+#: Every kind whose rows inherit. All four behave identically here, which
+#: is the point of the parametrization: what makes one an inheriting kind
+#: is its ``auto-declare`` miss policy and its ``inherits`` field, not
+#: anything per kind, so a fifth arrives by being added to this tuple.
 SPECS: tuple[_KindSpec, ...] = (
+    _KindSpec("vm-template", VMTemplate),
     _KindSpec("agent-template", AgentTemplate),
     _KindSpec("workspace-template", WorkspaceTemplate),
     _KindSpec("session-template", SessionTemplate),
