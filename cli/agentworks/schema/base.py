@@ -35,8 +35,8 @@ from weakref import WeakKeyDictionary
 from pydantic import BaseModel, ConfigDict, Field, RootModel, model_validator
 
 from agentworks.errors import StateError
-from agentworks.schema._shape import marker_of
-from agentworks.schema.markers import RefOwner
+from agentworks.schema._shape import marker_of, model_fields_of, shape_of
+from agentworks.schema.markers import REF_SCHEMA_KEY, RefOwner
 
 if TYPE_CHECKING:
     from pydantic import GetJsonSchemaHandler, ValidationInfo
@@ -49,10 +49,8 @@ if TYPE_CHECKING:
 #: the context with :func:`validation_context` rather than spelling it.
 OWNER_CONTEXT_KEY: Final = "owner"
 
-#: Per-class cache for :func:`_owner_templated_fields`.
-_TEMPLATED_FIELD_CACHE: Final[WeakKeyDictionary[type[BaseModel], tuple[tuple[str, RefMarker], ...]]] = (
-    WeakKeyDictionary()
-)
+#: Per-class cache for :func:`_marked_fields`.
+_MARKED_FIELD_CACHE: Final[WeakKeyDictionary[type[BaseModel], tuple[tuple[str, RefMarker], ...]]] = WeakKeyDictionary()
 
 # The settings both bases share. Kept as one literal so the two configs
 # below cannot drift; the ONLY intended difference between them is
@@ -139,8 +137,9 @@ class AgwModel(BaseModel):
         core_schema: CoreSchema,
         handler: GetJsonSchemaHandler,
     ) -> JsonSchemaValue:
-        """An owner-templated field is neither required nor non-nullable.
+        """Two corrections emitted schema needs and pydantic cannot make.
 
+        **An owner-templated field is neither required nor non-nullable.**
         The before-validator above resolves such a field from its marker,
         and it treats an omitted value and an explicit ``null`` alike, on
         purpose: reference extraction makes the same call, so the two
@@ -155,28 +154,41 @@ class AgwModel(BaseModel):
         - nullable, or it red-underlines ``token: null``, which is that
           same instruction spelled out, and which loads today.
 
+        **Every marked field carries its ``x-agw-ref`` on the property
+        itself**, which is the position the marker's whole purpose depends
+        on being readable; see :func:`_ref_at_top_level`. That half runs
+        for every marked field, templated or not, because the widening
+        above is only one of the two ways a marker ends up buried.
+
         Stated here, on the class that does the filling, rather than in
-        the emitter: the rule is a property of this model's validation
-        behavior, and a consumer correcting for it downstream would be a
-        second place to keep in sync. The field keeps its ``x-agw-ref``,
-        so a hover still shows what the omission resolves to.
+        the emitter: both rules are properties of this model's validation
+        behavior, and a consumer correcting for them downstream would be a
+        second place to keep in sync.
         """
         json_schema = handler(core_schema)
-        templated = {name for name, _marker in _owner_templated_fields(cls)}
-        if not templated:
+        marked = _marked_fields(cls)
+        if not marked:
             return json_schema
+        templated = {name for name, marker in marked if marker.default_template is not None}
         # The model's schema may arrive as a ``$ref`` into ``$defs``; the
         # required list and the properties live on the definition it
         # points at.
         resolved = handler.resolve_ref_schema(json_schema)
-        required = [name for name in resolved.get("required", ()) if name not in templated]
-        if required:
-            resolved["required"] = required
-        else:
-            resolved.pop("required", None)
+        if templated:
+            required = [name for name in resolved.get("required", ()) if name not in templated]
+            if required:
+                resolved["required"] = required
+            else:
+                resolved.pop("required", None)
         properties = resolved.get("properties", {})
-        for name in templated & set(properties):
-            properties[name] = _nullable(properties[name])
+        for name, _marker in marked:
+            # A hidden field (``SkipJsonSchema``) has no property to
+            # correct, which is the same absence the field-reference
+            # stream honors.
+            prop = properties.get(name)
+            if prop is None:
+                continue
+            properties[name] = _ref_at_top_level(_nullable(prop) if name in templated else prop)
         return json_schema
 
 
@@ -230,6 +242,40 @@ def _nullable(prop: JsonSchemaValue) -> JsonSchemaValue:
     return {"anyOf": [inner, {"type": "null"}], **outer}
 
 
+def _ref_at_top_level(prop: JsonSchemaValue) -> JsonSchemaValue:
+    """``prop`` with its ``x-agw-ref`` on the property itself.
+
+    A marker says what THE FIELD means, so the property is the one place
+    a reader should have to look for it. Pydantic puts it wherever the
+    ``Annotated`` sat, which for the two shapes a marked optional takes
+    (``Annotated[str, SecretRef(...)] | None`` natively, and a required
+    templated field after :func:`_nullable` widens it) is inside one
+    ``anyOf`` branch. Buried there an editor hover shows nothing, and
+    every consumer has to search a subtree to answer "does this field
+    name a Resource?", which is a question the property should answer.
+
+    A COLLECTION's element marker is deliberately untouched: it describes
+    one element rather than the field, so ``items`` is where it belongs
+    and where the walkers read it. Only the property's own branches are
+    considered here, so an element marker one level down is never lifted
+    onto the field that holds it.
+    """
+    if REF_SCHEMA_KEY in prop:
+        return prop
+    keyword = next((candidate for candidate in ("anyOf", "oneOf") if candidate in prop), None)
+    if keyword is None:
+        return prop
+    branches: list[JsonSchemaValue] = prop[keyword]
+    # The first is the only one, because a field carries ONE marker:
+    # ``marker_of`` reads the first on the field's spine, so a second
+    # branch could only repeat the same authored fact.
+    extension = next((branch[REF_SCHEMA_KEY] for branch in branches if REF_SCHEMA_KEY in branch), None)
+    if extension is None:
+        return prop
+    lifted = [{key: value for key, value in branch.items() if key != REF_SCHEMA_KEY} for branch in branches]
+    return {**prop, keyword: lifted, REF_SCHEMA_KEY: extension}
+
+
 def _accepts_null(prop: JsonSchemaValue) -> bool:
     """Whether ``prop`` already permits ``null``.
 
@@ -252,26 +298,113 @@ def validation_context(owner: RefOwner) -> dict[str, object]:
     return {OWNER_CONTEXT_KEY: owner}
 
 
-def _owner_templated_fields(model_cls: type[BaseModel]) -> tuple[tuple[str, RefMarker], ...]:
-    """The model's own fields whose marker declares a default template,
-    in declaration order.
+def _marked_fields(model_cls: type[BaseModel]) -> tuple[tuple[str, RefMarker], ...]:
+    """The model's own fields carrying a reference marker on the field
+    ITSELF, in declaration order.
 
-    Scalar fields only: a marked list has no single default identity, and
-    a nested model fills its own fields when it is validated.
-
-    Cached per class, since it is a pure function of the class and this
-    runs on every validation of every model. The cache is weak so a
-    model class defined inside a function (a test, mostly) is still
-    collectable.
+    Cached per class, since it is a pure function of the class and the
+    filling above runs on every validation of every model. The cache is
+    weak so a model class defined inside a function (a test, mostly) is
+    still collectable.
     """
-    cached = _TEMPLATED_FIELD_CACHE.get(model_cls)
+    cached = _MARKED_FIELD_CACHE.get(model_cls)
     if cached is not None:
         return cached
-    templated: list[tuple[str, RefMarker]] = []
+    marked: list[tuple[str, RefMarker]] = []
     for name, field in model_cls.model_fields.items():
         marker = marker_of(field)
-        if marker is not None and marker.default_template is not None:
-            templated.append((name, marker))
-    computed = tuple(templated)
-    _TEMPLATED_FIELD_CACHE[model_cls] = computed
+        if marker is not None:
+            marked.append((name, marker))
+    computed = tuple(marked)
+    _MARKED_FIELD_CACHE[model_cls] = computed
     return computed
+
+
+def _owner_templated_fields(model_cls: type[BaseModel]) -> tuple[tuple[str, RefMarker], ...]:
+    """The marked fields whose marker declares a default template.
+
+    Scalar fields only, and now provably so:
+    :func:`reference_marker_error` refuses a marker on a collection or on
+    a nested block at registration, so the filling above can write a
+    rendered name straight into the field. It was a comment here before
+    that, which is a promise no shape had to keep.
+
+    Filtered off :func:`_marked_fields` rather than cached separately: a
+    model has at most a handful of marked fields and most have none, so
+    the walk this saves is the expensive half.
+    """
+    return tuple((name, marker) for name, marker in _marked_fields(model_cls) if marker.default_template is not None)
+
+
+def reference_marker_error(model_cls: type[BaseModel]) -> str | None:
+    """Why one of ``model_cls``'s reference markers cannot mean what it
+    says, or ``None`` when every one of them can.
+
+    A marker names ONE Resource, so it belongs on a field that holds one
+    name. Put on a field that holds MANY, or on one that opens a block,
+    nothing in this layer can honor it, and each of the three consumers
+    fails differently and silently:
+
+    - validation writes the marker's rendered default where a list or a
+      table belongs, then rejects the field on a key the operator never
+      wrote;
+    - emitted schema widens the COLLECTION with a null arm rather than
+      its elements, and hangs the marker off the whole field;
+    - reference extraction reads the field as a scalar, so it emits a
+      bogus edge for the rendered default and none of the edges the
+      elements actually imply.
+
+    Refused here rather than handled at those three sites, because the
+    mistake is an author's and has exactly one fix: move the marker onto
+    the element type (``list[Annotated[str, ResourceRef(...)]]``, which is
+    how every shipped collection spells it) or onto the block's own
+    field. Registration conformance runs this over an implementation's
+    declared config model, so a plugin author sees it at registration
+    rather than an operator seeing its consequences at load.
+
+    Recursive over the same shapes validation reaches, since a nested
+    block, a collection's element model, and a union arm each fill and
+    extract on their own. A model that cannot be built reports nothing:
+    it has no fields to judge, and its own check
+    (:func:`~agentworks.schema.model_is_complete`) already refuses it.
+    """
+    return _marker_error(model_cls, ())
+
+
+#: How a field that cannot carry a marker holds its value, by the
+#: :class:`~agentworks.schema._shape.FieldShape` attribute that says so.
+_UNMARKABLE_SHAPES: Final = (
+    ("collection", "holds many values"),
+    ("nested_model", "opens a nested block"),
+    ("arms", "selects a discriminated union arm"),
+)
+
+
+def _marker_error(model_cls: type[BaseModel], visiting: tuple[type[BaseModel], ...]) -> str | None:
+    """:func:`reference_marker_error` over one model and everything it
+    reaches.
+
+    ``visiting`` is the current PATH, so a model reachable from itself
+    terminates, exactly as both walkers in this package handle it.
+    """
+    if model_cls in visiting:
+        return None
+    fields = model_fields_of(model_cls)
+    if fields is None:
+        return None
+    visiting = (*visiting, model_cls)
+    for name, field in fields.items():
+        shape = shape_of(field)
+        held = next((prose for attribute, prose in _UNMARKABLE_SHAPES if getattr(shape, attribute)), None)
+        if shape.marker is not None and held is not None:
+            return (
+                f"{model_cls.__name__}.{name} carries a reference marker on a field that {held}, "
+                f"where nothing can honor it; a marker names one Resource, so move it onto the "
+                f"value that names one"
+            )
+        for reachable in (shape.nested_model, shape.item_model, *(arm.model for arm in shape.arms)):
+            if reachable is not None:
+                reason = _marker_error(reachable, visiting)
+                if reason is not None:
+                    return reason
+    return None

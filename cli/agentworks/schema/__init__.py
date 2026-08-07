@@ -7,7 +7,9 @@ hand-validated lives here:
   closed-world bases every spec and capability config model extends.
 - :class:`SecretRef` / :class:`ResourceRef`, the ``Annotated`` markers
   that say what a field means about another Resource, and their
-  ``x-agw-ref`` JSON Schema encoding.
+  ``x-agw-ref`` JSON Schema encoding. :func:`reference_marker_error` is
+  the placement rule the three consumers of a marker all assume, checked
+  at registration so a marker nothing could honor is never declared.
 - :class:`CapabilityBlock`, the tagged table a hosting kind's spec field
   holds: the capability's name plus that capability's own config.
 - :func:`extract_references`, the total, never-raising reference
@@ -46,6 +48,7 @@ from agentworks.schema.base import (
     AgwRootModel,
     NonEmptyStr,
     PositiveInt,
+    reference_marker_error,
     validation_context,
 )
 from agentworks.schema.block import CapabilityBlock
@@ -97,6 +100,7 @@ __all__ = [
     "marker_of",
     "model_doc",
     "model_is_complete",
+    "reference_marker_error",
     "render_type",
     "validation_context",
 ]

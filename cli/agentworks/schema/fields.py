@@ -141,8 +141,9 @@ class FieldDoc:
 
     default_template: str | None
     """The owner-templated default name, unrendered: there is no owner at
-    this layer. Scalar fields only, since a list has no single default
-    identity."""
+    this layer. Scalar fields only, which
+    :func:`~agentworks.schema.reference_marker_error` enforces at
+    registration rather than leaving to authors to observe."""
 
     description: str | None
     choices: tuple[object, ...]
@@ -151,7 +152,11 @@ class FieldDoc:
     that wants the wire form reads ``.value``."""
 
     constraints: Mapping[str, object]
-    """Normalized to plain keys and plain values (``{"min_length": 1}``)."""
+    """Normalized to plain keys and plain values (``{"min_length": 1}``).
+
+    All from ONE carrier: the field's own spine, or its elements' when the
+    spine declares nothing. See :func:`_constraints_of` for why the two are
+    never merged."""
 
     examples: tuple[object, ...]
     """Values the field's author wrote as ``Field(examples=[...])``, in
@@ -333,7 +338,7 @@ def _default_of(field: FieldInfo) -> object:
 
 
 def _choices_of(annotation: object) -> tuple[object, ...]:
-    annotation, _optional = unwrap_optional(annotation)
+    annotation = _peeled(annotation)
     if get_origin(annotation) is Literal:
         return get_args(annotation)
     if isinstance(annotation, type) and issubclass(annotation, Enum):
@@ -341,32 +346,72 @@ def _choices_of(annotation: object) -> tuple[object, ...]:
     return ()
 
 
-def _constraints_of(field: FieldInfo) -> Mapping[str, object]:
-    """The field's constraints, from wherever the author spelled them.
+def _peeled(annotation: object) -> object:
+    """``annotation`` with its ``Annotated`` wrappers and its ``| None``
+    arms removed, however the two nest.
 
-    For a collection field these are the ELEMENT's constraints, matching
-    how ``ref`` reports the element's marker: both describe what one
-    value has to look like.
+    Both peels are needed at both depths, because pydantic keeps whichever
+    spelling the author used: ``Annotated[Literal[...] | None, Field(...)]``
+    hides the union inside the wrapper and
+    ``Annotated[Literal[...], Field(...)] | None`` hides the wrapper inside
+    the union. Peeling only one of the two reports an OPEN field for a
+    closed one, which reaches an operator as a sample with no values in it
+    and a describe line that lists none: a wrong answer with nothing to
+    signal it.
+
+    Terminates because each peel strictly reduces nesting, and both
+    helpers return their argument unchanged when there is nothing left to
+    remove.
     """
+    while True:
+        base, _metadata = split_annotated(annotation)
+        base, _optional = unwrap_optional(base)
+        if base is annotation:
+            return base
+        annotation = base
+
+
+def _constraints_of(field: FieldInfo) -> Mapping[str, object]:
+    """The field's constraints, from ONE carrier: its own spine when that
+    declares any, otherwise its elements'.
+
+    The same precedence ``ref`` uses (``shape.marker or shape.item_marker``),
+    and for the same reason: what the author spelled on the field wins, and
+    the elements answer for a field that says nothing itself, which is how
+    every shipped collection is written.
+
+    One carrier, never both merged. A list's ``min_length`` bounds how many
+    entries it holds and a string element's bounds how long one entry is;
+    flattened into a single mapping, the two arrive at
+    ``describe``/``sample`` spelled identically and an operator reads a
+    limit on the wrong thing. Reporting one carrier's facts can omit
+    something; merging them states something false.
+    """
+    spine = _constraints_in(spine_metadata(field))
+    return MappingProxyType(spine or _constraints_in(element_metadata(field)))
+
+
+def _constraints_in(metadata: list[object]) -> dict[str, object]:
+    """The normalized constraints one metadata list carries."""
     constraints: dict[str, object] = {}
-    for item in _constraint_carriers(field):
+    for item in _constraint_carriers(metadata):
         if isinstance(item, RefMarker):
             continue
         for key in _CONSTRAINT_KEYS:
             value = getattr(item, key, None)
             if value is not None:
                 constraints[key] = value
-    return MappingProxyType(constraints)
+    return constraints
 
 
-def _constraint_carriers(field: FieldInfo) -> Iterator[object]:
+def _constraint_carriers(metadata: list[object]) -> Iterator[object]:
     """Every metadata object that could carry a constraint.
 
     A ``Field(...)`` written inside an ``Annotated`` (rather than as the
     assigned default) survives as a nested ``FieldInfo`` holding its own
     metadata list, so that one level is flattened here.
     """
-    for item in (*spine_metadata(field), *element_metadata(field)):
+    for item in metadata:
         if isinstance(item, FieldInfo):
             yield from item.metadata
         else:

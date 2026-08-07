@@ -28,7 +28,7 @@ from agentworks.errors import (
     SecretMappingError,
 )
 from agentworks.plugins.onepassword import backend as op_mod
-from agentworks.plugins.onepassword.backend import OnePasswordBackend, _OpResult
+from agentworks.plugins.onepassword.backend import _FORMS_HINT, OnePasswordBackend, _OpResult
 from agentworks.resources.graph import Readiness
 from agentworks.schema import RefOwner
 from agentworks.secrets import active_backends, resolve_secrets
@@ -217,6 +217,58 @@ def test_mapping_accepts_valid_forms() -> None:
 def test_mapping_rejects_bad_forms(mapping: Any) -> None:
     with pytest.raises(ConfigError):
         _validate(mapping)
+
+
+@pytest.mark.parametrize(
+    ("mapping", "expected"),
+    [
+        pytest.param({"reference": "op://Work/npm/token"}, "account: is required", id="table-missing-account"),
+        pytest.param({"account": "acct"}, "reference: is required", id="table-missing-reference"),
+        pytest.param(
+            {"account": "acct", "reference": "op://Work/npm/token", "x": 1},
+            "x: unknown field; expected one of: account, reference",
+            id="table-unknown-key",
+        ),
+        pytest.param(
+            "Work/npm/token",
+            "must start with 'op://'",
+            id="string-missing-scheme",
+        ),
+    ],
+)
+def test_the_backends_own_revalidation_says_what_the_finalize_pass_says(mapping: Any, expected: str) -> None:
+    """``_resolved_ref`` re-validates a mapping defensively, and what it
+    reports has to be what an operator would have been told at load.
+
+    It used to read ``exc.errors()[0]['msg']``, which is whichever arm of
+    the string-or-table union pydantic tried first: every malformed TABLE
+    came back "Input should be a valid string", the one answer this
+    model's own before-validator exists to prevent, from the single
+    ``model_validate`` in the project that skipped the error bridge. The
+    two paths now produce the same text for the same mapping, which is the
+    property worth pinning: an operator has no way to know which one they
+    reached.
+    """
+    secret = _decl("s", backend_mappings={"onepassword": mapping})
+
+    with pytest.raises(ConfigError) as revalidated:
+        OnePasswordBackend().describe_lookup(secret, mapping)
+    with pytest.raises(ConfigError) as at_load:
+        _validate(mapping)
+
+    assert expected in str(revalidated.value)
+    assert str(revalidated.value) == str(at_load.value)
+
+
+def test_an_absent_mapping_is_framed_like_a_malformed_one() -> None:
+    """The other exit from ``_resolved_ref``. Same owner framing, and the
+    two accepted forms ride the ConfigError's ``hint`` rather than being
+    parenthesized into the message, which is where every other framed
+    config error puts its way forward."""
+    with pytest.raises(ConfigError) as exc:
+        OnePasswordBackend()._resolved_ref(_decl("s"), None)
+    assert "secret/s.backend_mappings.onepassword" in str(exc.value)
+    assert exc.value.hint == _FORMS_HINT
 
 
 def test_mapping_rejects_vault_item_field_table() -> None:

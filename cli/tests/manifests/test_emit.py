@@ -884,9 +884,10 @@ def test_reference_markers_reach_emitted_schema() -> None:
     marked field's ``x-agw-ref`` arriving in an emitted document is what
     says the two still read the same authored fact.
 
-    Searched recursively rather than at the property's top level: a
-    templated field is widened with a null arm, and the marker rides the
-    constrained arm, exactly as it does for a natively optional one.
+    Read through ``ref_extension``, which searches the subtree: a field's
+    own marker is on the property, and a collection's element marker is on
+    ``items``, so one reader covers both without knowing which shape it
+    was handed.
     """
     schema = document_schema("git-credential")
     marked = [

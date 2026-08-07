@@ -1,24 +1,21 @@
 """Reading an emitted property the way a consumer of the schema must.
 
-Two facts about a property are not where a first guess puts them, and
-both bit a test before they were centralized here.
-
-**A marker rides the branch its annotation sits on, not the property.**
-``Annotated[str, SecretRef(...)] | None`` emits
-
-    {"anyOf": [{"type": "string", "x-agw-ref": {...}}, {"type": "null"}],
-     "default": null, "title": "..."}
-
-and that is pydantic's own doing, with no agentworks hook involved (it
-puts the marker where the ``Annotated`` is). ``AgwModel`` widens an
-owner-templated field to exactly the same shape, so a reader that looked
-only at the property's top level would have been blind to the native case
-too, and silently: it would report "no reference here" for a field that
+A property's marker is not always at its top level, and a reader that
+assumed it was would silently report "no reference here" for a field that
 declares one.
 
-So: search the subtree. One rule for both shapes, and the rule holds for
-any future one, because it does not encode where pydantic happens to put
-things.
+**A field's own marker IS on the property.** ``AgwModel`` puts it there
+(``schema/base.py``, ``_ref_at_top_level``), whichever branch pydantic
+emitted it into: the string arm of ``Annotated[str, SecretRef(...)] | None``,
+or the constrained arm of a templated field the same hook widened.
+
+**A COLLECTION's element marker is not**, and should not be: it describes
+one element, so ``list[Annotated[str, ResourceRef(...)]]`` states it on
+``items`` where the walkers read it, and lifting it onto the field would
+claim the list itself names a Resource.
+
+So: search the subtree. One rule for both, and it does not encode where
+pydantic happens to put things.
 """
 
 from __future__ import annotations

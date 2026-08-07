@@ -12,7 +12,7 @@ from enum import Enum
 from typing import Annotated, Literal
 
 import pytest
-from pydantic import Field, StringConstraints
+from pydantic import AfterValidator, Field, StringConstraints
 
 from agentworks.errors import StateError
 from agentworks.schema import (
@@ -247,6 +247,44 @@ def test_an_open_field_reports_no_choices() -> None:
     assert docs(Constrained)[("nickname",)].choices == ()
 
 
+@pytest.mark.parametrize(
+    ("field_name", "expected"),
+    [
+        ("wrapper_in_the_union", ("x", "y")),
+        ("union_in_the_wrapper", ("x", "y")),
+        ("validated_enum", (Arch.ARM64, Arch.X86_64)),
+        ("described_enum", (Arch.ARM64, Arch.X86_64)),
+        ("bare_optional", ("x", "y")),
+        ("bare", ("x", "y")),
+    ],
+)
+def test_choices_survive_every_annotated_and_optional_spelling(field_name: str, expected: tuple[object, ...]) -> None:
+    """A closed field stays closed however its author nested ``Annotated``
+    and ``| None``.
+
+    Pydantic keeps the spelling that was written, so the annotation on the
+    record is ``Optional[Annotated[Literal[...], ...]]`` for one field and
+    ``Optional[Literal[...]]`` for the next, and a reader that peeled only
+    one wrapper reported an OPEN field for a closed one. That reaches an
+    operator as a describe line listing no values and a generated sample
+    with a placeholder instead of a real one: wrong, and with nothing to
+    signal that it is.
+    """
+
+    def keep(value: object) -> object:
+        return value
+
+    class Spellings(AgwModel):
+        wrapper_in_the_union: Annotated[Literal["x", "y"], Field(description="d")] | None = None
+        union_in_the_wrapper: Annotated[Literal["x", "y"] | None, Field(description="d")] = None
+        validated_enum: Annotated[Arch, AfterValidator(keep)] | None = None
+        described_enum: Annotated[Arch, Field(description="d")] | None = None
+        bare_optional: Literal["x", "y"] | None = None
+        bare: Literal["x", "y"] = "x"
+
+    assert docs(Spellings)[(field_name,)].choices == expected
+
+
 def test_constraints_are_normalized_to_plain_keys_and_values() -> None:
     assert dict(docs(Constrained)[("name",)].constraints) == {"min_length": 1, "pattern": "^[a-z]+$"}
     assert dict(docs(Constrained)[("cpus",)].constraints) == {"ge": 1, "le": 64}
@@ -374,6 +412,33 @@ def test_constraints_are_found_in_every_spelling(field_name: str, expected: dict
         plain: str = Field(default="xxxx", min_length=4)
 
     assert dict(docs(Spellings)[(field_name,)].constraints) == expected
+
+
+def test_a_collection_reports_one_carriers_constraints_not_a_mixture() -> None:
+    """A list's ``min_length`` bounds how many entries it holds; a string
+    element's bounds how long one entry is. Merged into a single mapping
+    they arrive at ``describe`` spelled identically, so an operator reads
+    a limit on the wrong thing and there is no way to tell.
+
+    The field's own spine wins whole, matching what ``ref`` does with a
+    marker (``shape.marker or shape.item_marker``): what the author
+    spelled on the field itself, and the elements' only when the field
+    says nothing. Reporting one carrier can omit a fact; reporting a mix
+    states one that is false.
+    """
+
+    class Bounded(AgwModel):
+        both: Annotated[
+            list[Annotated[str, Field(min_length=3)]],
+            Field(min_length=1, max_length=9),
+        ] = Field(default_factory=list)
+        elements_only: list[Annotated[str, Field(min_length=3)]] = Field(default_factory=list)
+        spine_only: list[str] = Field(default_factory=list, min_length=1)
+
+    entries = docs(Bounded)
+    assert dict(entries[("both",)].constraints) == {"min_length": 1, "max_length": 9}
+    assert dict(entries[("elements_only",)].constraints) == {"min_length": 3}
+    assert dict(entries[("spine_only",)].constraints) == {"min_length": 1}
 
 
 def test_each_arm_carries_its_own_identity() -> None:
