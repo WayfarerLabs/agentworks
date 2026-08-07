@@ -248,7 +248,13 @@ def _open_element(path: tuple[str, ...], by_path: dict[tuple[str, ...], list[Fie
     holder = next((entry for entry in container if entry.doc.path == path[:-1]), None)
     if holder is None or holder.doc.item_model is None or path[-1] != holder.doc.item_segment:
         return
-    _add_element(holder.doc, by_path, nested_model=holder.doc.item_model, union_arms=())
+    _add_element(
+        holder.doc,
+        by_path,
+        segment=path[-1],
+        annotation=holder.doc.item_model,
+        nested_model=holder.doc.item_model,
+    )
 
 
 def _open_tagged_element(doc: FieldDoc, by_path: dict[tuple[str, ...], list[FieldEntry]]) -> None:
@@ -268,6 +274,7 @@ def _open_tagged_element(doc: FieldDoc, by_path: dict[tuple[str, ...], list[Fiel
     _add_element(
         doc,
         by_path,
+        segment=doc.item_segment,
         annotation=_element_annotation(doc.item_union_arms),
         union_arms=doc.item_union_arms,
     )
@@ -289,18 +296,21 @@ def _add_element(
     holder: FieldDoc,
     by_path: dict[tuple[str, ...], list[FieldEntry]],
     *,
-    annotation: object = None,
+    segment: str,
+    annotation: object,
     nested_model: type[BaseModel] | None = None,
-    union_arms: tuple[UnionArm, ...],
+    union_arms: tuple[UnionArm, ...] = (),
 ) -> None:
     """Attach the element node ``holder`` holds many of, however it was
     reached.
 
     One synthesizer for both element shapes, so a collection of blocks and
     a collection of TAGGED blocks cannot come to different answers about
-    what an element is.
+    what an element is. What differs is what the element IS: one model,
+    whose fields the stream already streamed, or a choice among arms, one
+    of which :func:`_expanded` opens.
     """
-    path = (*holder.path, holder.item_segment or "")
+    path = (*holder.path, segment)
     element = replace(
         holder,
         path=path,
@@ -308,7 +318,7 @@ def _add_element(
         # nothing optional about it (writing the collection at all means
         # writing an element). What it CONTAINS follows: the stream's
         # fields for a plain block, the expanded arm's for a tagged one.
-        annotation=nested_model if annotation is None else annotation,
+        annotation=annotation,
         required=True,
         default=UNSET,
         default_template=None,
