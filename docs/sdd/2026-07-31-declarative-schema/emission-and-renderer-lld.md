@@ -233,6 +233,13 @@ document lines are `#` + the YAML, prose lines are `##` plus a space. Stripping 
 line turns the document lines into YAML and the prose lines into ordinary YAML comments. `--all`
 concatenates, with `#---` between documents.
 
+`#---` is itself a document line, and it belongs to CONCATENATION rather than to `--all`.
+**Corrected 2026-08-06, from the greenfield closeout verification:** `--write` into an existing file
+appended with no separator, so activating the addition folded its keys into the document above it
+and the load died on a duplicate `apiVersion`. Appending to a live hand-written manifest was the
+expensive shape, because it took down a resource that was already working. `samples._SEPARATOR` is
+now the one name both paths emit.
+
 The header carries the kind identifier, the kind's summary, and its overview, and not the authored
 title: the document below it says `kind: vm-site` already, and an operator scrolling a `--all` dump
 is looking for the identifier. The title is the field reference's heading.
