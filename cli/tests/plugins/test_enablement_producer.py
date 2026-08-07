@@ -277,20 +277,12 @@ def test_disabled_plugin_platform_withholds_its_config_implied_secret() -> None:
 # -- secret-backend -------------------------------------------------------------
 
 
-def test_disabled_plugin_backend_excluded_from_active_backends() -> None:
-    with seated_plugin(_capable_plugin()):
-        registry = Registry.empty()
-        _publish_builtin_backend(registry, "prompt")
-        _publish_capability(registry, "secret-backend", "fixture-backend")
-        registry.finalize(enablement_sources=[_plugin_source()])
-
-        assert registry.graph.enablement_of("secret-backend", "fixture-backend") is Enablement.disabled
-        config = cast(
-            "Config",
-            SimpleNamespace(secret_config_data=SimpleNamespace(backends=("fixture-backend", "prompt"))),
-        )
-        chain = [b.capability.name for b in active_backends(config, registry)]
-        assert chain == ["prompt"]  # fixture-backend excluded (disabled)
+# That a disabled plugin's backend is dropped from the resolution chain is
+# ``test_a_valid_mapping_to_a_disabled_backend_builds_and_stays_inert``
+# below, which makes the same two assertions (the node is disabled, and the
+# chain comes back as ``["prompt"]`` alone) over a registry that also
+# carries a well-formed mapping to the dormant backend, so it pins the
+# harder half of the same seam.
 
 
 def _registry_mapping_fixture_backend(mapping: MappingValue, *, publish_backend: bool = True) -> Registry:
