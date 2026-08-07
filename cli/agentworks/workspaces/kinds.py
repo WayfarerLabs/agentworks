@@ -36,7 +36,7 @@ class _WorkspaceTemplateKind:
 
     kind: str = "workspace-template"
     model: type[DeclaredResource] = WorkspaceTemplate
-    description: str = "Workspace configuration (repo, env, ...)"
+    description: str = "What a workspace clones, and the environment it runs in"
     prose: TopicProse = TopicProse(
         title="Workspace templates",
         overview="""

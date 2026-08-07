@@ -448,12 +448,13 @@ def test_emitted_schemas_accept_every_document_the_full_load_path_accepts(tmp_pa
     is why the two halves are ONE test over ONE set of documents rather
     than two that could drift onto different inputs.
 
-    The shipped plugins' platforms have to be seated, because the vm-site
-    sample declares azure, aws, and proxmox sites and the emitted union
-    describes what this host has REGISTERED. Importing
-    ``agentworks.plugins`` is what seats them (its module body registers
-    every shipped plugin), which this module's own imports already did;
-    the assert makes that dependency visible rather than lucky.
+    The shipped plugins' platforms have to be seated, because the emitted
+    union describes what this host has REGISTERED and the rendered samples
+    are validated against it. Seating is the emitter's own responsibility
+    now (``spec_model`` calls ``seat_installed_plugins``), so the assert
+    below is a premise check rather than a dependency this file arranges:
+    if it ever fails, the schemas these documents are checked against
+    describe a smaller host than the one that rendered them.
     """
     from agentworks.bootstrap import build_registry
     from agentworks.config import load_config

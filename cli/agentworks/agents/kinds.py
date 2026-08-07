@@ -48,7 +48,7 @@ class _AgentTemplateKind:
 
     kind: str = "agent-template"
     model: type[DeclaredResource] = AgentTemplate
-    description: str = "Agent user environment configuration (shell, tools, dotfiles, mise, ...)"
+    description: str = "How an agent user on a VM is set up"
     prose: TopicProse = TopicProse(
         title="Agent templates",
         overview="""

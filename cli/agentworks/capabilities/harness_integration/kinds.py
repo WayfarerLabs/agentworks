@@ -62,7 +62,7 @@ class _HarnessIntegrationKind:
     """Implementation of ``ResourceKind`` for ``"harness-integration"``."""
 
     kind: str = "harness-integration"
-    description: str = "Capability for running a session workload (shell, claude-code)"
+    description: str = "Capability for running a session's workload"
     prose: TopicProse = TopicProse(
         title="Harness integrations",
         overview="""

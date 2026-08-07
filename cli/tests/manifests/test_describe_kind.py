@@ -104,6 +104,25 @@ def test_a_host_kind_lists_the_arms_and_marks_the_one_shown() -> None:
     assert "- proxmox: Proxmox VE cluster VMs (clone + cloud-init)" in text
 
 
+def test_a_host_kind_gives_an_address_for_the_arms_it_did_not_expand() -> None:
+    """Listing five platforms and expanding one leaves the operator with no
+    way to read the other four, which is exactly the question the list
+    provokes."""
+    assert "`agw resource describe-kind vm-platform/" in _text("vm-site")
+
+
+def test_a_capability_kind_summary_does_not_enumerate_its_implementations() -> None:
+    """The summary renders directly above the live list from the registry,
+    so a parenthetical naming implementations is a second enumeration that
+    can go stale against the list below it. harness-integration's said
+    "(shell, claude-code)" from before codex shipped until 2.8's review."""
+    text = _text("harness-integration")
+    summary = text.splitlines()[1]
+
+    assert "codex" in text, "the registry list is what names them"
+    assert "(" not in summary, summary
+
+
 # --- what the surface does NOT need -----------------------------------
 
 

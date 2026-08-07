@@ -167,10 +167,14 @@ def test_uncommented_samples_build_a_registry(tmp_path: Path) -> None:
     so every reference a rendered document makes resolves at finalize and
     every capability config block validates against its own model.
 
-    The azure, aws, and proxmox plugins are enabled so a vm-site sample's
-    platform block reaches its platform's validation (a disabled platform's
-    site never does), which is what makes the rendered field names and
-    shapes actually checked rather than merely parsed as YAML.
+    The plugins are enabled for one reason: a disabled platform's site
+    never reaches its platform's validation, so the rendered capability
+    block would be parsed as YAML and never checked against the model it
+    claims to describe. The rendered vm-site writes the lima arm, whose
+    plugin is not among these; they are enabled so that the day the
+    rendered arm is a plugin's (a registration order change, a new
+    built-in), this test keeps checking what it says it checks instead of
+    quietly weakening.
     """
     from agentworks.bootstrap import build_registry
     from agentworks.config import load_config

@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 
 from agentworks.errors import StateError
-from agentworks.topics import TopicProse, prose_of
+from agentworks.topics import TopicProse, prose_of, summary_of
 
 PROSE = TopicProse(
     title="Fixture things",
@@ -51,6 +51,23 @@ def test_prose_of_reads_a_declared_record() -> None:
         prose = PROSE
 
     assert prose_of(Documented) is PROSE
+
+
+def test_summary_of_reads_the_declaration_that_already_exists() -> None:
+    """The contract's third authored string. Exported beside ``prose_of``
+    so a collector gathering all three does not have to re-derive the rule
+    that ``summary`` IS the ``description`` a kind or a capability class
+    already declares."""
+
+    class Described:
+        description = "a fixture thing, in one line"
+
+    class Blank:
+        description = ""
+
+    assert summary_of(Described) == "a fixture thing, in one line"
+    assert summary_of(Blank) is None
+    assert summary_of(object()) is None
 
 
 def test_prose_of_ignores_an_attribute_that_is_not_prose() -> None:

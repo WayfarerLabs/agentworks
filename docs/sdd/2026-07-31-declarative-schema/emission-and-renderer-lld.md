@@ -98,9 +98,16 @@ ALREADY declares exactly that, once:
 
 Restating it inside `TopicProse` would create two authored strings for one fact, which is precisely
 the drift FR13 exists to kill, and the smaller of the two would go stale first. So `summary` IS
-`description`, the mapping is documented on `TopicProse`, and where an existing description read
-like a table cell rather than an introduction it was rewritten in place, which improves
-`agw resource kinds` at the same time.
+`description`, and the mapping is documented on `TopicProse`.
+
+**Promoting a table cell to a summary raised the bar on eleven of them, and the review pass is where
+that was actually paid** (the first pass claimed the rewrite and did not do it; the claim is
+corrected here rather than left standing). Two shapes had to go. A parenthetical ENUMERATING the
+implementations, because `describe-kind` prints the summary directly above the live list from the
+registry, and harness-integration's had said "(shell, claude-code)" since before codex shipped: a
+stale enumeration rendered above the list that disproves it. And a parenthetical listing SOME
+fields, which is the one thing the prose contract forbids, in the field the design says is the prose
+summary. `agw resource kinds` reads better for the same edit.
 
 `title` is the display title (`"VM sites"`), used as the heading of `describe-kind` and available to
 the guide's topic pages. `overview` is voice-neutral markdown, shared verbatim by a reference

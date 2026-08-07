@@ -228,7 +228,7 @@ class _AptSourceKind:
     """Implementation of ``ResourceKind`` for ``"apt-source"``."""
 
     kind: str = "apt-source"
-    description: str = "3rd party apt repository definitions (key, source line)"
+    description: str = "A third-party apt repository, with its signing key"
     prose: TopicProse = TopicProse(
         title="Apt sources",
         overview="""

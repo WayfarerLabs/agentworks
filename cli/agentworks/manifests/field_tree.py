@@ -114,10 +114,17 @@ class FieldEntry:
     def sample_value(self) -> object:
         """The value a generated sample writes for this field.
 
-        In order: the author's first example, the one value a closed field
-        can hold (a union arm's tag), the field's own default where it is
-        worth showing, and finally a placeholder derived from the type.
-        ``UNSET`` for a field whose content is its children's.
+        In order: the author's first example, the ONE value a closed field
+        can hold, the field's own default where it is worth showing, and
+        finally a placeholder derived from the type. ``UNSET`` for a field
+        whose content is its children's.
+
+        The one-value step is the union arm's tag (``name: lima``), which is
+        the value rather than a choice among values. A field with SEVERAL
+        choices falls through to its default, because suggesting
+        ``tmux_layout: tiled`` beside a parenthetical reading "default:
+        aw-session-vertical" would offer an arbitrary pick as though it were
+        the recommended one; the type line already lists what may go there.
 
         An EMPTY default (``[]``, ``{}``, ``""``) is skipped in favor of the
         placeholder: it is the honest default and it teaches nothing, and a
@@ -126,12 +133,14 @@ class FieldEntry:
         """
         if self.doc.examples:
             return self.doc.examples[0]
-        if self.doc.choices:
+        if len(self.doc.choices) == 1:
             return _wire_value(self.doc.choices[0])
         if self.children:
             return UNSET
         if worth_showing(self.doc.default):
             return self.doc.default
+        if self.doc.choices:
+            return _wire_value(self.doc.choices[0])
         return _placeholder(self.type_label)
 
 

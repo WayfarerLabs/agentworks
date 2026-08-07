@@ -56,7 +56,7 @@ class _VMTemplateKind:
 
     kind: str = "vm-template"
     model: type[DeclaredResource] = VMTemplate
-    description: str = "VM configuration (sizing, installed tools, ...)"
+    description: str = "How a VM is sized, and what is installed on it"
     prose: TopicProse = TopicProse(
         title="VM templates",
         overview="""
@@ -120,7 +120,7 @@ class _AdminTemplateKind:
 
     kind: str = "admin-template"
     model: type[DeclaredResource] = AdminConfig
-    description: str = "VM admin user environment configuration (shell, tools, dotfiles, mise, ...)"
+    description: str = "How the admin user on a VM is set up"
     prose: TopicProse = TopicProse(
         title="Admin templates",
         overview="""

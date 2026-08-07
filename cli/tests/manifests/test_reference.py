@@ -84,11 +84,23 @@ def test_an_authored_example_is_what_the_sample_writes() -> None:
     assert "#  host: me@gpu-box" in _spec_lines(Exampled)
 
 
-def test_a_closed_field_writes_the_value_it_can_hold() -> None:
-    """``mode`` has two, so the first is written; a union arm's tag has
-    exactly one, which is what makes a rendered arm's ``name`` correct
-    rather than guessed."""
-    assert "#  # mode: fast" in _spec_lines(Exampled)
+def test_a_closed_field_with_ONE_value_writes_it() -> None:
+    """The union arm's tag: one value, so it is the value rather than a
+    choice among values, and that is what makes a rendered arm's ``name``
+    correct rather than guessed."""
+    assert "#    name: lima" in _spec_lines(SiteLike)
+
+
+def test_a_closed_field_with_SEVERAL_values_writes_its_default() -> None:
+    """``mode`` could hold either, and the type line already lists both.
+    Writing the first one would offer an arbitrary pick beside a
+    parenthetical naming a different default, which is what
+    ``tmux_layout`` did: suggested ``tiled``, said ``default:
+    aw-session-vertical``."""
+    lines = _spec_lines(Exampled)
+
+    assert "#  # mode: safe" in lines
+    assert "#  # mode: fast" not in lines
 
 
 def test_a_default_worth_showing_is_shown_and_an_empty_one_is_not() -> None:

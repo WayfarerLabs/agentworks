@@ -104,7 +104,21 @@ def _field(entry: FieldEntry, *, depth: int) -> Iterator[str]:
         shown = " (shown below)" if alternative.name == entry.rendered else ""
         summary = f": {alternative.summary}" if alternative.summary else ""
         yield f"{_INDENT * (depth + 1)}- {alternative.name}{shown}{summary}"
+    yield from _other_arms_pointer(entry, depth=depth + 1)
     yield from _fields(entry.children, depth=depth + 1)
+
+
+def _other_arms_pointer(entry: FieldEntry, *, depth: int) -> Iterator[str]:
+    """Where to read about the alternatives this field did not expand.
+
+    Listing four platforms by name and expanding one leaves an operator
+    with no address for the other three, which is exactly the question the
+    list provokes. The generated sample answers it; so should this.
+    """
+    other = next((alt for alt in entry.alternatives if alt.name != entry.rendered and alt.target), None)
+    if other is None:
+        return
+    yield f"{_INDENT * depth}`agw resource describe-kind {other.target}` for another one's fields."
 
 
 def _key(entry: FieldEntry) -> str:

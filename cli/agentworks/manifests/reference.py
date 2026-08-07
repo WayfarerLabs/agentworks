@@ -32,7 +32,7 @@ from agentworks.manifests.field_tree import Alternative, FieldEntry, field_tree,
 from agentworks.manifests.spec_model import declarable_kinds, hosted_capability, metadata_model, spec_model
 from agentworks.resources import KIND_REGISTRY
 from agentworks.schema import UNSET
-from agentworks.topics import prose_of
+from agentworks.topics import prose_of, summary_of
 
 if TYPE_CHECKING:
     from agentworks.capabilities.descriptor import CapabilityKindDescriptor
@@ -90,8 +90,15 @@ class SchemaReference:
 
 
 def describable_targets() -> tuple[str, ...]:
-    """Every target :func:`reference_for` accepts, sorted, for completion
-    and for the error that lists them."""
+    """Every target :func:`reference_for` accepts, sorted.
+
+    A declared service API rather than something a CLI surface consumes:
+    shell completion for ``describe-kind`` uses the config-free kinds
+    completer (which is deliberately narrower, since it must answer on a
+    host whose config does not load), and the unknown-kind refusal lists
+    the kind registry. This is for a caller that wants to ENUMERATE what
+    can be documented, which is what the guide's catalog does.
+    """
     from agentworks.capabilities.config import registered_implementations
 
     targets = list(declarable_kinds())
@@ -256,10 +263,9 @@ def _prose_of(subject: object) -> dict[str, str | None]:
     records why it is not restated as prose.
     """
     prose = prose_of(subject)
-    summary = getattr(subject, "description", None)
     return {
         "title": None if prose is None else prose.title,
-        "summary": summary if isinstance(summary, str) and summary else None,
+        "summary": summary_of(subject),
         "overview": None if prose is None else prose.overview,
     }
 

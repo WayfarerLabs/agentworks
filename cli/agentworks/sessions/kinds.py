@@ -45,7 +45,7 @@ class _SessionTemplateKind:
 
     kind: str = "session-template"
     model: type[DeclaredResource] = SessionTemplate
-    description: str = "Session configuration (command, resume, env)"
+    description: str = "The workload a session runs, and how it resumes"
     prose: TopicProse = TopicProse(
         title="Session templates",
         overview="""
@@ -100,7 +100,7 @@ class _NamedConsoleTemplateKind:
 
     kind: str = "named-console-template"
     model: type[DeclaredResource] = NamedConsoleConfig
-    description: str = "Named console configuration (layout, ...)"
+    description: str = "How a named console arranges its panes"
     prose: TopicProse = TopicProse(
         title="Named console templates",
         overview="""
@@ -114,12 +114,10 @@ class _NamedConsoleTemplateKind:
         restore-session, so changing it and running
         `agw console attach <name> --recreate` is enough to switch.
 
-        Most layout values map one to one onto tmux's own `select-layout` names, so the
-        same value can be applied live from a tmux key binding.
-        `aw-session-vertical` is agentworks' own: a single column with the session pane
-        on top and the shells stacked below it, computed per window from live tmux
-        dimensions. The `main-` layouts treat the session pane as the primary and stack
-        the shells beside it. The workspace-console generator does not read any of this.
+        Every layout but `aw-session-vertical` is a tmux built-in, so the same value can
+        be applied live from a `tmux select-layout` key binding; the ones named `main-`
+        treat the session pane as the primary and stack the shells beside it. The
+        workspace-console generator does not read any of this.
         """,
     )
     miss_policy: Literal["auto-declare", "error"] = "auto-declare"

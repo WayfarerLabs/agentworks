@@ -79,6 +79,20 @@ class TopicProse:
         object.__setattr__(self, "overview", cleaned)
 
 
+def summary_of(subject: object) -> str | None:
+    """``subject``'s one-line summary: the topic contract's ``summary``.
+
+    The other half of :func:`prose_of`, and the reason this module exports
+    a pair rather than one function. A consumer collecting the contract's
+    three authored strings needs to know where the third one comes from,
+    and "read the ``description`` a kind strategy or a capability class
+    declares" is a rule, not an obvious fact. Exported so the rule has one
+    implementation instead of being re-derived by each collector.
+    """
+    summary = getattr(subject, "description", None)
+    return summary if isinstance(summary, str) and summary else None
+
+
 def prose_of(subject: object) -> TopicProse | None:
     """``subject``'s prose, or ``None`` when it declares none.
 

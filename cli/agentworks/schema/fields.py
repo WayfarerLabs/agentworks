@@ -90,9 +90,13 @@ _SCALAR_RENDERINGS: Final[dict[object, str]] = {
     # What an operator WRITES, not what validation yields: both spellings
     # reach a `datetime` field through a before-validator (see
     # ``declared_resource.Expiry``), so naming the Python class here would
-    # tell them to write something YAML has no syntax for.
+    # tell them to write something YAML has no syntax for. `object` is the
+    # same problem in the other direction: it is Python's word for "any
+    # value", and it reaches an operator page through a mapping value type
+    # (a secret's `backend_mappings`).
     date: "date",
     datetime: "timestamp",
+    object: "any",
 }
 
 

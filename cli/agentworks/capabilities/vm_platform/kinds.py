@@ -48,7 +48,7 @@ class _VMPlatformKind:
     """Implementation of ``ResourceKind`` for ``"vm-platform"``."""
 
     kind: str = "vm-platform"
-    description: str = "Capability for running VMs on one backend kind (lima, wsl2, azure-vm, aws-ec2, proxmox)"
+    description: str = "Capability for running VMs on one backend"
     prose: TopicProse = TopicProse(
         title="VM platforms",
         overview="""

@@ -122,7 +122,7 @@ class _GitCredentialProviderKind:
     """Implementation of ``ResourceKind`` for ``"git-credential-provider"``."""
 
     kind: str = "git-credential-provider"
-    description: str = "Capability for provisioning git credentials based on the provider (github, azdo)"
+    description: str = "Capability for obtaining git tokens from one forge"
     prose: TopicProse = TopicProse(
         title="Git credential providers",
         overview="""
