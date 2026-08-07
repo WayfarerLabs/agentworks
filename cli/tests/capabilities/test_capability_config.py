@@ -251,6 +251,21 @@ def test_an_unknown_field_names_the_fields_that_are_valid(seated: None) -> None:
         _validate({"region": "eu", "regions": "eu"})
 
 
+def test_every_rejection_points_at_the_field_reference(seated: None) -> None:
+    """The capability-config counterpart of the declarable-kind path's
+    sample hint: an operator staring at a block they got wrong is told the
+    one command that renders what the block accepts. A capability's config
+    lives inside someone else's document, so `describe-kind KIND/NAME` is
+    the surface, not `sample`.
+    """
+    with pytest.raises(ConfigError) as caught:
+        _validate({"region": 8})
+
+    assert caught.value.hint == (
+        "`agw resource describe-kind vm-platform/fixture-platform` prints this implementation's fields"
+    )
+
+
 def test_the_raised_error_carries_its_own_framing(seated: None) -> None:
     """So the finalize pass's origin-suffix wrapper leaves it alone rather
     than framing it a second time."""

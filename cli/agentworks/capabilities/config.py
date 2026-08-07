@@ -139,14 +139,17 @@ def validate_capability_config(
     """
     descriptor = descriptor_for(kind)
     selected = selected_name(kind, config, name)
-    impl = None if selected is None else _seated_impl(descriptor, selected)
+    if selected is None:
+        return None
+    impl = _seated_impl(descriptor, selected)
     if impl is None:
         return None
+    hint = reference_hint(kind, selected)
     if descriptor.config_schema.discriminator is None:
         model = offered_model(impl, facet)
-        return _validated(model, config, owner=owner, location=location, provenance=provenance)
+        return _validated(model, config, owner=owner, location=location, hint=hint, provenance=provenance)
     union = capability_config_union(kind, facet)
-    validated = _validated(union, config, owner=owner, location=location, provenance=provenance)
+    validated = _validated(union, config, owner=owner, location=location, hint=hint, provenance=provenance)
     # The union is a root model, so the thing the capability was written
     # against is what it wraps, never the wrapper.
     return cast("BaseModel", validated.root)  # type: ignore[attr-defined]
@@ -378,15 +381,38 @@ def _class_name(kind: str) -> str:
     return "".join(part.capitalize() for part in kind.split("-"))
 
 
+def reference_hint(kind: str, name: str) -> str:
+    """Where an operator goes to see the capability config shape they got
+    wrong.
+
+    The counterpart of the declarable-kind path's sample hint
+    (``manifests.decode``): a kind's own fields are best seen as a document
+    to edit, while a capability's config is a block inside someone else's
+    document, so the field reference is the surface that answers it. Built
+    from the kind and the name for the same reason the sample hint is built
+    from the kind: a hand-kept per-capability steer would be a second
+    description of a shape that is already rendered.
+    """
+    return f"`agw resource describe-kind {kind}/{name}` prints this implementation's fields"
+
+
 def _validated(
     model: type[BaseModel],
     payload: object,
     *,
     owner: RefOwner,
     location: SourceLocation | None,
+    hint: str | None = None,
     provenance: Mapping[str, RefOwner] | None = None,
 ) -> BaseModel:
     try:
         return model.model_validate(payload, context=validation_context(owner))
     except PydanticValidationError as exc:
-        raise config_error_from(exc, model_cls=model, owner=owner, location=location, provenance=provenance) from exc
+        raise config_error_from(
+            exc,
+            model_cls=model,
+            owner=owner,
+            location=location,
+            hint=hint,
+            provenance=provenance,
+        ) from exc
