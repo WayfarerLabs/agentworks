@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
 from agentworks.errors import AgentworksError, ConfigError, ValidationError
+from agentworks.guide.assessment import OnboardingSnapshot
 from agentworks.guide.catalog import GuideCatalog, _build_guide_catalog
 from agentworks.guide.contract import (
     BlockId,
@@ -32,6 +33,7 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database
     from agentworks.guide.agent_mode import GuideMode
+    from agentworks.guide.assessment import VerificationEvidence
     from agentworks.resources import Registry
 
 _TOPIC_RE = re.compile(r"^[a-z][a-z0-9-]{0,62}(?:/[a-z][a-z0-9-]{0,62}){0,2}$")
@@ -103,10 +105,26 @@ def _dynamic_topic(registry: Registry | None, slug: str) -> TopicContribution:
 
 def _dynamic_names(registry: Registry) -> tuple[str, ...]:
     return tuple(sorted(KIND_REGISTRY)) + tuple(
-        f"{kind}/{name}"
-        for kind in sorted(KIND_REGISTRY)
-        for name, _resource in sorted(registry.iter_kind_items(kind))
+        f"{kind}/{name}" for kind in sorted(KIND_REGISTRY) for name, _resource in sorted(registry.iter_kind_items(kind))
     )
+
+
+def build_onboarding_snapshot(registry: Registry, db: Database) -> OnboardingSnapshot:
+    """Compose bounded onboarding facts through real anchor-scoped guide views."""
+    resources = []
+    instances = []
+    relationships = []
+    for kind in sorted(KIND_REGISTRY):
+        for name, _resource in sorted(registry.iter_kind_items(kind)):
+            view = build_guide_view(_dynamic_topic(registry, f"{kind}/{name}"), registry, db)
+            resources.append(view.me())
+            for instance in view.instances():
+                if instance not in instances:
+                    instances.append(instance)
+            for relationship in (*view.outbound(), *view.inbound()):
+                if relationship not in relationships:
+                    relationships.append(relationship)
+    return OnboardingSnapshot(tuple(resources), tuple(instances), tuple(relationships))
 
 
 def _normalize_requested(requested: tuple[str, ...]) -> tuple[str, ...]:
@@ -138,6 +156,7 @@ def render_guide(
     load_config_fn: Callable[[], Config] | None = None,
     load_registry_fn: Callable[[Config], Registry] | None = None,
     db: Database | None = None,
+    verification_evidence: tuple[VerificationEvidence, ...] = (),
 ) -> GuideResponse:
     """Build and render one atomic guide request with fail-soft live facts."""
     authored = build_authored_catalog()
@@ -174,9 +193,7 @@ def render_guide(
                 continue
             kind = slug.split("/", 1)[0]
             valid_dynamic = (
-                slug in dynamic_names
-                if registry is not None
-                else kind in KIND_REGISTRY and slug.count("/") <= 1
+                slug in dynamic_names if registry is not None else kind in KIND_REGISTRY and slug.count("/") <= 1
             )
             if not valid_dynamic:
                 raise _unknown(slug, all_names)
@@ -208,6 +225,15 @@ def render_guide(
                 db = cast("Database", _EmptyInventory())
         documents = []
         try:
+            onboarding_snapshot = None
+            if (
+                registry is not None
+                and system_error is None
+                and any(topic.topic == "concept-onboarding" for topic in selected)
+            ):
+                if db is None:
+                    raise RuntimeError("guide database was not constructed")
+                onboarding_snapshot = build_onboarding_snapshot(registry, db)
             for topic in selected:
                 view = None
                 unavailable = None
@@ -217,7 +243,16 @@ def render_guide(
                     view = build_guide_view(topic, registry, db)
                 else:
                     unavailable = "see the system failure below"
-                documents.append(render_topic(topic, view, mode, unavailable=unavailable).markdown.rstrip())
+                documents.append(
+                    render_topic(
+                        topic,
+                        view,
+                        mode,
+                        unavailable=unavailable,
+                        onboarding_snapshot=(onboarding_snapshot if topic.topic == "concept-onboarding" else None),
+                        verification_evidence=verification_evidence,
+                    ).markdown.rstrip()
+                )
         finally:
             if owned_db and db is not None:
                 db.close()

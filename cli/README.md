@@ -711,6 +711,20 @@ signature and stdout TTY fallback. Both modes carry the same semantic content. G
 instructional and never grants consent to resolve secrets, inspect the workstation, connect to a VM,
 or mutate state.
 
+`concept-onboarding` also renders a pure assessment of the projected registry, relationship, and
+stored-instance facts. It reports each fact as done, disabled, not ready, or unverifiable and emits
+only the still-applicable ordered action records. Verification evidence is caller-owned and scoped
+to one named target; a verified rerun is a no-op, while refusal keeps the documented manual
+alternative without executing or repeating the command.
+
+The guide service composes a frozen onboarding snapshot from registered exact-resource guide views.
+The assessment receives only their bounded fact records; it cannot traverse the registry, database,
+configuration, or operational capabilities.
+
+Phase 1 adds no CLI evidence flags. The CLI supplies an empty evidence tuple; direct guided,
+non-interactive, and future bootstrap service consumers may provide the typed tuple they own at the
+service boundary.
+
 Guide remains useful when configuration or registry finalization fails. Authored prose still
 renders, live blocks are marked unavailable, the framed failure appears once, and the command
 exits 1. `--names-only` emits one retained topic per line, degrades to authored topics plus
@@ -723,6 +737,18 @@ and PowerShell topic completion.
 | `agw guide TOPIC...`                 | Render one or more exact topics atomically       |
 | `agw guide TOPIC... --agent/--human` | Override automatic presentation mode             |
 | `agw guide --names-only`             | Emit topic names for shell completion            |
+
+### Guide management coverage
+
+The authored guide remains useful after initial setup. These operator goals have permanent entry
+points:
+
+| Goal                         | Guide coverage                                                       | Ordinary CLI surface                                                                        |
+| ---------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| Create or change a resource  | `concept-management`, then the bare kind and exact `kind/name` topic | The resource's owning command or canonical manifest                                         |
+| Adopt a capability           | `concept-management`, then the capability implementation topic       | `agw resource list --include-disabled` and the owning configuration surface                 |
+| Resolve upgrade deprecations | `concept-management`                                                 | Follow the emitted migration instruction before unrelated changes                           |
+| Troubleshoot                 | `concept-troubleshooting`                                            | Run `agw doctor` only with consent to examine the workstation; authorize repairs separately |
 
 ### Config
 
