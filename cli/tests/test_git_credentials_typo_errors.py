@@ -21,32 +21,18 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-@pytest.fixture()
-def ssh_keys(tmp_path: Path) -> tuple[Path, Path]:
-    pub = tmp_path / "id.pub"
-    priv = tmp_path / "id"
-    pub.write_text("ssh-ed25519 X")
-    priv.write_text("-----BEGIN-----")
-    return pub, priv
-
-
 def _write_cfg(
     tmp_path: Path,
-    ssh_keys: tuple[Path, Path],
     *,
     manifests: Sequence[ManifestDoc | str] = (),
 ) -> Path:
-    """``write_cfg`` under this file's keyword spelling. ``ssh_keys`` is
-    accepted and ignored; the shared helper writes the keypair itself."""
+    """``write_cfg`` under this file's keyword spelling."""
     return write_cfg(tmp_path, *manifests, filename="c.toml")
 
 
-def test_admin_referencing_undeclared_git_credential_errors_at_finalize(
-    tmp_path: Path, ssh_keys: tuple[Path, Path]
-) -> None:
+def test_admin_referencing_undeclared_git_credential_errors_at_finalize(tmp_path: Path) -> None:
     cfg = _write_cfg(
         tmp_path,
-        ssh_keys,
         manifests=[
             ManifestDoc(
                 "admin-template",
@@ -65,12 +51,9 @@ def test_admin_referencing_undeclared_git_credential_errors_at_finalize(
     assert "admin-template" in str(exc.value)
 
 
-def test_agent_template_referencing_undeclared_git_credential_errors(
-    tmp_path: Path, ssh_keys: tuple[Path, Path]
-) -> None:
+def test_agent_template_referencing_undeclared_git_credential_errors(tmp_path: Path) -> None:
     cfg = _write_cfg(
         tmp_path,
-        ssh_keys,
         manifests=[ManifestDoc("agent-template", "claude", {"git_credentials": ["github-typo"]})],
     )
     config = load_config(cfg, warn_issues=False)
@@ -80,13 +63,12 @@ def test_agent_template_referencing_undeclared_git_credential_errors(
     assert "agent-template" in str(exc.value)
 
 
-def test_declared_git_credential_does_not_error(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
+def test_declared_git_credential_does_not_error(tmp_path: Path) -> None:
     """The positive case: a declared credential resolves cleanly
     through the framework.
     """
     cfg = _write_cfg(
         tmp_path,
-        ssh_keys,
         manifests=[
             ManifestDoc("git-credential", "github", {"provider": {"name": "github"}}),
             ManifestDoc(

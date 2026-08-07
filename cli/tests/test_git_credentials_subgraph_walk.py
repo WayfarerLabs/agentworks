@@ -8,8 +8,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import pytest
-
 from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
 from tests.conftest import ManifestDoc, write_cfg
@@ -19,31 +17,17 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-@pytest.fixture()
-def ssh_keys(tmp_path: Path) -> tuple[Path, Path]:
-    pub = tmp_path / "id.pub"
-    priv = tmp_path / "id"
-    pub.write_text("ssh-ed25519 X")
-    priv.write_text("-----BEGIN-----")
-    return pub, priv
-
-
 def _write_cfg(
     tmp_path: Path,
-    ssh_keys: tuple[Path, Path],
     *,
     settings: str = "",
     manifests: Sequence[ManifestDoc | str] = (),
 ) -> Path:
-    """``write_cfg`` under this file's keyword spelling.
-
-    ``ssh_keys`` is accepted and ignored: the shared helper writes the
-    operator keypair itself, and no caller here reads the fixture's paths.
-    """
+    """``write_cfg`` under this file's keyword spelling."""
     return write_cfg(tmp_path, *manifests, settings=settings, filename="c.toml")
 
 
-def test_admin_to_git_credentials_to_secret_walk(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
+def test_admin_to_git_credentials_to_secret_walk(tmp_path: Path) -> None:
     """admin emits requirement for git_credentials:github;
     git_credentials:github emits requirement for secret:git-token-github;
     finalize walks the whole chain and auto-declares the secret with
@@ -52,7 +36,6 @@ def test_admin_to_git_credentials_to_secret_walk(tmp_path: Path, ssh_keys: tuple
     """
     cfg = _write_cfg(
         tmp_path,
-        ssh_keys,
         manifests=[
             ManifestDoc("git-credential", "github", {"provider": {"name": "github"}}),
             ManifestDoc(
@@ -79,10 +62,9 @@ def test_admin_to_git_credentials_to_secret_walk(tmp_path: Path, ssh_keys: tuple
     assert decl.origin.source == ("git-credential", "github")
 
 
-def test_agent_template_to_git_credentials_to_secret_walk(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
+def test_agent_template_to_git_credentials_to_secret_walk(tmp_path: Path) -> None:
     cfg = _write_cfg(
         tmp_path,
-        ssh_keys,
         # ``azdo`` ships in the opt-in ``azure`` system plugin; enable it so the
         # azdo credential is ready and the subgraph walk reaches its secret.
         settings="""
@@ -105,7 +87,7 @@ def test_agent_template_to_git_credentials_to_secret_walk(tmp_path: Path, ssh_ke
     assert decl.origin.source == ("git-credential", "azdo")
 
 
-def test_collect_secrets_for_walks_admin_subgraph(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
+def test_collect_secrets_for_walks_admin_subgraph(tmp_path: Path) -> None:
     """The ``collect_secrets_for`` helper walks the admin-template
     subgraph transitively (admin -> git_credentials -> secret) and
     returns the SecretDecls reachable along the way. Each token
@@ -115,7 +97,6 @@ def test_collect_secrets_for_walks_admin_subgraph(tmp_path: Path, ssh_keys: tupl
 
     cfg = _write_cfg(
         tmp_path,
-        ssh_keys,
         # ``azdo`` ships in the opt-in ``azure`` system plugin; enable it so the
         # azdo credential is ready and the admin subgraph walk reaches its secret.
         settings="""

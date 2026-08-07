@@ -31,18 +31,8 @@ backends = ["env-var"]
 """
 
 
-@pytest.fixture()
-def ssh_keys(tmp_path: Path) -> tuple[Path, Path]:
-    pub = tmp_path / "id.pub"
-    priv = tmp_path / "id"
-    pub.write_text("ssh-ed25519 X")
-    priv.write_text("-----BEGIN-----")
-    return pub, priv
-
-
 def _write_cfg(
     tmp_path: Path,
-    ssh_keys: tuple[Path, Path],
     *,
     settings: str = "",
     admin_env: dict[str, object] | None = None,
@@ -54,9 +44,6 @@ def _write_cfg(
     block, which is where an operator's secret-referencing env lives, so it
     is worth a spelling here. It is not shared vocabulary: one file wanting
     it does not make it everyone's.
-
-    ``ssh_keys`` is accepted and ignored; the shared helper writes the
-    keypair itself.
     """
     docs: list[ManifestDoc | str] = list(manifests)
     if admin_env is not None:
@@ -67,10 +54,9 @@ def _write_cfg(
 # -- Header section ---------------------------------------------------------
 
 
-def test_operator_declared_secret_shows_file_and_line(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
+def test_operator_declared_secret_shows_file_and_line(tmp_path: Path) -> None:
     cfg = _write_cfg(
         tmp_path,
-        ssh_keys,
         settings=_ENV_PROMPT,
         manifests=[ManifestDoc("secret", "api-key", description="API key for the operator's service")],
     )
@@ -93,7 +79,7 @@ def test_operator_declared_secret_shows_file_and_line(tmp_path: Path, ssh_keys: 
     assert desc.origin.line > 0
 
 
-def test_auto_declared_secret_shows_first_requirement_source(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
+def test_auto_declared_secret_shows_first_requirement_source(tmp_path: Path) -> None:
     """A secret referenced from `[admin.env]` but not declared in
     ``[secrets.*]`` auto-declares; the origin carries the structured
     source tuple and the description is synthesized so the list view
@@ -101,7 +87,6 @@ def test_auto_declared_secret_shows_first_requirement_source(tmp_path: Path, ssh
     """
     cfg = _write_cfg(
         tmp_path,
-        ssh_keys,
         settings=_ENV_PROMPT,
         admin_env={"API_KEY": {"secret": "auto-key"}},
     )
@@ -119,7 +104,7 @@ def test_auto_declared_secret_shows_first_requirement_source(tmp_path: Path, ssh
     assert desc.description == "(auto) the API_KEY env var for admin-template/default"
 
 
-def test_auto_declared_description_suffix_counts_other_sources(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
+def test_auto_declared_description_suffix_counts_other_sources(tmp_path: Path) -> None:
     """An auto-declared secret required by N distinct sources gets a
     ``" (and N-1 more)"`` suffix on the synthesized description (Origin
     names the first source; the suffix accounts for the rest). N
@@ -129,7 +114,6 @@ def test_auto_declared_description_suffix_counts_other_sources(tmp_path: Path, s
     """
     cfg = _write_cfg(
         tmp_path,
-        ssh_keys,
         settings=_ENV_PROMPT,
         admin_env={"SHARED_KEY": {"secret": "shared"}},
         manifests=[
@@ -161,13 +145,12 @@ def test_auto_declared_description_suffix_counts_other_sources(tmp_path: Path, s
 # -- Usages section ---------------------------------------------------------
 
 
-def test_multiple_usages_render_one_row_each(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
+def test_multiple_usages_render_one_row_each(tmp_path: Path) -> None:
     """A secret referenced by three sources shows three usage rows; the
     sources are distinct so the dedupe step does nothing.
     """
     cfg = _write_cfg(
         tmp_path,
-        ssh_keys,
         admin_env={"ADMIN_KEY": {"secret": "shared-key"}},
         manifests=[
             ManifestDoc("secret", "shared-key", description="Used by admin and a template"),
@@ -189,13 +172,12 @@ def test_multiple_usages_render_one_row_each(tmp_path: Path, ssh_keys: tuple[Pat
     assert texts == ["the ADMIN_KEY env var", "the TEMPLATE_KEY env var"]
 
 
-def test_no_usages_for_unreferenced_operator_declared_secret(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
+def test_no_usages_for_unreferenced_operator_declared_secret(tmp_path: Path) -> None:
     """An operator-declared secret nothing references has an empty
     ``usages`` tuple.
     """
     cfg = _write_cfg(
         tmp_path,
-        ssh_keys,
         manifests=[ManifestDoc("secret", "lonely-key", description="Declared but not used")],
     )
     config = load_config(cfg, warn_issues=False)
@@ -207,14 +189,13 @@ def test_no_usages_for_unreferenced_operator_declared_secret(tmp_path: Path, ssh
 # -- Backend mappings section ----------------------------------------------
 
 
-def test_backend_mappings_show_each_active_backend(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
+def test_backend_mappings_show_each_active_backend(tmp_path: Path) -> None:
     """One mapping per active backend in the resolver chain order. The
     env-var backend shows its derived identifier; the prompt backend has
     no static identifier.
     """
     cfg = _write_cfg(
         tmp_path,
-        ssh_keys,
         settings=_ENV_PROMPT,
         manifests=[ManifestDoc("secret", "api-key", description="API key")],
     )
@@ -234,13 +215,12 @@ def test_backend_mappings_show_each_active_backend(tmp_path: Path, ssh_keys: tup
     assert prompt.identifier is None
 
 
-def test_backend_mapping_respects_operator_override(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
+def test_backend_mapping_respects_operator_override(tmp_path: Path) -> None:
     """An operator's ``backend_mappings.env-var = "CUSTOM"`` overrides
     the framework default.
     """
     cfg = _write_cfg(
         tmp_path,
-        ssh_keys,
         settings=_ENV_ONLY,
         manifests=[
             ManifestDoc("secret", "api-key", {"backend_mappings": {"env-var": "CUSTOM_API_KEY"}}, description="API key")
@@ -254,13 +234,12 @@ def test_backend_mapping_respects_operator_override(tmp_path: Path, ssh_keys: tu
     assert env_var.identifier == "CUSTOM_API_KEY"
 
 
-def test_backend_mapping_respects_opt_out(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
+def test_backend_mapping_respects_opt_out(tmp_path: Path) -> None:
     """An operator's ``backend_mappings.env-var = false`` skips that
     backend for this secret; ``would_attempt`` is False.
     """
     cfg = _write_cfg(
         tmp_path,
-        ssh_keys,
         settings=_ENV_PROMPT,
         manifests=[ManifestDoc("secret", "api-key", {"backend_mappings": {"env-var": False}}, description="API key")],
     )
@@ -278,16 +257,13 @@ def test_backend_mapping_respects_opt_out(tmp_path: Path, ssh_keys: tuple[Path, 
 # -- Resolution preview section --------------------------------------------
 
 
-def test_resolution_preview_picks_env_var_when_var_is_set(
-    tmp_path: Path, ssh_keys: tuple[Path, Path], monkeypatch
-) -> None:
+def test_resolution_preview_picks_env_var_when_var_is_set(tmp_path: Path, monkeypatch) -> None:
     """Env-var first in the chain; the var is actually set. Preview
     reports env-var. This is the case where the operator's shell already
     holds the value and ``vm create`` will resolve silently.
     """
     cfg = _write_cfg(
         tmp_path,
-        ssh_keys,
         settings=_ENV_PROMPT,
         manifests=[ManifestDoc("secret", "api-key", description="API key")],
     )
@@ -300,9 +276,7 @@ def test_resolution_preview_picks_env_var_when_var_is_set(
     assert desc.resolution.resolved_by == "env-var"
 
 
-def test_resolution_preview_falls_through_when_env_var_is_unset(
-    tmp_path: Path, ssh_keys: tuple[Path, Path], monkeypatch
-) -> None:
+def test_resolution_preview_falls_through_when_env_var_is_unset(tmp_path: Path, monkeypatch) -> None:
     """Env-var is configured (would_attempt is True) but the operator
     hasn't set ``AW_SECRET_API_KEY`` in their shell. Preview must not
     claim env-var would resolve -- it must fall through to the next
@@ -313,7 +287,6 @@ def test_resolution_preview_falls_through_when_env_var_is_unset(
     """
     cfg = _write_cfg(
         tmp_path,
-        ssh_keys,
         settings=_ENV_PROMPT,
         manifests=[ManifestDoc("secret", "api-key", description="API key")],
     )
@@ -326,10 +299,9 @@ def test_resolution_preview_falls_through_when_env_var_is_unset(
     assert desc.resolution.resolved_by == "prompt"
 
 
-def test_resolution_preview_falls_through_to_prompt(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
+def test_resolution_preview_falls_through_to_prompt(tmp_path: Path) -> None:
     cfg = _write_cfg(
         tmp_path,
-        ssh_keys,
         settings=_ENV_PROMPT,
         manifests=[ManifestDoc("secret", "api-key", {"backend_mappings": {"env-var": False}}, description="API key")],
     )
@@ -344,9 +316,7 @@ def test_resolution_preview_falls_through_to_prompt(tmp_path: Path, ssh_keys: tu
 # -- Readiness-aware describe (R9.1 / R9.6) ---------------------------------
 
 
-def test_not_ready_backend_annotated_and_skipped_in_preview(
-    tmp_path: Path, ssh_keys: tuple[Path, Path], monkeypatch
-) -> None:
+def test_not_ready_backend_annotated_and_skipped_in_preview(tmp_path: Path, monkeypatch) -> None:
     """R9.1 / R9.6: a not-ready mapped backend (onepassword with no ``op`` on
     PATH) keeps its mapping shown but flagged ``(not ready: <reason>)`` in
     Backend mappings, is shown as skipped in the Resolution preview, and does
@@ -355,7 +325,6 @@ def test_not_ready_backend_annotated_and_skipped_in_preview(
     monkeypatch.setattr("shutil.which", lambda name: None)  # op absent -> not ready
     cfg = _write_cfg(
         tmp_path,
-        ssh_keys,
         settings="""
         [plugins]
         system = ["onepassword"]
@@ -385,7 +354,7 @@ def test_not_ready_backend_annotated_and_skipped_in_preview(
 
 
 def test_render_shows_not_ready_annotation_and_skip(
-    tmp_path: Path, ssh_keys: tuple[Path, Path], capsys: pytest.CaptureFixture[str], monkeypatch
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch
 ) -> None:
     """The rendered describe view carries the not-ready annotation on the
     mapping and the ``skipped: not ready`` line in the preview."""
@@ -394,7 +363,6 @@ def test_render_shows_not_ready_annotation_and_skip(
     monkeypatch.setattr("shutil.which", lambda name: None)
     cfg = _write_cfg(
         tmp_path,
-        ssh_keys,
         settings="""
         [plugins]
         system = ["onepassword"]
@@ -421,9 +389,7 @@ def test_render_shows_not_ready_annotation_and_skip(
     assert "would resolve via prompt" in out
 
 
-def test_interactive_optimism_preview_unchanged_under_readiness(
-    tmp_path: Path, ssh_keys: tuple[Path, Path], monkeypatch
-) -> None:
+def test_interactive_optimism_preview_unchanged_under_readiness(tmp_path: Path, monkeypatch) -> None:
     """LLD e acceptance line: the interactive-optimism preview is UNCHANGED.
     Readiness is the offline layer UNDER interactive-optimism: with an earlier
     not-ready onepassword skipped, a ready ``prompt`` is STILL previewed as the
@@ -433,7 +399,6 @@ def test_interactive_optimism_preview_unchanged_under_readiness(
     monkeypatch.setattr("shutil.which", lambda name: None)
     cfg = _write_cfg(
         tmp_path,
-        ssh_keys,
         settings="""
         [plugins]
         system = ["onepassword"]
@@ -460,7 +425,7 @@ def test_interactive_optimism_preview_unchanged_under_readiness(
     assert desc.resolution.available
 
 
-def test_resolution_preview_not_available_when_no_backend_attempts(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
+def test_resolution_preview_not_available_when_no_backend_attempts(tmp_path: Path) -> None:
     """A secret opted out of every active backend resolves via no
     backend; the preview reports "not available".
 
@@ -476,7 +441,7 @@ def test_resolution_preview_not_available_when_no_backend_attempts(tmp_path: Pat
     from agentworks.resources import Origin, Registry
     from agentworks.secrets.base import SecretDecl
 
-    cfg = _write_cfg(tmp_path, ssh_keys, settings=_ENV_ONLY)
+    cfg = _write_cfg(tmp_path, settings=_ENV_ONLY)
     config = load_config(cfg, warn_issues=False)
 
     from agentworks.manifests import builtin as builtin_manifests
@@ -514,7 +479,6 @@ def test_resolution_preview_not_available_when_no_backend_attempts(tmp_path: Pat
 
 def test_render_emits_header_usages_mappings_preview(
     tmp_path: Path,
-    ssh_keys: tuple[Path, Path],
     capsys: pytest.CaptureFixture[str],
     monkeypatch,
 ) -> None:
@@ -522,7 +486,6 @@ def test_render_emits_header_usages_mappings_preview(
 
     cfg = _write_cfg(
         tmp_path,
-        ssh_keys,
         settings=_ENV_PROMPT,
         admin_env={"ADMIN_KEY": {"secret": "api-key"}},
         manifests=[ManifestDoc("secret", "api-key", description="API key for the operator's service")],
@@ -560,7 +523,7 @@ def test_render_emits_header_usages_mappings_preview(
 # -- Used-by (Phase 3c dynamic dimension) -----------------------------------
 
 
-def test_describe_secret_used_by_is_none_without_db(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
+def test_describe_secret_used_by_is_none_without_db(tmp_path: Path) -> None:
     """Without ``db``, ``describe_secret`` leaves ``used_by = None`` and
     the renderer omits the ``Used by:`` section. Preserves the
     pre-Phase-3c behavior for callers that don't care about the
@@ -568,7 +531,6 @@ def test_describe_secret_used_by_is_none_without_db(tmp_path: Path, ssh_keys: tu
     """
     cfg = _write_cfg(
         tmp_path,
-        ssh_keys,
         settings=_ENV_ONLY,
         manifests=[ManifestDoc("secret", "api-key", description="k")],
     )
@@ -578,14 +540,14 @@ def test_describe_secret_used_by_is_none_without_db(tmp_path: Path, ssh_keys: tu
     assert desc.used_by is None
 
 
-def test_describe_secret_used_by_populated_with_db(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
+def test_describe_secret_used_by_populated_with_db(tmp_path: Path) -> None:
     """With ``db``, ``used_by`` is a tuple of ``InstanceRef``. For an
     admin-mode session referencing this secret via ``[admin.env]``,
     the tuple has one entry pointing at the session.
     """
     from agentworks.db import Database, SessionMode
 
-    cfg = _write_cfg(tmp_path, ssh_keys, admin_env={"API_KEY": {"secret": "shared-key"}})
+    cfg = _write_cfg(tmp_path, admin_env={"API_KEY": {"secret": "shared-key"}})
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
 
@@ -608,7 +570,6 @@ def test_describe_secret_used_by_populated_with_db(tmp_path: Path, ssh_keys: tup
 
 def test_render_emits_used_by_section_when_populated(
     tmp_path: Path,
-    ssh_keys: tuple[Path, Path],
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """The renderer emits ``Used by (per current config):`` between
@@ -618,7 +579,7 @@ def test_render_emits_used_by_section_when_populated(
     from agentworks.db import Database, SessionMode
     from agentworks.secrets.inspect import render_secret_description
 
-    cfg = _write_cfg(tmp_path, ssh_keys, admin_env={"API_KEY": {"secret": "shared-key"}})
+    cfg = _write_cfg(tmp_path, admin_env={"API_KEY": {"secret": "shared-key"}})
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
 
@@ -647,7 +608,6 @@ def test_render_emits_used_by_section_when_populated(
 
 def test_render_used_by_empty_shows_friendly_message(
     tmp_path: Path,
-    ssh_keys: tuple[Path, Path],
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """An empty ``used_by`` tuple (db provided but no sessions reach the
@@ -659,7 +619,6 @@ def test_render_used_by_empty_shows_friendly_message(
 
     cfg = _write_cfg(
         tmp_path,
-        ssh_keys,
         settings=_ENV_ONLY,
         manifests=[ManifestDoc("secret", "dead-key", description="Declared but no live session reaches it")],
     )
@@ -679,7 +638,6 @@ def test_render_used_by_empty_shows_friendly_message(
 
 def test_render_omits_used_by_section_when_none(
     tmp_path: Path,
-    ssh_keys: tuple[Path, Path],
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """When ``used_by`` is ``None`` (no db passed), the renderer omits
@@ -690,7 +648,6 @@ def test_render_omits_used_by_section_when_none(
 
     cfg = _write_cfg(
         tmp_path,
-        ssh_keys,
         settings=_ENV_ONLY,
         manifests=[ManifestDoc("secret", "api-key", description="k")],
     )
@@ -709,7 +666,7 @@ def test_render_omits_used_by_section_when_none(
 # -- Missing-name behavior --------------------------------------------------
 
 
-def test_describe_secret_raises_not_found_for_unknown_name(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
+def test_describe_secret_raises_not_found_for_unknown_name(tmp_path: Path) -> None:
     """The service-layer function raises ``NotFoundError`` for an
     unknown secret name (typed at the service layer per the project's
     service-layer-is-the-authority rule; CLI / future web/API clients
@@ -717,7 +674,7 @@ def test_describe_secret_raises_not_found_for_unknown_name(tmp_path: Path, ssh_k
     """
     from agentworks.errors import NotFoundError
 
-    cfg = _write_cfg(tmp_path, ssh_keys)
+    cfg = _write_cfg(tmp_path)
     config = load_config(cfg, warn_issues=False)
     registry = build_registry(config)
     with pytest.raises(NotFoundError) as exc:

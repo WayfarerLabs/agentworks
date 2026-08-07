@@ -13,8 +13,6 @@ from __future__ import annotations
 from pathlib import Path
 from textwrap import dedent
 
-import pytest
-
 from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
 from agentworks.resources import ALWAYS_MATERIALIZE_SOURCE
@@ -22,22 +20,12 @@ from agentworks.vms.admin import AdminConfig
 from tests.conftest import ManifestDoc, write_cfg, write_manifests
 
 
-@pytest.fixture()
-def ssh_keys(tmp_path: Path) -> tuple[Path, Path]:
-    pub = tmp_path / "id.pub"
-    priv = tmp_path / "id"
-    pub.write_text("ssh-ed25519 X")
-    priv.write_text("-----BEGIN-----")
-    return pub, priv
-
-
-def _write_cfg(tmp_path: Path, body: str, ssh_keys: tuple[Path, Path]) -> Path:
-    """``write_cfg`` under this file's spelling. ``ssh_keys`` is accepted
-    and ignored; the shared helper writes the keypair itself."""
+def _write_cfg(tmp_path: Path, body: str = "") -> Path:
+    """``write_cfg`` under this file's spelling."""
     return write_cfg(tmp_path, settings=body, filename="c.toml")
 
 
-def test_admin_template_default_present_when_no_admin_sections(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
+def test_admin_template_default_present_when_no_admin_sections(tmp_path: Path) -> None:
     """The loader path end to end: no admin declaration anywhere, and the
     registry still holds exactly one ``admin-template:default`` carrying
     the framework's own provenance.
@@ -46,7 +34,7 @@ def test_admin_template_default_present_when_no_admin_sections(tmp_path: Path, s
     files that each built this same config: the type, the name, the
     auto-declared variant, the always-materialize source, and the count.
     """
-    cfg = _write_cfg(tmp_path, "", ssh_keys)
+    cfg = _write_cfg(tmp_path)
     r = build_registry(load_config(cfg, warn_issues=False))
 
     admin = r.lookup("admin-template", "default")
@@ -62,12 +50,12 @@ def test_admin_template_default_present_when_no_admin_sections(tmp_path: Path, s
     assert len(list(r.iter_kind("admin-template"))) == 1
 
 
-def test_admin_template_default_present_with_admin_env_only(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
+def test_admin_template_default_present_with_admin_env_only(tmp_path: Path) -> None:
     """An admin-template:default manifest carrying only an env block still
     yields one admin-template:default with env populated and an
     operator-declared origin pointing at the manifest document.
     """
-    cfg = _write_cfg(tmp_path, "", ssh_keys)
+    cfg = _write_cfg(tmp_path)
     write_manifests(tmp_path, ManifestDoc("admin-template", "default", {"env": {"FOO": "bar"}}))
     r = build_registry(load_config(cfg, warn_issues=False))
 
@@ -82,8 +70,8 @@ def test_admin_template_default_present_with_admin_env_only(tmp_path: Path, ssh_
     assert admin.env["FOO"].value == "bar"
 
 
-def test_named_console_template_default_always_present(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
-    cfg = _write_cfg(tmp_path, "", ssh_keys)
+def test_named_console_template_default_always_present(tmp_path: Path) -> None:
+    cfg = _write_cfg(tmp_path)
     r = build_registry(load_config(cfg, warn_issues=False))
 
     nc = r.lookup("named-console-template", "default")
@@ -92,8 +80,8 @@ def test_named_console_template_default_always_present(tmp_path: Path, ssh_keys:
     assert len(list(r.iter_kind("named-console-template"))) == 1
 
 
-def test_named_console_template_default_with_real_section(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
-    cfg = _write_cfg(tmp_path, "", ssh_keys)
+def test_named_console_template_default_with_real_section(tmp_path: Path) -> None:
+    cfg = _write_cfg(tmp_path)
     write_manifests(tmp_path, ManifestDoc("named-console-template", "default", {"tmux_layout": "tiled"}))
     r = build_registry(load_config(cfg, warn_issues=False))
 
@@ -104,13 +92,13 @@ def test_named_console_template_default_with_real_section(tmp_path: Path, ssh_ke
     assert nc.tmux_layout == "tiled"
 
 
-def test_manifest_declared_default_needs_no_exemption(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
+def test_manifest_declared_default_needs_no_exemption(tmp_path: Path) -> None:
     """The scenario the old synthesized-singleton collision exemption
     existed for: a manifest declares admin-template/default and the TOML
     has no [admin.*] sections. With no placeholder published, the
     manifest row is simply the only declaration -- operator-declared,
     exactly one row, no exemption machinery."""
-    cfg = _write_cfg(tmp_path, "", ssh_keys)
+    cfg = _write_cfg(tmp_path)
     resources = tmp_path / "resources"
     resources.mkdir()
     (resources / "admin.yaml").write_text(

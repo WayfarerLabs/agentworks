@@ -41,33 +41,18 @@ def _resolve_tailscale_key(config, registry, vm_tmpl) -> str:  # type: ignore[no
     return resolver.get(vm_tmpl.tailscale_auth_key)
 
 
-@pytest.fixture()
-def ssh_keys(tmp_path: Path) -> tuple[Path, Path]:
-    pub = tmp_path / "id.pub"
-    priv = tmp_path / "id"
-    pub.write_text("ssh-ed25519 X")
-    priv.write_text("-----BEGIN-----")
-    return pub, priv
-
-
 def _write_cfg(
     tmp_path: Path,
-    ssh_keys: tuple[Path, Path],
     *,
     settings: str = "",
     manifests: Sequence[ManifestDoc | str] = (),
 ) -> Path:
-    """``write_cfg`` under this file's keyword spelling.
-
-    ``ssh_keys`` is accepted and ignored: the shared helper writes the
-    operator keypair itself, and no caller here reads the fixture's paths.
-    """
+    """``write_cfg`` under this file's keyword spelling."""
     return write_cfg(tmp_path, *manifests, settings=settings, filename="c.toml")
 
 
 def test_boundary_resolves_tailscale_from_env_var(
     tmp_path: Path,
-    ssh_keys: tuple[Path, Path],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The framework's env-var backend picks up ``AW_SECRET_TAILSCALE_AUTH_KEY``
@@ -77,7 +62,6 @@ def test_boundary_resolves_tailscale_from_env_var(
     """
     cfg = _write_cfg(
         tmp_path,
-        ssh_keys,
         settings="""
         [secret_config]
         backends = ["env-var"]
@@ -99,7 +83,6 @@ def test_boundary_resolves_tailscale_from_env_var(
 
 def test_boundary_uses_custom_tailscale_secret_name(
     tmp_path: Path,
-    ssh_keys: tuple[Path, Path],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A VMTemplate that overrides ``tailscale_auth_key = "custom-ts"``
@@ -108,7 +91,6 @@ def test_boundary_uses_custom_tailscale_secret_name(
     """
     cfg = _write_cfg(
         tmp_path,
-        ssh_keys,
         settings="""
         [secret_config]
         backends = ["env-var"]
@@ -129,7 +111,6 @@ def test_boundary_uses_custom_tailscale_secret_name(
 
 def test_template_preflight_fails_on_unresolvable_key(
     tmp_path: Path,
-    ssh_keys: tuple[Path, Path],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """With only the env-var backend active and the variable unset, the
@@ -138,7 +119,6 @@ def test_template_preflight_fails_on_unresolvable_key(
     """
     cfg = _write_cfg(
         tmp_path,
-        ssh_keys,
         settings="""
         [secret_config]
         backends = ["env-var"]
