@@ -82,6 +82,10 @@ Contributions supply block records and authored strings only. They cannot supply
 expressions, format strings, attribute paths, or renderer names outside the closed enum. Markdown is
 emitted as text, never interpreted by Agentworks as executable content. Registration rejects unknown
 fields and any expression-like placeholder syntax. A participant with no content registers no topic.
+Registration also enforces byte and count bounds on every authored field, block payload, selector,
+and related-topic slug. Rendering removes terminal control bytes at one final boundary, preserving
+only line feed and tab from the control ranges, so neither authored nor projected text can reset a
+terminal, ring a bell, erase output, or forge a control sequence.
 
 ### Registration ownership
 
@@ -112,9 +116,13 @@ copied field lists or rendered CLI text.
   registered category.
 - Additional plugin-owned topics, if needed, use `plugin/<plugin>/<topic>`.
 
-Every canonical slug has exactly one owner. Duplicate registration is a startup error regardless of
-load order; there is no precedence or override rule. The catalog validates every related-topic link
-after registration.
+Every canonical slug has exactly one owner; there is no precedence or override rule. Strict CI
+construction makes trusted in-tree taxonomy, ownership, duplicate, and broken-link contradictions
+hard failures. Runtime construction records the same contradictions as scoped issues and retains
+unaffected topics, so an installed guide remains useful even when a contribution is bad. Invalid
+plugin content is likewise isolated before it can suppress trusted content. A full index renders all
+visible issues and exits 1; an explicit retained topic keys status only to issues visible for that
+request and can render cleanly with exit 0.
 
 Multiple requested topics are validated as one request before output begins, rendered in the order
 requested, and separated by a markdown horizontal rule. Repeated slugs render once at their first
@@ -153,6 +161,11 @@ connection, probes the workstation, invokes a capability, or mutates data. Datab
 inventory is a read-only stored-row query already used by resource inspection; it cannot initiate a
 remote operation.
 
+Host-probing capability kinds are declared once in the resource-graph policy used by both ordinary
+readiness dispatch and the guide's suppression path. End-to-end guide tests exercise the default
+composition path and enforce an import boundary that prevents guide modules from acquiring probe,
+resolver, transport, mutation, or low-level filesystem-write powers through direct aliases.
+
 Guide remains usable when operator configuration is broken. It always loads and validates authored
 core content independently, then attempts a normal config load and a guide-scoped registry build for
 every guide request. The guide build preserves declaration, publication, materialization,
@@ -164,6 +177,11 @@ its facts are unavailable, and the original framed config error appears in the m
 construction is non-interactive by construction and can never prompt for or resolve a secret. A
 malformed plugin contribution is isolated to the guide-scoped catalog build, reported as
 unavailable, and cannot break unrelated CLI commands or valid core topics.
+
+Expected per-topic projection failures, such as a declared relationship naming a resource absent
+from the finalized registry, become scoped unavailable facts. Translation occurs at the exact lookup
+boundary. Programming errors from graph methods or kind-owned inventory hooks are not caught as
+missing resources.
 
 ## Guide rendering and agent shaping
 

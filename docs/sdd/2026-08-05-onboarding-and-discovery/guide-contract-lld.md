@@ -189,26 +189,31 @@ It has two stages:
 2. Batch-check ownership, canonical slug uniqueness, block uniqueness, and related links after all
    candidates are known.
 
-The batch check makes collision handling independent of load order and implements the HLA's startup
-error, never winner selection. Duplicate trusted core, kind, or implementation registrations raise
-`DuplicateTopicError` and fail guide catalog startup. A malformed system-plugin contribution is an
-isolated catalog issue: ownership-invalid candidates are rejected before collision grouping; a
-plugin candidate colliding with a reserved or trusted topic is rejected while the trusted topic is
-retained; and every plugin candidate in a plugin-to-plugin collision is rejected. Each rejection is
-a deterministic `GuideContributionError` reported by guide startup, but it cannot suppress valid
-core content or affect non-guide commands. This is the exact hard versus isolated boundary: trusted
-in-tree registration contradictions are programming errors and hard-fail the guide request;
-descriptor-carried plugin data is untrusted at the catalog boundary and fails soft per topic. Broken
-links invalidate only an isolated plugin source topic. A broken link in trusted content is a hard
-`BrokenTopicLinkError`. Issues are sorted by source, topic, and field path.
+The batch check makes collision handling independent of load order and never selects a winner.
+Strict CI construction raises the typed contribution error for every trusted core, kind, or
+implementation taxonomy, ownership, duplicate, or broken-link contradiction. Runtime construction
+records those same contradictions as deterministic scoped issues and retains unaffected topics. A
+malformed system-plugin contribution follows the same fail-soft runtime path: ownership-invalid
+candidates are rejected before collision grouping; a plugin candidate colliding with a reserved or
+trusted topic is rejected while the trusted topic is retained; and every plugin candidate in a
+plugin-to-plugin collision is rejected. Broken links invalidate only their source topics. Issues are
+sorted by source, topic, and field path.
 
-Hard catalog errors occur only at guide catalog startup, rather than import time, so unrelated CLI
-commands still work. Isolated plugin issues render in a "Guide content unavailable" section relevant
-to the requested topic or index and make a full guide request exit 1 after producing complete
-markdown. Valid explicit topics still render. `--names-only` returns only retained names, suppresses
-isolated issue prose, and exits 0 so completion remains useful. Catalog construction has no global
-cache because installed package inventory is a request fact; enablement is a later finalized-view
-fact and never controls collection.
+Catalog errors never occur at import time, so unrelated CLI commands still work. Visible issues
+render in a "Guide content unavailable" section. A full index reports every rejected contribution
+and exits 1 after producing complete markdown. An explicit retained topic reports only issues scoped
+to that request and can exit 0 when unrelated content is invalid. `--names-only` returns only
+retained names, suppresses issue prose, and exits 0 so completion remains useful. Catalog
+construction has no global cache because installed package inventory is a request fact; enablement
+is a later finalized-view fact and never controls collection.
+
+Validation applies limits before catalog retention: title 256 bytes, summary 2 KiB, each block 64
+KiB, total topic content 256 KiB, and at most 64 blocks and 64 related links. Selectors and every
+related-topic value are bounded separately from that markdown total: a `FieldReference.section` has
+at most 32 components of 256 bytes each, and every related topic is at most 191 bytes and satisfies
+the canonical topic-slug grammar of one to three slash-separated 63-character components. The final
+renderer strips every C0 control except line feed and tab, plus DEL and the entire C1 range, from
+both authored and projected text.
 
 ## `GuideView`: denied powers and allowed facts
 
@@ -293,7 +298,14 @@ calls `Registry.finalize()` or `graph.impl_of()`.
 The builder accepts no resolver or run context. A structural API test enumerates public attributes
 and recursively inspects returned dataclass fields, proving the forbidden objects cannot be reached.
 Sentinel tests replace finalize, `impl_of`, resolver calls, transport construction, database writes,
-and capability methods with raising spies. Rendering and view construction must not trigger them.
+and capability methods with raising spies. An end-to-end default-composition test starts before the
+guide registry is built, and an architectural import-boundary test rejects direct or aliased imports
+of probe, resolver, transport, mutation, and low-level filesystem-write powers into guide modules.
+Rendering and view construction must not trigger them.
+
+Expected missing-resource failures are translated at the exact registry lookup inside view
+construction into `GuideTraversalError`, which makes only that topic unavailable. `KeyError` from a
+graph method, an inventory hook, or another programming mistake is not caught by the service layer.
 
 ## Broken configuration and unavailable facts
 
@@ -417,7 +429,6 @@ Phase 1 adds service functions below Typer and thin commands:
 @dataclass(frozen=True, slots=True)
 class SecretVerification:
     name: str
-    verified: bool
 
 def verify_named_secret(
     config: Config,
@@ -430,7 +441,6 @@ def verify_named_secret(
 @dataclass(frozen=True, slots=True)
 class VMConnectionVerification:
     name: str
-    connected: bool
     transport: str
 
 def verify_vm_connection(
@@ -443,8 +453,13 @@ def verify_vm_connection(
 
 `agw secret verify NAME` verifies one registered secret through one normal resolution pass and
 backend precedence. The explicit boundary first calls `active_backends(config, registry)`, then
-filters that ordered `list[ActiveBackend]` with `not backend.interactive` unless
-`allow_interactive=True`.
+wraps each provider behind a verification-only adapter identified by the caller-known registered
+backend key. The adapter reads and snapshots the provider's interaction classification once behind
+the sanitizing boundary. Default non-interactive filtering uses only that snapshot, so a raising or
+stateful provider property cannot leak or change policy between filtering and execution.
+`ActiveBackend` carries that registered key from the config-chain lookup alongside the capability
+and stored readiness. Neither the verification adapter nor diagnostics recover identity by reading a
+provider-owned `name` property.
 
 HEAD's `resolve_secrets()` combines the ordered backend algorithm with `output.warn` readiness
 messages and `output.info("Resolved ...")` progress. Verification must not call that emitting
@@ -459,15 +474,16 @@ the explicit consent policy as `interactive_available`. `verify_named_secret()` 
 exactly once. Neither reporter receives resolved values.
 
 This path does not redirect, suppress, or mutate global output interactivity, config, the backend
-registry, or the resolver. The service copies no resolved value into its result and never returns,
-logs, or formats a value. Backend exceptions crossing this boundary are sanitized so their message
-and hint cannot contain returned secret bytes; existing typed category and entity framing remain.
-`--allow-interactive` is the only opt-in. The CLI translates it to the closed
-`SecretInteractionPolicy` enum. The service owns the invariant and rejects `ALLOW_INTERACTIVE` while
-global output policy is non-interactive, so non-Typer callers cannot bypass it. The consent is named
-explicitly in the action's boundary. On success the command emits exactly one line,
-`Secret '<name>' verified.`. Normal framed secret, mapping, connectivity, and configuration
-categories pass through with sanitized text.
+registry, or the resolver. The service copies no resolved value into its success-only result and
+never returns, logs, or formats a value. Backend exceptions and every provider-authored field
+crossing this boundary are replaced by caller-known identity plus fixed safe prose, without
+retaining the provider exception as a chained cause. First-party resolution diagnostics outside the
+provider boundary keep their typed category and actionable explanation. `--allow-interactive` is the
+only opt-in. The CLI translates it to the closed `SecretInteractionPolicy` enum. The service owns
+the invariant and rejects `ALLOW_INTERACTIVE` while global output policy is non-interactive, so
+non-Typer callers cannot bypass it. The consent is named explicitly in the action's boundary. On
+success the command emits exactly one line, `Secret '<name>' verified.`. Normal framed secret,
+mapping, connectivity, and configuration categories pass through with sanitized text.
 
 `agw vm verify-connection NAME` loads the named stored VM row, resolves its declared site and the
 canonical non-activating admin transport with `agentworks.transports.transport(vm, config)`, then
@@ -487,17 +503,26 @@ mutation call.
 Phase 1 is complete only with these focused proofs:
 
 - contract parsing rejects every unknown field, executable object, expression delimiter, invalid
-  taxonomy claim, duplicate block ID, duplicate topic, and broken link;
-- trusted duplicate registrations hard-fail guide startup; isolated plugin collisions and link
-  invalidation are deterministic under reversed contribution order; and malformed plugin content
-  cannot hide valid reserved core topics or break a non-guide command;
-- installed-wheel package-data tests load every authored block;
+  taxonomy claim, duplicate block ID, duplicate topic, broken link, overlong authored field,
+  over-count block/link/selector collection, overlong selector component or related slug, and
+  malformed related slug;
+- trusted taxonomy, ownership, duplicate, and broken-link contradictions fail strict CI
+  construction; runtime construction isolates them as visible issues, retains unaffected topics,
+  makes a full index exit 1, and lets an unrelated explicit retained topic render cleanly with exit
+  0; plugin collision and link invalidation stay deterministic under reversed contribution order;
+- installed-wheel package-data tests load every authored block under the normal CI marker selection;
 - human and agent snapshots have equal semantic block keys and payloads despite allowed heading and
   placement differences;
 - atomic multi-topic lookup emits nothing on any unknown slug and deduplicates repeated valid slugs
   at first position;
-- the public `GuideView` surface and returned-record graph contain no denied power, and raising
-  spies prove no finalize, prompt, resolve, capability call, probe, transport, or write occurs;
+- the public `GuideView` surface and returned-record graph contain no denied power; a default-path
+  composition test begins before registry construction; an import-boundary proof rejects direct and
+  aliased denied powers; and raising spies prove no finalize, prompt, resolve, capability call,
+  probe, transport, or low-level write occurs;
+- missing registry lookups become scoped topic failures while unrelated `KeyError` from graph or
+  inventory code escapes as a programming error;
+- every forbidden C0/C1/DEL byte is removed from authored and projected output while line feed and
+  tab are preserved;
 - broken-load and broken-finalize fixtures render authored content, one framed error, and an
   unavailable marker for every dynamic block, with no partial live facts;
 - onboarding scenarios prove guided and replayable paths choose the same action IDs and yield equal
@@ -505,9 +530,11 @@ Phase 1 is complete only with these focused proofs:
 - mode-selection tests pin explicit, signature, then TTY precedence and piped `--human` behavior;
 - named-secret tests cover success, miss, mapped miss, sanitized backend failure, default
   interactive filtering, explicit interactive consent, one shared ordered resolution pass, unchanged
-  global interactivity, and absence of secret bytes from outputs, records, logs, and errors;
-  successful verification captures stdout and stderr and proves the sole emitted line is the
-  verification success line, with no readiness or resolved-backend progress;
+  global interactivity, raising and stateful provider properties, a secret-bearing provider name,
+  one snapshotted interaction classification, caller-known registered identity, and absence of
+  secret bytes from outputs, records, logs, and errors; successful verification captures stdout and
+  stderr and proves the sole emitted line is the verification success line, with no readiness or
+  resolved-backend progress;
 - VM connection tests cover success plus missing, stopped, unreachable, and bad-transport cases, and
   assert no start, repair, rekey, reinit, secret prompt, or database mutation.
 
