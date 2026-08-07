@@ -208,6 +208,10 @@ class SSHLogger:
             lines.append(f"# Warnings: {len(self._warnings)}")
             for w in self._warnings:
                 lines.append(f"#   - {w}")
+        # Every warning is sanitized by _write before persistence. CodeQL does
+        # not model that immediately downstream replacement sanitizer; the
+        # adversarial logger tests cover both the first write and this recap.
+        # codeql[py/clear-text-storage-sensitive-data]
         self._write("\n".join(lines) + "\n")
 
     def _write(self, text: str) -> None:
@@ -218,12 +222,8 @@ class SSHLogger:
         # and their shell-quoted forms are registered before the header's
         # first write. The redaction set is fixed at construction because
         # incremental writes make late registration inherently unsafe.
-        # Callers therefore never pre-sanitize. CodeQL does not model the
-        # immediately dominating replacement sanitizer, so the sink carries
-        # a narrow suppression backed by the adversarial logger and lifecycle
-        # wiring tests.
+        # Callers therefore never pre-sanitize.
         with open(self.path, "a", encoding="utf-8", errors="replace") as f:
-            # codeql[py/clear-text-storage-sensitive-data]
             f.write(self._sanitize(text))
 
 
