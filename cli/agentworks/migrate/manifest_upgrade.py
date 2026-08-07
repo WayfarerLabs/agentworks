@@ -248,6 +248,27 @@ class _SpelledNull:
         self.text = text
 
 
+def _unspelled(value: Any) -> Any:
+    """``value`` as its MEANING, with a remembered null spelling dropped.
+
+    A ``_SpelledNull`` is an emitter concern: it exists so ``token_secret:
+    ~`` comes back out spelled ``~``, and it is a null everywhere else.
+    Anything that asks what a value IS has to go through here, because
+    ``isinstance`` says no to every type a null would have satisfied.
+
+    Skipping this is not a cosmetic bug, and it shipped once. The
+    round-trip read handed ``_tagged_table`` a ``_SpelledNull`` for
+    ``platform_config: null``, which is not ``None`` and not a ``dict``,
+    so the non-table refusal fired on a document it had no quarrel with:
+    a null carries no keys, so folding it deletes nothing and the
+    data-loss argument that refusal exists to make does not apply. The
+    operator got a message with an object repr and a heap address in it.
+    Two correct changes, colliding at the one position neither had a test
+    on.
+    """
+    return None if isinstance(value, _SpelledNull) else value
+
+
 @cache
 def _null_preserving_types() -> tuple[Any, Any]:
     """The ``(Constructor, Representer)`` pair that keeps null spelling.
@@ -348,24 +369,36 @@ def _folded_document(value: dict[str, Any]) -> dict[str, Any]:
 def _tagged_table(kind: str, value: dict[str, Any], capability: str, config: object) -> dict[str, Any]:
     """``{name: <capability>, <config keys...>}``, refusing what it cannot fold.
 
-    The only sibling that folds mechanically is a TABLE carrying no
-    ``name`` key of its own. The other two shapes raise here, during
-    planning, leaving the operator's tree untouched.
+    A sibling folds mechanically when it holds no keys the fold could
+    lose: a TABLE carrying no ``name`` key of its own, or nothing at all
+    (absent, or an explicit ``null`` in any spelling). The other two
+    shapes raise here, during planning, leaving the operator's tree
+    untouched.
 
-    Refusing a non-table sibling is not pedantry; folding one is a
-    DELETION. There are no keys to move, so the fold would emit the
-    tagged table and drop whatever the operator wrote on the floor, in a
-    file they never named (the upgrade is whole-tree, so any run reaches
-    it). Verification cannot catch that: ``legacy_pre_rows`` builds the
-    pre-side through this same function, so both sides would lose the key
-    and compare equal, and the run would report "verified: registry
-    unchanged" over a file it had just edited down. Independence bought
-    against an EMISSION bug is not independence against a FOLD-SEMANTICS
-    bug, which is this bug's class; only the refusal covers it.
+    An empty sibling is on the folding side deliberately, and the
+    argument below is the reason: a null carries no keys, so there is
+    nothing to drop and no data loss to refuse over. Getting that
+    boundary wrong in either direction has already cost once, so it is
+    pinned from both sides in ``tests/test_manifest_upgrade.py``.
 
-    ``decode.py``'s ``_reject_legacy_shape`` refuses both shapes without
-    offering the migrate hint, on the stated grounds that the migrator
-    refuses them too. This is the half that makes that true.
+    Refusing a sibling that holds a non-table VALUE is not pedantry;
+    folding one is a DELETION. There are no keys to move, so the fold
+    would emit the tagged table and drop whatever the operator wrote on
+    the floor, in a file they never named (the upgrade is whole-tree, so
+    any run reaches it). Verification cannot catch that: ``legacy_pre_rows``
+    builds the pre-side through this same function, so both sides would
+    lose the key and compare equal, and the run would report "verified:
+    registry unchanged" over a file it had just edited down. Independence
+    bought against an EMISSION bug is not independence against a
+    FOLD-SEMANTICS bug, which is this bug's class; only the refusal covers
+    it.
+
+    ``decode.py``'s ``_reject_legacy_shape`` refuses those two shapes
+    without offering the migrate hint, on the stated grounds that the
+    migrator refuses them too. This is the half that makes that true, and
+    the empty sibling is where the two have to agree the other way: it
+    folds here, so decode hands it the hint rather than a by-hand
+    instruction.
     """
     field, config_field = _LEGACY_SIBLING_SHAPES[kind]
     metadata = value.get("metadata")
@@ -445,7 +478,7 @@ def _fold_in_place(kind: str, document: dict[str, Any], spec: Any) -> None:
     field, config_field = _LEGACY_SIBLING_SHAPES[kind]
     index = list(spec).index(field)
     comments = spec.ca.items.get(field)
-    config = spec.get(config_field)
+    config = _unspelled(spec.get(config_field))
     config_comments = spec.ca.items.get(config_field)
     # Same refusal the plain-dict fold makes, before anything is mutated.
     _tagged_table(kind, document, spec[field], config)

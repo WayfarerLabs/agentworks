@@ -499,6 +499,51 @@ def test_a_non_table_retired_config_is_refused_rather_than_dropped(
     assert (resources / "odd.yaml").read_bytes() == before
 
 
+@pytest.mark.parametrize("spelling", ["", " null", " ~", " Null", " NULL"])
+def test_an_empty_retired_config_folds_rather_than_being_refused(tmp_path: Path, spelling: str) -> None:
+    """The refusal above is about DATA LOSS, and an empty sibling loses
+    none.
+
+    A null holds no keys, so the fold drops nothing and the whole
+    argument for refusing a non-table sibling stops applying. Every
+    spelling of it lands on the same tagged table, and the operator's
+    other keys come through untouched.
+
+    This position is where two correct changes collided. Null-spelling
+    preservation gave the round-trip read a ``_SpelledNull`` rather than a
+    ``None``, which is neither ``None`` nor a ``dict``, so the non-table
+    refusal fired on a document it had no quarrel with and printed the
+    carrier's object repr and heap address at the operator. Nothing
+    tested this position, which is how it went unnoticed; the
+    parametrization exists so no future spelling escapes it either.
+    """
+    cfg = _write_config(tmp_path)
+    resources = _resources(
+        tmp_path,
+        sites=dedent(f"""\
+            apiVersion: agentworks/v1
+            kind: vm-site
+            metadata:
+              name: dev   # the shared box
+            spec:
+              # which platform runs here
+              platform: lima
+              platform_config:{spelling}
+            """),
+    )
+
+    _run(cfg)
+
+    rewritten = (resources / "sites.yaml").read_text()
+    assert "  platform:\n    name: lima\n" in rewritten
+    assert "platform_config" not in rewritten
+    assert "# which platform runs here" in rewritten, "the fold is the only edit"
+    assert "name: dev   # the shared box" in rewritten
+    (entry,) = load_manifests(resources).entries
+    assert entry.resource.platform.name == "lima"
+    assert entry.resource.platform.config == {}
+
+
 def test_multi_document_markers_and_unrelated_documents_survive(tmp_path: Path) -> None:
     """Explicit stream markers, a leading `---`, a trailing `...`, and
     documents of other kinds all come back untouched. ruamel does not

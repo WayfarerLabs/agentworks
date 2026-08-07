@@ -623,6 +623,44 @@ def test_a_non_table_sibling_names_the_value_it_cannot_fold(tmp_path: Path) -> N
     assert excinfo.value.hint is None
 
 
+@pytest.mark.parametrize("spelling", ["", " null", " ~"])
+def test_an_empty_sibling_is_offered_the_migrator_rather_than_a_by_hand_fix(tmp_path: Path, spelling: str) -> None:
+    """An empty sibling holds nothing, so the migrator folds it, so the
+    error says so.
+
+    The refusal above withholds the migrate hint on the stated grounds
+    that the migrator refuses the same document. That reasoning does not
+    reach a null: there are no keys to lose, so the upgrade rewrites it
+    like any other. Withholding the hint here sent an operator to hand-fix
+    what one command does, and told them to put a value where it belongs
+    when they had written no value at all.
+
+    The extra instruction over the absent-sibling case is real work: the
+    empty key still has to go, or the next load answers with the ORPHAN
+    refusal instead.
+    """
+    with pytest.raises(ConfigError) as excinfo:
+        _load_one(
+            tmp_path,
+            f"empty-sibling{len(spelling)}",
+            f"""
+            apiVersion: agentworks/v1
+            kind: vm-site
+            metadata:
+              name: gpu-box
+            spec:
+              platform: lima
+              platform_config:{spelling}
+            """,
+        )
+
+    message = str(excinfo.value)
+    assert "spec.platform_config is empty, so there are no keys to fold" in message
+    assert "platform: {name: lima}" in message, "the rewrite is printable here, unlike a non-table value"
+    assert "remove it" in message
+    assert excinfo.value.hint == "`agw resource migrate --all` rewrites your manifests in place."
+
+
 def test_the_migrator_covers_every_surface_whose_error_names_it() -> None:
     """The invariant behind the hint: a remedy an error names has to do
     something for the document that just refused to load.

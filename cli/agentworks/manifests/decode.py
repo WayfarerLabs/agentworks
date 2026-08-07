@@ -176,10 +176,20 @@ def _reject_legacy_shape(surface: HostSurface, spec: Mapping[str, object], where
     rewrite that looks authoritative and is quietly wrong is worse than
     none: a sibling table carrying its OWN ``name`` (the fold would emit
     ``{name: a, name: b}``, which is not valid YAML and hides that two
-    keys claim to select the capability), and a sibling that is not a
-    table at all (there are no keys to fold, and printing the tag alone
-    would discard what the operator wrote). Neither carries the migrate
-    hint either, because the migrator refuses both documents too.
+    keys claim to select the capability), and a sibling holding a VALUE
+    that is not a table (there are no keys to fold, and printing the tag
+    alone would discard what the operator wrote). Neither carries the
+    migrate hint either, because the migrator refuses both documents too.
+
+    An EMPTY sibling (``platform_config:``, ``: null``, ``: ~``) is not
+    one of those two, and the difference is the whole reason the hint is
+    conditional: a null holds nothing, so the fold discards nothing and
+    the migrator rewrites it like any other document. It gets the rewrite
+    and the hint, with the extra instruction to delete the empty key that
+    the absent-sibling case has no need of. Saying otherwise sent an
+    operator to do by hand what one command does, and
+    ``test_the_migrator_covers_every_surface_whose_error_names_it`` is the
+    standing pin that this pairing stays honest.
 
     The retired sibling field is refused whatever sits beside it, which is
     the ORPHAN case (a ``platform_config`` alone) and the MIXED one (a
@@ -211,6 +221,12 @@ def _reject_legacy_shape(surface: HostSurface, spec: Mapping[str, object], where
             f"{head}; write one tagged table instead: {_tagged_rewrite(field, name, ())}", hint=MIGRATE_HINT
         )
     sibling = spec[config_field]
+    if sibling is None:
+        raise ConfigError(
+            f"{head}, and spec.{config_field} is empty, so there are no keys to fold; write one tagged "
+            f"table instead and remove it: {_tagged_rewrite(field, name, ())}",
+            hint=MIGRATE_HINT,
+        )
     if not isinstance(sibling, dict):
         raise ConfigError(
             f"{head}, and spec.{config_field} is {sibling!r} rather than a table, so there are no keys to fold; "
