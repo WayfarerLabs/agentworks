@@ -111,6 +111,17 @@ was ever this step's doing. The subtree search stays and is still needed, for th
 marker genuinely belongs one level down: a COLLECTION's element marker rides `items`, where it
 describes what it sits on, and lifting that onto the field would claim the list names a Resource.
 
+The lift is pinned on both sides of the fixture line. `tests/schema/test_markers.py` states three
+facts (the property is branchy, the marker is on it, no branch kept a copy) against fixture models
+covering both burial shapes;
+`tests/manifests/test_emit.py::test_the_shipped_token_field_states_its_reference_on_the_property`
+states the same three against the real emitted `git-credential` schema, so the shipped artifact is
+its own tripwire rather than a fixture standing in for it. The second pin is needed because the
+round-trip guard beside it cannot catch this regression:
+`test_reference_markers_reach_emitted_schema` reads through the subtree search, so a marker that
+fell back into its `anyOf` branch still satisfies it. Verified by disabling the lift, which reddens
+the new pin and leaves that one green.
+
 ### 2.3 The third round is not an emission bug: the two parsers read different YAML
 
 **Added 2026-08-06, from the greenfield closeout verification.** Sections 2.1 and 2.2 are both bugs
