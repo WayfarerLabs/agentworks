@@ -80,8 +80,11 @@ class AgentTemplate(DeclaredResource):
     """Whether to install ``mise_packages`` with no lockfile present."""
 
     mise_install_before: str | None = None
-    """How stale an existing mise install may be before it is refreshed:
-    a positive duration such as ``7d``, or an ISO date."""
+    """How OLD a tool version must be before mise will install it, as
+    supply-chain defense against a freshly published one: a positive
+    duration such as ``7d``, or an ISO date. Only fuzzy requests
+    (``latest``, ``node@20``) are filtered; an explicitly pinned version
+    installs regardless."""
 
     mise_prune_on_reinit: bool | None = None
     """Whether re-running init removes mise tools no longer declared."""

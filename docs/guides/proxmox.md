@@ -123,21 +123,13 @@ spec:
     verify_ssl: false
 ```
 
-| Field           | Description                                                          |
-| --------------- | -------------------------------------------------------------------- |
-| `api_url`       | Your Proxmox web UI URL (same host, port 8006)                       |
-| `node`          | Proxmox node name (visible in the UI sidebar, usually `pve`)         |
-| `token_id`      | The `full-tokenid` from the setup script output                      |
-| `template_vmid` | The VMID you used for the template (e.g. `9000`)                     |
-| `storage`       | Storage for VM disks (block storage like `local-lvm` or `data`)      |
-| `bridge`        | Network bridge (usually `vmbr0`)                                     |
-| `pool`          | Proxmox resource pool for agentworks VMs (default `agentworks`)      |
-| `verify_ssl`    | Set `false` if using a self-signed certificate (common for homelabs) |
-| `token_secret`  | Name of the secret holding the API token (default below)             |
+`agw resource describe-kind vm-platform/proxmox` documents every field above with its type, whether
+it is required, and its default; `agw resource sample vm-site` prints a commented starter to edit.
+Two values map to things this guide produced rather than to anything Proxmox calls by that name:
+`token_id` is the `full-tokenid` the setup script printed, and `template_vmid` is the VMID you gave
+the template. `node` is the node name in the Proxmox UI sidebar, usually `pve`.
 
-(`agw resource sample vm-site` prints a commented starter, and
-`agw resource describe-kind vm-platform/proxmox` prints these fields with their types. The legacy
-flat `[proxmox]` section in `config.toml` is a hard error at load now;
+(The legacy flat `[proxmox]` section in `config.toml` is a hard error at load now;
 `agw resource migrate vm-site` converts it.)
 
 The API token value is an ordinary agentworks secret named `proxmox-token` (auto-declared; rename

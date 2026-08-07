@@ -132,15 +132,16 @@ you a squiggle, while one that over-reports would underline valid configuration.
 ## Scoped GitHub credentials (fine-grained PATs)
 
 A `git-credential`'s `spec.provider` is one tagged table: its `name` key selects the provider
-capability (`github`, or `azdo` from the `azure` plugin) and the remaining keys are that provider's
-configuration. (The old sibling shape, a `provider:` string plus a `provider_config:` table, is no
-longer accepted; `agw resource migrate --all` folds the pair into the tagged table.) A github
-credential may carry a scope there: `repos: ["owner/name", ...]` pins the credential to specific
-repositories (always a list, even for one, matching a fine-grained PAT's selected repos), while
-`owner: "org"` covers every repository under that user or org, including repos an agent clones ad
-hoc that no workspace ever declared. The two are mutually exclusive; a credential with neither is
-the unscoped fallback. Scopes are a manifest feature (the removed flat TOML shape never had GitHub
-fields).
+capability and the remaining keys are that provider's configuration, which
+`agw resource describe-kind git-credential-provider/<name>` documents. (The old sibling shape, a
+`provider:` string plus a `provider_config:` table, is no longer accepted;
+`agw resource migrate --all` folds the pair into the tagged table.)
+
+A github credential may carry a scope there, and the choice is the part worth explaining:
+`repos: ["owner/name", ...]` pins the credential to specific repositories (always a list, even for
+one, matching a fine-grained PAT's selected repos), while `owner: "org"` covers every repository
+under that user or org, including repos an agent clones ad hoc that no workspace ever declared. The
+two are mutually exclusive; a credential with neither is the unscoped fallback.
 
 Selection lives in the agentworks credential helper: initialization sets `credential.useHttpPath`
 (via the managed include `~/.agentworks-git-scopes.gitconfig`), so git hands the helper the remote's
@@ -227,13 +228,15 @@ spec:
     region: eastus2
 ```
 
-- `spec.platform` is one table: its `name` key names a `vm-platform` capability row (`lima`, `wsl2`;
-  `proxmox` and `azure-vm` ship as the opt-in `proxmox` and `azure` system plugins, see
-  [System plugins](#system-plugins)), and the remaining keys are that platform's configuration,
-  validated by it (unknown keys are errors). A platform needing no config is just
-  `platform: {name: wsl2}`. Remote Lima is just a lima site with a `vm_host: user@host` key. The old
-  sibling shape (`platform: azure-vm` as a string plus a `platform_config:` table) is no longer
-  accepted; `agw resource migrate --all` folds the pair into the tagged table.
+- `spec.platform` is one table: its `name` key names a `vm-platform` capability row and the
+  remaining keys are that platform's configuration, validated by it (unknown keys are errors).
+  `agw resource describe-kind vm-platform` lists the platforms this build has, including any that
+  arrive with an opt-in [system plugin](#system-plugins);
+  `agw resource describe-kind vm-platform/<name>` documents one platform's own fields. A platform
+  needing no config is just `platform: {name: wsl2}`. Remote Lima is just a lima site with a
+  `vm_host: user@host` key. The old sibling shape (`platform: azure-vm` as a string plus a
+  `platform_config:` table) is no longer accepted; `agw resource migrate --all` folds the pair into
+  the tagged table.
 - The `lima-local` and `wsl2` sites ship built in with empty config. Like every site they register
   on every host and report not-ready where this host lacks what they need (wsl2 is Windows-only; a
   local Lima site needs `limactl`); a not-ready site still lists and describes with its reason, and
@@ -241,21 +244,22 @@ spec:
   platform.
 - Consumers name sites: `agw vm create --site`, `defaults.site` in config.toml, and each VM row's
   `site`. Templates deliberately carry no site: placement is per-host, never template state.
-- Site config secrets ride the standard secret machinery: a Proxmox site references its API token as
-  the `proxmox-token` secret (override with the `token_secret` key), auto-declared and resolved
-  through the backend chain like any other. An Azure site can do the same, optionally: it
-  authenticates with ambient credentials (`az login`, `AZURE_*` env vars, managed identity, browser
-  fallback) unless a `service_principal` table inside the platform table declares an explicit one,
-  in which case its `tenant_id` / `client_id` are plain config and its `secret` field names the
-  secret holding the client secret (default `azure-client-secret`). A site with a service principal
-  uses that identity and only that one: a rejected or expired client secret fails the command rather
-  than falling back to ambient credentials. `agw resource describe-kind vm-platform/azure-vm` shows
-  the block. The `proxmox` platform ships as the opt-in `proxmox` system plugin, so a proxmox site
-  (declared or legacy) is not-ready with an "enable plugin `proxmox`" hint and refused at use until
-  you set `[plugins] system = ["proxmox"]`. The `azure-vm` platform likewise ships as the opt-in
-  `azure` system plugin (which also provides the `azdo` git-credential provider and the `az-cli`
-  install-command), so the `azure-dev` example above is not-ready with an "enable plugin `azure`"
-  hint until you set `[plugins] system = ["azure"]`.
+- Site config secrets ride the standard secret machinery: a platform that needs a credential names
+  the secret holding it in its own config, defaulting to a well-known name when you leave the field
+  out (a Proxmox site's API token is the `proxmox-token` secret unless `token_secret` says
+  otherwise). Those secrets are auto-declared and resolved through the backend chain like any other,
+  and `agw resource describe-kind vm-platform/<name>` shows each platform's secret fields with their
+  default names. Azure is the one with a choice to make: it authenticates with ambient credentials
+  (`az login`, `AZURE_*` env vars, managed identity, browser fallback) unless a `service_principal`
+  table inside the platform table declares an explicit one. A site with a service principal uses
+  that identity and only that one, so a rejected or expired client secret fails the command rather
+  than falling back to ambient credentials.
+- The cloud and datacenter platforms ship as opt-in system plugins, so a site that names one is
+  not-ready with an "enable plugin `<name>`" hint, and refused at use, until you list that plugin in
+  `[plugins] system`. The `azure-dev` example above is not-ready until you set
+  `[plugins] system = ["azure"]`. `agw doctor` lists every installed plugin and whether it is
+  enabled, and `agw resource describe-kind vm-platform/<name>` says which plugin a platform arrives
+  with.
 - The legacy flat `[azure]` / `[proxmox]` TOML sections no longer load: like every resource section,
   they are a hard error in `config.toml` now. Run `agw resource migrate vm-site` to move them to
   vm-site manifests (they migrate as vm-site, unchanged).
@@ -284,17 +288,20 @@ spec:
   row, and the remaining keys are the config block that integration owns and validates (unknown keys
   are errors). A template that names no integration resolves to the built-in `shell` integration (a
   plain login shell, or an operator command), which is the built-in `default` template.
-- The `shell` integration's config vocabulary is `command` (the pane command; empty is a login
-  shell), `resume_command` (used by `session resume`, falling back to `command`), and
-  `required_commands` (executables checked on the launch target before any state mutation).
-  `command` / `resume_command` support the `{{session_name}}` and `{{workspace_name}}` variables.
+- `agw resource describe-kind harness-integration` lists the integrations this build has, and
+  `agw resource describe-kind harness-integration/<name>` documents one integration's config field
+  by field. That is the reference; what follows is what an operator wants to know beyond the fields
+  themselves.
+- Command strings support the `{{session_name}}` and `{{workspace_name}}` variables. This holds
+  wherever an integration takes a command or raw arguments (`shell`'s `command` and
+  `resume_command`, the `extra_args` escape hatch on `claude-code` and `codex`).
 - The integration-plus-config pair inherits as a unit: a child restating the same integration merges
-  its config keys into the parent's (child wins per key; `shell` unions `required_commands`), while
-  a child naming a _different_ integration starts fresh. `env`, `inherits`, and the description
-  merge as usual.
-- YAML manifests spell `command` / `resume_command` / `required_commands` inside the
-  `harness_integration` table. `agw resource describe harness-integration/shell` shows the
-  integration row and the templates that reference it.
+  its config keys into the parent's (child wins per key), while a child naming a _different_
+  integration starts fresh. `env`, `inherits`, and the description merge as usual. A few list fields
+  union across the chain rather than replacing, so a child adding one entry never silently drops the
+  parent's; the field reference marks which.
+- `agw resource describe harness-integration/<name>` is the other half: the integration's registry
+  row and the templates that reference it, rather than the fields it accepts.
 
 The `claude-code` integration runs Claude Code as the session. It ships as the opt-in `claude`
 system plugin (see "System plugins" below), so a `session-template` naming it still lists ready, but
@@ -318,13 +325,12 @@ spec:
     extra_args: [--append-system-prompt, "session {{session_name}}"] # optional escape hatch
 ```
 
-- Its config is three optional fields: `permission_mode` and `model` forward verbatim to
-  `claude --permission-mode` / `--model` (their choice sets are Claude's, not validated here: an
-  invalid value fails at launch with the tool's own error, which `session create` / `session resume`
-  capture into their error message when the workload exits immediately), and `extra_args` is a list
-  of raw argv tokens appended last, the escape hatch for any flag the integration does not model.
-  Unknown fields are errors. `extra_args` elements support the `{{session_name}}` /
-  `{{workspace_name}}` variables.
+- Its config is all optional, and every field is documented by
+  `agw resource describe-kind harness-integration/claude-code`. What the reference cannot tell you:
+  the fields that forward a value verbatim to `claude` are not validated here, because the valid
+  choices are Claude's and they move between its releases. An invalid one fails at launch with the
+  tool's own error, which `session create` / `session resume` capture into their error message when
+  the workload exits immediately.
 - The only requirement checked on the launch target is that `claude` is installed. The chosen action
   (resume vs new session) is announced in the pane on start, so it is never silent.
 
@@ -354,27 +360,27 @@ one) rather than discovering it later. Overriding `notify` yourself through `ext
 recording off (yours wins, because `extra_args` is appended last), which leaves resume relying on
 that fallback.
 
-Its config is ten optional fields: `model`, `sandbox`, `approval_policy`, and `profile` forward
-verbatim to `codex -m` / `-s` / `-a` / `-p` (their choice sets are Codex's, not validated here);
-`network` (bool) forwards to Codex's `sandbox_workspace_write.network_access` config key (Codex
-sandboxes network OFF by default even in `workspace-write`, so a coding session that needs
-`npm install` or `git push` wants `network: true`); `approvals_reviewer` (string) forwards to
-Codex's `approvals_reviewer` config key and selects who adjudicates approval escalations (sandbox
-escapes, blocked network access): Codex documents `user` (the default: escalations prompt the human
-in the pane) and `auto_review` (Codex's risk-based reviewer subagent approves or denies instead,
-with the sandbox still enforcing the outer boundary), so unattended-leaning "auto" templates usually
-want `auto_review`; `writable_dirs` (list) grants extra writable directories alongside the workspace
-(one `codex --add-dir` each; union-merged across template inheritance; entries are passed literally,
-so use absolute paths: `~` and `$HOME` are not expanded); `web_search` (bool) enables Codex's live
-web-search tool (`codex --search`, distinct from sandbox network access); `extra_args` is the same
-appended-last escape hatch; and `disable_strict_config` (bool) is the strictness off-switch
-described next. The integration always passes `--strict-config` so a Codex config mistake (or a
-Codex-renamed config key) fails loudly at launch instead of being silently ignored;
-`disable_strict_config: true` turns that off when strictness itself is the problem: a target whose
-`config.toml` Codex must tolerate (for example one written by a newer Codex than the target runs),
-or a target Codex old enough to not know the flag (it was verified against codex-cli 0.146.0, and an
-older binary rejects it as an unknown argument at launch). The only launch-target requirement is
-that `codex` is installed:
+Its config is all optional, and `agw resource describe-kind harness-integration/codex` documents
+every field. Four things the field reference does not say, because they are Codex's behavior rather
+than facts about the fields:
+
+- **Codex sandboxes network access OFF by default**, even under `workspace-write`. A coding session
+  that needs `npm install` or `git push` has to turn it on.
+- **Who adjudicates an approval escalation** (a sandbox escape, a blocked network call) is a choice.
+  Codex documents `user`, the default, where escalations prompt the human in the pane, and
+  `auto_review`, where Codex's risk-based reviewer subagent approves or denies instead with the
+  sandbox still enforcing the outer boundary. Unattended-leaning "auto" templates usually want
+  `auto_review`.
+- **Extra writable directories are passed literally**, so use absolute paths: `~` and `$HOME` are
+  not expanded.
+- **The integration always passes `--strict-config`**, so a Codex config mistake (or a Codex-renamed
+  config key) fails loudly at launch instead of being silently ignored. Turning that off is for when
+  strictness itself is the problem: a target whose `config.toml` Codex must tolerate (one written by
+  a newer Codex than the target runs), or a target Codex old enough not to know the flag (it was
+  verified against codex-cli 0.146.0, and an older binary rejects it as an unknown argument at
+  launch).
+
+The only launch-target requirement is that `codex` is installed:
 
 ```yaml
 apiVersion: agentworks/v1
@@ -411,12 +417,11 @@ policy is per kind:
   this host lacks what they need (`agw resource list` marks the row; `describe` and `agw doctor`
   carry the reason); using a not-ready site is an error naming the requirement. A site naming an
   UNKNOWN platform (a typo, or an uninstalled plugin) is a hard error at load, not a self-disable.
-- **Secret backends** (`env-var`, `prompt`; `onepassword` ships as an opt-in system plugin, see
-  below), **VM platforms** (`lima`, `wsl2`; `proxmox` and `azure-vm` ship as the opt-in `proxmox`
-  and `azure` system plugins, see below), **git-credential providers** (`github`; `azdo` ships in
-  the opt-in `azure` system plugin), and **harness integrations** (`shell`; `claude-code` and
-  `codex` ship as the opt-in `claude` and `codex` system plugins, see below): registered
-  capabilities, shown as read-only rows. You cannot declare or override them; secrets customize per
+- **The four capability kinds** (`secret-backend`, `vm-platform`, `git-credential-provider`,
+  `harness-integration`): registered code, shown as read-only rows. You cannot declare or override
+  one. `agw resource describe-kind <capability-kind>` lists the implementations this build has, and
+  naming one (`agw resource describe-kind vm-platform/proxmox`) says which system plugin it arrives
+  with, if any. Configuration is per consumer rather than per capability: secrets customize per
   secret via `backend_mappings`, platforms configure per site via the `spec.platform` table, and
   integrations configure per session-template via the `spec.harness_integration` table. Every
   installed platform publishes a row regardless of host support: a platform whose host requirements
@@ -460,11 +465,10 @@ installed plugin, its description, and whether it is enabled. Note the axis dist
 is the opt-in state and hides the row, while a **not-ready** resource (enabled but unable to run on
 this host) still lists with its reason.
 
-The shipped build installs the `onepassword` (1Password secret backend), `claude` (Claude Code
-harness integration and its `claude` CLI install-command), `codex` (Codex harness integration and
-its `codex` CLI install-command), `proxmox` (Proxmox VE VM platform), and `azure` (Azure VM
-platform, `azdo` git-credential provider, and `az-cli` install-command) plugins, all disabled until
-opted in. Authoring a system plugin is documented in the plugins package README
+Every plugin the build installs is disabled until you opt in. `agw doctor`'s **System plugins**
+roster is the list for this build, with each plugin's description and its opt-in state;
+`agw resource describe-kind <capability-kind>/<name>` says which plugin a given capability arrives
+with. Authoring a system plugin is documented in the plugins package README
 (`cli/agentworks/plugins/README.md`).
 
 **Config errors in a not-enabled plugin's resources surface only once you enable it.** Validation
@@ -500,20 +504,18 @@ installed plugin and whether it is enabled.
 Two layers, one rule each:
 
 - A **secret backend** is a capability resource: a read-only `secret-backend` row whose
-  implementation is registered code (`env-var`, `prompt`; `onepassword` ships as a system plugin;
-  later plugins, ...). You cannot declare one (the app, and plugins, register them), but they list
-  and describe like every other resource. Per-secret behavior (identifier overrides, structured
-  store addressing like `{ account = "my.1password.com", reference = "op://Work/npm/password" }`,
-  and opt-outs) lives in each secret's `backend_mappings.<backend>`. The `onepassword` backend now
-  ships as the opt-in `onepassword` system plugin (see [System plugins](#system-plugins)): its row
-  is present but disabled until you add `onepassword` to `[plugins].system`, so a secret mapped only
-  to it stays inert (and, if it is the sole path, fails resolve with an "enable plugin
-  `onepassword`" hint) until you opt in. Once enabled it reads via the 1Password CLI
-  (`op read op://vault/item/field`); it needs a per-secret `backend_mappings.onepassword` address in
-  one of two forms: a bare `op://vault/item/field` string (using op's default account, or
-  `OP_ACCOUNT`), or a `{ account, reference }` table when a specific account must be pinned. `op`
-  must be able to read at command time, meaning either the 1Password app's CLI integration is
-  enabled or you have run `op signin`.
+  implementation is registered code. You cannot declare one (the app, and plugins, register them),
+  but they list and describe like every other resource. `agw resource describe-kind secret-backend`
+  lists the backends this build has, and naming one
+  (`agw resource describe-kind secret-backend/onepassword`) documents the address it expects and
+  what it needs on this host. Per-secret behavior (identifier overrides, structured store
+  addressing, and opt-outs) lives in each secret's `backend_mappings.<backend>`. A backend that
+  arrives with a system plugin is present but disabled until you name that plugin in
+  `[plugins].system`, so a secret mapped only to it stays inert, and fails resolve with an "enable
+  plugin `<name>`" hint if it is the sole path. For `onepassword` specifically, the address is
+  either a bare `op://vault/item/field` string or a `{ account, reference }` table when a specific
+  account must be pinned, and `op` has to be able to read at command time: either the 1Password
+  app's CLI integration is enabled, or you have run `op signin`.
 - The **chain** is a setting: `[secret_config].backends` in `config.toml` lists the active backends
   in precedence order (default `["env-var", "prompt"]`). Registered backends absent from the chain
   are dormant.
