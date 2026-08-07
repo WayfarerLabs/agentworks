@@ -238,25 +238,6 @@ def test_publication_covers_every_registered_impl(descriptor: CapabilityKindDesc
     assert {name for name, _row in _published_rows(descriptor)} == expected
 
 
-@pytest.mark.parametrize("descriptor", _descriptors(), ids=lambda d: d.kind)
-def test_the_graph_routes_each_kind_to_its_own_readiness_callable(
-    descriptor: CapabilityKindDescriptor,
-) -> None:
-    """The graph's capability-node readiness IS this kind's callable, asked
-    about this kind's seated impl.
-
-    The fold no longer branches per kind, so what is left to get wrong is the
-    routing: dispatching a kind to another kind's record, or handing the
-    callable something other than the impl its registry holds. Both produce a
-    plausible verdict from the wrong source, which is exactly what this
-    compares away. The sentences themselves are pinned against stubs with
-    known answers below."""
-    seated_impls = list(descriptor.registry().items())
-    assert seated_impls, f"{descriptor.kind} has an empty registry; this test would prove nothing"
-    for name, seated in seated_impls:
-        assert descriptor.readiness(name, seated) == _capability_node_readiness(descriptor.kind, name)
-
-
 class _UnsupportedPlatform(ConformingVMPlatform):
     """A platform that is never host-supported, anywhere."""
 
@@ -291,6 +272,51 @@ def test_vm_platform_readiness_carries_the_host_support_sentence() -> None:
     assert descriptor.readiness("unsupported-fixture", _UnsupportedPlatform) == Readiness.blocked(
         "platform 'unsupported-fixture' is unsupported here: the fixture says so"
     )
+
+
+def test_the_graph_routes_a_capability_node_to_its_own_kinds_verdict() -> None:
+    """The graph's capability-node readiness, through the graph's own entry
+    point, against verdicts only the right route can produce.
+
+    ``test_plugin_framework.py`` explicitly DELEGATES the readiness
+    dispatch here, because it has no static structure to compare and has to
+    be pinned by output. What was here compared
+    ``descriptor.readiness(name, seated)`` against
+    ``_capability_node_readiness(kind, name)``, and the second expression
+    expands to the first, so both sides computed the same thing from the
+    same table: a mis-route survived it whenever the wrong source happened
+    to agree, which for the shipped impls is almost always (nearly all of
+    them are ready, so ready == ready proves nothing).
+
+    Literal verdicts instead, through fixtures with known answers. The
+    blocked sentence names the fixture, so it cannot be produced by
+    dispatching vm-platform to another kind's record (every other kind is
+    unconditionally ready) nor by handing the callable a different impl
+    (only this one says that).
+    """
+    from agentworks.plugins import Plugin, seated_plugin
+
+    with seated_plugin(
+        Plugin(
+            name="descriptor-readiness-fixtures",
+            capabilities={"vm-platform": (_SupportedPlatform, _UnsupportedPlatform)},
+        )
+    ):
+        assert _capability_node_readiness("vm-platform", "supported-fixture") == Readiness.ready()
+        assert _capability_node_readiness("vm-platform", "unsupported-fixture") == Readiness.blocked(
+            "platform 'unsupported-fixture' is unsupported here: the fixture says so"
+        )
+
+    # The two kinds with no host-support concept, pinned as the ready they
+    # are documented to be rather than against their own callable. Not
+    # secret-backend, which HAS one (`onepassword` is blocked where the op
+    # CLI is not installed), and so is host-dependent for the same reason
+    # the platforms above are done with fixtures.
+    for kind in ("harness-integration", "git-credential-provider"):
+        registry = descriptor_for(kind).registry()
+        assert registry, f"{kind} has an empty registry; this test would prove nothing"
+        for name in registry:
+            assert _capability_node_readiness(kind, name) == Readiness.ready(), (kind, name)
 
 
 def test_manifest_sections_match_the_decoders_host_surfaces() -> None:
