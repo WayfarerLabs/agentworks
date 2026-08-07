@@ -11,13 +11,12 @@ edit to learn about a field, one of these fails, which is the whole
 promise (FR15 for the default, FR6 for the description, FR13 for the
 regime being provable on a fixture rather than only on shipped models).
 
-Coverage as of this file's writing: validation, reference extraction, the
-emitted JSON Schema, and the ordered field-reference stream that the
-rendered sample and the describe surface both read (``iter_field_docs``).
-The sample RENDERER and the describe COMMAND are step 2.8's and do not
-exist yet; their arms belong here as they land, against this same
-fixture, rather than in files of their own, where the
-with-no-other-edits claim would be split up and weakened.
+Coverage: validation, reference extraction, the emitted JSON Schema, the
+ordered field-reference stream both human surfaces read
+(``iter_field_docs``), and, since step 2.8, those two surfaces themselves:
+the rendered sample and the field reference. Every arm is against this one
+fixture rather than in files of its own, where the with-no-other-edits
+claim would be split up and weakened.
 """
 
 from __future__ import annotations
@@ -32,7 +31,10 @@ from agentworks.capabilities.config import (
     validate_capability_config,
 )
 from agentworks.errors import ConfigError
+from agentworks.manifests.describe import reference_lines
 from agentworks.manifests.emit import document_schema
+from agentworks.manifests.reference import reference_for
+from agentworks.manifests.samples import sample_text
 from agentworks.plugins import Plugin, seated_plugin
 from agentworks.schema import AgwModel, NonEmptyStr, RefOwner, SecretRef, iter_field_docs
 from tests.plugins._fixtures import ConformingVMPlatform
@@ -240,3 +242,54 @@ def test_the_arm_is_there_only_because_the_capability_is_seated() -> None:
     registry, so an unseated platform contributes no arm, and seating one
     is the entire act of publishing its schema."""
     assert "DeclareOnceConfig" not in document_schema("vm-site")["$defs"]
+
+
+# -- Surface 5: the rendered sample -------------------------------------------
+
+
+def test_the_rendered_sample_offers_the_capability_as_an_alternative(seated: None) -> None:
+    """``agw resource sample vm-site`` renders ONE platform and names the
+    rest, so what a seated fixture reaches here is the alternatives line.
+    That is the whole edit: no sample file, no kind table, no entry
+    anywhere that says this platform exists."""
+    text = sample_text("vm-site")
+
+    assert "declare-once" in text
+    assert "`agw resource describe-kind vm-platform/" in text
+
+
+def test_no_sample_mentions_the_capability_when_it_is_not_seated() -> None:
+    """The counterpart, and the reason the arm above is not a coincidence:
+    the sample is rendered from the live registry rather than from a file
+    that happens to list platforms."""
+    assert "declare-once" not in sample_text("vm-site")
+
+
+# -- Surface 6: the field reference -------------------------------------------
+
+
+def test_the_field_reference_reads_the_same_one_declaration(seated: None) -> None:
+    """``agw resource describe-kind vm-platform/declare-once`` documents a
+    capability whose field, default, and description are declared once, on
+    the model, and nowhere else. Nothing was registered with the describe
+    surface; seating the capability is what put it there."""
+    reference = reference_for("vm-platform/declare-once")
+    region = next(entry for entry in reference.spec if entry.name == "region")
+
+    assert region.doc.default == REGION_DEFAULT
+    assert region.doc.description == REGION_DESCRIPTION
+
+    rendered = "\n".join(reference_lines(reference))
+    assert f"region  (string, optional, default '{REGION_DEFAULT}', min length 1)" in rendered
+    assert REGION_DESCRIPTION in rendered
+
+
+def test_the_field_reference_makes_the_same_templated_subtraction(seated: None) -> None:
+    """``token`` is required to pydantic and optional to the operator,
+    because the model fills it from its owner. Emitted schema already
+    stopped calling it required (above); the human surfaces make the same
+    subtraction from the same marker, and say what the omission
+    resolves to."""
+    rendered = "\n".join(reference_lines(reference_for("vm-platform/declare-once")))
+
+    assert "token  (string, optional, defaults to `declare-once-<name>`" in rendered
