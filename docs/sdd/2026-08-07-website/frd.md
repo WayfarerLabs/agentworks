@@ -1,6 +1,6 @@
 # FRD: The agentworks.build Website
 
-- Status: Seed, ready for an effort lead
+- Status: Requirements accepted; owned by the website effort lead
 - Date: 2026-08-07
 - Seeded by: the roadmap lead, at operator request. This is a standalone effort, deliberately NOT a
   child of the 2026-08-04-next-steps roadmap (see that roadmap's `target-state.md` out-of-scope
