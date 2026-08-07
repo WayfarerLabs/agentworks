@@ -159,6 +159,12 @@ def test_power_boundary_resolves_relative_imports_from_parent_and_root(
     assert _power_boundary_violations(source, package=package)
 
 
+def test_power_boundary_rejects_relative_import_beyond_package_root() -> None:
+    violations = _power_boundary_violations("from ... import output", package="agentworks.guide")
+
+    assert violations == ("line 1: invalid relative import",)
+
+
 def test_power_boundary_allows_only_the_inert_secret_topic_contribution_import() -> None:
     assert not _power_boundary_violations("from agentworks.secrets import guide_contributions as secret_topics")
     assert not _power_boundary_violations("from ..secrets import guide_contributions as secret_topics")
