@@ -425,13 +425,20 @@ Enforced by construction, not by a blanket guard:
   substitution over a pre-validated placeholder set (section 5.2). It parses nothing, imports
   nothing lazily, and invokes NO user code: it reads `model_fields` metadata and raw values, never a
   validator, never `model_validate`, never a capability method.
-- **Recursion carries a PATH-SCOPED visited set: push the model class on descent, pop on return.**
-  Not an accumulating set. An accumulating set terminates self-reference just as well but silently
-  drops diamonds: a model with `primary: CredsModel` and `fallback: CredsModel` would walk the first
-  and skip the second, so `fallback`'s secret would never become an edge. That is precisely the
-  silent-missing-edge outcome this section argues is worse than a crash, and it would defeat FR18
-  one indirection down. Path scoping cuts only a genuine cycle (a model reachable from itself),
-  which is the only case that cannot terminate.
+- **The walk carries a PATH-SCOPED visited set, keyed on the model AND the raw value it is read
+  against.** Not an accumulating set. An accumulating set terminates self-reference just as well but
+  silently drops diamonds: a model with `primary: CredsModel` and `fallback: CredsModel` would walk
+  the first and skip the second, so `fallback`'s secret would never become an edge. That is
+  precisely the silent-missing-edge outcome this section argues is worse than a crash, and it would
+  defeat FR18 one indirection down. Keying on the MODEL alone has the same defect one level deeper:
+  data nested through a repeated type is not a cycle at all, so a blob three levels into a
+  self-referential model, each level naming a secret of its own, validates fine and loses every edge
+  below the second occurrence. The pair cuts only what cannot terminate on its own, a blob reachable
+  from ITSELF, which a YAML anchor can produce.
+- **The walk is ITERATIVE, through `agentworks.traversal`, not through Python's stack.** The blob is
+  the operator's, so its depth is theirs to choose, and a `RecursionError` on a deeply nested
+  document would break this contract exactly as a raised exception would. The identity above is what
+  that walk is keyed by (`extract.py:_identity_of`).
 - Every value read from the blob is checked before use; an edge whose NAME cannot be derived (the
   field is present but is not a non-empty string) is omitted, exactly as today.
 - **An incomplete model contributes nothing rather than raising.** `model_fields` raises on a model
@@ -442,6 +449,19 @@ Enforced by construction, not by a blanket guard:
   registration conformance is what makes it so: a registered config model with an unresolved forward
   reference is refused at registration, where the author can see it, rather than degrading a graph
   edge at runtime. Recorded here as a requirement ON 2.3, not as a hope.
+
+> **Correction (finding 3, 2026-08-07): the two bullets above are what shipped; this section first
+> specified neither.** It said "push the model class on descent, pop on return", and that path
+> scoping "cuts only a genuine cycle (a model reachable from itself), which is the only case that
+> cannot terminate". Both halves were wrong in the same direction, and it is the direction this
+> section calls worse than a crash. Model-only scoping truncates FINITE data at the first repeated
+> type: nothing about a `SelfReferential` blob three levels deep fails to terminate, and every edge
+> below level two was silently absent. And a design that recurses through Python's stack answers a
+> deep enough document with `RecursionError`, which breaks the totality contract exactly as a raised
+> exception does, on an input the operator chose. Pinned by
+> `tests/schema/test_extract_completeness.py`, whose oracle walks the VALIDATED object with its own
+> traversal for this reason, and whose non-vacuity case is the four-level blob a model-keyed guard
+> reported one edge for.
 
 **Deliberately NOT a blanket `except Exception`.** A catch-all would convert a bug in the walker
 into silently missing graph edges, which is a worse failure than a crash: the graph would build,
@@ -694,6 +714,20 @@ def render_type(annotation: object) -> str:
     "integer"). Separate so a presenter may use it or ignore it."""
 ```
 
+> **Record (2026-08-07): the shipped record is wider than this sketch, and section 6.2 says that is
+> a coordination point, so here is what it carries and why.** `examples` (the author's
+> `Field(examples=[...])`, which is what lets a generated sample teach a real value rather than
+> `<string>`); `item_model`, for a field holding MANY blocks, whose fields follow under a
+> placeholder segment; `item_segment`, the placeholder segment itself (`[]` or `<key>`), so a
+> presenter placing an element does not decide for itself what kind of collection a rendered type
+> string describes; and `item_union_arms`, the arms one ELEMENT may be when the elements are a
+> discriminated union of models. The last is finding 5's documentation half: such a field was
+> classified for the dependency graph and invisible to every human surface, which rendered it as an
+> opaque "list of table". The `item_` prefix is the record's one convention for this: an `item_`
+> field says what one value INSIDE the field is, and reading an element's arms off `union_arms`
+> would render the collection itself as one arm, a whole indent level shallower than the document
+> has it.
+
 `choices`, `constraints`, and `ModelDoc` are here because this record is a cross-SDD coordination
 point (section 6.2), and widening it later means renegotiating with the onboarding child SDD rather
 than editing a file. All three have concrete day-one consumers:
@@ -740,10 +774,20 @@ than editing a file. All three have concrete day-one consumers:
   shared source, not a CLI-layer detail: it lives in `resources/schema/`, and any change to its
   shape is a cross-SDD coordination point, not a local refactor. That is also why `ref` carries the
   marker itself rather than a flattened copy of its fields: one vocabulary for both consumers.
-- **Same PATH-SCOPED recursion guard as the extractor** (push on descent, pop on return), and it
-  matters here for the same reason in a different costume: an accumulating visited set would render
+- **A PATH-SCOPED recursion guard, on the MODEL alone.** Path scoping matters here for the same
+  reason it does in the extractor, in a different costume: an accumulating visited set would render
   a nested block for `primary: CredsModel` and then emit NOTHING for `fallback: CredsModel`, so the
-  generated sample would be missing a whole section of the config an operator has to write.
+  generated sample would be missing a whole section of the config an operator has to write. What the
+  two guards key on differs, and has to (**corrected 2026-08-07**, when finding 3 made the
+  extractor's key a pair): this walker describes a TYPE and has no blob, so a model reachable from
+  itself has no finite expansion to truncate, while the extractor reads a finite document and would
+  drop real edges keyed the same way.
+- **The guard covers what the STREAM expands, which is nested blocks and collection elements, not
+  union arms.** The arms are handles here, so the walker never opens one and has nothing to guard;
+  the presenter that DOES open one carries its own path guard over the models whose arms are
+  currently open (`manifests/field_tree.py:_tree`). A collection whose elements are a tagged union
+  goes through that same presenter guard, which is what keeps a group whose members are groups from
+  expanding until the interpreter gives up.
 - **An incomplete model raises `StateError` here**, unlike the extractor, which contributes nothing
   (section 4.2). The asymmetry is deliberate: extraction is total by contract and its caller cannot
   handle an exception, while `iter_field_docs` is a developer-facing walker whose caller is a
