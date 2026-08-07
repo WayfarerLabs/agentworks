@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentworks.ssh import SSHLogger
+from agentworks.ssh import SSHLogger, SSHResult
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -55,8 +55,9 @@ def test_close_without_exception_omits_traceback_block(logger: SSHLogger) -> Non
     assert "# Finished:" in text
 
 
-def test_write_sink_sanitizes_regardless_of_caller_discipline(
-    logger: SSHLogger,
+def test_write_sink_sanitizes_every_persistent_surface(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The sink is the single sanitizing choke point: a registered
     redaction never reaches the file even when a caller hands raw,
@@ -64,15 +65,14 @@ def test_write_sink_sanitizes_regardless_of_caller_discipline(
     itself (no public method pre-sanitizes; correctness must not
     depend on caller discipline)."""
     secret = "tskey-auth-supersecret-12345"
-    logger.add_redaction(secret)
+    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
+    logger = SSHLogger("vm1", "test-op", redactions=(secret,))
 
     logger.step(f"joining with {secret}")
     logger.output(f"raw output {secret}")
     logger.warning(f"warn {secret}")
     logger.log_error(f"error {secret}")
     logger.log_timeout(f"tailscale up --auth-key {secret}", 1, 2)
-    from agentworks.ssh import SSHResult
-
     logger.log_command(
         f"tailscale up --auth-key {secret}",
         SSHResult(returncode=1, stdout=f"out {secret}", stderr=f"err {secret}"),
@@ -85,13 +85,17 @@ def test_write_sink_sanitizes_regardless_of_caller_discipline(
     assert text.count("[REDACTED]") >= 8
 
 
-def test_close_footer_redacts_recorded_warnings(logger: SSHLogger) -> None:
+def test_close_footer_redacts_recorded_warnings(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The footer's warning recap is written at close time, after the
     live WARNING line; a secret inside a recorded warning must be
     redacted there too (this leaked before sanitization moved into the
     sink)."""
     secret = "ghp-supersecret-token"
-    logger.add_redaction(secret)
+    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
+    logger = SSHLogger("vm1", "test-op", redactions=(secret,))
     logger.warning(f"credential rejected: {secret}")
     logger.close()
 
@@ -101,13 +105,44 @@ def test_close_footer_redacts_recorded_warnings(logger: SSHLogger) -> None:
     assert text.count("[REDACTED]") == 2
 
 
-def test_close_redacts_secrets_from_traceback(logger: SSHLogger) -> None:
-    """Secrets registered via ``add_redaction`` must not leak into the
-    appended traceback (the operator's Tailscale auth key or git PAT
+def test_redactions_cannot_be_registered_after_writes(logger: SSHLogger) -> None:
+    """Incremental logs persist their header during construction, so accepting
+    later redactions would make the no-cleartext guarantee timing-dependent."""
+    assert not hasattr(logger, "add_redaction")
+
+
+def test_shell_quoted_secret_is_redacted_from_command(logger: SSHLogger) -> None:
+    """Shell quoting rewrites embedded single quotes, so the transformed
+    representation must be registered alongside the raw secret."""
+    import shlex
+
+    secret = "password-with-'quote"
+    logger = SSHLogger("vm1", "test-op", redactions=(secret,))
+    quoted = shlex.quote(secret)
+
+    logger.log_command(
+        f"example --password {quoted}",
+        SSHResult(returncode=1, stdout="", stderr=""),
+    )
+    logger.close()
+
+    text = logger.path.read_text()
+    assert secret not in text
+    assert quoted not in text
+    assert "example --password [REDACTED]" in text
+
+
+def test_close_redacts_secrets_from_traceback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Secrets supplied at construction must not leak into the appended
+    traceback (the operator's Tailscale auth key or git PAT
     might appear in a ``str(exc)`` payload, which would otherwise hit
     the per-op log as plaintext)."""
     secret = "tskey-auth-supersecret-12345"
-    logger.add_redaction(secret)
+    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
+    logger = SSHLogger("vm1", "test-op", redactions=(secret,))
     try:
         raise RuntimeError(f"tailscale up failed with key={secret}")
     except RuntimeError:

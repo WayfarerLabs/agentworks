@@ -642,9 +642,7 @@ def reinit_vm(
         # Build Tailscale SSH target with logging
         from agentworks.ssh import SSHLogger
 
-        logger = SSHLogger(name, "vm-reinit")
-        for token in git_tokens.values():
-            logger.add_redaction(token)
+        logger = SSHLogger(name, "vm-reinit", redactions=tuple(git_tokens.values()))
         ts_target = transport(vm, config, default_timeout=60, logger=logger)
 
         home = f"/home/{vm.admin_username}"

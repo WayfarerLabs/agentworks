@@ -89,30 +89,40 @@ class SSHLogger:
     written incrementally so partial logs survive crashes.
 
     Usage:
-        logger = SSHLogger("myvm", "vm-create")
+        logger = SSHLogger("myvm", "vm-create", redactions=(auth_key,))
         logger.step("Installing packages")
         run(target, "apt-get install ...", logger=logger)
         logger.warning("package X failed")
         logger.close()
     """
 
-    def __init__(self, vm_name: str, command_stem: str) -> None:
+    def __init__(
+        self,
+        vm_name: str,
+        command_stem: str,
+        *,
+        redactions: tuple[str, ...] = (),
+    ) -> None:
         from datetime import UTC, datetime
 
         timestamp = datetime.now(tz=UTC).strftime("%Y%m%dT%H%M%SZ")
         self.vm_name = vm_name
         self.path = LOG_DIR / f"{vm_name}-{timestamp}-{command_stem}.log"
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._redact: list[str] = []
+        normalized: list[str] = []
+        for secret in redactions:
+            if not secret:
+                continue
+            for representation in (secret, shlex.quote(secret)):
+                if representation not in normalized:
+                    normalized.append(representation)
+        # Prefer the longest representation so an overlapping shorter token
+        # cannot rewrite part of it before the complete value is matched.
+        self._redact = tuple(sorted(normalized, key=len, reverse=True))
         self._warnings: list[str] = []
 
         ts = datetime.now(tz=UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
         self._write(f"# Log: {vm_name} ({command_stem})\n# Started: {ts}\n\n")
-
-    def add_redaction(self, secret: str) -> None:
-        """Register a secret to be redacted from all output."""
-        if secret:
-            self._redact.append(secret)
 
     def _sanitize(self, text: str) -> str:
         for secret in self._redact:
@@ -204,9 +214,11 @@ class SSHLogger:
         # The single sanitizing choke point: every byte that reaches the
         # log file passes through redaction HERE, so the no-secrets-in-
         # logs property holds regardless of caller discipline (a caller
-        # composing a message from raw values cannot bypass it, and
-        # redactions registered mid-operation cover everything written
-        # afterwards). Callers therefore never pre-sanitize.
+        # composing a message from raw values cannot bypass it). Raw secrets
+        # and their shell-quoted forms are registered before the header's
+        # first write. The redaction set is fixed at construction because
+        # incremental writes make late registration inherently unsafe.
+        # Callers therefore never pre-sanitize.
         with open(self.path, "a", encoding="utf-8", errors="replace") as f:
             f.write(self._sanitize(text))
 
