@@ -210,50 +210,309 @@ This was deprecated with a load-time warning in an earlier release and is now re
 declared as YAML manifests (see "Declaring resources" above); settings sections load exactly as
 before.
 
-**Upgrading.** This is a breaking change, and the rewrite is yours to make. Agentworks does not ship
-a migration command: what it ships instead is an error that names every offending section, and the
-two commands that show you what each one becomes.
+**Upgrading.** This is a breaking change, and the rewrite is yours to make. Agentworks ships no
+migration command. What it ships instead is an error naming every offending section, two commands
+that render the target shape live from this build's registry, and this section. If you would rather
+delegate the work than do it by hand, "Handing the rewrite to an agent" below is the same procedure
+written as a brief.
 
-The shape of the work is the same for most kinds. One TOML section becomes one YAML document: the
-section's name becomes `metadata.name`, its `description` moves to `metadata.description`, and every
-other key moves into `spec` under the same name. So `[secrets.npm-token]` becomes a `secret`
-document named `npm-token`, `[vm_templates.dev]` a `vm-template` named `dev`, and so on.
+### What still answers while `config.toml` is refused
 
-```bash
-agw resource describe-kind vm-template            # every field, its type, whether it is required
-agw resource sample vm-template --write vms.yaml  # a commented starter to edit
-agw doctor                                        # confirms the result loads and resolves
+Read this before you start, because it decides the order. The refusal happens at config load, so
+every command that builds the registry stops at it:
+
+- **`agw resource describe-kind <kind>` reads no config at all.** It answers on a host whose
+  `config.toml` does not load, and it documents kinds and capability implementations whose plugin is
+  not enabled.
+- **`agw resource sample <kind>`, and `--write <file>`, load settings only.** They work against a
+  `config.toml` that still carries every section you are about to delete.
+- **`agw resource schema --write` loads settings only too.** Run it first: a schema-aware editor
+  then checks each manifest as you type it, which is the only feedback available until the whole
+  rewrite is finished (see "Editing manifests with schema support" above).
+- **`agw resource list`, `agw secret list`, and `agw doctor` build the registry**, so they cannot
+  answer until the last resource section is gone. They are the finish line, not the feedback loop.
+
+That last point shapes everything else, so it is worth stating plainly: **there is no partial
+success.** A `config.toml` carrying one leftover section fails exactly like one carrying ten, so you
+cannot rewrite one kind, confirm it loads, and move on to the next. Write every manifest first,
+delete every section in one pass, then verify.
+
+### The inventory is the error message
+
+Any registry command names the full list of sections in one pass, so it is your work list:
+
+```console
+$ agw resource list
+Configuration error: config.toml declares resources, which config.toml no longer supports (it is
+settings only now): [secrets.*], [vm_templates.*], [session_templates.*], [git_credentials.*],
+[proxmox]. Rewrite the sections as YAML manifests (the [azure]/[proxmox] sections become vm-site
+manifests), then remove the sections from config.toml.
+  Hint: `agw resource sample <kind> --write <kind>s.yaml` writes a commented starter to edit, and
+  `agw resource describe-kind <kind>` lists every field with its type. The "TOML resource sections:
+  removed" section of docs/guides/resources.md walks through it section by section.
 ```
 
-Work one kind at a time, deleting each `config.toml` section once its manifest loads. Both commands
-above read no config, so they answer while `config.toml` is still failing, and `--write` loads
-settings only, so it works against a config that still carries the sections.
+Each retired section maps to exactly one kind. Where the section name does not say which, this is
+the whole table:
 
-These sections are the exceptions:
+| Retired TOML section          | Becomes kind             |
+| ----------------------------- | ------------------------ |
+| `[secrets.*]`                 | `secret`                 |
+| `[vm_templates.*]`            | `vm-template`            |
+| `[agent_templates.*]`         | `agent-template`         |
+| `[workspace_templates.*]`     | `workspace-template`     |
+| `[session_templates.*]`       | `session-template`       |
+| `[git_credentials.*]`         | `git-credential`         |
+| `[admin.config]`              | `admin-template`         |
+| `[named_console]`             | `named-console-template` |
+| `[azure]` / `[proxmox]`       | `vm-site`                |
+| `[apt_sources.*]`             | `apt-source`             |
+| `[apt_packages.*]`            | `apt-package`            |
+| `[system_install_commands.*]` | `system-install-command` |
+| `[user_install_commands.*]`   | `user-install-command`   |
+| `[secret_backends.*]`         | nothing; see below       |
 
-- `[azure]` becomes a `vm-site` named `azure` whose `spec.platform` is `{name: azure-vm, ...}`, and
-  `[proxmox]` a `vm-site` named `proxmox` whose platform is `{name: proxmox, ...}`. The section's
-  keys sit inside that table beside the name. See "VM sites and platforms" above for the shape.
-- `[git_credentials.*]`: the section's `provider` (or the older `type`) and its `token` both move
-  inside one tagged `spec.provider` table, along with anything else the provider owns such as `org`.
-  See "Scoped GitHub credentials" above.
-- `[session_templates.*]`: a flat `command` / `resume_command` / `required_commands` trio belongs to
-  the `shell` harness integration, so it becomes
-  `spec.harness_integration: {name: shell, command: ...}`. A section that already names
-  `harness_integration` moves that name and its `harness_integration_config` keys into the same
-  tagged table. See "Harness integrations" above.
-- `[admin.config]` and `[admin.env]` become one `admin-template` named `default`, with the env table
-  nested as `spec.env`.
-- `[named_console]` becomes a `named-console-template` named `default`.
-- `[secret_backends.*]` becomes nothing. Those sections never carried configuration; delete them and
-  list the backends you want in `[secret_config].backends`, which is a setting and stays in
-  `config.toml`.
+### The rule, with one section worked through
 
-**Manifests on a retired shape.** A manifest that still names a capability in the old sibling shape
-(`platform: lima` plus a `platform_config:` table, and likewise `provider`/`provider_config`) does
-not load either. The error prints the exact tagged table that replaces it, built from what your own
-document says, so the fix is to paste that line in place of the pair. Every document on the old
-shape has to move: one left behind leaves the whole resources directory unloadable.
+One TOML section becomes one YAML document. The section's name becomes `metadata.name`, its
+`description` moves to `metadata.description`, and every other key moves into `spec` keeping its
+spelling:
+
+```toml
+# config.toml, before
+[secrets.npm-token]
+description = "npm registry token"
+hint = "Generate at https://www.npmjs.com/settings/me/tokens"
+backend_mappings = { env-var = "NPM_TOKEN" }
+```
+
+```yaml
+# resources/secrets.yaml, after
+apiVersion: agentworks/v1
+kind: secret
+metadata:
+  name: npm-token
+  description: npm registry token
+spec:
+  hint: Generate at https://www.npmjs.com/settings/me/tokens
+  backend_mappings:
+    env-var: NPM_TOKEN
+```
+
+Two things move rather than copy across: `name` was never a key, it was the second half of the
+section header, and `description` is the one key that leaves the section body for `metadata`. A
+`vm-template` is the same move with no surprises at all: `[vm_templates.dev]` with `cpus = 4` and
+`memory = 16` becomes a `vm-template` named `dev` whose `spec` carries `cpus: 4` and `memory: 16`.
+
+`agw resource describe-kind <kind>` is the authority on what a `spec` accepts, and it is worth
+running per kind rather than assuming: several field names read like something they are not (a
+vm-template sizes memory with `memory`, in GiB, not `memory_gib`).
+
+### Where to put the files
+
+Every `*.yaml` and `*.yml` file under `~/.config/agentworks/resources/` is loaded, including files
+in subdirectories, and a single file may hold many documents separated by `---`. Nothing keys off
+the file name, so the layout is genuinely yours: one file per kind (`secrets.yaml`,
+`vm-templates.yaml`), one file per resource, or one file for everything all behave identically.
+Dot-directories are skipped, which is why the generated `.schema/` directory sitting in there is
+never read as configuration.
+
+One file per kind, named after the kind, is the layout that makes this rewrite easiest to check:
+each `config.toml` section family lands in exactly one file, so "did I move all of it" is answerable
+by looking at one place. `agw resource sample <kind> --write <kind>s.yaml` is built for that shape,
+and it is safe to point at a file that already exists: a second kind is appended under a commented
+`#---`, and the file's schema modeline is restamped from the one kind's schema to the any-kind
+`manifest.schema.json`. Both of those are document lines you must uncomment, so re-read "Declaring
+resources: YAML manifests" above before editing an appended file.
+
+### The sections that are not a straight move
+
+- **`[azure]` and `[proxmox]`** become `vm-site` manifests. The section name becomes the resource
+  name, and the section's keys move inside the tagged `spec.platform` table rather than sitting
+  directly under `spec`. Take the platform's `name` from `agw resource describe-kind vm-platform`
+  rather than from the section header: `[proxmox]` does select the `proxmox` platform, but `[azure]`
+  selects `azure-vm`, so only one of the two matches its old section name.
+
+  ```toml
+  # config.toml, before
+  [proxmox]
+  api_url = "https://pve.example.com:8006"
+  node = "pve1"
+  token_id = "agentworks@pam!agw"
+  template_vmid = 9000
+  ```
+
+  ```yaml
+  # resources/vm-sites.yaml, after
+  apiVersion: agentworks/v1
+  kind: vm-site
+  metadata:
+    name: proxmox
+  spec:
+    platform:
+      name: proxmox
+      api_url: https://pve.example.com:8006
+      node: pve1
+      token_id: agentworks@pam!agw
+      template_vmid: 9000
+  ```
+
+  Both platforms ship as opt-in system plugins now, so the site loads but reports not-ready until
+  you add `proxmox` (or `azure`) to `[plugins] system`. See "VM sites and platforms" above.
+
+- **`[git_credentials.*]`** folds three flat keys into one tagged `spec.provider` table: the
+  section's `provider` (or the older `type`) becomes the table's `name`, and `token` and the
+  provider's own keys (azdo's `org`) join it inside:
+
+  ```toml
+  # config.toml, before
+  [git_credentials.github]
+  provider = "github"
+  token = "gh-pat"
+  ```
+
+  ```yaml
+  # resources/git-credentials.yaml, after
+  apiVersion: agentworks/v1
+  kind: git-credential
+  metadata:
+    name: github
+  spec:
+    provider:
+      name: github
+      token: gh-pat
+  ```
+
+  `token` is the one to look at twice: it names a secret, it is not the token value, and inside the
+  table it sits beside `name` rather than under a config sub-table. Omitting it still defaults to
+  `git-token-<credential name>`. **If a github section carried `repos` or `owner`, note that TOML
+  ignored them and provisioned the credential unscoped**, warning as it did so. Writing them in the
+  manifest is therefore a real change: the credential becomes scoped, which is what those keys
+  always looked like they did. See "Scoped GitHub credentials" above before you carry them over.
+
+- **`[session_templates.*]`** with a flat `command` / `resume_command` / `required_commands` trio
+  hoists that trio into the `shell` harness integration, because those keys were always `shell`'s
+  config:
+
+  ```toml
+  # config.toml, before
+  [session_templates.htop]
+  description = "Live process monitor"
+  command = "htop"
+  required_commands = ["htop"]
+  ```
+
+  ```yaml
+  # resources/session-templates.yaml, after
+  apiVersion: agentworks/v1
+  kind: session-template
+  metadata:
+    name: htop
+    description: Live process monitor
+  spec:
+    harness_integration:
+      name: shell
+      command: htop
+      required_commands: [htop]
+  ```
+
+  A section that already named `harness_integration` (or the older `harness`) moves that value to
+  the table's `name` and lifts its `harness_integration_config` keys in beside it. A section with a
+  `restart_command` renames it to `resume_command` on the way. See "Harness integrations" above.
+
+- **`[admin.config]` and `[admin.env]`** become one `admin-template` named `default`, with the env
+  table nested as `spec.env`.
+
+- **`[named_console]`** becomes a `named-console-template` named `default`.
+
+- **`[secret_backends.*]`** becomes nothing at all. Those sections never carried configuration:
+  delete them, and list the backends you want in `[secret_config].backends`, which is a setting and
+  stays in `config.toml`. This is the one retired section that is not part of the hard error, so it
+  behaves differently from the rest and can outlive the rewrite: a section naming a backend this
+  build has (`[secret_backends.env-var]`) only warns, while one naming a backend it does not have
+  fails the load outright. A `[secret_backends.onepassword]` section hits that second case on a host
+  where the `onepassword` plugin is not enabled, so delete it whether or not you still use
+  1Password.
+
+### Deleting the sections, and knowing you are done
+
+Only once every manifest is written, delete every resource section from `config.toml` in one pass,
+leaving the settings sections (`[operator]`, `[paths]`, `[defaults]`, `[session]`,
+`[secret_config]`, `[plugins]`) untouched. Then work through what the registry says, in this order:
+
+```bash
+agw resource list --origin operator   # every resource you declared, and the file each came from
+agw doctor                            # the full health picture
+```
+
+`agw resource list --origin operator` is the first real check, and reading it beats trusting it: the
+count should match the number of sections you started with, and every row's origin should name the
+file you expect. A resource that silently failed to move does not appear here.
+
+Expect to run it more than once. Errors aggregate within a single resource but not across resources,
+because the load stops at the first document that fails, so six broken manifests take six passes
+rather than producing one list of six. That is normal; each pass names a file, a resource, and a
+field.
+
+`agw doctor` is the finish line. You are done when its **Configuration** group reports
+`Config is valid` and the run ends with `0 fail`:
+
+```console
+Configuration:
+  [ok]   Config file: /home/you/.config/agentworks/config.toml
+  [ok]   Config is valid
+
+Secrets:
+  [ok]   Secret 'gh-pat' (auto): would resolve via prompt
+  [ok]   Secret 'npm-token': would resolve via prompt
+
+Results: 18 ok, 11 info, 0 warn, 0 fail
+```
+
+Read the **Secrets** group rather than skimming it. Every secret your manifests reference appears
+there, including the ones nothing declared explicitly: a git credential's `token` and a platform's
+token secret are auto-declared, and they are marked `(auto)`. A secret you expected to be named and
+described appearing as `(auto)` instead usually means a `spec` key did not move where you thought it
+did. `info` rows are not failures; a not-ready site whose plugin is off is reported there by design.
+
+### Handing the rewrite to an agent
+
+The rewrite is mechanical but it has to be done against what this build actually accepts, which is
+exactly the sort of work worth delegating to a coding agent with shell access: it can run
+`describe-kind` per kind and read the real field list instead of guessing, and it can iterate on the
+per-resource errors until `agw doctor` is clean.
+
+Agentworks does not yet ship a command that drives this conversation for you, so give the agent the
+procedure above as its brief. What matters is that it gets the constraints, not just the goal:
+
+- The work list is the load error from `agw resource list`, and the target shape comes from
+  `agw resource describe-kind <kind>` per kind. Field names are to be read from that output, never
+  recalled.
+- `describe-kind`, `sample`, and `schema --write` work while `config.toml` is refused; `list`,
+  `secret list`, and `doctor` do not.
+- Nothing verifies until every resource section is deleted, so all manifests get written before any
+  section is removed.
+- Settings sections stay in `config.toml`. Only resource sections move.
+- Done means `agw resource list --origin operator` shows every resource with the expected origin,
+  and `agw doctor` reports `Config is valid` with `0 fail`.
+- The original `config.toml` is worth keeping a copy of until `agw doctor` is clean, since nothing
+  in this process rewrites your files for you.
+
+**Manifests on a retired shape.** Separately from the TOML sections, a manifest that names a
+capability in the old sibling shape (`platform: lima` plus a `platform_config:` table, and likewise
+`provider` / `provider_config`) does not load either. The error names the replacement, built from
+your own document:
+
+```console
+$ agw resource list
+Configuration error: resources/git-credentials.yaml:1: spec.provider names the capability as a
+string, which is no longer supported; write one tagged table instead: provider: {name: github,
+token: ..., owner: ...}
+```
+
+The keys it lists are the ones your document actually had, in order, with the values elided as
+`...`, so it tells you the shape to write and you fill your own values back in. Every document on
+the old shape has to move: one left behind leaves the whole resources directory unloadable.
 
 ## VM sites and platforms
 
@@ -517,13 +776,16 @@ roster is the list for this build, with each plugin's description and its opt-in
 with. Authoring a system plugin is documented in the plugins package README
 (`cli/agentworks/plugins/README.md`).
 
-**Config errors in a not-enabled plugin's resources surface only once you enable it.** Validation
-runs over enabled, reachable resources, so a mistake in a disabled plugin's config (for example a
-typo in the platform config of a proxmox `vm-site` manifest while the `proxmox` plugin is not
-enabled) is not reported until you add the plugin to `[plugins].system`. The first thing you see is
-the actionable "enable plugin `<name>`" hint; the config error surfaces on the next build once
-enabled, still before any real work runs. This is the same rule that defers validation for any
-not-ready resource, applied to the opt-in axis.
+**A capability's config is validated whether or not you can use it here.** Enablement and readiness
+gate USE, not validation: a `vm-site` naming the `proxmox` platform has its platform config checked
+when the manifest loads, even on a host where the `proxmox` plugin is not enabled, and the same
+holds for a resource that is merely not-ready (a `wsl2` site validates off Windows). So a misspelled
+key is a hard error naming the fields the capability declares, on every host, rather than something
+that lies dormant until you opt in. That is deliberate: a typo that only surfaced on the one machine
+that had the plugin turned on would be a configuration error you carry around unnoticed. What
+enablement and readiness DO defer is the consequence, not the check: a resource whose capability is
+disabled is not-ready with an "enable plugin `<name>`" hint and is refused at use, never misreported
+as a config mistake.
 
 **Upgrading: Azure, Proxmox, 1Password, and Claude Code are now opt-in.** These vendor- and
 tool-specific capabilities used to be built in and always available; they now ship as the `azure`,
@@ -624,23 +886,51 @@ Upgrade, run any command, and fix what it names. Repeat until commands stop comp
 **Expect one resource per pass.** Errors aggregate WITHIN a resource: a document with three problems
 reports all three at once. They do not aggregate ACROSS resources, because the load stops at the
 first resource that fails. `agw resource list` and `agw doctor` both behave this way, so six broken
-resources is six passes rather than one list of six.
+resources is six passes rather than one list of six. Aggregation is also per check rather than per
+document, so one document can report twice across two passes: a bad `spec` key is caught when the
+document is decoded, while a bad key inside a capability's config table is caught by a later
+validation pass, and fixing the first is what lets you see the second.
 
 **The line number is the document's, not the mistake's.** Each error names the file, the resource,
 the field, and what was expected, and the `file:line` is where that DOCUMENT starts. Look for the
-named field inside the document at that line rather than at the line itself.
+named field inside the document at that line rather than at the line itself. One case points
+somewhere else on purpose: when the offending value was inherited, the error names the row that
+DECLARED it and adds an `(inherited from <kind>/<name>)` tail, so the file and line are the parent's
+rather than the child you ran into it through.
 
 **Two commands keep working when nothing else does.** `agw resource describe-kind <kind>` (and
 `<capability-kind>/<name>`) documents every field the kind accepts, and `agw resource sample <kind>`
 prints the same fields as a document to edit. Neither reads your config, so both answer while it is
 unloadable. That is why every error points at them.
 
+### Every host checks every declaration now
+
+Validation no longer depends on whether you can actually use the thing being validated. Every
+declared resource's capability config is checked whenever the manifest loads, regardless of whether
+the resource is ready on this host, whether its plugin is enabled, and whether anything ever
+references it. Only the document and the model the capability declares decide the answer, so it
+cannot vary between machines.
+
+This is the change most likely to surface on a host that was quiet before. A misspelled key in a
+`proxmox` site's platform config used to sit dormant on a laptop that never enabled the `proxmox`
+plugin, and a `wsl2` site's config went unchecked anywhere except Windows. Both are hard errors
+everywhere now, so a config you have been carrying for months can fail on the first machine you
+upgrade even though nothing about that machine uses it. The fix is the same as any other unknown
+key: `agw resource describe-kind vm-platform/<name>` names the fields, and the error already does
+too.
+
+What did NOT change is readiness and enablement themselves. A site whose plugin is off is still
+not-ready with an "enable plugin `<name>`" hint and still refused at use; it is only the question of
+whether its config is well-formed that stopped being host-dependent.
+
 ### The retired sibling capability shape
 
 `platform: lima` beside a `platform_config:` table (and likewise `provider` / `provider_config`) is
-a hard error. The error prints the exact replacement, built from what your document says: the
-capability you named plus the keys you wrote, folded into one tagged table. Paste that in place of
-the pair.
+a hard error. The error prints the replacement, built from what your document says: the capability
+you named plus the keys you wrote, folded into one tagged table. The keys appear in your document's
+order with their values elided as `...`, so what you get is the shape to write rather than a line to
+paste unedited; put it in place of the pair and fill your own values back in. "TOML resource
+sections: removed" above shows one of these errors in full.
 
 Two documents get no printed replacement, because no honest one exists. If the `*_config` table
 carries its own `name` key, two keys claim to select the capability and which one wins is yours to
@@ -663,11 +953,17 @@ Values are no longer coerced. A quoted number is a string, and a string is not a
   an error. (Adjacent and the same flavor: a vm-template's `cpus: "4"` used to load, and an
   install-command's `command: 7` used to install the string `"7"`.)
 
-- **An explicit `null` is a type error** on a field that is not nullable, rather than a synonym for
-  omitting the key. That covers `shell`'s `command`, `resume_command`, and `required_commands`,
-  `extra_args` on `claude-code` and `codex`, `codex`'s `writable_dirs`, a github credential's
-  `repos`, and a `session-template`'s `env`. If you wrote one to mean "no value", delete the line
-  instead.
+- **An explicit `null` is a type error** on any field the kind does not declare nullable, rather
+  than a synonym for omitting the key. If you wrote one to mean "no value", delete the line instead.
+  The split is worth knowing rather than memorizing, because the four inheriting template kinds are
+  the exception: THEIR own scalars are nullable by design, where `null` means "not set here,
+  inherit". Almost nothing else is. Their `env` tables and `inherits` lists are not nullable, and
+  neither is anything on the `admin-template`, the apt kinds, the install-command kinds, or a
+  harness integration's or platform's config block. The ones most likely to be sitting in an
+  existing file are `shell`'s `command`, `resume_command`, and `required_commands`, `extra_args` on
+  `claude-code` and `codex`, `codex`'s `writable_dirs`, a github credential's `repos`, and a
+  `session-template`'s `env`. `agw resource describe-kind` marks each field "or null" when null is
+  legal, so it settles any case not listed here.
 
 **Every quoted boolean meant `true`.** That is the whole class, not just the three named above:
 `key_dearmor`, `tmuxinator`, and `mise_activate` / `mise_allow_unlocked` / `mise_prune_on_reinit` /
@@ -709,13 +1005,32 @@ used to be a hard error whose message told you to OMIT the key instead. The rule
 and `null` mean the same thing, so that same input quietly resolves to the default-named secret and
 the site declares a dependency on it.
 
+The rule itself is general: every field that names a secret and has a default reads absent and
+`null` alike. These three are called out because they are the ones whose behavior CHANGED. A git
+credential's `token` (default `git-token-<name>`) follows the same rule but always did, so there is
+nothing to look for there.
+
 **If one of those lines is still in your file, you are the person this affects.** Nothing warns you,
-because to the loader an explicit `null` is now simply the ordinary way of taking the default. Go
-looking for one; a bare key with no value counts too, because that is a null as well:
+because to the loader an explicit `null` is now simply the ordinary way of taking the default, and
+nothing downstream can tell it apart from an omitted key: both resolve to the default-named secret,
+so `agw doctor` and `agw resource describe` look identical either way. Your file is the only place
+the evidence survives, which is why this one is a scan rather than a check:
 
 ```bash
-grep -rnE '(token_secret|access_key_secret|secret): *(null|~)? *$' ~/.config/agentworks/resources
+grep -rniE '(token_secret|access_key_secret|secret):[[:space:]]*(null|~)?[[:space:]]*([,}]|$)' \
+  ~/.config/agentworks/resources
 ```
+
+Three details in that pattern are load-bearing, because YAML has more ways to write a null than the
+obvious one. `-i` catches `Null` and `NULL`, which the loader reads as null exactly like `null`.
+Ending on `[,}]` as well as end-of-line catches a field written inside a flow mapping
+(`service_principal: { client_id: cid, secret: null }`), where the line does not end after the
+value. And the optional `(null|~)?` catches a bare key with nothing after it, which is a null too.
+
+Treat a clean result as good evidence rather than as proof. It is a line-oriented scan of a format
+that does not have to be line-oriented, so it will still miss a quoted key (`"secret": null`) or a
+value pushed onto its own continuation line. If you use one of these three platforms, it is worth
+opening the site's manifest and looking at the field directly.
 
 Then decide, per hit:
 
@@ -727,6 +1042,33 @@ Then decide, per hit:
 
 Nothing rewrites your files, so the evidence stays where you left it: that `grep` answers the same
 before and after every other fix here.
+
+### Multi-parent inheritance resolves differently
+
+Two fixes to how `inherits` chains fold land together, on all four template kinds (`vm-template`,
+`agent-template`, `workspace-template`, `session-template`). Neither reports anything: your
+manifests load exactly as before and simply resolve to different values, so this and the null-secret
+change above are the two to go looking for rather than wait for.
+
+- **A parent that declares nothing no longer overwrites one that did.** Each parent used to be
+  resolved on its own first, which meant its DEFAULTS were applied as though it had asked for them.
+  So `inherits: [base, extras]`, where `extras` sets no fields, used to reset every scalar `base`
+  had set back to the built-in default. It now contributes only what it actually declares. If you
+  have been compensating for this (restating a parent's values in the child, or ordering `inherits`
+  to work around it), the compensation is now redundant and may itself be changing the answer. A
+  `vm-template` chain that sets `tailscale_auth_key` is the one worth checking first: the old
+  behavior could leave the graph depending on the default-named secret while VMs provisioned with a
+  different one.
+- **A template reached by two routes now applies once, at its earliest position.** In a diamond,
+  where `kid` inherits `a` and `b` and both inherit `root`, the chain used to replay `root` a second
+  time after `a`, so a field that `root` and `a` both declared resolved to ROOT's value: a
+  grandparent landing back on top of the parent that overrode it. The chain is linearized now, so
+  the same field resolves to `a`'s, which is what "nearest wins" always described. Only diamonds are
+  affected; a single-parent chain resolves exactly as it did.
+
+Both are corrections, so in most cases the new answer is the one you meant. That does not make them
+safe to ignore: nothing warns, and the value that changes is the one being used. Check any template
+whose `inherits` names more than one parent, and any parent that declares little or nothing.
 
 ### Two smaller ones
 
@@ -743,6 +1085,11 @@ before and after every other fix here.
 required and non-optional, so a platform must use what it is handed rather than re-defaulting a
 missing value. The defaults are declared once, on the template model. `generate_bootstrap_script`'s
 `swap` parameter became required for the same reason.
+
+Note that the request's field names are not the manifest's. A `vm-template` spec writes `memory`,
+`disk`, and `swap` (all in GiB), and those resolve into `memory_gib`, `disk_gib`, and `swap_gib` on
+the request; only `cpus` is spelled the same on both sides. Grepping for one set and expecting to
+find the other is the easy mistake here.
 
 ### Nothing to do
 
