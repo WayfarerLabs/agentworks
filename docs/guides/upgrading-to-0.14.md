@@ -27,40 +27,6 @@ that render the target shape live from this build's registry, and this section. 
 delegate the work than do it by hand, "Handing the rewrite to an agent" below is the same procedure
 written as a brief.
 
-### First: delete every `[secret_backends.*]` section
-
-Do this before anything else, because it is the one leftover that can stop the commands the rest of
-this section depends on. A `[secret_backends.<name>]` section naming anything other than a built-in
-backend (`env-var`, `prompt`) is a hard error in the **settings** load. That is a separate check
-from the resource-section refusal, and the commands that go on working while `config.toml` still
-carries resource sections do so by skipping the resource check only. They still run the settings
-load, so they still meet this:
-
-```console
-$ agw resource schema --write
-Configuration error: [secret_backends.onepassword] names an unknown secret backend; supported: ['env-var', 'prompt']
-
-$ agw resource sample secret --write secrets.yaml
-Configuration error: [secret_backends.onepassword] names an unknown secret backend; supported: ['env-var', 'prompt']
-```
-
-`agw doctor` is hit by it too, and more quietly: its settings-only retry fails the same way, so the
-report truncates to the resource-section fail row with every later group reporting `skipped`, and
-nothing on screen says a `[secret_backends.*]` section is the reason. `agw resource list` never
-shows this error at all, because the resource-section refusal fires first. So a section you can only
-see by reading `config.toml` takes out the two commands you start with and the one you iterate with.
-
-Plugin state has nothing to do with it. The check runs at config load against the built-in backend
-registry, which no plugin has been loaded into yet at that point, so `[secret_backends.onepassword]`
-fails identically whether or not `onepassword` is listed in `[plugins] system`, and on a host where
-the plugin is enabled and perfectly healthy (delete the section and `agw doctor` will say so:
-`[ok] plugin onepassword`). This is not new in this release: the previous build refuses the same
-section the same way.
-
-A section naming a backend this build does have (`[secret_backends.env-var]`) only warns rather than
-failing, but delete those in the same pass. They never carried configuration, and what replaces them
-is `[secret_config].backends`; "The sections that are not a straight move" below has the detail.
-
 ### What still answers while `config.toml` is refused
 
 Read this before you start, because it decides the order. The resource-section refusal happens at
@@ -350,14 +316,12 @@ resources guide before editing an appended file.
 
 - **`[named_console]`** becomes a `named-console-template` named `default`.
 
-- **`[secret_backends.*]`** becomes nothing at all. Those sections never carried configuration:
-  delete them, and list the backends you want in `[secret_config].backends`, which is a setting and
-  stays in `config.toml`. These are the sections "First: delete every `[secret_backends.*]` section"
-  above told you to remove before anything else, and that ordering is the point: they are not part
-  of the resource-section error, they are checked by the settings load instead, so one naming a
-  backend that is not built in (`[secret_backends.onepassword]`) breaks the very commands you need
-  to do the rewrite. One naming a built-in backend (`[secret_backends.env-var]`) only warns, but it
-  is dead weight either way.
+- **`[secret_backends.*]`** becomes nothing at all. Those sections never carried configuration, only
+  the backend's name, so there is nothing to move and no manifest to write: delete them, and list
+  the backends you want in `[secret_config].backends`, which is a setting and stays in
+  `config.toml`. They are named by the resource-section error like every other section, with that
+  deletion spelled out in place of the rewrite instruction, so there is nothing to do about them
+  ahead of the rest.
 
 ### Deleting the sections, and knowing you are done
 
@@ -436,9 +400,8 @@ per-resource errors until `agw doctor` is clean.
 Agentworks does not yet ship a command that drives this conversation for you, so give the agent the
 procedure above as its brief. What matters is that it gets the constraints, not just the goal:
 
-- Every `[secret_backends.*]` section comes out first, before anything else is run. One naming a
-  non-built-in backend fails the settings load and takes `sample --write` and `schema --write` down
-  with it, whatever `[plugins] system` says.
+- `[secret_backends.*]` sections are deleted, not rewritten. They are the one family in the error
+  with no manifest form; the error says so per run.
 - The work list is the load error from `agw resource list`, and the target shape comes from
   `agw resource describe-kind <kind>` per kind. Field names are to be read from that output, never
   recalled. Where a `spec` selects a capability implementation, the fields come from

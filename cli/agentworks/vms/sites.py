@@ -19,8 +19,13 @@ self-disable but a hard finalize error (R9.2): the site emits its
 platform edge unconditionally and the absent capability row is a loud
 miss. A not-ready site still lists, describes, and holds references;
 using it (:func:`resolve_site`) is a typed error with the reason, and
-existing references (VMs, ``defaults.site``) degrade to doctor warnings
-rather than breaking every command. Readiness is folded once at finalize and
+existing references to it (VMs, ``defaults.site``) degrade to doctor
+warnings rather than breaking every command. That degradation is about
+UNREADINESS only. A name that resolves to NO site at all is a different
+answer and always has been: it is a hard error, from the generic
+settings-reference check for ``defaults.site``
+(``config.references.validate_setting_references``) and from finalize for a
+manifest's ``site`` field. Readiness is folded once at finalize and
 read off the graph (``graph.readiness_of``); :func:`select_site` /
 :func:`ensure_site_ready` and the inspect / doctor projections all read that
 stored verdict rather than recomputing it.
@@ -41,7 +46,6 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from agentworks.capabilities.vm_platform import VMPlatform
-    from agentworks.config import Config
     from agentworks.resources.graph import DependencyState, FinalizeContext, Readiness
     from agentworks.resources.reference import ResourceReference
     from agentworks.resources.registry import Registry
@@ -347,29 +351,13 @@ def ensure_site_ready(decl: VMSiteDecl, registry: Registry) -> None:
         )
 
 
-def validate_sites(config: Config, registry: Registry) -> None:
-    """Config consistency at the composition boundary (run by
-    ``bootstrap.build_registry`` after finalize, beside
-    ``secrets.validate_chain``): settings that name sites must resolve.
-
-    Config vocabulary in the errors; settings are never published as
-    pseudo-resources (ADR 0016).
-    """
-    site = config.defaults.site
-    if site is None:
-        return
-    try:
-        registry.lookup("vm-site", site)
-    except KeyError:
-        # Unknown only: a DISABLED site is valid config here (this
-        # host may simply lack the requirement); using it errors at
-        # resolve_site with the reason, and doctor warns on the
-        # reference.
-        raise ConfigError(
-            f"defaults.site names an unknown site '{site}'",
-            hint=(
-                f"declare a vm-site named '{site}' "
-                f"(see `agw resource sample vm-site`) or point defaults.site "
-                f"at a declared site (`agw resource list --kind vm-site`)"
-            ),
-        ) from None
+# ``validate_sites`` used to live here: the post-finalize check that
+# ``defaults.site`` names a real vm-site. It was one of three hand-written
+# answers to a single question, so it is now a row in
+# ``config.references``'s table of settings that name resources, which
+# raises the same message shape a dangling manifest reference gets. Nothing
+# about it was vm-specific: it looked a name up in the registry.
+#
+# What IS vm-specific stayed put. Whether a site that exists can be USED
+# here is :func:`ensure_site_ready` above, and it is a different (typed,
+# non-config) error on purpose.

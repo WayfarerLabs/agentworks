@@ -258,6 +258,15 @@ def test_opt_out_never_reaches_the_capability(tmp_path: Path, test_only_backend:
 def test_chain_naming_unknown_backend_errors_at_build_registry(
     tmp_path: Path,
 ) -> None:
+    """A bad chain name fails the registry build.
+
+    The message is the generic settings-reference one now (the chain is one
+    of the settings that name resources, so it gets the same treatment and
+    wording as ``defaults.site`` and as a dangling manifest reference); the
+    per-setting behavior is pinned in tests/test_config_setting_references.py.
+    What this asserts is the SECRETS-side contract that has to keep holding:
+    a bad chain name never reaches resolution.
+    """
     config = _config(
         tmp_path,
         """
@@ -265,43 +274,50 @@ def test_chain_naming_unknown_backend_errors_at_build_registry(
         backends = ["nope", "prompt"]
         """,
     )
-    with pytest.raises(ConfigError, match="unknown backend 'nope'") as exc:
+    with pytest.raises(ConfigError, match="references unknown secret-backend 'nope'"):
         build_registry(config)
+
+
+def test_active_backends_still_guards_a_hand_built_registry(tmp_path: Path) -> None:
+    """``active_backends``'s own unknown-name error is a backstop, and this
+    is the path that still reaches it.
+
+    On any registry from ``build_registry`` the settings-reference pass has
+    already refused the name, so that branch is unreachable there. But
+    ``active_backends`` is public and takes any registry: a caller that
+    assembles one by hand skips that pass, and without the guard a typo would
+    surface as a bare ``KeyError`` out of ``impl_of``. Pins that the lower
+    layer still answers for itself.
+    """
+    from agentworks.resources import Registry
+
+    config = _config(tmp_path, '[secret_config]\nbackends = ["nope"]\n')
+    hand_built = Registry.empty()
+    hand_built.finalize()
+    with pytest.raises(ConfigError, match="unknown backend 'nope'") as exc:
+        active_backends(config, hand_built)
     assert exc.value.hint is not None
     assert "registered backends" in exc.value.hint
 
 
-def test_legacy_toml_backend_section_is_warned_noop(tmp_path: Path) -> None:
-    """[secret_backends.<name>] sections are deprecated no-ops: they
-    warn, publish nothing, and the descriptor row keeps serving the
-    chain."""
+def test_the_chain_serves_from_the_descriptor_row(tmp_path: Path) -> None:
+    """The built-in backend rows come from the capability descriptor and
+    serve the chain directly. Nothing in config.toml declares or overrides
+    them: ``[secret_backends.*]`` is a retired resource section now (refused
+    at load, covered in tests/test_config_deprecation_warnings.py), so this
+    is the only way a built-in backend reaches the chain."""
     config = _config(
         tmp_path,
         """
-        [secret_backends.env-var]
-
         [secret_config]
         backends = ["env-var"]
         """,
     )
-    assert any("[secret_backends.env-var] is deprecated" in issue for issue in config.deprecation_issues)
     registry = build_registry(config)
     row = registry.lookup("secret-backend", "env-var")
     assert row.origin.variant == "built-in"
     backends = active_backends(config, registry)
     assert [b.name for b in backends] == ["env-var"]
-
-
-def test_legacy_toml_backend_unknown_name_still_errors(tmp_path: Path) -> None:
-    """Typo protection survives the deprecation: an unknown name in a
-    legacy section is a hard ConfigError, not a silent no-op."""
-    with pytest.raises(ConfigError, match="unknown secret backend"):
-        _config(
-            tmp_path,
-            """
-            [secret_backends.envvar]
-            """,
-        )
 
 
 def test_would_attempt_is_pure_of_secret_and_mapping() -> None:

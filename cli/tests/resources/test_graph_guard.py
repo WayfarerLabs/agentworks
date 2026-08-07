@@ -90,9 +90,6 @@ eight of them behind in one change, which is why the check exists.
   CONSTRUCTION of a capability instance to run an operation, not a graph query.
 - ``manifests/decode.py``: a decode-time shadow check (a code-registry
   membership test), before the graph exists.
-- ``config/loaders_secrets.py``: load-time validation of the deprecated
-  ``[secret_backends]`` TOML section, before the graph exists (a config-shape
-  check, not an edge/readiness probe).
 - ``resources/inspect.py`` / ``secrets/inspect.py``: the describe-VIEW
   projections carry a ``references`` field, populated FROM ``dependents_of`` (the
   honest reader), distinct from the retired resource-dataclass field.
@@ -358,8 +355,13 @@ _REGISTRY_READ_ALLOWLIST = frozenset(
         # of them would be the probe this pattern bans:
         #   git_credentials/credential.py, sessions/template.py,
         #   secrets/base.py
-        # Load-time validation of the deprecated [secret_backends] section.
-        "config/loaders_secrets.py",
+        # Also deliberately ABSENT: ``config/loaders_secrets.py``, which used
+        # to read SECRET_BACKEND_REGISTRY to judge the name on a
+        # ``[secret_backends.<name>]`` section. That check is gone (the
+        # section is a retired resource section, refused generically), and
+        # with it the only reason a settings loader ever touched a capability
+        # registry. Settings loaders validate SHAPE; what a name resolves to
+        # is settled after finalize, against the graph.
     }
 )
 

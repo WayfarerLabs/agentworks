@@ -93,15 +93,19 @@ class Config:
     # plugins.publish_plugins / build_registry.
     enabled_system_plugins: tuple[str, ...] = ()
     config_issues: tuple[str, ...] = ()
-    # Deprecation nudges ([secret_backends.*] no-ops): a separate channel so real issues stay sharp for tests and
-    # callers, and so --no-deprecations can silence only these.
-    # ``deprecation_issues`` holds the ambient teaching messages;
-    # ``noop_secret_backend_sections`` holds the bare facts (display shapes
-    # of the sections present) for surfaces that render their own tidy lines
-    # (doctor). The old TOML-resource-section nudge is now a hard error
-    # (``_raise_for_resource_sections``), so it no longer rides this channel.
+    # Deprecation nudges: a separate channel from ``config_issues`` so real
+    # issues stay sharp for tests and callers, and so --no-deprecations can
+    # silence only these.
+    #
+    # EMPTY TODAY, and honestly so: both nudges that ever rode it are hard
+    # errors now (the TOML resource sections, then the ``[secret_backends.*]``
+    # no-op that was the last producer), so nothing populates it. It is kept
+    # as the mechanism, not as a half-migration: it is generic, it is backed
+    # by an operator-facing CLI flag, and the next deprecation wants it. If
+    # config.toml ends up with no deprecation to nudge about for a whole
+    # release, retire the field, ``load_config(warn_deprecations=)``,
+    # ``--no-deprecations``, and ``output.deprecations_suppressed`` together.
     deprecation_issues: tuple[str, ...] = ()
-    noop_secret_backend_sections: tuple[str, ...] = ()
 
     def publish_to(self, registry: Registry) -> None:
         """Publish Config's resources into ``registry`` (now a no-op).

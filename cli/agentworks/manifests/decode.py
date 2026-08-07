@@ -86,10 +86,11 @@ KIND_SECTIONS: dict[str, tuple[str, ...]] = {
     "git-credential": ("git_credentials",),
     "admin-template": ("admin",),
     "named-console-template": ("named_console",),
-    # secret-backend: capability kind, not declarable (no decoder). It is
-    # listed so the table stays a complete record of the retired sections;
-    # the resource-section refusal skips it, because [secret_backends.*] is
-    # a deprecated no-op rather than a resource declaration.
+    # secret-backend: capability kind, not declarable, so there is no decoder
+    # and never was a manifest to write. It is listed because the section IS
+    # a retired resource-declaring section and the resource-section refusal
+    # sweeps it like the rest; what differs is only its remediation ("delete
+    # it", not "rewrite it as a manifest"), which that refusal spells out.
     "secret-backend": ("secret_backends",),
     "vm-site": ("azure", "proxmox"),
     "apt-source": ("apt_sources",),

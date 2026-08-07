@@ -22,8 +22,12 @@ import path ``agentworks.config`` unchanged:
 - ``loaders_core``: generic TOML-loading helpers (the unknown-key pair) and
   the ``[operator]`` / ``[paths]`` / ``[defaults]`` settings loaders.
 - ``loaders_sessions``: the ``[session.config]`` settings loader.
-- ``loaders_secrets``: ``[secret_backends.*]`` (deprecated no-op warning),
-  ``[secret_config]``, and ``[plugins]``.
+- ``loaders_secrets``: the ``[secret_config]`` and ``[plugins]`` settings
+  loaders.
+- ``references``: the settings values that NAME resource rows, and the
+  post-finalize check that they resolve. Not a loader: the registry does not
+  exist yet at load time, so the loaders validate shape and this validates
+  existence, from ``bootstrap.build_registry``.
 - ``load``: the ``load_config`` entry point (drives the settings loaders and
   the resource-section hard error).
 
@@ -56,7 +60,6 @@ from agentworks.config.loaders_core import (
 )
 from agentworks.config.loaders_secrets import (
     _load_plugins,
-    _load_secret_backends,
     _load_secret_config,
 )
 from agentworks.config.loaders_sessions import (
@@ -69,6 +72,11 @@ from agentworks.config.models import (
     PathsConfig,
     SessionConfig,
     _SectionLineMap,
+)
+from agentworks.config.references import (
+    SettingReference,
+    setting_references,
+    validate_setting_references,
 )
 from agentworks.config.validation import (
     CONFIG_DIR,
@@ -92,12 +100,12 @@ __all__ = [
     "OperatorConfig",
     "PathsConfig",
     "SessionConfig",
+    "SettingReference",
     "_SectionLineMap",
     "_load_defaults",
     "_load_operator",
     "_load_paths",
     "_load_plugins",
-    "_load_secret_backends",
     "_load_secret_config",
     "_load_session_config",
     "_require",
@@ -105,6 +113,8 @@ __all__ = [
     "_warn_unexpected_keys",
     "_raise_unexpected_top_level_keys",
     "load_config",
+    "setting_references",
     "validate_admin_username",
+    "validate_setting_references",
     "validate_vm_workspaces",
 ]
