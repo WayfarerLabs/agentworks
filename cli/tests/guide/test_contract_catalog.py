@@ -195,9 +195,7 @@ def test_taxonomy_gate_is_runtime_fail_soft_and_ci_strict_for_trusted_content(
         (("core:bad-taxonomy", topic), ("core:safe", _topic("concept-safe"))),
     )
     assert catalog.names() == ("concept-safe",)
-    assert [(issue.error.topic, issue.error.field_path) for issue in catalog.issues] == [
-        ("guide-test/demo", "anchor")
-    ]
+    assert [(issue.error.topic, issue.error.field_path) for issue in catalog.issues] == [("guide-test/demo", "anchor")]
 
     with pytest.raises(GuideContributionError) as raised:
         _build_guide_catalog((("core:bad-taxonomy", topic),), strict_trusted_taxonomy=True)

@@ -122,10 +122,6 @@ def test_power_boundary_rejects_direct_and_parent_package_alias_imports(source: 
 
 
 def test_power_boundary_allows_only_the_inert_secret_topic_contribution_import() -> None:
-    assert not _power_boundary_violations(
-        "from agentworks.secrets import guide_contributions as secret_topics"
-    )
-    violations = _power_boundary_violations(
-        "from agentworks.secrets import guide_contributions, resolve_secrets"
-    )
+    assert not _power_boundary_violations("from agentworks.secrets import guide_contributions as secret_topics")
+    violations = _power_boundary_violations("from agentworks.secrets import guide_contributions, resolve_secrets")
     assert violations == ("line 1: import agentworks.secrets.resolve_secrets",)

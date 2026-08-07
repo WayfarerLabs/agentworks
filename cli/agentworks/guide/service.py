@@ -114,13 +114,9 @@ def _dynamic_topic(registry: Registry | None, slug: str) -> TopicContribution:
 
 def _dynamic_names(registry: Registry) -> tuple[str, ...]:
     candidates = set(KIND_REGISTRY) | {
-        f"{kind}/{name}"
-        for kind in sorted(KIND_REGISTRY)
-        for name, _resource in sorted(registry.iter_kind_items(kind))
+        f"{kind}/{name}" for kind in sorted(KIND_REGISTRY) for name, _resource in sorted(registry.iter_kind_items(kind))
     }
-    return tuple(
-        sorted(name for name in candidates if is_valid_topic_slug(name))
-    )
+    return tuple(sorted(name for name in candidates if is_valid_topic_slug(name)))
 
 
 def build_onboarding_snapshot(registry: Registry, db: Database) -> OnboardingSnapshot:
@@ -219,9 +215,7 @@ def render_guide(
 
     validated_slots: list[tuple[str, TopicContribution | str | None]] = []
     if requested:
-        rejected_topics = frozenset(
-            issue.error.topic for issue in authored.issues if issue.error.topic is not None
-        )
+        rejected_topics = frozenset(issue.error.topic for issue in authored.issues if issue.error.topic is not None)
         for slug in requested:
             if slug in authored_names:
                 validated_slots.append((slug, authored.lookup(slug)))
@@ -238,8 +232,7 @@ def render_guide(
             validated_slots.append((slug, slug))
 
     requested_slots = tuple(
-        (slug, _dynamic_topic(registry, value) if isinstance(value, str) else value)
-        for slug, value in validated_slots
+        (slug, _dynamic_topic(registry, value) if isinstance(value, str) else value) for slug, value in validated_slots
     )
 
     selected_topics = tuple(topic for _slug, topic in requested_slots if topic is not None)
