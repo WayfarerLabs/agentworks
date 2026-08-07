@@ -118,11 +118,12 @@ copied field lists or rendered CLI text.
 
 Every canonical slug has exactly one owner; there is no precedence or override rule. Strict CI
 construction makes trusted in-tree taxonomy, ownership, duplicate, and broken-link contradictions
-hard failures. Runtime construction records the same contradictions as scoped issues and retains
-unaffected topics, so an installed guide remains useful even when a contribution is bad. Invalid
-plugin content is likewise isolated before it can suppress trusted content. A full index renders all
-visible issues and exits 1; an explicit retained topic keys status only to issues visible for that
-request and can render cleanly with exit 0.
+hard failures. Runtime construction records trusted taxonomy drift as a scoped issue and retains
+unaffected topics, so a kind rename cannot make the installed guide unusable. Other trusted
+ownership, duplicate, and broken-link contradictions remain hard startup failures because they are
+curation bugs with no unambiguous winner. Invalid plugin content is isolated before it can suppress
+trusted content. A full index renders all visible isolated issues and exits 1; an explicit retained
+topic keys status only to issues visible for that request and can render cleanly with exit 0.
 
 Multiple requested topics are validated as one request before output begins, rendered in the order
 requested, and separated by a markdown horizontal rule. Repeated slugs render once at their first

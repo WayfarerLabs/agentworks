@@ -192,12 +192,13 @@ It has two stages:
 The batch check makes collision handling independent of load order and never selects a winner.
 Strict CI construction raises the typed contribution error for every trusted core, kind, or
 implementation taxonomy, ownership, duplicate, or broken-link contradiction. Runtime construction
-records those same contradictions as deterministic scoped issues and retains unaffected topics. A
-malformed system-plugin contribution follows the same fail-soft runtime path: ownership-invalid
-candidates are rejected before collision grouping; a plugin candidate colliding with a reserved or
-trusted topic is rejected while the trusted topic is retained; and every plugin candidate in a
-plugin-to-plugin collision is rejected. Broken links invalidate only their source topics. Issues are
-sorted by source, topic, and field path.
+records trusted taxonomy drift as a deterministic scoped issue and retains unaffected topics;
+trusted ownership, duplicate, and broken-link contradictions remain hard startup failures because
+there is no safe winner. A malformed system-plugin contribution follows the fail-soft runtime path:
+ownership-invalid candidates are rejected before collision grouping; a plugin candidate colliding
+with a reserved or trusted topic is rejected while the trusted topic is retained; and every plugin
+candidate in a plugin-to-plugin collision is rejected. Broken links invalidate only their source
+topics. Issues are sorted by source, topic, and field path.
 
 Catalog errors never occur at import time, so unrelated CLI commands still work. Visible issues
 render in a "Guide content unavailable" section. A full index reports every rejected contribution
@@ -210,10 +211,12 @@ is a later finalized-view fact and never controls collection.
 Validation applies limits before catalog retention: title 256 bytes, summary 2 KiB, each block 64
 KiB, total topic content 256 KiB, and at most 64 blocks and 64 related links. Selectors and every
 related-topic value are bounded separately from that markdown total: a `FieldReference.section` has
-at most 32 components of 256 bytes each, and every related topic is at most 191 bytes and satisfies
-the canonical topic-slug grammar of one to three slash-separated 63-character components. The final
-renderer strips every C0 control except line feed and tab, plus DEL and the entire C1 range, from
-both authored and projected text.
+at most 32 components of 256 bytes each, and every related topic is at most 317 bytes. Bare concept
+and kind slugs use one strict 63-character lower-kebab segment. `kind/name` uses that strict kind
+segment plus the canonical resource-name grammar and its 253-character maximum. Plugin-owned slugs
+use `plugin/<plugin>/<topic>` with two strict 63-character segments. The final renderer strips every
+C0 control except line feed and tab, plus DEL and the entire C1 range, from both authored and
+projected text.
 
 ## `GuideView`: denied powers and allowed facts
 
@@ -318,8 +321,11 @@ Every full guide request follows this order:
    readiness checks disabled. It preserves probe-dependent readiness as unavailable rather than
    converting it to not-ready. Ordinary command registry builds remain unchanged.
 4. On success, derive dynamic bare-kind and `kind/name` topics from the finalized registry, combine
-   them with authored topics, then validate existence for the entire request atomically. Any unknown
-   topic produces no output. Only after that check does rendering begin.
+   them with authored topics, and remove any dynamic identity already owned by a retained authored
+   topic. Then validate existence for the entire request atomically. Any truly unknown topic
+   produces no output. A requested topic rejected into a scoped runtime catalog issue retains its
+   position as an unavailable topic rather than becoming unknown. Only after that check does
+   rendering begin.
 5. On `ConfigError` or another framed `AgentworksError` from load or finalize, classify requested
    slugs without pretending the failed registry exists. Authored topics can still render. A
    syntactically valid bare registered-kind slug or `registered-kind/name` slug is a dynamic request
@@ -375,10 +381,12 @@ class GuideAction:
 ```
 
 Command tokens are literals or exact `$INPUT_NAME` substitutions validated against
-`required_inputs`. Shell operators, substitutions, redirects, environment assignments, and
-unregistered placeholders are rejected. Sensitive input values are never interpolated into rendered
-commands. Such actions instruct the operator to use the verification surface's ordinary secure input
-boundary instead.
+`required_inputs`. Literal tokens use a closed grammar: an alphanumeric first character followed by
+only alphanumeric, dot, underscore, colon, slash, or hyphen, with a separate lower-kebab option
+grammar. Shell operators, substitutions, redirects, expansions, glob syntax, comments, grouping,
+environment assignments, whitespace, and unregistered placeholders are rejected. Sensitive input
+values are never interpolated into rendered commands. Such actions instruct the operator to use the
+verification surface's ordinary secure input boundary instead.
 
 Assessment returns `done`, `not-ready`, `disabled`, or `unverifiable` plus an ordered tuple of
 action IDs. It consumes only `GuideView` facts and explicit caller inputs. There is no onboarding
@@ -454,12 +462,15 @@ def verify_vm_connection(
 `agw secret verify NAME` verifies one registered secret through one normal resolution pass and
 backend precedence. The explicit boundary first calls `active_backends(config, registry)`, then
 wraps each provider behind a verification-only adapter identified by the caller-known registered
-backend key. The adapter reads and snapshots the provider's interaction classification once behind
-the sanitizing boundary. Default non-interactive filtering uses only that snapshot, so a raising or
-stateful provider property cannot leak or change policy between filtering and execution.
+backend key. Ordered resolution reads and snapshots a provider's interaction classification only
+when it reaches that backend, behind the sanitizing boundary. Default non-interactive filtering uses
+only that snapshot, so a raising or stateful provider property cannot leak or change policy between
+filtering and execution. A later backend is never inspected after an earlier one succeeds.
 `ActiveBackend` carries that registered key from the config-chain lookup alongside the capability
 and stored readiness. Neither the verification adapter nor diagnostics recover identity by reading a
-provider-owned `name` property.
+provider-owned `name` property. Verification accepts readiness only when its exact type is the
+core-owned `Readiness` record and copies its safe fields; a provider-authored subclass or substitute
+is rejected without property access.
 
 HEAD's `resolve_secrets()` combines the ordered backend algorithm with `output.warn` readiness
 messages and `output.info("Resolved ...")` progress. Verification must not call that emitting
@@ -470,7 +481,7 @@ wrapper. Extract its loop without semantic changes into the private lower-level 
 The new verification-only `resolve_secrets_quiet()` calls the same seam with a
 `_QuietResolutionReporter`, which discards readiness-skip and resolved-backend events, and passes
 the explicit consent policy as `interactive_available`. `verify_named_secret()` invokes
-`resolve_secrets_quiet([decl], filtered, registry=registry, interactive_available=allow_interactive)`
+`resolve_secrets_quiet([decl], backends, registry=registry, interactive_available=allow_interactive)`
 exactly once. Neither reporter receives resolved values.
 
 This path does not redirect, suppress, or mutate global output interactivity, config, the backend
@@ -507,9 +518,11 @@ Phase 1 is complete only with these focused proofs:
   over-count block/link/selector collection, overlong selector component or related slug, and
   malformed related slug;
 - trusted taxonomy, ownership, duplicate, and broken-link contradictions fail strict CI
-  construction; runtime construction isolates them as visible issues, retains unaffected topics,
-  makes a full index exit 1, and lets an unrelated explicit retained topic render cleanly with exit
-  0; plugin collision and link invalidation stay deterministic under reversed contribution order;
+  construction; runtime construction isolates taxonomy drift as a visible issue and retains
+  unaffected topics while the other trusted contradictions remain hard startup failures; a full
+  index with isolated issues exits 1 and an unrelated explicit retained topic renders cleanly with
+  exit 0; plugin collision and link invalidation stay deterministic under reversed contribution
+  order;
 - installed-wheel package-data tests load every authored block under the normal CI marker selection;
 - human and agent snapshots have equal semantic block keys and payloads despite allowed heading and
   placement differences;
@@ -535,6 +548,9 @@ Phase 1 is complete only with these focused proofs:
   secret bytes from outputs, records, logs, and errors; successful verification captures stdout and
   stderr and proves the sole emitted line is the verification success line, with no readiness or
   resolved-backend progress;
+- ordered verification tests prove a later backend's policy and readiness remain untouched after an
+  earlier success, an excluded interactive backend's readiness remains untouched, and a
+  provider-authored `Readiness` subclass is rejected without reading its properties;
 - VM connection tests cover success plus missing, stopped, unreachable, and bad-transport cases, and
   assert no start, repair, rekey, reinit, secret prompt, or database mutation.
 
@@ -544,6 +560,14 @@ VM verification must construct the existing canonical, non-activating admin tran
 `agentworks.transports.transport(vm, config)`. That factory only builds the Tailscale SSH transport
 and never observes, starts, or repairs the VM. The verification service must not reuse an ordinary
 `vm exec` body or activation gate.
+
+The SSH logger's redaction set is immutable and complete before its first write. Remote Lima
+provisioning therefore registers the Tailscale key at construction, removes even a partially copied
+remote YAML file when transfer fails, and on later failure or interruption kills detached work,
+removes its `.out`, `.sh`, `.pid`, and `.status` artifacts, then deletes the failed instance.
+Cleanup is best effort, never replaces the original failure, and never includes secret-bearing
+cleanup text in diagnostics. Tests pin this ordering for ordinary exceptions and
+`KeyboardInterrupt`.
 
 The current kind-owned `instances` hook receives the full registry and resource object. It is safe
 only while called inside `build_guide_view` and eagerly reduced to `GuideInstanceFact`. Passing the
