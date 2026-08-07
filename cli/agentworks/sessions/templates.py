@@ -167,23 +167,18 @@ def _resolve(
     return result
 
 
-def _resolve_walk(
+def _layers(
     templates: Mapping[str, SessionTemplate],
     name: str,
     _visiting: tuple[str, ...] = (),
-) -> EffectiveSessionTemplate:
-    """Depth-first, left-to-right resolution, threading the raw harness_integration
-    pair alongside the accumulating ``ResolvedSessionTemplate``.
+) -> list[SessionTemplate]:
+    """The DECLARATIONS ``name`` merges from, in merge order: each
+    parent's own chain first (left to right), then the row itself. See
+    ``vms.templates._layers`` for the shape all four resolvers share and
+    why it matches ``resources.inheritance.merge_layers``.
 
-    A ``None`` integration name means nothing in the lineage declared one
-    (distinct from a declared ``shell``): keeping that distinction is what
-    lets a selector-silent later parent leave an earlier parent's pair
-    untouched instead of switching the lineage back to ``shell``.
-    ``description`` / ``env`` merge exactly as before, independent of the
-    pair.
-
-    ``_visiting`` carries the chain of in-progress resolves so cycles
-    raise ``InheritanceCycleError`` instead of ``RecursionError``. The
+    ``_visiting`` carries the chain of in-progress walks so cycles raise
+    ``InheritanceCycleError`` instead of ``RecursionError``. The
     framework's cycle pass at build_registry time is the canonical check;
     this guard is the safety net for callers that resolve without going
     through build_registry, and :func:`effective_template` keys on the
@@ -193,37 +188,71 @@ def _resolve_walk(
         raise inheritance_cycle_error("session-template", (*_visiting, name))
 
     if name not in templates:
-        return EffectiveSessionTemplate(resolved=ResolvedSessionTemplate(name=name))
+        return []
 
     tmpl = templates[name]
+    next_visiting = (*_visiting, name)
+    layers = [layer for parent in tmpl.inherits for layer in _layers(templates, parent, next_visiting)]
+    layers.append(tmpl)
+    return layers
+
+
+def _declared_pair(tmpl: SessionTemplate) -> MergedHarness:
+    """One template's OWN harness declaration, in the shape the fold
+    takes. ``name`` is ``None`` when this template declares no
+    integration, which is what :func:`_merge_pair` reads as "says nothing"
+    and leaves the accumulator alone for.
+    """
+    block = tmpl.harness_integration
+    if block is None:
+        return MergedHarness()
+    owner = RefOwner(kind="session-template", name=tmpl.name)
+    return MergedHarness(
+        name=block.name,
+        config=block.config,
+        provenance=dict.fromkeys(block.config, owner),
+        declared_by=("session-template", tmpl.name),
+    )
+
+
+def _resolve_walk(
+    templates: Mapping[str, SessionTemplate],
+    name: str,
+    _visiting: tuple[str, ...] = (),
+) -> EffectiveSessionTemplate:
+    """Resolve ``name``'s chain: one accumulator per half, folded over the
+    chain's declarations in merge order.
+
+    Both halves fold the same layer list, so the pair and the
+    ``description`` / ``env`` half can no longer disagree about which
+    declaration came last. That the fold reads the DECLARATIONS rather
+    than each parent's already-resolved template is what keeps a silent
+    layer silent; see ``vms.templates._resolve_from_dict``.
+
+    A ``None`` integration name means nothing in the lineage declared one
+    (distinct from a declared ``shell``): keeping that distinction is what
+    lets a selector-silent later parent leave an earlier parent's pair
+    untouched instead of switching the lineage back to ``shell``.
+
+    Folding FLAT is also what makes an integration switch stick. A chain
+    that names A, switches to B, then names A again keeps only what the
+    last A declared, because the switch to B discarded A's blob and
+    nothing brings it back. Merging each parent's already-merged pair
+    would hide that switch inside the parent's own result and resurrect
+    the first A's config across a capability that had already discarded
+    it, contradicting the rule :func:`_merge_pair` documents. Pinned by
+    ``tests/sessions/test_session_template_surface.py``.
+    """
     result = ResolvedSessionTemplate(name=name)
     harness = MergedHarness()
-    next_visiting = (*_visiting, name)
-
-    for parent_name in tmpl.inherits:
-        parent = _resolve_walk(templates, parent_name, next_visiting)
-        _merge(result, parent.resolved)
-        harness = _merge_pair(harness, parent.harness)
-
-    _merge_template(result, tmpl)
-    declared_harness = tmpl.harness_integration
-    declared_config = declared_harness.config if declared_harness is not None else {}
-    harness = _merge_pair(
-        harness,
-        MergedHarness(
-            name=declared_harness.name if declared_harness is not None else None,
-            config=declared_config,
-            provenance=dict.fromkeys(declared_config, RefOwner(kind="session-template", name=name)),
-            declared_by=("session-template", name),
-        ),
-    )
-    result.name = name
+    for layer in _layers(templates, name, _visiting):
+        _merge_template(result, layer)
+        harness = _merge_pair(harness, _declared_pair(layer))
     return EffectiveSessionTemplate(resolved=result, harness=harness)
 
 
 def _merge_pair(acc: MergedHarness, child: MergedHarness) -> MergedHarness:
-    """Fold one declared (or already-merged) harness pair into the
-    accumulator:
+    """Fold one layer's DECLARED harness pair into the accumulator:
 
     - a child that says nothing about the harness integration leaves the pair
       untouched (a ``harness_integration_config`` without a ``harness_integration`` cannot load,
@@ -259,19 +288,11 @@ def _merge_pair(acc: MergedHarness, child: MergedHarness) -> MergedHarness:
     )
 
 
-def _merge(target: ResolvedSessionTemplate, source: ResolvedSessionTemplate) -> None:
-    """Merge source's description / env into target (the pair merges
-    separately, via :func:`_merge_pair`). Scalars: source wins. Maps:
-    merge with source wins."""
-    target.description = source.description
-    target.env = _merge_map(target.env, source.env)
-
-
 def _merge_template(target: ResolvedSessionTemplate, tmpl: SessionTemplate) -> None:
-    """Merge a raw SessionTemplate's description / env into a
-    ResolvedSessionTemplate (the pair merges separately, via
-    :func:`_merge_pair`). None = not set, skip. Scalars: child
-    overrides. Maps: merge with child wins."""
+    """Fold one declared SessionTemplate's description / env into the
+    accumulator (the pair folds separately, via :func:`_merge_pair`).
+    None = not set, skip. Scalars: later layer overrides. Maps: merge with
+    the later layer winning. The only writer of those two fields."""
     if tmpl.description is not None:
         target.description = tmpl.description
     if tmpl.env:

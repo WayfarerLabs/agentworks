@@ -82,15 +82,18 @@ def effective_template(templates: Mapping[str, AgentTemplate], name: str) -> Res
         return ResolvedAgentTemplate(name=name)
 
 
-def _resolve(
+def _layers(
     templates: Mapping[str, AgentTemplate],
     name: str,
     _visiting: tuple[str, ...] = (),
-) -> ResolvedAgentTemplate:
-    """Depth-first, left-to-right resolution.
+) -> list[AgentTemplate]:
+    """The DECLARATIONS ``name`` merges from, in merge order: each
+    parent's own chain first (left to right), then the row itself. See
+    ``vms.templates._layers`` for the shape all four resolvers share and
+    why it matches ``resources.inheritance.merge_layers``.
 
-    ``_visiting`` carries the chain of in-progress resolves so cycles
-    raise a clean ``InheritanceCycleError`` instead of crashing with
+    ``_visiting`` carries the chain of in-progress walks so cycles raise
+    a clean ``InheritanceCycleError`` instead of crashing with
     ``RecursionError``. The framework's ``Registry.finalize`` cycle pass
     is the canonical check at build_registry time; this resolver-internal
     guard is the safety net for the load-time eager-resolve path (Phase
@@ -101,18 +104,28 @@ def _resolve(
         raise inheritance_cycle_error("agent-template", (*_visiting, name))
 
     if name not in templates:
-        return ResolvedAgentTemplate(name=name)
+        return []
 
     tmpl = templates[name]
-    result = ResolvedAgentTemplate(name=name)
     next_visiting = (*_visiting, name)
+    layers = [layer for parent in tmpl.inherits for layer in _layers(templates, parent, next_visiting)]
+    layers.append(tmpl)
+    return layers
 
-    for parent_name in tmpl.inherits:
-        parent = _resolve(templates, parent_name, next_visiting)
-        _merge(result, parent)
 
-    _merge_template(result, tmpl)
-    result.name = name
+def _resolve(
+    templates: Mapping[str, AgentTemplate],
+    name: str,
+    _visiting: tuple[str, ...] = (),
+) -> ResolvedAgentTemplate:
+    """Resolve ``name``'s chain, defaults applied: one accumulator folded
+    over the chain's declarations. See ``vms.templates._resolve_from_dict``
+    for why the fold reads the DECLARATIONS rather than each parent's
+    resolved template.
+    """
+    result = ResolvedAgentTemplate(name=name)
+    for layer in _layers(templates, name, _visiting):
+        _merge_template(result, layer)
     return result
 
 
@@ -127,28 +140,10 @@ def _append_dedupe(target: list[str], source: list[str]) -> list[str]:
     return result
 
 
-def _merge(target: ResolvedAgentTemplate, source: ResolvedAgentTemplate) -> None:
-    """Merge source into target. Scalars: source wins. Lists: append with dedupe."""
-    target.shell = source.shell
-    target.git_credentials = _append_dedupe(target.git_credentials, source.git_credentials)
-    target.user_install_commands = _append_dedupe(target.user_install_commands, source.user_install_commands)
-    target.dotfiles_source = source.dotfiles_source
-    target.dotfiles_destination = source.dotfiles_destination
-    target.dotfiles_install_cmd = source.dotfiles_install_cmd
-    target.mise_activate = source.mise_activate
-    target.mise_packages = _append_dedupe(target.mise_packages, source.mise_packages)
-    target.mise_lockfile = source.mise_lockfile
-    target.mise_allow_unlocked = source.mise_allow_unlocked
-    target.mise_install_before = source.mise_install_before
-    target.mise_prune_on_reinit = source.mise_prune_on_reinit
-    target.claude_marketplaces = _append_dedupe(target.claude_marketplaces, source.claude_marketplaces)
-    target.claude_plugins = _append_dedupe(target.claude_plugins, source.claude_plugins)
-    target.env = {**target.env, **source.env}
-
-
 def _merge_template(target: ResolvedAgentTemplate, tmpl: AgentTemplate) -> None:
-    """Merge a raw AgentTemplate into a ResolvedAgentTemplate. None = not set, skip.
-    Scalars: child overrides. Lists: append with dedupe."""
+    """Fold one declared AgentTemplate into the accumulator. None = not
+    set, skip. Scalars: later layer overrides. Lists: append with dedupe.
+    The only writer of a ``ResolvedAgentTemplate``'s fields."""
     if tmpl.shell is not None:
         target.shell = tmpl.shell
     if tmpl.git_credentials is not None:
