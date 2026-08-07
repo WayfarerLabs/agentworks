@@ -77,10 +77,17 @@ class _EmptyInventory:
 def build_authored_catalog(*, strict_trusted_taxonomy: bool = False) -> GuideCatalog:
     """Collect records, optionally making trusted taxonomy drift a CI error."""
     from agentworks.plugins import SYSTEM_PLUGINS
+    from agentworks.plugins.publish import plugin_manifest_resource_owners
 
     trusted = tuple((f"core:{topic.topic}", topic) for topic in guide_contributions())
     plugins = tuple((plugin, tuple(plugin.guide_topics)) for _, plugin in sorted(SYSTEM_PLUGINS.items()))
-    return _build_guide_catalog(trusted, plugins, strict_trusted_taxonomy=strict_trusted_taxonomy)
+    resource_owners = plugin_manifest_resource_owners(plugin for plugin, _topics in plugins)
+    return _build_guide_catalog(
+        trusted,
+        plugins,
+        resource_owners,
+        strict_trusted_taxonomy=strict_trusted_taxonomy,
+    )
 
 
 def _dynamic_topic(registry: Registry | None, slug: str) -> TopicContribution:

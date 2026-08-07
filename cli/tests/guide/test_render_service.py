@@ -39,7 +39,7 @@ from agentworks.guide.agent_mode import select_guide_mode
 from agentworks.guide.catalog import _build_guide_catalog
 from agentworks.guide.contributions import guide_contributions
 from agentworks.guide.render import _dynamic, render_index, render_topic, sanitize_terminal_output
-from agentworks.guide.service import _dynamic_topic, _EmptyInventory, render_guide
+from agentworks.guide.service import _dynamic_topic, _EmptyInventory, build_authored_catalog, render_guide
 from agentworks.guide.view import build_guide_view
 from agentworks.plugins.base import Plugin
 from agentworks.resources import ResourceReference
@@ -791,3 +791,34 @@ def test_plugin_guide_topics_are_normalized_to_an_inert_tuple() -> None:
     topic = guide_contributions()[0]
     plugin = Plugin("guide-test", guide_topics=[topic])  # type: ignore[arg-type]
     assert plugin.guide_topics == (topic,)
+
+
+def test_authored_catalog_accepts_only_plugin_bundled_declarable_topics(monkeypatch: pytest.MonkeyPatch) -> None:
+    owned_topic = TopicContribution(
+        TopicSlug("agent-template/fixture-agent-tmpl"),
+        "Fixture agent template",
+        "A template contributed by the fixture plugin.",
+        ResourceAnchor("agent-template", "fixture-agent-tmpl"),
+        (Overview(BlockId("overview"), "Fixture plugin guidance."),),
+    )
+    unowned_topic = TopicContribution(
+        TopicSlug("vm-template/plugin-template"),
+        "Unowned VM template",
+        "A resource the plugin does not contribute.",
+        ResourceAnchor("vm-template", "plugin-template"),
+        (Overview(BlockId("overview"), "This contribution must be rejected."),),
+    )
+    plugin = Plugin(
+        "guide-manifest-fixture",
+        manifests="tests.plugins._manifest_declarable_fixture",
+        guide_topics=(owned_topic, unowned_topic),
+    )
+    monkeypatch.setattr("agentworks.plugins.SYSTEM_PLUGINS", {plugin.name: plugin})
+
+    catalog = build_authored_catalog()
+
+    assert catalog.lookup("agent-template/fixture-agent-tmpl") == owned_topic
+    assert "vm-template/plugin-template" not in catalog.names()
+    assert [(issue.error.topic, issue.error.field_path) for issue in catalog.issues] == [
+        ("vm-template/plugin-template", "topic")
+    ]

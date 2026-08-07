@@ -11,6 +11,7 @@ from agentworks.guide.contract import (
     ActionInput,
     ConsentBoundary,
     GuideAction,
+    is_valid_topic_slug,
     validate_guide_action,
 )
 from agentworks.guide.view import GuideIdentity, GuideInstanceFact, GuideRelationship, GuideResourceFact
@@ -170,6 +171,14 @@ def _validate_evidence(
         if type(item.action_id) is not str or item.action_id not in known_ids:
             raise ValidationError(f"unknown onboarding action {item.action_id!r}")
         if type(item.target) is not GuideIdentity or type(item.outcome) is not VerificationOutcome:
+            raise ValidationError("verification evidence has an invalid target or outcome")
+        target_kind = item.target.kind
+        target_name = item.target.name
+        if (
+            type(target_kind) is not str
+            or type(target_name) is not str
+            or not is_valid_topic_slug(target_kind + "/" + target_name)
+        ):
             raise ValidationError("verification evidence has an invalid target or outcome")
         if item.target in by_target:
             raise ValidationError(f"duplicate verification evidence for {item.target.kind}/{item.target.name}")
