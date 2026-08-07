@@ -17,7 +17,8 @@ from agentworks.guide.service import render_guide
 from agentworks.guide.view import GuideIdentity
 
 _EVIDENCE_RE = re.compile(
-    r"(?P<action>[a-z][a-z0-9-]*):(?P<kind>[a-z][a-z0-9-]*)/(?P<name>[^/:=\s]+)="
+    r"(?P<action>[a-z][a-z0-9-]*):(?P<kind>[a-z][a-z0-9-]*)/"
+    r"(?P<name>[a-z0-9](?:[a-z0-9_-]{0,251}[a-z0-9])?)="
     r"(?P<outcome>verified|failed|refused)"
 )
 

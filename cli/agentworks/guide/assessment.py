@@ -211,7 +211,7 @@ def assess_onboarding(
             findings.append(OnboardingFinding(fact.identity, OnboardingStatus.UNVERIFIABLE, fact.verdict.reason))
         elif not fact.verdict.ready:
             findings.append(OnboardingFinding(fact.identity, OnboardingStatus.NOT_READY, fact.verdict.reason))
-        elif fact.identity.kind in {"secret", "vm"} and fact.identity.name != fact.identity.kind:
+        elif fact.identity.kind in {"secret", "vm"}:
             findings.append(
                 OnboardingFinding(fact.identity, OnboardingStatus.UNVERIFIABLE, "Explicit proof has not been recorded.")
             )

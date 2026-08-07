@@ -24,11 +24,12 @@ from agentworks.guide import (
 )
 from agentworks.guide.catalog import _build_guide_catalog
 from agentworks.plugins.base import Plugin
+from agentworks.resources import KIND_REGISTRY
 
 
 def _topic(slug: str, *, related: list[str] | None = None, markdown: object = "Text.") -> dict[str, object]:
     anchor: dict[str, str]
-    if slug.startswith("concept-"):
+    if slug.startswith(("concept-", "plugin/")):
         anchor = {"type": "concept", "name": slug}
     elif "/" in slug:
         kind, name = slug.split("/", 1)
@@ -152,7 +153,53 @@ def test_plugin_collision_and_broken_link_isolation_are_deterministic() -> None:
     def issue_shapes(catalog: GuideCatalog) -> list[tuple[str, str | None, str]]:
         return [(issue.error.source, issue.error.topic, issue.error.field_path) for issue in catalog.issues]
 
-    assert issue_shapes(catalogs[0]) == issue_shapes(catalogs[1])
+    expected = [
+        ("system-plugin:z", "plugin/z/broken", "related_topics"),
+        ("system-plugin:z", "plugin/z/shared", "topic"),
+        ("system-plugin:z", "plugin/z/shared", "topic"),
+    ]
+    assert issue_shapes(catalogs[0]) == issue_shapes(catalogs[1]) == expected
+    assert isinstance(catalogs[0].issues[0].error, BrokenTopicLinkError)
+    assert all(isinstance(issue.error, DuplicateTopicError) for issue in catalogs[0].issues[1:])
+
+
+class _TestKind:
+    kind = "guide-test"
+    miss_policy = "error"
+    auto_declare_names = None
+    category = "declarable"
+    description = "Test guide kind."
+    builtin_override = "allow"
+
+    def synthesize(self, references: object) -> object:
+        raise AssertionError("not used")
+
+
+def test_plugin_ownership_gate_rejects_another_plugin_namespace() -> None:
+    catalog = _build_guide_catalog((), ((Plugin("z"), (_topic("plugin/y/topic"),)),))
+    assert catalog.names() == ()
+    assert [(issue.error.topic, issue.error.field_path) for issue in catalog.issues] == [("plugin/y/topic", "topic")]
+
+
+def test_taxonomy_gate_is_ci_fatal_for_trusted_content_and_fail_soft_for_plugin_content(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    handler = _TestKind()
+    monkeypatch.setitem(KIND_REGISTRY, handler.kind, handler)
+    topic = _topic("guide-test/demo")
+    object.__setattr__(handler, "category", "capability")
+
+    with pytest.raises(GuideContributionError) as raised:
+        _build_guide_catalog((("core:bad-taxonomy", topic),))
+    assert raised.value.field_path == "anchor"
+
+    catalog = _build_guide_catalog(
+        (),
+        ((Plugin("z"), (topic,)),),
+        (("z", "guide-test", "demo"),),
+    )
+    assert catalog.names() == ()
+    assert [(issue.error.topic, issue.error.field_path) for issue in catalog.issues] == [("guide-test/demo", "anchor")]
 
 
 def test_registered_plugin_implementation_and_owner_adapter_resource_topics_are_accepted() -> None:
@@ -230,9 +277,49 @@ def test_action_nested_input_validation_is_exact(field: str, bad: object) -> Non
         validate_guide_action(action, "core")
 
 
+@pytest.mark.parametrize(
+    "token",
+    ["a;b", "a|b", "a&b", "a>b", "a<b", "a'b", 'a"b', "a\\b", "a b", "a\nb", "a\x1bb"],
+)
+@pytest.mark.parametrize("field", ["command", "verification"])
+def test_action_tokens_reject_shell_syntax_whitespace_and_controls_anywhere(field: str, token: str) -> None:
+    action = _action()
+    object.__setattr__(action, field, ("agw", token))
+    with pytest.raises(GuideContributionError):
+        validate_guide_action(action, "core")
+
+
 @pytest.mark.parametrize("verification", [(), ("&&",), ("${NAME}",), ("$UNKNOWN",)])
 def test_action_verification_uses_literal_argv_vocabulary(verification: tuple[str, ...]) -> None:
     action = _action()
     object.__setattr__(action, "verification", verification)
     with pytest.raises(GuideContributionError):
         validate_guide_action(action, "core")
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "path"),
+    [
+        ("title", "x" * 257, "title"),
+        ("summary", "x" * 2049, "summary"),
+        ("blocks", [{"type": "overview", "id": "overview", "markdown": "x" * (64 * 1024 + 1)}], "blocks[0].markdown"),
+        ("blocks", [{"type": "overview", "id": f"block-{index}", "markdown": "x"} for index in range(65)], "blocks"),
+        ("related_topics", [f"concept-related-{index}" for index in range(65)], "related_topics"),
+    ],
+)
+def test_contribution_volume_bounds_fail_closed(field: str, value: object, path: str) -> None:
+    topic = _topic("concept-safe")
+    topic[field] = value
+    with pytest.raises(GuideContributionError) as raised:
+        parse_topic_contribution(topic, "plugin:z")
+    assert raised.value.field_path == path
+
+
+def test_contribution_total_markdown_volume_is_bounded() -> None:
+    topic = _topic("concept-safe")
+    topic["blocks"] = [
+        {"type": "overview", "id": f"block-{index}", "markdown": "x" * (60 * 1024)} for index in range(5)
+    ]
+    with pytest.raises(InvalidBlockError) as raised:
+        parse_topic_contribution(topic, "plugin:z")
+    assert raised.value.field_path == "blocks"

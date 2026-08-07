@@ -138,6 +138,14 @@ def test_ready_rerun_with_accepted_proof_is_a_clean_no_op() -> None:
     assert assessment.actions == ()
 
 
+@pytest.mark.parametrize("kind", ["secret", "vm"])
+def test_resource_named_after_its_kind_still_requires_explicit_proof(kind: str) -> None:
+    assessment = assess_onboarding(_snapshot(_fact(kind, kind)))
+    assert assessment.findings[0].status is OnboardingStatus.UNVERIFIABLE
+    expected = "verify-named-secret" if kind == "secret" else "verify-vm-connection"
+    assert assessment.action_ids == (ActionId(expected),)
+
+
 def test_cli_replays_target_scoped_evidence_end_to_end(monkeypatch: pytest.MonkeyPatch, db: Database) -> None:
     registry = Registry.empty()
     registry.add(
@@ -287,6 +295,22 @@ def test_cli_rejects_malformed_evidence_atomically(monkeypatch: pytest.MonkeyPat
     assert result.stdout == ""
     assert "ACTION_ID:KIND/NAME=verified|failed|refused" in result.stderr
     assert loaded is False
+
+
+@pytest.mark.parametrize("control", ["\x00", "\x07", "\x1b", "\x7f", "\x80", "\x9f"])
+def test_cli_rejects_control_bytes_in_evidence_without_echoing_them(control: str) -> None:
+    value = f"verify-named-secret:secret/to{control}ken=verified"
+    result = CliRunner().invoke(app, ["guide", "concept-onboarding", "--evidence", value])
+    assert result.exit_code == 2
+    assert control not in result.stderr
+    assert "ACTION_ID:KIND/NAME=verified|failed|refused" in result.stderr
+
+
+def test_cli_rejects_line_break_in_evidence_without_echoing_the_value() -> None:
+    value = "verify-named-secret:secret/to\nken=verified"
+    result = CliRunner().invoke(app, ["guide", "concept-onboarding", "--evidence", value])
+    assert result.exit_code == 2
+    assert value not in result.stderr
 
 
 @pytest.mark.parametrize(

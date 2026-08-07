@@ -6,10 +6,7 @@ import sys
 import zipfile
 from pathlib import Path
 
-import pytest
 
-
-@pytest.mark.integration
 def test_installed_wheel_contains_every_authored_guide_block(tmp_path: Path) -> None:
     project = Path(__file__).parents[2]
     environment = {**os.environ, "UV_CACHE_DIR": str(tmp_path / "uv-cache")}
@@ -40,7 +37,7 @@ def test_installed_wheel_contains_every_authored_guide_block(tmp_path: Path) -> 
         capture_output=True,
         text=True,
     )
-    python = wheel_environment / "bin" / "python"
+    python = wheel_environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     subprocess.run(
         ["uv", "pip", "install", "--python", str(python), str(wheel)],
         cwd=tmp_path,
