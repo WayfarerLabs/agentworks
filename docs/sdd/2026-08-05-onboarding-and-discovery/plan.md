@@ -107,7 +107,7 @@ identifies all wave 2 gates, and has no unresolved review finding.
       `./scripts/rulesync-upgen.sh --check` passes.
 - [x] Unit, integration, CLI, completion, packaging, typing, and lint gates pass.
 - [x] Step reviewed by `agentworks-reviewer` and a fresh-eyes reviewer; valid findings resolved.
-- [ ] Always-green ready-to-merge implementation PR opened and roadmap-lead review requested.
+- [x] Always-green ready-to-merge implementation PR opened and roadmap-lead review requested.
 
 Definition of done: R2, R3, R4, R5, R9, R10, R12, R13, R14, and R15 work for static topics and
 current registry/resource-derived content without any wave 2 surface.
