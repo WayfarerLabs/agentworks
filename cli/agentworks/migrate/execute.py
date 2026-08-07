@@ -304,6 +304,7 @@ def _digest(path: Path) -> str:
 def _verify(plan: MigrationPlan) -> int:
     from agentworks.bootstrap import build_registry
     from agentworks.config import load_config
+    from agentworks.errors import ConfigError
 
     # ``resources=False`` is load-bearing: after a partial migration the
     # rewritten config may still carry un-migrated resource sections, which a
@@ -312,8 +313,25 @@ def _verify(plan: MigrationPlan) -> int:
     # manifests, including the just-emitted YAML, still load, so the
     # post-registry is the operator's real post-upgrade world minus the
     # not-yet-migrated TOML rows.
-    post_config = load_config(plan.config_path, warn_issues=False, resources=False)
-    post_rows = normalized_rows(build_registry(post_config))
+    try:
+        post_config = load_config(plan.config_path, warn_issues=False, resources=False)
+        post_rows = normalized_rows(build_registry(post_config))
+    except ConfigError as exc:
+        # Planning already built this same registry over the tree this run
+        # would produce (``preflight.require_loadable_tree``) and refused
+        # if it failed, so reaching here means the prediction was wrong:
+        # the tree was edited mid-run, or the writes did not land as
+        # planned. Saying so is the point. A bare config error arriving
+        # under "Applying migration..." is what sent an operator off to
+        # hand-fix a file the migration never touched.
+        raise StateError(
+            f"migration verification could not run: the migrated config does not load: {exc}",
+            hint=(
+                "This same check passed when the run was planned, so either the config was edited "
+                "while the run was in flight or this run wrote something unexpected. Rollback is "
+                "being attempted; inspect its outcome before re-running."
+            ),
+        ) from exc
     difference = first_difference(plan.pre_rows, post_rows)
     if difference is not None:
         raise StateError(

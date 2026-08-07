@@ -1,11 +1,16 @@
 """Plan a migration run: selectors, emission, layout, and the TOML edit.
 
-Planning is pure: it reads the config file text and produces a
-``MigrationPlan`` carrying everything ``execute_plan`` needs (rendered
-YAML documents grouped by target file, the rewritten TOML text, and the
-source-normalized pre-migration rows for verification, built from the
-migrator's own TOML/YAML oracle rather than a registry). ``--dry-run``
-is therefore just "plan and print".
+Planning reads the config file text and produces a ``MigrationPlan``
+carrying everything ``execute_plan`` needs (rendered YAML documents
+grouped by target file, the rewritten TOML text, and the source
+-normalized pre-migration rows for verification, built from the
+migrator's own TOML/YAML oracle rather than a registry).
+
+Planning WRITES nothing, but it is not read-only in the pure sense: on
+the way out it holds the run to its precondition, building a registry
+over the tree the run would produce (``preflight``). ``--dry-run`` is
+"plan and print" precisely so that a dry run is held to the same
+precondition as the real run rather than to a weaker one.
 """
 
 from __future__ import annotations
@@ -29,6 +34,7 @@ from agentworks.migrate.manifest_upgrade import (
     legacy_pre_rows,
     plan_rewrites,
 )
+from agentworks.migrate.preflight import require_loadable_tree
 from agentworks.migrate.toml_edit import apply_toml_edits, key_name
 from agentworks.migrate.toml_resources import toml_resource_rows
 from agentworks.migrate.verify import strip_source_fields
@@ -162,6 +168,32 @@ class MigrationPlan:
         """Every ``kind/name`` an in-place rewrite touches, in plan order."""
         return tuple(token for rewrite in self.rewrites for token in rewrite.resources)
 
+    @property
+    def post_migration_texts(self) -> dict[Path, str]:
+        """Every manifest file this run would change, with the text it
+        would end up holding.
+
+        The whole resources tree, as this run would leave it, is this
+        overlaid on what is already on disk. That is what lets a dry run
+        answer the question a real run answers by writing and then
+        loading (``migrate/preflight.py``).
+
+        Built from the same two functions ``execute_plan`` writes
+        through, so the preview and the write cannot disagree. Rewrites
+        carry their final text already, including any documents coalesced
+        into them.
+        """
+        texts: dict[Path, str] = {}
+        for write in self.writes:
+            texts[write.path] = (
+                appended_yaml_text(write.path.read_text(encoding="utf-8"), write.documents)
+                if write.exists
+                else created_yaml_text(write)
+            )
+        for rewrite in self.rewrites:
+            texts[rewrite.path] = rewrite.new_text
+        return texts
+
 
 def plan_migration(
     config: Config,
@@ -173,11 +205,17 @@ def plan_migration(
 ) -> MigrationPlan:
     """Resolve selectors against the config's TOML and build the plan.
 
-    Pure over the config file text: reads the TOML directly (no registry).
-    The pre-side verification rows come from the migrator's own oracle
+    Reads the TOML directly rather than through a registry: the pre-side
+    verification rows come from the migrator's own oracle
     (``toml_resource_rows`` over the original TOML plus the decoded original
-    YAML), so planning does not need a built registry, and the post-side
-    (``execute._verify``) builds its own from the rewritten config.
+    YAML), and the post-side (``execute._verify``) builds its own from the
+    rewritten config.
+
+    The one registry planning DOES build is the precondition's, over the
+    tree this run would produce rather than the one on disk
+    (``preflight.require_loadable_tree``). That is what lets a dry run
+    reach the real run's verdict; the migrator still works on a config no
+    other command can load, which is the property that mattered.
 
     Migrating everything requires the explicit ``all_resources`` opt-in
     (``--all``); an empty selection without it is an error, so a bare
@@ -187,7 +225,10 @@ def plan_migration(
     Raises ``ValidationError`` for selector errors (unknown kind,
     explicit selector matching nothing) and ``ConfigError`` for TOML
     shapes the tool refuses (dotted-key / inline-table declarations,
-    filename-unsafe names under the per-resource layout).
+    filename-unsafe names under the per-resource layout), for a manifest
+    the upgrade half cannot fold, and for a resources tree that would not
+    load once this run was applied (``preflight.require_loadable_tree``:
+    the precondition both the dry run and the real run are held to).
     """
     if all_resources and selectors:
         raise ValidationError(
@@ -257,7 +298,7 @@ def plan_migration(
     else:
         new_text = old_text
 
-    return MigrationPlan(
+    plan = MigrationPlan(
         config_path=config_path,
         resources_dir=resources_dir,
         units=selected,
@@ -273,6 +314,15 @@ def plan_migration(
         pre_rows=pre_rows,
         emitted_documents=emitted_documents,
     )
+    # Last, and on the way out, so the dry run and the real run reach the
+    # identical verdict: a run whose tree does not load cannot be verified,
+    # so it is refused here rather than after the writes (preflight.py).
+    # Skipped when there is nothing to do, so a fully-migrated config with
+    # an unrelated broken manifest still answers "nothing to migrate"
+    # rather than complaining about work it was not asked to do.
+    if not plan.nothing_to_do:
+        require_loadable_tree(plan, config)
+    return plan
 
 
 def _build_pre_rows(config_path: Path, selected: list[MigrationUnit]) -> dict[tuple[str, str], Any]:

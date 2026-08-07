@@ -774,12 +774,19 @@ def test_singleton_assignment_shape_refused(tmp_path: Path) -> None:
         _plan(cfg, ["admin-template"])
 
 
-def test_slash_names_are_rejected_by_verification(tmp_path: Path) -> None:
+def test_slash_names_are_rejected_before_anything_is_written(tmp_path: Path) -> None:
     """'/' is banned in resource names at Registry.add (maintainer ruling,
-    2026-07-05). Planning is pure over text now (no plan-time registry
-    build), so a slash-named unit is discovered and emitted, but the
-    post-run verification's registry rebuild rejects the '/' and the run
-    rolls back: the config is restored and no manifest survives."""
+    2026-07-05), which the loader does not catch: the document parses and
+    decodes, and the row is refused when it is added.
+
+    So this is exactly the class the load precondition exists for, and it
+    is caught at PLANNING now, over the tree the run would produce
+    (``preflight``). It used to be emitted, written, and only then
+    rejected by the post-run rebuild, which rolled back correctly but told
+    the operator about it under "Applying migration..." and gave a dry run
+    nothing to report. Nothing is written either way; the difference is
+    that ``--dry-run`` now says so too.
+    """
     cfg = _write_config(
         tmp_path,
         resources="""\
@@ -788,9 +795,8 @@ cpus = 2
 """,
     )
     before = cfg.read_text()
-    config, plan = _plan(cfg, [], all_resources=True)
     with pytest.raises(ConfigError, match="contains '/'"):
-        execute_plan(plan, config)
+        _plan(cfg, [], all_resources=True)
     assert cfg.read_text() == before
     assert not (tmp_path / "resources" / "vm-templates.yaml").exists()
 

@@ -13,6 +13,11 @@ import pytest
 _PURE_BUILD_REGISTRY_CALLERS = {
     "doctor.py": "doctor passes an explicit ManifestSet to render health rows",
     "migrate/execute.py": "post-migration equivalence verification",
+    "migrate/preflight.py": (
+        "the migration's load precondition, over an overlaid ManifestSet "
+        "describing a tree that is not on disk; its warnings would be about "
+        "a hypothetical config, and the run's own refusal is the output"
+    ),
 }
 
 

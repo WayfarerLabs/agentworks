@@ -20,7 +20,7 @@ from agentworks.manifests.envelope import validate_envelope
 from agentworks.source_location import SourceLocation
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterator, Mapping
     from pathlib import Path
 
     from agentworks.resources.registry import Registry
@@ -156,19 +156,26 @@ def _iter_manifest_files(resources_dir: Path) -> Iterator[Path]:
         stack.extend(reversed(subdirs))
 
 
-def _iter_documents(path: Path) -> Iterator[tuple[object, SourceLocation]]:
+def _iter_documents(path: Path, text: str | None = None) -> Iterator[tuple[object, SourceLocation]]:
     """Yield ``(value, location)`` per YAML document in ``path``.
 
     ``yaml.compose_all`` yields one node per document carrying its start
     mark; values are constructed from the composed node with the safe
     constructor so per-document line numbers survive.
+
+    ``text`` supplies the content instead of reading ``path``, for a
+    caller asking what a file it has NOT written would load as (see
+    ``load_manifests``'s ``overlay``). ``path`` still frames every
+    location, so errors name the file the operator will edit rather than
+    wherever the text came from.
     """
-    try:
-        text = path.read_text(encoding="utf-8")
-    except UnicodeDecodeError as exc:
-        raise ConfigError(f"{path}: not valid UTF-8: {exc}") from exc
-    except OSError as exc:
-        raise ConfigError(f"{path}: cannot read manifest: {exc}") from exc
+    if text is None:
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError as exc:
+            raise ConfigError(f"{path}: not valid UTF-8: {exc}") from exc
+        except OSError as exc:
+            raise ConfigError(f"{path}: cannot read manifest: {exc}") from exc
     try:
         for node in yaml.compose_all(text, Loader=_StrictLoader):
             if node is None:
@@ -225,19 +232,36 @@ def locate_document(resources_dir: Path, kind: str, name: str) -> LocateResult:
     return LocateResult(location=None, unreadable=tuple(unreadable))
 
 
-def load_manifests(resources_dir: Path) -> ManifestSet:
+def load_manifests(resources_dir: Path, *, overlay: Mapping[Path, str] | None = None) -> ManifestSet:
     """Load, validate, and decode every manifest under ``resources_dir``.
 
     A missing directory is valid (empty set). Raises ``ConfigError`` on
     envelope violations, spec-level validation errors, and duplicate
     ``(kind, name)`` declarations across the whole set.
+
+    ``overlay`` maps a manifest path to the text to read INSTEAD of
+    whatever is on disk, including for paths that do not exist yet. It
+    answers "would this load?" for a tree a caller is about to write but
+    has not: ``agw resource migrate`` uses it so a dry run refuses
+    exactly what the real run refuses (migrate/preflight.py).
+
+    One deliberate imprecision: an overlay path with no file on disk is
+    loaded AFTER the walk rather than in the position it will occupy once
+    it exists. Load order is a real contract (it is first-matching
+    -reference attribution order), so this would matter to a caller
+    reading the returned entries; it does not matter to one asking only
+    whether the set loads, which is what an overlay is for.
     """
     entries: list[ManifestEntry] = []
     issues: list[str] = []
     seen: dict[tuple[str, str], SourceLocation] = {}
 
-    for path in _iter_manifest_files(resources_dir):
-        for value, location in _iter_documents(path):
+    paths = list(_iter_manifest_files(resources_dir))
+    if overlay:
+        paths.extend(sorted(set(overlay) - set(paths)))
+
+    for path in paths:
+        for value, location in _iter_documents(path, overlay.get(path) if overlay else None):
             doc = validate_envelope(value, location)
             key = (doc.kind, doc.name)
             if key in seen:

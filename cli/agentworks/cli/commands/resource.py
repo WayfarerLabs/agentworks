@@ -387,8 +387,11 @@ def resource_migrate(
     ] = False,
     yes: Annotated[bool, typer.Option("--yes", help="Skip the confirmation prompt.")] = False,
 ) -> None:
-    """Migrate TOML-declared resources to YAML manifests, and upgrade
-    manifests still using a retired shape.
+    """Migrate TOML-declared resources to YAML manifests, upgrading retired shapes.
+
+    The summary is deliberately ONE line: completion specs take
+    `.split("\\n")[0]` of it, so a summary wrapped in the source shows up
+    truncated mid-sentence in every shell.
 
     A recurring, incremental mover: run it any time you want to move
     resources (or a subset) from TOML to YAML. New
@@ -441,6 +444,17 @@ def resource_migrate(
             output.info(line)
         output.info("")
         output.info("Dry run: nothing was written.")
+        # Say which of the real run's two checks this reached. Planning
+        # ran the load precondition over the tree this would produce, so
+        # a dry run no longer reports success where the real run refuses;
+        # what is left is the registry-equivalence check, which needs the
+        # files on disk and answers a migrator-bug question rather than a
+        # config one. Claiming or implying both would be the old bug.
+        output.detail(
+            "Checked: the config loads and the registry builds with this migration applied. A "
+            "real run repeats that and then verifies the rebuilt registry MATCHES the one it "
+            "replaced, which needs the files on disk."
+        )
         return
 
     for line in render_preview(plan):
