@@ -153,5 +153,19 @@ permanent readiness reason that defers its own validation. That contract never r
 pass to be gated; the two were coupled by accident. A test now pins non-construction directly on
 `not_ready` rather than by way of the deferral behavior.
 
-One enablement-keyed suppression survives by design: R9.9's skip of a mapping addressed to a
-present-but-disabled secret backend. It is recorded as an explicit exception at its site.
+**R9.9's own suppression closed too, later the same day.** This entry originally recorded it as
+surviving by design: the skip of a mapping addressed to a present-but-disabled secret backend. The
+operator ruled against that on the grounds that it lets an operator accumulate invalid configuration
+which then fails at the worst possible moment, when they enable the resource. A mapping is now
+validated whether or not its backend is enabled. The mapping staying INERT for resolution is a
+separate property and is untouched: that lives in `active_backends`, on a different path, and the
+two were only ever entangled in the prose. The `enabled_backends` parameter that carried the
+suppression is retired from the `validate_config` contract entirely, rather than left as an unused
+input that reads as an invitation to gate on the environment again.
+
+What remains on the validate path is not enablement-keyed: an implementation this host has not
+seated selects no model, so the shape check no-ops and the dangling capability edge reports the
+absence once. Separately, R12 materialization gating means a row referenced only by not-ready or
+disabled nodes is never synthesized, so pass 7 never sees it. That is deliberate and documented, but
+it reaches the same outcome by another mechanism and is worth knowing about when reading the
+"unconditional" claim above.
