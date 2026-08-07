@@ -86,7 +86,7 @@ def test_probe_free_finalize_preserves_unavailable_validation_and_deferred_mater
         def not_ready(self, deps: object) -> Readiness:
             raise AssertionError("probe-dependent readiness hook was invoked")
 
-        def validate(self, enabled_backends: frozenset[str]) -> None:
+        def validate_config(self, context: object) -> None:
             validated.append(self.name)
 
     @dataclass(frozen=True)

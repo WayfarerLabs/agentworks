@@ -700,9 +700,12 @@ and rewrite any that still live in `config.toml`; the
 
 `agw guide [TOPIC]...` renders Markdown teaching together with safe facts from the current finalized
 resource registry. With no topic it prints a security disclosure, onboarding entry point, and topic
-index. Bare kind topics such as `vm-template` list the current resources of that kind; exact
-`kind/name` topics describe current state and relationships. Core concepts use names such as
-`concept-onboarding`, `concept-secrets`, and `concept-reporting-bugs`.
+index. Bare declarable-kind topics such as `vm-template` render current resources, a live field
+reference, and a generated sample from the same schema services the manifest loader uses.
+Capability-kind and implementation topics render their live alternatives or configuration fields,
+including implementations that are installed but disabled. Exact declared-resource topics describe
+current state and relationships and link back to their kind's shared schema. Core concepts use names
+such as `concept-onboarding`, `concept-migration`, `concept-secrets`, and `concept-reporting-bugs`.
 
 Multiple topics render in the requested order and are validated atomically: one unknown topic
 prevents all output. Repeated topics render once at their first position. `--agent` and `--human`
@@ -743,10 +746,17 @@ before output. Agentworks does not persist an evidence ledger. Direct guided, no
 future bootstrap service consumers may provide the typed tuple they own at the service boundary.
 
 Guide remains useful when configuration or registry finalization fails. Authored prose still
-renders, live blocks are marked unavailable, the framed failure appears once, and the command
-exits 1. `--names-only` emits one retained topic per line, degrades to authored topics plus
-code-owned kind names under broken configuration, and exits 0. This stable stream backs Bash, Zsh,
-and PowerShell topic completion.
+renders, schema-derived field references and samples remain available without configuration, other
+live blocks are marked unavailable, the framed failure appears once, and the command exits 1.
+`--names-only` emits one retained topic per line, degrades to authored topics plus every
+schema-describable kind and capability implementation under broken configuration, and exits 0. This
+stable stream backs Bash, Zsh, and PowerShell topic completion.
+
+`concept-migration` is the exceptional 0.14 resource-model rewrite guide, not a general upgrade
+workflow. It keeps the sequence, checkpoints, and consent boundaries in colocated package data and
+points to the installed kind and implementation topics for fields and samples. Its action records
+are inert instructions. Rendering them never reads a path, runs doctor, edits configuration, or
+authorizes an agent to do so.
 
 | Command                                                               | Description                                      |
 | --------------------------------------------------------------------- | ------------------------------------------------ |
@@ -761,12 +771,13 @@ and PowerShell topic completion.
 The authored guide remains useful after initial setup. These operator goals have permanent entry
 points:
 
-| Goal                         | Guide coverage                                                       | Ordinary CLI surface                                                                        |
-| ---------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| Create or change a resource  | `concept-management`, then the bare kind and exact `kind/name` topic | The resource's owning command or canonical manifest                                         |
-| Adopt a capability           | `concept-management`, then the capability implementation topic       | `agw resource list --include-disabled` and the owning configuration surface                 |
-| Resolve upgrade deprecations | `concept-management`                                                 | Follow the emitted migration instruction before unrelated changes                           |
-| Troubleshoot                 | `concept-troubleshooting`                                            | Run `agw doctor` only with consent to examine the workstation; authorize repairs separately |
+| Goal                            | Guide coverage                                                       | Ordinary CLI surface                                                                        |
+| ------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| Create or change a resource     | `concept-management`, then the bare kind and exact `kind/name` topic | The resource's owning command or canonical manifest                                         |
+| Adopt a capability              | `concept-management`, then the capability implementation topic       | `agw resource list --include-disabled` and the owning configuration surface                 |
+| Resolve upgrade deprecations    | `concept-management`                                                 | Follow the emitted migration instruction before unrelated changes                           |
+| Migrate the 0.14 resource model | `concept-migration`, then each live kind or implementation topic     | Validate each manifest with doctor, cut over TOML once, then compare operator inventory     |
+| Troubleshoot                    | `concept-troubleshooting`                                            | Run `agw doctor` only with consent to examine the workstation; authorize repairs separately |
 
 ### Config
 

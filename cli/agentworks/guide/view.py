@@ -21,9 +21,8 @@ from agentworks.resources.graph import Enablement
 
 if TYPE_CHECKING:
     from agentworks.db import Database
-    from agentworks.resources import Registry
+    from agentworks.resources import Origin, Registry
     from agentworks.resources.kind import ResourceKind
-    from agentworks.resources.origin import Origin
 
 
 class GuideRoot(Enum):
@@ -174,7 +173,7 @@ def _resource_fact(registry: Registry, kind: str, name: str, resource: object) -
         GuideIdentity(kind, name),
         handler.category,
         cast("str | None", getattr(resource, "description", None)),
-        _origin(cast("Origin | None", getattr(resource, "origin", None))),
+        _origin(getattr(resource, "origin", None)),
         GuideVerdict(
             registry.graph.enablement_of(kind, name) is Enablement.enabled,
             readiness.is_ready,

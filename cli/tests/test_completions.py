@@ -137,6 +137,20 @@ class TestDynamicCompletionsMapping:
         assert "agw guide --names-only" in POWERSHELL_SNIPPETS["guide_topics"]
         assert "agw guide --names-only" in DYNAMIC_FUNCTIONS["guide_topics"]
 
+    def test_guide_topic_completion_stream_keeps_schema_targets_when_config_is_broken(self) -> None:
+        from agentworks.errors import ConfigError
+        from agentworks.guide import GuideMode
+        from agentworks.guide.service import render_guide
+
+        def broken_config() -> object:
+            raise ConfigError("broken config")
+
+        response = render_guide((), GuideMode.AGENT, names_only=True, load_config_fn=broken_config)
+
+        assert response.exit_code == 0
+        assert "vm-template" in response.names
+        assert "vm-platform/wsl2" in response.names
+
 
 class TestOptionFlagsInSpec:
     """Pin option flags that must (or must not) reach the completion tree.

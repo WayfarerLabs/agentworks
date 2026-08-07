@@ -19,7 +19,6 @@ from agentworks.guide import (
     AgentContract,
     BlockId,
     ConceptAnchor,
-    FieldReference,
     GuideCatalog,
     GuideCatalogIssue,
     GuideContributionError,
@@ -29,7 +28,6 @@ from agentworks.guide import (
     Overview,
     Relationships,
     ResourceAnchor,
-    Sample,
     State,
     Teaching,
     TopicContribution,
@@ -254,7 +252,8 @@ def test_live_dynamic_block_payloads_have_semantic_parity() -> None:
     assert [(block.key, block.source_payload) for block in human.blocks] == [
         (block.key, block.source_payload) for block in agent.blocks
     ]
-    assert human.blocks[0].source_payload == "- `vm-template/demo`"
+    inventory = next(block for block in human.blocks if block.key.block_id == "inventory")
+    assert inventory.source_payload == "- `vm-template/demo`"
 
 
 class _ExactGraph:
@@ -380,8 +379,6 @@ def test_every_block_renderer_and_unsupported_block_refusal_are_explicit() -> No
             InstanceList(BlockId("instances")),
             State(BlockId("state")),
             Relationships(BlockId("relationships")),
-            FieldReference(BlockId("fields")),
-            Sample(BlockId("sample")),
             TopicLinks(BlockId("links")),
         ),
         (TopicSlug("concept-management"),),
@@ -396,22 +393,17 @@ def test_every_block_renderer_and_unsupported_block_refusal_are_explicit() -> No
         "instances",
         "state",
         "relationships",
-        "fields",
-        "sample",
         "links",
     }
-    assert rendered.markdown.count("available after schema services are installed") == 2
     assert "`concept-management`" in rendered.markdown
     assert {line for line in rendered.markdown.splitlines() if line.startswith("## ⟦AGW framework⟧")} == {
         "## ⟦AGW framework⟧ Agent operating contract",
         "## ⟦AGW framework⟧ Current inventory",
         "## ⟦AGW framework⟧ Current state",
-        "## ⟦AGW framework⟧ Fields",
         "## ⟦AGW framework⟧ How it works",
         "## ⟦AGW framework⟧ Overview",
         "## ⟦AGW framework⟧ Related topics",
         "## ⟦AGW framework⟧ Relationships",
-        "## ⟦AGW framework⟧ Sample",
     }
     with pytest.raises(TypeError, match="unsupported dynamic guide block object"):
         _dynamic(object(), view)  # type: ignore[arg-type]

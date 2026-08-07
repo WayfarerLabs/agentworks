@@ -106,6 +106,7 @@ def test_bootstrap_logger_receives_every_resolved_secret(
         _stub_exec_target(),
         _SpyPlatform(),  # type: ignore[arg-type]
         RunContext(),
+        admin_username="admin",
         tailscale_auth_key="tailscale-secret",
         git_tokens={"gh": "github-secret", "gl": "gitlab-secret"},
         on_tailscale_ready=lambda: None,

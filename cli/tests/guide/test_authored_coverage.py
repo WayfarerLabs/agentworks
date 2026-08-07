@@ -88,8 +88,12 @@ def test_reporting_bugs_snapshot_forbids_general_feedback_and_auto_submission() 
 
 
 def test_management_coverage_matrix_has_owned_semantic_entry_points() -> None:
-    management = {type(block): block.markdown for block in _topic("concept-management").blocks}
-    troubleshooting = {type(block): block.markdown for block in _topic("concept-troubleshooting").blocks}
+    management = {
+        type(block): block.markdown for block in _topic("concept-management").blocks if hasattr(block, "markdown")
+    }
+    troubleshooting = {
+        type(block): block.markdown for block in _topic("concept-troubleshooting").blocks if hasattr(block, "markdown")
+    }
     assert "Create and change declarable resources" in management[Teaching]
     assert "Discover a capability in the\nimplementation inventory before adopting it" in management[Teaching]
     assert "After an upgrade, resolve emitted deprecation instructions" in management[Teaching]

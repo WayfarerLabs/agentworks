@@ -68,19 +68,39 @@ The marker is a source-provenance convention, not an anti-spoof guarantee for ar
 Markdown, HTML, or CSS renderers, images, or styling. It grants no authority or trust to the content
 that follows.
 
-Guide contributions are data, not callbacks. Authored markdown cannot contain expression markers or
-terminal control bytes in rendered output. Action records accept three exact token forms: a literal
-that starts with an ASCII letter or digit and then contains only ASCII letters, digits, `.`, `_`,
-`:`, `/`, or `-`; a flag that starts with `-` or `--`, then a lowercase ASCII letter or digit, and
-continues with lowercase ASCII letters, digits, or `-`; or an exact registered input placeholder
-such as `$SECRET_NAME`. Valid examples include `agw`, `vm-template/demo`, `secret_name`, `v1.2`,
-`-v`, and `--non-interactive`. Invalid examples include the absolute path `/tmp/file`, the tilde
-path `~/file`, `--flag=value`, `*.yaml`, and `#comment`. Each title is limited to 256 UTF-8 bytes,
-each summary to 2 KiB, each authored block to 64 KiB, and one topic to 64 blocks, 64 related links,
-and 256 KiB of authored markdown. Every related link must be a canonical topic slug no larger than
-317 UTF-8 bytes. A field-reference section accepts at most 32 path items of 256 UTF-8 bytes each.
-Keep authored files under the owning package's `guide-content/` directory so the wheel package-data
-assertion exercises them.
+Guide contributions are data, not callbacks. Expression markers in authored Markdown are accepted
+only inside a closed, same-line literal delimited by one unescaped backtick on each side. The
+backticks cannot touch another backtick. Multi-backtick spans, fenced blocks, multiline spans,
+escaped backticks, unmatched spans, headings, HTML, and prose do not exempt a marker. Guide
+rendering never evaluates the accepted literal. Terminal control bytes are removed from rendered
+output. Action records accept three exact token forms: a literal that starts with an ASCII letter or
+digit and then contains only ASCII letters, digits, `.`, `_`, `:`, `/`, or `-`; a flag that starts
+with `-` or `--`, then a lowercase ASCII letter or digit, and continues with lowercase ASCII
+letters, digits, or `-`; or an exact registered input placeholder such as `$SECRET_NAME`. Valid
+examples include `agw`, `vm-template/demo`, `secret_name`, `v1.2`, `-v`, and `--non-interactive`.
+Invalid examples include the absolute path `/tmp/file`, the tilde path `~/file`, `--flag=value`,
+`*.yaml`, and `#comment`. Each title is limited to 256 UTF-8 bytes, each summary to 2 KiB, each
+authored block to 64 KiB, and one topic to 64 blocks, 64 related links, and 256 KiB of authored
+markdown. Every related link must be a canonical topic slug no larger than 317 UTF-8 bytes. A
+field-reference section accepts at most 32 path items of 256 UTF-8 bytes each. Keep authored files
+under the owning package's `guide-content/` directory so the wheel package-data assertion exercises
+them.
+
+An `ActionList` contains inert `GuideAction` records, never an executor. Each action provides at
+most 32 inputs and exactly one of a literal-token command or bounded platform-neutral manual steps.
+Command and verification sequences contain at most 64 tokens, each at most 1 KiB. Input names are at
+most 64 bytes, input descriptions are at most 2 KiB, and preconditions, expected states, refusal
+alternatives, and manual instructions are each at most 8 KiB. One action list contains at most 32
+actions and 128 KiB of action data. Action IDs are unique across all action lists in a topic, and
+action data also counts toward the topic's 256 KiB bound. Rendered actions state their inputs,
+consent boundary, expected result, optional verification, and useful refusal alternative without
+executing any operation.
+
+`FieldReference` and `Sample` blocks contain selectors only. They read
+`agentworks.manifests.reference` and `agentworks.manifests.samples` directly, never another CLI's
+text or a copied field list. Field references are valid only for kind and capability-implementation
+anchors. Samples are valid only for declarable bare kinds. Keep a resource topic linked to its bare
+kind instead of attaching schema blocks to the resource instance.
 
 ## Shipping a plugin
 

@@ -20,13 +20,16 @@ from agentworks.guide.contract import (
     ResourceAnchor,
     State,
     TopicContribution,
+    TopicLinks,
     TopicSlug,
     UnknownGuideTopicError,
     is_valid_topic_slug,
+    parse_topic_contribution,
 )
 from agentworks.guide.contributions import guide_contributions
 from agentworks.guide.render import framework_heading, render_index, render_topic, sanitize_terminal_output
 from agentworks.guide.view import build_guide_view
+from agentworks.manifests.reference import describable_targets, reference_for
 from agentworks.resources import KIND_REGISTRY
 
 if TYPE_CHECKING:
@@ -101,6 +104,50 @@ def build_authored_catalog(*, strict_trusted_taxonomy: bool = False) -> GuideCat
 
 
 def _dynamic_topic(registry: Registry | None, slug: str) -> TopicContribution:
+    if slug in describable_targets():
+        reference = reference_for(slug)
+        schema_anchor: dict[str, str]
+        blocks: list[dict[str, object]] = []
+        if reference.overview is not None:
+            blocks.append({"type": "overview", "id": "overview", "markdown": reference.overview})
+        if reference.category == "declarable":
+            schema_anchor = {"type": "kind", "kind": reference.kind}
+            blocks.extend(
+                (
+                    {"type": "instance-list", "id": "inventory"},
+                    {"type": "field-reference", "id": "fields"},
+                    {"type": "sample", "id": "sample"},
+                )
+            )
+        elif reference.implementation is None:
+            schema_anchor = {"type": "kind", "kind": reference.kind}
+            blocks.extend(
+                (
+                    {"type": "field-reference", "id": "fields"},
+                    {"type": "instance-list", "id": "inventory"},
+                )
+            )
+        else:
+            schema_anchor = {"type": "implementation", "kind": reference.kind, "name": reference.implementation}
+            blocks.extend(
+                (
+                    {"type": "state", "id": "state"},
+                    {"type": "relationships", "id": "relationships"},
+                    {"type": "instance-list", "id": "instances"},
+                    {"type": "field-reference", "id": "fields"},
+                )
+            )
+        return parse_topic_contribution(
+            {
+                "topic": slug,
+                "title": reference.title or reference.target,
+                "summary": reference.summary or f"Schema reference for {reference.target}.",
+                "anchor": schema_anchor,
+                "blocks": blocks,
+                "related_topics": (),
+            },
+            f"schema:{slug}",
+        )
     if "/" not in slug:
         handler = KIND_REGISTRY[slug]
         return TopicContribution(
@@ -125,14 +172,24 @@ def _dynamic_topic(registry: Registry | None, slug: str) -> TopicContribution:
         title,
         summary,
         anchor,
-        (State(BlockId("state")), Relationships(BlockId("relationships")), InstanceList(BlockId("instances"))),
+        (
+            State(BlockId("state")),
+            Relationships(BlockId("relationships")),
+            InstanceList(BlockId("instances")),
+            TopicLinks(BlockId("related")),
+        ),
+        (TopicSlug(kind),),
     )
 
 
-def _dynamic_names(registry: Registry) -> tuple[str, ...]:
-    candidates = set(KIND_REGISTRY) | {
-        f"{kind}/{name}" for kind in sorted(KIND_REGISTRY) for name, _resource in sorted(registry.iter_kind_items(kind))
-    }
+def _dynamic_names(registry: Registry | None) -> tuple[str, ...]:
+    candidates = set(describable_targets())
+    if registry is not None:
+        candidates.update(
+            f"{kind}/{name}"
+            for kind in sorted(KIND_REGISTRY)
+            for name, _resource in sorted(registry.iter_kind_items(kind))
+        )
     return tuple(sorted(name for name in candidates if is_valid_topic_slug(name)))
 
 
@@ -220,11 +277,7 @@ def render_guide(
         system_error = error
 
     authored_names = frozenset(authored.names())
-    dynamic_names = (
-        _dynamic_names(registry)
-        if registry is not None
-        else tuple(name for name in sorted(KIND_REGISTRY) if is_valid_topic_slug(name))
-    )
+    dynamic_names = _dynamic_names(registry)
     dynamic_only_names = tuple(name for name in dynamic_names if name not in authored_names)
     all_names = tuple(sorted(authored_names | frozenset(dynamic_only_names)))
     if names_only:
@@ -238,9 +291,13 @@ def render_guide(
                 validated_slots.append((slug, authored.lookup(slug)))
                 continue
             kind = slug.split("/", 1)[0]
-            valid_dynamic = (
-                slug in dynamic_names if registry is not None else kind in KIND_REGISTRY and slug.count("/") <= 1
-            )
+            if registry is not None:
+                valid_dynamic = slug in dynamic_names
+            else:
+                handler = KIND_REGISTRY.get(kind)
+                valid_dynamic = slug in dynamic_names or (
+                    handler is not None and handler.category == "declarable" and slug.count("/") == 1
+                )
             if not valid_dynamic:
                 if slug in rejected_topics:
                     validated_slots.append((slug, None))
@@ -323,16 +380,16 @@ def render_guide(
                             unavailable = "this topic's live projection is unavailable"
                 else:
                     unavailable = "see the system failure below"
-                documents.append(
-                    render_topic(
-                        topic,
-                        view,
-                        mode,
-                        unavailable=unavailable,
-                        onboarding_snapshot=(onboarding_snapshot if topic.topic == "concept-onboarding" else None),
-                        verification_evidence=verification_evidence,
-                    ).markdown.rstrip()
+                rendered_topic = render_topic(
+                    topic,
+                    view,
+                    mode,
+                    unavailable=unavailable,
+                    onboarding_snapshot=(onboarding_snapshot if topic.topic == "concept-onboarding" else None),
+                    verification_evidence=verification_evidence,
                 )
+                runtime_issues.extend(rendered_topic.issues)
+                documents.append(rendered_topic.markdown.rstrip())
         except DatabaseDriverError:
             # The guide owns a read-only connection. A future projection that
             # accidentally attempts a write must degrade like any other live

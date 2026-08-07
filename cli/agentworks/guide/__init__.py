@@ -19,6 +19,7 @@ from agentworks.guide.catalog import GuideCatalog, GuideCatalogIssue
 from agentworks.guide.contract import (
     ActionId,
     ActionInput,
+    ActionList,
     AgentContract,
     BlockId,
     BrokenTopicLinkError,
@@ -66,6 +67,7 @@ from agentworks.guide.view import (
 __all__ = [
     "ActionId",
     "ActionInput",
+    "ActionList",
     "AgentContract",
     "BlockId",
     "BrokenTopicLinkError",
