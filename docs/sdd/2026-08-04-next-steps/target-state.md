@@ -1,7 +1,7 @@
 # Target State
 
 - Status: North star, accumulating settled rulings
-- Last updated: 2026-08-05
+- Last updated: 2026-08-07
 
 This document describes where Agentworks is going across this roadmap effort, synthesized from the
 perspectives in `inputs/`. It is the target of these waves, not a forever vision: when
@@ -155,12 +155,24 @@ memory is a cache, the repository is the system of record, and distillation is t
 
 ### Compatibility posture (all destinations)
 
-Breaking changes are acceptable across this roadmap provided each ships with a deprecation runway
-and migration helpers: warn and migrate in one release, reject in the next (the 0.13 to 0.14
-pattern). Deprecations are dropped on their scheduled release rather than accumulating: wave 1
-restores that baseline by clearing every expired surface, and each later breaking wave clears its
-own runway on schedule so the target state carries no expired compatibility. The generic deprecation
-framework survives every cleanup.
+Breaking changes are acceptable across this roadmap provided each ships with a deprecation runway:
+warn in one release, reject in the next (the 0.13 to 0.14 pattern). Deprecations are dropped on
+their scheduled release rather than accumulating: wave 1 restores that baseline by clearing every
+expired surface, and each later breaking wave clears its own runway on schedule so the target state
+carries no expired compatibility. The generic deprecation framework survives every cleanup.
+
+**Remediation is precise errors plus the guide, not automated migrators** (operator ruling,
+2026-08-07). A breaking change ships with hard errors that name the offending input and the exact
+remediation, and with guide content that walks the operator or their agent through the rewrite;
+Agentworks does not maintain automated migration tooling. The ruling came from the wave 2 review:
+`agw resource migrate` required a frozen re-implementation of the old shapes as a verification
+oracle, and every divergence between oracle and model surfaced as a self-blaming failure. Its
+deliberate deletability (the separability guard) let it be removed before release rather than
+maintained until a scheduled expiry. The agent-led path verifies with real surfaces (`agw doctor`,
+loading the result) instead of an oracle, and the guide teaches it in the same release that breaks
+the old inputs. One consequence stays on the ledger: the manifest surface currently has no
+deprecation warn-window channel, so a future manifest-shape deprecation must rebuild one or ship as
+a hard break with guide coverage.
 
 ### Cross-cutting: anchored projections (all destinations)
 
@@ -184,6 +196,17 @@ mechanisms, chosen per surface and done properly. Authored content still carries
 graph carries the dynamic truth, and no effort should over-index on pushing everything into the
 graph. Where a projection is impossible (the workstation agent sits outside the platform), the
 principle inverts to disclosure, per the onboarding security disclosure.
+
+### Cross-cutting: shared traversal discipline (all destinations)
+
+Traversals of operator-controlled graphs (inheritance chains, reference graphs, nested model walks
+over operator data) go through shared, iterative or memoized, cycle-safe helpers rather than each
+module hand-rolling recursive descent (operator agreement, 2026-08-07, from the wave 2 review: the
+registry's cycle detector was deliberately iterative while a finalize-pass walker upstream of it was
+hand-rolled, unmemoized, and exponential on diamond inheritance). Bounded walks over code-shaped
+structures (a model class's own fields) may stay naturally recursive; the discipline applies where
+the input size or shape is the operator's to choose. The closeout wave checks this property across
+everything the roadmap touched.
 
 ## Explicitly out of scope
 

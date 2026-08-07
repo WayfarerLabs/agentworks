@@ -31,6 +31,13 @@ is locked.
       first commit records the release in that SDD's plan)
 - [ ] Phase 2 implementation complete (absorbs generic-discriminator removal and the migrator's
       fate)
+- [x] Five-pass roadmap review of PR #414 delivered (2026-08-07): request changes, three blockers,
+      structural core verified sound
+- [ ] Migrator deleted per the remediation-posture ruling (operator, 2026-08-07; see
+      `target-state.md` compatibility posture): both halves of `migrate/` removed on the branch,
+      error hints repointed at guide-led remediation, `locked.md` updated with a dated entry
+- [ ] Surviving review findings fixed on the branch (inheritance merge guard and restored coverage,
+      the schema silent-edge cluster, robustness items, SDD artifact corruption)
 - [ ] Locked
 
 ### Design track: capability-kind descriptor contract
