@@ -39,7 +39,6 @@ from typing import TYPE_CHECKING, Annotated, Any, Final, Literal, Union, cast
 
 from pydantic import Field, create_model
 from pydantic.json_schema import GenerateJsonSchema, JsonSchemaValue
-from pydantic_core import core_schema
 
 from agentworks.errors import ValidationError
 from agentworks.manifests.envelope import API_VERSION
@@ -52,6 +51,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from pydantic import BaseModel
+    from pydantic_core import core_schema
 
 #: Where written schemas live, relative to the resources directory.
 #: Dot-prefixed on purpose: ``loader._iter_manifest_files`` prunes

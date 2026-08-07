@@ -549,7 +549,7 @@ def test_the_widened_spellings_are_exactly_where_the_two_parsers_disagree() -> N
 
     # The editor's set is a subset of the loader's: the two agree that
     # `true` / `false` are booleans, and differ only by what 1.1 adds.
-    assert _YAML_12_BOOLEANS <= loader_spellings
+    assert loader_spellings >= _YAML_12_BOOLEANS
     assert loader_spellings - _YAML_12_BOOLEANS == set(YAML_11_ONLY_BOOLEANS)
 
 
