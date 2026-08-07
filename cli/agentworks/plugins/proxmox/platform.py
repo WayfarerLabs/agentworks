@@ -71,9 +71,10 @@ class ProxmoxConfig(AgwModel):
     """The resource pool new VMs join."""
 
     verify_ssl: bool = True
-    """Whether to verify the cluster's TLS certificate. A boolean: ``no``
-    is a string, and a string here used to mean TRUE, which is the
-    opposite of what it reads as."""
+    """Whether to verify the cluster's TLS certificate. A boolean,
+    written unquoted: ``false`` and YAML's ``no`` both read as false. A
+    QUOTED ``"no"`` is a string, refused now, and it used to mean TRUE,
+    the opposite of what it reads as."""
 
 
 class ProxmoxPlatform(VMPlatform):

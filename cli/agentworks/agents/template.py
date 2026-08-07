@@ -68,9 +68,10 @@ class AgentTemplate(DeclaredResource):
     """The command run inside the checkout to install the dotfiles."""
 
     mise_activate: bool | None = None
-    """Whether to activate mise in the agent user's shell. A boolean: ``no`` is a string, and a
-    string here used to mean TRUE, which is the opposite of what it
-    reads as."""
+    """Whether to activate mise in the agent user's shell. A boolean, written unquoted:
+    ``false`` and YAML's ``no`` both read as false. A QUOTED ``"no"`` is
+    a string, refused now, and it used to mean TRUE, the opposite of
+    what it reads as."""
 
     mise_packages: list[str] | None = None
     """Tools to install with mise, each as ``name@version``."""
@@ -80,9 +81,10 @@ class AgentTemplate(DeclaredResource):
 
     mise_allow_unlocked: bool | None = None
     """Whether to install ``mise_packages`` with no lockfile present.
-    A boolean: ``no`` is a string, and a
-    string here used to mean TRUE, which is the opposite of what it
-    reads as."""
+    A boolean, written unquoted:
+    ``false`` and YAML's ``no`` both read as false. A QUOTED ``"no"`` is
+    a string, refused now, and it used to mean TRUE, the opposite of
+    what it reads as."""
 
     mise_install_before: str | None = None
     """How OLD a tool version must be before mise will install it, as
@@ -93,9 +95,10 @@ class AgentTemplate(DeclaredResource):
 
     mise_prune_on_reinit: bool | None = None
     """Whether re-running init removes mise tools no longer declared.
-    A boolean: ``no`` is a string, and a
-    string here used to mean TRUE, which is the opposite of what it
-    reads as."""
+    A boolean, written unquoted:
+    ``false`` and YAML's ``no`` both read as false. A QUOTED ``"no"`` is
+    a string, refused now, and it used to mean TRUE, the opposite of
+    what it reads as."""
 
     claude_marketplaces: list[str] | None = None
     """Claude Code marketplaces to register for the agent user."""

@@ -66,7 +66,9 @@ spec:
 `--write <file>` saves it under the resources directory instead. Samples are fully commented out:
 delete one leading `#` from each DOCUMENT line to activate the parts you want. A saved file also
 opens with a `# yaml-language-server:` line, which is an ordinary comment and stays one;
-uncommenting that would turn it into a key the loader rejects.
+uncommenting that would turn it into a key the loader rejects. Writing a second kind into a file
+that already has content appends it under a commented `#---`, which is a document line like any
+other: uncomment that too, or the new document's keys merge into whatever precedes them.
 
 The sample is rendered from the same declaration the loader validates against, so it always matches
 what the kind actually accepts. The fields you MUST write are live document lines; every optional
@@ -128,6 +130,22 @@ error, but agentworks also applies rules JSON Schema cannot state (cross-field c
 character rules, whether a capability is registered here at all), so a manifest with no editor
 diagnostics can still fail to load. The direction is on purpose: a schema that under-reports costs
 you a squiggle, while one that over-reports would underline valid configuration.
+
+**The schemas target YAML 1.2**, because that is the version every schema-aware editor parses. The
+loader is PyYAML, which is YAML 1.1, and the two versions disagree about exactly two things a
+manifest can hold:
+
+- **`yes` / `no` / `on` / `off` are booleans to the loader and plain strings under 1.2.** The
+  emitted schemas accept both, so `verify_ssl: no` is not underlined. The cost is that a QUOTED
+  `"no"` is accepted by the schema too, and the loader refuses it: once parsed, the two are the same
+  string and nothing in the schema can tell them apart. That is the under-reporting direction, so it
+  is a squiggle you do not get rather than one you get wrongly. `describe-kind` warns about the
+  quoted spelling on every boolean field.
+- **A bare `expires: 2027-01-01` is a date to the loader and a string under 1.2.** This one is not
+  expressible: JSON Schema's types are JSON's, and a date is not among them, so no schema can be
+  written that a YAML 1.1 checker would accept here. Under 1.2 it is a string and validates cleanly,
+  so it costs nothing in a real editor. Quote it (`expires: "2027-01-01"`) if you ever point a 1.1
+  validator at your manifests; the loader takes the quoted form too.
 
 ## Scoped GitHub credentials (fine-grained PATs)
 

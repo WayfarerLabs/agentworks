@@ -14,7 +14,9 @@ from typing import TYPE_CHECKING, ClassVar, Literal
 
 import pytest
 
+from agentworks.errors import ConfigError
 from agentworks.manifests.describe import reference_lines
+from agentworks.manifests.loader import load_manifests
 from agentworks.manifests.reference import describable_targets, reference_for
 from agentworks.plugins import Plugin, seated_plugin
 from agentworks.schema import AgwModel
@@ -22,6 +24,7 @@ from tests.plugins._fixtures import ConformingVMPlatform
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from pathlib import Path
 
 
 class DisabledConfig(AgwModel):
@@ -198,10 +201,49 @@ def test_a_boolean_that_used_to_invert_says_so(target: str, field: str) -> None:
     behavior they had, and the error's own remedy is to come here, so the
     warning has to be here for the whole class rather than for the one
     field somebody happened to think of.
+
+    The warning names the QUOTED spelling, and the assertion pins that
+    it does. It used to say a bare ``no`` was a string, which described
+    the retired TOML loader: manifests are YAML, where a bare ``no`` is a
+    boolean and means exactly what it reads as. Warning about the wrong
+    spelling is worse than not warning, because the whole hazard on these
+    fields is a silent inversion.
     """
     entry = _field_entry(_text(target), field)
 
-    assert "used to mean TRUE, which is the opposite of what it reads as" in entry, entry
+    assert "used to mean TRUE, the opposite of what it reads as" in entry, entry
+    assert 'QUOTED `"no"`' in entry, entry
+
+
+def test_the_quoted_boolean_warning_describes_this_loader(tmp_path: Path) -> None:
+    """The property the warning asserts, executed against the loader.
+
+    A string match on prose only proves the prose did not change. What
+    makes the warning TRUE is the loader: a bare ``no`` is a boolean
+    (pyyaml resolves YAML 1.1) and the quoted one is a string the strict
+    models refuse. Pinned here, beside the text it justifies, so a change
+    to either has to face the other.
+
+    One field stands for the list above. The rule is the parser's and the
+    strict models', not any field's: every entry is a plain ``bool``, so
+    a second case would exercise the same two lines of pydantic.
+    """
+    manifest = (
+        "apiVersion: agentworks/v1\nkind: apt-source\nmetadata:\n  name: docker\nspec:\n"
+        "  key_url: https://example.com/k.gpg\n  key_path: /etc/apt/keyrings/docker.gpg\n"
+        "  source: deb https://example.com stable main\n  source_file: docker.list\n"
+        "  key_dearmor: {value}\n"
+    )
+    resources = tmp_path / "resources"
+    resources.mkdir()
+
+    (resources / "bare.yaml").write_text(manifest.format(value="no"))
+    (entry,) = load_manifests(resources).entries
+    assert entry.resource.key_dearmor is False, "a bare `no` means false, exactly as it reads"
+
+    (resources / "bare.yaml").write_text(manifest.format(value='"no"'))
+    with pytest.raises(ConfigError, match="key_dearmor"):
+        load_manifests(resources)
 
 
 # --- the CLI ----------------------------------------------------------
