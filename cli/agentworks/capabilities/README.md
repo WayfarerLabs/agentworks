@@ -518,13 +518,82 @@ The shared surface is real (it is a lifecycle, not a boilerplate default), so it
 - the construct, `preflight`, and `runup` instance contract (both readiness stages no-op by default:
   resolvability prediction belongs to the operation's preflight sweep, not to the instance or its
   node, and the capabilities with nothing to check or authenticate get the right behavior for free);
-- the capability's identity (`name`, `description`) as the registry sees it.
+- the capability's identity (`name`, `description`) as the registry sees it, and the
+  `contract_version` it is written against.
 
 Subclasses add their ops. `GitHubCredentialProvider`, `VMPlatform`, and `HarnessIntegration` extend
 it. Consuming resources do not.
 
+**Four class-level declarations are required and none is defaulted:** `name`, `description`,
+`contract_version`, and `config_model`. A default on any of them would let an implementation inherit
+a claim it never made, which is exactly how the retired invoked `validate` behaved: an author who
+forgot it got "accepts anything" for free, and an unmigrated implementation looked migrated.
+Registration refuses an implementation missing any of the four, naming it.
+
 The base lives at the top of the `capabilities/` subtree, not in `resources/`: it is capability
 machinery, not framework machinery.
+
+### The Kind Descriptor: One Table, Core-Owned
+
+A capability KIND is declared data too, and the same rule holds one rung up: the framework READS
+what it needs to know about a kind rather than asking code. `CapabilityKindDescriptor`
+(`capabilities/descriptor.py`) is one frozen record per kind, and `capability_descriptors()` is the
+single enumeration of the four. Each capability package contributes its own record beside its kind
+strategy (`vm_platform/kinds.py`, `harness_integration/kinds.py`, `git_credential/kinds.py`,
+`secrets/kinds.py`), so nothing central knows a kind's internals.
+
+The table exists because the alternative was a switchboard. Seven sites used to enumerate the four
+kinds independently (the plugin adapter table, the graph's kind set, its readiness dispatch, the
+per-kind registry loaders, bootstrap publication, the plugin snapshot/restore tuple, and manifest
+decode's capability-field map), so adding a kind meant finding all seven and a disagreement between
+any two was invisible. They derive from the table now.
+
+What a record carries, and why each field is a fact about the kind rather than about one
+implementation of it:
+
+- **`contract_version`**, the single implementation contract version this build supports. Every
+  implementation declares its own and registration requires an EXACT match, so a contract change is
+  a hard cutover: bumping the number refuses every implementation still on the old one until each is
+  migrated. Supporting two at once would need a supported-range field and a compatibility rule,
+  which is a decision to make when a real migration needs it, not before.
+- **`config_schema`** (a `ConfigContract`), what a config model offered for this kind must BE: the
+  base it extends (`AgwModel` where the config is mapping-shaped, `AgwRootModel` where it is not,
+  because a secret backend's per-secret mapping may be a bare string), and the discriminator field
+  for a kind whose config is dispatched by a tagged union. **The kind states the contract;
+  implementations declare the models.** That is what makes a per-facet declaration a capability's
+  own business rather than a framework change.
+- **`implementation_contract`, `required_operations`, `required_attributes`**, what an
+  implementation must satisfy. Not uniform in shape: three kinds declare an ABC and are checked
+  nominally, while `SecretBackend` is a `Protocol` whose members include properties, so it is
+  checked structurally and the attribute and operation sets ARE its enforcement.
+- **`registry`, `registry_policy`, `entry_factory`, `readiness`, `publisher_source`**, how the
+  kind's implementations are stored, published as read-only rows, and asked whether this host
+  supports them.
+- **`manifest_section`** (a `HostSurface`), which declarable kind's spec selects this capability and
+  under which field. `None` for `secret-backend`, whose `backend_mappings` map key already names it.
+
+The kind list is fixed by the core and the descriptors are frozen: a plugin contributes
+IMPLEMENTATIONS of existing kinds, never a kind. Domain operations stay domain-owned, too. Nothing
+here touches `VMPlatform.create` or `SecretBackend.batch_get`; the descriptor wires a kind into the
+framework without absorbing what makes the kind itself.
+
+#### Registration-Time Conformance
+
+Because the descriptor states the contract, the contract is checkable, and it is checked before
+anything is seated. Every implementation is run against its kind's record
+(`capabilities/conformance.py`) at registration: the base it derives from, its metadata, the
+non-operation members the framework reads off it, that nothing would stop it being constructed, the
+domain operations, the config model against `config_schema`, and the contract version.
+[`../plugins/README.md`](../plugins/README.md#contract-conformance) enumerates the checks; this is
+the one place they are listed.
+
+The check is **structural and never constructs the implementation**, so it says the same thing for
+every kind regardless of how that kind's registry stores things. It replaced an
+`isinstance(impl, type)` gate and a `cast`, under which a class that merely looked plausible seated
+fine and failed later, far from the mistake. `register_plugin` runs it in its validation pass before
+any registry is mutated, so a non-conforming implementation is a typed error naming the plugin and
+seating stays all-or-nothing. Built-in implementations are held to the same contract by the
+descriptor table's own self-test.
 
 ### Secrets Are Just Declared References
 
