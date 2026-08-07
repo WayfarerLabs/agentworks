@@ -92,11 +92,11 @@ def test_a_child_completed_by_its_parent_validates(seated: None) -> None:
     _registry(parent, child)  # no raise
 
 
-def test_a_lineage_that_supplies_the_required_field_nowhere_is_a_load_error(seated: None) -> None:
-    parent = SessionTemplate(name="base", harness_integration=CapabilityBlock.of("needy", **{"timeout": 5}))
-    child = SessionTemplate(name="kid", inherits=["base"])
-    with pytest.raises(ConfigError, match="command: is required"):
-        _registry(parent, child)
+# A lineage that supplies the required field NOWHERE used to be its own
+# test, over this same parent and a child that declares nothing. It could
+# not fail for the reason it named: the parent alone is already incomplete,
+# so the error it caught was the parent's own row every time, which is what
+# the test below asserts (and it asserts the located spelling of it).
 
 
 def test_a_parent_that_cannot_stand_alone_is_itself_a_load_error(seated: None) -> None:

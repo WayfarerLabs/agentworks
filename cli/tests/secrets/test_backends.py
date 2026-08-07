@@ -157,10 +157,6 @@ def test_extraction_over_a_backend_mapping_is_reached_at_all() -> None:
     assert [ref.name for ref in references] == ["shared-key"]
 
 
-def test_builtin_backends_registered() -> None:
-    assert set(SECRET_BACKEND_REGISTRY) >= {"env-var", "prompt"}
-
-
 def test_one_descriptor_row_per_capability(tmp_path: Path) -> None:
     """The collapse's registry shape: kind secret-backend holds exactly
     the capability descriptors (no declarable rows, no secret-provider

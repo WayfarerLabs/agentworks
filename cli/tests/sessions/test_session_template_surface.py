@@ -88,9 +88,11 @@ def _config(tmp_path: Path, body: str):  # type: ignore[no-untyped-def]
     "field",
     [
         pytest.param("nope", id="a-plain-typo"),
-        # The retired TOML spelling of a real setting. It is an unknown key
-        # to the shell arm like any other, which is the point: it earns no
-        # migration steer of its own.
+        # The retired TOML spelling of a real setting, and the case that
+        # keeps it retired: re-adding ``restart_command`` to ``ShellConfig``
+        # fails this row alone. It earns no migration steer of its own
+        # either, which is why the expectation is the same unknown-key line
+        # the typo gets.
         pytest.param("restart_command", id="a-retired-key"),
     ],
 )
@@ -212,20 +214,11 @@ def test_child_silent_inherits_the_pair_unchanged() -> None:
     assert resolved.harness_integration_config == {"command": "claude"}
 
 
-def test_child_different_harness_integration_starts_fresh(fake_harness_integration: None) -> None:
-    """A child naming a DIFFERENT harness integration starts from an empty blob; the
-    parent's blob was addressed to the wrong capability and never leaks."""
-    templates = {
-        "base": SessionTemplate(name="base", harness_integration=CapabilityBlock.of("shell", **{"command": "sh-cmd"})),
-        "child": SessionTemplate(
-            name="child",
-            inherits=["base"],
-            harness_integration=CapabilityBlock.of("fake", **{"marker": "child"}),
-        ),
-    }
-    resolved = resolve_from_dict(templates, "child")
-    assert resolved.harness_integration == "fake"
-    assert resolved.harness_integration_config == {"marker": "child"}  # no leak of the shell blob
+# A child naming a DIFFERENT harness integration starting from an empty
+# blob is the first move of the test below, which runs the switch across a
+# chain that also switches BACK and so pins the flat fold order on top of
+# the discard. The two-template version of it made the same assertion off
+# the same line and caught nothing the harder one does not.
 
 
 def test_a_switch_inside_one_parents_chain_discards_an_earlier_parents_blob(

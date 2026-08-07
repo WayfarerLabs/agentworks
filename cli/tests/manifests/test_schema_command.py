@@ -108,19 +108,31 @@ def test_write_with_a_kind_is_a_clean_refusal(
 
 
 @pytest.mark.parametrize(
-    ("argument", "expected"),
-    [("nope", "unknown kind"), ("vm-platform", "capability kind")],
+    ("argument", "expected", "hint"),
+    [("nope", "unknown kind", "known kinds:"), ("vm-platform", "capability kind", "declarable kinds:")],
 )
 def test_a_bad_kind_is_a_clean_domain_error(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     argument: str,
     expected: str,
+    hint: str,
 ) -> None:
     """Issue #276's contract, which is why the kind argument is a plain
     string and not a click.Choice: anything an operator types reaches the
-    service layer and comes back as one `Error:` line."""
+    service layer and comes back as one `Error:` line.
+
+    DOMAIN error, not merely a handled one, and the last two assertions are
+    what say so. ``_entry.py``'s catch-all renders an unexpected exception
+    as ``Error: <TypeName>: <message>`` and follows it with the line naming
+    the log file it wrote the traceback to, so a ``_require_emittable`` that
+    raised ``RuntimeError`` would still exit 1 with the expected words on
+    stderr. The absent traceback line is what separates the two, and the
+    hint is the thing an operator gets out of the difference: only a
+    ``ValidationError``'s ``hint`` reaches the terminal.
+    """
     assert _run(monkeypatch, argument) == 1
     err = capsys.readouterr().err
     assert expected in err
-    assert "Traceback" not in err
+    assert hint in err
+    assert "full traceback written to" not in err

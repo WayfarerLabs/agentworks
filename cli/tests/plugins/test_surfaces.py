@@ -215,25 +215,15 @@ def test_include_disabled_render_marks_disabled_and_not_ready_distinctly(
 # -- describe of a disabled row (explicit lookup, always renders) ---------------
 
 
-def test_describe_disabled_row_renders_with_disabled_line_and_provenance(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    config = _config("alpha")  # beta disabled
-    registry = _seat_and_publish(monkeypatch, config)
-
-    desc = describe_resource(registry, "vm-platform", "beta-platform")
-    # describe is an explicit lookup: it renders the named row even disabled.
-    assert desc.name == "beta-platform"
-    # The Disabled line's text is derived from origin + config, exactly as the
-    # roster phrases it, NOT from a per-node reason.
-    assert desc.disabled_reason == "not enabled in [plugins].system (plugin beta)"
-
-
 def test_describe_disabled_row_render_output(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    config = _config("alpha")
+    """describe is an explicit lookup: it renders the named row even when
+    the row is disabled, and the Disabled line's text is derived from
+    origin plus config, exactly as the roster phrases it, NOT from a
+    per-node reason."""
+    config = _config("alpha")  # beta disabled
     registry = _seat_and_publish(monkeypatch, config)
 
     render_resource_description(describe_resource(registry, "vm-platform", "beta-platform"))
