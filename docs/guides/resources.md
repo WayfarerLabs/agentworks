@@ -71,10 +71,13 @@ that already has content appends it under a commented `#---`, which is a documen
 other: uncomment that too, or the new document's keys merge into whatever precedes them.
 
 The sample is rendered from the same declaration the loader validates against, so it always matches
-what the kind actually accepts. The fields you MUST write are live document lines; every optional
-field is a commented suggestion at its own indent, carrying its type, its default or an example, and
-what it is for. Uncomment the ones you want. Where a field selects a capability (a vm-site's
-`platform`), one implementation is written out and the rest are named beside it.
+what the kind actually accepts. Everything in it is commented, but at two depths, and the one `#`
+you delete is what tells them apart: a required field carries a single `#` and becomes a live
+document line, while an optional field carries two and stays an ordinary comment at its own indent,
+with its type, its default or an example, and what it is for. So one uncomment pass over the file
+gives you a document that loads, carrying exactly the required fields; then delete a second `#` from
+each optional field you actually want. Where a field selects a capability (a vm-site's `platform`),
+one implementation is written out and the rest are named beside it.
 
 `agw resource describe-kind` is the same information without a document to edit:
 
@@ -109,10 +112,17 @@ line:
 ```
 
 Both `agw resource sample --write` and `agw resource migrate` stamp it on the files they CREATE, and
-write the schemas alongside so the reference resolves. They leave an existing file's first line
-alone, because a modeline has to be at the top and inserting one would shift every line number you
-already know. To get the association on a manifest you wrote by hand, add that line yourself
-(`agw resource schema --write` first, so the file it names exists).
+write the schemas alongside so the reference resolves. Writing into a file that already exists never
+INSERTS a line, and what happens depends on whether one is there already:
+
+- **No modeline?** Nothing is added. A modeline has to be the first line, and inserting one would
+  shift every line number you already know. To get the association on a manifest you wrote by hand,
+  add that line yourself (`agw resource schema --write` first, so the file it names exists).
+- **A modeline already there?** It is rewritten in place, which moves no line at all. A file created
+  for one kind names that kind's schema; append a second kind to it and it is no longer a one-kind
+  file, so the line is restamped to `manifest.schema.json`, the any-kind schema. Leaving it on the
+  first kind's would have your editor check the new document against the wrong shape and underline
+  configuration that loads, which is the failure this association exists to prevent.
 
 The schema describes THIS host: a capability from a plugin appears in it once the plugin is
 installed, so re-run `agw resource schema --write` after installing one. The schemas are generated
