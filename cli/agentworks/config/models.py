@@ -101,10 +101,14 @@ class Config:
     # errors now (the TOML resource sections, then the ``[secret_backends.*]``
     # no-op that was the last producer), so nothing populates it. It is kept
     # as the mechanism, not as a half-migration: it is generic, it is backed
-    # by an operator-facing CLI flag, and the next deprecation wants it. If
-    # config.toml ends up with no deprecation to nudge about for a whole
-    # release, retire the field, ``load_config(warn_deprecations=)``,
-    # ``--no-deprecations``, and ``output.deprecations_suppressed`` together.
+    # by an operator-facing CLI flag, and the next deprecation wants it.
+    # KEPT DELIBERATELY, not pending retirement (operator ruling,
+    # 2026-08-07): being empty is not the test, because a warn window is
+    # exactly the thing you cannot build at the moment you need it. The
+    # split is per-SOURCE carrier into a shared surface, so a deprecation
+    # from somewhere other than settings adds its own carrier and reuses
+    # ``--no-deprecations`` and ``output.deprecations_suppressed`` rather
+    # than widening this field to mean something it does not.
     deprecation_issues: tuple[str, ...] = ()
 
     def publish_to(self, registry: Registry) -> None:

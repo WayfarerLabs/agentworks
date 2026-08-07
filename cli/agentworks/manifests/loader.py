@@ -95,14 +95,23 @@ class ManifestSet:
     channel is only what an operator should act on without the config
     refusing to load.
 
-    There is no deprecation channel here. The one manifest deprecation
-    that ever rode one (the sibling capability-config shape) is a hard
-    error now, so the channel would have been a field that is always
-    empty, a warn loop that never fires, and a bundle gate that always
-    passes. ``Config.deprecation_issues`` is a separate thing and stays,
-    though it is empty for the same reason since ``[secret_backends.*]``
-    became a hard error too; see the note on that field for what its
-    eventual retirement would have to take with it.
+    There is no deprecation channel here YET, and that is a statement
+    about consumers rather than about the design. The one manifest
+    deprecation that ever rode one (the sibling capability-config shape)
+    is a hard error now, so building the carrier today would add a field
+    nothing writes.
+
+    When the next manifest-shape deprecation arrives, and the roadmap
+    ledger says one is expected because this effort removed the warn
+    window that used to exist, the pattern to copy is
+    ``Config.deprecation_issues``: a per-SOURCE carrier feeding the shared
+    surface, so ``--no-deprecations`` and
+    ``output.deprecations_suppressed`` serve it without changes. That
+    field is kept deliberately for the same reason (operator ruling,
+    2026-08-07) even though it is empty today: a warn window is exactly
+    the thing you cannot build at the moment you discover you need it. Do
+    NOT read its emptiness, or this absence, as evidence the mechanism was
+    a mistake.
     """
 
     entries: tuple[ManifestEntry, ...]
