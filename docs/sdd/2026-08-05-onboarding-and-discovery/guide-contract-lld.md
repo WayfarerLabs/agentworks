@@ -561,13 +561,22 @@ VM verification must construct the existing canonical, non-activating admin tran
 and never observes, starts, or repairs the VM. The verification service must not reuse an ordinary
 `vm exec` body or activation gate.
 
-The SSH logger's redaction set is immutable and complete before its first write. Remote Lima
-provisioning therefore registers the Tailscale key at construction, removes even a partially copied
-remote YAML file when transfer fails, and on later failure or interruption kills detached work,
-removes its `.out`, `.sh`, `.pid`, and `.status` artifacts, then deletes the failed instance.
-Cleanup is best effort, never replaces the original failure, and never includes secret-bearing
-cleanup text in diagnostics. Tests pin this ordering for ordinary exceptions and
-`KeyboardInterrupt`.
+The SSH logger's redaction set is immutable and complete before its first write. Lima provisioning
+therefore registers the Tailscale key at logger construction. Local provisioning streams the
+secret-bearing template to `limactl create` on standard input and never writes a local template
+file. Remote provisioning atomically creates and validates a high-entropy private directory on the
+VM host, streams the template into a mode-0600 file inside it through the bare SSH standard-input
+boundary, and suppresses remote output that could reflect that input.
+
+After every remote create attempt, provisioning recursively removes the private directory and
+verifies its absence, retrying only expected transport, operating-system, and interrupt failures. A
+typed cleanup error names only the validated residue path and safe manual-removal action when
+removal cannot be confirmed. That credential-residue risk takes precedence over the provisioning
+failure without chaining potentially secret-bearing provider or transport text. Otherwise the
+original failure or `KeyboardInterrupt` survives logger-close and cleanup failures. The separate
+partial-instance rollback kills detached work, removes its `.out`, `.sh`, `.pid`, and `.status`
+artifacts, then deletes the failed instance. Tests pin both cleanup layers for ordinary exceptions,
+adversarial filesystem entries, and `KeyboardInterrupt`.
 
 The current kind-owned `instances` hook receives the full registry and resource object. It is safe
 only while called inside `build_guide_view` and eagerly reduced to `GuideInstanceFact`. Passing the
