@@ -543,16 +543,20 @@ def resource_sample(
     # deprecation nudge -- this command is the remediation path) stay out.
     config = load_config(resources=False)
     resources_dir = config.source_path.parent / RESOURCES_DIRNAME
-    path, appended = write_sample(resources_dir, write, kind, all_kinds=all_kinds)
-    verb = "Appended sample to" if appended else "Wrote sample to"
+    path, outcome = write_sample(resources_dir, write, kind, all_kinds=all_kinds)
+    verb = "Appended sample to" if outcome == "appended" else "Wrote sample to"
     output.info(f"{verb} {path}")
     output.info("Uncomment the document lines (delete one leading '#') to activate.")
-    if appended:
+    # Each arm names something that IS in the file. A blank file that was
+    # already there ("filled") gets neither a separator nor a modeline, so
+    # it gets neither line; claiming the separator there pointed the
+    # operator at a '#---' that was not written.
+    if outcome == "appended":
         output.detail(
             "The '#---' above the new sample is one of those document lines: it separates it from what was already "
             "in the file, so uncomment it too."
         )
-    else:
+    elif outcome == "created":
         output.detail(
             "The first line associates a schema, so a schema-aware editor checks the file as you type. Leave it as a "
             "comment."

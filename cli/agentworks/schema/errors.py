@@ -41,6 +41,7 @@ here as ``PydanticValidationError`` and this module produces
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import cache
 from typing import TYPE_CHECKING, Final
 
 from pydantic import RootModel
@@ -384,6 +385,8 @@ def _contextual_message(detail: ErrorDetails, container: type[BaseModel] | None)
             # annotation, which would be a second enumeration to keep in
             # sync with the first.
             return f"must be one of: {expected}" if isinstance(expected, str) else None
+        case "bool_type":
+            return _quoted_boolean(detail.get("input"))
         case "union_tag_not_found":
             tag_field = _unquoted(ctx.get("discriminator"))
             return f"{tag_field} is required" if tag_field else None
@@ -400,6 +403,53 @@ def _contextual_message(detail: ErrorDetails, container: type[BaseModel] | None)
             return str(error) if isinstance(error, Exception) else None
         case _:
             return None
+
+
+@cache
+def _loader_boolean_spellings() -> frozenset[str]:
+    """Every plain scalar the manifest loader reads as a boolean.
+
+    Derived from pyyaml's own table through a real load rather than
+    listed, the way ``manifests.emit.YAML_11_ONLY_BOOLEANS`` is derived in
+    its own tests. The question this answers is what the LOADER would have
+    done with the same text unquoted, so the loader's parser is the only
+    honest source for it.
+
+    Imported inside the function: this package is the model layer and
+    nothing else in it depends on the serialization format. The dependency
+    is real but narrow, and it belongs to this one message.
+    """
+    import yaml
+
+    words = yaml.constructor.SafeConstructor.bool_values
+    casings = {casing for word in words for casing in (word.lower(), word.upper(), word.capitalize())}
+    return frozenset(text for text in casings if isinstance(yaml.safe_load(f"a: {text}")["a"], bool))
+
+
+def _quoted_boolean(value: object) -> str | None:
+    """ "must be a boolean", naming the quotes when they are the cause.
+
+    This message is now the ONLY signal an operator gets for a quoted
+    ``"no"``. The emitted schema deliberately accepts it: under YAML 1.2 a
+    bare ``no`` and a quoted ``"no"`` are the same parsed string, so the
+    widening that stopped editors red-underlining the valid bare form also
+    made them silent on the invalid quoted one (emission LLD, section
+    2.3). The editor having nothing to say is what puts the whole weight
+    here.
+
+    Naming the cause rather than the shape, because "must be a boolean"
+    reads as a contradiction to someone looking at a line that says
+    ``no``: the value is right and the quotes are what is wrong. The
+    field docstrings say the same thing in advance; this says it at the
+    moment it happens.
+
+    Only for a string the loader would have read as a boolean. Anything
+    else (``verify_ssl: 5``) goes back to the flat table, because the
+    quotes are not the story there.
+    """
+    if isinstance(value, str) and value in _loader_boolean_spellings():
+        return f"must be a boolean, and '{value}' is quoted, which makes it a string; write it unquoted"
+    return None
 
 
 def _unknown_field(container: type[BaseModel] | None) -> str:

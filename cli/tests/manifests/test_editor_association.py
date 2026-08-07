@@ -65,8 +65,8 @@ def test_a_written_sample_is_checked_by_the_schema_it_points_at(tmp_path: Path, 
     its modeline the way an editor would, and check the sample's own
     documents against what is found there."""
     resources = tmp_path / "resources"
-    manifest, appended = write_sample(resources, f"{kind}.yaml", kind)
-    assert not appended
+    manifest, outcome = write_sample(resources, f"{kind}.yaml", kind)
+    assert outcome == "created"
 
     schema = _schema_an_editor_would_load(manifest)
     validator = Draft202012Validator(schema)
@@ -104,9 +104,9 @@ def test_an_append_never_inserts_a_modeline(tmp_path: Path) -> None:
     manifest.write_text("# my own notes\napiVersion: agentworks/v1\n")
     before = manifest.read_text()
 
-    _, appended = write_sample(resources, "hand-written.yaml", "secret")
+    _, outcome = write_sample(resources, "hand-written.yaml", "secret")
 
-    assert appended
+    assert outcome == "appended"
     after = manifest.read_text()
     assert after.startswith(before)
     assert MODELINE_PREFIX not in after
@@ -126,9 +126,9 @@ def test_appending_a_second_kind_restamps_the_modeline(tmp_path: Path) -> None:
     manifest, _ = write_sample(resources, "mixed.yaml", "secret")
     body_before = manifest.read_text().split("\n", 1)[1]
 
-    _, appended = write_sample(resources, "mixed.yaml", "vm-template")
+    _, outcome = write_sample(resources, "mixed.yaml", "vm-template")
 
-    assert appended
+    assert outcome == "appended"
     first, body_after = manifest.read_text().split("\n", 1)
     assert first == f"{MODELINE_PREFIX}{SCHEMA_DIRNAME}/{ENVELOPE_SCHEMA_FILENAME}"
     assert body_after.startswith(body_before), "the body is appended to, never rewritten"

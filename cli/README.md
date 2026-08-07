@@ -772,7 +772,9 @@ rewritten and writes nothing; add `--full` for complete YAML documents, YAML dif
 `resource sample` prints a kind's fully-commented-out sample manifest (`--all` for every kind) --
 the YAML teaching surface, mirroring `agw config sample` for the settings file. `--write <file>`
 saves under the resources directory instead (relative `.yaml`/`.yml` path; appends if the file
-exists). Written samples are inert until you uncomment them (delete one leading `#` per line), so
+exists). Dot-prefixed names are refused, file or directory: the manifest loader skips them (that is
+what keeps the generated `.schema/` out of the walk), so a manifest written there could never be
+activated. Written samples are inert until you uncomment them (delete one leading `#` per line), so
 `--write` can never create a live resource or a duplicate.
 
 Samples are RENDERED from the same declarations the loader validates against, so they cannot drift

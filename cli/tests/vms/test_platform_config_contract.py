@@ -242,10 +242,24 @@ def test_proxmox_no_longer_accepts_a_quoted_template_vmid() -> None:
 def test_proxmox_no_longer_reads_a_string_verify_ssl_as_true() -> None:
     """BREAKING, and the more important half: ``verify_ssl: "no"`` was
     consumed as ``bool("no")``, which is TRUE, so the config did the
-    opposite of what it read as. It is an error now."""
+    opposite of what it read as. It is an error now.
+
+    The message names the QUOTES, not just the type, and that matters
+    more than it used to. The emitted schema deliberately accepts a
+    quoted ``"no"`` (under YAML 1.2 it is the same parsed string as the
+    valid bare ``no``, so the widening that stopped editors underlining
+    the bare form made them silent on this one), so this error is the
+    only signal an operator gets. "Must be a boolean" alone reads as a
+    contradiction to someone looking at a line that says ``no``.
+    """
     _validate("proxmox", {**PROXMOX_CONFIG, "verify_ssl": False})
-    with pytest.raises(ConfigError, match="verify_ssl: must be a boolean"):
+    with pytest.raises(ConfigError, match="verify_ssl: must be a boolean, and 'no' is quoted") as excinfo:
         _validate("proxmox", {**PROXMOX_CONFIG, "verify_ssl": "no"})
+    assert "write it unquoted" in str(excinfo.value)
+
+    # A value the quotes are not the story for keeps the plain phrasing.
+    with pytest.raises(ConfigError, match="verify_ssl: must be a boolean$"):
+        _validate("proxmox", {**PROXMOX_CONFIG, "verify_ssl": 5})
 
 
 @pytest.mark.parametrize(

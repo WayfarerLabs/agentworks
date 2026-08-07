@@ -17,7 +17,7 @@ lines into ordinary YAML comments; ``manifests/skeleton.py`` owns it.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from agentworks.errors import ValidationError
 from agentworks.manifests.reference import kind_reference
@@ -29,6 +29,15 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 _SUFFIXES = {".yaml", ".yml"}
+
+SampleWriteOutcome = Literal["created", "appended", "filled"]
+"""What ``write_sample`` did, at the granularity the CLI has to describe.
+
+The three differ in exactly what ends up in the file that the operator
+then has to act on: a ``created`` file gets a modeline and no separator,
+an ``appended`` one gets a separator and keeps whatever modeline it had,
+and a ``filled`` one (the file existed and was blank) gets neither.
+"""
 
 _SEPARATOR = "#---"
 """A YAML document separator, commented like every other document line.
@@ -64,14 +73,27 @@ def write_sample(
     kind: str | None = None,
     *,
     all_kinds: bool = False,
-) -> tuple[Path, bool]:
+) -> tuple[Path, SampleWriteOutcome]:
     """Write (or append) the sample under the resources directory.
 
-    Returns ``(path, appended)``. An append is separated from what is
-    already in the file by a commented ``---`` (:data:`_SEPARATOR`). What
-    this command writes is inert either way, so the separator changes
-    nothing about the file it hands back; it matters at the operator's
-    NEXT step, which is the whole point of writing the sample. Uncomment a
+    Returns ``(path, outcome)``. THREE outcomes, not two, because the two
+    things the caller has to tell an operator about (a separator above the
+    new document, a modeline on the first line) are not present in the
+    same cases:
+
+    - ``"created"``: the file was not there. It opens with the modeline
+      and carries no separator, having nothing to separate from.
+    - ``"appended"``: the file held content. A commented ``---``
+      (:data:`_SEPARATOR`) sits above the new document, and the modeline
+      is restamped if one was already there.
+    - ``"filled"``: the file was there and blank. Neither: ``_joined``
+      writes no separator over nothing, and an append never INSERTS a
+      modeline. Collapsing this into ``"appended"`` had the command point
+      an operator at a ``#---`` that was not in their file.
+
+    The separator changes nothing about the file handed back, since what
+    this writes is inert either way. It matters at the operator's NEXT
+    step, which is the whole point of writing the sample. Uncomment a
     sample appended without one and its keys land in the preceding
     document, which takes down a resource that was already working and
     reports it as a duplicate ``apiVersion`` rather than as a missing
@@ -102,11 +124,12 @@ def write_sample(
 
     target = _validated_target(resources_dir, filename)
     text = sample_text(kind, all_kinds=all_kinds)
-    appended = target.exists()
     target.parent.mkdir(parents=True, exist_ok=True)
-    if appended:
+    if target.exists():
+        existing = target.read_text(encoding="utf-8")
+        outcome: SampleWriteOutcome = "appended" if existing.strip() else "filled"
         body, restamped = restamped_modeline(
-            _joined(target.read_text(encoding="utf-8"), text),
+            _joined(existing, text),
             manifest_path=target,
             resources_dir=resources_dir,
             kinds=_validated_kinds(kind, all_kinds),
@@ -116,11 +139,11 @@ def write_sample(
             # The line now names the envelope schema, so that file has to
             # be there for the same reason a created file's does.
             write_schema_set(resources_dir / SCHEMA_DIRNAME)
-    else:
-        header = modeline(manifest_path=target, resources_dir=resources_dir, kind=kind)
-        target.write_text(f"{header}\n{text}", encoding="utf-8")
-        write_schema_set(resources_dir / SCHEMA_DIRNAME)
-    return target, appended
+        return target, outcome
+    header = modeline(manifest_path=target, resources_dir=resources_dir, kind=kind)
+    target.write_text(f"{header}\n{text}", encoding="utf-8")
+    write_schema_set(resources_dir / SCHEMA_DIRNAME)
+    return target, "created"
 
 
 def _joined(existing: str, text: str) -> str:

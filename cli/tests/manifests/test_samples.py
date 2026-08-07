@@ -22,7 +22,7 @@ from agentworks.errors import ValidationError
 from agentworks.manifests.decode import KIND_SECTIONS
 from agentworks.manifests.emit import MODELINE_PREFIX
 from agentworks.manifests.loader import load_manifests
-from agentworks.manifests.samples import sample_text, write_sample
+from agentworks.manifests.samples import _SEPARATOR, sample_text, write_sample
 from agentworks.manifests.spec_model import declarable_kinds
 
 
@@ -208,13 +208,13 @@ system = ["azure", "aws", "proxmox"]
 
 def test_write_sample_creates_and_appends(tmp_path: Path) -> None:
     resources = tmp_path / "resources"
-    path, appended = write_sample(resources, "kinds/secret.yaml", "secret")
-    assert not appended
+    path, outcome = write_sample(resources, "kinds/secret.yaml", "secret")
+    assert outcome == "created"
     assert path == resources / "kinds" / "secret.yaml"
     first = path.read_text()
 
-    path2, appended2 = write_sample(resources, "kinds/secret.yaml", "vm-template")
-    assert appended2
+    path2, outcome2 = write_sample(resources, "kinds/secret.yaml", "vm-template")
+    assert outcome2 == "appended"
     assert path2 == path
     text = path.read_text()
     # The BODY is appended to, never rewritten. The first line is the
@@ -288,6 +288,80 @@ def test_appending_to_a_hand_written_manifest_keeps_it_declaring(tmp_path: Path)
         ("vm-template", "dev"),
         ("secret", "my-secret"),
     }
+
+
+def test_appending_to_a_file_with_no_trailing_newline_still_separates(tmp_path: Path) -> None:
+    """``_joined``'s other branch, which nothing reached.
+
+    Every test around this seeds text ending in ``\\n``, so the branch that
+    supplies the missing one was unpinned on a helper that had just had a
+    bug in it. Without it the separator lands on the end of the operator's
+    last line (``  cpus: 4#---``), which is not a document line, does not
+    become one when uncommented, and corrupts the line it landed on.
+    """
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    manifest = resources / "mine.yaml"
+    manifest.write_text(
+        "apiVersion: agentworks/v1\nkind: vm-template\nmetadata:\n  name: dev\nspec:\n  cpus: 4",
+        encoding="utf-8",
+    )
+
+    _, outcome = write_sample(resources, "mine.yaml", "secret")
+
+    assert outcome == "appended"
+    assert "\n  cpus: 4\n\n#---\n" in manifest.read_text()
+    _activate(manifest)
+    assert {(entry.kind, entry.name) for entry in load_manifests(resources).entries} == {
+        ("vm-template", "dev"),
+        ("secret", "my-secret"),
+    }
+
+
+def test_a_third_append_separates_from_the_second(tmp_path: Path) -> None:
+    """Appending is not a two-document special case.
+
+    Two appends were pinned and three were not, which is exactly where a
+    separator emitted from the wrong state would show: the third document
+    is the first one appended to a file this command itself both created
+    and grew.
+    """
+    resources = tmp_path / "resources"
+    write_sample(resources, "many.yaml", "vm-template")
+    write_sample(resources, "many.yaml", "secret")
+    write_sample(resources, "many.yaml", "apt-package")
+
+    manifest = resources / "many.yaml"
+    assert manifest.read_text().count(f"\n{_SEPARATOR}\n") == 2
+    _activate(manifest)
+    assert {(entry.kind, entry.name) for entry in load_manifests(resources).entries} == {
+        ("vm-template", "my-vm-template"),
+        ("secret", "my-secret"),
+        ("apt-package", "my-apt-package"),
+    }
+
+
+def test_writing_into_a_file_that_exists_and_is_blank_emits_no_separator(tmp_path: Path) -> None:
+    """The third outcome, and the reason there are three.
+
+    ``_joined`` deliberately writes no separator over nothing, and an
+    append never inserts a modeline, so this file ends up with neither.
+    The command used to call this an append and point the operator at a
+    ``#---`` that was not written.
+    """
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    manifest = resources / "touched.yaml"
+    manifest.write_text("\n  \n", encoding="utf-8")
+
+    _, outcome = write_sample(resources, "touched.yaml", "secret")
+
+    assert outcome == "filled"
+    text = manifest.read_text()
+    assert _SEPARATOR not in text
+    assert MODELINE_PREFIX not in text
+    _activate(manifest)
+    assert [(entry.kind, entry.name) for entry in load_manifests(resources).entries] == [("secret", "my-secret")]
 
 
 def test_sample_capability_kind_is_a_clean_cli_error(
