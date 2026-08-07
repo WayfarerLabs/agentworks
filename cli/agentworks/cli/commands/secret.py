@@ -96,11 +96,12 @@ def secret_verify(
     from agentworks.bootstrap import load_request_registry
     from agentworks.config import load_config
     from agentworks.errors import ValidationError
-    from agentworks.secrets.verification import verify_named_secret
+    from agentworks.secrets.verification import SecretInteractionPolicy, verify_named_secret
 
     if allow_interactive and output.non_interactive():
         raise ValidationError("--allow-interactive cannot be used with --non-interactive")
     config = load_config()
     registry = load_request_registry(config)
-    result = verify_named_secret(config, registry, name, allow_interactive=allow_interactive)
+    policy = SecretInteractionPolicy.ALLOW_INTERACTIVE if allow_interactive else SecretInteractionPolicy.NON_INTERACTIVE
+    result = verify_named_secret(config, registry, name, interaction_policy=policy)
     output.result(f"Secret '{result.name}' verified.")

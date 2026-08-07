@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING
 
 from agentworks.errors import NotFoundError
 
+_VERIFY_CONNECTION_TIMEOUT_SECONDS = 10
+
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database
@@ -28,7 +30,7 @@ def verify_vm_connection(
     registry: Registry,
     name: str,
 ) -> VMConnectionVerification:
-    """Prove the stored VM accepts one canonical, non-mutating command."""
+    """Prove the stored VM accepts one bounded, canonical, non-mutating command."""
     vm = db.get_vm(name)
     if vm is None:
         raise NotFoundError(
@@ -46,7 +48,7 @@ def verify_vm_connection(
     import agentworks.transports as transports
 
     target = transports.transport(vm, config)
-    target.run("true", sudo=False, tty=False, env=None)
+    target.run("true", sudo=False, tty=False, env=None, timeout=_VERIFY_CONNECTION_TIMEOUT_SECONDS)
     description = target.describe()
     kind, separator, _endpoint = description.partition(":")
     return VMConnectionVerification(

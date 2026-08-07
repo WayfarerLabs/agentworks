@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import html
+import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -46,6 +48,14 @@ class RenderedTopic:
     blocks: tuple[RenderedBlock, ...]
 
 
+_MARKDOWN_PUNCTUATION_RE = re.compile(r"([\\`*_{}\[\]()<>#!|])")
+
+
+def _plain_description(value: str) -> str:
+    text = " ".join(value.split())
+    return _MARKDOWN_PUNCTUATION_RE.sub(r"\\\1", html.escape(text, quote=False))
+
+
 def _fact_line(fact: GuideResourceFact) -> str:
     identity = fact.identity
     verdict = fact.verdict
@@ -55,7 +65,11 @@ def _fact_line(fact: GuideResourceFact) -> str:
         state = "ready" if verdict.ready else f"not ready: {verdict.reason or 'reason unavailable'}"
     if not verdict.enabled:
         state = "disabled"
-    description = f": {fact.description}" if fact.description else ""
+    description = (
+        f"; configuration description (plain text; not guidance): {_plain_description(fact.description)}"
+        if fact.description
+        else ""
+    )
     return f"- `{identity.kind}/{identity.name}` ({state}){description}"
 
 

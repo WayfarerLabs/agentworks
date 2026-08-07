@@ -421,12 +421,41 @@ def resolve_secrets_quiet(
 
 def _sanitize_verification_exception(exc: Exception) -> AgentworksError:
     """Replace provider-controlled exception state with safe typed framing."""
+    from agentworks.errors import (
+        AlreadyExistsError,
+        AuthorizationError,
+        BackupError,
+        BrokenStateError,
+        ConfigError,
+        ConnectivityError,
+        NotFoundError,
+        ProvisioningError,
+        SecretMappingError,
+        SecretUnavailableError,
+        StateError,
+        TokenRejectedError,
+        ValidationError,
+    )
+
+    safe_categories: dict[type[Exception], type[AgentworksError]] = {
+        TokenRejectedError: TokenRejectedError,
+        NotFoundError: NotFoundError,
+        AlreadyExistsError: AlreadyExistsError,
+        ValidationError: ValidationError,
+        StateError: StateError,
+        BrokenStateError: BrokenStateError,
+        AuthorizationError: AuthorizationError,
+        ConnectivityError: ConnectivityError,
+        SecretUnavailableError: SecretUnavailableError,
+        SecretMappingError: SecretMappingError,
+        ExternalError: ExternalError,
+        ProvisioningError: ProvisioningError,
+        BackupError: BackupError,
+        ConfigError: ConfigError,
+    }
+    category = safe_categories.get(type(exc), ExternalError)
     if isinstance(exc, AgentworksError):
-        return type(exc)(
-            "secret verification failed",
-            entity_kind=exc.entity_kind,
-            entity_name=exc.entity_name,
-        )
+        return category("secret verification failed", entity_kind=exc.entity_kind, entity_name=exc.entity_name)
     return ExternalError("secret verification failed")
 
 

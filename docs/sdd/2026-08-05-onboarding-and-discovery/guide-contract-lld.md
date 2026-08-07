@@ -233,6 +233,7 @@ class GuideVerdict:
     enabled: bool
     ready: bool
     reason: str | None
+    is_available: bool = True
 
 @dataclass(frozen=True, slots=True)
 class GuideResourceFact:
@@ -253,6 +254,10 @@ class GuideInstanceFact:
     kind: str
     name: str
 ```
+
+`description` is untrusted operator or plugin data. Before Markdown rendering, guide normalizes it
+to labeled plain text and neutralizes Markdown links, images, headings, HTML, and other block
+syntax. It never shares the authored teaching style or placement.
 
 `GuideOrigin` intentionally drops operator file paths, source identifiers, and auto-declaration
 source tuples. `usage` is the already-materialized sanitized relationship label. Descriptions and
@@ -369,6 +374,11 @@ table, marker file, raw-config inspection, doctor invocation, or action executor
 replayable rendering select the same records. Refusal maps to `unverifiable` and the same manual
 alternative in both paths.
 
+The CLI accepts repeatable `--evidence ACTION_ID:KIND/NAME=OUTCOME` values, where `OUTCOME` is
+`verified`, `failed`, or `refused`. Parsing is strict and atomic. Parsed target-scoped evidence is
+the public replay boundary into rendering; Agentworks does not store it. The same evidence tuple
+must produce the same findings and ordered action records in human and agent modes.
+
 ## Agent-mode signature inventory and precedence
 
 `select_guide_mode(explicit, environ, stdout_isatty)` uses this exact precedence:
@@ -414,7 +424,7 @@ def verify_named_secret(
     registry: Registry,
     name: str,
     *,
-    allow_interactive: bool = False,
+    interaction_policy: SecretInteractionPolicy = SecretInteractionPolicy.NON_INTERACTIVE,
 ) -> SecretVerification: ...
 
 @dataclass(frozen=True, slots=True)
@@ -452,18 +462,20 @@ This path does not redirect, suppress, or mutate global output interactivity, co
 registry, or the resolver. The service copies no resolved value into its result and never returns,
 logs, or formats a value. Backend exceptions crossing this boundary are sanitized so their message
 and hint cannot contain returned secret bytes; existing typed category and entity framing remain.
-`--allow-interactive` is the only opt-in, is rejected with global `--non-interactive`, and is named
-explicitly in the action's consent boundary. On success the command emits exactly one line,
+`--allow-interactive` is the only opt-in. The CLI translates it to the closed
+`SecretInteractionPolicy` enum. The service owns the invariant and rejects `ALLOW_INTERACTIVE` while
+global output policy is non-interactive, so non-Typer callers cannot bypass it. The consent is named
+explicitly in the action's boundary. On success the command emits exactly one line,
 `Secret '<name>' verified.`. Normal framed secret, mapping, connectivity, and configuration
 categories pass through with sanitized text.
 
 `agw vm verify-connection NAME` loads the named stored VM row, resolves its declared site and the
 canonical non-activating admin transport with `agentworks.transports.transport(vm, config)`, then
-runs the transport's smallest no-op command (`true`) without a TTY, sudo, environment injection, or
-workspace. It does not call activation, observe/start, readiness repair, rekey, reinit, or any
-database write. A stopped target therefore fails as connectivity, rather than being started. Success
-reports only the VM name and transport kind; failure uses the existing `NotFoundError`,
-`StateError`, or `ConnectivityError` framing.
+runs the transport's smallest no-op command (`true`) with an explicit bounded verification timeout
+and without a TTY, sudo, environment injection, or workspace. It does not retry or call activation,
+observe/start, readiness repair, rekey, reinit, or any database write. A stopped target therefore
+fails as connectivity, rather than being started. Success reports only the VM name and transport
+kind; failure uses the existing `NotFoundError`, `StateError`, or `ConnectivityError` framing.
 
 Neither verification operation is callable from `GuideView`, a dynamic block resolver, assessment,
 catalog construction, or rendering. Tests use spy backends and transports to prove secret values do

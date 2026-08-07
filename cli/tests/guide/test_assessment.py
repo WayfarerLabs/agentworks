@@ -7,7 +7,9 @@ from types import SimpleNamespace
 from typing import cast
 
 import pytest
+from typer.testing import CliRunner
 
+from agentworks.cli import app
 from agentworks.config import Config
 from agentworks.db import Database
 from agentworks.errors import ValidationError
@@ -33,6 +35,7 @@ from agentworks.guide import (
 from agentworks.guide.service import build_onboarding_snapshot
 from agentworks.resources import KIND_REGISTRY, Origin, Registry, ResourceReference
 from agentworks.resources.kind import InstanceRef
+from agentworks.secrets.base import SecretDecl
 
 
 def _fact(
@@ -133,6 +136,157 @@ def test_ready_rerun_with_accepted_proof_is_a_clean_no_op() -> None:
     )
     assert assessment.findings[0].status is OnboardingStatus.DONE
     assert assessment.actions == ()
+
+
+def test_cli_replays_target_scoped_evidence_end_to_end(monkeypatch: pytest.MonkeyPatch, db: Database) -> None:
+    registry = Registry.empty()
+    registry.add(
+        "secret",
+        "tailscale-auth-key",
+        SecretDecl(name="tailscale-auth-key", description=""),
+        Origin.built_in(source="test"),
+    )
+    registry.finalize()
+    monkeypatch.setattr("agentworks.config.load_config", lambda **kwargs: cast("Config", SimpleNamespace()))
+    monkeypatch.setattr("agentworks.bootstrap.load_guide_registry", lambda config: registry)
+    monkeypatch.setattr("agentworks.db.DB_PATH", SimpleNamespace(exists=lambda: True))
+    monkeypatch.setattr("agentworks.db.Database", lambda read_only: db)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "guide",
+            "concept-onboarding",
+            "--agent",
+            "--evidence",
+            "verify-named-secret:secret/tailscale-auth-key=verified",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "`secret/tailscale-auth-key`: done" in result.stdout
+    assert "### `verify-named-secret`" not in result.stdout
+
+
+def test_cli_replays_refusal_as_manual_alternative_without_repeating_action(
+    monkeypatch: pytest.MonkeyPatch, db: Database
+) -> None:
+    registry = Registry.empty()
+    registry.add(
+        "secret",
+        "tailscale-auth-key",
+        SecretDecl(name="tailscale-auth-key", description=""),
+        Origin.built_in(source="test"),
+    )
+    registry.finalize()
+    monkeypatch.setattr("agentworks.config.load_config", lambda **kwargs: cast("Config", SimpleNamespace()))
+    monkeypatch.setattr("agentworks.bootstrap.load_guide_registry", lambda config: registry)
+    monkeypatch.setattr("agentworks.db.DB_PATH", SimpleNamespace(exists=lambda: True))
+    monkeypatch.setattr("agentworks.db.Database", lambda read_only: db)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "guide",
+            "concept-onboarding",
+            "--agent",
+            "--evidence",
+            "verify-named-secret:secret/tailscale-auth-key=refused",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "`secret/tailscale-auth-key`: unverifiable" in result.stdout
+    assert "Use describe and backend readiness as prediction only" in result.stdout
+    assert "### `verify-named-secret`" not in result.stdout
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["--names-only"],
+        [],
+        ["concept-management"],
+    ],
+    ids=["names-only", "index", "non-onboarding-topic"],
+)
+def test_cli_rejects_evidence_for_shapes_that_cannot_consume_it(
+    monkeypatch: pytest.MonkeyPatch, arguments: list[str]
+) -> None:
+    loaded = False
+
+    def load_config(**kwargs: object) -> object:
+        nonlocal loaded
+        loaded = True
+        return object()
+
+    monkeypatch.setattr("agentworks.config.load_config", load_config)
+    result = CliRunner().invoke(
+        app,
+        ["guide", *arguments, "--evidence", "verify-named-secret:secret/token=verified"],
+    )
+
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert isinstance(result.exception, ValidationError)
+    assert "verification evidence" in str(result.exception)
+    assert loaded is False
+
+
+@pytest.mark.parametrize(
+    "records",
+    [
+        [
+            "verify-named-secret:secret/tailscale-auth-key=verified",
+            "verify-named-secret:secret/tailscale-auth-key=refused",
+        ],
+        ["unknown-action:secret/tailscale-auth-key=verified"],
+        ["verify-vm-connection:secret/tailscale-auth-key=verified"],
+        ["verify-named-secret:secret/missing=verified"],
+    ],
+    ids=["duplicate", "unknown-action", "mismatched-action", "inapplicable-target"],
+)
+def test_cli_rejects_semantically_invalid_evidence_before_rendering(
+    monkeypatch: pytest.MonkeyPatch, db: Database, records: list[str]
+) -> None:
+    registry = Registry.empty()
+    registry.add(
+        "secret",
+        "tailscale-auth-key",
+        SecretDecl(name="tailscale-auth-key", description=""),
+        Origin.built_in(source="test"),
+    )
+    registry.finalize()
+    monkeypatch.setattr("agentworks.config.load_config", lambda **kwargs: cast("Config", SimpleNamespace()))
+    monkeypatch.setattr("agentworks.bootstrap.load_guide_registry", lambda config: registry)
+    monkeypatch.setattr("agentworks.db.DB_PATH", SimpleNamespace(exists=lambda: True))
+    monkeypatch.setattr("agentworks.db.Database", lambda read_only: db)
+    arguments = ["guide", "concept-onboarding", "--agent"]
+    for record in records:
+        arguments.extend(("--evidence", record))
+
+    result = CliRunner().invoke(app, arguments)
+
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert isinstance(result.exception, ValidationError)
+
+
+def test_cli_rejects_malformed_evidence_atomically(monkeypatch: pytest.MonkeyPatch) -> None:
+    loaded = False
+
+    def load_config(**kwargs: object) -> object:
+        nonlocal loaded
+        loaded = True
+        return object()
+
+    monkeypatch.setattr("agentworks.config.load_config", load_config)
+    result = CliRunner().invoke(app, ["guide", "concept-onboarding", "--evidence", "not-evidence"])
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert "ACTION_ID:KIND/NAME=verified|failed|refused" in result.stderr
+    assert loaded is False
 
 
 @pytest.mark.parametrize(

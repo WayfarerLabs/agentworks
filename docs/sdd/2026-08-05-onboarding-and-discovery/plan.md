@@ -76,6 +76,9 @@ identifies all wave 2 gates, and has no unresolved review finding.
 - [x] Guided and replayable modes consume the same ordered action records; fixture scenarios prove
       equal registry, graph, stored-row, and explicit verification outcomes for equal inputs,
       including equal `unverifiable` outcomes after refusal.
+- [x] Final review correction exposes strict repeatable target-scoped evidence on the guide CLI so
+      caller-owned replay logs can produce verified no-op and refusal-equivalent reruns without an
+      Agentworks onboarding ledger.
 - [x] Verification-surface inventory is rechecked against HEAD in the guide LLD: secret describe and
       doctor prediction, doctor and readiness tool checks, and lifecycle-only SSH checks are marked
       existing; actual secret proof and a non-mutating named-VM connection check are marked gaps.
@@ -90,6 +93,10 @@ identifies all wave 2 gates, and has no unresolved review finding.
       `concept-` discovery and resource/capability `kind/name` topics.
 - [x] Golden-path acceptance is step-bounded in automation and timed manually on a clean machine;
       the evidence records time to first working session and every operator interaction.
+- [x] Phase 1 acceptance records time to the first actionable guide plan and every interaction in
+      that guide-only path. This corrective item supersedes the preceding completed item's premature
+      "first working session" wording; the actual fresh-operator working-session acceptance requires
+      the published bootstrap packages and remains in Phase 3.
 - [x] A management coverage matrix proves topics cover creating and changing resources, adopting a
       capability, resolving upgrade deprecations, and consented doctor-driven troubleshooting.
 - [x] Permanent CLI and contributor documentation shipped with the command. Sample config reviewed;
@@ -99,7 +106,7 @@ identifies all wave 2 gates, and has no unresolved review finding.
       shared Claude Code, Codex, and Copilot outputs regenerated, and
       `./scripts/rulesync-upgen.sh --check` passes.
 - [x] Unit, integration, CLI, completion, packaging, typing, and lint gates pass.
-- [ ] Step reviewed by `agentworks-reviewer` and a fresh-eyes reviewer; valid findings resolved.
+- [x] Step reviewed by `agentworks-reviewer` and a fresh-eyes reviewer; valid findings resolved.
 - [ ] Always-green ready-to-merge implementation PR opened and roadmap-lead review requested.
 
 Definition of done: R2, R3, R4, R5, R9, R10, R12, R13, R14, and R15 work for static topics and

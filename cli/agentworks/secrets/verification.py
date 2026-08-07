@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 from typing import TYPE_CHECKING
 
 from agentworks.errors import NotFoundError
@@ -20,21 +21,35 @@ class SecretVerification:
     verified: bool
 
 
+class SecretInteractionPolicy(Enum):
+    """Caller policy for backends that can require operator interaction."""
+
+    NON_INTERACTIVE = "non-interactive"
+    ALLOW_INTERACTIVE = "allow-interactive"
+
+
 def verify_named_secret(
     config: Config,
     registry: Registry,
     name: str,
     *,
-    allow_interactive: bool = False,
+    interaction_policy: SecretInteractionPolicy = SecretInteractionPolicy.NON_INTERACTIVE,
 ) -> SecretVerification:
     """Resolve one registered secret without retaining or exposing its value."""
-    from agentworks.errors import AgentworksError
+    from agentworks import output
+    from agentworks.errors import AgentworksError, ValidationError
     from agentworks.secrets.kinds import SECRET_KIND_NAME
     from agentworks.secrets.resolve import (
         _sanitize_verification_exception,
         active_backends,
         resolve_secrets_quiet,
     )
+
+    if type(interaction_policy) is not SecretInteractionPolicy:
+        raise ValidationError("secret verification requires an explicit interaction policy")
+    if interaction_policy is SecretInteractionPolicy.ALLOW_INTERACTIVE and output.non_interactive():
+        raise ValidationError("interactive secret verification is unavailable in global non-interactive mode")
+    allow_interactive = interaction_policy is SecretInteractionPolicy.ALLOW_INTERACTIVE
 
     try:
         decl = registry.lookup(SECRET_KIND_NAME, name)

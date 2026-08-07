@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import difflib
+import html
 import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
@@ -37,6 +38,14 @@ if TYPE_CHECKING:
     from agentworks.resources import Registry
 
 _TOPIC_RE = re.compile(r"^[a-z][a-z0-9-]{0,62}(?:/[a-z][a-z0-9-]{0,62}){0,2}$")
+_MARKDOWN_PUNCTUATION_RE = re.compile(r"([\\`*_{}\[\]()<>#!|])")
+
+
+def _configuration_description(value: str) -> str:
+    """Project untrusted config/plugin prose as labeled Markdown-safe text."""
+    text = " ".join(value.split())
+    escaped = _MARKDOWN_PUNCTUATION_RE.sub(r"\\\1", html.escape(text, quote=False))
+    return f"Configuration description (plain text; not guidance): {escaped}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,7 +89,7 @@ def _dynamic_topic(registry: Registry | None, slug: str) -> TopicContribution:
         return TopicContribution(
             TopicSlug(slug),
             f"{slug} resources",
-            handler.description or f"Current {slug} resources.",
+            _configuration_description(handler.description) if handler.description else f"Current {slug} resources.",
             KindAnchor(slug),
             (InstanceList(BlockId("inventory")),),
         )
@@ -92,7 +101,7 @@ def _dynamic_topic(registry: Registry | None, slug: str) -> TopicContribution:
         resource = registry.lookup(kind, name)
         description = getattr(resource, "description", None)
         if isinstance(description, str) and description.strip():
-            summary = description
+            summary = _configuration_description(description)
     anchor = ImplementationAnchor(kind, name) if handler.category == "capability" else ResourceAnchor(kind, name)
     return TopicContribution(
         TopicSlug(slug),
@@ -161,6 +170,13 @@ def render_guide(
     """Build and render one atomic guide request with fail-soft live facts."""
     authored = build_authored_catalog()
     requested = _normalize_requested(requested)
+    if verification_evidence != ():
+        if names_only:
+            raise ValidationError("verification evidence cannot be used with --names-only")
+        if not requested:
+            raise ValidationError("verification evidence requires the concept-onboarding topic")
+        if "concept-onboarding" not in requested:
+            raise ValidationError("verification evidence requires the concept-onboarding topic")
     if load_config_fn is None:
         from agentworks.config import load_config
 
@@ -234,6 +250,15 @@ def render_guide(
                 if db is None:
                     raise RuntimeError("guide database was not constructed")
                 onboarding_snapshot = build_onboarding_snapshot(registry, db)
+                # Validate the complete replay log against current projected
+                # targets before rendering any selected document. This keeps
+                # multi-topic output atomic even when onboarding is not first.
+                if verification_evidence != ():
+                    from agentworks.guide.assessment import assess_onboarding
+
+                    assess_onboarding(onboarding_snapshot, verification_evidence=verification_evidence)
+            elif verification_evidence != ():
+                raise ValidationError("verification evidence requires available onboarding facts")
             for topic in selected:
                 view = None
                 unavailable = None

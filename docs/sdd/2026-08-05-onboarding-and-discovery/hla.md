@@ -132,6 +132,10 @@ already-materialized data:
 - declared inbound and outbound relationships from graph edges;
 - resource instances from existing kind-owned instance inventory hooks.
 
+Descriptions are operator or plugin data, not authored teaching. Guide projects them as labeled
+plain text with Markdown and HTML syntax neutralized, so configured facts cannot become agent
+instructions, headings, links, images, or executable markup.
+
 The mode is gated by leaving powers unwired. Its public API has no secret resolver, run target,
 capability implementation, mutable node, raw config, or arbitrary graph traversal entry point. In
 particular, the current graph's `impl_of` power is absent. Named concept roots expose only bounded
@@ -202,7 +206,8 @@ record refusals in the current interaction or caller-owned replay log. The guide
 action plan:
 
 - guided use lets the agent ask before each consent boundary and execute the next action;
-- replayable use uses the same actions with `agw --non-interactive` and explicit inputs;
+- replayable use uses the same actions with `agw --non-interactive`, explicit inputs, and repeatable
+  target-scoped `--evidence ACTION_ID:KIND/NAME=OUTCOME` values from the caller-owned replay log;
 - reruns skip facts already ready and report new, disabled, not-ready, or unverifiable items.
 
 The first slice defines the assessment and plan. It does not add a CLI wizard or hidden state
@@ -215,13 +220,17 @@ action records. Equivalence means both produce the same registry, graph, stored-
 verification outcomes for the same inputs. A refusal produces the same `unverifiable` outcome in
 both modes.
 
+Evidence outcomes are `verified`, `failed`, or `refused`. The CLI validates every evidence item
+atomically and persists none of them. A verified rerun can therefore become a no-op without adding
+an Agentworks onboarding ledger; the caller remains responsible for retaining and replaying proof.
+
 ### Verification surface inventory
 
 | Need                          | Existing surface                                                                                                                                        | Gap and commitment                                                                                                                                                                                                                                                                |
 | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Secret reference availability | `agw secret describe` predicts the ready backend without resolving or exposing a value. Doctor reports the same prediction in its consented full check. | Prediction is not proof. Add a named-secret verification operation that resolves through the normal boundary, returns only success or framed failure, never emits or returns the value to the caller, and cannot fall through to an interactive backend without explicit consent. |
 | Required host tools           | `agw doctor` checks `ssh`, `scp`, and `tailscale`; finalized capability rows carry already-computed readiness for their host requirements.              | The LLD inventories every onboarding action's required tool and adds a safe explicit check only where doctor or readiness does not already cover it. Agent-side discovery of other installed tools remains consent-first.                                                         |
-| SSH connectivity              | VM lifecycle code verifies connectivity during mutating operations, but there is no dedicated read-only operator surface for an existing VM.            | Add a non-mutating named-VM connection verification operation that uses the standard transport and reports success or framed failure without repairing, rekeying, or changing power state.                                                                                        |
+| SSH connectivity              | VM lifecycle code verifies connectivity during mutating operations, but there is no dedicated read-only operator surface for an existing VM.            | Add a bounded, non-mutating named-VM connection verification operation that uses the standard transport and reports success or framed failure without repairing, rekeying, or changing power state.                                                                               |
 
 Doctor and the new proof operations run only as explicit, consented action records. Guide rendering
 never calls them.
