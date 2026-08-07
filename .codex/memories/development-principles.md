@@ -47,10 +47,10 @@ Bad complexity, on the other hand, is complexity that is either unnecessary or i
 problem at hand. In addition to being the opposite of the characteristics above, there are specific
 things to watch out for:
 
-1. There are a lot of exceptions. The physical world doesn't generally have a lot of exceptions, and
-   neither should your software. If you find yourself writing a lot of special-case code, it's a
-   sign that the design is wrong. More than likely, you're not modeling the real world correctly,
-   and you should take a step back and re-evaluate your design.
+1. There are a lot of exceptions. A properly-designed system rarely needs them. If you find yourself
+   writing a lot of special-case code, it's a sign that the design is wrong. More than likely,
+   you're not modeling the underlying reality correctly, and you should take a step back and
+   re-evaluate your design.
 2. It is brittle. If a small change in one part of the system causes a cascade of changes in other
    parts, it's a sign that the design is wrong. The components should be as independent as possible,
    and changes should be localized to the smallest possible area.
@@ -121,6 +121,8 @@ and the longer the bridge lives, the more likely someone builds on the wrong sid
 one small push from retiring the old way entirely, make the push now; someone has to eventually, and
 it will never again be as cheap as it is while the context is loaded in your head.
 
+## How you work
+
 ### 9. Leave things nicer than you found them
 
 Even when that means touching things outside your immediate scope, and not just code: fill in the
@@ -133,8 +135,6 @@ Another SDD's artifacts, and lead-owned artifacts of your own effort (FRD, HLA, 
 checkboxes) when you are not the lead, are not yours to tidy no matter how obvious the fix looks;
 the `sdd` skill's ownership rule governs them. Flag what you found to whoever owns it, in the terms
 you would have used to fix it, and leave the file alone.
-
-## How you work
 
 ### 10. Ask questions; push back; then commit
 
