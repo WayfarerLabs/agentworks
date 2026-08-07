@@ -81,7 +81,6 @@ def spec_model(kind: str) -> type[BaseModel]:
     arm, because ``harness_integration: null`` loads: dropping it would
     describe a document the loader accepts as invalid.
     """
-    _seat_plugin_capabilities()
     row = row_model(kind)
     descriptor = hosted_capability(kind)
     if descriptor is None or descriptor.manifest_section is None:
