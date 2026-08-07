@@ -5,6 +5,16 @@ Date: 2026-08-01 (phase 2 framed by the descriptor contract, 2026-08-05)
 Status: DRAFT. Companion to [frd.md](frd.md); plan and LLDs follow. Phase 1 is on `main`; phase 2
 executes through the capability-kind descriptor (see the phase-2 callout and Component 0).
 
+**Amended 2026-08-07 (operator ruling; see FR2).** `agw resource migrate` is deleted, both halves,
+and remediation for a breaking change is precise errors plus guide content, with the agent-oriented
+`agw guide` walking the operator through the rewrite. Much of the architecture below was designed
+around the migrator: the settings-only load with a `load_manifests` overlay, the deliberately
+independent frozen oracle, the comment-preserving YAML rewrite mechanism, and the `ruamel-yaml` and
+`tomlkit` dependencies behind them. All of it was built and then deleted before this effort merged.
+Statements describing that machinery as the target state are corrected or marked SUPERSEDED below.
+The SEQUENCING section and the design-tension notes are left as written, because they are the record
+of what the effort actually did rather than claims about the shipped system.
+
 ## Architecture overview
 
 The target state puts a single declarative model layer between every config frontend and every
@@ -32,13 +42,14 @@ Small architecture, mostly deletion. Components:
 
 - **Hard error at load.** The settings loader keeps a single check over `KIND_SECTIONS` (the
   existing shared table): any resource-declaring section present in config.toml is an aggregated
-  `ConfigError` naming the sections and pointing at `agw resource migrate` / `agw resource sample`.
-  The existing warning (and its `--no-deprecations` silence) is replaced by this error. The
-  settings-only load (`resources=False`) that `resource sample --write` and `resource edit`'s
-  fallback use today becomes the escape-hatch mechanism; `agw resource migrate`, which today loads
-  the full config (it is exempted only from the deprecation nudge and reads registry rows for
-  verification), MOVES to the settings-only load. That move is what forces the verification rework
-  below.
+  `ConfigError` naming the sections found, the exact rewrite for each, and the surfaces that render
+  the target shape (`agw resource sample`, `agw resource describe-kind`). The existing warning (and
+  its `--no-deprecations` silence) is replaced by this error. The settings-only load
+  (`resources=False`) that `resource sample --write` and `resource edit`'s fallback use stays the
+  escape-hatch mechanism, so those commands still work on a config.toml that no longer loads.
+  (SUPERSEDED 2026-08-07: this bullet also moved `agw resource migrate` onto the settings-only load,
+  which is what forced the verification rework described further down. Both the migrator and that
+  rework are deleted.)
 - **Loader deletion.** The TOML resource loaders (`loaders_resources.py`, `loaders_secrets.py`'s
   resource half, `loaders_sessions.py`) and the decode layer's route-through-TOML-loaders shims are
   deleted. Decode logic that survives moves to be owned by the manifest decoders outright; this is
@@ -87,10 +98,10 @@ today's independently-enumerating sites (the adapter table, the graph's kind set
 dispatch, the per-kind registry loaders, bootstrap publication, the plugin snapshot/restore tuple,
 and manifest decode's per-kind capability branches) derive from the descriptor instead.
 `KIND_REGISTRY` and manifest decode's `KIND_SECTIONS` legitimately enumerate all resource kinds and
-stay; the descriptor's `kind_strategy` field feeds `KIND_REGISTRY` rather than replacing it. The
-migrator's kind-participation flags stay hand-maintained (the migrator is a deliberately independent
-frozen oracle; the deferred `migration_participation` field exists only for the future in which it
-derives).
+stay; the descriptor's `kind_strategy` field feeds `KIND_REGISTRY` rather than replacing it. (A
+deferred `migration_participation` field was specified here, to derive the migrator's
+hand-maintained kind-participation flags some day. It went with the migrator and is not on the
+shipped descriptor.)
 
 The descriptor also makes trust-but-verify enforceable at registration, replacing the current
 type-and-cast seam: implementation-contract conformance, required metadata, a side-effect-free
@@ -252,8 +263,9 @@ Pre-support already shipped ahead of this SDD (PR #349): manifest decode accepts
 warns once, aggregated, on the old one, and `agw resource migrate` emits the tagged form (so the
 phase 1 migrator work inherits tagged emission; there is no shape flip to schedule). What lands here
 is the hardening: the old sibling shape (`platform` plus `platform_config` and kin) becomes a hard
-error naming the exact rewrite, and `agw resource migrate` gains a manifest-upgrade mode that
-rewrites YAML files in place under its existing backup-first discipline.
+error naming the exact rewrite. A manifest-upgrade mode was specified here and shipped; it was
+deleted with the migrator under the 2026-08-07 ruling, so the hard error and the guide carry this
+break alone.
 
 A `name` tag naming a capability with no registration on this host is a hard finalize error, exactly
 as shipped today (the registry-readiness refactor's R9.2/R9.11 rulings, preserved by operator
@@ -337,10 +349,9 @@ per kind, plus an envelope schema. Surfaces:
   completions tree gains it) prints or writes the schema set.
 - `agw resource sample --write` stamps the yaml-language-server modeline referencing the written
   schema files, so operators get completions and hover docs with zero editor setup beyond the
-  extension. FR9's "generated manifests" resolves to this surface plus the migrator's emitted YAML,
-  which gains the same modeline stamp in phase 2 once schemas exist (the migrator itself lands in
-  phase 1, before there is a schema to reference). Emission targets JSON Schema 2020-12; a draft-4
-  down-level exists only if FR14's taplo integration lands and demands it.
+  extension. FR9's "generated manifests" resolves to this surface alone. The migrator's emitted YAML
+  was the other half and took the same modeline stamp; both are gone. Emission targets JSON Schema
+  2020-12; a draft-4 down-level exists only if FR14's taplo integration lands and demands it.
 
 ### Component 7: the sample and describe renderer
 
@@ -379,8 +390,9 @@ defaulting locally.
 
 - **Pydantic v2** (latest stable at implementation time), with the mypy plugin, strict mode, and
   frozen models. New runtime dependency; the only one this effort adds.
-- Everything else stays: pyyaml composition for marks, tomlkit for the migrator and settings, typer
-  for the CLI surfaces.
+- Everything else stays: pyyaml composition for marks, stdlib `tomllib` for settings, typer for the
+  CLI surfaces. `ruamel-yaml` and `tomlkit` were added for the migrator's round-tripping and were
+  removed with it; nothing round-trips either format now.
 
 ## Sequencing (within one branch and PR)
 
