@@ -32,8 +32,9 @@ finds, and selectors go on scoping the TOML units only.
 
 That last property is also why this module fails LOUDLY during planning,
 rather than skipping what it cannot handle: a file that will not parse,
-or a capability config carrying a ``name`` key that cannot fold, makes
-the whole run impossible, since verification loads the entire directory.
+or a capability config this cannot fold (one carrying its own ``name``
+key, or one that is not a table at all), makes the whole run impossible,
+since verification loads the entire directory.
 Refusing before anything is written leaves the operator one hand fix and
 an untouched tree; carrying on would rewrite other files first and die
 afterwards, having converted one problem into two.
@@ -345,14 +346,45 @@ def _folded_document(value: dict[str, Any]) -> dict[str, Any]:
 
 
 def _tagged_table(kind: str, value: dict[str, Any], capability: str, config: object) -> dict[str, Any]:
-    """``{name: <capability>, <config keys...>}``, refusing a name clash."""
+    """``{name: <capability>, <config keys...>}``, refusing what it cannot fold.
+
+    The only sibling that folds mechanically is a TABLE carrying no
+    ``name`` key of its own. The other two shapes raise here, during
+    planning, leaving the operator's tree untouched.
+
+    Refusing a non-table sibling is not pedantry; folding one is a
+    DELETION. There are no keys to move, so the fold would emit the
+    tagged table and drop whatever the operator wrote on the floor, in a
+    file they never named (the upgrade is whole-tree, so any run reaches
+    it). Verification cannot catch that: ``legacy_pre_rows`` builds the
+    pre-side through this same function, so both sides would lose the key
+    and compare equal, and the run would report "verified: registry
+    unchanged" over a file it had just edited down. Independence bought
+    against an EMISSION bug is not independence against a FOLD-SEMANTICS
+    bug, which is this bug's class; only the refusal covers it.
+
+    ``decode.py``'s ``_reject_legacy_shape`` refuses both shapes without
+    offering the migrate hint, on the stated grounds that the migrator
+    refuses them too. This is the half that makes that true.
+    """
+    field, config_field = _LEGACY_SIBLING_SHAPES[kind]
+    metadata = value.get("metadata")
+    name = metadata.get("name") if isinstance(metadata, dict) else "?"
+    by_hand = f"`agw resource edit {kind}/{name}` opens the file."
+    if config is not None and not isinstance(config, dict):
+        raise ConfigError(
+            f"cannot upgrade {kind}/{name}: spec.{config_field} is {config!r} rather than a table, "
+            f"so there are no keys to fold",
+            hint=(
+                f"Write spec.{field} as one tagged table by hand and put that value where it "
+                f"belongs, or remove it. {by_hand}"
+            ),
+        )
     if isinstance(config, dict) and "name" in config:
-        metadata = value.get("metadata")
-        name = metadata.get("name") if isinstance(metadata, dict) else "?"
         raise ConfigError(
             f"cannot upgrade {kind}/{name}: its capability config carries a "
             f"'name' key, which collides with the tagged table's discriminator",
-            hint="Fold this resource's capability table by hand.",
+            hint=f"Fold this resource's capability table by hand. {by_hand}",
         )
     table: dict[str, Any] = {"name": capability}
     if isinstance(config, dict):

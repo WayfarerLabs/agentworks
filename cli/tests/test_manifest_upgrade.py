@@ -456,6 +456,49 @@ def test_a_name_key_in_the_retired_config_is_refused_before_any_write(tmp_path: 
     assert (resources / "sites.yaml").read_bytes() == before
 
 
+@pytest.mark.parametrize(
+    ("kind", "field", "config_field", "capability"),
+    [
+        ("vm-site", "platform", "platform_config", "lima"),
+        ("git-credential", "provider", "provider_config", "github"),
+        ("session-template", "harness_integration", "harness_integration_config", "claude-code"),
+    ],
+)
+def test_a_non_table_retired_config_is_refused_rather_than_dropped(
+    tmp_path: Path, kind: str, field: str, config_field: str, capability: str
+) -> None:
+    """Folding a sibling that is not a table would DELETE it.
+
+    There are no keys to move, so the fold emits the tagged table and
+    drops the operator's value, in a file they never named (the upgrade
+    is whole-tree, so any run reaches it). Verification is structurally
+    blind to it, because the pre-side folds through the same function and
+    loses the key too, so the run reported "verified: registry unchanged"
+    over a file it had just edited down. The refusal is the only thing
+    that covers this class, and decode's message for the same shape says
+    in as many words that the migrator refuses it.
+    """
+    cfg = _write_config(tmp_path)
+    resources = _resources(
+        tmp_path,
+        odd=dedent(f"""\
+            apiVersion: agentworks/v1
+            kind: {kind}
+            metadata:
+              name: odd
+            spec:
+              {field}: {capability}
+              {config_field}: not-a-table
+            """),
+    )
+    before = (resources / "odd.yaml").read_bytes()
+
+    config = load_config(cfg, warn_issues=False, resources=False)
+    with pytest.raises(ConfigError, match=f"spec.{config_field} is 'not-a-table' rather than a table"):
+        plan_migration(config, [], all_resources=True)
+    assert (resources / "odd.yaml").read_bytes() == before
+
+
 def test_multi_document_markers_and_unrelated_documents_survive(tmp_path: Path) -> None:
     """Explicit stream markers, a leading `---`, a trailing `...`, and
     documents of other kinds all come back untouched. ruamel does not
