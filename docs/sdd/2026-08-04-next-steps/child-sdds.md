@@ -75,6 +75,15 @@ is locked.
       effort's per-phase PR plan
 - [ ] Locked
 
+### Installer plugins (pre-0.14 core slimming): 2026-08-07-installer-plugins
+
+- [x] Ruled into roadmap scope (operator, 2026-08-07): misc core installers move behind system
+      plugins before the 0.14.0 cut, with a first-class disabled-error experience
+- [ ] Seeded (FRD; no dependencies, effort can launch whenever)
+- [ ] Picked up by an effort lead (inventory-first, phased artifact review)
+- [ ] Implementation complete (moves, disabled errors, guide topics, upgrade-guide step)
+- [ ] Locked
+
 ### Not yet spawned
 
 Planned children, seeded when their prerequisites land (see `phasing.md`):

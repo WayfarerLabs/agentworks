@@ -103,10 +103,12 @@ picked off whenever bandwidth allows, on its own merits and its own schedule.
 - **0.14.0 (held; operator ruling, 2026-08-06):** the breaking cleanup does not ship alone. The cut
   waits for the guide first slice (guide command core, `concept-onboarding`, the README bootstrap),
   so the release that rejects old inputs also ships the CLI that teaches the new ones; newcomers
-  ride the forgiving 0.13.0 until then. The 0.13.0 warnings stay true because the version number
-  attaches to the breaking content, not the date. If wave 2's generic-discriminator hard error lands
-  in the same window, it folds in: one well-cushioned breaking release instead of two. While `main`
-  holds unreleased breaking changes, urgent operator fixes ship from a `0.13.x` backport branch.
+  ride the forgiving 0.13.0 until then. The installer-plugins child (operator ruling, 2026-08-07; no
+  dependencies, runs any time) also gates the cut: its moves are breaking and belong in the same
+  well-cushioned release. The 0.13.0 warnings stay true because the version number attaches to the
+  breaking content, not the date. If wave 2's generic-discriminator hard error lands in the same
+  window, it folds in: one well-cushioned breaking release instead of two. While `main` holds
+  unreleased breaking changes, urgent operator fixes ship from a `0.13.x` backport branch.
 - **Later:** remaining waves map to releases as they prove out; no need to pin numbers now.
 
 ## Open ordering decisions
