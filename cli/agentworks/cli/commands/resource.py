@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Annotated, cast
 
-import click
 import typer
 
 from agentworks.cli._app import app
@@ -34,8 +33,6 @@ resource_app = typer.Typer(
 )
 app.add_typer(resource_app)
 
-_LAYOUT_CHOICES = click.Choice(["per-kind", "single", "per-resource"])
-_TOML_CHOICES = click.Choice(["comment", "delete"])
 # The sample-kind argument is deliberately a plain string, not a
 # click.Choice: ANY kind the operator types (a capability kind, a typo,
 # anything) must reach the service layer, which rejects with a clean,
@@ -195,9 +192,9 @@ def resource_describe(
         render_resource_description,
     )
 
-    # One KIND/NAME grammar across the resource group (same token shape
-    # as `resource migrate` selectors); '/' cannot appear in names, so
-    # the first-slash split is unambiguous.
+    # One KIND/NAME grammar across the resource group (`resource edit`
+    # and `resource list --names-only` use the same token); '/' cannot
+    # appear in names, so the first-slash split is unambiguous.
     kind, slash, name = ref.partition("/")
     if not slash or not name:
         raise ValidationError(
@@ -321,176 +318,6 @@ def resource_edit(
     raise typer.Exit(subprocess.call([editor, str(path)]))
 
 
-@resource_app.command("migrate")
-def resource_migrate(
-    selectors: Annotated[
-        list[str] | None,
-        typer.Argument(
-            help=(
-                "What to migrate: KIND (one kind) or KIND/NAME (one "
-                "resource). Repeatable; overlaps union. Required unless "
-                "--all is passed."
-            ),
-        ),
-    ] = None,
-    all_resources: Annotated[
-        bool,
-        typer.Option(
-            "--all",
-            help=(
-                "Migrate every TOML-declared resource. Required for a "
-                "whole-config run; a bare invocation is an error, never "
-                "an accidental full migration."
-            ),
-        ),
-    ] = False,
-    layout: Annotated[
-        str,
-        typer.Option(
-            "--layout",
-            click_type=_LAYOUT_CHOICES,
-            help=(
-                "How resources map to files: per-kind (default; "
-                "vm-templates.yaml), single (resources.yaml), or per-resource "
-                "(vm-template/small.yaml)."
-            ),
-        ),
-    ] = "per-kind",
-    toml: Annotated[
-        str,
-        typer.Option(
-            "--toml",
-            click_type=_TOML_CHOICES,
-            help=(
-                "What happens to the migrated TOML sections: comment "
-                "(default; commented out in place with a marker) or delete."
-            ),
-        ),
-    ] = "comment",
-    dry_run: Annotated[
-        bool,
-        typer.Option(
-            "--dry-run",
-            help=(
-                "Print what would migrate where; write nothing. Summary by "
-                "default; add --full for the YAML documents and the "
-                "config.toml diff."
-            ),
-        ),
-    ] = False,
-    full: Annotated[
-        bool,
-        typer.Option(
-            "--full",
-            help=("With --dry-run: include the full YAML documents and the config.toml diff in the output."),
-        ),
-    ] = False,
-    yes: Annotated[bool, typer.Option("--yes", help="Skip the confirmation prompt.")] = False,
-) -> None:
-    """Migrate TOML-declared resources to YAML manifests, upgrading retired shapes.
-
-    The summary is deliberately ONE line: completion specs take
-    `.split("\\n")[0]` of it, so a summary wrapped in the source shows up
-    truncated mid-sentence in every shell.
-
-    A recurring, incremental mover: run it any time you want to move
-    resources (or a subset) from TOML to YAML. New
-    TOML-derived documents append without rewriting existing files.
-
-    Every run also upgrades existing manifests still naming a capability
-    in the retired sibling shape (`platform: lima` plus `platform_config:`)
-    to the tagged table, preserving comments. That part is not scoped by
-    the selectors: the old shape does not load, so leaving one document
-    behind would leave the whole resources directory unloadable.
-
-    The original config.toml is backed up first, every manifest this run
-    replaces is snapshotted beside it, and every real run verifies the
-    resulting registry is identical before it counts as done.
-    """
-    from agentworks import output
-    from agentworks.config import load_config
-    from agentworks.errors import UserAbort, ValidationError
-    from agentworks.migrate import execute_plan, plan_migration
-    from agentworks.migrate.render import render_dry_run, render_preview
-
-    if full and not dry_run:
-        raise ValidationError(
-            "--full only applies to --dry-run",
-            hint="A real run prints the summary and asks for confirmation.",
-        )
-
-    # This command IS the remediation for the resource-section hard error, so
-    # it loads settings-only (resources=False) to read a config that still
-    # carries resource sections. Planning is no longer pure over the config
-    # text: the preflight builds a registry over the tree this run WOULD
-    # produce, which is what lets a dry run reach the real run's verdict. The
-    # property that mattered survives, because the migrator still works on a
-    # config no other command can load (see migrate/preflight.py).
-    config = load_config(resources=False)
-    plan = plan_migration(
-        config,
-        list(selectors or []),
-        all_resources=all_resources,
-        layout=layout,
-        toml_mode=toml,
-    )
-
-    if plan.nothing_to_do:
-        output.info(
-            "Nothing to migrate: no TOML-declared resources remain, and every manifest is on the current shape."
-        )
-        return
-
-    if dry_run:
-        for line in render_dry_run(plan, full=full):
-            output.info(line)
-        output.info("")
-        output.info("Dry run: nothing was written.")
-        # Say which of the real run's two checks this reached. Planning
-        # ran the load precondition over the tree this would produce, so
-        # a dry run no longer reports success where the real run refuses;
-        # what is left is the registry-equivalence check, which needs the
-        # files on disk and answers a migrator-bug question rather than a
-        # config one. Claiming or implying both would be the old bug.
-        output.detail(
-            "Checked: the config loads and the registry builds with this migration applied. A "
-            "real run repeats that and then verifies the rebuilt registry MATCHES the one it "
-            "replaced, which needs the files on disk."
-        )
-        return
-
-    for line in render_preview(plan):
-        output.info(line)
-    if not yes and not output.confirm("Proceed?", default=False):
-        raise UserAbort("migration cancelled")
-
-    output.info("Applying migration...")
-    result = execute_plan(plan, config)
-    for path in result.created:
-        output.detail(f"Created {path}")
-    for path in result.appended:
-        output.detail(f"Appended to {path}")
-    for path in result.replaced:
-        output.detail(f"Upgraded {path}")
-    if result.config_rewritten:
-        output.detail(f"Rewrote {plan.config_path} (backup: {result.backup_path})")
-    else:
-        output.detail(f"Backup: {result.backup_path}")
-    if result.yaml_backup_path is not None:
-        output.detail(f"YAML recovery copies: {result.yaml_backup_path}")
-    if result.schema_dir is not None:
-        output.detail(f"Editor schemas: {result.schema_dir} (created files reference them)")
-    if result.dropped_secret_backends:
-        output.detail("Dropped deprecated [secret_backends.*] sections.")
-    # Phrased as what the operator just watched happen, not as the
-    # internal comparison. "registry unchanged" was true and read as
-    # "it did nothing" straight after a list of files it had rewritten,
-    # which is the opposite of the reassurance this line exists to give.
-    output.result(
-        f"verified: the {result.verified_rows} migrated resource(s) load from the new files exactly as before"
-    )
-
-
 @resource_app.command("sample")
 def resource_sample(
     kind: Annotated[
@@ -503,10 +330,7 @@ def resource_sample(
         bool,
         typer.Option(
             "--all",
-            help=(
-                "Print every kind's sample. Required for the full set; a "
-                "bare invocation is an error, matching `resource migrate`."
-            ),
+            help=("Print every kind's sample. Required for the full set; a bare invocation is an error."),
         ),
     ] = False,
     write: Annotated[
@@ -592,9 +416,9 @@ def resource_schema(
 
     Point a schema-aware editor at these and manifests get completions,
     hover docs, and diagnostics as you type. Files written by
-    `agw resource sample --write` and `agw resource migrate` already
-    carry the association, as a `# yaml-language-server: $schema=...`
-    line; add that line to a hand-written manifest to get the same.
+    `agw resource sample --write` already carry the association, as a
+    `# yaml-language-server: $schema=...` line; add that line to a
+    hand-written manifest to get the same.
 
     The schema describes THIS host: a capability contributed by a plugin
     appears in it once that plugin is installed, so re-run --write after

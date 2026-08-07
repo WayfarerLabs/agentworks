@@ -88,8 +88,6 @@ eight of them behind in one change, which is why the check exists.
   backend to validate its mapping (R9.9).
 - ``git_credentials/__init__.py`` / ``vms/initializer/credentials.py``: op-time
   CONSTRUCTION of a capability instance to run an operation, not a graph query.
-- ``migrate/planning.py``: the migrate dry-run, not a finalized-registry path
-  (it keeps its explicit validation, caller inventory A).
 - ``manifests/decode.py``: a decode-time shadow check (a code-registry
   membership test), before the graph exists.
 - ``config/loaders_secrets.py``: load-time validation of the deprecated
@@ -359,7 +357,7 @@ _REGISTRY_READ_ALLOWLIST = frozenset(
         # the descriptor allow-list below. A registry read reappearing in any
         # of them would be the probe this pattern bans:
         #   git_credentials/credential.py, sessions/template.py,
-        #   secrets/base.py, migrate/planning.py
+        #   secrets/base.py
         # Load-time validation of the deprecated [secret_backends] section.
         "config/loaders_secrets.py",
     }

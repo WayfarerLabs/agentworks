@@ -34,7 +34,7 @@ from typing import TYPE_CHECKING, Literal
 
 from agentworks import output
 from agentworks.resources.graph import Enablement
-from agentworks.resources.render import format_file_path, format_origin_line, format_reference_entry
+from agentworks.resources.render import format_origin_line, format_reference_entry
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -453,12 +453,11 @@ def render_kind_table(rows: list[KindRow]) -> None:
 def edit_location(registry: Registry, kind: str, name: str) -> tuple[Path, int]:
     """Resolve ``agw resource edit KIND/NAME`` to the manifest to open.
 
-    Only operator-declared YAML manifests are editable through this
-    command. The other origins error with the right next step
-    (maintainer ruling, 2026-07-05, keep-it-simple scope):
+    Every operator-declared resource is a YAML manifest (ADR 0022), so an
+    operator-declared origin resolves straight to its file and line. The
+    other origins error with the right next step (maintainer ruling,
+    2026-07-05, keep-it-simple scope):
 
-    - operator-declared in TOML: point at ``agw resource migrate`` or
-      ``agw config edit`` rather than opening config.toml here.
     - built-in: not on disk in editable form.
     - auto-declared: nothing on disk at all.
 
@@ -491,15 +490,6 @@ def edit_location(registry: Registry, kind: str, name: str) -> tuple[Path, int]:
             hint=f"Declare it explicitly first: {sample_hint}",
         )
     assert origin.file is not None and origin.line is not None  # variant contract
-    if origin.file.suffix == ".toml":
-        raise ValidationError(
-            f"{kind}/{name} is declared in TOML ({format_file_path(origin.file)}:{origin.line})",
-            hint=(
-                f"Move it to a YAML manifest with `agw resource migrate "
-                f"{kind}/{name}`, or edit the config directly with "
-                f"`agw config edit`."
-            ),
-        )
     return origin.file, origin.line
 
 

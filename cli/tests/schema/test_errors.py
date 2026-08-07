@@ -612,8 +612,12 @@ def test_the_bridge_produces_a_plain_config_error() -> None:
 
 
 def test_an_owner_label_overrides_the_kind_slash_name_framing() -> None:
-    """``agw resource migrate`` reports against the TOML file it has not
-    rewritten yet, so it frames in that file's vocabulary."""
+    """A caller that has to frame in a narrower vocabulary than kind/name
+    sets a label, and the bridge uses it verbatim.
+
+    The standing case is a secret's ``backend_mappings`` value, which
+    frames as ``secret/npm-token.backend_mappings.onepassword`` because
+    the secret alone is ambiguous when it maps several backends."""
     owner = RefOwner(kind="vm-site", name="lab", label="[azure]")
     exc = _fails(PrincipalLike, {"tenant_id": "t"})
 

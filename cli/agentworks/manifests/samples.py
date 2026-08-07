@@ -56,8 +56,9 @@ def sample_text(kind: str | None = None, *, all_kinds: bool = False) -> str:
     """The rendered sample for ``kind``, or (with ``all_kinds``) every kind.
 
     Dumping every kind requires the explicit ``all_kinds`` opt-in
-    (``--all``), mirroring ``agw resource migrate``: a bare invocation is an
-    error, never a wall of thirteen samples by accident.
+    (``--all``): a bare invocation is an error, never a wall of thirteen
+    samples by accident. That is the CLI's standing shape for a bulk
+    operation (see ``.claude/rules/cli-conventions.md``).
     """
     kinds = _validated_kinds(kind, all_kinds)
     parts = [skeleton_text(kind_reference(k)).rstrip("\n") for k in kinds]

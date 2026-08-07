@@ -4,8 +4,8 @@ to compose a validated ``Config``.
 
 config.toml is settings only now (ADR 0022): a resource-declaring section
 is a hard error (``_raise_for_resource_sections``), gated on ``resources``
-so the migrator and other remediation commands can still read a config
-that carries them via the ``resources=False`` escape hatch.
+so the remediation commands can still read a config that carries them via
+the ``resources=False`` escape hatch.
 
 Split out of the former monolithic ``agentworks/config.py`` (see
 ``agentworks/config/__init__.py`` for the package overview).
@@ -60,9 +60,10 @@ EXPECTED_TOP_LEVEL_KEYS = {
 # ``[vm_templates.default]`` / ``[agent_templates.default]`` resource shape
 # before this effort, and those shapes are themselves now resources (ADR 0022).
 # The pointed rename error used to live in the vm/agent template loaders, which
-# relocated into the migrator; on a normal load they now fall through to the
-# generic unexpected-key path, so give them a targeted hint at the modern
-# destination (a YAML manifest) rather than the stale rename target.
+# were deleted with the TOML resource surface; on a normal load these keys now
+# fall through to the generic unexpected-key path, so give them a targeted hint
+# at the modern destination (a YAML manifest) rather than the stale rename
+# target.
 _LEGACY_SINGLETON_HINTS = {
     "vm": "[vm.config] is a legacy spelling of the vm-template resource; declare it as a YAML "
     "manifest (`agw resource sample vm-template`).",
@@ -96,13 +97,19 @@ def _raise_for_resource_sections(data: dict[str, object]) -> None:
     YAML manifests. This is the replacement for the old deprecation nudge
     (``_warn_deprecated_resource_sections``); it reuses the same shared
     ``KIND_SECTIONS`` presence sweep (minus ``secret_backends``, which has
-    its own no-op warning) and the same grep-able display shapes, so the
-    error and ``agw resource migrate`` cannot disagree about what counts.
+    its own no-op warning) and the same grep-able display shapes.
+
+    The rewrite is the operator's, so the error carries every part of it
+    they need: which sections are the problem, which kind each becomes
+    where the section name does not say, the two commands that print the
+    target shape, and the guide section that walks it through. There is no
+    tool to defer to (operator ruling, 2026-08-07).
 
     The escape hatch is ``load_config(resources=False)``: the commands that
-    ARE the remediation (``agw resource migrate``, ``resource sample
-    --write``, ``resource edit``'s fallback) load that way and so still read
-    a config that carries resource sections.
+    ARE the remediation (``resource sample --write``, ``resource edit``'s
+    fallback) load that way and so still read a config that carries
+    resource sections, which is what lets an operator author the
+    replacement manifests before deleting the sections.
     """
     from agentworks.manifests.decode import KIND_SECTIONS
 
@@ -124,19 +131,23 @@ def _raise_for_resource_sections(data: dict[str, object]) -> None:
     if not present:
         return
     noun = "section" if len(present) == 1 else "sections"
-    # The [azure]/[proxmox] sections migrate as vm-site, a kind name nothing
-    # on screen would suggest; name it only when one is present.
+    # The [azure]/[proxmox] sections become vm-site, a kind name nothing on
+    # screen would suggest; name it only when one is present.
     site_hint = (
-        " (the [azure]/[proxmox] sections migrate as vm-site)"
+        " (the [azure]/[proxmox] sections become vm-site manifests)"
         if any(s in ("[azure]", "[proxmox]") for s in present)
         else ""
     )
     raise ConfigError(
         f"config.toml declares resources, which config.toml no longer supports "
-        f"(it is settings only now): {', '.join(present)}. Move the {noun} to "
-        f"YAML manifests with `agw resource migrate <kind>` (or "
-        f"`agw resource migrate --all`){site_hint}, or author new manifests "
-        f"from `agw resource sample <kind>`. Then remove the {noun} from config.toml."
+        f"(it is settings only now): {', '.join(present)}. Rewrite the {noun} as "
+        f"YAML manifests{site_hint}, then remove the {noun} from config.toml.",
+        hint=(
+            "`agw resource sample <kind> --write <kind>s.yaml` writes a commented starter to edit, "
+            "and `agw resource describe-kind <kind>` lists every field with its type. "
+            'The "TOML resource sections: removed" section of docs/guides/resources.md '
+            "walks through it section by section."
+        ),
     )
 
 
@@ -157,10 +168,10 @@ def load_config(
             silenceable per-invocation via --no-deprecations).
         resources: Enforce the resource-section hard error (default: True).
             config.toml is settings only now; a resource-declaring section is
-            a hard error. The commands that ARE the remediation (``agw
-            resource migrate``, ``resource sample --write``, ``resource edit``
-            fallback) pass False to read a config that still carries such
-            sections. Settings load identically either way.
+            a hard error. The commands that ARE the remediation (``resource
+            sample --write``, ``resource edit``'s fallback) pass False to read
+            a config that still carries such sections. Settings load
+            identically either way.
 
     Returns:
         Validated Config object.

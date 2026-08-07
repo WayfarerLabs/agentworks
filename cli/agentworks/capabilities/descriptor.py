@@ -225,22 +225,13 @@ class CapabilityKindDescriptor:
     whose methods run at several levels with different config is then a
     per-capability declaration rather than a framework change."""
 
-    # Fields deliberately NOT added yet, each recorded with the trigger that
-    # would create it, so neither is built early nor reinvented later:
+    # One field is deliberately NOT added yet, recorded with the trigger
+    # that would create it so it is neither built early nor reinvented:
     #
-    #   consumer_gating         -> the first NEW consuming surface that
-    #                              consolidates gating derivation. Nothing
-    #                              here changes gating behavior today, so
-    #                              there is nothing to carry.
-    #   migration_participation -> only if a later effort rules that
-    #                              ``agw resource migrate`` both survives
-    #                              AND should derive from the live
-    #                              descriptor. The counterargument stands:
-    #                              the migrator is a deliberately
-    #                              independent frozen oracle, so deriving
-    #                              from live wiring would defeat its whole
-    #                              purpose. Its kind-participation flags
-    #                              stay hand-maintained.
+    #   consumer_gating -> the first NEW consuming surface that
+    #                      consolidates gating derivation. Nothing here
+    #                      changes gating behavior today, so there is
+    #                      nothing to carry.
     #
     # Snapshot/restore needs no field at all: it iterates the table, so
     # participation is membership and a flag could only be wrong.

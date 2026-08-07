@@ -5,8 +5,7 @@ session-template's harness_integration) takes the capability as one
 tagged table whose ``name`` key selects it and whose remaining keys are
 its config. The legacy sibling shape (a naming string plus a ``*_config``
 table) was accepted with a deprecation warning through 0.14 and is a hard
-error now, naming the exact rewrite; ``agw resource migrate`` is the
-remediation.
+error now, naming the exact rewrite the operator applies by hand.
 """
 
 from __future__ import annotations
@@ -18,7 +17,19 @@ import pytest
 
 from agentworks.errors import ConfigError
 from agentworks.manifests import load_manifests
-from agentworks.migrate.manifest_upgrade import _LEGACY_SIBLING_SHAPES
+
+_REWRITE_HINT = (
+    "Apply the rewrite above; `agw resource describe-kind <kind>` documents the field, "
+    "and `agw resource sample <kind>` prints it as a document to edit. "
+    'See "Upgrading" in docs/guides/resources.md.'
+)
+"""The operator-facing text, spelled out rather than imported.
+
+The remediation is the operator's own edit now (operator ruling,
+2026-08-07), so what the hint SAYS is the whole remedy rather than a
+pointer to a command that would do it. Importing the constant would assert
+it equals itself; this is the representative-mistakes corpus, and the text
+is what it is pinning."""
 
 _SURFACES = [
     (
@@ -107,7 +118,7 @@ def test_sibling_shape_is_rejected_with_the_exact_rewrite(
         _load_one(tmp_path, "old", old_doc)
     assert f"spec.{field} names the capability as a string" in str(excinfo.value)
     assert rewrite in str(excinfo.value)
-    assert excinfo.value.hint == "`agw resource migrate --all` rewrites your manifests in place."
+    assert excinfo.value.hint == _REWRITE_HINT
 
 
 def test_bare_naming_string_is_rejected_with_a_one_key_rewrite(tmp_path: Path) -> None:
@@ -325,16 +336,16 @@ def test_session_template_without_selector_remains_a_valid_default_or_inheriting
         ),
     ],
 )
-def test_mixed_shape_is_a_hard_error_with_no_migrate_hint(tmp_path: Path, doc: str, field: str) -> None:
+def test_mixed_shape_is_a_hard_error_with_no_rewrite_hint(tmp_path: Path, doc: str, field: str) -> None:
     """A tagged table beside a sibling ``*_config``: the message names the
     field that is not supported, so the operator's next move is to fold
     those keys in rather than to guess which half won.
 
-    And it carries NO hint at all. The migrator will not guess which half
-    of a mixed document wins either, so it leaves this file alone; naming
-    it here would send the operator to a command that does nothing for
-    them. The sample hint every model-layer error carries is not reached
-    either, because this refusal runs ahead of validation.
+    And it carries NO hint at all. The hint reads "apply the rewrite
+    above", and no rewrite is printed here: which half of a mixed document
+    wins is the operator's call, so any rewrite would be a guess. The
+    sample hint every model-layer error carries is not reached either,
+    because this refusal runs ahead of validation.
     """
     with pytest.raises(ConfigError) as excinfo:
         _load_one(tmp_path, "mixed", doc)
@@ -369,21 +380,6 @@ def test_tagged_table_requires_a_string_name_key(tmp_path: Path, name_line: str,
                 {name_line}
             """,
         )
-
-
-def test_migrator_tagged_table_refuses_name_config_key() -> None:
-    """The migrator's emission guard: a config key literally named
-    'name' would collide with the tagged table's discriminator. Known
-    capabilities reject it via pre-write validation; this guard is the
-    backstop for capabilities the run cannot validate, so it is pinned
-    directly."""
-    from agentworks.migrate.planning import _tagged_capability_table
-
-    with pytest.raises(ConfigError, match="collides with the tagged table's discriminator"):
-        _tagged_capability_table("vm-site", "weird", "future-platform", {"name": "sneaky"})
-    # Without the collision the table folds name-first.
-    table = _tagged_capability_table("vm-site", "ok", "lima", {"vm_host": "me@box"})
-    assert table == {"name": "lima", "vm_host": "me@box"}
 
 
 def test_tagged_shape_reaches_finalize_validation(tmp_path: Path) -> None:
@@ -497,7 +493,7 @@ def test_cli_fails_on_the_old_shape_and_no_deprecations_does_not_silence_it(
         assert isinstance(result.exception, ConfigError)
         assert "res.yaml:2:" in str(result.exception)
         assert "platform: {name: lima, vm_host: ...}" in str(result.exception)
-        assert result.exception.hint == "`agw resource migrate --all` rewrites your manifests in place."
+        assert result.exception.hint == _REWRITE_HINT
 
 
 def test_cli_tagged_shape_loads_cleanly(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -570,12 +566,12 @@ def test_builtin_bundle_publishes_cleanly() -> None:
 # -- The rewrite is only printed when it would be an honest one ---------------
 
 
-def test_a_sibling_carrying_its_own_name_gets_no_rewrite_and_no_migrate_hint(tmp_path: Path) -> None:
+def test_a_sibling_carrying_its_own_name_gets_no_rewrite_and_no_hint(tmp_path: Path) -> None:
     """Folding this document would emit ``platform: {name: a, name: b}``,
     which is not valid YAML and hides that two keys claim to select the
-    capability. Which one wins is the operator's call, and the migrator
-    refuses it for the same reason, so pointing at the migrator here would
-    send them to a command that leaves their file alone.
+    capability. Which one wins is the operator's call, so no rewrite is
+    printed, and with no rewrite on screen the hint that says to apply it
+    would be pointing at nothing.
     """
     with pytest.raises(ConfigError) as excinfo:
         _load_one(
@@ -624,16 +620,15 @@ def test_a_non_table_sibling_names_the_value_it_cannot_fold(tmp_path: Path) -> N
 
 
 @pytest.mark.parametrize("spelling", ["", " null", " ~"])
-def test_an_empty_sibling_is_offered_the_migrator_rather_than_a_by_hand_fix(tmp_path: Path, spelling: str) -> None:
-    """An empty sibling holds nothing, so the migrator folds it, so the
-    error says so.
+def test_an_empty_sibling_is_shown_the_rewrite(tmp_path: Path, spelling: str) -> None:
+    """An empty sibling holds nothing, so the rewrite is printable, so it
+    is printed.
 
-    The refusal above withholds the migrate hint on the stated grounds
-    that the migrator refuses the same document. That reasoning does not
-    reach a null: there are no keys to lose, so the upgrade rewrites it
-    like any other. Withholding the hint here sent an operator to hand-fix
-    what one command does, and told them to put a value where it belongs
-    when they had written no value at all.
+    The refusal above prints none, because folding a non-table value would
+    discard what the operator wrote. That reasoning does not reach a null:
+    there are no keys to lose. Withholding the rewrite here told an
+    operator to put a value where it belongs when they had written no
+    value at all.
 
     The extra instruction over the absent-sibling case is real work: the
     empty key still has to go, or the next load answers with the ORPHAN
@@ -658,25 +653,25 @@ def test_an_empty_sibling_is_offered_the_migrator_rather_than_a_by_hand_fix(tmp_
     assert "spec.platform_config is empty, so there are no keys to fold" in message
     assert "platform: {name: lima}" in message, "the rewrite is printable here, unlike a non-table value"
     assert "remove it" in message
-    assert excinfo.value.hint == "`agw resource migrate --all` rewrites your manifests in place."
+    assert excinfo.value.hint == _REWRITE_HINT
 
 
-def test_the_migrator_covers_every_surface_whose_error_names_it() -> None:
-    """The invariant behind the hint: a remedy an error names has to do
-    something for the document that just refused to load.
+def test_decode_refuses_exactly_the_three_retired_sibling_shapes() -> None:
+    """The retired shapes, pinned by hand against the derived table.
 
-    Decode attaches the migrate hint from ONE generic guard over every
-    host surface, so every host surface has to be one the migrator's
-    upgrade covers. A fourth hosting kind would get the hint for free and
-    would need an entry there for it to be true; session-template already
-    did, and the hint pointed at a command that printed "nothing to
-    migrate" for the exact document that had just failed to load.
+    Decode refuses the sibling pair from ONE generic guard driven by
+    ``HostSurface``, so what it refuses is whatever the descriptor table
+    says: nothing in the refusal path would notice a renamed
+    ``config_field``, because both halves would move together. That field
+    exists only so the refusal can name a spelling operators have already
+    typed, and renaming it would leave the guard looking for a key nobody
+    ever wrote.
 
-    The FIELD NAMES are compared too, not just the kinds. The migrator is
-    a deliberately independent oracle so it hand-writes its own pairs
-    rather than deriving them from ``HostSurface``, and a hand-written
-    copy that has drifted would leave the upgrade looking for a key decode
-    never refuses."""
+    Hand-written expectations for that reason, field names included. A
+    fourth hosting kind lands here as a failure, which is the point: it
+    inherits the refusal and the hint automatically, and this is where
+    someone decides whether the sibling pair was ever a spelling for it.
+    """
     from agentworks.manifests.decode import _hosting_descriptors
 
     core = {
@@ -685,4 +680,8 @@ def test_the_migrator_covers_every_surface_whose_error_names_it() -> None:
         if descriptor.manifest_section is not None
     }
 
-    assert core == _LEGACY_SIBLING_SHAPES
+    assert core == {
+        "vm-site": ("platform", "platform_config"),
+        "git-credential": ("provider", "provider_config"),
+        "session-template": ("harness_integration", "harness_integration_config"),
+    }

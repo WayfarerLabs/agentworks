@@ -610,14 +610,13 @@ class TestStaticChoiceCompletion:
     every Choice-typed option silently loses static completion (the
     generators' choices branches were dead code)."""
 
-    def test_migrate_option_choices_extracted(self) -> None:
+    def test_shell_option_choices_extracted(self) -> None:
         from agentworks.cli import app
         from agentworks.completions.spec import build_spec
 
-        migrate = build_spec(app).subcommands["resource"].subcommands["migrate"]
-        by_name = {p.name: p.choices for p in migrate.params}
-        assert by_name["layout"] == ["per-kind", "single", "per-resource"]
-        assert by_name["toml"] == ["comment", "delete"]
+        show = build_spec(app).subcommands["completion"].subcommands["show"]
+        by_name = {p.name: p.choices for p in show.params}
+        assert by_name["shell"] == ["bash", "zsh", "powershell", "pwsh"]
 
     def test_sample_kind_completes_dynamically(self) -> None:
         # The sample-kind argument is a plain string (no click.Choice: any
@@ -647,7 +646,7 @@ class TestStaticChoiceCompletion:
         assert kind.dynamic_completer == "resource_kinds"
         assert [opt for param in schema.params for opt in param.opts] == ["--write"]
 
-    def test_all_shells_emit_toml_choices(self) -> None:
+    def test_all_shells_emit_shell_choices(self) -> None:
         from agentworks.cli import app
         from agentworks.completions.bash import generate_bash
         from agentworks.completions.powershell import generate_powershell
@@ -655,11 +654,11 @@ class TestStaticChoiceCompletion:
         from agentworks.completions.zsh import generate_zsh
 
         spec = build_spec(app)
-        # Shell-specific emission shapes (the zsh/bash forms put both
-        # choices on one line; powershell emits one CompletionResult per
+        # Shell-specific emission shapes (the zsh/bash forms put every
+        # choice on one line; powershell emits one CompletionResult per
         # choice).
-        assert ":toml:(comment delete)" in generate_zsh(spec, "t")
-        assert 'compgen -W "comment delete"' in generate_bash(spec, "t")
+        assert ":shell:(bash zsh powershell pwsh)" in generate_zsh(spec, "t")
+        assert 'compgen -W "bash zsh powershell pwsh"' in generate_bash(spec, "t")
         ps = generate_powershell(spec, "t")
-        assert "::new('comment', 'comment'" in ps
-        assert "::new('delete', 'delete'" in ps
+        assert "::new('bash', 'bash'" in ps
+        assert "::new('pwsh', 'pwsh'" in ps

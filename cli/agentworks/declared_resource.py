@@ -295,11 +295,11 @@ def replace_fields(row: Any, **updates: Any) -> Any:
 
     Declared-resource rows are models and the capability marker rows
     (``VMPlatformEntry`` and kin) are still frozen dataclasses, and both
-    flow through the same framework code (origin stamping, the migrator's
-    source-field normalization). One helper rather than an
-    ``is_dataclass`` branch at each site, because a branch that silently
-    no-ops on the shape it does not know is exactly how the migrator's
-    equivalence check would start comparing provenance.
+    flow through the same framework code (origin stamping, the auto-declared
+    description). One helper rather than an ``is_dataclass`` branch at each
+    site, because a branch that silently no-ops on the shape it does not
+    know would leave a row unstamped and nothing would say so: the caller
+    gets an object back either way.
 
     Framework-supplied values only: the model path does not re-validate,
     exactly as ``dataclasses.replace`` does not.

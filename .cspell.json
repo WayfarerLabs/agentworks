@@ -53,6 +53,7 @@
     "dearmor",
     "dedup",
     "defanged",
+    "deletability",
     "disjointness",
     "distros",
     "docstrings",

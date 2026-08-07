@@ -1,10 +1,10 @@
 """Secrets-related settings loaders: the deprecated ``[secret_backends.*]``
 no-op sections, ``[secret_config]``, and ``[plugins]``.
 
-The ``[secrets.*]`` resource loader (``_load_secrets``) and the aggregated
-deprecated-TOML-resource-section warning relocated when config.toml stopped
-declaring resources (ADR 0022): ``_load_secrets`` moved to
-``agentworks.migrate.toml_resources``, and the warning became a raising
+The ``[secrets.*]`` resource loader (``_load_secrets``) is gone: config.toml
+stopped declaring resources (ADR 0022), and secrets are decoded from YAML
+manifests by ``agentworks.manifests.decode``. The aggregated
+deprecated-TOML-resource-section warning that lived here became a raising
 check (``_raise_for_resource_sections``) in ``agentworks.config.load``.
 
 Split out of the former monolithic ``agentworks/config.py`` (see
@@ -60,8 +60,8 @@ def _load_secret_backends(
         deprecations.append(
             f"[secret_backends.{backend_str}] is deprecated and has no effect: "
             f"the built-in backends ship with agentworks, and activation is "
-            f"[secret_config].backends. Remove the section, or run "
-            f"`agw resource migrate --all` to drop it."
+            f"[secret_config].backends. Delete the section; if you meant to "
+            f"activate {backend_str}, list it there instead."
         )
     return tuple(found)
 

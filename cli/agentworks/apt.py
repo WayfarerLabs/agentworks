@@ -30,11 +30,7 @@ from pydantic import Field
 
 from agentworks.declared_resource import DeclaredResource
 from agentworks.errors import ConfigError
-from agentworks.resource_loading import (
-    _SYNTHESIZED_DECLS,
-    _require_field,
-    _require_list,
-)
+from agentworks.resource_loading import _require_field, _require_list
 from agentworks.resources.kind import KIND_REGISTRY, synthesize_no_default
 from agentworks.schema import ResourceRef
 from agentworks.topics import TopicProse
@@ -42,7 +38,6 @@ from agentworks.topics import TopicProse
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from agentworks.config import _SectionLineMap
     from agentworks.resources.graph import FinalizeContext
     from agentworks.resources.reference import ResourceReference
 
@@ -116,10 +111,11 @@ class AptPackageEntry(DeclaredResource):
 
     Optional, and deliberately so rather than by transcription: the loader
     this replaces read it through ``_require_list``, whose ``get(key, [])``
-    made an omitted ``apt`` an empty list rather than an error. The
-    migrator's oracle still reads it that way, so requiring it here would
-    make a config.toml that hard-errors on load carry a remediation that
-    refuses to run."""
+    made an omitted ``apt`` an empty list rather than an error. An
+    apt-package that installs nothing is a real declaration (it can carry
+    ``apt_sources`` alone, so a template gets the repository without a
+    package from it), so the model kept the tolerance rather than inventing
+    a requirement the old surface never had."""
 
     apt_sources: list[Annotated[str, ResourceRef(kind="apt-source", usage="an apt source")]] = Field(
         default_factory=list
@@ -159,7 +155,6 @@ class AptPackageEntry(DeclaredResource):
 
 def _load_apt_sources(
     raw: dict[str, object],
-    decls: _SectionLineMap = _SYNTHESIZED_DECLS,
 ) -> dict[str, AptSourceEntry]:
     entries: dict[str, AptSourceEntry] = {}
     for name, data in raw.items():
@@ -177,14 +172,12 @@ def _load_apt_sources(
             source=str(_require_field(data, "source", ctx)),
             source_file=source_file,
             key_dearmor=bool(data.get("key_dearmor", False)),
-            declared_at=decls.lookup("apt_sources", name),
         )
     return entries
 
 
 def _load_apt_packages(
     raw: dict[str, object],
-    decls: _SectionLineMap = _SYNTHESIZED_DECLS,
 ) -> dict[str, AptPackageEntry]:
     entries: dict[str, AptPackageEntry] = {}
     for name, data in raw.items():
@@ -196,7 +189,6 @@ def _load_apt_packages(
             description=str(data["description"]) if "description" in data else None,
             apt=_require_list(data, "apt", ctx),
             apt_sources=_require_list(data, "apt_sources", ctx) if "apt_sources" in data else [],
-            declared_at=decls.lookup("apt_packages", name),
         )
     return entries
 

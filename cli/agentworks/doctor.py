@@ -538,7 +538,7 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
     for section in config.noop_secret_backend_sections:
         g.warn(
             f"Config has a no-op {section} section",
-            "deprecated and ignored; remove it, or `agw resource migrate --all` drops it",
+            "deprecated and ignored; delete the section, and set [secret_config].backends instead",
         )
 
     # SSH keys

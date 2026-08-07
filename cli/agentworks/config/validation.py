@@ -67,8 +67,6 @@ def validate_vm_workspaces(path: str) -> None:
     """
     import posixpath
 
-    from agentworks.errors import ConfigError
-
     normalized = posixpath.normpath(path)
     if normalized == "/home" or normalized.startswith("/home/"):
         raise ConfigError(
@@ -85,20 +83,6 @@ _MISE_DURATION_RE = re.compile(r"^[1-9][0-9]*[dhwmy]$")
 
 def _has_unsafe_mise_component_char(value: str) -> bool:
     return any(char.isspace() or ord(char) < 32 or ord(char) == 127 or char in {'"', "\\"} for char in value)
-
-
-def validate_mise_settings(packages: list[str], lockfile: str | None, install_before: str, *, context: str) -> None:
-    """:func:`check_mise_settings`, framed by the caller's section label.
-
-    The migrator's frozen TOML oracle reports against the section an
-    operator is looking at (``[agent_templates.claude]``), so it keeps
-    this form; a kind spec model calls the unframed check and lets the
-    error bridge frame the batch.
-    """
-    try:
-        check_mise_settings(packages, lockfile, install_before)
-    except ValueError as exc:
-        raise ConfigError(f"{context}.{exc}") from exc
 
 
 def check_mise_settings(packages: list[str], lockfile: str | None, install_before: str) -> None:

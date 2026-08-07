@@ -62,11 +62,15 @@ class RefOwner:
     kind: str
     name: str
     label: str | None = None
-    """An override for :attr:`display`, for the one caller that frames in
-    a different vocabulary on purpose: ``agw resource migrate`` reports
-    against the TOML file it has not rewritten yet (``[azure].region is
-    required ...``), because that is the file the operator is looking at.
-    Everything else leaves it unset and gets ``kind/name``."""
+    """An override for :attr:`display`, for a caller that has to frame in a
+    narrower vocabulary than ``kind/name``.
+
+    A secret's ``backend_mappings`` value is the standing case: the secret
+    alone is ambiguous when it maps several backends, and a root model's
+    errors carry no field path of their own, so the owner frames as
+    ``secret/npm-token.backend_mappings.onepassword`` (see
+    ``SecretDecl._mapping_owner``). Everything else leaves it unset and
+    gets ``kind/name``."""
 
     @property
     def display(self) -> str:

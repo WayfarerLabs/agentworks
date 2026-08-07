@@ -29,7 +29,7 @@ spec:
 ```
 
 Resource declarations in `config.toml` are not loaded at runtime. If you still have a classic
-`[admin.config]` declaration, migrate it with `agw resource migrate`; see
+`[admin.config]` declaration, rewrite it as an admin-template manifest; see
 [resources.md](resources.md).
 
 Run `agw vm create <name>` or `agw vm reinit <name>` and the tools will be available.

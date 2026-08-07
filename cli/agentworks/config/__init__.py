@@ -4,8 +4,7 @@ Config lives at ~/.config/agentworks/config.toml. It is read-only at runtime.
 
 This package holds the settings dataclasses and the settings-section
 loaders; nothing else. config.toml is settings only now (ADR 0022): the
-TOML resource loaders relocated to ``agentworks.migrate.toml_resources``
-(the migrator's private oracle), so a resource-declaring section is a hard
+TOML resource loaders are gone and a resource-declaring section is a hard
 error at load. The declarable-resource dataclasses (VMTemplate,
 AgentTemplate, AdminConfig, WorkspaceTemplate, SessionTemplate,
 NamedConsoleConfig, GitCredentialConfig) live in their domain packages;
@@ -20,9 +19,8 @@ import path ``agentworks.config`` unchanged:
   validators. Has no dependency on any sibling submodule.
 - ``models``: the settings dataclasses, the ``Config`` object (and its
   now-empty ``publish_to``), and ``_SectionLineMap``.
-- ``loaders_core``: generic TOML-loading helpers (the unknown-key pair and
-  ``_parse_env_table``, shared with the migrator's TOML oracle) and the
-  ``[operator]`` / ``[paths]`` / ``[defaults]`` settings loaders.
+- ``loaders_core``: generic TOML-loading helpers (the unknown-key pair) and
+  the ``[operator]`` / ``[paths]`` / ``[defaults]`` settings loaders.
 - ``loaders_sessions``: the ``[session.config]`` settings loader.
 - ``loaders_secrets``: ``[secret_backends.*]`` (deprecated no-op warning),
   ``[secret_config]``, and ``[plugins]``.
@@ -52,7 +50,6 @@ from agentworks.config.loaders_core import (
     _load_defaults,
     _load_operator,
     _load_paths,
-    _parse_env_table,
     _require,
     _require_string_list,
     _warn_unexpected_keys,
@@ -103,7 +100,6 @@ __all__ = [
     "_load_secret_backends",
     "_load_secret_config",
     "_load_session_config",
-    "_parse_env_table",
     "_require",
     "_require_string_list",
     "_warn_unexpected_keys",

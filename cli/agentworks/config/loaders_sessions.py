@@ -1,9 +1,10 @@
 """Session-related settings loader: ``[session.config]``.
 
 The ``[session_templates.*]`` resource loader (``_load_session_templates``
-and its ``_session_harness_integration_pair`` helper) relocated to
-``agentworks.migrate.toml_resources`` when config.toml stopped declaring
-resources (ADR 0022); only the settings loader remains here.
+and its ``_session_harness_integration_pair`` helper) is gone: config.toml
+stopped declaring resources (ADR 0022), so only the settings loader
+remains here. A session template is a YAML manifest whose
+``harness_integration`` is one tagged table, which needs no hoist.
 
 Split out of the former monolithic ``agentworks/config.py`` (see
 ``agentworks/config/__init__.py`` for the package overview).

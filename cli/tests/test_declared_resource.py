@@ -2,8 +2,8 @@
 
 It exists because a declared row is a MODEL while the capability marker
 rows beside it are still frozen dataclasses, and the framework code that
-stamps both (origin, the auto-declared description, the migrator's
-source-field normalization) must not branch on which shape it got.
+stamps both (origin, the auto-declared description) must not branch on
+which shape it got.
 """
 
 from __future__ import annotations
@@ -52,14 +52,14 @@ def test_the_original_row_is_untouched() -> None:
 def test_the_model_path_does_not_re_validate() -> None:
     """Framework-supplied values only, exactly as ``dataclasses.replace``
     behaves: the caller is stamping provenance, not accepting operator
-    input, and a re-validation here would reject the ``None`` the
-    migrator's normalization writes into a required field."""
+    input, and a re-validation here would reject a ``None`` the framework
+    deliberately writes into a field the operator must fill."""
     assert replace_fields(_ModelRow(name="a"), name=None).name is None
 
 
 def test_something_that_is_neither_is_a_loud_failure() -> None:
-    """Never a silent pass-through: a no-op on an unrecognized shape is
-    how the migrator's equivalence check would start comparing the very
-    fields this helper exists to strip."""
+    """Never a silent pass-through: the caller gets an object back either
+    way, so a no-op on an unrecognized shape leaves the row unstamped and
+    nothing says so until something downstream reads the missing field."""
     with pytest.raises(StateError, match="neither a frozen dataclass nor a model"):
         replace_fields(object(), origin="built-in")

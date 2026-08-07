@@ -63,10 +63,14 @@ def test_resource_sections_hard_error_naming_sections(tmp_path: Path) -> None:
     assert "[vm_templates.*]" in message
     assert "[named_console]" in message
     assert "[admin.config]" in message
-    # And it points at the two remediation commands and says settings-only.
-    assert "agw resource migrate" in message
-    assert "agw resource sample" in message
     assert "settings only" in message
+    # The rewrite is the operator's, so the hint carries the whole remedy:
+    # the two commands that print the target shape, and the guide section
+    # that walks it through.
+    hint = excinfo.value.hint or ""
+    assert "agw resource sample" in hint
+    assert "agw resource describe-kind" in hint
+    assert "docs/guides/resources.md" in hint
 
 
 def test_legacy_site_sections_get_the_vm_site_clause(tmp_path: Path) -> None:
@@ -77,7 +81,7 @@ def test_legacy_site_sections_get_the_vm_site_clause(tmp_path: Path) -> None:
         subscription_id = "0000"
         """,
     )
-    with pytest.raises(ConfigError, match="migrate as vm-site"):
+    with pytest.raises(ConfigError, match=r"\[azure\]/\[proxmox\] sections become vm-site manifests"):
         load_config(cfg, warn_issues=False)
 
 
@@ -146,7 +150,8 @@ def test_shipped_sample_config_loads_clean(tmp_path: Path) -> None:
 def test_secret_backends_keeps_its_no_op_deprecation(tmp_path: Path) -> None:
     """[secret_backends.*] is NOT a resource section (it is a capability-kind
     no-op), so it stays a deprecation on the channel rather than a hard
-    error, pointing at `agw resource migrate --all`."""
+    error. The remedy is a deletion the operator makes, plus the one place
+    activation actually happens."""
     cfg = _config(
         tmp_path,
         """
@@ -156,7 +161,8 @@ def test_secret_backends_keeps_its_no_op_deprecation(tmp_path: Path) -> None:
     config = load_config(cfg, warn_issues=False)
     assert len(config.deprecation_issues) == 1
     assert config.deprecation_issues[0].startswith("[secret_backends.env-var]")
-    assert "agw resource migrate --all" in config.deprecation_issues[0]
+    assert "Delete the section" in config.deprecation_issues[0]
+    assert "[secret_config].backends" in config.deprecation_issues[0]
     assert config.noop_secret_backend_sections == ("[secret_backends.env-var]",)
 
 
@@ -198,24 +204,6 @@ def test_normal_command_errors_against_a_resource_declaring_config(tmp_path: Pat
     # captured exception.
     assert isinstance(result.exception, ConfigError)
     assert "settings only" in str(result.exception)
-
-
-def test_resource_migrate_runs_against_a_resource_declaring_config(tmp_path: Path, monkeypatch) -> None:
-    from typer.testing import CliRunner
-
-    from agentworks.cli import app
-
-    cfg = _config(
-        tmp_path,
-        """
-        [secrets.npm-token]
-        description = "npm token"
-        """,
-    )
-    monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
-    dry = CliRunner().invoke(app, ["resource", "migrate", "secret", "--dry-run"])
-    assert dry.exit_code == 0, dry.output
-    assert "secret/npm-token" in dry.output
 
 
 def test_resource_sample_write_runs_against_a_resource_declaring_config(tmp_path: Path, monkeypatch) -> None:

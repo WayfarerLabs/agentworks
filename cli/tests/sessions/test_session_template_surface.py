@@ -1,8 +1,14 @@
 """The template surface: the internal
 ``(harness_integration, harness_integration_config)`` pair,
-the TOML hoist and strict unknown-key errors, the manifest flat-field
-rejection, the pair-inheritance rules (FRD R5, including the multi-parent
-divergence), and the harness-integration reference / describe surfaces.
+the manifest flat-field rejection, the pair-inheritance rules (FRD R5,
+including the multi-parent divergence), and the harness-integration
+reference / describe surfaces.
+
+The flat-TOML hoist and its two conflict errors (FRD R6) were pinned here
+against the migrator's frozen TOML reader. Both are gone (operator ruling,
+2026-08-07): config.toml declares no session templates, so there is no
+flat shape left to hoist. The manifest-side equivalents survive below
+(``test_yaml_restart_command_is_rejected``, the flat-field rejection).
 """
 
 from __future__ import annotations
@@ -76,196 +82,6 @@ def _config(tmp_path: Path, body: str):  # type: ignore[no-untyped-def]
         + dedent(body)
     )
     return load_config(cfg, warn_issues=False)
-
-
-def _templates(config) -> dict[str, SessionTemplate]:  # type: ignore[no-untyped-def]
-    from agentworks.resources.access import kind_dict
-
-    return kind_dict(build_registry(config), "session-template")
-
-
-# The flat-TOML session-template hoist is no
-# longer reachable on the normal load path: config.toml is settings-only (ADR
-# 0022), so a ``[session_templates.*]`` section hard-errors as a resource
-# section. That reader (``_session_harness_integration_pair`` and the
-# ``_load_session_templates`` normalization around it) relocated to the
-# migrator's pre-side oracle, so these pins exercise the surviving reader.
-
-
-def _oracle_row(tmp_path: Path, body: str, name: str) -> SessionTemplate:
-    """The flat-TOML session template ``name``, read through the migrator's
-    oracle."""
-    from typing import cast
-
-    from agentworks.migrate.toml_resources import toml_resource_rows
-
-    cfg = tmp_path / "legacy.toml"
-    cfg.write_text(dedent(body))
-    return cast("SessionTemplate", toml_resource_rows(cfg)[("session-template", name)])
-
-
-def _oracle_rows(tmp_path: Path, body: str) -> object:
-    """Run the migrator oracle over ``body`` (the raising path for the
-    conflict pins)."""
-    from agentworks.migrate.toml_resources import toml_resource_rows
-
-    cfg = tmp_path / "legacy.toml"
-    cfg.write_text(dedent(body))
-    return toml_resource_rows(cfg)
-
-
-def _pair(body: str, name: str) -> tuple[str | None, dict[str, object] | None]:
-    """The raw canonical pair for one flat-TOML template."""
-    import tomllib
-
-    from agentworks.migrate.toml_resources import _session_harness_integration_pair
-
-    data = tomllib.loads(dedent(body))
-    return _session_harness_integration_pair(name, data["session_templates"][name])  # type: ignore[index]
-
-
-# -- TOML hoist + the two conflict errors (FRD R6) ---------------------------
-
-
-def test_flat_toml_restart_command_is_rejected(tmp_path: Path) -> None:
-    with pytest.raises(
-        ConfigError,
-        match=r"unexpected keys in \[session_templates.claude\]: restart_command",
-    ):
-        _oracle_row(
-            tmp_path,
-            """
-            [session_templates.claude]
-            command = "claude"
-            restart_command = "claude --resume"
-            """,
-            "claude",
-        )
-
-
-def test_flat_toml_resume_command_is_canonical(tmp_path: Path) -> None:
-    tmpl = _oracle_row(
-        tmp_path,
-        """
-        [session_templates.claude]
-        command = "claude"
-        resume_command = "claude --resume"
-        """,
-        "claude",
-    )
-    assert tmpl.harness_integration is not None
-    assert tmpl.harness_integration.config == {
-        "command": "claude",
-        "resume_command": "claude --resume",
-    }
-
-
-def test_local_resume_and_restart_command_conflict(tmp_path: Path) -> None:
-    with pytest.raises(ConfigError, match=r"unexpected keys.*restart_command"):
-        _oracle_rows(
-            tmp_path,
-            """
-            [session_templates.bad]
-            resume_command = "new"
-            restart_command = "old"
-            """,
-        )
-
-
-def test_nested_toml_harness_config_passes_through(tmp_path: Path) -> None:
-    tmpl = _oracle_row(
-        tmp_path,
-        """
-        [session_templates.htop]
-        harness_integration = "shell"
-        [session_templates.htop.harness_integration_config]
-        command = "htop"
-        required_commands = ["htop"]
-        """,
-        "htop",
-    )
-    assert tmpl.harness_integration is not None
-    assert tmpl.harness_integration.name == "shell"
-    assert tmpl.harness_integration.config == {"command": "htop", "required_commands": ["htop"]}
-
-
-def test_canonical_toml_harness_integration_pair_normalizes_to_internal_pair(tmp_path: Path) -> None:
-    integration, config = _pair(
-        """
-        [session_templates.htop]
-        harness_integration = "shell"
-        [session_templates.htop.harness_integration_config]
-        command = "htop"
-        required_commands = ["htop"]
-        """,
-        "htop",
-    )
-    assert integration == "shell"
-    assert config == {"command": "htop", "required_commands": ["htop"]}
-    # The canonical spelling is not flagged as a deprecated selector.
-
-
-def test_toml_harness_old_and_canonical_pairs_cannot_mix(tmp_path: Path) -> None:
-    with pytest.raises(ConfigError, match=r"unexpected keys.*harness"):
-        _oracle_rows(
-            tmp_path,
-            """
-            [session_templates.bad]
-            harness = "shell"
-            harness_integration = "shell"
-            """,
-        )
-
-
-def test_undeclared_template_leaves_the_pair_none(tmp_path: Path) -> None:
-    tmpl = _oracle_row(
-        tmp_path,
-        """
-        [session_templates.plain]
-        description = "just a login shell"
-        """,
-        "plain",
-    )
-    assert tmpl.harness_integration is None
-
-
-def test_flat_fields_with_non_shell_harness_is_an_error(tmp_path: Path) -> None:
-    with pytest.raises(ConfigError, match="cannot combine with harness"):
-        _oracle_rows(
-            tmp_path,
-            """
-            [session_templates.bad]
-            harness_integration = "claude-code"
-            command = "claude"
-            """,
-        )
-
-
-def test_flat_fields_with_explicit_harness_config_is_an_error(
-    tmp_path: Path,
-) -> None:
-    with pytest.raises(ConfigError, match=r"unexpected keys.*harness_config"):
-        _oracle_rows(
-            tmp_path,
-            """
-            [session_templates.bad]
-            command = "claude"
-            [session_templates.bad.harness_config]
-            command = "claude"
-            """,
-        )
-
-
-def test_harness_config_without_harness_is_an_error(tmp_path: Path) -> None:
-    with pytest.raises(ConfigError, match=r"unexpected keys.*harness_config"):
-        _oracle_rows(
-            tmp_path,
-            """
-            [session_templates.bad]
-            [session_templates.bad.harness_config]
-            command = "claude"
-            """,
-        )
 
 
 def test_unknown_shell_field_errors_at_build(tmp_path: Path) -> None:
