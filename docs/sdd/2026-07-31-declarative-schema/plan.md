@@ -1007,17 +1007,28 @@ BUILT, including the migrator; they stay as written. These are the boxes for wha
 - [x] `ruamel-yaml` and `tomlkit` removed, orphaned by the deletion.
 - [x] FRD and HLA reconciled with the ruling; dated entry on the readiness refactor's lockfile,
       which is on `main` and therefore locked.
-- [ ] R9.9's enablement-keyed validation suppression closed (operator ruling: an operator should not
+- [x] R9.9's enablement-keyed validation suppression closed (operator ruling: an operator should not
       accumulate invalid config that blows up when they enable the resource).
-- [ ] Robustness and test hardening: findings 14, 18, 24, 27, 31, the surviving union arm noise, and
+- [x] Robustness and test hardening: findings 14, 18, 24, 27, 31, the surviving union arm noise, and
       the two style nits.
-- [ ] Operator upgrade guide rewritten for the no-migrator path, including the agent-led route.
-- [ ] INDEPENDENT operator rehearsal of the rewritten guide. Not optional and not the writer's to
+- [x] Operator upgrade guide rewritten for the no-migrator path, including the agent-led route.
+- [x] INDEPENDENT operator rehearsal of the rewritten guide. Not optional and not the writer's to
       run: the migrator-era rehearsal took 13 rounds against a guide whose content was correct and
       whose order could not work, and prose review cannot find an ordering defect.
 - [ ] Unknown-key posture applied uniformly across config.toml, kind specs, and capability blobs.
-- [ ] `locked.md` rewritten to describe what ships. The lock binds at `main`, so pre-merge this is
+- [x] `locked.md` rewritten to describe what ships. The lock binds at `main`, so pre-merge this is
       an ordinary edit rather than a dated superseding entry.
+- [x] The upgrade material split into `docs/guides/upgrading-to-0.14.md`, release-scoped so its
+      retirement is a deletion rather than surgery on a permanent guide, with the error that points
+      at it carrying a comment naming everything that retirement must take.
+- [x] The vanishing-union-arm family closed in all three instances: a discriminated union inside a
+      collection (graph and field stream), and a scalar-or-model union's model arm.
+- [x] `ScalarShorthand` declares a scalar shorthand once, retiring FR13's last hand-written schema
+      fragment.
+- [x] `ruamel-yaml` and `tomlkit` removed, orphaned by the migrator deletion.
+- [x] The test estate pared from 5341 to 4970, each removal proven by executing the mutation it was
+      claimed to be covered by, with a 22-mutation regression re-run after every change.
+- [x] `red-window-inventory.md` retired, its bounded window having closed.
 - [ ] Final review pass at the finished state.
 
 ## Pressure-test notes (what writing this plan surfaced)
