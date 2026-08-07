@@ -100,11 +100,49 @@ def test_two_sibling_fields_of_one_nested_model_both_extract() -> None:
     assert names(extract_references(DiamondLike, blob, OWNER)) == ["primary-secret", "fallback-secret"]
 
 
-def test_a_self_referential_model_terminates() -> None:
+def test_a_recursive_model_walks_finite_data_all_the_way_down() -> None:
+    """Recursion in the TYPE is not a cycle in the DATA.
+
+    This blob nests three levels and ends. Pydantic validates every one of
+    them, so a walker that stopped at the first repeated type would leave
+    two secrets out of the dependency graph with nothing reported: the
+    resource would be missing at runtime, in a run that finalized clean.
+    """
     blob = {"secret": "top", "child": {"secret": "nested", "child": {"secret": "deeper"}}}
-    # The path-scoped guard cuts the genuine cycle, which is the one case
-    # that cannot terminate on its own.
+    assert names(extract_references(SelfReferential, blob, OWNER)) == ["top", "nested", "deeper"]
+
+
+def test_data_reachable_from_itself_terminates() -> None:
+    """The one input that cannot terminate on its own, which a YAML anchor
+    can write (``child: *self``). The edges it does name are still
+    extracted; only the second visit to the same value is cut."""
+    blob: dict[str, object] = {"secret": "top"}
+    blob["child"] = blob
+
     assert names(extract_references(SelfReferential, blob, OWNER)) == ["top"]
+
+
+def test_a_data_cycle_through_two_values_terminates() -> None:
+    """A cycle the guard cannot see by looking at one value: two tables
+    that name each other."""
+    outer: dict[str, object] = {"secret": "outer"}
+    inner: dict[str, object] = {"secret": "inner", "child": outer}
+    outer["child"] = inner
+
+    assert names(extract_references(SelfReferential, outer, OWNER)) == ["outer", "inner"]
+
+
+def test_deeply_nested_finite_data_neither_truncates_nor_overflows() -> None:
+    """Depth is the operator's to choose, and the totality contract has no
+    exception for "too deep". A recursive walk raises ``RecursionError``
+    here well before the bottom, which is a raised exception from a
+    function documented never to raise."""
+    depth = 5_000
+    blob: dict[str, object] = {"secret": "bottom"}
+    for _ in range(depth):
+        blob = {"child": blob}
+
+    assert names(extract_references(SelfReferential, blob, OWNER)) == ["bottom"]
 
 
 # --- marked lists -----------------------------------------------------
@@ -168,8 +206,17 @@ def test_malformed_elements_are_skipped_and_the_rest_still_extract() -> None:
     assert names(extract_references(CatalogLike, blob, OWNER)) == ["kept", "also-kept"]
 
 
-def test_a_self_reference_through_a_collection_terminates() -> None:
+def test_a_recursive_model_walks_a_finite_collection_all_the_way_down() -> None:
     blob = {"secret": "top", "children": [{"secret": "nested", "children": [{"secret": "deeper"}]}]}
+    assert names(extract_references(SelfReferential, blob, OWNER)) == ["top", "nested", "deeper"]
+
+
+def test_a_data_cycle_through_a_collection_terminates() -> None:
+    """The guard has to hold on both routes into a model: the field and
+    the collection element."""
+    blob: dict[str, object] = {"secret": "top"}
+    blob["children"] = [blob]
+
     assert names(extract_references(SelfReferential, blob, OWNER)) == ["top"]
 
 

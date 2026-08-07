@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from agentworks.errors import ConfigError, NotFoundError, inheritance_cycle_error, unknown_template_error
+from agentworks.errors import ConfigError, NotFoundError, unknown_template_error
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -102,48 +102,21 @@ def effective_template(templates: Mapping[str, WorkspaceTemplate], name: str) ->
         return ResolvedTemplate(name=name)
 
 
-def _layers(
-    templates: Mapping[str, WorkspaceTemplate],
-    name: str,
-    _visiting: tuple[str, ...] = (),
-) -> list[WorkspaceTemplate]:
-    """The DECLARATIONS ``name`` merges from, in merge order: each
-    parent's own chain first (left to right), then the row itself. See
-    ``vms.templates._layers`` for the shape all four resolvers share and
-    why it matches ``resources.inheritance.merge_layers``.
-
-    ``_visiting`` carries the chain of in-progress walks so cycles raise
-    ``InheritanceCycleError`` instead of ``RecursionError``. The
-    framework's cycle pass at build_registry time is the canonical check;
-    this guard is the safety net for callers that resolve without going
-    through build_registry, and :func:`effective_template` keys on the
-    type to stay total.
-    """
-    if name in _visiting:
-        raise inheritance_cycle_error("workspace-template", (*_visiting, name))
-
-    if name not in templates:
-        return []
-
-    tmpl = templates[name]
-    next_visiting = (*_visiting, name)
-    layers = [layer for parent in tmpl.inherits for layer in _layers(templates, parent, next_visiting)]
-    layers.append(tmpl)
-    return layers
-
-
 def _resolve(
     templates: Mapping[str, WorkspaceTemplate],
     name: str,
-    _visiting: tuple[str, ...] = (),
 ) -> ResolvedTemplate:
     """Resolve ``name``'s chain, defaults applied: one accumulator folded
     over the chain's declarations, last one wins. See
     ``vms.templates._resolve_from_dict`` for why the fold reads the
     DECLARATIONS rather than each parent's resolved template.
     """
+    # Imported here, not at module level: ``agentworks.resources``'s package
+    # init loads every kind module, and every kind module reaches this one.
+    from agentworks.resources.inheritance import resolution_layers
+
     result = ResolvedTemplate(name=name)
-    for layer in _layers(templates, name, _visiting):
+    for layer in resolution_layers(templates, name, "workspace-template"):
         _merge_template(result, layer)
     return result
 

@@ -15,9 +15,11 @@ registering a kind for it.
 
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import TYPE_CHECKING, Annotated, Literal
 
 import pytest
+import yaml
 from pydantic import Discriminator, Field
 
 from agentworks.errors import ValidationError
@@ -41,6 +43,44 @@ class Exampled(AgwModel):
     tags: list[str] = Field(default_factory=list)
     note: str | None = None
     enabled: bool = False
+
+
+class Route(AgwModel):
+    """One element of a required list of tables."""
+
+    host: str = Field(examples=["gpu-box"])
+    user: str = Field(examples=["me"])
+
+
+class Routed(AgwModel):
+    """A model with a REQUIRED list of tables.
+
+    No shipped kind has one, which is the only reason the sequence
+    element rendered as a mapping key named ``-`` for as long as it did:
+    the defect was always commented out, so the end-to-end
+    uncomment-and-load suite never met it.
+    """
+
+    routes: list[Route]
+
+
+class Layout(StrEnum):
+    """A closed field spelled as an enum rather than as a ``Literal``."""
+
+    TILED = "tiled"
+    VERTICAL = "vertical"
+
+
+class Enumed(AgwModel):
+    """A model with an enum-typed field carrying a default.
+
+    ``FieldDoc`` carries enum MEMBERS, and a member is not something
+    pyyaml can represent, so the default reached the dumper and took the
+    whole document down with a ``RepresenterError``.
+    """
+
+    layout: Layout = Layout.VERTICAL
+    host: str = Field(examples=["me@gpu-box"])
 
 
 def _reference(model: type[AgwModel]) -> SchemaReference:
@@ -172,8 +212,41 @@ def test_a_collection_of_blocks_renders_one_element() -> None:
 
     assert "#  # vm_sizes:" in lines
     assert "#    # one element, as an example:" in lines
-    assert "#    # -:" in lines
+    # A sequence element has no key. `-:` is a mapping under a key
+    # literally named `-`, which is a different document.
+    assert "#    # -" in lines
     assert "#      # cpus: <integer>" in lines
+
+
+def _uncommented_spec(model: type[AgwModel]) -> object:
+    """The spec block of ``model``'s skeleton, put through the documented
+    one-``#`` strip and read as YAML."""
+    text = skeleton_text(_reference(model))
+    stripped = "\n".join(line.removeprefix("#") for line in text.splitlines())
+    document = yaml.safe_load(stripped)
+    assert isinstance(document, dict)
+    return document["spec"]
+
+
+def test_an_uncommented_required_list_of_tables_loads_and_validates() -> None:
+    """The module's headline promise, over the one shape no shipped kind
+    has.
+
+    Every other required field renders as a scalar on its own key line, so
+    a broken element opener stayed invisible: a commented line is not YAML
+    and nothing was ever asked to read it. Uncommenting is what asks.
+    """
+    spec = _uncommented_spec(Routed)
+
+    assert spec == {"routes": [{"host": "gpu-box", "user": "me"}]}
+    assert Routed.model_validate(spec).routes[0].host == "gpu-box"
+
+
+def test_an_enum_default_renders_as_the_value_a_document_carries() -> None:
+    """``FieldDoc.choices`` carries enum MEMBERS, and pyyaml has no
+    representation for one, so an enum-typed field with a default took the
+    whole rendered document down rather than printing a line."""
+    assert "#  # layout: vertical" in _spec_lines(Enumed)
 
 
 def test_a_table_of_blocks_renders_one_entry_under_a_placeholder_key() -> None:
@@ -210,6 +283,59 @@ def test_a_union_that_is_not_a_capability_offers_no_pointer() -> None:
     entry = _entries_by_name(_reference(SiteLike))["platform"]
 
     assert [alt.target for alt in entry.alternatives] == [None, None]
+
+
+class SelfReachingArm(AgwModel):
+    """A union arm reachable from itself, which a plugin's config model
+    may be: a group whose members are groups."""
+
+    name: Literal["group"]
+    member: Annotated[SelfReachingArm, Discriminator("name")] | None = None
+
+
+class SelfReaching(AgwModel):
+    """A field whose union arm reaches itself."""
+
+    group: Annotated[SelfReachingArm, Discriminator("name")]
+
+
+SelfReachingArm.model_rebuild()
+SelfReaching.model_rebuild()
+
+
+def test_a_union_arm_reachable_from_itself_stops_rather_than_recurring() -> None:
+    """``iter_field_docs`` threads a cycle guard, and the tree re-entered
+    it from scratch for every expanded arm, so a self-reachable arm ran
+    until the interpreter gave up: ``describe-kind``, ``sample``, and the
+    guide's field reference all died on the same model.
+
+    One level is expanded and the second is not, and ``rendered`` says so
+    rather than claiming an arm whose fields are absent.
+    """
+    entry = _entries_by_name(_reference(SelfReaching))["group"]
+
+    assert entry.rendered == "group"
+    inner = {child.name: child for child in entry.children}["member"]
+    assert [alt.name for alt in inner.alternatives] == ["group"]
+    assert inner.children == ()
+    assert inner.rendered is None
+
+
+def test_two_sibling_fields_sharing_an_arm_each_expand_it() -> None:
+    """The guard is the current PATH, not an accumulating set. A set would
+    expand the first field's union and leave the second field's a bare
+    line, which in a generated sample is a whole block an operator has to
+    write and is not told about."""
+
+    class TwoGroups(AgwModel):
+        first: Annotated[SelfReachingArm, Discriminator("name")]
+        second: Annotated[SelfReachingArm, Discriminator("name")]
+
+    TwoGroups.model_rebuild()
+    entries = _entries_by_name(_reference(TwoGroups))
+
+    assert entries["first"].rendered == "group"
+    assert entries["second"].rendered == "group"
 
 
 # --- root models -----------------------------------------------------------

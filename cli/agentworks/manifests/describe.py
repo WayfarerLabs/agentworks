@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 from agentworks import output
 from agentworks.manifests.field_tree import worth_showing
 from agentworks.manifests.reference import plain_text
+from agentworks.manifests.yaml_value import render_value
 from agentworks.schema import MAPPING_KEY, SEQUENCE_ELEMENT
 
 if TYPE_CHECKING:
@@ -132,18 +133,23 @@ def _key(entry: FieldEntry) -> str:
 
 def _facts_of(entry: FieldEntry) -> str:
     """The parenthetical after a field name: what it takes and whether it
-    has to be there."""
+    has to be there.
+
+    Values render as YAML, not as Python ``repr``. The reader is about to
+    write these into a document, so a boolean default has to read ``true``
+    and a string example has to arrive without Python's quotes around it.
+    """
     facts = [entry.type_label, "required" if entry.writable else "optional"]
     if entry.doc.default_template is not None:
         facts.append(f"defaults to `{entry.doc.default_template.replace('{owner_name}', '<name>')}`")
     elif worth_showing(entry.doc.default) and not entry.children:
-        facts.append(f"default {entry.doc.default!r}")
+        facts.append(f"default {render_value(entry.doc.default)}")
     if entry.doc.ref is not None:
         facts.append(f"names a {entry.doc.ref.kind}")
     for key, value in entry.doc.constraints.items():
         facts.append(f"{key.replace('_', ' ')} {value}")
     if entry.doc.examples:
-        facts.append(f"e.g. {entry.doc.examples[0]!r}")
+        facts.append(f"e.g. {render_value(entry.doc.examples[0])}")
     return f"({', '.join(facts)})"
 
 

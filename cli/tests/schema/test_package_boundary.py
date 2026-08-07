@@ -24,7 +24,12 @@ _PACKAGE = Path(__file__).resolve().parents[2] / "agentworks" / "schema"
 
 #: What the schema package may reach for. Each is a top-level leaf that
 #: imports nothing of ours, so none can start a cycle back here.
-_PERMITTED = ("agentworks.errors", "agentworks.source_location", "agentworks.schema")
+_PERMITTED = (
+    "agentworks.errors",
+    "agentworks.source_location",
+    "agentworks.schema",
+    "agentworks.traversal",
+)
 
 
 def _agentworks_imports(source: str) -> set[str]:

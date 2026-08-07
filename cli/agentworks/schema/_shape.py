@@ -17,16 +17,14 @@ import typing
 from contextlib import suppress
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Annotated, Final, TypeGuard, Union, get_args, get_origin
+from typing import Annotated, Final, TypeGuard, Union, get_args, get_origin
 
 from pydantic import BaseModel, Discriminator
 from pydantic.errors import PydanticSchemaGenerationError, PydanticUndefinedAnnotation
+from pydantic.fields import FieldInfo
 from pydantic.json_schema import SkipJsonSchema
 
 from agentworks.schema.markers import RefMarker
-
-if TYPE_CHECKING:
-    from pydantic.fields import FieldInfo
 
 #: The runtime class behind ``SkipJsonSchema[X]``, which expands to
 #: ``Annotated[X, SkipJsonSchema()]``, so the metadata item a field
@@ -97,6 +95,28 @@ class FieldShape:
     arms: tuple[UnionArmType, ...]
     """The union's arms, in declaration order; empty unless the field is
     a discriminated union of models."""
+
+    item_discriminator: str | None
+    """:attr:`discriminator` one level down: the tag field a COLLECTION's
+    elements are dispatched on (``list[Annotated[A | B,
+    Discriminator("kind")]]``).
+
+    Kept apart from :attr:`discriminator` for the reason ``item_marker``
+    is kept apart from ``marker``: one describes the field, the other
+    describes one value inside it. A field holding a collection has no
+    arms of its OWN, so reusing the field-level attributes would tell a
+    walker to dispatch the collection itself on a tag."""
+
+    item_arms: tuple[UnionArmType, ...]
+    """:attr:`arms` one level down: the arms one ELEMENT of a collection
+    may be, empty unless the elements are a discriminated union of models.
+
+    A collection of tagged blocks is not a shape the framework ships
+    today (all four discriminated unions are top-level capability
+    configs), and it is one any capability or plugin author can write.
+    Left unclassified, its elements read as an undiscriminated union,
+    which no walker expands: a secret named inside such an element would
+    be absent from the dependency graph with nothing reported."""
 
     union_members: tuple[object, ...]
     """The members of an UNDISCRIMINATED union, in declaration order, as
@@ -185,6 +205,8 @@ def shape_of(field: FieldInfo) -> FieldShape:
     nested_model: type[BaseModel] | None = None
     discriminator: str | None = None
     arms: tuple[UnionArmType, ...] = ()
+    item_discriminator: str | None = None
+    item_arms: tuple[UnionArmType, ...] = ()
     union_members: tuple[object, ...] = ()
     item_union_members: tuple[object, ...] = ()
 
@@ -195,7 +217,16 @@ def shape_of(field: FieldInfo) -> FieldShape:
         item_marker = _first_marker(element_meta)
         item_model = element if _is_model(element) else None
         if item_model is None and _is_union(element):
-            item_union_members = tuple(split_annotated(arg)[0] for arg in get_args(element))
+            # Same order as the field-level branch below, and for the same
+            # reason: a tagged union addresses one arm from a raw blob and
+            # an untagged one addresses none, so asking about the tag first
+            # is what keeps a collection of tagged blocks from reading as
+            # an opaque union nothing walks into.
+            item_discriminator = _element_discriminator(element_meta)
+            if item_discriminator is not None:
+                item_arms = _arms_of(element, item_discriminator)
+            else:
+                item_union_members = tuple(split_annotated(arg)[0] for arg in get_args(element))
     elif _is_model(inner) or _is_union(inner):
         discriminator = _discriminator_of(field)
         if discriminator is not None:
@@ -223,6 +254,8 @@ def shape_of(field: FieldInfo) -> FieldShape:
         nested_model=nested_model,
         discriminator=discriminator,
         arms=arms,
+        item_discriminator=item_discriminator,
+        item_arms=item_arms,
         union_members=union_members,
         item_union_members=item_union_members,
     )
@@ -400,6 +433,25 @@ def _discriminator_of(field: FieldInfo) -> str | None:
     for candidate in (field.discriminator, *spine_metadata(field)):
         if isinstance(candidate, Discriminator) and isinstance(candidate.discriminator, str):
             return candidate.discriminator
+    return None
+
+
+def _element_discriminator(metadata: list[object]) -> str | None:
+    """The tag field name a COLLECTION's elements are dispatched on.
+
+    The element's own ``Annotated`` metadata is the only place it can be,
+    which is why this reads a metadata list rather than a field the way
+    :func:`_discriminator_of` does: a discriminator written on the FIELD
+    selects among the FIELD's arms, and a field holding a collection has
+    none of its own. Both spellings pydantic accepts inside an
+    ``Annotated`` are read, because missing one is a silently
+    unclassified union rather than an error.
+    """
+    for item in metadata:
+        if isinstance(item, Discriminator) and isinstance(item.discriminator, str):
+            return item.discriminator
+        if isinstance(item, FieldInfo) and isinstance(item.discriminator, str):
+            return item.discriminator
     return None
 
 

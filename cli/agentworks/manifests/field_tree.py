@@ -18,7 +18,6 @@ into the record a caller asks for by name.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from enum import Enum
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, RootModel
@@ -112,7 +111,11 @@ class FieldEntry:
 
     @property
     def sample_value(self) -> object:
-        """The value a generated sample writes for this field.
+        """The value a generated sample writes for this field, as a Python
+        value: a presenter renders it with
+        :func:`~agentworks.manifests.yaml_value.render_value`, which is
+        what turns an enum member, a nested table, or a plugin's exotic
+        default into the form a document carries.
 
         In order: the author's first example, the ONE value a closed field
         can hold, the field's own default where it is worth showing, and
@@ -134,13 +137,13 @@ class FieldEntry:
         if self.doc.examples:
             return self.doc.examples[0]
         if len(self.doc.choices) == 1:
-            return _wire_value(self.doc.choices[0])
+            return self.doc.choices[0]
         if self.children:
             return UNSET
         if worth_showing(self.doc.default):
             return self.doc.default
         if self.doc.choices:
-            return _wire_value(self.doc.choices[0])
+            return self.doc.choices[0]
         return _placeholder(self.type_label)
 
 
@@ -151,9 +154,34 @@ def field_tree(model: type[BaseModel], capability_kind: str | None = None) -> tu
     discriminated union's arms ARE, when they are: it is what lets an
     alternative carry the address that documents it and the implementation's
     own one-liner rather than its config model's docstring.
+    """
+    return _tree(model, capability_kind, ())
+
+
+def _tree(
+    model: type[BaseModel],
+    capability_kind: str | None,
+    expanding: tuple[type[BaseModel], ...],
+) -> tuple[FieldEntry, ...]:
+    """One level of :func:`field_tree`, told which models are already open
+    above it.
 
     The stream is flat and addressed by path, so the tree is built by
     attaching each doc to the entry at its parent path.
+
+    ``expanding`` is the current PATH of models whose union arms are being
+    rendered, and it is the guard against a config model reachable from
+    itself through a union: ``iter_field_docs`` threads its own guard, but
+    it is re-entered from scratch for each expanded arm, so without this
+    a self-reachable arm would recur until the interpreter gave up and
+    take ``describe-kind``, ``sample``, and ``schema`` down with it. Path
+    scoped rather than accumulating, for the same reason the stream's own
+    guard is: two sibling fields whose unions share an arm each render it.
+
+    Naturally recursive, and it stays that way: the structure walked here
+    is a model class graph, whose depth an AUTHOR writes rather than an
+    operator, which is the case the shared traversal discipline
+    (:mod:`agentworks.traversal`) leaves alone.
     """
     roots: list[FieldEntry] = []
     by_path: dict[tuple[str, ...], list[FieldEntry]] = {(): roots}
@@ -166,7 +194,8 @@ def field_tree(model: type[BaseModel], capability_kind: str | None = None) -> tu
             raise StateError(f"the field stream reached {'.'.join(doc.path)} before its parent block")
         siblings.append(FieldEntry(doc=doc, children=(), alternatives=(), rendered=None))
         by_path[doc.path] = []
-    return tuple(_resolved(entry, by_path, capability_kind) for entry in roots)
+    expanding = (*expanding, model)
+    return tuple(_resolved(entry, by_path, capability_kind, expanding) for entry in roots)
 
 
 def root_entry(model: type[BaseModel], entries: tuple[FieldEntry, ...]) -> FieldEntry | None:
@@ -237,13 +266,14 @@ def _resolved(
     entry: FieldEntry,
     by_path: dict[tuple[str, ...], list[FieldEntry]],
     capability_kind: str | None,
+    expanding: tuple[type[BaseModel], ...],
 ) -> FieldEntry:
     """``entry`` with its children attached, root wrappers collapsed, and
     its union (if it has one) expanded to one arm."""
-    children = tuple(_resolved(child, by_path, capability_kind) for child in by_path[entry.doc.path])
+    children = tuple(_resolved(child, by_path, capability_kind, expanding) for child in by_path[entry.doc.path])
     entry = replace(entry, children=children)
     entry = _collapsed(entry)
-    return _expanded(entry, capability_kind)
+    return _expanded(entry, capability_kind, expanding)
 
 
 def _collapsed(entry: FieldEntry) -> FieldEntry:
@@ -273,7 +303,11 @@ def _collapsed(entry: FieldEntry) -> FieldEntry:
     )
 
 
-def _expanded(entry: FieldEntry, capability_kind: str | None) -> FieldEntry:
+def _expanded(
+    entry: FieldEntry,
+    capability_kind: str | None,
+    expanding: tuple[type[BaseModel], ...],
+) -> FieldEntry:
     """A discriminated union rendered as ONE arm, with the rest listed.
 
     The first registered arm, which is a built-in: the core's
@@ -297,9 +331,17 @@ def _expanded(entry: FieldEntry, capability_kind: str | None) -> FieldEntry:
         )
         for arm in arms
     )
+    if arms[0].doc.model in expanding:
+        # The arm is already open above this point, so expanding it again
+        # would never finish. The alternatives are still named and
+        # ``rendered`` stays None, which says truthfully that nothing was
+        # expanded here: a document nests this shape to some finite depth
+        # the model cannot know, and a reference that showed one more
+        # level would be no more complete than one that shows none.
+        return replace(entry, alternatives=alternatives)
     return replace(
         entry,
-        children=field_tree(arms[0].doc.model, capability_kind),
+        children=_tree(arms[0].doc.model, capability_kind, expanding),
         alternatives=alternatives,
         rendered=arms[0].tag,
     )
@@ -340,12 +382,3 @@ def _placeholder(type_label: str) -> object:
     if label.startswith("table of "):
         return {_PLACEHOLDER_KEY: _placeholder(label.removeprefix("table of "))}
     return _PLACEHOLDERS.get(label, "<value>")
-
-
-def _wire_value(choice: object) -> object:
-    """A ``Literal`` value or ``Enum`` member as a document carries it.
-
-    ``FieldDoc.choices`` carries enum MEMBERS deliberately, so a presenter
-    that wants the wire form asks for it. A sample writes the wire form.
-    """
-    return choice.value if isinstance(choice, Enum) else choice

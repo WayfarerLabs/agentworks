@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
-from agentworks.errors import inheritance_cycle_error, unknown_template_error
+from agentworks.errors import unknown_template_error
 from agentworks.schema import RefOwner
 
 #: The workload a session runs when nothing in its lineage names one: a
@@ -149,7 +149,6 @@ def effective_template(templates: Mapping[str, SessionTemplate], name: str) -> E
 def _resolve(
     templates: Mapping[str, SessionTemplate],
     name: str,
-    _visiting: tuple[str, ...] = (),
 ) -> ResolvedSessionTemplate:
     """Depth-first, left-to-right resolution.
 
@@ -160,41 +159,11 @@ def _resolve(
     merge, with the rest of hard validation (FR12), and construction
     re-validates the blob it binds.
     """
-    effective = _resolve_walk(templates, name, _visiting)
+    effective = _resolve_walk(templates, name)
     result = effective.resolved
     result.harness_integration = effective.harness.name or DEFAULT_HARNESS_INTEGRATION
     result.harness_integration_config = dict(effective.harness.config)
     return result
-
-
-def _layers(
-    templates: Mapping[str, SessionTemplate],
-    name: str,
-    _visiting: tuple[str, ...] = (),
-) -> list[SessionTemplate]:
-    """The DECLARATIONS ``name`` merges from, in merge order: each
-    parent's own chain first (left to right), then the row itself. See
-    ``vms.templates._layers`` for the shape all four resolvers share and
-    why it matches ``resources.inheritance.merge_layers``.
-
-    ``_visiting`` carries the chain of in-progress walks so cycles raise
-    ``InheritanceCycleError`` instead of ``RecursionError``. The
-    framework's cycle pass at build_registry time is the canonical check;
-    this guard is the safety net for callers that resolve without going
-    through build_registry, and :func:`effective_template` keys on the
-    type to stay total.
-    """
-    if name in _visiting:
-        raise inheritance_cycle_error("session-template", (*_visiting, name))
-
-    if name not in templates:
-        return []
-
-    tmpl = templates[name]
-    next_visiting = (*_visiting, name)
-    layers = [layer for parent in tmpl.inherits for layer in _layers(templates, parent, next_visiting)]
-    layers.append(tmpl)
-    return layers
 
 
 def _declared_pair(tmpl: SessionTemplate) -> MergedHarness:
@@ -218,7 +187,6 @@ def _declared_pair(tmpl: SessionTemplate) -> MergedHarness:
 def _resolve_walk(
     templates: Mapping[str, SessionTemplate],
     name: str,
-    _visiting: tuple[str, ...] = (),
 ) -> EffectiveSessionTemplate:
     """Resolve ``name``'s chain: one accumulator per half, folded over the
     chain's declarations in merge order.
@@ -243,9 +211,13 @@ def _resolve_walk(
     it, contradicting the rule :func:`_merge_pair` documents. Pinned by
     ``tests/sessions/test_session_template_surface.py``.
     """
+    # Imported here, not at module level: ``agentworks.resources``'s package
+    # init loads every kind module, and every kind module reaches this one.
+    from agentworks.resources.inheritance import resolution_layers
+
     result = ResolvedSessionTemplate(name=name)
     harness = MergedHarness()
-    for layer in _layers(templates, name, _visiting):
+    for layer in resolution_layers(templates, name, "session-template"):
         _merge_template(result, layer)
         harness = _merge_pair(harness, _declared_pair(layer))
     return EffectiveSessionTemplate(resolved=result, harness=harness)
