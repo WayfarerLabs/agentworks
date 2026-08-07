@@ -13,8 +13,8 @@ The immutable origin snapshot is `starting-state.md`; the journey is the diff fr
 
 ## Declarative schema
 
-Both phases are on `main` and the `2026-07-31-declarative-schema` SDD is locked (phase 1 via PR
-# 316; phase 2 via PR #414, 2026-08-07). Every schema fact is authored once in a registration-time
+Both phases are on `main`, and the `2026-07-31-declarative-schema` SDD is locked: phase 1 landed via
+PR #316, phase 2 via PR #414 (2026-08-07). Every schema fact is authored once in a registration-time
 Pydantic model: validation, reference extraction (`agentworks/schema/`, a total two-walker split
 with shared iterative traversal in `agentworks/traversal.py`), JSON Schema emission with `x-agw-ref`
 markers, live samples, and `describe-kind` all derive from the models. The error bridge is the
