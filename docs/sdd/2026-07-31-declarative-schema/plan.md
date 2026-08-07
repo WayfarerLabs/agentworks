@@ -91,6 +91,13 @@ enumerated by 1.2f (operator-approved bounded window, see the preamble). The ste
 
 ### 1.2f Close the red window (fixture conversion to green)
 
+**`red-window-inventory.md` was retired 2026-08-07, after the window closed.** It enumerated the red
+set so the window stayed bounded, and that job finished when 1.2f burned it down. By then it named
+29 tests the suite no longer collects, most of them deleted with the migrator, so reading it
+described a state that had not existed for days. Nothing referenced it, and the window's rationale,
+bound, and closure are recorded here. See commit `3464d586` for the artifact. The checkboxes below
+are untouched: the enumeration happened, and this records only that its by-product was cleaned up.
+
 - [x] The ~58 TOML-resource fixtures are converted to YAML manifests (or hand-built registry rows
       where a test asserts registry/graph outcomes), by area: config, resources, sessions,
       git-credentials, vms, plugins, orchestrated. A shared resources-dir fixture helper is added
