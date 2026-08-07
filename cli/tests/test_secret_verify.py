@@ -11,11 +11,11 @@ from typer.testing import CliRunner
 from agentworks import output
 from agentworks.cli import app
 from agentworks.config import Config
-from agentworks.errors import ConnectivityError, ExternalError, NotFoundError, SecretMappingError
+from agentworks.errors import AgentworksError, ConnectivityError, ExternalError, NotFoundError, SecretMappingError
 from agentworks.resources.registry import Registry
 from agentworks.secrets.base import SecretDecl
 from agentworks.secrets.resolve import ActiveBackend
-from agentworks.secrets.verification import verify_named_secret
+from agentworks.secrets.verification import SecretInteractionPolicy, verify_named_secret
 
 
 class _Backend:
@@ -157,11 +157,44 @@ def test_verify_explicit_interactive_consent_and_global_state_unchanged(monkeypa
     output.set_non_interactive(False)
     before = output.non_interactive()
 
-    result = verify_named_secret(SimpleNamespace(), registry, "token", allow_interactive=True)  # type: ignore[arg-type]
+    result = verify_named_secret(
+        SimpleNamespace(), registry, "token", interaction_policy=SecretInteractionPolicy.ALLOW_INTERACTIVE
+    )  # type: ignore[arg-type]
 
     assert result.verified is True
     assert backend.calls == 1
     assert output.non_interactive() is before
+
+
+def test_verify_service_enforces_global_noninteractive_policy() -> None:
+    output.set_non_interactive(True)
+    try:
+        with pytest.raises(AgentworksError, match="interactive secret verification is unavailable"):
+            verify_named_secret(
+                SimpleNamespace(),  # type: ignore[arg-type]
+                SimpleNamespace(),  # type: ignore[arg-type]
+                "token",
+                interaction_policy=SecretInteractionPolicy.ALLOW_INTERACTIVE,
+            )
+    finally:
+        output.set_non_interactive(False)
+
+
+def test_custom_agentworks_error_subclass_is_not_reconstructed(monkeypatch: pytest.MonkeyPatch) -> None:
+    class ProviderError(ConnectivityError):
+        pass
+
+    backend = _Backend(failure=ProviderError("backend exposed swordfish"))
+    registry = SimpleNamespace(lookup=lambda kind, name: SecretDecl(name=name, description=""))
+    monkeypatch.setattr("agentworks.secrets.resolve.active_backends", lambda config, registry: [_active(backend)])
+
+    with pytest.raises(ExternalError) as caught:
+        verify_named_secret(SimpleNamespace(), registry, "token")  # type: ignore[arg-type]
+
+    assert type(caught.value) is ExternalError
+    assert caught.value.__context__ is None
+    assert caught.value.__traceback__ is not None
+    assert "swordfish" not in str(caught.value)
 
 
 def test_secret_verify_cli_emits_exactly_one_success_line(monkeypatch: pytest.MonkeyPatch) -> None:

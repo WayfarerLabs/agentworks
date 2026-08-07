@@ -35,7 +35,10 @@ def test_verify_connection_uses_one_canonical_no_op(monkeypatch: pytest.MonkeyPa
         "worker",
     )
 
-    assert calls == [("site", "local"), ("true", {"sudo": False, "tty": False, "env": None})]
+    assert calls == [
+        ("site", "local"),
+        ("true", {"sudo": False, "tty": False, "env": None, "timeout": 10}),
+    ]
     assert result.connected is True
     assert result.transport == "ssh"
 
@@ -105,7 +108,7 @@ def test_verify_connection_surfaces_failure_without_activation_or_mutation(
     assert calls == [
         ("get_vm", "worker"),
         ("site", "local"),
-        ("run", "true", {"sudo": False, "tty": False, "env": None}),
+        ("run", "true", {"sudo": False, "tty": False, "env": None, "timeout": 10}),
     ]
 
 

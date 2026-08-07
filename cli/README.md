@@ -725,9 +725,12 @@ The guide service composes a frozen onboarding snapshot from registered exact-re
 The assessment receives only their bounded fact records; it cannot traverse the registry, database,
 configuration, or operational capabilities.
 
-Phase 1 adds no CLI evidence flags. The CLI supplies an empty evidence tuple; direct guided,
-non-interactive, and future bootstrap service consumers may provide the typed tuple they own at the
-service boundary.
+Replay a caller-owned verification log with a repeatable, target-scoped flag such as
+`--evidence verify-named-secret:secret/tailscale-auth-key=verified` or
+`--evidence verify-vm-connection:vm/worker=refused`. The accepted outcomes are `verified`, `failed`,
+and `refused`; malformed, duplicate, mismatched, or inapplicable records fail the whole request
+before output. Agentworks does not persist an evidence ledger. Direct guided, non-interactive, and
+future bootstrap service consumers may provide the typed tuple they own at the service boundary.
 
 Guide remains useful when configuration or registry finalization fails. Authored prose still
 renders, live blocks are marked unavailable, the framed failure appears once, and the command
@@ -735,12 +738,13 @@ exits 1. `--names-only` emits one retained topic per line, degrades to authored 
 code-owned kind names under broken configuration, and exits 0. This stable stream backs Bash, Zsh,
 and PowerShell topic completion.
 
-| Command                              | Description                                      |
-| ------------------------------------ | ------------------------------------------------ |
-| `agw guide`                          | Render the guide index and onboarding disclosure |
-| `agw guide TOPIC...`                 | Render one or more exact topics atomically       |
-| `agw guide TOPIC... --agent/--human` | Override automatic presentation mode             |
-| `agw guide --names-only`             | Emit topic names for shell completion            |
+| Command                                                               | Description                                      |
+| --------------------------------------------------------------------- | ------------------------------------------------ |
+| `agw guide`                                                           | Render the guide index and onboarding disclosure |
+| `agw guide TOPIC...`                                                  | Render one or more exact topics atomically       |
+| `agw guide TOPIC... --agent/--human`                                  | Override automatic presentation mode             |
+| `agw guide concept-onboarding --evidence ACTION_ID:KIND/NAME=OUTCOME` | Replay caller-owned proof                        |
+| `agw guide --names-only`                                              | Emit topic names for shell completion            |
 
 ### Guide management coverage
 

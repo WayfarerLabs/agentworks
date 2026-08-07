@@ -18,6 +18,11 @@ multi-topic success and failure, authored broken-config fallback, and no-topic i
 resolution, VM connections, action execution, configuration mutation, and state mutation did not
 occur.
 
+This Phase 1 measurement intentionally stops at the first actionable guide plan. FRD acceptance
+criterion 1 requires the published Claude Code and Codex bootstrap packages and a working session,
+so its clean-machine timing and interaction evidence belongs to Phase 3 rather than this guide-core
+slice.
+
 ## Acceptance findings and rerun
 
 The initial run found that host-tool readiness inspected executable presence during guide registry
