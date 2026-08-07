@@ -13,10 +13,8 @@ agent-template) surfaces as a framework ``ConfigError`` at
 ``build_registry`` time citing the reference's source. Built-in entries
 ship as bundled manifests under ``manifests/builtin/``; operators may add
 or override entries via YAML manifests. The ``_load_system_commands`` /
-``_load_user_commands`` helpers below belong to the migrator's frozen TOML
-oracle (``agentworks.migrate.toml_resources``), which is written
-independently of the rows' own models on purpose, so its
-registry-equivalence check stays a real test of the emission mapping.
+``_load_user_commands`` helpers below survive the TOML sunset (ADR 0022)
+because the manifest install decoders delegate to them.
 
 ``agentworks.resources.kinds.__init__`` imports this module so the two
 kinds self-register into ``KIND_REGISTRY`` at load.
@@ -31,18 +29,13 @@ from pydantic import Field, model_validator
 
 from agentworks.declared_resource import DeclaredResource
 from agentworks.errors import ConfigError
-from agentworks.resource_loading import (
-    _SYNTHESIZED_DECLS,
-    _require_field,
-    _require_list,
-)
+from agentworks.resource_loading import _require_field, _require_list
 from agentworks.resources.kind import KIND_REGISTRY, synthesize_no_default
 from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from agentworks.config import _SectionLineMap
     from agentworks.resources.reference import ResourceReference
 
 
@@ -167,7 +160,6 @@ def _load_test_fields(data: dict[str, object], ctx: str) -> _TestFields:
 
 def _load_system_commands(
     raw: dict[str, object],
-    decls: _SectionLineMap = _SYNTHESIZED_DECLS,
 ) -> dict[str, SystemInstallCommandEntry]:
     entries: dict[str, SystemInstallCommandEntry] = {}
     for name, data in raw.items():
@@ -180,7 +172,6 @@ def _load_system_commands(
             description=str(data["description"]) if "description" in data else None,
             command=str(_require_field(data, "command", ctx)),
             path=_require_list(data, "path", ctx) if "path" in data else [],
-            declared_at=decls.lookup("system_install_commands", name),
             **tests,
         )
     return entries
@@ -188,7 +179,6 @@ def _load_system_commands(
 
 def _load_user_commands(
     raw: dict[str, object],
-    decls: _SectionLineMap = _SYNTHESIZED_DECLS,
 ) -> dict[str, UserInstallCommandEntry]:
     entries: dict[str, UserInstallCommandEntry] = {}
     for name, data in raw.items():
@@ -201,7 +191,6 @@ def _load_user_commands(
             description=str(data["description"]) if "description" in data else None,
             command=str(_require_field(data, "command", ctx)),
             path=_require_list(data, "path", ctx) if "path" in data else [],
-            declared_at=decls.lookup("user_install_commands", name),
             **tests,
         )
     return entries

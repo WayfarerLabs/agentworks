@@ -235,7 +235,7 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     # completer that builds a registry (so it would go quiet on a broken
     # config, which is exactly when this command is worth reaching for).
     ("resource.describe-kind", "target"): "resource_kinds",
-    # Resource migration + authoring. `resource sample`'s kind argument
+    # Resource authoring. `resource sample`'s kind argument
     # is a plain string (no click.Choice: any typed kind must reach the
     # service layer for a clean domain error, issue #276), so it
     # completes via the same config-free kinds completer `resource list

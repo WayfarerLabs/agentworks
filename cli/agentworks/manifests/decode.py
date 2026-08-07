@@ -21,9 +21,9 @@ as a ``CapabilityBlock``. The CONTENT of a capability-owned blob is NOT
 validated here: its shape check is the finalize ``validate_config`` pass
 (R3), against the capability's own declared model.
 
-``KIND_SECTIONS`` maps kind identifiers to their legacy TOML section
-names; it is the shared table the manifest migrator consumes so the two
-sides cannot disagree about what maps to what.
+``KIND_SECTIONS`` maps kind identifiers to their retired TOML section
+names. Its one consumer is the resource-section refusal in
+``config.load``, which names the sections a config.toml still carries.
 """
 
 from __future__ import annotations
@@ -73,9 +73,9 @@ def _sample_hint(kind: str) -> str:
     return f"`agw resource sample {kind}` prints this kind's fields"
 
 
-# Kind identifier -> legacy TOML section name(s) (the migrator's table).
-# Every kind maps to exactly one section except vm-site, whose legacy
-# declarations are the two flat sections [azure] / [proxmox] with
+# Kind identifier -> retired TOML section name(s). Every kind maps to
+# exactly one section except vm-site, whose legacy declarations were the
+# two flat sections [azure] / [proxmox] with
 # section-name-becomes-resource-name semantics.
 KIND_SECTIONS: dict[str, tuple[str, ...]] = {
     "secret": ("secrets",),
@@ -86,8 +86,10 @@ KIND_SECTIONS: dict[str, tuple[str, ...]] = {
     "git-credential": ("git_credentials",),
     "admin-template": ("admin",),
     "named-console-template": ("named_console",),
-    # secret-backend: capability kind, not declarable (no decoder);
-    # listed for the migrator's [secret_backends.*] drop handling only.
+    # secret-backend: capability kind, not declarable (no decoder). It is
+    # listed so the table stays a complete record of the retired sections;
+    # the resource-section refusal skips it, because [secret_backends.*] is
+    # a deprecated no-op rather than a resource declaration.
     "secret-backend": ("secret_backends",),
     "vm-site": ("azure", "proxmox"),
     "apt-source": ("apt_sources",),
@@ -141,14 +143,17 @@ def _hosting_descriptors() -> Mapping[str, CapabilityKindDescriptor]:
     )
 
 
-MIGRATE_HINT = "`agw resource migrate --all` rewrites your manifests in place."
-"""Remediation for the legacy shape the migrator can MECHANICALLY fold.
+SIBLING_SHAPE_HINT = (
+    "Apply the rewrite above; `agw resource describe-kind <kind>` documents the field, "
+    "and `agw resource sample <kind>` prints it as a document to edit. "
+    'See "Upgrading" in docs/guides/resources.md.'
+)
+"""Where an operator goes to make the retired sibling shape load again.
 
-Only that one: a naming string, with or without a foldable sibling table.
-The migrator refuses to guess at a document that mixes the two shapes, or
-at one whose sibling would collide with the tag (which half wins is the
-operator's call), so pointing those errors here would send an operator to
-a command that leaves their file alone.
+Attached only to the errors that PRINT a rewrite, which is what "the
+rewrite above" refers to. The two shapes with no honest rewrite (below)
+carry their instruction inline instead and get no hint, so the hint never
+points at something that is not on screen.
 """
 
 
@@ -178,26 +183,28 @@ def _reject_legacy_shape(surface: HostSurface, spec: Mapping[str, object], where
     ``{name: a, name: b}``, which is not valid YAML and hides that two
     keys claim to select the capability), and a sibling holding a VALUE
     that is not a table (there are no keys to fold, and printing the tag
-    alone would discard what the operator wrote). Neither carries the
-    migrate hint either, because the migrator refuses both documents too.
+    alone would discard what the operator wrote). Both say what to do
+    inline, and neither carries :data:`SIBLING_SHAPE_HINT`, which reads
+    "apply the rewrite above" and would be pointing at nothing.
 
     An EMPTY sibling (``platform_config:``, ``: null``, ``: ~``) is not
-    one of those two, and the difference is the whole reason the hint is
-    conditional: a null holds nothing, so the fold discards nothing and
-    the migrator rewrites it like any other document. It gets the rewrite
-    and the hint, with the extra instruction to delete the empty key that
-    the absent-sibling case has no need of. Saying otherwise sent an
-    operator to do by hand what one command does, and
-    ``test_the_migrator_covers_every_surface_whose_error_names_it`` is the
-    standing pin that this pairing stays honest.
+    one of those two: a null holds nothing, so the fold discards nothing
+    and the rewrite is printable. It gets the rewrite and the hint, with
+    the extra instruction to delete the empty key that the
+    absent-sibling case has no need of.
 
     The retired sibling field is refused whatever sits beside it, which is
     the ORPHAN case (a ``platform_config`` alone) and the MIXED one (a
     tagged ``platform`` table beside a stray ``platform_config``). The
     model layer would answer both with a generic unknown key, and the
-    operator's next move is the same in both: fold those keys in. No
-    migrate hint, because the migrator will not guess which half of a
-    mixed document wins and has nothing to fold in the orphan one.
+    operator's next move is the same in both: fold those keys in.
+
+    **session-template is refused here even though no shipped release
+    emitted the pair.** Its ``harness_integration`` was born tagged (the
+    field rename and the rejection of the string form shipped in one
+    release), so no file agentworks WROTE can carry the sibling shape. The
+    shape is what an operator TYPES from ``harness:`` muscle memory, which
+    is what this refusal is for.
 
     This is the one compatibility surface the model swap leaves behind,
     and it goes together with ``HostSurface.config_field``, whose only
@@ -218,14 +225,14 @@ def _reject_legacy_shape(surface: HostSurface, spec: Mapping[str, object], where
     head = f"{where}: spec.{field} names the capability as a string, which is no longer supported"
     if config_field not in spec:
         raise ConfigError(
-            f"{head}; write one tagged table instead: {_tagged_rewrite(field, name, ())}", hint=MIGRATE_HINT
+            f"{head}; write one tagged table instead: {_tagged_rewrite(field, name, ())}", hint=SIBLING_SHAPE_HINT
         )
     sibling = spec[config_field]
     if sibling is None:
         raise ConfigError(
             f"{head}, and spec.{config_field} is empty, so there are no keys to fold; write one tagged "
             f"table instead and remove it: {_tagged_rewrite(field, name, ())}",
-            hint=MIGRATE_HINT,
+            hint=SIBLING_SHAPE_HINT,
         )
     if not isinstance(sibling, dict):
         raise ConfigError(
@@ -238,7 +245,7 @@ def _reject_legacy_shape(surface: HostSurface, spec: Mapping[str, object], where
             f"selects the capability is your call; merge them by hand into one spec.{field} table"
         )
     raise ConfigError(
-        f"{head}; write one tagged table instead: {_tagged_rewrite(field, name, sibling)}", hint=MIGRATE_HINT
+        f"{head}; write one tagged table instead: {_tagged_rewrite(field, name, sibling)}", hint=SIBLING_SHAPE_HINT
     )
 
 

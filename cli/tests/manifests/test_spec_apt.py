@@ -101,14 +101,14 @@ def test_every_rejection_points_at_the_sample_surface() -> None:
     assert caught.value.hint == "`agw resource sample apt-source` prints this kind's fields"
 
 
-def test_an_apt_package_with_no_packages_loads_on_both_sides() -> None:
-    """The two sides have to agree about what is REQUIRED, not just about
-    what a document means, or `agw resource migrate` dead-ends: the
-    operator's config.toml hard-errors on load and the remediation aborts
-    at verification and rolls back.
+def test_an_apt_package_with_no_packages_loads_through_both_paths() -> None:
+    """The spec model and the per-entry loader it fronts have to agree
+    about what is REQUIRED, not just about what a document means: the
+    manifest decoder delegates to the loader, so a disagreement is a
+    document that validates and then fails to build.
 
-    `apt` reads as optional through the oracle's `_require_list`, whose
-    `get(key, [])` predates this step, so the model matches it."""
+    `apt` reads as optional through `_require_list`, whose `get(key, [])`
+    predates this step, so the model matches it."""
     from agentworks.apt import _load_apt_packages
 
     assert decode("apt-package", "empty", {}).apt == []

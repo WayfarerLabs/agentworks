@@ -1,11 +1,10 @@
 """``agw resource edit KIND/NAME`` -- open the declaring YAML manifest.
 
-Only operator-declared YAML resources are editable (maintainer ruling,
-2026-07-05, keep-it-simple scope): TOML-declared resources point at
-``agw resource migrate`` / ``agw config edit``; built-in and
-auto-declared resources have no file to open. ``edit_location`` is the
-service authority; the CLI adds only the KIND/NAME parse and the
-$EDITOR launch.
+Every operator-declared resource is a YAML manifest (ADR 0022), so an
+operator-declared origin opens straight away. Built-in and auto-declared
+resources have no file to open and say so (maintainer ruling, 2026-07-05,
+keep-it-simple scope). ``edit_location`` is the service authority; the CLI
+adds only the KIND/NAME parse and the $EDITOR launch.
 """
 
 from __future__ import annotations

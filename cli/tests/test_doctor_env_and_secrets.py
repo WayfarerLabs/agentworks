@@ -400,7 +400,9 @@ def test_doctor_shows_noop_secret_backend_sections(tmp_path: Path, monkeypatch) 
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
     g, _, _ = _check_config()
     warns = [(c.name, c.message or "") for c in g.checks if c.status == Status.WARN]
-    assert any("[secret_backends.env-var]" in name and "remove it" in message for name, message in warns), warns
+    assert any("[secret_backends.env-var]" in name and "delete the section" in message for name, message in warns), (
+        warns
+    )
 
 
 def test_manifest_issues_surface_as_doctor_rows(tmp_path: Path, monkeypatch, capsys) -> None:

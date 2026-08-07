@@ -192,9 +192,9 @@ def resource_describe(
         render_resource_description,
     )
 
-    # One KIND/NAME grammar across the resource group (same token shape
-    # as `resource migrate` selectors); '/' cannot appear in names, so
-    # the first-slash split is unambiguous.
+    # One KIND/NAME grammar across the resource group (`resource edit`
+    # and `resource list --names-only` use the same token); '/' cannot
+    # appear in names, so the first-slash split is unambiguous.
     kind, slash, name = ref.partition("/")
     if not slash or not name:
         raise ValidationError(
@@ -330,10 +330,7 @@ def resource_sample(
         bool,
         typer.Option(
             "--all",
-            help=(
-                "Print every kind's sample. Required for the full set; a "
-                "bare invocation is an error, matching `resource migrate`."
-            ),
+            help=("Print every kind's sample. Required for the full set; a bare invocation is an error."),
         ),
     ] = False,
     write: Annotated[
@@ -419,9 +416,9 @@ def resource_schema(
 
     Point a schema-aware editor at these and manifests get completions,
     hover docs, and diagnostics as you type. Files written by
-    `agw resource sample --write` and `agw resource migrate` already
-    carry the association, as a `# yaml-language-server: $schema=...`
-    line; add that line to a hand-written manifest to get the same.
+    `agw resource sample --write` already carry the association, as a
+    `# yaml-language-server: $schema=...` line; add that line to a
+    hand-written manifest to get the same.
 
     The schema describes THIS host: a capability contributed by a plugin
     appears in it once that plugin is installed, so re-run --write after

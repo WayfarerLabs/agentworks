@@ -49,7 +49,7 @@ def _capability_kinds() -> list[str]:
 
 def test_every_declarable_kind_renders() -> None:
     # secret-backend is a capability descriptor post-collapse
-    # (2026-07-07): in KIND_SECTIONS for the migrator's drop table, not
+    # (2026-07-07): in KIND_SECTIONS as a retired section name, not
     # declarable, no sample.
     assert "secret-backend" not in declarable_kinds()
     assert set(declarable_kinds()) | {"secret-backend"} == set(KIND_SECTIONS)
@@ -102,8 +102,8 @@ def test_all_kinds_concatenation_and_unknown_kind() -> None:
 
 
 def test_bare_sample_requires_kind_or_all() -> None:
-    """Mirrors `resource migrate`: dumping every kind is an explicit
-    opt-in, and mixing a kind with --all is an error."""
+    """Dumping every kind is an explicit opt-in (the CLI's standing
+    `--all` shape), and mixing a kind with --all is an error."""
     with pytest.raises(ValidationError, match="indicate a kind"):
         sample_text()
     with pytest.raises(ValidationError, match="not both"):

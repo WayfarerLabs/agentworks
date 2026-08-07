@@ -18,6 +18,19 @@ import pytest
 from agentworks.errors import ConfigError
 from agentworks.manifests import load_manifests
 
+_REWRITE_HINT = (
+    "Apply the rewrite above; `agw resource describe-kind <kind>` documents the field, "
+    "and `agw resource sample <kind>` prints it as a document to edit. "
+    'See "Upgrading" in docs/guides/resources.md.'
+)
+"""The operator-facing text, spelled out rather than imported.
+
+The remediation is the operator's own edit now (operator ruling,
+2026-08-07), so what the hint SAYS is the whole remedy rather than a
+pointer to a command that would do it. Importing the constant would assert
+it equals itself; this is the representative-mistakes corpus, and the text
+is what it is pinning."""
+
 _SURFACES = [
     (
         "vm-site",
@@ -105,7 +118,7 @@ def test_sibling_shape_is_rejected_with_the_exact_rewrite(
         _load_one(tmp_path, "old", old_doc)
     assert f"spec.{field} names the capability as a string" in str(excinfo.value)
     assert rewrite in str(excinfo.value)
-    assert excinfo.value.hint == "`agw resource migrate --all` rewrites your manifests in place."
+    assert excinfo.value.hint == _REWRITE_HINT
 
 
 def test_bare_naming_string_is_rejected_with_a_one_key_rewrite(tmp_path: Path) -> None:
@@ -323,16 +336,16 @@ def test_session_template_without_selector_remains_a_valid_default_or_inheriting
         ),
     ],
 )
-def test_mixed_shape_is_a_hard_error_with_no_migrate_hint(tmp_path: Path, doc: str, field: str) -> None:
+def test_mixed_shape_is_a_hard_error_with_no_rewrite_hint(tmp_path: Path, doc: str, field: str) -> None:
     """A tagged table beside a sibling ``*_config``: the message names the
     field that is not supported, so the operator's next move is to fold
     those keys in rather than to guess which half won.
 
-    And it carries NO hint at all. The migrator will not guess which half
-    of a mixed document wins either, so it leaves this file alone; naming
-    it here would send the operator to a command that does nothing for
-    them. The sample hint every model-layer error carries is not reached
-    either, because this refusal runs ahead of validation.
+    And it carries NO hint at all. The hint reads "apply the rewrite
+    above", and no rewrite is printed here: which half of a mixed document
+    wins is the operator's call, so any rewrite would be a guess. The
+    sample hint every model-layer error carries is not reached either,
+    because this refusal runs ahead of validation.
     """
     with pytest.raises(ConfigError) as excinfo:
         _load_one(tmp_path, "mixed", doc)
@@ -480,7 +493,7 @@ def test_cli_fails_on_the_old_shape_and_no_deprecations_does_not_silence_it(
         assert isinstance(result.exception, ConfigError)
         assert "res.yaml:2:" in str(result.exception)
         assert "platform: {name: lima, vm_host: ...}" in str(result.exception)
-        assert result.exception.hint == "`agw resource migrate --all` rewrites your manifests in place."
+        assert result.exception.hint == _REWRITE_HINT
 
 
 def test_cli_tagged_shape_loads_cleanly(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -553,12 +566,12 @@ def test_builtin_bundle_publishes_cleanly() -> None:
 # -- The rewrite is only printed when it would be an honest one ---------------
 
 
-def test_a_sibling_carrying_its_own_name_gets_no_rewrite_and_no_migrate_hint(tmp_path: Path) -> None:
+def test_a_sibling_carrying_its_own_name_gets_no_rewrite_and_no_hint(tmp_path: Path) -> None:
     """Folding this document would emit ``platform: {name: a, name: b}``,
     which is not valid YAML and hides that two keys claim to select the
-    capability. Which one wins is the operator's call, and the migrator
-    refuses it for the same reason, so pointing at the migrator here would
-    send them to a command that leaves their file alone.
+    capability. Which one wins is the operator's call, so no rewrite is
+    printed, and with no rewrite on screen the hint that says to apply it
+    would be pointing at nothing.
     """
     with pytest.raises(ConfigError) as excinfo:
         _load_one(
@@ -607,16 +620,15 @@ def test_a_non_table_sibling_names_the_value_it_cannot_fold(tmp_path: Path) -> N
 
 
 @pytest.mark.parametrize("spelling", ["", " null", " ~"])
-def test_an_empty_sibling_is_offered_the_migrator_rather_than_a_by_hand_fix(tmp_path: Path, spelling: str) -> None:
-    """An empty sibling holds nothing, so the migrator folds it, so the
-    error says so.
+def test_an_empty_sibling_is_shown_the_rewrite(tmp_path: Path, spelling: str) -> None:
+    """An empty sibling holds nothing, so the rewrite is printable, so it
+    is printed.
 
-    The refusal above withholds the migrate hint on the stated grounds
-    that the migrator refuses the same document. That reasoning does not
-    reach a null: there are no keys to lose, so the upgrade rewrites it
-    like any other. Withholding the hint here sent an operator to hand-fix
-    what one command does, and told them to put a value where it belongs
-    when they had written no value at all.
+    The refusal above prints none, because folding a non-table value would
+    discard what the operator wrote. That reasoning does not reach a null:
+    there are no keys to lose. Withholding the rewrite here told an
+    operator to put a value where it belongs when they had written no
+    value at all.
 
     The extra instruction over the absent-sibling case is real work: the
     empty key still has to go, or the next load answers with the ORPHAN
@@ -641,7 +653,7 @@ def test_an_empty_sibling_is_offered_the_migrator_rather_than_a_by_hand_fix(tmp_
     assert "spec.platform_config is empty, so there are no keys to fold" in message
     assert "platform: {name: lima}" in message, "the rewrite is printable here, unlike a non-table value"
     assert "remove it" in message
-    assert excinfo.value.hint == "`agw resource migrate --all` rewrites your manifests in place."
+    assert excinfo.value.hint == _REWRITE_HINT
 
 
 def test_decode_refuses_exactly_the_three_retired_sibling_shapes() -> None:

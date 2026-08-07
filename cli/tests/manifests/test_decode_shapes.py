@@ -95,8 +95,8 @@ def test_a_kind_owned_key_inside_the_provider_block_is_the_providers_to_refuse(
 
 
 def test_git_credential_token_in_provider_config(tmp_path: Path) -> None:
-    """token lives under provider_config now; a top-level spec.token is
-    rejected with a migration hint."""
+    """token lives inside the tagged provider table now; a top-level
+    spec.token is rejected as an unknown field."""
     _manifest(
         tmp_path,
         """

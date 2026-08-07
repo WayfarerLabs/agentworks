@@ -319,12 +319,13 @@ def restamped_modeline(
 ) -> tuple[str, bool]:
     """``text`` with its modeline corrected for ``kinds`` being added to it.
 
-    Returns ``(text, changed)``. Shared by everything that APPENDS to a
-    manifest (``resource sample --write``, ``resource migrate``), because
-    the way a modeline goes wrong is always the same: a file stamped for
-    one kind stops being a one-kind file, and the editor goes on checking
-    the new documents against the first kind's shape, red-underlining
-    configuration the loader accepts.
+    Returns ``(text, changed)``. Split out of ``resource sample --write``,
+    its one caller, because the rule belongs beside ``modeline`` (the
+    function that decides what a correct one says) rather than inside the
+    writer. The way a modeline goes wrong is always the same: a file
+    stamped for one kind stops being a one-kind file, and the editor goes
+    on checking the new documents against the first kind's shape,
+    red-underlining configuration the loader accepts.
 
     Two rules, and the difference between them is the whole reason this
     can be done at all:
