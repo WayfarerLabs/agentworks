@@ -18,7 +18,6 @@ class SecretVerification:
     """Value-free result of proving one named secret resolves."""
 
     name: str
-    verified: bool
 
 
 class SecretInteractionPolicy(Enum):
@@ -37,10 +36,9 @@ def verify_named_secret(
 ) -> SecretVerification:
     """Resolve one registered secret without retaining or exposing its value."""
     from agentworks import output
-    from agentworks.errors import AgentworksError, ValidationError
+    from agentworks.errors import ValidationError
     from agentworks.secrets.kinds import SECRET_KIND_NAME
     from agentworks.secrets.resolve import (
-        _sanitize_verification_exception,
         active_backends,
         resolve_secrets_quiet,
     )
@@ -60,14 +58,10 @@ def verify_named_secret(
             entity_name=name,
         ) from None
 
-    sanitized: AgentworksError | None = None
-    try:
-        backends = active_backends(config, registry)
-    except Exception as exc:
-        sanitized = _sanitize_verification_exception(exc)
-        backends = []
-    if sanitized is not None:
-        raise sanitized from None
+    # Registry and chain construction are first-party orchestration. Preserve
+    # their typed diagnostics; only calls into a selected backend are treated
+    # as provider-controlled and sanitized by ``resolve_secrets_quiet``.
+    backends = active_backends(config, registry)
     permitted = backends if allow_interactive else [backend for backend in backends if not backend.interactive]
     resolved = resolve_secrets_quiet(
         [decl],
@@ -75,5 +69,9 @@ def verify_named_secret(
         registry=registry,
         interactive_available=allow_interactive,
     )
-    # Deliberately test membership only. The value dies with this frame.
-    return SecretVerification(name=name, verified=name in resolved)
+    # The ordered resolver either proves every requested name or raises. Keep
+    # this membership check as an internal contract without carrying a
+    # permanently true result field into the CLI.
+    if name not in resolved:
+        raise RuntimeError("secret resolver returned without the requested proof")
+    return SecretVerification(name=name)

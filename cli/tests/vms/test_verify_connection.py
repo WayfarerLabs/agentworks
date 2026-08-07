@@ -6,7 +6,9 @@ from types import SimpleNamespace
 from typing import cast
 
 import pytest
+from typer.testing import CliRunner
 
+from agentworks.cli import app
 from agentworks.config import Config
 from agentworks.db import Database
 from agentworks.errors import ConnectivityError, NotFoundError, StateError
@@ -39,7 +41,7 @@ def test_verify_connection_uses_one_canonical_no_op(monkeypatch: pytest.MonkeyPa
         ("site", "local"),
         ("true", {"sudo": False, "tty": False, "env": None, "timeout": 10}),
     ]
-    assert result.connected is True
+    assert not hasattr(result, "connected")
     assert result.transport == "ssh"
 
 
@@ -120,3 +122,23 @@ def test_verify_connection_missing_vm() -> None:
             cast("Registry", SimpleNamespace()),
             "missing",
         )
+
+
+def test_verify_connection_cli_reports_service_result(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[object, ...]] = []
+    database = object()
+    config = object()
+    registry = object()
+    monkeypatch.setattr("agentworks.cli.commands.vm.get_db", lambda: database)
+    monkeypatch.setattr("agentworks.config.load_config", lambda: config)
+    monkeypatch.setattr("agentworks.bootstrap.load_request_registry", lambda candidate: registry)
+    monkeypatch.setattr(
+        "agentworks.vms.manager.verify_vm_connection",
+        lambda db, cfg, reg, name: calls.append((db, cfg, reg, name)) or SimpleNamespace(name=name, transport="ssh"),
+    )
+
+    result = CliRunner().invoke(app, ["vm", "verify-connection", "worker"])
+
+    assert result.exit_code == 0
+    assert result.stdout == "VM 'worker' connection verified via ssh.\n"
+    assert calls == [(database, config, registry, "worker")]

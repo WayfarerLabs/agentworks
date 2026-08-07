@@ -277,6 +277,17 @@ def _ensure_tailscale(
         # ``reinit_vm`` call in ``lifecycle.py``) affect this call site too.
         _mgr.verify_tailscale_available()
         exec_target = native_transport(vm, platform, config, ctx=ctx, stack=_stack)
+        # A rejoin command contains the resolved auth key. This fast repair
+        # path deliberately has no durable operation log, so reject any future
+        # transport change that attaches a redaction-free logger here. A
+        # logged rejoin must instead construct its logger with ``auth_key`` in
+        # the immutable redaction set before the first write.
+        if exec_target.logger is not None:
+            raise StateError(
+                "Tailscale rejoin transport unexpectedly has an operation logger",
+                entity_kind="vm",
+                entity_name=vm.name,
+            )
         _mgr.rejoin_tailscale(db, vm.name, exec_target, auth_key=auth_key)
 
     # After the stack unwinds (Azure has removed its transient SSH

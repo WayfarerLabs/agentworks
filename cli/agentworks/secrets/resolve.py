@@ -17,6 +17,8 @@ from agentworks import output
 from agentworks.errors import AgentworksError, ConfigError, ExternalError, SecretUnavailableError
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
+
     from agentworks.config import Config
     from agentworks.resources.graph import Readiness
     from agentworks.resources.registry import Registry
@@ -256,7 +258,7 @@ def validate_chain(config: Config, registry: Registry) -> None:
 
 def _fail_unavailable(
     missing: list[SecretDecl],
-    backends: list[ActiveBackend],
+    backends: Sequence[ActiveBackend | _VerificationBackend],
     errors: dict[str, str] | None,
     registry: Registry | None = None,
 ) -> None:
@@ -390,36 +392,33 @@ def resolve_secrets_quiet(
     interactive_available: bool,
 ) -> dict[str, str]:
     """Resolve through the canonical ordered loop without progress output."""
-    sanitized: AgentworksError | None = None
+    allowed_secret_names = frozenset(secret.name for secret in secrets)
+    safe_backends = tuple(
+        _VerificationBackend(backend, allowed_secret_names=allowed_secret_names) for backend in backends
+    )
+    return _resolve_secrets_ordered(
+        secrets,
+        safe_backends,
+        errors=None,
+        registry=registry,
+        reporter=_QuietResolutionReporter(),
+        interactive_available=interactive_available,
+    )
+
+
+def _safe_exception_attribute(exc: Exception, name: str) -> object | None:
+    """Read an optional exception field without trusting subclass setup."""
     try:
-        return _resolve_secrets_ordered(
-            secrets,
-            backends,
-            errors=None,
-            registry=registry,
-            reporter=_QuietResolutionReporter(),
-            interactive_available=interactive_available,
-        )
-    except AgentworksError as exc:
-        # A third-party backend controls its own exception text and hint. At
-        # this proof boundary neither is trusted: a badly behaved backend can
-        # include the fetched bytes in either field. Preserve the typed error
-        # category and entity framing, but replace all backend-authored prose.
-        sanitized = _sanitize_verification_exception(exc)
-    except Exception as exc:
-        # Provider code is not required to use Agentworks' exception hierarchy.
-        # Do not chain an untyped exception: its message, attributes, and
-        # traceback can all retain provider-controlled secret material.
-        sanitized = _sanitize_verification_exception(exc)
-
-    # Raise after leaving the provider exception's handler. ``raise ... from
-    # None`` suppresses display of implicit context, but raising inside the
-    # handler still retains the original exception on ``__context__``.
-    assert sanitized is not None
-    raise sanitized from None
+        return getattr(exc, name, None)
+    except Exception:
+        return None
 
 
-def _sanitize_verification_exception(exc: Exception) -> AgentworksError:
+def _sanitize_verification_exception(
+    exc: Exception,
+    *,
+    allowed_secret_names: frozenset[str] = frozenset(),
+) -> AgentworksError:
     """Replace provider-controlled exception state with safe typed framing."""
     from agentworks.errors import (
         AlreadyExistsError,
@@ -455,13 +454,100 @@ def _sanitize_verification_exception(exc: Exception) -> AgentworksError:
     }
     category = safe_categories.get(type(exc), ExternalError)
     if isinstance(exc, AgentworksError):
-        return category("secret verification failed", entity_kind=exc.entity_kind, entity_name=exc.entity_name)
+        entity_kind = _safe_exception_attribute(exc, "entity_kind")
+        entity_name = _safe_exception_attribute(exc, "entity_name")
+        # Exception fields are backend-authored too. Preserve only the fixed
+        # kind and an exact name from the caller's already-known declaration
+        # set; malformed, surprising, or secret-bearing fields are discarded.
+        if entity_kind == "secret" and type(entity_name) is str and entity_name in allowed_secret_names:
+            return category("secret verification failed", entity_kind="secret", entity_name=entity_name)
+        if entity_kind == "secret":
+            return category("secret verification failed", entity_kind="secret")
+        return category("secret verification failed")
     return ExternalError("secret verification failed")
+
+
+def _verification_backend_call[T](
+    operation: Callable[[], T],
+    *,
+    allowed_secret_names: frozenset[str],
+) -> T:
+    """Call provider code, sanitizing only the verification boundary."""
+    sanitized: AgentworksError | None = None
+    try:
+        return operation()
+    except Exception as exc:
+        sanitized = _sanitize_verification_exception(exc, allowed_secret_names=allowed_secret_names)
+
+    # Raising outside the provider exception handler prevents the fetched
+    # value and provider traceback from remaining as implicit context.
+    assert sanitized is not None
+    raise sanitized from None
+
+
+@dataclass(frozen=True)
+class _VerificationBackend:
+    """Value-sanitizing adapter used only by named-secret verification."""
+
+    backend: ActiveBackend
+    allowed_secret_names: frozenset[str]
+
+    @property
+    def readiness(self) -> Readiness:
+        return self.backend.readiness
+
+    @property
+    def name(self) -> str:
+        name = _verification_backend_call(
+            lambda: self.backend.name,
+            allowed_secret_names=self.allowed_secret_names,
+        )
+        if type(name) is not str:
+            raise ExternalError("secret verification failed")
+        return name
+
+    @property
+    def interactive(self) -> bool:
+        interactive = _verification_backend_call(
+            lambda: self.backend.interactive,
+            allowed_secret_names=self.allowed_secret_names,
+        )
+        if type(interactive) is not bool:
+            raise ExternalError("secret verification failed")
+        return interactive
+
+    def would_attempt(self, secret: SecretDecl) -> bool:
+        attempted = _verification_backend_call(
+            lambda: self.backend.would_attempt(secret),
+            allowed_secret_names=self.allowed_secret_names,
+        )
+        if type(attempted) is not bool:
+            raise ExternalError("secret verification failed")
+        return attempted
+
+    def describe_lookup(self, secret: SecretDecl) -> None:
+        # Quiet verification has no progress surface, so it does not invoke
+        # this provider-authored diagnostic hook at all.
+        del secret
+
+    def resolve(self, secrets: list[SecretDecl]) -> dict[str, str]:
+        resolved = _verification_backend_call(
+            lambda: self.backend.resolve(secrets),
+            allowed_secret_names=self.allowed_secret_names,
+        )
+        expected = {secret.name for secret in secrets}
+        if (
+            type(resolved) is not dict
+            or any(type(name) is not str or type(value) is not str for name, value in resolved.items())
+            or not set(resolved).issubset(expected)
+        ):
+            raise ExternalError("secret verification failed")
+        return resolved
 
 
 def _resolve_secrets_ordered(
     secrets: list[SecretDecl],
-    backends: list[ActiveBackend],
+    backends: Sequence[ActiveBackend | _VerificationBackend],
     *,
     errors: dict[str, str] | None,
     registry: Registry | None,

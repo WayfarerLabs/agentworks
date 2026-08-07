@@ -211,7 +211,7 @@ def test_remote_abandon_warning_names_the_vm_host(
     monkeypatch.setattr(
         LimaPlatform,
         "_create_remote",
-        lambda self, name, yaml: (_ for _ in ()).throw(interrupt),
+        lambda self, name, yaml, *, redactions: (_ for _ in ()).throw(interrupt),
     )
 
     with pytest.raises(KeyboardInterrupt) as exc:
@@ -248,11 +248,13 @@ def test_remote_interrupt_kills_the_detached_limactl_before_deleting(
         lima_mod, "ssh_run", lambda target, cmd, **kw: events.append(("ssh", cmd)) or SimpleNamespace(stdout="")
     )
 
+    captured_redactions: list[tuple[str, ...]] = []
+
     class _StubLogger:
         path = "/dev/null"
 
         def __init__(self, *a: object, **kw: object) -> None:
-            pass
+            captured_redactions.append(kw.get("redactions", ()))  # type: ignore[arg-type]
 
         def log_error(self, msg: str) -> None:
             pass
@@ -284,6 +286,7 @@ def test_remote_interrupt_kills_the_detached_limactl_before_deleting(
         LimaPlatform("lima", {"vm_host": "user@host"}).create(_request(), RunContext())
 
     assert exc.value is interrupt
+    assert captured_redactions == [("tskey-test",)]
     # The kill goes through run_detached's PID-file mechanism, and it
     # PRECEDES the delete.
     kill_cmd = "kill $(cat /tmp/agentworks-lima-myvm.pid)"
@@ -296,6 +299,38 @@ def test_remote_interrupt_kills_the_detached_limactl_before_deleting(
     # widened finally): the host-side rm of the copied YAML still runs.
     assert ("ssh", "rm -f /tmp/agentworks-myvm.yaml") in events
     assert any("Ctrl-C again to abandon" in w for w in captured_output.warnings)
+
+
+def test_remote_provision_failure_redacts_log_and_raised_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Bootstrap output can echo the embedded key, so neither sink may."""
+    from agentworks import remote_exec
+
+    secret = "tskey-test"
+    _wire_remote_host(monkeypatch, [])
+    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
+    monkeypatch.setattr(lima_mod, "copy_to", lambda *a, **k: None)
+    monkeypatch.setattr(lima_mod, "ssh_run", lambda *a, **k: SimpleNamespace(stdout=""))
+    monkeypatch.setattr(
+        remote_exec,
+        "run_detached",
+        lambda *a, **k: SimpleNamespace(exit_code=1, output=f"bootstrap rejected {secret}"),
+    )
+
+    with pytest.raises(SSHError) as caught:
+        LimaPlatform("lima", {"vm_host": "user@host"})._create_remote(
+            "myvm",
+            f"embedded: {secret}",
+            redactions=(secret,),
+        )
+
+    assert secret not in str(caught.value)
+    (log_path,) = tmp_path.glob("*.log")
+    log_text = log_path.read_text()
+    assert secret not in log_text
+    assert "bootstrap rejected [REDACTED]" in log_text
 
 
 def test_cleanup_failure_warns_and_does_not_mask_the_original(

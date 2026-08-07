@@ -316,7 +316,8 @@ class LimaPlatform(VMPlatform):
         try:
             try:
                 if self.is_remote:
-                    self._create_remote(instance_name, rendered)
+                    redactions = (request.tailscale_auth_key,) if request.tailscale_auth_key else ()
+                    self._create_remote(instance_name, rendered, redactions=redactions)
                 else:
                     self._create_local(instance_name, rendered)
 
@@ -456,8 +457,18 @@ class LimaPlatform(VMPlatform):
         limactl before deleting the instance."""
         return f"/tmp/agentworks-lima-{instance_name}"
 
-    def _create_remote(self, instance_name: str, lima_yaml: str) -> None:
-        """Create and start a Lima VM on the site's vm_host."""
+    def _create_remote(
+        self,
+        instance_name: str,
+        lima_yaml: str,
+        *,
+        redactions: tuple[str, ...],
+    ) -> None:
+        """Create and start a Lima VM on the site's vm_host.
+
+        ``lima_yaml`` can embed bootstrap secrets. The caller supplies the
+        complete set before the incremental operation logger writes anything.
+        """
         assert self._vm_host_ssh is not None
         target = SSHTarget(host=self._vm_host_ssh, user=None)
 
@@ -476,7 +487,7 @@ class LimaPlatform(VMPlatform):
         from agentworks.remote_exec import run_detached
         from agentworks.ssh import SSHLogger
 
-        ssh_logger = SSHLogger(instance_name, "vm-provision")
+        ssh_logger = SSHLogger(instance_name, "vm-provision", redactions=redactions)
         host_target = self._host_transport(logger=ssh_logger)
         lima_cmd = (
             f"limactl create --name {instance_name} --tty=false {remote_template} && limactl start {instance_name}"
@@ -507,8 +518,7 @@ class LimaPlatform(VMPlatform):
                 ssh_logger.log_error(result.output)
                 raise SSHError(
                     f"limactl create/start failed (exit {result.exit_code})\n"
-                    f"SSH log: {ssh_logger.path}\n"
-                    f"Last output:\n{result.output[-1000:]}"
+                    f"Sanitized output is in SSH log: {ssh_logger.path}"
                 )
         finally:
             # Exactly-once close, covering the paths where run_detached

@@ -11,7 +11,15 @@ from typer.testing import CliRunner
 from agentworks import output
 from agentworks.cli import app
 from agentworks.config import Config
-from agentworks.errors import AgentworksError, ConnectivityError, ExternalError, NotFoundError, SecretMappingError
+from agentworks.errors import (
+    AgentworksError,
+    ConfigError,
+    ConnectivityError,
+    ExternalError,
+    NotFoundError,
+    SecretMappingError,
+    SecretUnavailableError,
+)
 from agentworks.resources.registry import Registry
 from agentworks.secrets.base import SecretDecl
 from agentworks.secrets.resolve import ActiveBackend
@@ -66,7 +74,7 @@ def test_verify_filters_interactive_and_returns_no_value(monkeypatch: pytest.Mon
     result = verify_named_secret(SimpleNamespace(), registry, "token")  # type: ignore[arg-type]
 
     assert result.name == "token"
-    assert result.verified is True
+    assert not hasattr(result, "verified")
     assert not hasattr(result, "value")
     assert interactive.calls == 0
     assert regular.calls == 1
@@ -113,18 +121,89 @@ def test_verify_sanitizes_every_backend_exception(
     assert "swordfish" not in repr(caught.value)
 
 
-def test_verify_sanitizes_backend_activation_exception(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_verify_sanitizer_fails_closed_for_malformed_agentworks_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class MalformedProviderError(AgentworksError):
+        def __init__(self) -> None:
+            Exception.__init__(self, "provider exposed swordfish")
+
+        def __getattribute__(self, name: str) -> object:
+            if name in {"entity_kind", "entity_name", "hint"}:
+                raise RuntimeError("attribute exposed swordfish")
+            return super().__getattribute__(name)
+
+    backend = _Backend(failure=MalformedProviderError())
     registry = SimpleNamespace(lookup=lambda kind, name: SecretDecl(name=name, description=""))
-    monkeypatch.setattr(
-        "agentworks.secrets.resolve.active_backends",
-        lambda config, registry: (_ for _ in ()).throw(RuntimeError("activation exposed swordfish")),
-    )
+    monkeypatch.setattr("agentworks.secrets.resolve.active_backends", lambda config, registry: [_active(backend)])
 
     with pytest.raises(ExternalError) as caught:
         verify_named_secret(SimpleNamespace(), registry, "token")  # type: ignore[arg-type]
 
     assert str(caught.value) == "secret verification failed"
     assert caught.value.__context__ is None
+    assert getattr(caught.value, "entity_kind", None) is None
+    assert getattr(caught.value, "entity_name", None) is None
+    assert "swordfish" not in repr(caught.value)
+
+
+def test_verify_distrusts_backend_authored_entity_fields(monkeypatch: pytest.MonkeyPatch) -> None:
+    backend = _Backend(
+        failure=ConnectivityError(
+            "provider exposed swordfish",
+            entity_kind="secret",
+            entity_name="swordfish",
+        )
+    )
+    registry = SimpleNamespace(lookup=lambda kind, name: SecretDecl(name=name, description=""))
+    monkeypatch.setattr("agentworks.secrets.resolve.active_backends", lambda config, registry: [_active(backend)])
+
+    with pytest.raises(ConnectivityError) as caught:
+        verify_named_secret(SimpleNamespace(), registry, "token")  # type: ignore[arg-type]
+
+    assert caught.value.entity_kind == "secret"
+    assert caught.value.entity_name is None
+    assert "swordfish" not in repr(caught.value)
+
+
+def test_verify_preserves_first_party_chain_diagnostic(monkeypatch: pytest.MonkeyPatch) -> None:
+    registry = SimpleNamespace(lookup=lambda kind, name: SecretDecl(name=name, description=""))
+    monkeypatch.setattr(
+        "agentworks.secrets.resolve.active_backends",
+        lambda config, registry: (_ for _ in ()).throw(ConfigError("unknown backend in configured chain")),
+    )
+
+    with pytest.raises(ConfigError, match="unknown backend in configured chain"):
+        verify_named_secret(SimpleNamespace(), registry, "token")  # type: ignore[arg-type]
+
+
+def test_verify_preserves_first_party_unavailable_diagnostic(monkeypatch: pytest.MonkeyPatch) -> None:
+    registry = SimpleNamespace(
+        lookup=lambda kind, name: SecretDecl(name=name, description=""),
+        graph=SimpleNamespace(),
+        iter_kind_items=lambda kind: iter(()),
+    )
+    monkeypatch.setattr("agentworks.secrets.resolve.active_backends", lambda config, registry: [])
+
+    with pytest.raises(SecretUnavailableError, match="no active backend could resolve secret.*token") as caught:
+        verify_named_secret(SimpleNamespace(), registry, "token")  # type: ignore[arg-type]
+
+    assert caught.value.hint is not None
+    assert "agw secret describe token" in caught.value.hint
+
+
+def test_verify_does_not_misclassify_first_party_activation_exception(monkeypatch: pytest.MonkeyPatch) -> None:
+    registry = SimpleNamespace(lookup=lambda kind, name: SecretDecl(name=name, description=""))
+    failure = RuntimeError("activation failed before any backend ran")
+    monkeypatch.setattr(
+        "agentworks.secrets.resolve.active_backends",
+        lambda config, registry: (_ for _ in ()).throw(failure),
+    )
+
+    with pytest.raises(RuntimeError) as caught:
+        verify_named_secret(SimpleNamespace(), registry, "token")  # type: ignore[arg-type]
+
+    assert caught.value is failure
 
 
 def test_verify_preserves_ordered_fallback_and_quiets_not_ready(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -144,7 +223,7 @@ def test_verify_preserves_ordered_fallback_and_quiets_not_ready(monkeypatch: pyt
 
     result = verify_named_secret(SimpleNamespace(), registry, "token")  # type: ignore[arg-type]
 
-    assert result.verified is True
+    assert not hasattr(result, "verified")
     assert skipped.calls == 0
     assert winner.calls == 1
     assert events == []
@@ -161,7 +240,7 @@ def test_verify_explicit_interactive_consent_and_global_state_unchanged(monkeypa
         SimpleNamespace(), registry, "token", interaction_policy=SecretInteractionPolicy.ALLOW_INTERACTIVE
     )  # type: ignore[arg-type]
 
-    assert result.verified is True
+    assert not hasattr(result, "verified")
     assert backend.calls == 1
     assert output.non_interactive() is before
 

@@ -126,12 +126,11 @@ def test_write_sink_sanitizes_every_persistent_surface(
     assert text.count("[REDACTED]") >= 8
 
 
-def test_warning_text_remains_in_memory_but_is_never_persisted(
+def test_warning_text_is_sanitized_before_durable_logging(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Warning details are useful to live callers but are too unconstrained
-    to copy into an operation log, even when known secrets are registered."""
+    """Durable warnings retain their diagnosis without leaking known secrets."""
     secret = "ghp-supersecret-token"
     warning = f"credential rejected: {secret}"
     monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
@@ -141,7 +140,7 @@ def test_warning_text_remains_in_memory_but_is_never_persisted(
     initial_text = logger.path.read_text()
     assert warning not in initial_text
     assert secret not in initial_text
-    assert initial_text.endswith("WARNING\n")
+    assert "WARNING: credential rejected: [REDACTED]" in initial_text
     assert logger.warnings == [warning]
 
     logger.close()
@@ -149,6 +148,7 @@ def test_warning_text_remains_in_memory_but_is_never_persisted(
     text = logger.path.read_text()
     assert warning not in text
     assert secret not in text
+    assert "WARNING: credential rejected: [REDACTED]" in text
     assert "# Warnings: 1" in text
     assert logger.warnings == [warning]
 

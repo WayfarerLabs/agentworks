@@ -5,10 +5,11 @@ from __future__ import annotations
 import difflib
 import html
 import re
+import sqlite3
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
-from agentworks.errors import AgentworksError, ConfigError, ValidationError
+from agentworks.errors import AgentworksError, ConfigError, StateError, ValidationError
 from agentworks.guide.assessment import OnboardingSnapshot
 from agentworks.guide.catalog import GuideCatalog, _build_guide_catalog
 from agentworks.guide.contract import (
@@ -278,6 +279,26 @@ def render_guide(
                         verification_evidence=verification_evidence,
                     ).markdown.rstrip()
                 )
+        except sqlite3.DatabaseError:
+            # The guide owns a read-only connection. A future projection that
+            # accidentally attempts a write must degrade like any other live
+            # fact failure, without exposing SQLite internals or a database
+            # path. Render the whole selected set without live views so a
+            # multi-topic response stays atomic.
+            system_error = StateError(
+                "state database rejected a guide projection",
+                hint="Run a normal Agentworks command to inspect or repair the state database.",
+            )
+            documents = [
+                render_topic(
+                    topic,
+                    None,
+                    mode,
+                    unavailable="see the system failure below",
+                    verification_evidence=verification_evidence,
+                ).markdown.rstrip()
+                for topic in selected
+            ]
         finally:
             if owned_db and db is not None:
                 db.close()
