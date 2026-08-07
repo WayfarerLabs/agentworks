@@ -47,6 +47,7 @@ from agentworks.resources import KIND_REGISTRY
 from agentworks.schema import AgwModel, AgwRootModel
 
 if TYPE_CHECKING:
+    from collections.abc import Collection
     from pathlib import Path
 
     from pydantic import BaseModel
@@ -176,6 +177,48 @@ def modeline(*, manifest_path: Path, resources_dir: Path, kind: str | None) -> s
     target = resources_dir / SCHEMA_DIRNAME / filename
     relative = os.path.relpath(target, start=manifest_path.parent)
     return f"{MODELINE_PREFIX}{PurePath(relative).as_posix()}"
+
+
+def restamped_modeline(
+    text: str, *, manifest_path: Path, resources_dir: Path, kinds: Collection[str]
+) -> tuple[str, bool]:
+    """``text`` with its modeline corrected for ``kinds`` being added to it.
+
+    Returns ``(text, changed)``. Shared by everything that APPENDS to a
+    manifest (``resource sample --write``, ``resource migrate``), because
+    the way a modeline goes wrong is always the same: a file stamped for
+    one kind stops being a one-kind file, and the editor goes on checking
+    the new documents against the first kind's shape, red-underlining
+    configuration the loader accepts.
+
+    Two rules, and the difference between them is the whole reason this
+    can be done at all:
+
+    - A file with NO modeline is returned untouched. Adding one means
+      inserting at line 1 and shifting every line number the operator and
+      every stored ``declared_at`` already know, which is a bigger change
+      to their file than an append was asked to make.
+    - A modeline that is already there is REPLACED in place, which moves
+      no line at all.
+
+    Nothing parses the body to decide. The existing modeline is the record
+    of what the file was for, and for a sample append the body is mostly
+    commented-out text no YAML parser would report a kind for anyway.
+
+    Callers must ensure the schema set exists, since the line may now name
+    a schema file the file did not refer to before.
+    """
+    first, newline, rest = text.partition("\n")
+    if not first.startswith(MODELINE_PREFIX):
+        return text, False
+    unique = set(kinds)
+    only = unique.pop() if len(unique) == 1 else None
+    if first == modeline(manifest_path=manifest_path, resources_dir=resources_dir, kind=only):
+        return text, False
+    envelope = modeline(manifest_path=manifest_path, resources_dir=resources_dir, kind=None)
+    if first == envelope:
+        return text, False
+    return f"{envelope}{newline}{rest}", True
 
 
 # -- Model assembly --------------------------------------------------------

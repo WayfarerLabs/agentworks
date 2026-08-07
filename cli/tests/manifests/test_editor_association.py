@@ -12,6 +12,7 @@ finds, and validates the file's own documents against it.
 from __future__ import annotations
 
 import json
+from textwrap import dedent
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -19,15 +20,13 @@ import yaml
 from jsonschema import Draft202012Validator
 
 from agentworks.config import load_config
-from agentworks.manifests.emit import ENVELOPE_SCHEMA_FILENAME, SCHEMA_DIRNAME
+from agentworks.manifests.emit import ENVELOPE_SCHEMA_FILENAME, MODELINE_PREFIX, SCHEMA_DIRNAME
 from agentworks.manifests.samples import write_sample
 from agentworks.manifests.spec_model import declarable_kinds
 from agentworks.migrate import execute_plan, plan_migration
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-MODELINE_PREFIX = "# yaml-language-server: $schema="
 
 # This file used to import ``agentworks.plugins`` for its side effect,
 # because an emitted schema describes the capabilities THIS HOST has
@@ -135,6 +134,43 @@ def test_appending_a_second_kind_restamps_the_modeline(tmp_path: Path) -> None:
     assert body_after.startswith(body_before), "the body is appended to, never rewritten"
     assert manifest.read_text().count(MODELINE_PREFIX) == 1
     assert (resources / SCHEMA_DIRNAME / ENVELOPE_SCHEMA_FILENAME).is_file()
+
+
+def test_a_migration_append_restamps_a_stale_modeline(tmp_path: Path) -> None:
+    """The migrator appends to files it did not create, so it hits the
+    same staleness, and worse: these are LIVE documents rather than
+    commented-out samples, so the editor really does underline resources
+    that load.
+
+    `--layout single` targets one file for every kind, which is the shape
+    that reaches an existing single-kind file with documents of another
+    kind.
+    """
+    (tmp_path / "id.pub").write_text("ssh-ed25519 AAAA")
+    (tmp_path / "id").write_text("-----BEGIN OPENSSH PRIVATE KEY-----")
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        dedent(f"""\
+        [operator]
+        ssh_public_key = "{(tmp_path / "id.pub").as_posix()}"
+        ssh_private_key = "{(tmp_path / "id").as_posix()}"
+
+        [paths]
+        backups = "{(tmp_path / "backups").as_posix()}"
+
+        [vm_templates.dev]
+        cpus = 4
+        """)
+    )
+    resources = tmp_path / "resources"
+    manifest, _ = write_sample(resources, "resources.yaml", "secret")
+    assert manifest.read_text().splitlines()[0].endswith("secret.schema.json")
+
+    config = load_config(config_path, warn_issues=False, resources=False)
+    execute_plan(plan_migration(config, [], all_resources=True, layout="single"), config)
+
+    assert manifest.read_text().splitlines()[0] == (f"{MODELINE_PREFIX}{SCHEMA_DIRNAME}/{ENVELOPE_SCHEMA_FILENAME}")
+    assert "kind: vm-template" in manifest.read_text(), "the append itself still happened"
 
 
 def test_appending_the_same_kind_leaves_the_modeline_alone(tmp_path: Path) -> None:

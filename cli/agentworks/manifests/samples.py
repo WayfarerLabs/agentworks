@@ -80,7 +80,7 @@ def write_sample(
     rule ("delete one leading ``#`` from the document lines") is still true
     of the body.
     """
-    from agentworks.manifests.emit import SCHEMA_DIRNAME, modeline, write_schema_set
+    from agentworks.manifests.emit import SCHEMA_DIRNAME, modeline, restamped_modeline, write_schema_set
 
     target = _validated_target(resources_dir, filename)
     text = sample_text(kind, all_kinds=all_kinds)
@@ -89,9 +89,9 @@ def write_sample(
     if appended:
         existing = target.read_text(encoding="utf-8")
         separator = "" if existing.endswith("\n") or not existing else "\n"
-        body, restamped = _restamped(
+        body, restamped = restamped_modeline(
             f"{existing}{separator}\n{text}",
-            target=target,
+            manifest_path=target,
             resources_dir=resources_dir,
             kinds=_validated_kinds(kind, all_kinds),
         )
@@ -105,31 +105,6 @@ def write_sample(
         target.write_text(f"{header}\n{text}", encoding="utf-8")
         write_schema_set(resources_dir / SCHEMA_DIRNAME)
     return target, appended
-
-
-def _restamped(text: str, *, target: Path, resources_dir: Path, kinds: tuple[str, ...]) -> tuple[str, bool]:
-    """``text`` with its modeline corrected for the kinds now in the file.
-
-    Returns ``(text, changed)``. A file with no modeline is returned as it
-    came: this only ever REPLACES a first line that is already one, never
-    adds one, so no line number moves.
-
-    The existing modeline is what says which kind the file was for, so
-    nothing has to parse the body (which is mostly commented-out samples
-    that no YAML parser would report a kind for anyway).
-    """
-    from agentworks.manifests.emit import MODELINE_PREFIX, modeline
-
-    first, newline, rest = text.partition("\n")
-    if not first.startswith(MODELINE_PREFIX):
-        return text, False
-    only = kinds[0] if len(kinds) == 1 else None
-    if first == modeline(manifest_path=target, resources_dir=resources_dir, kind=only):
-        return text, False
-    envelope = modeline(manifest_path=target, resources_dir=resources_dir, kind=None)
-    if first == envelope:
-        return text, False
-    return f"{envelope}{newline}{rest}", True
 
 
 def _validated_kinds(kind: str | None, all_kinds: bool) -> tuple[str, ...]:

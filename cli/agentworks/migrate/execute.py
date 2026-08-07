@@ -83,7 +83,7 @@ def execute_plan(plan: MigrationPlan, config: Config) -> ExecutionResult:
                 old_digest = sha256(old_bytes).hexdigest()
                 _require_digest(write.path, old_digest, f"append to {write.path}")
                 old_text = old_bytes.decode("utf-8")
-                new_text = appended_yaml_text(old_text, write.documents)
+                new_text = appended_yaml_text(old_text, write)
                 new_digest = sha256(new_text.encode()).hexdigest()
                 appended[write.path] = (old_digest, new_digest, snapshot)
                 _atomic_write(

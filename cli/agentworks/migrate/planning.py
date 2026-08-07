@@ -186,7 +186,7 @@ class MigrationPlan:
         texts: dict[Path, str] = {}
         for write in self.writes:
             texts[write.path] = (
-                appended_yaml_text(write.path.read_text(encoding="utf-8"), write.documents)
+                appended_yaml_text(write.path.read_text(encoding="utf-8"), write)
                 if write.exists
                 else created_yaml_text(write)
             )
@@ -360,7 +360,7 @@ def _coalesce_writes_and_rewrites(
         if write is None:
             merged.append(rewrite)
             continue
-        new_text = appended_yaml_text(rewrite.new_text, write.documents)
+        new_text = appended_yaml_text(rewrite.new_text, write)
         merged.append(
             replace(
                 rewrite,
@@ -372,16 +372,29 @@ def _coalesce_writes_and_rewrites(
     return list(pending.values()), merged
 
 
-def appended_yaml_text(existing: str, documents: list[str]) -> str:
-    """``existing`` with ``documents`` appended, each after a ``---``.
+def appended_yaml_text(existing: str, write: FileWrite) -> str:
+    """``existing`` with ``write``'s documents appended, each after a
+    ``---``, and its modeline corrected if they make it untrue.
 
     The one spelling of "append manifest documents to a file's text",
     shared with ``execute_plan``: the coalesced case builds it at plan
     time and the ordinary append builds it at write time, and the two
     must produce identical bytes for the same inputs.
+
+    Takes the whole ``FileWrite`` rather than its documents so the
+    restamp cannot be forgotten at one of the call sites. A file stamped
+    for one kind that this run adds another kind to would otherwise go on
+    pointing at the first kind's schema, and unlike the sample case these
+    are LIVE documents: the operator's editor red-underlines resources
+    that load.
     """
+    from agentworks.manifests.emit import restamped_modeline
+
     prefix = "" if existing.endswith("\n") or not existing else "\n"
-    return existing + prefix + "".join(f"---\n{document}" for document in documents)
+    text = existing + prefix + "".join(f"---\n{document}" for document in write.documents)
+    # ``execute_plan`` writes the schema set on every run, after
+    # verification, so a line this points at the envelope resolves.
+    return restamped_modeline(text, manifest_path=write.path, resources_dir=write.resources_dir, kinds=write.kinds)[0]
 
 
 def created_yaml_text(write: FileWrite) -> str:
