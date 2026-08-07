@@ -324,3 +324,17 @@ def test_write_sample_refuses_escapes_and_suffixes(tmp_path: Path) -> None:
         write_sample(resources, "../escape.yaml")
     with pytest.raises(ValidationError, match=".yaml or .yml"):
         write_sample(resources, "samples.txt")
+
+
+@pytest.mark.parametrize("filename", [".schema/sneaky.yaml", ".hidden.yaml", "nested/.d/x.yaml"])
+def test_write_sample_refuses_unloadable_dot_paths(tmp_path: Path, filename: str) -> None:
+    """``--write`` may not write where the loader will never look.
+
+    ``loader._iter_manifest_files`` prunes every dot-prefixed name, file
+    and directory alike, so writing there produced a file plus a promise
+    ("uncomment to activate") that no amount of uncommenting could keep.
+    """
+    resources = tmp_path / "resources"
+    with pytest.raises(ValidationError, match="dot-prefixed"):
+        write_sample(resources, filename, "secret")
+    assert not (resources / filename).exists()

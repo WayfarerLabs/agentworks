@@ -186,6 +186,8 @@ def _validated_kinds(kind: str | None, all_kinds: bool) -> tuple[str, ...]:
 def _validated_target(resources_dir: Path, filename: str) -> Path:
     from pathlib import PurePath
 
+    from agentworks.manifests.emit import SCHEMA_DIRNAME
+
     rel = PurePath(filename)
     if rel.is_absolute() or ".." in rel.parts:
         raise ValidationError(
@@ -196,5 +198,18 @@ def _validated_target(resources_dir: Path, filename: str) -> Path:
         raise ValidationError(
             f"--write requires a .yaml or .yml filename; got {filename!r}",
             hint="The manifest loader only reads *.yaml / *.yml files.",
+        )
+    if any(part.startswith(".") for part in rel.parts):
+        # The same rule `loader._iter_manifest_files` walks by, stated
+        # against the path rather than against `.schema/` by name: the
+        # loader prunes every dot-prefixed file AND directory, so a
+        # manifest written under any of them is unreachable, not just one
+        # written under the generated-schema directory.
+        raise ValidationError(
+            f"--write cannot write into a dot-prefixed file or directory; got {filename!r}",
+            hint=(
+                "The manifest loader skips dot-prefixed names (that is what keeps the generated "
+                f"{SCHEMA_DIRNAME}/ out of the walk), so a manifest written there could never be activated."
+            ),
         )
     return resources_dir / rel
