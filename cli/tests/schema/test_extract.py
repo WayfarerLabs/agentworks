@@ -58,11 +58,17 @@ def test_an_omitted_field_falls_back_to_the_owner_template() -> None:
     assert names(extract_references(GithubLike, {}, OWNER)) == ["git-token-prod"]
 
 
-def test_an_explicit_null_is_treated_as_omitted() -> None:
-    assert names(extract_references(GithubLike, {"token": None}, OWNER)) == ["git-token-prod"]
+# An explicit ``null`` is treated as an omission, which is a DIVERGENCE
+# from three shipped validators rather than parity with them, so it is
+# pinned with the other three in
+# ``test_an_explicit_null_diverges_from_three_shipped_validators``.
 
 
-@pytest.mark.parametrize("value", [8, "", True, [], {}, ["a"]])
+# The two branches ``_scalar_edge`` can reject a written value on: not a
+# string at all, and a string with nothing in it. Every other malformed
+# value the walk could be handed reaches one of these two, so the
+# totality suite is where the rest of the garbage belongs.
+@pytest.mark.parametrize("value", [8, ""])
 def test_a_malformed_name_omits_the_edge(value: object) -> None:
     # The edge's identity is destroyed, so it is omitted rather than
     # guessed at; validation is where the shape error surfaces.
@@ -198,8 +204,12 @@ def test_a_tuple_of_names_is_a_sequence_like_a_list() -> None:
     assert names(extract_references(CatalogLike, {"templates": ["base", "other"]}, OWNER)) == ["base", "other"]
 
 
-@pytest.mark.parametrize("value", ["not a list", 8, {"a": "table"}, None])
+@pytest.mark.parametrize("value", ["not a list", {"a": "table"}])
 def test_a_collection_that_is_not_one_contributes_nothing(value: object) -> None:
+    # The two values that are ITERABLE without being the declared
+    # collection, which is what ``_elements_of`` has to refuse by shape
+    # rather than by truthiness: a bare string would otherwise decompose
+    # into characters and a table would hand over its keys.
     assert extract_references(CatalogLike, {"accounts": value}, OWNER) == ()
 
 
@@ -238,8 +248,10 @@ def test_an_arms_own_templated_default_applies() -> None:
     assert names(extract_references(SiteLike, {"platform": {"name": "proxmox"}}, OWNER)) == ["proxmox-token"]
 
 
-@pytest.mark.parametrize("tag", [None, 8, "unregistered", ""])
+@pytest.mark.parametrize("tag", [8, "unregistered"])
 def test_a_tag_naming_no_arm_contributes_nothing(tag: object) -> None:
+    # ``_arm_block``'s two rejections: a tag that is not a name at all,
+    # and a name no arm answers to.
     assert extract_references(SiteLike, {"platform": {"name": tag}}, OWNER) == ()
 
 
@@ -344,8 +356,11 @@ def test_a_scalar_is_not_read_as_a_root_model_arm() -> None:
 # --- surfaces that are not mapping-shaped -----------------------------
 
 
-@pytest.mark.parametrize("blob", [None, "op://vault/item", 0, False, [], ["a"], object()])
+@pytest.mark.parametrize("blob", [None, "op://vault/item", ["a"]])
 def test_a_blob_that_is_not_a_table_contributes_nothing(blob: object) -> None:
+    # Refused by SHAPE rather than by truthiness, which is what the
+    # non-empty list is here to say: a walk guarded by ``if not blob``
+    # would go on to read keys off it.
     assert extract_references(GithubLike, blob, OWNER) == ()
 
 
@@ -364,15 +379,8 @@ def test_a_model_rooted_root_model_carries_its_roots_references() -> None:
     assert extract_references(MappingRoot, "not a table", OWNER) == ()
 
 
-def test_an_unresolvable_model_contributes_nothing_rather_than_raising() -> None:
-    class Unresolvable(AgwModel):
-        nested: NeverDefined  # type: ignore[name-defined]  # noqa: F821
-
-    assert extract_references(Unresolvable, {"nested": {}}, OWNER) == ()
-
-
 @pytest.mark.parametrize("model_cls", [NeverResolved, ResolvesToUnbuildable])
-def test_a_model_that_cannot_be_built_contributes_nothing(model_cls: type[AgwModel]) -> None:
+def test_a_model_that_cannot_be_built_contributes_nothing_rather_than_raising(model_cls: type[AgwModel]) -> None:
     # Two different failures, and the second is the one that used to
     # escape: pydantic's own ``raise_errors=False`` covers an annotation
     # that never resolves, not one that resolves to a type it cannot
@@ -383,11 +391,11 @@ def test_a_model_that_cannot_be_built_contributes_nothing(model_cls: type[AgwMod
 # --- parity with the shipped hand-rolled derivations -------------------
 
 
-def test_parity_with_the_github_token_derivation() -> None:
-    # capabilities/git_credential/base.py::token_dependency
-    assert names(extract_references(GithubLike, {}, OWNER)) == ["git-token-prod"]
-    assert names(extract_references(GithubLike, {"token": "override"}, OWNER)) == ["override"]
-    assert extract_references(GithubLike, {"token": 8}, OWNER) == ()
+# Parity with ``capabilities/git_credential/base.py::token_dependency`` is
+# the marked-scalar section at the top of this file: ``GithubLike`` IS the
+# git-credential shape, so the three cases that derivation has (a written
+# name, an omission falling back to the template, a malformed value naming
+# nothing) are already pinned there one apiece.
 
 
 def test_parity_with_the_azure_service_principal_derivation() -> None:

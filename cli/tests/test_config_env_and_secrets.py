@@ -604,43 +604,47 @@ def test_unknown_backend_kind_in_secret_backends_errors(
         load_config(cfg_file, warn_issues=False)
 
 
-@pytest.mark.parametrize(
-    ("manifest", "context_label"),
-    [
-        (
-            ManifestDoc("vm-template", "default", {"env": {"AGENTWORKS_VM": "override"}}),
-            "vm-template/default.env",
-        ),
-        (
-            ManifestDoc("admin-template", "default", {"env": {"AGENTWORKS_PLATFORM": "override"}}),
-            "admin-template/default.env",
-        ),
-        (
-            ManifestDoc("agent-template", "claude", {"env": {"AGENTWORKS_AGENT": "override"}}),
-            "agent-template/claude.env",
-        ),
-        (
-            ManifestDoc("workspace-template", "ws", {"env": {"AGENTWORKS_WORKSPACE": "override"}}),
-            "workspace-template/ws.env",
-        ),
-        (
-            ManifestDoc("session-template", "shell", {"env": {"AGENTWORKS_SESSION": "override"}}),
-            "session-template/shell.env",
-        ),
-    ],
-)
-def test_agentworks_prefix_warning_fires_for_every_scope(
-    tmp_path: Path,
-    manifest: ManifestDoc,
-    context_label: str,
-) -> None:
+#: Every scope that has an env table, with the address its warning frames
+#: under. One decode over all five below rather than one test each: the
+#: check finds its subject by ANNOTATION (``decode._env_hygiene_issues``
+#: matches a mapping of ``EnvEntry``), so there is no per-scope branch to
+#: exercise separately; what is worth pinning is that no scope is missed.
+_ENV_BEARING_SCOPES = [
+    (ManifestDoc("vm-template", "default", {"env": {"AGENTWORKS_VM": "override"}}), "vm-template/default.env"),
+    (
+        ManifestDoc("admin-template", "default", {"env": {"AGENTWORKS_PLATFORM": "override"}}),
+        "admin-template/default.env",
+    ),
+    (ManifestDoc("agent-template", "claude", {"env": {"AGENTWORKS_AGENT": "override"}}), "agent-template/claude.env"),
+    (
+        ManifestDoc("workspace-template", "ws", {"env": {"AGENTWORKS_WORKSPACE": "override"}}),
+        "workspace-template/ws.env",
+    ),
+    (
+        ManifestDoc("session-template", "shell", {"env": {"AGENTWORKS_SESSION": "override"}}),
+        "session-template/shell.env",
+    ),
+]
+
+
+def test_agentworks_prefix_warning_fires_for_every_scope(tmp_path: Path) -> None:
     """The AGENTWORKS_* override warning fires for every scope's env table,
     not just admin.env. Pin this so a future refactor that moves the check
-    into a per-scope code path doesn't silently miss some scopes."""
+    into a per-scope code path doesn't silently miss some scopes.
+
+    Every missed scope is named, rather than the first: a refactor that
+    dropped three of them should say so in one run.
+    """
     cfg_file = tmp_path / "config.toml"
-    _write_base(cfg_file, manifests=[manifest])
+    _write_base(cfg_file, manifests=[manifest for manifest, _label in _ENV_BEARING_SCOPES])
     issues = _manifest_issues(cfg_file)
-    assert any(context_label in issue and "identity variable" in issue for issue in issues), issues
+
+    unwarned = [
+        label
+        for _manifest, label in _ENV_BEARING_SCOPES
+        if not any(label in issue and "identity variable" in issue for issue in issues)
+    ]
+    assert unwarned == [], f"env tables whose AGENTWORKS_* override went unwarned: {unwarned}; issues were {issues}"
 
 
 def test_plaintext_env_with_newline_warns(tmp_path: Path) -> None:

@@ -66,28 +66,18 @@ def test_vm_template_child_inherits_parent_needs_and_drops_what_it_overrides() -
     assert ("secret", "tailscale-auth-key") in _targets(parent, context)
 
 
-def test_vm_template_child_inherits_the_auth_key_its_parent_declared() -> None:
-    """The key travels DOWN the chain, which is the direction the test
-    above does not cover: there the child names its own.
-
-    Worth its own case because this one is a SILENT wrong answer rather
-    than a loud one. A child that loses its parent's key still resolves
-    and still publishes a secret edge, just to the built-in default name,
-    so the graph gates one secret while the VM provisions with another.
-    """
-    parent = VMTemplate(name="base", tailscale_auth_key="base-ts-key")
-    child = VMTemplate(name="kid", inherits=["base"])
-    targets = _targets(child, _context("vm-template", parent, child))
-
-    assert ("secret", "base-ts-key") in targets
-    assert ("secret", "tailscale-auth-key") not in targets
-
-
 def test_a_later_silent_parent_does_not_move_the_childs_auth_key_edge() -> None:
-    """The multi-parent form of the same edge, and the one that was wrong:
-    the second parent declares no key, so it used to arrive carrying the
+    """The key travelling DOWN the chain, in the form that was wrong: the
+    second parent declares no key, so it used to arrive carrying the
     built-in default and overwrite the first parent's real one. Nothing
     about the child changes, and the secret it depends on does.
+
+    A SILENT wrong answer rather than a loud one, which is what earns it a
+    case of its own: a child that loses its parent's key still resolves
+    and still publishes a secret edge, just to the built-in default name,
+    so the graph gates one secret while the VM provisions with another.
+    The single-parent form is the prefix of this one and needs no separate
+    case.
 
     ``tests/resources/test_inheritance_merge.py`` asserts the invariant
     behind this over every field of every inheriting kind; this pins what

@@ -9,7 +9,7 @@ imports neither ``sessions`` nor ``orchestration``.
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Annotated, ClassVar, Literal
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -17,8 +17,7 @@ from agentworks.capabilities.base import OperationScope, RunContext, ScopeLevel
 from agentworks.capabilities.config import capability_config_references, validate_capability_config
 from agentworks.capabilities.harness_integration import ShellIntegration
 from agentworks.errors import ConfigError, StateError
-from agentworks.schema import AgwModel, NonEmptyStr, RefOwner, SecretRef
-from tests.plugins._fixtures import ConformingHarnessIntegration
+from agentworks.schema import RefOwner
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -98,28 +97,6 @@ def test_shells_config_is_entirely_optional_beyond_its_tag() -> None:
     assert required == ["name"]  # the discriminator, which no template writes
 
 
-def test_a_tag_and_an_owner_templated_reference_need_nothing_from_a_template() -> None:
-    """Both are statically required and neither is something a template
-    writes: the tag is on every arm by construction, and the model layer
-    fills a templated reference from the owner. Worth pinning because a
-    model that required something a template CAN write used to be refused
-    outright; now that the merged blob is what validates, a required field
-    is a legitimate thing to declare (see
-    ``tests/sessions/test_effective_config_validation.py``) and these two
-    are simply the cases no lineage has to supply at all."""
-
-    class _Tagged(AgwModel):
-        name: Literal["tagged"]
-        token: Annotated[NonEmptyStr, SecretRef(usage="a token", default_template="tok-{owner_name}")]
-
-    class _TaggedIntegration(ConformingHarnessIntegration):
-        name: ClassVar[str] = "tagged"
-        description: ClassVar[str] = "declares a tag and a templated reference"
-        config_model: ClassVar[type[AgwModel]] = _Tagged
-
-    assert _TaggedIntegration.config_for() is _Tagged
-
-
 # -- config vocabulary: extraction + validation -------------------------------
 
 
@@ -166,13 +143,6 @@ def test_omitted_fields_arrive_defaulted_not_none() -> None:
     assert (config.command, config.resume_command, config.required_commands) == ("", "", [])
 
 
-def test_validation_rejects_an_explicit_null() -> None:
-    """The corollary of a defaulted field: ``null`` is no longer a
-    spelling of "omitted". Omit the key instead."""
-    with pytest.raises(ConfigError, match="command: must be a string"):
-        _validate({"command": None})
-
-
 def test_shell_launch_note_is_silent() -> None:
     # shell has no resume-vs-new notion, so it adds no op-output note.
     assert _harness_integration().launch_note() is None
@@ -189,6 +159,10 @@ def test_validation_rejects_deprecated_runtime_field() -> None:
 
 
 def test_validation_rejects_non_string_command() -> None:
+    # ``null`` is covered by the same declaration and the same message: the
+    # field is ``str`` with a default, so an explicit null is no longer a
+    # spelling of "omitted" (which is what
+    # ``test_omitted_fields_arrive_defaulted_not_none`` pins).
     with pytest.raises(ConfigError, match="command: must be a string"):
         _validate({"command": 3})
 

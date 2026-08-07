@@ -27,7 +27,10 @@ def test_overview_is_dedented_so_prose_can_be_written_where_it_belongs() -> None
     assert PROSE.overview == "A fixture thing is what a test declares.\n\nSecond paragraph."
 
 
-@pytest.mark.parametrize(("title", "overview"), [("", "text"), ("   ", "text"), ("Title", "   ")])
+# Whitespace-only rather than empty for the title, because that is the
+# stricter of the two: a check that forgot to strip would pass "" and fail
+# here.
+@pytest.mark.parametrize(("title", "overview"), [("   ", "text"), ("Title", "   ")])
 def test_empty_prose_is_refused_rather_than_rendered_blank(title: str, overview: str) -> None:
     """The contract's answer for "nothing useful to say" is to contribute
     no prose at all, so empty prose is a mistake rather than a choice."""

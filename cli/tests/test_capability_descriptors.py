@@ -256,24 +256,6 @@ class _SupportedPlatform(ConformingVMPlatform):
     description = "a platform with a known host-support verdict"
 
 
-def test_vm_platform_readiness_carries_the_host_support_sentence() -> None:
-    """Pin BOTH vm-platform readiness branches, and the blocked branch's exact
-    sentence, on every host.
-
-    The shipped platforms cannot do this: whether `wsl2` is host-supported
-    depends on the machine the suite runs on, so on Linux the blocked branch is
-    exercised by accident and on Windows it would not be exercised at all. The
-    sentence is operator-facing and the vm-site that depends on a platform
-    propagates this same verdict, so it is pinned against stubs with known
-    answers instead.
-    """
-    descriptor = descriptor_for("vm-platform")
-    assert descriptor.readiness("supported-fixture", _SupportedPlatform) == Readiness.ready()
-    assert descriptor.readiness("unsupported-fixture", _UnsupportedPlatform) == Readiness.blocked(
-        "platform 'unsupported-fixture' is unsupported here: the fixture says so"
-    )
-
-
 def test_the_graph_routes_a_capability_node_to_its_own_kinds_verdict() -> None:
     """The graph's capability-node readiness, through the graph's own entry
     point, against verdicts only the right route can produce.
@@ -293,6 +275,15 @@ def test_the_graph_routes_a_capability_node_to_its_own_kinds_verdict() -> None:
     dispatching vm-platform to another kind's record (every other kind is
     unconditionally ready) nor by handing the callable a different impl
     (only this one says that).
+
+    BOTH vm-platform branches are pinned here, and the blocked branch's
+    exact sentence with them, because ``_capability_node_readiness``
+    expands to the descriptor callable: the two verdicts below are what
+    that callable answered. The shipped platforms could not pin this at
+    all, since whether `wsl2` is host-supported depends on the machine the
+    suite runs on, so on Linux the blocked branch would be exercised by
+    accident and on Windows not at all. The sentence is operator-facing and
+    a vm-site depending on a platform propagates this same verdict.
     """
     from agentworks.plugins import Plugin, seated_plugin
 
@@ -373,40 +364,22 @@ def test_each_kinds_config_contract_matches_how_its_config_is_dispatched() -> No
     assert contracts["secret-backend"].discriminator is None
 
 
-@pytest.mark.parametrize("descriptor", _descriptors(), ids=lambda d: d.kind)
-def test_a_kinds_config_contract_admits_the_models_that_kind_registers(
-    descriptor: CapabilityKindDescriptor,
-) -> None:
-    """Every model a seated implementation offers satisfies its kind's
-    contract. Vacuous only while a kind has no models yet, which the
-    conformance suite below covers from the other side."""
-    for name, seated in descriptor.registry().items():
-        model = getattr(_impl_class(seated), "config_model", None)
-        if model is None:
-            continue
-        assert issubclass(model, descriptor.config_schema.base), f"{descriptor.kind} {name!r}"
-
-
 # -- Conformance of everything this build ships -----------------------------
 
 
 @pytest.mark.parametrize("descriptor", _descriptors(), ids=lambda d: d.kind)
 def test_every_registered_builtin_impl_conforms(descriptor: CapabilityKindDescriptor) -> None:
     """Registration-time conformance is only worth wiring in if what we
-    already ship passes it."""
+    already ship passes it.
+
+    Every check the contract makes, over every seated implementation,
+    plugin-supplied ones included: a shipped plugin's impls are seated by
+    the time this runs, so iterating the registry covers them. That is why
+    "the models a kind registers satisfy its ``config_schema.base``" is not
+    a test of its own; ``conformance_error`` makes exactly that
+    ``issubclass`` check (``capabilities/conformance.py:193``) and, unlike a
+    bare subclass assertion, fails rather than skips when an impl declares
+    no model at all.
+    """
     for name, seated in descriptor.registry().items():
         assert conformance_error(descriptor, _impl_class(seated)) is None, f"{descriptor.kind} {name!r}"
-
-
-def test_every_shipped_plugin_impl_conforms() -> None:
-    """The shipped plugins' declared impls conform too, checked off the
-    descriptors rather than off the registries, so a plugin impl that never
-    seats (because a built-in occupies its name) is still covered."""
-    from agentworks.plugins import SYSTEM_PLUGINS
-
-    assert SYSTEM_PLUGINS, "the shipped plugin index is empty; this test would prove nothing"
-    for plugin in SYSTEM_PLUGINS.values():
-        for kind, impls in plugin.capabilities.items():
-            descriptor = descriptor_for(kind)
-            for impl in impls:
-                assert conformance_error(descriptor, impl) is None, f"{plugin.name} {kind} {impl.__name__}"

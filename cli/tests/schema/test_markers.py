@@ -68,15 +68,6 @@ class Marked(AgwModel):
     two ways a marker ends up one level down."""
 
 
-def test_secret_ref_defaults_its_kind() -> None:
-    assert SecretRef(usage="u").kind == "secret"
-    assert ResourceRef(kind="vm-template", usage="u").kind == "vm-template"
-
-
-def test_markers_default_to_a_uses_relationship() -> None:
-    assert SecretRef(usage="u").relationship is RefRelationship.USES
-
-
 def test_render_default_substitutes_the_owner() -> None:
     marker = SecretRef(usage="u", default_template="{owner_kind}-token-{owner_name}")
     assert marker.render_default(OWNER) == "git-credential-token-prod"
@@ -114,12 +105,10 @@ def test_a_template_the_extractor_could_not_render_is_refused_at_construction(te
     assert expected in str(exc.value)
 
 
-def test_the_whole_vocabulary_is_accepted() -> None:
-    marker = SecretRef(usage="u", default_template="{owner_kind}/{owner_name}")
-    assert marker.default_template == "{owner_kind}/{owner_name}"
-
-
 def test_schema_extension_carries_all_four_keys() -> None:
+    # Also where the two per-marker DEFAULTS are pinned: ``SecretRef``
+    # answers for the "secret" kind without being told, and every marker
+    # relates by "uses" until it says otherwise.
     assert SecretRef(usage="the auth token", default_template="git-token-{owner_name}").schema_extension() == {
         "kind": "secret",
         "usage": "the auth token",

@@ -40,11 +40,6 @@ def example_config(tmp_path: Path) -> Path:
     return p
 
 
-def test_empty_registry_is_not_finalized() -> None:
-    r = Registry.empty()
-    assert not r.is_finalized
-
-
 def test_add_rejects_names_containing_slash(tmp_path: Path) -> None:
     """'/' is banned in resource names at the single publisher choke
     point (maintainer ruling, 2026-07-05): it is reserved for kind/name

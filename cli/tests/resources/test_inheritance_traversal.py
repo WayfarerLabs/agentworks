@@ -81,6 +81,12 @@ def test_no_runtime_need_traversal_attributes_the_parents_default_to_the_child(
     declared secret references rather than the graph, so what has to be
     checked of them is the reference set they are given; the closure is
     where the crossing used to happen.
+
+    Both halves of the split are here, as EQUALITY rather than
+    containment, which is what makes them one assertion: the parent's
+    ``base-env-secret`` has to still reach the child (cutting the edge
+    without the child publishing its merged declaration's needs would
+    silently drop it), and it has to reach the child exactly once.
     """
     graph = inheriting_registry.graph
 
@@ -100,14 +106,6 @@ def test_no_runtime_need_traversal_attributes_the_parents_default_to_the_child(
 
     node = vm_template_node(resolve_template(inheriting_registry, "kid"))
     assert {ref.name for ref in node.config_secret_refs()} == {"kid-auth-key"}
-
-
-def test_the_inherited_need_still_reaches_the_child(inheriting_registry: Registry) -> None:
-    """The other side of the split, and the reason it could not land alone:
-    cutting the edge without the child publishing its merged declaration's
-    needs would silently DROP the parent's env secret instead of
-    double-counting it."""
-    assert "base-env-secret" in {decl.name for decl in collect_secrets_for(inheriting_registry, ("vm-template", "kid"))}
 
 
 def _disabling(*keys: tuple[str, str]) -> EnablementSource:

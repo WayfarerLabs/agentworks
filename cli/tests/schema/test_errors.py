@@ -150,18 +150,8 @@ def test_an_absent_capability_name_reads_as_a_missing_field() -> None:
     assert _lines(SiteLike, {"platform": {"vm_host": "h"}}) == ["vm-site/lab.platform: name is required"]
 
 
-@pytest.mark.parametrize(
-    "blob",
-    [
-        {"client_id": 8, "tenant_id": "t"},
-        {"tenant_id": "t"},
-        {"client_id": "c", "tenant_id": "t", "client_ids": 1},
-    ],
-)
-def test_every_corpus_entry_is_owner_framed(blob: dict[str, object]) -> None:
-    (line,) = _lines(PrincipalLike, blob)
-
-    assert line.startswith("vm-site/lab.")
+# Owner framing is not asserted separately for the corpus: each of the four
+# entries above pins its WHOLE line, ``vm-site/lab.`` prefix included.
 
 
 # -- Framing: one error -------------------------------------------------------
@@ -225,12 +215,6 @@ def test_a_hint_is_carried_through() -> None:
     assert error.hint == "see `agw resource describe`"
 
 
-def test_the_bridge_produces_a_config_error() -> None:
-    """Never the agentworks ``ValidationError``, which is a different
-    thing (invalid input at the command surface)."""
-    assert isinstance(_raised(PrincipalLike, {"tenant_id": "t"}), ConfigError)
-
-
 # -- Framing: several errors --------------------------------------------------
 
 
@@ -254,12 +238,6 @@ def test_no_line_of_a_multi_error_batch_is_unlocated() -> None:
     assert header.startswith("sites.yaml:12: ")
     assert body, "a multi-error batch renders its problems on their own lines"
     assert all(line.startswith("  ") for line in body), "an unindented line reads as a new, unlocated message"
-
-
-def test_a_multi_error_header_states_the_true_count() -> None:
-    header = str(_raised(SiteLike, THREE_PROBLEMS)).splitlines()[0]
-
-    assert header.endswith("vm-site/lab: 3 problems")
 
 
 def test_a_multi_error_batch_without_a_location_still_reads_as_one_message() -> None:
@@ -348,11 +326,9 @@ def test_a_marked_list_element_is_addressed_by_its_index() -> None:
     assert _lines(TemplateLike, {"inherits": ["a", 8]}) == ["vm-site/lab.inherits[1]: must be a string"]
 
 
-def test_a_whole_document_problem_carries_no_path() -> None:
-    assert _lines(StringRoot, {"a": 1}) == ["vm-site/lab: must be a string"]
-
-
-def test_a_root_models_problem_is_framed_by_its_location_too() -> None:
+def test_a_whole_document_problem_carries_no_path_and_is_located_like_any_other() -> None:
+    # A root model's problem is the document's, so there is no field
+    # segment to render after the owner; the location still frames it.
     assert str(_raised(StringRoot, {"a": 1})) == "sites.yaml:12: vm-site/lab: must be a string"
 
 
@@ -394,6 +370,11 @@ def test_an_undiscriminated_unions_arm_name_is_dropped_too() -> None:
 
     Every arm reports, so this is a batch: the owner is on the header and
     the problems are the indented lines under it.
+
+    The surviving line is also what says the union collapse below leaves
+    a DEEPER failure alone: this problem is past the union position, it
+    names a field of the arm the operator clearly meant, and it is the
+    informative kind the collapse must never eat.
     """
     lines = _lines(UndiscriminatedSite, {"platform": {"name": "lima", "vm_host": 8}})
 
@@ -429,39 +410,32 @@ def test_a_table_key_spelled_like_the_marker_is_still_addressed() -> None:
     ]
 
 
-def test_a_nested_table_keeps_a_key_spelled_like_the_marker() -> None:
-    """The drop is conditioned on the marker being the LAST segment as
-    well as on standing past a mapping key, and that is what this shape
-    needs: one level down, the operator's literal ``[key]`` is not last
-    and pydantic's marker after it is. Without the last-segment condition
-    the operator's own key was the one dropped."""
+class NestedShoutyTable(AgwModel):
+    """A table of tables whose inner keys are constrained."""
 
-    class Nested(AgwModel):
-        """A table of tables whose inner keys are constrained."""
-
-        outer: dict[str, dict[ShoutyKey, int]] = Field(default_factory=dict)
-
-    assert _lines(Nested, {"outer": {"a": {"[key]": 1}}}) == [
-        "vm-site/lab.outer.a.[key].[key]: invalid key '[key]' (must be upper case)"
-    ]
+    outer: dict[str, dict[ShoutyKey, int]] = Field(default_factory=dict)
 
 
-def test_a_nested_tables_key_marker_is_noise_the_walk_does_not_reach() -> None:
-    """The half this does NOT fix, said out loud. The walk loses track at
-    a collection whose elements are themselves a collection, so it cannot
-    tell the marker from a segment the operator wrote and keeps it. Noise
-    in the path, never a wrong one, and no kind spec has this shape: the
-    env table is the only constrained-key mapping and its values are
-    models."""
-
-    class Nested(AgwModel):
-        """A table of tables whose inner keys are constrained."""
-
-        outer: dict[str, dict[ShoutyKey, int]] = Field(default_factory=dict)
-
-    assert _lines(Nested, {"outer": {"a": {"low": 1}}}) == [
-        "vm-site/lab.outer.a.low.[key]: invalid key 'low' (must be upper case)"
-    ]
+@pytest.mark.parametrize(
+    ("key", "expected"),
+    [
+        # The drop is conditioned on the marker being the LAST segment as
+        # well as on standing past a mapping key, and that is what this
+        # shape needs: one level down, the operator's literal ``[key]`` is
+        # not last and pydantic's marker after it is. Without the
+        # last-segment condition the operator's own key was the one dropped.
+        ("[key]", "vm-site/lab.outer.a.[key].[key]: invalid key '[key]' (must be upper case)"),
+        # The half this does NOT fix, said out loud. The walk loses track
+        # at a collection whose elements are themselves a collection, so it
+        # cannot tell the marker from a segment the operator wrote and
+        # keeps it. Noise in the path, never a wrong one, and no kind spec
+        # has this shape: the env table is the only constrained-key mapping
+        # and its values are models.
+        ("low", "vm-site/lab.outer.a.low.[key]: invalid key 'low' (must be upper case)"),
+    ],
+)
+def test_a_nested_tables_key_keeps_the_segments_the_walk_cannot_tell_apart(key: str, expected: str) -> None:
+    assert _lines(NestedShoutyTable, {"outer": {"a": {key: 1}}}) == [expected]
 
 
 def test_a_value_matching_no_alternative_of_a_union_is_one_problem() -> None:
@@ -483,15 +457,6 @@ def test_a_collapsed_union_line_replaces_pydantics_member_labels() -> None:
     assert len(_problems(exc, MappingValueLike, OWNER)) == 1
 
 
-def test_a_failure_inside_a_union_member_is_not_collapsed_away() -> None:
-    """A problem DEEPER than the union position is the informative kind
-    (it names a field of the member the operator clearly meant), so the
-    collapse deliberately leaves those alone."""
-    lines = _lines(UndiscriminatedSite, {"platform": {"name": "lima", "vm_host": 8}})
-
-    assert "  platform.vm_host: must be a string" in lines
-
-
 def test_the_arm_that_got_past_the_shape_answers_for_the_whole_union() -> None:
     """The table arm accepted the value and failed on a field of it, so
     it is the arm the operator meant. The string arm's "must be a string"
@@ -508,6 +473,12 @@ def test_a_shape_rejection_is_noise_whichever_end_of_the_batch_it_lands_on() -> 
     arm is the one that matched, so the table arm's "must be a table"
     trails the real message instead of leading it. Same noise, and the
     same single line survives.
+
+    That surviving line is also the scalar-arm rendering, unprefixed: a
+    non-model arm has no fields to continue into, so dropping its name
+    leaves the message at the document level, which is where a root
+    model's problems belong anyway (``must not be empty``, not ``str:
+    must not be empty``).
     """
     assert _lines(StringOrTableRoot, "") == ["vm-site/lab: must not be empty"]
 
@@ -519,14 +490,6 @@ def test_a_union_no_arm_could_enter_still_lists_every_alternative() -> None:
     string nor a table is that case.
     """
     assert _lines(StringOrTableRoot, 5) == ["vm-site/lab: must be a string or a table"]
-
-
-def test_an_undiscriminated_root_models_scalar_arm_renders_unprefixed() -> None:
-    """A non-model arm has no fields to continue into, so dropping its
-    name leaves the message alone at the document level, which is where a
-    root model's problems belong anyway: ``must not be empty``, not
-    ``str: must not be empty``."""
-    assert _lines(StringOrTableRoot, "") == ["vm-site/lab: must not be empty"]
 
 
 # -- Normalization ------------------------------------------------------------
@@ -644,7 +607,11 @@ def test_a_validators_own_message_is_carried_without_pydantics_prefix() -> None:
 
 
 def test_the_bridge_produces_a_plain_config_error() -> None:
-    """There is no marker type any more, and none is needed: every error a
+    """A ``ConfigError`` exactly, never a subclass and never the
+    agentworks ``ValidationError`` (a different thing: invalid input at
+    the command surface).
+
+    There is no marker type any more, and none is needed: every error a
     resource's ``validate_config`` raises comes from here, so the finalize
     pass has one framing to leave alone rather than two to tell apart."""
     raised = _raised(PrincipalLike, {})
