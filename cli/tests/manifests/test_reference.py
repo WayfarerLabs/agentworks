@@ -293,6 +293,26 @@ def test_a_union_that_is_not_a_capability_offers_no_pointer() -> None:
     assert [alt.target for alt in entry.alternatives] == [None, None]
 
 
+def test_an_alternative_gets_an_address_only_when_the_address_exists() -> None:
+    """Being collected UNDER a capability kind does not make every union in
+    the tree a union of its implementations.
+
+    A kind's whole spec is collected under the capability it hosts, arms
+    included, so any other tagged block an author writes inside one was
+    handed `agw resource describe-kind vm-platform/leaf`: a printed command
+    that fails. The registry decides, since it is what the command asks.
+    """
+    (element,) = field_tree(Nodes, "vm-platform")[0].children
+
+    assert [alt.name for alt in element.alternatives] == ["group", "leaf"]
+    assert [alt.target for alt in element.alternatives] == [None, None]
+    # The counterpart, over the real registry: an arm that IS an
+    # implementation keeps its address.
+    platform = _entries_by_name(reference_for("vm-site"))["platform"]
+    assert platform.alternatives
+    assert all(alt.target == f"vm-platform/{alt.name}" for alt in platform.alternatives)
+
+
 class SelfReachingArm(AgwModel):
     """A union arm reachable from itself, which a plugin's config model
     may be: a group whose members are groups."""

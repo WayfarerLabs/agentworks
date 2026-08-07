@@ -383,15 +383,15 @@ def _expanded(
     if not entry.doc.union_arms:
         return entry
     arms = entry.doc.union_arms
-    summaries = _implementation_summaries(capability_kind)
+    implementations = _implementations(capability_kind)
     alternatives = tuple(
         Alternative(
             name=arm.tag,
             # The IMPLEMENTATION's one-liner where the arm is one (what
             # lima IS), falling back to the arm model's own docstring
             # (what its config is) for a union that is not a capability.
-            summary=summaries.get(arm.tag) or arm.doc.description,
-            target=None if capability_kind is None else f"{capability_kind}/{arm.tag}",
+            summary=implementations.get(arm.tag) or arm.doc.description,
+            target=f"{capability_kind}/{arm.tag}" if arm.tag in implementations else None,
         )
         for arm in arms
     )
@@ -411,19 +411,29 @@ def _expanded(
     )
 
 
-def _implementation_summaries(capability_kind: str | None) -> dict[str, str]:
-    """Each implementation's one-line description, keyed by the tag that
-    selects it, for a union whose arms are capability configs."""
+def _implementations(capability_kind: str | None) -> dict[str, str | None]:
+    """Every implementation of ``capability_kind`` this host has, mapped to
+    its one-line description.
+
+    MEMBERSHIP is as load-bearing as the description, which is why an
+    implementation with no description is still a key here: an arm gets
+    the address that documents it only when that address exists. A
+    capability kind's own union has an implementation behind every arm,
+    but it is not the only union in the tree an implementation's config is
+    collected under, and any other one (a list of disks, each saying which
+    kind of disk it is) would otherwise be handed
+    ``agw resource describe-kind vm-platform/local``, a command that
+    fails.
+    """
     if capability_kind is None:
         return {}
     from agentworks.capabilities.config import registered_implementations
 
-    summaries = {}
+    implementations: dict[str, str | None] = {}
     for name, impl in registered_implementations(capability_kind).items():
         description = getattr(impl, "description", None)
-        if isinstance(description, str) and description:
-            summaries[name] = description
-    return summaries
+        implementations[name] = description if isinstance(description, str) and description else None
+    return implementations
 
 
 def _is_root_model(model: type[BaseModel] | None) -> bool:
