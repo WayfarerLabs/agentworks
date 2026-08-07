@@ -37,9 +37,9 @@ is locked.
       `target-state.md` compatibility posture): both halves of `migrate/` removed, error hints
       repointed at guide-led remediation, `locked.md` records the ruling
 - [x] Surviving review findings fixed and re-verified (execution re-review 2026-08-07: all fourteen
-      items fixed and pinned; final round closed the marker-refusal gap and the settings references;
-      two operator rulings recorded in place, settings hard errors and the deprecation-channel keep,
-      resolving the channel-gap ledger item)
+      items fixed and pinned; final round closed the marker-refusal reachability gap and landed the
+      settings references; two operator rulings recorded in place, settings hard errors and the
+      config deprecation-channel keep; the manifest channel-gap item in `target-state.md` stands)
 - [x] Merged to `main` and locked (PR #414, 2026-08-07; `locked.md` binds at merge)
 
 ### Design track: capability-kind descriptor contract

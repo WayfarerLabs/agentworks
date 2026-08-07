@@ -3,7 +3,7 @@
 - Snapshot date: 2026-08-07, post-wave-2 (update at wave boundaries)
 - Baseline: Agentworks 0.13.0 plus the phase 1 TOML sunset (PR #316), the 0.14 expired-compat
   removals (PR #406), and declarative-schema phase 2 through the descriptor (PR #414); the 0.14.0
-  release itself is pending on the guide first slice and the installer-plugins child
+  release itself is pending per the `phasing.md` release mapping
 
 This document records where the system actually is, verified by code reconnaissance rather than
 assumed from the perspectives. It is the ground truth the phasing rests on; when a wave lands,
@@ -30,9 +30,11 @@ stays settled in the docs and this roadmap's contracts.
 
 Cleared by wave 1 (PR #406, 2026-08-05): every in-scope expired surface is removed, including the
 session restart vocabulary, the legacy harness selectors, the older configuration aliases, the
-legacy VM console module, and the dead Python surfaces. The generic deprecation framework survives
-with only live registrations; the remaining deprecated shape is the generic capability discriminator
-compatibility, which wave 2 removes with its tagged-union hardening.
+legacy VM console module, and the dead Python surfaces. Wave 2 finished the job: the generic
+capability discriminator compatibility is a hard error, the config deprecation channel currently
+carries nothing and is kept deliberately as the warn-window carrier (operator ruling, 2026-08-07),
+and the manifest surface has no warn-window channel (the standing consequence recorded in
+`target-state.md`).
 
 ## Capability framework
 
@@ -48,8 +50,8 @@ compatibility, which wave 2 removes with its tagged-union hardening.
   secret-backend constructed-singleton policy is a descriptor-carried interim exception for wave 3
   to remove. `_VMPlatformKind` moved into `capabilities/` with its siblings.
 - The secret-source direction still goes with the grain: the backend/source split is specified in
-  `target-state.md` and the descriptor records the open readiness-shape choice for the
-  `secret-source` kind (wave 3's call).
+  `target-state.md`, and the descriptor contract records the open readiness-shape choice for the
+  `secret-source` kind as wave 3's call, which the descriptor must record once made.
 - One recorded descriptor-contract escalation stands open for the roadmap: map-keyed
   `backend_mappings` emission needs the descriptor to record where a map-keyed capability is hosted
   (the `onepassword` trigger has fired; see the locked declarative-schema SDD).
