@@ -57,10 +57,12 @@ builds against a single declaration frontend.
   `agw resource migrate` is deleted, both halves. In its place: the load error names every offending
   section and the exact rewrite for it; `agw resource sample` and `agw resource describe-kind`
   render the target shape live from the registry; and the upgrade section of
-  `docs/guides/resources.md` walks the rewrite. The agent-oriented `agw guide` command (owned by the
-  onboarding effort) is the intended vehicle, and it is why this effort ships `describable_targets`,
-  `implementation_reference`, and `capability_kind_reference` with no in-tree caller: an agent walks
-  the operator through the rewrite against live registry state rather than against prose.
+  `docs/guides/upgrading-to-0.14.md` walks the rewrite (release-scoped, and split out of
+  `resources.md` so it can be deleted rather than unpicked when the sunset is behind us). The
+  agent-oriented `agw guide` command (owned by the onboarding effort) is the intended vehicle, and
+  it is why this effort ships `describable_targets`, `implementation_reference`, and
+  `capability_kind_reference` with no in-tree caller: an agent walks the operator through the
+  rewrite against live registry state rather than against prose.
 
 **`agw guide` is NOT built at this effort's merge, and the guide does not name it.** Verified at
 HEAD: no command module, no registration, every Phase 1 box in
@@ -74,10 +76,10 @@ arrives; until then it has no caller, which is a real cost and is recorded rathe
 **Sequencing risk, for the roadmap to own.** `phasing.md` gates the 0.14.0 cut on the guide's first
 slice, but that slice as planned ships `concept-onboarding`, not a migration topic. If the TOML
 sunset reaches operators before a topic covering it, the vehicle this requirement names is absent at
-exactly the moment it is needed, and the human path in `docs/guides/resources.md` is carrying the
-break alone. That is survivable, because the human path is written to stand on its own, but it
-should be a decision rather than a discovery. The ruling's rationale is recorded in the roadmap's
-`target-state.md`: the migrator required a frozen re-implementation of the old shapes as a
+exactly the moment it is needed, and the human path in `docs/guides/upgrading-to-0.14.md` is
+carrying the break alone. That is survivable, because the human path is written to stand on its own,
+but it should be a decision rather than a discovery. The ruling's rationale is recorded in the
+roadmap's `target-state.md`: the migrator required a frozen re-implementation of the old shapes as a
 verification oracle, and every divergence between oracle and model surfaced to the operator as a
 self-blaming failure.
 
