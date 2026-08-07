@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Union
 from pydantic import BaseModel, RootModel
 
 from agentworks.errors import StateError
-from agentworks.schema import UNSET, iter_field_docs, render_type
+from agentworks.schema import UNSET, element_annotation, iter_field_docs, render_type
 
 if TYPE_CHECKING:
     from agentworks.schema import FieldDoc, UnionArm
@@ -251,8 +251,13 @@ def _open_element(path: tuple[str, ...], by_path: dict[tuple[str, ...], list[Fie
     _add_element(
         holder.doc,
         by_path,
+        # What one element IS, read off the collection's own type rather
+        # than off the model it opens. The two differ exactly where an
+        # element may be written as a bare scalar as well as a table: the
+        # model is one arm of the element, and naming it here would
+        # document a shorthand's table form as the only form.
         segment=path[-1],
-        annotation=holder.doc.item_model,
+        annotation=element_annotation(holder.doc.annotation) or holder.doc.item_model,
         nested_model=holder.doc.item_model,
     )
 

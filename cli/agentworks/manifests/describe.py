@@ -60,6 +60,7 @@ def reference_lines(reference: SchemaReference) -> Iterator[str]:
         yield ""
         yield "config: (a value, not a table)"
         yield from _wrapped(_facts_of(reference.root_value), depth=1)
+        yield from _table_form(reference.root_value)
     if reference.alternatives:
         yield ""
         yield "implementations:"
@@ -90,6 +91,22 @@ def _heading(reference: SchemaReference) -> Iterator[str]:
         for paragraph in reference.overview.split("\n\n"):
             yield ""
             yield from _wrapped(paragraph, depth=0)
+
+
+def _table_form(entry: FieldEntry) -> Iterator[str]:
+    """The fields of the block a config that is a VALUE may be written as.
+
+    A value that is a bare string or a table has no field name of its own
+    to hang the table form under, so the heading above it can only say
+    what may go there. Left at that, the arm reads as the bare word
+    "table" while the emitted schema beside it spells out both of the
+    properties an operator has to write, which is the disagreement this
+    surface exists to not have.
+    """
+    if not entry.children:
+        return
+    yield f"{_INDENT}as a table:"
+    yield from _fields(entry.children, depth=2)
 
 
 def _fields(entries: tuple[FieldEntry, ...], *, depth: int) -> Iterator[str]:

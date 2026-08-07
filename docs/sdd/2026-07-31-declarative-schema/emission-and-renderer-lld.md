@@ -449,6 +449,23 @@ The secret kind's prose points at `secret-backend/onepassword` for what a `backe
 may hold, which is the one place a rendered document still hands an operator to another surface
 rather than describing the shape inline. That is section 11's un-built splice, not an oversight.
 
+> **Added 2026-08-07: both presenters now render a field that takes a scalar OR a table.** An
+> operator rehearsal found `describe-kind vm-template` documenting `env` as a table of tables while
+> the emitted schema offered a string arm for the same field (see `schema-foundation-lld.md` section
+> 6.2 for the classifier half). Two presenter decisions came with it:
+>
+> - **The skeleton renders the BLOCK and names the scalar on the type line.** A sample exists to
+>   show structure an operator cannot guess: `FOO: a value` has none, and `{secret: <name>}` is two
+>   keys nobody guesses. So `env`'s line reads `(table of string or table, optional)` and the
+>   `value` / `secret` suggestions stay under it. Uncommenting still yields a document that loads,
+>   because every line under an optional field is a suggestion either way.
+> - **`describe-kind` labels the table form of a config that is a VALUE** (`as a table:`, then that
+>   model's fields). A root-model config has no field name to hang its block under, so unlabeled
+>   children at the same indent as the facts line would read as the config's own fields, which is
+>   the opposite of the heading above them. `secret-backend/onepassword` is the shipped case; its
+>   negative twin is `secret-backend/env-var`, where the label does not appear because there is no
+>   block, which is what keeps the label a derived fact.
+
 ## 11. Deliberately not built
 
 - **The map-keyed splice for `backend_mappings`.** 2.7 escalated it (the descriptor has no record of

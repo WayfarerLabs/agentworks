@@ -112,6 +112,47 @@ def test_a_field_carries_its_type_requiredness_and_description() -> None:
     assert "Operator-facing text shown when the secret has to be entered by hand" in text
 
 
+def test_a_field_that_folds_a_scalar_offers_both_spellings() -> None:
+    """The shipped defect: an env table accepts ``FOO: a value`` and
+    ``FOO: {secret: x}``, the emitted schema said so, and this surface
+    documented the table alone, so an operator following the guide's
+    "authority on what a spec accepts" rewrote every plaintext value into
+    a table for no reason.
+
+    Both halves are asserted, because the fix has to ADD the scalar rather
+    than replace the block: the operator who needs the secret form still
+    has to be told what is in it.
+    """
+    text = _text("vm-template")
+
+    assert "  env  (table of string or table, optional)" in text
+    assert "    <key>  (string or table, required)" in text
+    assert "      value  (string or null, optional)" in text
+    assert "      secret  (string or null, optional, names a secret)" in text
+
+
+def test_a_config_that_may_be_a_table_says_what_is_in_the_table() -> None:
+    """The same under-report in the other direction: a config that is a
+    string or a table named both arms and left the table's own fields to
+    the reader's imagination."""
+    text = _text("secret-backend/onepassword")
+
+    assert "config: (a value, not a table)" in text
+    assert "  (string or table, required, min length 1)" in text
+    assert "  as a table:" in text
+    assert "    account  (string, required, min length 1)" in text
+    assert "    reference  (string, required, min length 1)" in text
+
+
+def test_a_config_that_is_only_ever_a_scalar_has_no_table_form() -> None:
+    """The negative twin: the label appears because a block was found, not
+    because a config is a value."""
+    text = _text("secret-backend/env-var")
+
+    assert "config: (a value, not a table)" in text
+    assert "as a table:" not in text
+
+
 def test_a_kind_points_at_the_sample_that_renders_the_same_fields() -> None:
     assert "`agw resource sample secret`" in _text("secret")
 

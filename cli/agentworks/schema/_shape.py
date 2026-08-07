@@ -17,7 +17,7 @@ import typing
 from contextlib import suppress
 from dataclasses import dataclass
 from enum import Enum
-from typing import Annotated, Final, TypeGuard, Union, get_args, get_origin
+from typing import TYPE_CHECKING, Annotated, Final, TypeGuard, Union, get_args, get_origin
 
 from pydantic import BaseModel, Discriminator
 from pydantic.errors import PydanticSchemaGenerationError, PydanticUndefinedAnnotation
@@ -25,6 +25,10 @@ from pydantic.fields import FieldInfo
 from pydantic.json_schema import SkipJsonSchema
 
 from agentworks.schema.markers import RefMarker
+from agentworks.schema.shorthand import scalar_shorthand_of
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 #: The runtime class behind ``SkipJsonSchema[X]``, which expands to
 #: ``Annotated[X, SkipJsonSchema()]``, so the metadata item a field
@@ -65,9 +69,11 @@ class FieldShape:
     """
 
     annotation: object
-    """The field's annotation with reference markers stripped out, at
-    every depth. Optionality is preserved: ``str | None`` stays
-    ``str | None``."""
+    """What an operator may WRITE here, as an annotation: reference
+    markers stripped out at every depth, and every model declaring a
+    scalar shorthand widened to the union it accepts (``EnvEntry`` reads
+    ``str | EnvEntry``). Optionality is preserved: ``str | None`` stays
+    ``str | None``. See :func:`accepted_annotation`."""
 
     optional: bool
     """Whether ``None`` is an accepted value."""
@@ -129,6 +135,23 @@ class FieldShape:
     per member and prefixes each with the member's own name, a segment
     the operator never wrote."""
 
+    union_model: type[BaseModel] | None
+    """The ONE model among :attr:`union_members`, when exactly one of them
+    is a model (``str | AccountRef``): the single block an operator could
+    write where this field goes.
+
+    Kept apart from :attr:`nested_model` rather than folded into it,
+    because a field that MAY be a block is not a field that IS one, and
+    the two other readers of that attribute depend on the difference:
+    reference extraction would walk a raw string as though it were a
+    block, and the error bridge would stop reading
+    :attr:`union_members` and start rendering pydantic's per-member name
+    segments (``AccountRef``) as path segments the operator never wrote.
+    Only the field-documentation stream reads this, and only to expand
+    what the block contains: without it a shape whose emitted schema
+    spells out both arms documents the model arm as the bare word
+    "table"."""
+
     item_union_members: tuple[object, ...]
     """:attr:`union_members` one level down: the members of an
     undiscriminated union held by a COLLECTION's elements
@@ -141,6 +164,40 @@ class FieldShape:
     reads it, and for the same reason it reads ``union_members``: without
     it the walk loses track at the element and renders pydantic's member
     labels (``backend_mappings.b.str``) as path segments."""
+
+    item_union_model: type[BaseModel] | None
+    """:attr:`union_model` one level down: the one block an ELEMENT of a
+    collection could be (``dict[str, str | AccountRef]``).
+
+    No shipped field has this shape (the shipped scalar-or-block union is
+    a secret backend's whole mapping, and ``backend_mappings``'s elements
+    offer a bare table rather than a model), and it is one any capability
+    or plugin author can write. Classified for the reason
+    :attr:`item_arms` is: the field-documentation surfaces would otherwise
+    render such an element as an opaque "table" while the emitted schema
+    spelled out its properties, which is the same disagreement between the
+    two derivations, one level down."""
+
+    @property
+    def block(self) -> type[BaseModel] | None:
+        """The model whose fields the field-documentation stream expands
+        under this field: the block it IS, or the one block a union
+        offers.
+
+        Only that stream, which is why this is a derived pairing rather
+        than one classified attribute: reference extraction and the error
+        bridge read :attr:`nested_model` and :attr:`union_members` on
+        their own, and each would be wrong about the other's shape (see
+        :attr:`union_model`). Paired here rather than at the two places
+        the stream needs it, so what the stream SAYS a field contains and
+        what it actually streams under it cannot come apart.
+        """
+        return self.nested_model or self.union_model
+
+    @property
+    def item_block(self) -> type[BaseModel] | None:
+        """:attr:`block` for ONE element of a collection."""
+        return self.item_model or self.item_union_model
 
 
 def spine_metadata(field: FieldInfo) -> list[object]:
@@ -208,7 +265,9 @@ def shape_of(field: FieldInfo) -> FieldShape:
     item_discriminator: str | None = None
     item_arms: tuple[UnionArmType, ...] = ()
     union_members: tuple[object, ...] = ()
+    union_model: type[BaseModel] | None = None
     item_union_members: tuple[object, ...] = ()
+    item_union_model: type[BaseModel] | None = None
 
     found = _collection_element(inner)
     if found is not None:
@@ -227,6 +286,7 @@ def shape_of(field: FieldInfo) -> FieldShape:
                 item_arms = _arms_of(element, item_discriminator)
             else:
                 item_union_members = tuple(split_annotated(arg)[0] for arg in get_args(element))
+                item_union_model = _sole_model(item_union_members)
     elif _is_model(inner) or _is_union(inner):
         discriminator = _discriminator_of(field)
         if discriminator is not None:
@@ -243,9 +303,10 @@ def shape_of(field: FieldInfo) -> FieldShape:
             nested_model = inner
         else:
             union_members = tuple(split_annotated(arg)[0] for arg in get_args(inner))
+            union_model = _sole_model(union_members)
 
     return FieldShape(
-        annotation=strip_markers(field.annotation),
+        annotation=accepted_annotation(field.annotation),
         optional=optional,
         marker=marker,
         collection=collection,
@@ -257,7 +318,9 @@ def shape_of(field: FieldInfo) -> FieldShape:
         item_discriminator=item_discriminator,
         item_arms=item_arms,
         union_members=union_members,
+        union_model=union_model,
         item_union_members=item_union_members,
+        item_union_model=item_union_model,
     )
 
 
@@ -372,17 +435,81 @@ def strip_markers(annotation: object) -> object:
     """
     base, metadata = split_annotated(annotation)
     kept = [item for item in metadata if not isinstance(item, RefMarker)]
-    stripped = _strip_arguments(base)
+    stripped = _rebuilt_arguments(base, strip_markers)
     if kept:
         return Annotated[(stripped, *kept)]
     return stripped
 
 
-def _strip_arguments(annotation: object) -> object:
+def accepted_annotation(annotation: object) -> object:
+    """``annotation`` as an operator may WRITE it: markers stripped, and
+    every model declaring a scalar shorthand widened to the union it
+    accepts (``dict[str, EnvEntry]`` reads ``dict[str, str | EnvEntry]``).
+
+    The widening is what keeps the two derivations of a model saying the
+    same thing. A shorthand is a before-validator, which is invisible to
+    an annotation and to ``model_json_schema`` alike; emitted schema
+    learns it from
+    :meth:`~agentworks.schema.AgwModel.__get_pydantic_json_schema__` and
+    every human surface learns it here, from the same declaration. Left
+    out, ``describe-kind`` renders a bare "table" for a field whose
+    emitted schema offers ``{anyOf: [string, object]}``, and an operator
+    who trusts the surface the resources guide calls the authority
+    rewrites every plaintext env value into a table for no reason.
+
+    The MODEL is not replaced, only the annotation naming it: a walker
+    still expands the block through ``nested_model`` or ``item_model``,
+    because a shorthand adds a spelling rather than removing one.
+    """
+    return _widened(strip_markers(annotation))
+
+
+def element_annotation(annotation: object) -> object | None:
+    """The type ONE element of a collection annotation holds, or ``None``
+    when ``annotation`` does not hold a collection.
+
+    For the presenter that has to name an element's own type: the flat
+    stream has no doc for an element (a model says a list holds tables
+    without saying how many), so the tree synthesizes one, and reading
+    the type off the collection here is what keeps that synthesized node
+    saying what :func:`accepted_annotation` already worked out rather
+    than falling back to the element MODEL, which is one arm of it.
+    """
+    inner, _optional = unwrap_optional(annotation)
+    inner, _metadata = split_annotated(inner)
+    found = _collection_element(inner)
+    return None if found is None else found[1]
+
+
+def _widened(annotation: object) -> object:
+    """:func:`accepted_annotation`'s recursion, over an annotation whose
+    markers are already stripped."""
+    base, metadata = split_annotated(annotation)
+    shorthand = scalar_shorthand_of(base)
+    if shorthand is not None:
+        # The shorthand first, so the rendered type leads with the form
+        # nearly every operator writes.
+        widened: object = Union[shorthand.annotation, base]  # noqa: UP007
+    else:
+        widened = _rebuilt_arguments(base, _widened)
+    if metadata:
+        return Annotated[(widened, *metadata)]
+    return widened
+
+
+def _rebuilt_arguments(annotation: object, transform: Callable[[object], object]) -> object:
+    """``annotation`` with ``transform`` applied to each of its type
+    arguments, or unchanged when it has none or none of them moved.
+
+    Shared by the two rewrites this module makes over an annotation TREE,
+    so a shape one of them can rebuild is a shape both can. Annotations
+    with no reconstructible origin (a ``Literal``, a callable) are
+    returned unchanged.
+    """
     args = get_args(annotation)
     if not args:
         return annotation
-    rebuilt = tuple(strip_markers(arg) for arg in args)
+    rebuilt = tuple(transform(arg) for arg in args)
     if rebuilt == args:
         return annotation
     origin = get_origin(annotation)
@@ -391,6 +518,21 @@ def _strip_arguments(annotation: object) -> object:
     if isinstance(origin, type):
         return types.GenericAlias(origin, rebuilt)
     return annotation
+
+
+def _sole_model(members: tuple[object, ...]) -> type[BaseModel] | None:
+    """The ONE model among an undiscriminated union's members, when
+    exactly one of them is a model.
+
+    Two or more and nothing here can choose: no tag addresses an arm from
+    a raw blob, so naming one would be a guess, and rendering one would
+    tell an operator that the arm the walk happened to meet first is the
+    one they should write. Exactly one is the ``str | AccountRef`` shape,
+    where the union offers a single block and some scalars that have
+    nothing to expand.
+    """
+    models = [member for member in members if _is_model(member)]
+    return models[0] if len(models) == 1 else None
 
 
 def split_annotated(annotation: object) -> tuple[object, list[object]]:

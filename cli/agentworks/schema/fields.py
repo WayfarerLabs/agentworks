@@ -175,12 +175,18 @@ class FieldDoc:
 
     nested_model: type[BaseModel] | None
     """Set when this field opens a nested block, whose fields follow this
-    one in the stream at a longer path."""
+    one in the stream at a longer path.
+
+    Set for a field that MAY be a block as well as for one that is: a
+    union of scalars and one model (``str | AccountRef``) offers exactly
+    one block an operator could write, and the fields it holds are the
+    half of it :attr:`annotation` cannot say."""
 
     item_model: type[BaseModel] | None
     """Set when this field holds MANY blocks (a list of tables, a table
     of tables). The element's fields follow this one in the stream, once,
-    under this field's :attr:`item_segment`."""
+    under this field's :attr:`item_segment`. Set for a collection whose
+    element MAY be a block too, for the reason :attr:`nested_model` is."""
 
     item_segment: str | None
     """How ONE element of this field is addressed, as the path segment
@@ -328,11 +334,17 @@ def _expandable(shape: FieldShape) -> tuple[type[BaseModel] | None, tuple[str, .
     Its element is a choice among models rather than one model, so the
     arms ride on the doc (``FieldDoc.item_union_arms``) and the presenter
     picks, exactly as it does for a union written on the field itself.
+
+    A union of scalars and ONE model does open its block, at both depths:
+    there is nothing to pick, the block is the only shape with fields, and
+    the scalar arms are already in the rendered type. The stream's own
+    ``visiting`` guard covers it, so a model reachable from itself through
+    such a union terminates like any other nested block.
     """
-    if shape.nested_model is not None:
-        return shape.nested_model, ()
-    if shape.item_model is not None and (segment := _segment_of(shape)) is not None:
-        return shape.item_model, (segment,)
+    if shape.block is not None:
+        return shape.block, ()
+    if shape.item_block is not None and (segment := _segment_of(shape)) is not None:
+        return shape.item_block, (segment,)
     return None, ()
 
 
@@ -357,8 +369,10 @@ def _field_doc(path: tuple[str, ...], field: FieldInfo, shape: FieldShape) -> Fi
         constraints=_constraints_of(field),
         examples=tuple(field.examples or ()),
         ref=marker,
-        nested_model=shape.nested_model,
-        item_model=shape.item_model,
+        # The block a field OPENS, whether it always is one or only may
+        # be, from the same pairing ``_expandable`` walks.
+        nested_model=shape.block,
+        item_model=shape.item_block,
         item_segment=_segment_of(shape),
         union_arms=_documented(shape.arms),
         item_union_arms=_documented(shape.item_arms),

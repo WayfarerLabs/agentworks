@@ -3,18 +3,14 @@
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING, Annotated, Any, Final
+from typing import TYPE_CHECKING, Annotated, ClassVar, Final
 
 from pydantic import AfterValidator, model_validator
 
-from agentworks.schema import AgwModel, SecretRef
+from agentworks.schema import AgwModel, ScalarShorthand, SecretRef
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
-
-    from pydantic import GetJsonSchemaHandler
-    from pydantic.json_schema import JsonSchemaValue
-    from pydantic_core import CoreSchema
 
     from agentworks.resources.reference import SecretReference
 
@@ -45,25 +41,29 @@ class EnvEntry(AgwModel):
 
     Two spellings, one type: an operator writes ``FOO: a value`` for the
     plaintext form and ``FOO: {secret: my-secret}`` for the other, and the
-    before-validator below folds the first into the second. The KEY is the
-    env var's name and lives in the table that holds this entry; it is
+    shorthand declared below folds the first into the second. The KEY is
+    the env var's name and lives in the table that holds this entry; it is
     deliberately not a field here, because two places to say one thing is
     two places that can disagree (nothing ever enforced that a table's key
     matched its entry's).
     """
+
+    scalar_shorthand: ClassVar = ScalarShorthand(annotation=str, field="value")
+    """``FOO: a value`` is the plaintext form, and it is the shape
+    operators write for all but a handful of entries.
+
+    One declaration, three derivations: the fold, the emitted schema's
+    string arm, and the "string or table" every human surface renders.
+    Both of the first two were written by hand here once, which is how the
+    third came to be missing: ``describe-kind`` documented the table form
+    alone for a field whose emitted schema had offered both since it was
+    written."""
 
     value: str | None = None
     """The plaintext value to export."""
 
     secret: Annotated[str, SecretRef(usage="an env var's value")] | None = None
     """The name of a declared secret whose value is exported instead."""
-
-    @model_validator(mode="before")
-    @classmethod
-    def _accept_a_bare_value(cls, data: Any) -> Any:
-        """``FOO: a value`` is the plaintext form, and it is the shape
-        operators write for all but a handful of entries."""
-        return {"value": data} if isinstance(data, str) else data
 
     @model_validator(mode="after")
     def _exactly_one_source(self) -> EnvEntry:
@@ -72,24 +72,6 @@ class EnvEntry(AgwModel):
         if self.value is not None and self.secret is not None:
             raise ValueError("cannot set both value and secret")
         return self
-
-    @classmethod
-    def __get_pydantic_json_schema__(
-        cls,
-        core_schema: CoreSchema,
-        handler: GetJsonSchemaHandler,
-    ) -> JsonSchemaValue:
-        """The two accepted spellings, in emitted schema.
-
-        The before-validator above is invisible to ``model_json_schema``,
-        which would emit the table form alone and let a schema-aware editor
-        flag every plaintext entry an operator writes. This is the one
-        place in the kind-spec models where a schema fact is written by
-        hand rather than derived, and it sits beside the validator that
-        implements it so the two are read together; a test validates both
-        spellings against the emitted schema.
-        """
-        return {"anyOf": [{"type": "string"}, handler(core_schema)]}
 
     def referenced_resources(
         self,

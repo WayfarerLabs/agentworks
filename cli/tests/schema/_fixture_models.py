@@ -11,12 +11,12 @@ parity tests at them.
 from __future__ import annotations
 
 import socket
-from typing import Annotated, Literal
+from typing import Annotated, ClassVar, Literal
 
 from pydantic import AfterValidator, Discriminator, Field
 from pydantic.json_schema import SkipJsonSchema
 
-from agentworks.schema import AgwModel, AgwRootModel, NonEmptyStr, ResourceRef, SecretRef
+from agentworks.schema import AgwModel, AgwRootModel, NonEmptyStr, ResourceRef, ScalarShorthand, SecretRef
 from agentworks.schema.reference import RefRelationship
 
 
@@ -333,6 +333,82 @@ class StringOrTableRoot(AgwRootModel[NonEmptyStr | AccountRefLike]):
     (nothing tags a bare string)."""
 
 
+class ScalarOrBlockLike(AgwModel):
+    """Unions of some scalars and ONE model, at both depths.
+
+    The field-level spelling is the shipped onepassword mapping written
+    somewhere a root model is not needed. The element-level ones are not
+    shipped and any capability or plugin author can write one; classified
+    for the reason a collection of TAGGED blocks is, since a walker that
+    stopped at the element would render it as an opaque "table" while the
+    emitted schema spelled its properties out.
+
+    The arm is a MARKED model on purpose, which is what makes this fixture
+    pin the boundary as well as the shape: the field-documentation stream
+    expands the block, and reference extraction does not walk it, so a
+    secret named in here implies no graph edge. That is what
+    ``test_extract_totality`` records this model as edgeless for.
+    """
+
+    mapping: str | CredsLike | None = None
+    mappings: dict[str, str | CredsLike] = Field(default_factory=dict)
+    mapping_list: list[str | CredsLike] = Field(default_factory=list)
+
+
+class SelfReferentialUnion(AgwModel):
+    """A scalar-or-block union whose block is reachable from itself.
+
+    The block a union OFFERS expands like any other nested block, so it
+    takes the stream's own path guard; without one the walk would recur
+    until the interpreter gave up and take every surface down with it.
+    """
+
+    name: str = ""
+    child: str | SelfReferentialUnion | None = None
+
+
+class ShorthandLike(AgwModel):
+    """A model an operator may also write as one bare scalar: the shipped
+    ``EnvEntry`` shape, with the same two fields it folds between."""
+
+    scalar_shorthand: ClassVar = ScalarShorthand(annotation=str, field="value")
+
+    value: str | None = None
+    secret: Annotated[str, SecretRef(usage="the shorthand entry's secret")] | None = None
+
+
+class ShorthandTemplatedLike(AgwModel):
+    """A shorthand model with an OWNER-TEMPLATED field beside the folded
+    one.
+
+    The order pin: the fold has to happen before owner-templated defaults
+    are filled, since the fill acts on a mapping and a shorthand value is
+    not one yet. Folded second, this model's ``token`` would resolve for
+    an operator who wrote the table form and silently not for one who
+    wrote the scalar.
+    """
+
+    scalar_shorthand: ClassVar = ScalarShorthand(annotation=str, field="value")
+
+    value: str | None = None
+    token: Annotated[str, SecretRef(usage="the shorthand token", default_template="shorthand-{owner_name}")] | None = (
+        None
+    )
+
+
+class ShorthandHolder(AgwModel):
+    """The three ways a shorthand model is held.
+
+    One authored shorthand has to reach every one of them, because the
+    shipped case is the middle one (five spec models hold an ``EnvEntry``
+    table) and nothing about the declaration is per-field.
+    """
+
+    entry: ShorthandLike | None = None
+    entries: dict[str, ShorthandLike] = Field(default_factory=dict)
+    entry_list: list[ShorthandLike] = Field(default_factory=list)
+
+
 def _shouty(value: str) -> str:
     if not value.isupper():
         raise ValueError(f"invalid key {value!r} (must be upper case)")
@@ -405,6 +481,11 @@ ALL_FIXTURES = (
     MappingRoot,
     AccountRefLike,
     StringOrTableRoot,
+    ScalarOrBlockLike,
+    SelfReferentialUnion,
+    ShorthandLike,
+    ShorthandTemplatedLike,
+    ShorthandHolder,
     TableWithConstrainedKeys,
     MappingValueLike,
     FrameworkFielded,

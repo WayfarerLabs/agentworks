@@ -53,11 +53,24 @@ def test_an_unknown_key_is_refused() -> None:
 
 
 def test_both_spellings_validate_against_the_emitted_schema() -> None:
-    """The before-validator is invisible to ``model_json_schema``, so the
-    two spellings are declared by hand three lines from it. This is what
-    keeps a schema-aware editor from flagging every plaintext entry."""
+    """A shorthand is invisible to ``model_json_schema``, which would emit
+    the table form alone and let a schema-aware editor flag every
+    plaintext entry an operator writes. The arm comes from the declaration
+    (:class:`~agentworks.schema.ScalarShorthand`) rather than from a hook
+    written here, which is what put the same fact into the field
+    documentation too."""
     emitted = EnvEntry.model_json_schema()
     shapes = emitted["anyOf"]
 
     assert shapes[0] == {"type": "string"}
     assert set(shapes[1]["properties"]) == {"value", "secret"}
+
+
+def test_the_two_spellings_are_one_declaration() -> None:
+    """The anti-drift pin. The scalar the loader takes, the arm the schema
+    offers, and the type every human surface renders are the same authored
+    fact, so no consumer can be updated without the others."""
+    assert EnvEntry.scalar_shorthand is not None
+    assert EnvEntry.scalar_shorthand.annotation is str
+    assert EnvEntry.scalar_shorthand.field == "value"
+    assert EnvEntry.model_validate("vim") == EnvEntry(value="vim")
