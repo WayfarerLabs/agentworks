@@ -42,8 +42,9 @@ from agentworks.manifests.loader import load_manifests
 from agentworks.manifests.samples import sample_text
 from agentworks.manifests.spec_model import declarable_kinds
 from agentworks.plugins import Plugin, seated_plugin
-from agentworks.schema import AgwModel
+from agentworks.schema import REF_SCHEMA_KEY, AgwModel
 from tests._emitted_schema import ref_extension
+from tests.manifests.conftest import uncomment
 from tests.plugins._fixtures import ConformingVMPlatform
 
 if TYPE_CHECKING:
@@ -135,12 +136,6 @@ def _construct_yaml_12_integer(_loader: yaml.SafeLoader, node: yaml.Node) -> int
 
 
 _EditorLoader.add_constructor("tag:yaml.org,2002:int", _construct_yaml_12_integer)
-
-
-def _uncomment(text: str) -> str:
-    """The sample surface's documented uncomment rule: strip one leading
-    ``#`` per line."""
-    return "\n".join(line[1:] if line.startswith("#") else line for line in text.splitlines()) + "\n"
 
 
 def _documents(text: str) -> list[dict[str, Any]]:
@@ -527,7 +522,7 @@ def test_emitted_schemas_accept_every_document_the_full_load_path_accepts(tmp_pa
     resources = tmp_path / "resources"
     resources.mkdir()
     for kind in declarable_kinds():
-        (resources / f"{kind}.yaml").write_text(_uncomment(sample_text(kind)))
+        (resources / f"{kind}.yaml").write_text(uncomment(sample_text(kind)))
     build_registry(load_config(_a_config(tmp_path), warn_issues=False))
 
     envelope = envelope_schema()
@@ -925,6 +920,37 @@ def test_reference_markers_reach_emitted_schema() -> None:
     ]
     assert marked, "no x-agw-ref survived into the git-credential schema"
     assert all(set(extension) == {"kind", "usage", "default_template", "relationship"} for extension in marked)
+
+
+def test_the_shipped_token_field_states_its_reference_on_the_property() -> None:
+    """The burial that ``_ref_at_top_level`` exists to undo, asserted
+    against a REAL shipped field rather than a fixture model.
+
+    ``token`` is the field worth pinning: it is optional and templated, so
+    pydantic emits it as ``anyOf: [string, null]`` with the marker inside
+    the string branch, and the lift hoists it onto the property. The
+    fixture-model pins cover both burial shapes, but a fixture cannot
+    drift out from under the shipped models. This reddens if a real
+    provider's ``token`` stops answering "does this field name a secret?"
+    at the property, which is where an editor hover and every consumer
+    look.
+
+    Three separate facts, because dropping any one of them would let a
+    regression through: the property is branchy (so the marker got there
+    by the lift and not by sitting flat), the marker is on the property,
+    and no branch kept a copy (lifted, not duplicated, so there stays
+    exactly one place to read it).
+    """
+    tokens = [
+        (name, definition["properties"]["token"])
+        for name, definition in document_schema("git-credential")["$defs"].items()
+        if "token" in definition.get("properties", {})
+    ]
+    assert tokens, "no provider config in the git-credential schema declares a token"
+    for name, prop in tokens:
+        assert "anyOf" in prop, (name, prop)
+        assert prop.get(REF_SCHEMA_KEY, {}).get("kind") == "secret", (name, prop)
+        assert all(REF_SCHEMA_KEY not in branch for branch in prop["anyOf"]), (name, prop)
 
 
 # -- Writing, and the modeline ---------------------------------------------

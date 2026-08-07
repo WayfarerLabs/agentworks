@@ -12,7 +12,7 @@ IS an owner-defaulted secret name on a shipped, inheriting kind, so the
 case is the real one rather than a constructed analogue.
 
 The producing half (a child's edges coming off its merged declaration) is
-pinned by ``tests/test_effective_template_dependencies.py``; neither half
+pinned by ``tests/resources/test_effective_template_dependencies.py``; neither half
 is correct alone, so both files assert absences.
 """
 

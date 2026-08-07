@@ -8,7 +8,7 @@ design:
 
 - the ``name`` check, because ``register_plugin`` rejects the same shape a
   few lines earlier with its own message. Its real caller is the table
-  self-test in ``tests/test_capability_descriptors.py``, which is the only
+  self-test in ``tests/capabilities/test_capability_descriptors.py``, which is the only
   thing that checks a core BUILT-IN's name at all, since built-ins are
   assigned straight into their registries and never pass through
   registration;

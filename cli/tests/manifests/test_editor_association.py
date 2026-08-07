@@ -20,6 +20,7 @@ from jsonschema import Draft202012Validator
 from agentworks.manifests.emit import ENVELOPE_SCHEMA_FILENAME, MODELINE_PREFIX, SCHEMA_DIRNAME
 from agentworks.manifests.samples import write_sample
 from agentworks.manifests.spec_model import declarable_kinds
+from tests.manifests.conftest import uncomment
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -45,11 +46,11 @@ def _schema_an_editor_would_load(manifest: Path) -> dict[str, Any]:
 
 
 def _uncommented_documents(manifest: Path) -> list[dict[str, Any]]:
-    """The file's documents as an operator activates them: one leading
-    ``#`` stripped from each line of the sample body."""
-    lines = manifest.read_text().splitlines()[1:]  # past the modeline
-    body = "\n".join(line[1:] if line.startswith("#") else line for line in lines)
-    return [doc for doc in yaml.safe_load_all(body) if isinstance(doc, dict)]
+    """The file's documents as an operator activates them: the modeline
+    dropped (it is a file header, not a document line) and the shared
+    one-``#`` strip applied to the sample body."""
+    body = "\n".join(manifest.read_text().splitlines()[1:])  # past the modeline
+    return [doc for doc in yaml.safe_load_all(uncomment(body)) if isinstance(doc, dict)]
 
 
 def test_a_written_sample_is_checked_by_the_schema_it_points_at(tmp_path: Path) -> None:
