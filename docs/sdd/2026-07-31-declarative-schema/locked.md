@@ -126,15 +126,20 @@ inventing a dependency on a resource the operator never wrote, which finalize wo
   not relaxing `required`, which would delete a real diagnostic from standalone templates.
 - **FR14 (settings-section models and a config.toml schema) is descoped**, as the plan permitted.
   The settings layer is the largest remaining cluster of consumer-side re-defaulting, and
-  `_warn_unexpected_keys` survives with EIGHT call sites for the same reason. It is also where the
-  name-validation discipline has not been applied: `[secret_config].backends` accepts any list of
-  strings with no registry check, so a typo there silently misroutes secret resolution, while
-  `[secret_backends.<plugin>]`, a section that does nothing, hard-fails the load with a message
-  naming only the built-ins. The strictness is inverted relative to which setting matters. The shape
-  the successor should take: settings values that NAME things (`[secret_config].backends`,
-  `defaults.site`, `defaults.runup_git_credentials`) are references, and should get shape validation
-  at load and reference resolution at finalize through the machinery manifests already use, rather
-  than a growing pile of bespoke checks in `doctor`.
+  `_warn_unexpected_keys` survives with EIGHT call sites for the same reason. Its name validation is
+  uneven rather than absent. `[secret_config].backends` gets the split right already: shape at
+  settings load (a list of strings), names later against the finalized graph in `active_backends`,
+  which raises naming the unknown backend and listing the registered ones. That is the correct
+  shape, forced by the chicken and egg (the registry does not exist at settings-load time), and
+  `doctor` plus every consuming path reaches it. What is uneven: `[secret_backends.<plugin>]`, a
+  deprecated no-op section, hard-fails at settings load against the BUILT-IN registry alone, so a
+  correctly spelled plugin backend is reported as unknown and the load dies over a section that does
+  nothing. A no-op should not fail harder, earlier, and less accurately than the key that decides
+  resolution order. The generalization worth carrying: settings values that NAME things
+  (`[secret_config].backends`, `defaults.site`, `defaults.runup_git_credentials`) are references.
+  Two of the three are checked by hand in `doctor`, per field, which is the switchboard pattern this
+  effort collapsed elsewhere; typing them as references would give existence checking and the
+  dangling-name error from machinery manifests already use.
 - **Two union shapes extract no edges, by design.** An undiscriminated union of two or more models
   addresses no arm without guessing which; a union tagged by non-string literals is outside the
   framework's rule that every discriminator is a capability or kind NAME. Both are fixture-only; no
