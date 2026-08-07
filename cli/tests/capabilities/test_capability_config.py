@@ -10,7 +10,7 @@ behavior all four share.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, ClassVar, Literal
+from typing import TYPE_CHECKING, Annotated, ClassVar, Literal, get_args
 
 import pytest
 from pydantic import BaseModel
@@ -86,10 +86,35 @@ class ThirdPlatform(ConformingVMPlatform):
     config_model: ClassVar[type[AgwModel]] = ThirdConfig
 
 
-def _arm_names() -> set[str]:
-    """The names of the arms the assembled vm-platform union carries."""
-    arms = capability_config_union("vm-platform").model_fields["root"].annotation
-    return {arm.__name__ for arm in getattr(arms, "__args__", ())}
+class SoleConfig(AgwModel):
+    """The only arm a one-arm union has."""
+
+    name: Literal["sole-platform"]
+    region: str | None = None
+
+
+class SolePlatform(ConformingVMPlatform):
+    name: ClassVar[str] = "sole-platform"
+    description: ClassVar[str] = "the only registered platform"
+    config_model: ClassVar[type[AgwModel]] = SoleConfig
+
+
+def _arm_names(kind: str = "vm-platform") -> set[str]:
+    """The names of the arms the assembled ``kind`` union carries.
+
+    ``Union[(X,)]`` is ``X``, so a one-arm union has already collapsed to
+    the bare arm by the time it reaches the annotation, and has no
+    ``__args__`` to read. Reading them off regardless would answer "no
+    arms" for a shape the framework really does produce, which is a
+    silently wrong answer rather than a failure, so the collapsed case is
+    handled here instead of assumed away.
+    """
+    annotation = capability_config_union(kind).model_fields["root"].annotation
+    arms = get_args(annotation)
+    if arms:
+        return {arm.__name__ for arm in arms}
+    assert annotation is not None, "the union wrapper always annotates its root"
+    return {annotation.__name__}
 
 
 FIXTURE_NAMES = frozenset({"fixture-platform", "other-platform"})
@@ -112,6 +137,23 @@ def seated() -> Iterator[None]:
         fixtures = {name: impl for name, impl in registry.items() if name in FIXTURE_NAMES}
         registry.clear()
         registry.update(fixtures)
+        yield
+
+
+@pytest.fixture
+def sole_seated() -> Iterator[None]:
+    """The live vm-platform registry holding EXACTLY one implementation.
+
+    The same real plugin machinery as :func:`seated`, so what the one-arm
+    assertions see is the union ``capability_config_union`` really
+    assembles off the real registry rather than one hand-written to look
+    like the collapsed shape.
+    """
+    with seated_plugin(Plugin(name="sole", capabilities={"vm-platform": (SolePlatform,)})):
+        registry = descriptor_for("vm-platform").registry()
+        sole = {name: impl for name, impl in registry.items() if name == SolePlatform.name}
+        registry.clear()
+        registry.update(sole)
         yield
 
 
@@ -245,6 +287,11 @@ def test_an_omitted_templated_secret_resolves_from_the_owner(seated: None) -> No
 
 
 def test_a_bad_field_is_owner_framed_and_located(seated: None) -> None:
+    """The whole message, asserted whole, because the error bridge OWNS the
+    framing: it carries the location and the owner itself, so the finalize
+    pass adds none of its own and a caller that wrapped this with a
+    location would make the operator read the file and line twice.
+    """
     with pytest.raises(ConfigError) as caught:
         _validate({"region": 8})
 
@@ -269,13 +316,6 @@ def test_every_rejection_points_at_the_field_reference(seated: None) -> None:
     assert caught.value.hint == (
         "`agw resource describe-kind vm-platform/fixture-platform` prints this implementation's fields"
     )
-
-
-def test_the_raised_error_carries_its_own_framing(seated: None) -> None:
-    """So the finalize pass's origin-suffix wrapper leaves it alone rather
-    than framing it a second time."""
-    with pytest.raises(ConfigError):
-        _validate({"region": 8})
 
 
 def test_the_arm_is_selected_by_the_capability_name_not_by_the_blob(seated: None) -> None:
@@ -378,6 +418,46 @@ def test_a_capability_swapping_its_model_gets_a_fresh_union(seated: None) -> Non
     finally:
         FixturePlatform.config_model = original
     assert capability_config_union("vm-platform") is before, "and back again, from the cache"
+
+
+def test_a_one_arm_union_collapses_to_its_only_arm(sole_seated: None) -> None:
+    """``Union[(X,)]`` is ``X``, so the union the builder returns for a kind
+    with one registered implementation IS the bare arm: there is no union
+    object left to read arms off.
+
+    Pinned against the real builder over the real registry, because the
+    collapse is a property of what ``capability_config_union`` assembles,
+    not of a union written by hand to resemble it. No shipped kind is
+    down to one implementation today, but every kind is one disabled
+    plugin away from it, and the shape reaches operators through emitted
+    schema and the field reference.
+    """
+    assert _arm_names() == {"SoleConfig"}
+
+
+def test_a_collapsed_union_still_dispatches_on_the_tag(sole_seated: None) -> None:
+    """What the collapse must NOT cost: the tagged-union behavior.
+
+    A bare model would accept the config and reject a wrong tag too, so
+    the distinguishing evidence is the MESSAGE. An unknown name still
+    reports as the union's "unknown name; registered: ..." rather than as
+    a literal mismatch on a field the operator did write, which is what
+    makes the collapsed form the shape a second implementation grows into
+    rather than a different one.
+    """
+    union = capability_config_union("vm-platform")
+    validated = validate_capability_config(
+        kind="vm-platform", config={"name": "sole-platform", "region": "eu"}, owner=OWNER
+    )
+
+    assert isinstance(validated, SoleConfig), "the collapsed union still unwraps to the arm it selected"
+
+    with pytest.raises(PydanticValidationError) as caught:
+        union.model_validate({"name": "nope"}, context=validation_context(OWNER))
+
+    assert str(config_error_from(caught.value, model_cls=union, owner=OWNER)) == (
+        "vm-site/lab: unknown name 'nope'; registered: 'sole-platform'"
+    )
 
 
 def test_a_map_keyed_kind_has_no_union_to_assemble() -> None:
