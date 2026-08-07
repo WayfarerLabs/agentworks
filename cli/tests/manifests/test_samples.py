@@ -89,23 +89,29 @@ def test_every_registered_kind_is_declarable_or_a_capability() -> None:
     assert set(declarable_kinds()) | set(_capability_kinds()) == set(_registered_kinds())
 
 
-@pytest.mark.parametrize("kind", _capability_kinds())
-def test_capability_kinds_report_no_sample(kind: str) -> None:
+def test_capability_kinds_report_no_sample() -> None:
     """Every capability kind `resource kinds` lists is a valid argument
     value, so it reaches the service layer instead of dying as a raw parse
     error (issue #276). The service layer rejects it with a typed domain
     error that names the kind, offers the declarable set, and (new with the
-    renderer) points at the surface that DOES document a capability."""
-    with pytest.raises(ValidationError) as excinfo:
-        sample_text(kind)
-    err = excinfo.value
-    assert kind in str(err)
-    assert "capability kind" in str(err)
-    assert "no sample manifest" in str(err)
-    assert err.hint is not None
-    assert f"describe-kind {kind}" in err.hint
-    for declarable in declarable_kinds():
-        assert declarable in err.hint
+    renderer) points at the surface that DOES document a capability.
+
+    Looped over the registry's capability category, which
+    ``test_kind_models.py::test_the_registry_has_kinds_of_both_categories``
+    keeps non-empty. One refusal serves every one of them, so the report
+    worth having is each kind that stopped getting it.
+    """
+    for kind in _capability_kinds():
+        with pytest.raises(ValidationError) as excinfo:
+            sample_text(kind)
+        err = excinfo.value
+        assert kind in str(err)
+        assert "capability kind" in str(err), kind
+        assert "no sample manifest" in str(err), kind
+        assert err.hint is not None, kind
+        assert f"describe-kind {kind}" in err.hint
+        for declarable in declarable_kinds():
+            assert declarable in err.hint, (kind, declarable)
 
 
 def test_all_kinds_concatenation_and_unknown_kind() -> None:
@@ -462,15 +468,20 @@ def test_write_sample_refuses_escapes_and_suffixes(tmp_path: Path) -> None:
         write_sample(resources, "samples.txt")
 
 
-@pytest.mark.parametrize("filename", [".schema/sneaky.yaml", ".hidden.yaml", "nested/.d/x.yaml"])
-def test_write_sample_refuses_unloadable_dot_paths(tmp_path: Path, filename: str) -> None:
+def test_write_sample_refuses_unloadable_dot_paths(tmp_path: Path) -> None:
     """``--write`` may not write where the loader will never look.
 
     ``loader._iter_manifest_files`` prunes every dot-prefixed name, file
     and directory alike, so writing there produced a file plus a promise
     ("uncomment to activate") that no amount of uncommenting could keep.
+
+    Three positions for the dot (a leading directory, the file itself, a
+    nested directory) against the one production expression that walks
+    every part of the path. They fail together or not at all, so they are
+    one loop that names the spelling that got through.
     """
     resources = tmp_path / "resources"
-    with pytest.raises(ValidationError, match="dot-prefixed"):
-        write_sample(resources, filename, "secret")
-    assert not (resources / filename).exists()
+    for filename in (".schema/sneaky.yaml", ".hidden.yaml", "nested/.d/x.yaml"):
+        with pytest.raises(ValidationError, match="dot-prefixed"):
+            write_sample(resources, filename, "secret")
+        assert not (resources / filename).exists(), filename

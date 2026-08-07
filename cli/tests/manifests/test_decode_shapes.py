@@ -48,39 +48,36 @@ def _manifest(tmp_path: Path, text: str, rel: str = "res.yaml") -> None:
     path.write_text(dedent(text))
 
 
-@pytest.mark.parametrize(
-    ("key", "value"),
-    [
-        pytest.param("type", "github", id="the-retired-selector"),
-        pytest.param("org", "my-org", id="a-provider-owned-field"),
-    ],
-)
-def test_a_stray_top_level_key_names_the_one_field_this_kind_has(tmp_path: Path, key: str, value: str) -> None:
+def test_a_stray_top_level_key_names_the_one_field_this_kind_has(tmp_path: Path) -> None:
     """Both mistakes an operator brings from the flat TOML shape land on
     the same message, and that IS the design: the hand-written "use
     provider, not type" steer is gone, and provider-owned fields like
     ``org`` never rode the spec top level in YAML. Naming the kind's one
     field says both things without a second place to keep either.
 
+    One loop, because landing on the same message is the claim: the
+    retired selector and a provider-owned field, side by side.
+
     (``token`` is the exception that keeps its own steer, because the
     field list alone does not say WHERE the token goes; see
     ``test_spec_hosts.py::test_a_top_level_token_keeps_its_steer``.)
     """
-    _manifest(
-        tmp_path,
-        f"""
-        apiVersion: agentworks/v1
-        kind: git-credential
-        metadata:
-          name: github
-        spec:
-          provider:
-            name: github
-          {key}: {value}
-        """,
-    )
-    with pytest.raises(ConfigError, match=f"{key}: unknown field; expected one of: provider"):
-        load_manifests(tmp_path / "resources")
+    for key, value in (("type", "github"), ("org", "my-org")):
+        _manifest(
+            tmp_path,
+            f"""
+            apiVersion: agentworks/v1
+            kind: git-credential
+            metadata:
+              name: github
+            spec:
+              provider:
+                name: github
+              {key}: {value}
+            """,
+        )
+        with pytest.raises(ConfigError, match=f"{key}: unknown field; expected one of: provider"):
+            load_manifests(tmp_path / "resources")
 
 
 def test_a_kind_owned_key_inside_the_provider_block_is_the_providers_to_refuse(
@@ -148,26 +145,27 @@ def test_provider_must_be_a_tagged_table(tmp_path: Path) -> None:
         load_manifests(tmp_path / "resources")
 
 
-@pytest.mark.parametrize("field", ["description", "name"])
-def test_a_metadata_field_written_in_spec_is_refused(tmp_path: Path, field: str) -> None:
+def test_a_metadata_field_written_in_spec_is_refused(tmp_path: Path) -> None:
     """The metadata fields ARE fields of the row, so ``extra="forbid"``
     would accept one written in ``spec`` and let it silently override the
-    envelope. Parametrized over two of them because the guard is derived
-    from the row base rather than naming ``description`` alone."""
-    _manifest(
-        tmp_path,
-        f"""
-        apiVersion: agentworks/v1
-        kind: secret
-        metadata:
-          name: s1
-          description: d
-        spec:
-          {field}: also here
-        """,
-    )
-    with pytest.raises(ConfigError, match=f"{field} belong\\(s\\) in metadata, not in spec"):
-        load_manifests(tmp_path / "resources")
+    envelope. Over two of them because the guard is derived from the row
+    base rather than naming ``description`` alone, and in one loop for the
+    same reason: one derivation answers for both."""
+    for field in ("description", "name"):
+        _manifest(
+            tmp_path,
+            f"""
+            apiVersion: agentworks/v1
+            kind: secret
+            metadata:
+              name: s1
+              description: d
+            spec:
+              {field}: also here
+            """,
+        )
+        with pytest.raises(ConfigError, match=f"{field} belong\\(s\\) in metadata, not in spec"):
+            load_manifests(tmp_path / "resources")
 
 
 # The per-kind NAME CAPS were pinned here three times over and are not any
@@ -180,12 +178,22 @@ def test_a_metadata_field_written_in_spec_is_refused(tmp_path: Path, field: str)
 # and ``::test_secret_name_over_secret_cap_errors``.
 
 
-@pytest.mark.parametrize(
-    "kind",
-    ["vm-template", "agent-template", "workspace-template", "admin-template", "named-console-template"],
-)
-def test_a_description_is_stored_by_every_formerly_template_shaped_kind(tmp_path: Path, kind: str) -> None:
-    """description is framework-uniform now, so no declarable kind emits
+#: The five kinds that were template-shaped before description became
+#: framework-uniform. Written out rather than derived from
+#: ``declarable_kinds()``: the rest of the declarable set has required spec
+#: fields, so ``spec: {}`` would not decode for them. The claim below is
+#: therefore about these five, not about every declarable kind.
+_FORMERLY_TEMPLATE_SHAPED = [
+    "vm-template",
+    "agent-template",
+    "workspace-template",
+    "admin-template",
+    "named-console-template",
+]
+
+
+def test_a_description_is_stored_by_every_formerly_template_shaped_kind(tmp_path: Path) -> None:
+    """description is framework-uniform now, so none of these kinds emits
     the retired "not yet stored" warning and every one of them keeps the
     value.
 
@@ -194,23 +202,32 @@ def test_a_description_is_stored_by_every_formerly_template_shaped_kind(tmp_path
     carries it into a registry nothing can look it up in would be the same
     defect one layer along. A separate vm-template-only test made that
     second half of the claim; it is the same claim for every kind here.
+
+    One load over all five rather than a case each. Uniformity is the
+    claim, so what a failure has to say is which kinds stopped being
+    uniform, and this way the loader and the registry are each built once.
     """
-    _manifest(
-        tmp_path,
-        f"""
-        apiVersion: agentworks/v1
-        kind: {kind}
-        metadata:
-          name: default
-          description: uniform description
-        spec: {{}}
-        """,
-    )
+    for kind in _FORMERLY_TEMPLATE_SHAPED:
+        _manifest(
+            tmp_path,
+            f"""
+            apiVersion: agentworks/v1
+            kind: {kind}
+            metadata:
+              name: default
+              description: uniform description
+            spec: {{}}
+            """,
+            rel=f"{kind}.yaml",
+        )
     manifests = load_manifests(tmp_path / "resources")
+    registry = build_registry(_config(tmp_path))
 
     assert not manifests.issues
-    assert manifests.entries[0].resource.description == "uniform description"
-    assert build_registry(_config(tmp_path)).lookup(kind, "default").description == "uniform description"
+    decoded = {entry.kind: entry.resource.description for entry in manifests.entries}
+    assert decoded == dict.fromkeys(_FORMERLY_TEMPLATE_SHAPED, "uniform description")
+    stored = {kind: registry.lookup(kind, "default").description for kind in _FORMERLY_TEMPLATE_SHAPED}
+    assert stored == dict.fromkeys(_FORMERLY_TEMPLATE_SHAPED, "uniform description")
 
 
 def test_install_command_kind_decode_error_carries_location(tmp_path: Path) -> None:

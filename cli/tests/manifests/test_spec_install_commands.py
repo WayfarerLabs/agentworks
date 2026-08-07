@@ -16,7 +16,6 @@ operator wrote, and that keeps its sweep over both.
 
 from __future__ import annotations
 
-import pytest
 from pydantic import BaseModel
 
 from agentworks.install_commands import SystemInstallCommandEntry, UserInstallCommandEntry
@@ -68,12 +67,17 @@ def test_the_optional_fields_default() -> None:
 # -- What an operator reads when it is wrong ----------------------------------
 
 
-@pytest.mark.parametrize("kind", _KINDS)
-def test_a_missing_command_says_it_is_required(kind: str) -> None:
-    """Swept over both kinds, unlike its neighbours: what it pins is that
-    the diagnostic names the kind the operator wrote, which is the one
-    fact the shared spec does not supply."""
-    assert rejection(kind, "example", {}) == f"res.yaml:7: {kind}/example.command: is required"
+def test_a_missing_command_says_it_is_required() -> None:
+    """Over both kinds, unlike its neighbours: what it pins is that the
+    diagnostic names the kind the operator wrote, which is the one fact
+    the shared spec does not supply. One loop, because the expectation is
+    that kind's own name and both come from one shared refusal."""
+    misread = [
+        (kind, got)
+        for kind in _KINDS
+        if (got := rejection(kind, "example", {})) != f"res.yaml:7: {kind}/example.command: is required"
+    ]
+    assert not misread
 
 
 def test_two_tests_are_refused_by_name() -> None:

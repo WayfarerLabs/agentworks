@@ -423,20 +423,30 @@ def test_a_table_of_tagged_blocks_hangs_its_element_under_a_placeholder_key() ->
     assert {child.name for child in element.children} == {"name", "vm_host"}
 
 
-@pytest.mark.parametrize("model_cls", [TaggedCollectionSite, FieldTaggedCollectionSite, Nodes])
-def test_the_tree_offers_every_element_arm_the_stream_does(model_cls: type[AgwModel]) -> None:
+def test_the_tree_offers_every_element_arm_the_stream_does() -> None:
     """The presenter drops no arm the stream carries, at any depth of any
     model: one element node, listing every alternative in the order the
-    author declared them."""
-    offered = 0
-    for entry in _walk(field_tree(model_cls)):
-        if not entry.doc.item_union_arms:
-            continue
-        offered += 1
-        (element,) = entry.children
-        assert [alt.name for alt in element.alternatives] == [arm.tag for arm in entry.doc.item_union_arms]
+    author declared them.
 
-    assert offered, "this model has no tagged collection, so it proves nothing"
+    Three models in one loop, reporting every element node that dropped an
+    arm. The presenter is shared, so a rule that starts dropping drops on
+    all three, and the list of which nodes lost what is the report worth
+    reading.
+    """
+    dropped: list[str] = []
+    for model_cls in (TaggedCollectionSite, FieldTaggedCollectionSite, Nodes):
+        offered = 0
+        for entry in _walk(field_tree(model_cls)):
+            if not entry.doc.item_union_arms:
+                continue
+            offered += 1
+            (element,) = entry.children
+            offers = [alt.name for alt in element.alternatives]
+            carries = [arm.tag for arm in entry.doc.item_union_arms]
+            if offers != carries:
+                dropped.append(f"{model_cls.__name__}.{'.'.join(entry.doc.path)}: offers {offers}, stream {carries}")
+        assert offered, f"{model_cls.__name__} has no tagged collection, so it proves nothing"
+    assert not dropped, "\n".join(dropped)
 
 
 def test_a_tagged_collection_arm_reachable_from_itself_stops_rather_than_recurring() -> None:

@@ -139,18 +139,23 @@ def test_bare_naming_string_is_rejected_with_a_one_key_rewrite(tmp_path: Path) -
         )
 
 
-@pytest.mark.parametrize(("kind", "field", "old_doc", "rewrite"), _SURFACES)
-def test_sibling_config_alone_names_the_unsupported_field(
-    tmp_path: Path, kind: str, field: str, old_doc: str, rewrite: str
-) -> None:
+def test_sibling_config_alone_names_the_unsupported_field(tmp_path: Path) -> None:
     """A ``*_config`` table with no naming field beside it: the message
     names the field that is not supported rather than reporting the
     capability as missing, which is what the kind's own required-field
-    error would say."""
-    config_field = f"{field}_config"
-    document = "\n".join(line for line in dedent(old_doc).splitlines() if not line.strip().startswith(f"{field}:"))
-    with pytest.raises(ConfigError, match=f"spec.{config_field} is not a supported YAML field"):
-        _load_one(tmp_path, "ownerless", document)
+    error would say.
+
+    Looped over ``_SURFACES`` rather than parametrized: the expectation is
+    derived from the surface's own field name, so all three make one claim
+    of the shared refusal and a report naming every surface that stopped
+    making it is the useful failure. The sweep above keeps its cases
+    because each carries its own rendered REWRITE.
+    """
+    for kind, field, old_doc, _rewrite in _SURFACES:
+        config_field = f"{field}_config"
+        document = "\n".join(line for line in dedent(old_doc).splitlines() if not line.strip().startswith(f"{field}:"))
+        with pytest.raises(ConfigError, match=f"spec.{config_field} is not a supported YAML field"):
+            _load_one(tmp_path, f"ownerless-{kind}", document)
 
 
 def test_session_template_canonical_selector_decodes_to_the_internal_pair(tmp_path: Path) -> None:
@@ -185,109 +190,112 @@ def test_session_template_canonical_selector_decodes_to_the_internal_pair(tmp_pa
 #: left is one case per distinct claim: each retired KEY, and the mixture
 #: that might have been thought to rescue one.
 _RETIRED_SELECTORS = [
-    pytest.param("harness_config:\n    command: htop", "harness_config", id="config-without-a-selector"),
-    pytest.param("harness: shell", "harness", id="a-name-that-used-to-work"),
+    ("config-without-a-selector", "harness_config:\n    command: htop", "harness_config"),
+    ("a-name-that-used-to-work", "harness: shell", "harness"),
     # A canonical selector beside it does not rescue the retired one.
-    pytest.param("harness: shell\n  harness_integration:\n    name: shell", "harness", id="old-and-canonical-mixed"),
+    ("old-and-canonical-mixed", "harness: shell\n  harness_integration:\n    name: shell", "harness"),
 ]
 
 
-@pytest.mark.parametrize(("spec_body", "key"), _RETIRED_SELECTORS)
-def test_a_retired_session_selector_is_an_unknown_field_at_its_own_location(
-    tmp_path: Path, spec_body: str, key: str
-) -> None:
+def test_a_retired_session_selector_is_an_unknown_field_at_its_own_location(tmp_path: Path) -> None:
     """The retired keys read as what they are, with the document's
     ``file:line`` on the front so an operator with several templates knows
-    which one to open."""
-    with pytest.raises(ConfigError, match=rf"res\.yaml:2:.*{key}: unknown field; expected one of: "):
-        _load_one(
-            tmp_path,
-            "retired-selector",
-            f"""
+    which one to open.
+
+    One loop, because the note above is the whole reason these are
+    together: they all land on ``extra="forbid"``, so re-admitting a key
+    reddens the lot. The label is carried into the failure so the spelling
+    that stopped being refused still names itself.
+    """
+    for label, spec_body, key in _RETIRED_SELECTORS:
+        # The literal keeps its original indentation: ``dedent`` strips the
+        # COMMON prefix, and ``spec_body``'s own continuation lines carry
+        # only their nesting, so indenting the block further would leave
+        # dedent nothing to strip and change the document.
+        document = f"""
             apiVersion: agentworks/v1
             kind: session-template
             metadata:
               name: htop
             spec:
               {spec_body}
-            """,
+            """
+        with pytest.raises(ConfigError, match=rf"res\.yaml:2:.*{key}: unknown field; expected one of: "):
+            _load_one(tmp_path, f"retired-selector-{label}", document)
+
+
+def test_session_template_without_selector_remains_a_valid_default_or_inheriting_template(tmp_path: Path) -> None:
+    """A template that names no integration loads, whether it is the
+    default one an operator configures or a child that inherits its
+    parent's. Both spellings make the one claim, so they are one loop."""
+    for label, spec in (("a-default", "env:\n    TERM: xterm-256color"), ("an-inheritor", "inherits: [parent]")):
+        manifests = _load_one(
+            tmp_path,
+            f"no-selector-{label}",
+            "\n".join(
+                (
+                    "apiVersion: agentworks/v1",
+                    "kind: session-template",
+                    "metadata:",
+                    "  name: child",
+                    "spec:",
+                    *(f"  {line}" for line in spec.splitlines()),
+                )
+            ),
         )
+        (entry,) = manifests.entries
+        assert entry.resource.harness_integration is None, label
 
 
-@pytest.mark.parametrize(
-    "spec",
-    ["env:\n    TERM: xterm-256color", "inherits: [parent]"],
-)
-def test_session_template_without_selector_remains_a_valid_default_or_inheriting_template(
-    tmp_path: Path, spec: str
-) -> None:
-    manifests = _load_one(
-        tmp_path,
-        "no-selector",
-        "\n".join(
-            (
-                "apiVersion: agentworks/v1",
-                "kind: session-template",
-                "metadata:",
-                "  name: child",
-                "spec:",
-                *(f"  {line}" for line in spec.splitlines()),
-            )
-        ),
-    )
-    (entry,) = manifests.entries
-    assert entry.resource.harness_integration is None
+#: A tagged table AND its retired sibling, on each hosting surface.
+_MIXED_SHAPES = [
+    (
+        "platform",
+        """
+        apiVersion: agentworks/v1
+        kind: vm-site
+        metadata:
+          name: gpu-box
+        spec:
+          platform:
+            name: lima
+            vm_host: me@gpu-box
+          platform_config:
+            vm_host: elsewhere
+        """,
+    ),
+    (
+        "provider",
+        """
+        apiVersion: agentworks/v1
+        kind: git-credential
+        metadata:
+          name: ado
+        spec:
+          provider:
+            name: azdo
+          provider_config:
+            org: my-org
+        """,
+    ),
+    (
+        "harness_integration",
+        """
+        apiVersion: agentworks/v1
+        kind: session-template
+        metadata:
+          name: htop
+        spec:
+          harness_integration:
+            name: shell
+          harness_integration_config:
+            command: htop
+        """,
+    ),
+]
 
 
-@pytest.mark.parametrize(
-    ("doc", "field"),
-    [
-        (
-            """
-            apiVersion: agentworks/v1
-            kind: vm-site
-            metadata:
-              name: gpu-box
-            spec:
-              platform:
-                name: lima
-                vm_host: me@gpu-box
-              platform_config:
-                vm_host: elsewhere
-            """,
-            "platform",
-        ),
-        (
-            """
-            apiVersion: agentworks/v1
-            kind: git-credential
-            metadata:
-              name: ado
-            spec:
-              provider:
-                name: azdo
-              provider_config:
-                org: my-org
-            """,
-            "provider",
-        ),
-        (
-            """
-            apiVersion: agentworks/v1
-            kind: session-template
-            metadata:
-              name: htop
-            spec:
-              harness_integration:
-                name: shell
-              harness_integration_config:
-                command: htop
-            """,
-            "harness_integration",
-        ),
-    ],
-)
-def test_mixed_shape_is_a_hard_error_with_no_rewrite_hint(tmp_path: Path, doc: str, field: str) -> None:
+def test_mixed_shape_is_a_hard_error_with_no_rewrite_hint(tmp_path: Path) -> None:
     """A tagged table beside a sibling ``*_config``: the message names the
     field that is not supported, so the operator's next move is to fold
     those keys in rather than to guess which half won.
@@ -297,11 +305,15 @@ def test_mixed_shape_is_a_hard_error_with_no_rewrite_hint(tmp_path: Path, doc: s
     wins is the operator's call, so any rewrite would be a guess. The
     sample hint every model-layer error carries is not reached either,
     because this refusal runs ahead of validation.
+
+    One loop over the three surfaces: the expectation is derived from each
+    one's own field name, so all three make the one claim.
     """
-    with pytest.raises(ConfigError) as excinfo:
-        _load_one(tmp_path, "mixed", doc)
-    assert f"spec.{field}_config is not a supported YAML field" in str(excinfo.value)
-    assert excinfo.value.hint is None
+    for field, doc in _MIXED_SHAPES:
+        with pytest.raises(ConfigError) as excinfo:
+            _load_one(tmp_path, f"mixed-{field}", doc)
+        assert f"spec.{field}_config is not a supported YAML field" in str(excinfo.value)
+        assert excinfo.value.hint is None, field
 
 
 @pytest.mark.parametrize(
@@ -570,8 +582,7 @@ def test_a_non_table_sibling_names_the_value_it_cannot_fold(tmp_path: Path) -> N
     assert excinfo.value.hint is None
 
 
-@pytest.mark.parametrize("spelling", ["", " null", " ~"])
-def test_an_empty_sibling_is_shown_the_rewrite(tmp_path: Path, spelling: str) -> None:
+def test_an_empty_sibling_is_shown_the_rewrite(tmp_path: Path) -> None:
     """An empty sibling holds nothing, so the rewrite is printable, so it
     is printed.
 
@@ -584,12 +595,17 @@ def test_an_empty_sibling_is_shown_the_rewrite(tmp_path: Path, spelling: str) ->
     The extra instruction over the absent-sibling case is real work: the
     empty key still has to go, or the next load answers with the ORPHAN
     refusal instead.
+
+    All three YAML spellings of "empty" in one loop: they reach one branch
+    and the expectation does not vary, so a spelling that stopped being
+    read as empty is what the failure has to name, and it does.
     """
-    with pytest.raises(ConfigError) as excinfo:
-        _load_one(
-            tmp_path,
-            f"empty-sibling{len(spelling)}",
-            f"""
+    for spelling in ("", " null", " ~"):
+        with pytest.raises(ConfigError) as excinfo:
+            _load_one(
+                tmp_path,
+                f"empty-sibling{len(spelling)}",
+                f"""
             apiVersion: agentworks/v1
             kind: vm-site
             metadata:
@@ -598,13 +614,13 @@ def test_an_empty_sibling_is_shown_the_rewrite(tmp_path: Path, spelling: str) ->
               platform: lima
               platform_config:{spelling}
             """,
-        )
+            )
 
-    message = str(excinfo.value)
-    assert "spec.platform_config is empty, so there are no keys to fold" in message
-    assert "platform: {name: lima}" in message, "the rewrite is printable here, unlike a non-table value"
-    assert "remove it" in message
-    assert excinfo.value.hint == _REWRITE_HINT
+        message = str(excinfo.value)
+        assert "spec.platform_config is empty, so there are no keys to fold" in message, spelling
+        assert "platform: {name: lima}" in message, f"{spelling!r}: the rewrite is printable here"
+        assert "remove it" in message, spelling
+        assert excinfo.value.hint == _REWRITE_HINT, spelling
 
 
 def test_decode_refuses_exactly_the_three_retired_sibling_shapes() -> None:
