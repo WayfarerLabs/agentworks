@@ -274,3 +274,35 @@ is now settings only: `[azure]` and `[proxmox]` no longer load as deprecated vm-
 they hard-error at config load. Migrate them to `vm-site` manifests with
 `agw resource migrate vm-site` (they still migrate as vm-site). ADR 0016's dual-path stance is
 superseded by [ADR 0022](../../adrs/0022-single-resource-declaration-frontend.md).
+
+## Addendum: 2026-08-06 (schema-registration for capability config has landed)
+
+This SDD's deferral, recorded above under scoped-out work as "**Schema-registration for capability
+config.** Uses the shipped invoked-validation API as-is; the declarative-schema upgrade is future
+work", is resolved. That upgrade shipped in the declarative-schema effort's phase 2; the permanent
+record is [ADR 0023](../../adrs/0023-declared-schemas-and-the-kind-descriptor.md).
+
+A `vm-platform` now DECLARES its config as a model (`config_model`) and the core derives validation,
+reference extraction, defaulting, JSON Schema emission, `agw resource sample`, and
+`agw resource describe-kind` from it, invoking no platform code. Concretely for the surfaces this
+SDD designed:
+
+- **The capability-config secret machinery this SDD built stays**, and is now declared rather than
+  computed: proxmox's `token_secret` is a `SecretRef`-marked field with `proxmox-token` as its
+  owner-templated default, and the same marker is what authorizes the op to read that secret through
+  the context. The AWS platform this SDD anticipated ("AWS-credentials-by-secret needs no new
+  design") landed as `aws-ec2` on exactly that shape, with a nested `credentials` table.
+- **A vm-site's `spec.platform` is one tagged table**, not the `platform` / `platform_config`
+  sibling pair this SDD shipped. The sibling pair is a hard error; `agw resource migrate --all`
+  folds it in place.
+- **Unknown keys inside a platform's config are hard errors**, and so are wrong types. That is a
+  break for proxmox specifically, which previously coerced `template_vmid` through `int(str(...))`
+  and read `verify_ssl` through `bool(...)`, so a quoted `"9000"` loaded and a `"no"` meant true.
+  The operator upgrade note is in `docs/guides/resources.md`.
+- **`ProvisionRequest` arrives fully resolved.** Its `cpus` / `memory_gib` / `disk_gib` / `swap_gib`
+  are required and non-optional, and the per-platform consumer-side re-defaulting this SDD's
+  platforms each carried is gone; the defaults are declared once on the template model.
+
+The vm-site / vm-platform model itself, the readiness and enablement axes, the bundled-site
+mechanism, the reserved names, and the exposure and rollback contracts recorded above are all
+unchanged.
