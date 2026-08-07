@@ -32,7 +32,7 @@ from agentworks.schema import (
     validation_context,
 )
 from agentworks.schema.errors import _problems
-from agentworks.source_location import SourceLocation
+from agentworks.source_location import SourceLocation, synthesized
 
 from ._fixture_models import (
     CatalogLike,
@@ -177,6 +177,35 @@ def test_one_error_without_a_location_is_just_the_owner_framed_line() -> None:
     error = _raised(PrincipalLike, {"client_id": 8, "tenant_id": "t"}, location=None)
 
     assert str(error) == "vm-site/lab.client_id: must be a string"
+
+
+def test_a_synthesized_location_frames_nothing() -> None:
+    """``SourceLocation`` carries its own sentinels, and ``_located``
+    honors them rather than rendering them. A framework-constructed row
+    (``source_location.synthesized()``) has no file an operator could
+    open, so prefixing ``<synthesized>:`` would offer them a path that
+    does not exist. Identical to passing no location at all, which is what
+    "no location an operator can navigate to" means.
+    """
+    error = _raised(PrincipalLike, {"client_id": 8, "tenant_id": "t"}, location=synthesized())
+
+    assert str(error) == "vm-site/lab.client_id: must be a string"
+
+
+def test_a_location_with_no_line_still_names_the_file() -> None:
+    """The other sentinel, and it is NOT the same answer. ``line == 0``
+    means the row was not introduced by a specific declaration site, but
+    the file is real and worth sending the operator to; only the position
+    is missing. Rendering it would put them on line 0, which no editor
+    has.
+    """
+    error = _raised(
+        PrincipalLike,
+        {"client_id": 8, "tenant_id": "t"},
+        location=SourceLocation(file=Path("sites.yaml"), line=0),
+    )
+
+    assert str(error) == "sites.yaml: vm-site/lab.client_id: must be a string"
 
 
 def test_the_owner_rides_along_as_the_errors_entity() -> None:

@@ -143,6 +143,49 @@ def test_a_collection_field_names_the_model_its_elements_hold() -> None:
     assert docs(CatalogLike)[("extra_secrets",)].ref is not None
 
 
+@pytest.mark.parametrize("platform", ["azure", "aws"])
+def test_the_shipped_optional_catalog_shape_expands_its_element(platform: str) -> None:
+    """The two real catalog fields, which no test reached.
+
+    ``CatalogLike`` above claims to stand in for them, and on the part
+    that matters here it does not: it spells ``list[X] =
+    Field(default_factory=list)``, while both shipped fields are
+    ``Annotated[list[X], Field(min_length=1)] | None = None``. The walker
+    has to peel the optional AND the ``Annotated`` wrapper, in that
+    nesting, before it can see a collection at all
+    (``schema/_shape.py:198-199``). Miss either peel and the field reads
+    as an opaque scalar: no element, so a generated sample and a
+    describe-kind listing both stop telling an operator what goes inside
+    a catalog entry, with nothing raised.
+
+    Asserted against the element model's OWN field set rather than a list
+    of names, so adding a field to a catalog entry does not need this test
+    edited to keep meaning something.
+
+    The plugin models are imported inside the test because this package
+    is a leaf that must not reach into them (``test_package_boundary``);
+    the rule is about the package, and keeping its tests visibly narrow
+    too costs nothing.
+    """
+    from agentworks.plugins.aws.platform import AwsEC2Config, AwsInstanceType
+    from agentworks.plugins.azure.platform import AzureVMConfig, AzureVMSize
+
+    catalogs: dict[str, tuple[type[AgwModel], type[AgwModel], str]] = {
+        "azure": (AzureVMConfig, AzureVMSize, "vm_sizes"),
+        "aws": (AwsEC2Config, AwsInstanceType, "instance_types"),
+    }
+    config, element, name = catalogs[platform]
+
+    field_docs = docs(config)
+
+    assert field_docs[(name,)].item_model is element
+    # ``| None = None``: optional, and the absent catalog is the default.
+    assert field_docs[(name,)].required is False
+    assert field_docs[(name,)].default is None
+    reached = {path[-1] for path in field_docs if path[:2] == (name, SEQUENCE_ELEMENT)}
+    assert reached == set(element.model_fields)
+
+
 def test_a_root_model_streams_its_one_root_field() -> None:
     from ._fixture_models import MappingRoot, StringRoot
 
@@ -192,6 +235,33 @@ def test_a_declared_default_of_none_is_not_the_absence_of_one() -> None:
 
 def test_a_default_factory_is_called() -> None:
     assert docs(Constrained)[("tags",)].default == []
+
+
+def test_a_factory_that_needs_the_other_fields_reports_no_default() -> None:
+    """Pydantic lets a ``default_factory`` take the already-validated
+    values of the fields declared before it. A doc walker has none: it is
+    describing the shape, not validating a document, so there is nothing
+    to hand such a factory and calling it would raise.
+
+    Reporting UNSET is the honest answer, and it is the same one a
+    required field gets, which is exactly right for the surfaces
+    downstream: the sample renderer writes a live line only for a field
+    whose value it knows, so this field is offered as one the operator
+    fills in rather than pre-filled with a value invented from an empty
+    document.
+    """
+
+    class Derived(AgwModel):
+        prefix: str = "agw"
+        label: str = Field(default_factory=lambda data: f"{data['prefix']}-label")
+
+    doc = docs(Derived)[("label",)]
+
+    assert doc.default is UNSET
+    # The factory really is the validated-data kind, and it really does
+    # work when pydantic (not the walker) calls it: the walker is
+    # declining to invent an input, not routing around a broken factory.
+    assert Derived().label == "agw-label"
 
 
 def test_the_description_comes_from_the_attribute_docstring() -> None:
