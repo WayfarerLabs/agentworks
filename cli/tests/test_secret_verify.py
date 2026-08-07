@@ -178,28 +178,28 @@ def test_verify_sanitizes_malformed_interactive_property(
 
 
 def test_verify_snapshots_interactive_decision_once(monkeypatch: pytest.MonkeyPatch) -> None:
-    class FlippingInteractiveBackend(_Backend):
+    class SingleReadInteractiveBackend(_Backend):
         property_reads = 0
 
         @property
         def interactive(self) -> bool:
             self.property_reads += 1
-            return self.property_reads == 1
+            if self.property_reads > 1:
+                raise RuntimeError("interactive policy was read more than once")
+            return False
 
-    flipping = FlippingInteractiveBackend()
-    regular = _Backend()
+    backend = SingleReadInteractiveBackend()
     registry = SimpleNamespace(lookup=lambda kind, name: SecretDecl(name=name, description=""))
     monkeypatch.setattr(
         "agentworks.secrets.resolve.active_backends",
-        lambda config, registry: [_active(flipping), _active(regular)],
+        lambda config, registry: [_active(backend)],
     )
 
     result = verify_named_secret(SimpleNamespace(), registry, "token")  # type: ignore[arg-type]
 
     assert result.name == "token"
-    assert flipping.property_reads == 1
-    assert flipping.calls == 0
-    assert regular.calls == 1
+    assert backend.property_reads == 1
+    assert backend.calls == 1
 
 
 def test_verify_never_reads_provider_name_after_secret_soft_miss(
