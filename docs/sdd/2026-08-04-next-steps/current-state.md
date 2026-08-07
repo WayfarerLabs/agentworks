@@ -52,9 +52,10 @@ and the manifest surface has no warn-window channel (the standing consequence re
 - The secret-source direction still goes with the grain: the backend/source split is specified in
   `target-state.md`, and the descriptor contract records the open readiness-shape choice for the
   `secret-source` kind as wave 3's call, which the descriptor must record once made.
-- One recorded descriptor-contract escalation stands open for the roadmap: map-keyed
-  `backend_mappings` emission needs the descriptor to record where a map-keyed capability is hosted
-  (the `onepassword` trigger has fired; see the locked declarative-schema SDD).
+- The map-keyed `backend_mappings` escalation from the wave 2 closeout is ruled (roadmap,
+  2026-08-07, recorded in `capability-descriptor-contract.md`): the descriptor gains a field
+  recording where a map-keyed capability is hosted, schema emission as first consumer, landing with
+  wave 3 (its seed's R8); the `onepassword` trigger has fired.
 
 ## Session runtime (observability groundwork)
 
