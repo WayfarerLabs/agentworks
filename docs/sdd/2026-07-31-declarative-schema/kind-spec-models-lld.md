@@ -700,8 +700,19 @@ The rule, stated so it stays narrow: problems that share a loc prefix and end ex
 position are ONE problem ("the value is none of the alternatives"), rendered once from the union's
 members. Problems that go DEEPER than the union position (a failure inside a model arm, e.g.
 onepassword's `account.reference: is required`) stay as they are, because those are informative and
-collapsing them would lose the only useful thing in the batch. The `_AtUnion` cursor already
-identifies the union position, so this is a grouping over `_problems`, not a new walk.
+collapsing them would lose the only useful thing in the batch.
+
+**Amended 2026-08-07 (review finding 22).** The rule as written is incomplete, and shipping it alone
+left a real defect: when a deeper problem exists, the SHALLOW alternatives line has to be DROPPED,
+not kept beside it. Keeping both is what made every malformed onepassword table lead with
+`Input should be a valid string`, a complaint about whichever arm sorted first, printed directly
+above the real diagnosis. The paragraph above even cites `account.reference: is required` without
+noticing the noise beside it. What shipped: an arm that got past the SHAPE check and then failed on
+CONTENT silences the other arms' shape rejections, because those arms were never the one the
+operator meant. Where no arm got past the shape check, the collapse to "must be a string or a table"
+is exactly right and is preserved. This affects the shipped `validate_capability_config` path, not
+only a plugin's own revalidation. The `_AtUnion` cursor already identifies the union position, so
+this is a grouping over `_problems`, not a new walk.
 
 Extension (c) also fixes the member-label paths for free, which is why the models do not get a guard
 validator to route around the problem (section 5.4).
