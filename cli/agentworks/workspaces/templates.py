@@ -102,15 +102,18 @@ def effective_template(templates: Mapping[str, WorkspaceTemplate], name: str) ->
         return ResolvedTemplate(name=name)
 
 
-def _resolve(
+def _layers(
     templates: Mapping[str, WorkspaceTemplate],
     name: str,
     _visiting: tuple[str, ...] = (),
-) -> ResolvedTemplate:
-    """Depth-first, left-to-right resolution of a template.
+) -> list[WorkspaceTemplate]:
+    """The DECLARATIONS ``name`` merges from, in merge order: each
+    parent's own chain first (left to right), then the row itself. See
+    ``vms.templates._layers`` for the shape all four resolvers share and
+    why it matches ``resources.inheritance.merge_layers``.
 
-    ``_visiting`` carries the chain of in-progress resolves so cycles
-    raise ``InheritanceCycleError`` instead of ``RecursionError``. The
+    ``_visiting`` carries the chain of in-progress walks so cycles raise
+    ``InheritanceCycleError`` instead of ``RecursionError``. The
     framework's cycle pass at build_registry time is the canonical check;
     this guard is the safety net for callers that resolve without going
     through build_registry, and :func:`effective_template` keys on the
@@ -120,37 +123,34 @@ def _resolve(
         raise inheritance_cycle_error("workspace-template", (*_visiting, name))
 
     if name not in templates:
-        return ResolvedTemplate(name=name)
+        return []
 
     tmpl = templates[name]
-    result = ResolvedTemplate(name=name)
     next_visiting = (*_visiting, name)
+    layers = [layer for parent in tmpl.inherits for layer in _layers(templates, parent, next_visiting)]
+    layers.append(tmpl)
+    return layers
 
-    # Walk parents first
-    for parent_name in tmpl.inherits:
-        parent = _resolve(templates, parent_name, next_visiting)
-        _merge(result, parent)
 
-    # Apply this template's own values (last-one-wins)
-    _merge_template(result, tmpl)
-    result.name = name  # always use the originally requested name
+def _resolve(
+    templates: Mapping[str, WorkspaceTemplate],
+    name: str,
+    _visiting: tuple[str, ...] = (),
+) -> ResolvedTemplate:
+    """Resolve ``name``'s chain, defaults applied: one accumulator folded
+    over the chain's declarations, last one wins. See
+    ``vms.templates._resolve_from_dict`` for why the fold reads the
+    DECLARATIONS rather than each parent's resolved template.
+    """
+    result = ResolvedTemplate(name=name)
+    for layer in _layers(templates, name, _visiting):
+        _merge_template(result, layer)
     return result
 
 
-def _merge(target: ResolvedTemplate, source: ResolvedTemplate) -> None:
-    """Merge source into target (source wins for scalars)."""
-    if source.repo is not None:
-        target.repo = source.repo
-    target.tmuxinator = source.tmuxinator
-    if source.git_user_name is not None:
-        target.git_user_name = source.git_user_name
-    if source.git_user_email is not None:
-        target.git_user_email = source.git_user_email
-    target.env = {**target.env, **source.env}
-
-
 def _merge_template(target: ResolvedTemplate, tmpl: WorkspaceTemplate) -> None:
-    """Merge a raw WorkspaceTemplate into a ResolvedTemplate."""
+    """Fold one declared WorkspaceTemplate into the accumulator. None =
+    not set, skip. The only writer of a ``ResolvedTemplate``'s fields."""
     if tmpl.repo is not None:
         target.repo = tmpl.repo
     if tmpl.tmuxinator is not None:

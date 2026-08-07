@@ -68,15 +68,29 @@ def resolve_from_dict(
     return ResolvedVMTemplate(name="default")
 
 
-def _resolve_from_dict(
+def _layers(
     templates: Mapping[str, VMTemplate],
     name: str,
     _visiting: tuple[str, ...] = (),
-) -> ResolvedVMTemplate:
-    """Depth-first resolution using a templates dict.
+) -> list[VMTemplate]:
+    """The DECLARATIONS ``name`` merges from, in merge order: each
+    parent's own chain first (left to right), then the row itself.
 
-    ``_visiting`` carries the chain of in-progress resolves so cycles
-    raise a clean ``InheritanceCycleError`` (matching the framework's
+    The same chain, and deliberately the same order, as
+    :func:`agentworks.resources.inheritance.merge_layers`, because a
+    provenance answer read off those layers has to name the layer whose
+    value this resolver's fold actually kept. It differs in exactly one
+    way: a cycle RAISES here. A resolve has a caller that can be told,
+    whereas ``merge_layers`` runs inside the finalize build walk, which
+    may not raise.
+
+    A name with no row contributes NO layer, matching ``merge_layers``:
+    an unresolved parent is the miss policy's to report, and a template
+    that stood in for it would be a fabricated declaration whose every
+    field says "the built-in default".
+
+    ``_visiting`` carries the chain of in-progress walks so a cycle
+    raises a clean ``InheritanceCycleError`` (matching the framework's
     cycle-pass error shape) instead of crashing with ``RecursionError``.
     This is the resolver's internal safety net; the canonical cycle check
     lives in ``Registry.finalize`` at build_registry time, but this
@@ -88,19 +102,37 @@ def _resolve_from_dict(
         raise inheritance_cycle_error("vm-template", (*_visiting, name))
 
     if name not in templates:
-        # Implicit default: return built-in defaults
-        return ResolvedVMTemplate(name=name)
+        return []
 
     tmpl = templates[name]
-    result = ResolvedVMTemplate(name=name)
     next_visiting = (*_visiting, name)
+    layers = [layer for parent in tmpl.inherits for layer in _layers(templates, parent, next_visiting)]
+    layers.append(tmpl)
+    return layers
 
-    for parent_name in tmpl.inherits:
-        parent = _resolve_from_dict(templates, parent_name, next_visiting)
-        _merge(result, parent)
 
-    _merge_template(result, tmpl)
-    result.name = name
+def _resolve_from_dict(
+    templates: Mapping[str, VMTemplate],
+    name: str,
+    _visiting: tuple[str, ...] = (),
+) -> ResolvedVMTemplate:
+    """Resolve ``name``'s chain, defaults applied.
+
+    ONE accumulator, folded over the chain's declarations. That is what
+    keeps a silent parent silent: every write goes through
+    :func:`_merge_template`, which skips an undeclared field, so there is
+    never a second defaults-applied template for a later parent to
+    overwrite an earlier one's real value with. Resolving each parent to
+    its own ``ResolvedVMTemplate`` first would destroy that distinction
+    before the merge could read it, since a resolved template cannot say
+    which of its values it was given and which it defaulted to.
+
+    A name with no row resolves to the built-in defaults, via an empty
+    chain.
+    """
+    result = ResolvedVMTemplate(name=name)
+    for layer in _layers(templates, name, _visiting):
+        _merge_template(result, layer)
     return result
 
 
@@ -149,23 +181,14 @@ def _append_dedupe(target: list[str], source: list[str]) -> list[str]:
     return result
 
 
-def _merge(target: ResolvedVMTemplate, source: ResolvedVMTemplate) -> None:
-    """Merge source into target. Scalars: source wins. Lists: append with dedupe."""
-    target.cpus = source.cpus
-    target.memory = source.memory
-    target.disk = source.disk
-    target.swap = source.swap
-    target.apt = _append_dedupe(target.apt, source.apt)
-    target.apt_packages = _append_dedupe(target.apt_packages, source.apt_packages)
-    target.snap = _append_dedupe(target.snap, source.snap)
-    target.system_install_commands = _append_dedupe(target.system_install_commands, source.system_install_commands)
-    target.env = {**target.env, **source.env}
-    target.tailscale_auth_key = source.tailscale_auth_key
-
-
 def _merge_template(target: ResolvedVMTemplate, tmpl: VMTemplate) -> None:
-    """Merge a raw VMTemplate into a ResolvedVMTemplate. None = not set, skip.
-    Scalars: child overrides. Lists: append with dedupe.
+    """Fold one declared VMTemplate into the accumulator. None = not set,
+    skip. Scalars: later layer overrides. Lists: append with dedupe.
+
+    The ONLY writer of a ``ResolvedVMTemplate``'s fields, which is what
+    makes "a layer that declares nothing changes nothing" hold by
+    construction rather than by two parallel field lists agreeing about
+    every field forever.
     """
     if tmpl.cpus is not None:
         target.cpus = tmpl.cpus

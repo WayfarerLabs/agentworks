@@ -420,6 +420,42 @@ def test_child_different_harness_integration_starts_fresh(fake_harness_integrati
     assert resolved.harness_integration_config == {"marker": "child"}  # no leak of the shell blob
 
 
+def test_a_switch_inside_one_parents_chain_discards_an_earlier_parents_blob(
+    fake_harness_integration: None,
+) -> None:
+    """The rule above, applied across a chain that switches away and back:
+    ``fake`` discards the ``shell`` blob accumulated so far, and naming
+    ``shell`` again afterwards starts fresh rather than recovering it.
+
+    Worth pinning because the merge could plausibly go the other way. The
+    resolver folds the chain's declarations FLAT, in one merge order, so
+    the switch sits between the two ``shell`` layers and separates them.
+    Merging each parent's already-merged pair instead would hide the
+    switch inside ``back-to-shell``'s own result and hand the fold a
+    plain ``shell`` pair, resurrecting ``from-first`` across a capability
+    that had already discarded it.
+    """
+    templates = {
+        "shell-parent": SessionTemplate(
+            name="shell-parent",
+            harness_integration=CapabilityBlock.of("shell", **{"command": "from-first"}),
+        ),
+        "detour": SessionTemplate(
+            name="detour",
+            harness_integration=CapabilityBlock.of("fake", **{"marker": "detour"}),
+        ),
+        "back-to-shell": SessionTemplate(
+            name="back-to-shell",
+            inherits=["detour"],
+            harness_integration=CapabilityBlock.of("shell", **{"resume_command": "from-second"}),
+        ),
+        "child": SessionTemplate(name="child", inherits=["shell-parent", "back-to-shell"]),
+    }
+    resolved = resolve_from_dict(templates, "child")
+    assert resolved.harness_integration == "shell"
+    assert resolved.harness_integration_config == {"resume_command": "from-second"}
+
+
 def test_multi_parent_silent_parent_does_not_wipe(tmp_path: Path) -> None:
     """The pinned divergence from today's multi-parent semantics (FRD
     R5): a later harness-integration-silent parent no longer wipes an earlier
