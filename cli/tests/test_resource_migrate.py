@@ -1292,7 +1292,7 @@ def test_cli_migrate_yes_executes_and_verifies(tmp_path: Path, monkeypatch: pyte
     _write_config(tmp_path)
     result = _cli(tmp_path, monkeypatch, ["resource", "migrate", "--all", "--yes"])
     assert result.exit_code == 0, result.stdout
-    assert "verified: registry unchanged" in result.stdout
+    assert "migrated resource(s) load from the new files exactly as before" in result.stdout
     assert (tmp_path / "resources" / "secrets.yaml").exists()
 
 

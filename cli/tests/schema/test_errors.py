@@ -29,9 +29,9 @@ from agentworks.schema import (
     AgwRootModel,
     RefOwner,
     config_error_from,
-    render_validation_error,
     validation_context,
 )
+from agentworks.schema.errors import _problems
 from agentworks.source_location import SourceLocation
 
 from ._fixture_models import (
@@ -90,10 +90,6 @@ def _fails(model_cls: type[BaseModel], blob: object) -> PydanticValidationError:
     return caught.value
 
 
-def _lines(model_cls: type[BaseModel], blob: object) -> list[str]:
-    return render_validation_error(_fails(model_cls, blob), model_cls=model_cls, owner=OWNER)
-
-
 def _raised(
     model_cls: type[BaseModel],
     blob: object,
@@ -106,6 +102,18 @@ def _raised(
         owner=OWNER,
         location=location,
     )
+
+
+def _lines(model_cls: type[BaseModel], blob: object) -> list[str]:
+    """The message ``blob`` produces, unlocated, split into lines.
+
+    Unlocated so that a path or normalization assertion reads as the
+    address and the message alone; the location framing is pinned in its
+    own sections. A single problem renders as one owner-framed line, so
+    most assertions below are a one-element list; several render as a
+    header plus one indented line each.
+    """
+    return str(_raised(model_cls, blob, location=None)).splitlines()
 
 
 # -- The representative-mistakes corpus ---------------------------------------
@@ -246,16 +254,17 @@ def test_a_capped_batch_says_how_many_it_did_not_show() -> None:
     assert body[-1] == "  ... and 3 more"
 
 
-def test_the_pure_renderer_is_uncapped() -> None:
-    """The cap belongs to the raised message, not to the diagnostic text:
-    a surface rendering the lines itself decides how many to show."""
-    assert len(_lines(SiteLike, _overlong_blob())) == MAX_ERROR_LINES + 3
+def test_the_cap_hides_nothing_from_the_rendering_core() -> None:
+    """The cap is the raised message's presentation and nothing more:
+    every problem is still there for a diagnostic surface that builds on
+    ``_problems`` and decides its own limit."""
+    assert len(_problems(_fails(SiteLike, _overlong_blob()), SiteLike, OWNER)) == MAX_ERROR_LINES + 3
 
 
-def test_every_error_the_exception_carries_gets_a_line() -> None:
+def test_every_error_the_exception_carries_gets_a_problem() -> None:
     exc = _fails(SiteLike, THREE_PROBLEMS)
 
-    assert len(render_validation_error(exc, model_cls=SiteLike, owner=OWNER)) == exc.error_count()
+    assert len(_problems(exc, SiteLike, OWNER)) == exc.error_count()
 
 
 # -- Path rendering -----------------------------------------------------------
@@ -353,10 +362,13 @@ def test_an_undiscriminated_unions_arm_name_is_dropped_too() -> None:
     the segment is dropped and the walk continues inside the named arm.
     Live, not hypothetical: a secret backend's mapping is a bare string
     or a table, which has no tag to discriminate on.
+
+    Every arm reports, so this is a batch: the owner is on the header and
+    the problems are the indented lines under it.
     """
     lines = _lines(UndiscriminatedSite, {"platform": {"name": "lima", "vm_host": 8}})
 
-    assert "vm-site/lab.platform.vm_host: must be a string" in lines
+    assert "  platform.vm_host: must be a string" in lines
 
 
 def test_an_undiscriminated_union_keeps_its_arms_field_list() -> None:
@@ -365,7 +377,7 @@ def test_an_undiscriminated_union_keeps_its_arms_field_list() -> None:
     fields."""
     lines = _lines(UndiscriminatedSite, {"platform": {"name": "lima", "bogus": 1}})
 
-    assert "vm-site/lab.platform.bogus: unknown field; expected one of: name, vm_host" in lines
+    assert "  platform.bogus: unknown field; expected one of: name, vm_host" in lines
 
 
 def test_a_constrained_table_key_is_addressed_without_pydantics_key_marker() -> None:
@@ -439,7 +451,7 @@ def test_a_collapsed_union_line_replaces_pydantics_member_labels() -> None:
     exc = _fails(MappingValueLike, {"backend_mappings": {"npm": 3}})
 
     assert exc.error_count() == 3
-    assert len(render_validation_error(exc, model_cls=MappingValueLike, owner=OWNER)) == 1
+    assert len(_problems(exc, MappingValueLike, OWNER)) == 1
 
 
 def test_a_failure_inside_a_union_member_is_not_collapsed_away() -> None:
@@ -448,27 +460,32 @@ def test_a_failure_inside_a_union_member_is_not_collapsed_away() -> None:
     collapse deliberately leaves those alone."""
     lines = _lines(UndiscriminatedSite, {"platform": {"name": "lima", "vm_host": 8}})
 
-    assert "vm-site/lab.platform.vm_host: must be a string" in lines
+    assert "  platform.vm_host: must be a string" in lines
 
 
 def test_alternatives_that_name_no_shape_keep_their_own_lines() -> None:
     """A union member that fails on a LENGTH rather than on a shape has
     no phrase to contribute to an alternatives list, so the run is left
     uncollapsed rather than described with a phrase this module would
-    have to invent."""
-    lines = _lines(StringOrTableRoot, "")
+    have to invent.
 
-    assert "vm-site/lab: must not be empty" in lines
-    assert len(lines) > 1
+    The header's count is what says "uncollapsed": one problem would have
+    rendered as a single line with no header at all.
+    """
+    header, *body = _lines(StringOrTableRoot, "")
+
+    assert header == "vm-site/lab: 2 problems"
+    assert "  must not be empty" in body
 
 
 def test_an_undiscriminated_root_models_scalar_arm_renders_unprefixed() -> None:
     """A non-model arm has no fields to continue into, so dropping its
     name leaves the message alone at the document level, which is where a
-    root model's problems belong anyway."""
+    root model's problems belong anyway: ``must not be empty``, not
+    ``str: must not be empty``."""
     lines = _lines(StringOrTableRoot, "")
 
-    assert "vm-site/lab: must not be empty" in lines
+    assert "  must not be empty" in lines
 
 
 # -- Normalization ------------------------------------------------------------
@@ -538,16 +555,15 @@ def test_a_length_floor_above_one_keeps_pydantics_exact_wording() -> None:
 def test_an_unmapped_error_type_falls_through_verbatim() -> None:
     """No paraphrase is invented for an error type the table has not
     considered: pydantic's own message is carried through unchanged."""
-    exc = _fails(Bounded, {"cpus": 0})
-    (detail,) = exc.errors(include_url=False)
+    (detail,) = _fails(Bounded, {"cpus": 0}).errors(include_url=False)
 
     assert detail["type"] not in {"missing", "int_type"}
-    assert render_validation_error(exc, model_cls=Bounded, owner=OWNER) == [f"vm-site/lab.cpus: {detail['msg']}"]
+    assert _lines(Bounded, {"cpus": 0}) == [f"vm-site/lab.cpus: {detail['msg']}"]
 
 
-def test_the_pure_renderer_answers_for_every_corpus_entry() -> None:
-    """The diagnostic entry point is usable from a surface that has no
-    business handling an exception of its own."""
+def test_every_corpus_shape_renders_something_an_operator_can_read() -> None:
+    """No shape in the corpus falls through to an empty message, whatever
+    the walk makes of its path."""
     for model_cls, blob in (
         (PrincipalLike, {}),
         (PrincipalLike, {"client_id": 8, "nope": 1}),
@@ -599,6 +615,6 @@ def test_an_owner_label_overrides_the_kind_slash_name_framing() -> None:
     """``agw resource migrate`` reports against the TOML file it has not
     rewritten yet, so it frames in that file's vocabulary."""
     owner = RefOwner(kind="vm-site", name="lab", label="[azure]")
-    exc = _fails(PrincipalLike, {})
+    exc = _fails(PrincipalLike, {"tenant_id": "t"})
 
-    assert render_validation_error(exc, model_cls=PrincipalLike, owner=owner)[0].startswith("[azure].")
+    assert str(config_error_from(exc, model_cls=PrincipalLike, owner=owner)).startswith("[azure].")

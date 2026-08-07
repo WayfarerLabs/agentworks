@@ -34,7 +34,7 @@ from agentworks.schema import (
     AgwModel,
     RefOwner,
     SecretRef,
-    render_validation_error,
+    config_error_from,
     validation_context,
 )
 from agentworks.source_location import SourceLocation
@@ -391,9 +391,9 @@ def test_an_unregistered_name_is_rejected_by_the_union_naming_what_is_registered
     with pytest.raises(PydanticValidationError) as caught:
         union.model_validate({"name": "nope"}, context=validation_context(OWNER))
 
-    (line,) = render_validation_error(caught.value, model_cls=union, owner=OWNER)
-    assert line.startswith("vm-site/lab: unknown name 'nope'; registered: ")
-    assert "'fixture-platform'" in line
+    message = str(config_error_from(caught.value, model_cls=union, owner=OWNER))
+    assert message.startswith("vm-site/lab: unknown name 'nope'; registered: ")
+    assert "'fixture-platform'" in message
 
 
 # -- Construction-time validation ---------------------------------------------

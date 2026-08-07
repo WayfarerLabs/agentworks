@@ -20,10 +20,9 @@ import path ``agentworks.config`` unchanged:
   validators. Has no dependency on any sibling submodule.
 - ``models``: the settings dataclasses, the ``Config`` object (and its
   now-empty ``publish_to``), and ``_SectionLineMap``.
-- ``loaders_core``: generic TOML-loading helpers, the ``[operator]`` /
-  ``[paths]`` / ``[defaults]`` settings loaders, and the two shared
-  nonconforming-secret-name helpers (used by both the migrator oracle and
-  the manifest decoders).
+- ``loaders_core``: generic TOML-loading helpers (the unknown-key pair and
+  ``_parse_env_table``, shared with the migrator's TOML oracle) and the
+  ``[operator]`` / ``[paths]`` / ``[defaults]`` settings loaders.
 - ``loaders_sessions``: the ``[session.config]`` settings loader.
 - ``loaders_secrets``: ``[secret_backends.*]`` (deprecated no-op warning),
   ``[secret_config]``, and ``[plugins]``.

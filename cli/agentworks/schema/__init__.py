@@ -15,9 +15,9 @@ hand-validated lives here:
 - :func:`iter_field_docs`, the ordered field-reference stream every human
   presentation of a model derives from, and :func:`render_type` beside
   it for the presenters that want our type rendering.
-- :func:`config_error_from` and :func:`render_validation_error`, the
-  bridge from a pydantic ``ValidationError`` to the owner-framed,
-  located text an operator reads.
+- :func:`config_error_from`, the bridge from a pydantic
+  ``ValidationError`` to the owner-framed, located text an operator
+  reads.
 
 **This package is a LEAF, and that is load-bearing rather than tidy.** It
 imports ``agentworks.errors`` and ``agentworks.source_location``, both
@@ -52,7 +52,6 @@ from agentworks.schema.block import CapabilityBlock
 from agentworks.schema.errors import (
     MAX_ERROR_LINES,
     config_error_from,
-    render_validation_error,
 )
 from agentworks.schema.extract import extract_references
 from agentworks.schema.fields import (
@@ -99,6 +98,5 @@ __all__ = [
     "model_doc",
     "model_is_complete",
     "render_type",
-    "render_validation_error",
     "validation_context",
 ]

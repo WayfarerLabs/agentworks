@@ -6,18 +6,23 @@ good as the hand-rolled message it replaces, rather than
 ``Input should be a valid string [type=string_type, input_value=8,
 input_type=int]``. This module is that half.
 
-Two entry points over one rendering:
+:func:`config_error_from` is the one entry point. It builds the
+``ConfigError`` a caller raises, and it OWNS the location framing rather
+than leaving it to the call site. That is not a convenience: pydantic
+reports every problem in one exception, and both of today's framings
+assume a single-line message (decode prefixes line 1 only, so lines 2..N
+come out unlocated; the finalize pass appends the origin, gluing it to
+the LAST line). Framing the batch here is the only shape in which no
+error line is unlocated.
 
-- :func:`render_validation_error` is PURE: it returns the lines and
-  raises nothing, so doctor rows, ``describe``, and any other diagnostic
-  surface can show the same text without an exception in hand.
-- :func:`config_error_from` builds the ``ConfigError`` a caller raises,
-  and it OWNS the location framing rather than leaving it to the call
-  site. That is not a convenience: pydantic reports every problem in one
-  exception, and both of today's framings assume a single-line message
-  (decode prefixes line 1 only, so lines 2..N come out unlocated; the
-  finalize pass appends the origin, gluing it to the LAST line). Framing
-  the batch here is the only shape in which no error line is unlocated.
+A diagnostic surface wanting the same text WITHOUT an exception in hand
+(a doctor row, ``describe``) reads :func:`_problems`, the shared core the
+framing is built over, and frames the problems its own way. That is why
+the core is factored out under a name of its own despite having one
+caller today. A pure public wrapper over it shipped for a while and was
+retired never having gained one: the reusable-text property lives in
+``_problems``, so a wrapper is four lines whenever a real consumer turns
+up.
 
 **Normalization is an explicit table and nothing else.** An error type
 the table does not cover falls through to pydantic's own message
@@ -57,8 +62,9 @@ if TYPE_CHECKING:
 
 #: The most error lines a raised ``ConfigError`` body carries. The header
 #: always states the TRUE count, so a capped batch never hides how bad
-#: the document is. The pure renderer is uncapped: its caller is a
-#: diagnostic surface that can decide for itself.
+#: the document is. The cap is presentation and nothing else:
+#: :func:`_problems` yields one problem per mistake however many there
+#: are, so a diagnostic surface built on it sets its own limit.
 MAX_ERROR_LINES: Final = 10
 
 #: Pydantic's error ``type`` to the operator-facing phrasing, chosen to
@@ -105,38 +111,6 @@ _ALTERNATIVE_PHRASES: Final[Mapping[str, str]] = {
 #: legitimately occur, so a table whose key really is spelled ``[key]``
 #: still renders that key.
 _KEY_MARKER: Final = "[key]"
-
-
-def render_validation_error(
-    exc: PydanticValidationError,
-    *,
-    model_cls: type[BaseModel],
-    owner: RefOwner,
-    provenance: Mapping[str, RefOwner] | None = None,
-) -> list[str]:
-    """One owner-framed line per problem in ``exc``, normalized.
-
-    Each line is ``<kind>/<name>.<field.path>: <message>``, or
-    ``<kind>/<name>: <message>`` for a whole-document problem (a root
-    model, whose errors carry no path).
-
-    Pure: no raising, no I/O, no framing. This is the diagnostic form;
-    :func:`config_error_from` is the one that builds an exception. It takes
-    ``provenance`` for the same reason it takes ``owner``: the two forms
-    are one rendering, and a diagnostic surface showing a different
-    attribution from the error would be its own bug.
-
-    **No production caller yet.** The module docstring names doctor rows
-    and ``describe`` as the surfaces this exists for, and neither reaches
-    it: every error an operator sees today comes through
-    :func:`config_error_from`. So this is a shipped API exercised only by
-    tests, which is worth knowing before treating it as load-bearing. It
-    is not dead code that can simply go, either: the declarative-schema
-    plan names the pure entry point as a deliverable, so whether to wire
-    it into doctor or retire it (with ``MAX_ERROR_LINES``' export) is the
-    plan owner's call rather than a cleanup.
-    """
-    return [_owner_framed(owner, problem) for problem in _problems(exc, model_cls, owner, provenance)]
 
 
 def config_error_from(

@@ -12,7 +12,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError as PydanticValidationError
 
-from agentworks.schema import AgwModel, CapabilityBlock, RefOwner, render_validation_error
+from agentworks.schema import AgwModel, CapabilityBlock, RefOwner, config_error_from
 
 OWNER = RefOwner(kind="vm-site", name="lab")
 
@@ -22,6 +22,16 @@ class Host(AgwModel):
     table."""
 
     platform: CapabilityBlock
+
+
+def _message(caught: PydanticValidationError) -> str:
+    """What an operator reads for ``caught``, unlocated.
+
+    Unlocated because these assertions are about the block's own shape,
+    not about where it was declared; the location framing is pinned in
+    ``tests/schema/test_errors.py``.
+    """
+    return str(config_error_from(caught, model_cls=Host, owner=OWNER))
 
 
 def test_the_capabilitys_own_keys_survive_validation() -> None:
@@ -52,18 +62,14 @@ def test_an_omitted_tag_reads_as_a_missing_field() -> None:
     with pytest.raises(PydanticValidationError) as caught:
         Host.model_validate({"platform": {"vm_host": "h"}})
 
-    assert render_validation_error(caught.value, model_cls=Host, owner=OWNER) == [
-        "vm-site/lab.platform.name: is required"
-    ]
+    assert _message(caught.value) == "vm-site/lab.platform.name: is required"
 
 
 def test_an_empty_tag_is_refused() -> None:
     with pytest.raises(PydanticValidationError) as caught:
         Host.model_validate({"platform": {"name": ""}})
 
-    assert render_validation_error(caught.value, model_cls=Host, owner=OWNER) == [
-        "vm-site/lab.platform.name: must not be empty"
-    ]
+    assert _message(caught.value) == "vm-site/lab.platform.name: must not be empty"
 
 
 def test_a_non_table_reads_as_a_table_requirement() -> None:
@@ -72,9 +78,7 @@ def test_a_non_table_reads_as_a_table_requirement() -> None:
     with pytest.raises(PydanticValidationError) as caught:
         Host.model_validate({"platform": "lima"})
 
-    assert render_validation_error(caught.value, model_cls=Host, owner=OWNER) == [
-        "vm-site/lab.platform: must be a table"
-    ]
+    assert _message(caught.value) == "vm-site/lab.platform: must be a table"
 
 
 def test_the_emitted_schema_leaves_the_capabilitys_half_open() -> None:
