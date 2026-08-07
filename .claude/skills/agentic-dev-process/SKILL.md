@@ -10,7 +10,7 @@ This is the top-level playbook for how a development effort runs, from a standin
 merge-ready PR. It ties three things together: the `sdd` skill (how we spec significant work), the
 `agentworks-dev` subagent (who implements), and the `agentworks-reviewer` subagent (who checks). The
 always-on rules in `.rulesync/rules/` and the repo's `CONTRIBUTING.md` cover the mechanics (code
-style, linting, conventional commits); the `agentworks-dev` philosophy covers _how_ to write the
+style, linting, conventional commits); the `development-principles` rule covers _how_ to write the
 code. This skill covers the flow that sits above both.
 
 The process scales with the work. A large effort walks every step below; a small change collapses
@@ -27,9 +27,9 @@ Before touching anything, decide how big this is, because the size picks the tra
 - **Small, simple changes** (localized, well-patterned, low-risk): skip SDD and implement directly.
   They still get reviewed (section 5), committed regularly (section 6), and escalated if they turn
   out bigger than they looked. Implementing directly changes who writes the code, not the bar it is
-  held to: the lead holds every standard the `agentworks-dev` philosophy sets out. That philosophy
-  is the project's, merely packaged as a persona so it can be handed to a subagent; skipping the
-  delegation does not waive it.
+  held to: the always-on `development-principles` rule applies to the lead directly, and skipping
+  the delegation does not waive it. (The `agentworks-dev` persona is that rule embodied for
+  delegated implementation, plus the delegation-specific lane.)
 - When it is genuinely ambiguous which track fits, lean heavier for anything that reshapes a
   contract or is hard to undo, lighter for a localized change that follows an existing pattern. If
   still unsure, ask (the `ask-questions` rule).
