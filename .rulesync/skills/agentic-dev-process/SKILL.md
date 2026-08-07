@@ -77,14 +77,15 @@ stays out of the weeds on purpose:
   filter: the dev raises a decision or a plan problem, the lead decides it, and only the genuinely
   operator-significant ones go up (section 8). Review LLDs closely; like the plan, they can surface
   an FRD/HLA gap, which the lead feeds upstream.
-- **Isolate parallel subagents from each other.** Subagents launched from one session share both the
-  git checkout and the session's harness scratchpad directory, so two writers collide by
-  construction. Launch any subagent that mutates files with worktree isolation so it works on its
-  own copy of the repo; this is mandatory when more than one file-mutating subagent runs at once,
-  and cheap insurance even for a single one (the lead's own checkout stays quiet). Worktrees isolate
-  git, not the scratchpad: also charter each subagent to create and stay inside its own namespaced
-  scratchpad subdirectory (for example `scratchpad/<task-slug>/`), and anything fixture-sensitive
-  (like a tester) to create a fresh temp directory under that.
+- **Isolate parallel subagents from each other.** Subagents launched from one session share the git
+  checkout, so two writers collide by construction. Launch any subagent that mutates files with
+  worktree isolation so it works on its own copy of the repo; this is mandatory when more than one
+  file-mutating subagent runs at once, and cheap insurance even for a single one (the lead's own
+  checkout stays quiet). Worktrees isolate only git: any shared temporary filesystem (a harness
+  scratchpad, a shared temp or fixture directory) must be subdivided the same way. Charter each
+  subagent to create and stay inside its own namespaced subdirectory (for example `<task-slug>/`
+  under the shared root), and anything fixture-sensitive (like a tester) to create a fresh temp
+  directory under that.
 
 ## 4. Choose the model deliberately for each delegation
 
