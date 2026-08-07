@@ -157,7 +157,6 @@ def _join_tailscale(
     exec_target: Transport,
     *,
     auth_key: str,
-    logger: SSHLogger | None = None,
 ) -> str:
     """Join Tailscale, update DB. Returns the Tailscale IP.
 
@@ -172,12 +171,6 @@ def _join_tailscale(
     # /etc/default/tailscaled, set during bootstrap. `tailscale up` is the
     # client and only takes client-side flags.
     ts_cmd = f"tailscale up --auth-key {quoted_key}"
-
-    # Redact the auth key from any attached loggers before it appears in logs.
-    if exec_target.logger is not None:
-        exec_target.logger.add_redaction(auth_key)
-    if logger is not None:
-        logger.add_redaction(auth_key)
 
     exec_target.run(ts_cmd, sudo=True)
     result = exec_target.run("tailscale ip -4", sudo=True)
