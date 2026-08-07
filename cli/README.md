@@ -715,6 +715,16 @@ Guide registry construction never probes host tools or backend availability. Rea
 require workstation inspection is rendered as unavailable; use an explicitly consented diagnostic
 surface when that fact is needed. Normal commands retain their ordinary readiness probes.
 
+Every renderer-owned level-2 heading in raw CLI Markdown carries the exact literal `⟦AGW framework⟧`
+marker. The contribution contract rejects either delimiter, whether literal or HTML-entity encoded,
+in authored topic titles, summaries, and Markdown. An authored contribution therefore cannot emit
+that exact literal marker in raw CLI Markdown. Other authored Markdown and HTML remain authored
+content and are not relabeled.
+
+The marker is a source-provenance convention, not an anti-spoof guarantee for arbitrary downstream
+Markdown, HTML, or CSS renderers, images, or styling. It grants no authority or trust to the content
+that follows.
+
 `concept-onboarding` also renders a pure assessment of the projected registry, relationship, and
 stored-instance facts. It reports each fact as done, disabled, not ready, or unverifiable and emits
 only the still-applicable ordered action records. Verification evidence is caller-owned and scoped

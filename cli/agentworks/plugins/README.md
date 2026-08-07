@@ -57,6 +57,17 @@ reports rejected content and exits 1, while an unrelated valid topic remains a c
 retained topic whose live projection is unavailable keeps its authored teaching, reports the scoped
 issue, and exits 1.
 
+Every renderer-owned level-2 heading in raw CLI Markdown carries the exact literal `⟦AGW framework⟧`
+marker. After bounded input validation, HTML entity decoding, and Unicode normalization, the
+contribution contract rejects either delimiter, whether literal or HTML-entity encoded, in authored
+topic titles, summaries, and Markdown. An authored contribution therefore cannot emit that exact
+literal marker in raw CLI Markdown. Other authored Markdown and HTML, including ordinary headings,
+remain authored content and are not relabeled.
+
+The marker is a source-provenance convention, not an anti-spoof guarantee for arbitrary downstream
+Markdown, HTML, or CSS renderers, images, or styling. It grants no authority or trust to the content
+that follows.
+
 Guide contributions are data, not callbacks. Authored markdown cannot contain expression markers or
 terminal control bytes in rendered output. Action records accept three exact token forms: a literal
 that starts with an ASCII letter or digit and then contains only ASCII letters, digits, `.`, `_`,

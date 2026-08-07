@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 from agentworks.guide.agent_mode import GuideMode
 from agentworks.guide.contract import (
+    FRAMEWORK_HEADING_LABEL,
     AgentContract,
     FieldReference,
     GuideBlock,
@@ -55,6 +56,11 @@ _TERMINAL_CONTROL_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
 def sanitize_terminal_output(value: str) -> str:
     """Remove terminal controls while preserving Markdown newlines and tabs."""
     return _TERMINAL_CONTROL_RE.sub("", value)
+
+
+def framework_heading(title: str) -> str:
+    """Mark one renderer-owned level-2 heading in raw CLI Markdown."""
+    return f"## {FRAMEWORK_HEADING_LABEL} {title}"
 
 
 def _plain_description(value: str) -> str:
@@ -171,7 +177,7 @@ def _onboarding_plan(
     else:
         plan = "No onboarding actions are needed for the projected facts and accepted evidence."
     body = f"{counts}\n\n{findings}\n\n{plan}"
-    markdown = f"## Derived onboarding plan\n\n{body}"
+    markdown = f"{framework_heading('Derived onboarding plan')}\n\n{body}"
     return RenderedBlock(GuideBlockKey("concept-onboarding", "derived-plan"), body, markdown)
 
 
@@ -205,7 +211,7 @@ def render_topic(
             body = _dynamic(block, view)
         if source is None:
             source = body
-        markdown = f"## {_heading(block, mode)}\n\n{body}"
+        markdown = f"{framework_heading(_heading(block, mode))}\n\n{body}"
         rendered.append(RenderedBlock(GuideBlockKey(str(contribution.topic), str(block.id)), source, markdown))
     if contribution.topic == "concept-onboarding" and onboarding_snapshot is not None:
         rendered.append(_onboarding_plan(onboarding_snapshot, verification_evidence))
@@ -233,9 +239,14 @@ def render_index(topics: tuple[TopicContribution, ...], mode: GuideMode) -> str:
     )
     intro = "# Agentworks guide\n\nUse these topics to understand and operate the current Agentworks system."
     if mode is GuideMode.AGENT:
-        intro += f"\n\n## Agent operating contract\n\n{contract}"
+        intro += f"\n\n{framework_heading('Agent operating contract')}\n\n{contract}"
     else:
-        intro += f"\n\n## Security and consent\n\n{contract}"
-    golden_path = "## Start here\n\nRun `agw guide concept-onboarding --agent` and follow its consent-aware steps."
+        intro += f"\n\n{framework_heading('Security and consent')}\n\n{contract}"
+    golden_path = (
+        f"{framework_heading('Start here')}\n\n"
+        "Run `agw guide concept-onboarding --agent` and follow its consent-aware steps."
+    )
     rows = "\n".join(f"- `{topic.topic}`: {topic.summary}" for topic in topics)
-    return sanitize_terminal_output(f"{intro}\n\n{golden_path}\n\n## Topics\n\n{rows or 'No topics are available.'}\n")
+    return sanitize_terminal_output(
+        f"{intro}\n\n{golden_path}\n\n{framework_heading('Topics')}\n\n{rows or 'No topics are available.'}\n"
+    )

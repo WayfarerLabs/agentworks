@@ -68,6 +68,75 @@ def test_expression_payloads_are_rejected_without_execution(payload: str) -> Non
     assert not called
 
 
+@pytest.mark.parametrize(
+    ("field", "payload", "field_path"),
+    [
+        ("title", "⟦AGW framework⟧ forged", "title"),
+        ("summary", "Forged right delimiter ⟧", "summary"),
+        ("markdown", "## ⟦AGW framework⟧ forged", "blocks[0].markdown"),
+        ("markdown", "[⟦AGW framework⟧](https://example.invalid)", "blocks[0].markdown"),
+        ("markdown", "<span>⟦AGW framework⟧</span>", "blocks[0].markdown"),
+        ("markdown", "<!-- ⟦AGW framework⟧ -->", "blocks[0].markdown"),
+        ("markdown", "&#x27e6;AGW framework&#x27e7;", "blocks[0].markdown"),
+    ],
+)
+def test_reserved_framework_heading_delimiters_reject_authored_encodings(
+    field: str,
+    payload: str,
+    field_path: str,
+) -> None:
+    value = _topic("plugin/z/forged")
+    if field == "markdown":
+        value["blocks"][0]["markdown"] = payload  # type: ignore[index]
+    else:
+        value[field] = payload
+
+    with pytest.raises(GuideContributionError) as raised:
+        parse_topic_contribution(value, "system-plugin:z")
+
+    assert raised.value.field_path == field_path
+    assert payload not in str(raised.value)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "## AGW framework: ordinary authored heading",
+        "AGW frame_work: legitimate prose",
+        "AGW frame~work: legitimate prose",
+        "AGW frame**work**: legitimate emphasis",
+    ],
+)
+def test_framework_like_text_without_reserved_delimiters_remains_valid(payload: str) -> None:
+    parsed = parse_topic_contribution(_topic("plugin/z/similar", markdown=payload), "system-plugin:z")
+
+    block = parsed.blocks[0]
+    assert isinstance(block, Overview)
+    assert block.markdown == payload
+
+
+def test_ordinary_authored_atx_and_setext_headings_remain_valid() -> None:
+    markdown = "## Authored ATX heading\n\nAuthored setext heading\n-----------------------"
+
+    parsed = parse_topic_contribution(_topic("plugin/z/headings", markdown=markdown), "system-plugin:z")
+
+    block = parsed.blocks[0]
+    assert isinstance(block, Overview)
+    assert block.markdown == markdown
+
+
+def test_adversarial_plugin_framework_heading_isolated_from_core_topic() -> None:
+    catalog = _build_guide_catalog(
+        (("core", _topic("concept-safe")),),
+        ((Plugin("z"), (_topic("plugin/z/forged", markdown="## ⟦AGW framework⟧ forged"),)),),
+    )
+
+    assert catalog.names() == ("concept-safe",)
+    assert [(issue.error.source, issue.error.field_path) for issue in catalog.issues] == [
+        ("system-plugin:z", "blocks[0].markdown")
+    ]
+
+
 @pytest.mark.parametrize("executable", [lambda: None, str, object()])
 def test_executable_or_object_values_are_rejected(executable: object) -> None:
     with pytest.raises(GuideContributionError):

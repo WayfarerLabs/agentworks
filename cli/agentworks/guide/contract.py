@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import html
 import re
+import unicodedata
 from dataclasses import dataclass
 from enum import Enum
 from typing import NewType, cast
@@ -13,6 +15,8 @@ from agentworks.resource_names import MAX_RESOURCE_NAME_LENGTH, RESOURCE_NAME_RE
 TopicSlug = NewType("TopicSlug", str)
 BlockId = NewType("BlockId", str)
 ActionId = NewType("ActionId", str)
+FRAMEWORK_HEADING_LABEL = "⟦AGW framework⟧"
+FRAMEWORK_HEADING_DELIMITERS = frozenset({"⟦", "⟧"})
 
 _ID_RE = re.compile(r"^[a-z][a-z0-9-]{0,62}$")
 _TOPIC_SEGMENT_RE = re.compile(r"^[a-z][a-z0-9-]{0,62}$")
@@ -284,6 +288,25 @@ def _bounded_string(
     return result
 
 
+def _contains_framework_heading_delimiter(value: str) -> bool:
+    """Detect either reserved delimiter after bounded textual decoding."""
+    normalized = unicodedata.normalize("NFKC", html.unescape(value))
+    return not FRAMEWORK_HEADING_DELIMITERS.isdisjoint(normalized)
+
+
+def _reject_framework_heading_delimiter(
+    value: str,
+    *,
+    source: str,
+    topic: str,
+    path: str,
+    error_type: type[GuideContributionError] = GuideContributionError,
+) -> str:
+    if _contains_framework_heading_delimiter(value):
+        raise _error(error_type, source, topic, path, "contains a reserved framework heading delimiter")
+    return value
+
+
 def _parse_anchor(value: object, source: str, topic: str) -> TopicAnchor:
     data = _mapping(value, {"type", "name", "kind"}, {"type"}, source=source, topic=topic, path="anchor")
     discriminator = data["type"]
@@ -340,6 +363,13 @@ def _parse_block(value: object, source: str, topic: str, index: int) -> GuideBlo
         )
         if any(marker in markdown for marker in _EXPRESSION_MARKERS):
             raise _error(InvalidBlockError, source, topic, f"{path}.markdown", "contains an expression delimiter")
+        _reject_framework_heading_delimiter(
+            markdown,
+            source=source,
+            topic=topic,
+            path=f"{path}.markdown",
+            error_type=InvalidBlockError,
+        )
         if discriminator == "overview":
             return Overview(BlockId(block_id), markdown)
         if discriminator == "teaching":
@@ -530,10 +560,14 @@ def parse_topic_contribution(value: object, source: str) -> TopicContribution:
     related = tuple(related_items)
     if len(related) != len(set(related)):
         raise _error(GuideContributionError, source, topic, "related_topics", "contains a repeated link")
+    title = _bounded_string(data["title"], source=source, topic=topic, path="title", max_bytes=_MAX_TITLE_BYTES)
+    summary = _bounded_string(data["summary"], source=source, topic=topic, path="summary", max_bytes=_MAX_SUMMARY_BYTES)
+    _reject_framework_heading_delimiter(title, source=source, topic=topic, path="title")
+    _reject_framework_heading_delimiter(summary, source=source, topic=topic, path="summary")
     return TopicContribution(
         TopicSlug(topic),
-        _bounded_string(data["title"], source=source, topic=topic, path="title", max_bytes=_MAX_TITLE_BYTES),
-        _bounded_string(data["summary"], source=source, topic=topic, path="summary", max_bytes=_MAX_SUMMARY_BYTES),
+        title,
+        summary,
         anchor,
         blocks,
         related,
