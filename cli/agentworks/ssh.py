@@ -19,6 +19,7 @@ module retains the small set of bare-``SSHTarget`` helpers that aren't
 
 from __future__ import annotations
 
+import logging
 import shlex
 import subprocess
 from dataclasses import dataclass
@@ -81,6 +82,13 @@ class SSHError(ConnectivityError):
 LOG_DIR = Path.home() / ".config" / "agentworks" / "logs"
 
 
+class _PropagatingFileHandler(logging.FileHandler):
+    """File handler that preserves the logger's write-failure contract."""
+
+    def handleError(self, record: logging.LogRecord) -> None:  # noqa: N802, ARG002
+        raise
+
+
 class SSHLogger:
     """Incremental command logger. Writes to disk on every call.
 
@@ -109,6 +117,7 @@ class SSHLogger:
         self.vm_name = vm_name
         self.path = LOG_DIR / f"{vm_name}-{timestamp}-{command_stem}.log"
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._active_handler: _PropagatingFileHandler | None = None
         normalized: list[str] = []
         for secret in redactions:
             if not secret:
@@ -196,32 +205,54 @@ class SSHLogger:
         import traceback
         from datetime import UTC, datetime
 
-        exc_type, exc, exc_tb = sys.exc_info()
-        if exc is not None:
-            ts_exc = datetime.now(tz=UTC).strftime("%H:%M:%S")
-            tb_text = "".join(traceback.format_exception(exc_type, exc, exc_tb))
-            self._write(f"[{ts_exc}] EXCEPTION:\n{tb_text}\n")
+        try:
+            exc_type, exc, exc_tb = sys.exc_info()
+            if exc is not None:
+                ts_exc = datetime.now(tz=UTC).strftime("%H:%M:%S")
+                tb_text = "".join(traceback.format_exception(exc_type, exc, exc_tb))
+                self._write(f"[{ts_exc}] EXCEPTION:\n{tb_text}\n")
 
-        ts = datetime.now(tz=UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
-        lines = [f"\n# Finished: {ts}"]
-        if self._warnings:
-            lines.append(f"# Warnings: {len(self._warnings)}")
-        self._write("\n".join(lines) + "\n")
+            ts = datetime.now(tz=UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
+            lines = [f"\n# Finished: {ts}"]
+            if self._warnings:
+                lines.append(f"# Warnings: {len(self._warnings)}")
+            self._write("\n".join(lines) + "\n")
+        finally:
+            self._close_active_handler()
 
-    # Registered raw and shell-quoted secrets are removed before this function's
-    # only filesystem write. CodeQL does not model the replacement sanitizer;
-    # adversarial sink tests and lifecycle wiring tests enforce the boundary.
-    def _write(self, text: str) -> None:  # lgtm[py/clear-text-storage-sensitive-data]
+    def _write(self, text: str) -> None:
         # The single sanitizing choke point: every byte that reaches the
-        # log file passes through redaction HERE, so the no-secrets-in-
-        # logs property holds regardless of caller discipline (a caller
+        # file handler passes through redaction here, so the no-secrets-in-logs
+        # property holds regardless of caller discipline (a caller
         # composing a message from raw values cannot bypass it). Raw secrets
         # and their shell-quoted forms are registered before the header's
         # first write. The redaction set is fixed at construction because
         # incremental writes make late registration inherently unsafe.
         # Callers therefore never pre-sanitize.
-        with open(self.path, "a", encoding="utf-8", errors="replace") as f:
-            f.write(self._sanitize(text))
+        record = logging.LogRecord(
+            name="agentworks.ssh.operation",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
+            msg=self._sanitize(text),
+            args=(),
+            exc_info=None,
+        )
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        handler = _PropagatingFileHandler(self.path, mode="a", encoding="utf-8", errors="replace")
+        self._active_handler = handler
+        try:
+            handler.setFormatter(logging.Formatter("%(message)s"))
+            handler.terminator = ""
+            handler.handle(record)
+        finally:
+            self._close_active_handler()
+
+    def _close_active_handler(self) -> None:
+        handler = self._active_handler
+        self._active_handler = None
+        if handler is not None:
+            handler.close()
 
 
 SSH_CONNECT_TIMEOUT = 30

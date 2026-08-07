@@ -55,6 +55,47 @@ def test_close_without_exception_omits_traceback_block(logger: SSHLogger) -> Non
     assert "# Finished:" in text
 
 
+def test_path_retargeting_moves_subsequent_records(
+    logger: SSHLogger,
+    tmp_path: Path,
+) -> None:
+    """Backup logging changes the public path after construction; the active
+    handler must follow it without copying prior records."""
+    original_path = logger.path
+    retargeted = tmp_path / "backup" / "backup.log"
+    logger.path = retargeted
+
+    logger.output("backup payload")
+    assert logger._active_handler is None
+    logger.close()
+
+    assert "backup payload" not in original_path.read_text()
+    assert "backup payload" in retargeted.read_text()
+    assert "# Finished:" in retargeted.read_text()
+
+
+def test_write_error_propagates_and_closes_handler(
+    logger: SSHLogger,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The logging adapter must not swallow filesystem failures, and its
+    transient descriptor must close on the exceptional path."""
+    from agentworks import ssh
+
+    def failing_emit(handler: object, record: object) -> None:
+        try:
+            raise OSError("disk full")
+        except OSError:
+            handler.handleError(record)  # type: ignore[attr-defined]
+
+    monkeypatch.setattr(ssh._PropagatingFileHandler, "emit", failing_emit)
+
+    with pytest.raises(OSError, match="disk full"):
+        logger.output("payload")
+
+    assert logger._active_handler is None
+
+
 def test_write_sink_sanitizes_every_persistent_surface(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
