@@ -14,7 +14,6 @@ from agentworks.guide.assessment import OnboardingSnapshot
 from agentworks.guide.catalog import GuideCatalog, _build_guide_catalog
 from agentworks.guide.contract import (
     BlockId,
-    GuideTraversalError,
     ImplementationAnchor,
     InstanceList,
     KindAnchor,
@@ -76,13 +75,13 @@ class _EmptyInventory:
         return ()
 
 
-def build_authored_catalog() -> GuideCatalog:
-    """Collect core and installed-plugin records without reading operator config."""
+def build_authored_catalog(*, strict_trusted_taxonomy: bool = False) -> GuideCatalog:
+    """Collect records, optionally making trusted taxonomy drift a CI error."""
     from agentworks.plugins import SYSTEM_PLUGINS
 
     trusted = tuple((f"core:{topic.topic}", topic) for topic in guide_contributions())
     plugins = tuple((plugin, tuple(plugin.guide_topics)) for _, plugin in sorted(SYSTEM_PLUGINS.items()))
-    return _build_guide_catalog(trusted, plugins)
+    return _build_guide_catalog(trusted, plugins, strict_trusted_taxonomy=strict_trusted_taxonomy)
 
 
 def _dynamic_topic(registry: Registry | None, slug: str) -> TopicContribution:
@@ -155,15 +154,9 @@ def _framed_error(error: AgentworksError) -> str:
     return message
 
 
-def _view_failure(topic: TopicContribution, error: AgentworksError | GuideTraversalError | KeyError) -> str:
+def _view_failure(topic: TopicContribution, error: AgentworksError) -> str:
     """Frame a bounded per-topic projection failure without leaking raw resource objects."""
-    if isinstance(error, KeyError):
-        detail = "a referenced live resource is missing"
-    elif isinstance(error, AgentworksError):
-        detail = _framed_error(error)
-    else:
-        detail = str(error)
-    return f"live facts for {topic.topic} are unavailable: {detail}"
+    return f"live facts for {topic.topic} are unavailable: {_framed_error(error)}"
 
 
 def _unknown(slug: str, names: tuple[str, ...]) -> UnknownGuideTopicError:
@@ -262,7 +255,7 @@ def render_guide(
                 onboarding_topic = next(topic for topic in selected if topic.topic == "concept-onboarding")
                 try:
                     onboarding_snapshot = build_onboarding_snapshot(registry, db)
-                except (AgentworksError, GuideTraversalError, KeyError) as error:
+                except AgentworksError as error:
                     runtime_issues.append(_view_failure(onboarding_topic, error))
                     onboarding_snapshot = None
                 # Validate the complete replay log against current projected
@@ -287,7 +280,7 @@ def render_guide(
                     else:
                         try:
                             view = build_guide_view(topic, registry, db)
-                        except (AgentworksError, GuideTraversalError, KeyError) as error:
+                        except AgentworksError as error:
                             runtime_issues.append(_view_failure(topic, error))
                             unavailable = "this topic's live projection is unavailable"
                 else:

@@ -99,8 +99,10 @@ def _build_guide_catalog(
     trusted: tuple[tuple[str, object], ...],
     system_plugins: tuple[tuple[Plugin, tuple[object, ...]], ...] = (),
     plugin_resource_owners: tuple[tuple[str, str, str], ...] = (),
+    *,
+    strict_trusted_taxonomy: bool = False,
 ) -> GuideCatalog:
-    """Build one catalog, hard-failing trusted errors and isolating plugin errors."""
+    """Build one catalog, with an opt-in CI gate for trusted taxonomy errors."""
     resource_owners: dict[str, set[str]] = {}
     for plugin, kind, name in plugin_resource_owners:
         resource_owners.setdefault(plugin, set()).add(f"{kind}/{name}")
@@ -130,7 +132,10 @@ def _build_guide_catalog(
                 raise ownership
             taxonomy = _taxonomy_error(candidate, topic)
             if taxonomy is not None:
-                raise taxonomy
+                if candidate.trusted and strict_trusted_taxonomy:
+                    raise taxonomy
+                issues.append(taxonomy)
+                continue
             parsed.append((candidate, topic))
         except GuideContributionError as error:
             if candidate.trusted:

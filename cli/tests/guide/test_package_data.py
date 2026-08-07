@@ -54,7 +54,7 @@ def test_installed_wheel_contains_every_authored_guide_block(tmp_path: Path) -> 
             (
                 "import agentworks; "
                 "from agentworks.guide.service import build_authored_catalog; "
-                "catalog = build_authored_catalog(); "
+                "catalog = build_authored_catalog(strict_trusted_taxonomy=True); "
                 "blocks = [block for topic in catalog.topics for block in topic.blocks "
                 "if hasattr(block, 'markdown')]; "
                 "assert blocks and all(block.markdown.strip() for block in blocks); "

@@ -165,6 +165,36 @@ def test_view_refuses_registry_before_finalization() -> None:
         )
 
 
+def test_missing_anchor_resource_becomes_a_typed_traversal_failure() -> None:
+    class MissingRegistry(_Registry):
+        def lookup(self, kind: str, name: str) -> object:
+            raise KeyError((kind, name))
+
+    with pytest.raises(GuideTraversalError, match="guide resource vm-template/missing") as raised:
+        build_guide_view(
+            _topic_for(ResourceAnchor("vm-template", "missing")),
+            MissingRegistry(),  # type: ignore[arg-type]
+            SimpleNamespace(),
+        )
+    assert raised.value.__suppress_context__
+
+
+def test_non_lookup_key_error_is_not_translated_to_a_missing_resource() -> None:
+    class BrokenGraph(_Graph):
+        def readiness_of(self, kind: str, name: str) -> Readiness:
+            raise KeyError("graph invariant")
+
+    class BrokenRegistry(_Registry):
+        graph = BrokenGraph()
+
+    with pytest.raises(KeyError, match="graph invariant"):
+        build_guide_view(
+            _topic_for(ResourceAnchor("vm-template", "demo")),
+            BrokenRegistry(),  # type: ignore[arg-type]
+            SimpleNamespace(),
+        )
+
+
 def test_real_finalized_registry_relationships_and_instance_hook_are_eager(monkeypatch: pytest.MonkeyPatch) -> None:
     exhausted = False
 

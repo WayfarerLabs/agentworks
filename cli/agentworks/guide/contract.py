@@ -22,6 +22,9 @@ _MAX_MARKDOWN_BYTES = 64 * 1024
 _MAX_TOPIC_MARKDOWN_BYTES = 256 * 1024
 _MAX_BLOCKS = 64
 _MAX_RELATED_TOPICS = 64
+_MAX_TOPIC_SLUG_BYTES = 191
+_MAX_SECTION_ITEMS = 32
+_MAX_SECTION_ITEM_BYTES = 256
 
 
 class GuideContributionError(ValidationError):
@@ -218,9 +221,17 @@ def _mapping(
     return result
 
 
-def _string(value: object, *, source: str, topic: str | None, path: str, blank: bool = False) -> str:
+def _string(
+    value: object,
+    *,
+    source: str,
+    topic: str | None,
+    path: str,
+    blank: bool = False,
+    error_type: type[GuideContributionError] = GuideContributionError,
+) -> str:
     if type(value) is not str or (not blank and not value.strip()):
-        raise _error(GuideContributionError, source, topic, path, "must be a non-blank string")
+        raise _error(error_type, source, topic, path, "must be a non-blank string")
     return value
 
 
@@ -232,10 +243,18 @@ def _bounded_string(
     path: str,
     max_bytes: int,
     blank: bool = False,
+    error_type: type[GuideContributionError] = GuideContributionError,
 ) -> str:
-    result = _string(value, source=source, topic=topic, path=path, blank=blank)
+    result = _string(
+        value,
+        source=source,
+        topic=topic,
+        path=path,
+        blank=blank,
+        error_type=error_type,
+    )
     if len(result.encode("utf-8")) > max_bytes:
-        raise _error(GuideContributionError, source, topic, path, f"exceeds the {max_bytes}-byte limit")
+        raise _error(error_type, source, topic, path, f"exceeds the {max_bytes}-byte limit")
     return result
 
 
@@ -291,6 +310,7 @@ def _parse_block(value: object, source: str, topic: str, index: int) -> GuideBlo
             path=f"{path}.markdown",
             max_bytes=_MAX_MARKDOWN_BYTES,
             blank=True,
+            error_type=InvalidBlockError,
         )
         if any(marker in markdown for marker in _EXPRESSION_MARKERS):
             raise _error(InvalidBlockError, source, topic, f"{path}.markdown", "contains an expression delimiter")
@@ -305,9 +325,28 @@ def _parse_block(value: object, source: str, topic: str, index: int) -> GuideBlo
         if type(raw) not in {tuple, list}:
             raise _error(InvalidBlockError, source, topic, f"{path}.section", "must contain non-blank strings")
         section = cast("list[object] | tuple[object, ...]", raw)
-        if not all(type(item) is str and item.strip() for item in section):
-            raise _error(InvalidBlockError, source, topic, f"{path}.section", "must contain non-blank strings")
-        normalized = tuple(item.strip() for item in cast("list[str] | tuple[str, ...]", section))
+        if len(section) > _MAX_SECTION_ITEMS:
+            raise _error(
+                InvalidBlockError,
+                source,
+                topic,
+                f"{path}.section",
+                f"exceeds the {_MAX_SECTION_ITEMS}-item limit",
+            )
+        normalized_items: list[str] = []
+        for section_index, item in enumerate(section):
+            item_path = f"{path}.section[{section_index}]"
+            normalized_items.append(
+                _bounded_string(
+                    item,
+                    source=source,
+                    topic=topic,
+                    path=item_path,
+                    max_bytes=_MAX_SECTION_ITEM_BYTES,
+                    error_type=InvalidBlockError,
+                ).strip()
+            )
+        normalized = tuple(normalized_items)
         return FieldReference(BlockId(block_id), normalized)
     _mapping(value, {"type", "id"}, {"type", "id"}, source=source, topic=topic, path=path)
     if discriminator == "instance-list":
@@ -441,10 +480,21 @@ def parse_topic_contribution(value: object, source: str) -> TopicContribution:
             "related_topics",
             f"exceeds the {_MAX_RELATED_TOPICS}-link limit",
         )
-    related = tuple(
-        TopicSlug(_string(item, source=source, topic=topic, path=f"related_topics[{index}]"))
-        for index, item in enumerate(related_values)
-    )
+    related_items: list[TopicSlug] = []
+    for index, item in enumerate(related_values):
+        item_path = f"related_topics[{index}]"
+        related_topic = _bounded_string(
+            item,
+            source=source,
+            topic=topic,
+            path=item_path,
+            max_bytes=_MAX_TOPIC_SLUG_BYTES,
+            error_type=InvalidTopicSlugError,
+        )
+        if not _TOPIC_RE.fullmatch(related_topic):
+            raise _error(InvalidTopicSlugError, source, topic, item_path, "is not a valid topic slug")
+        related_items.append(TopicSlug(related_topic))
+    related = tuple(related_items)
     if len(related) != len(set(related)):
         raise _error(GuideContributionError, source, topic, "related_topics", "contains a repeated link")
     return TopicContribution(
