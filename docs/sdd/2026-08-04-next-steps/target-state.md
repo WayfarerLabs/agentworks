@@ -221,3 +221,10 @@ and so no wave accidentally forecloses them:
 - **The named-console-template selector SDD** (`2026-07-19`, drafted pre-roadmap) and the
   companion-shell and resilient-attach wins unbundled from the herdr FRD. Standalone work that
   proceeds independently of this roadmap.
+- **The agentworks.build website** (`docs/sdd/2026-08-07-website/`, seeded 2026-08-07 at operator
+  request as a standalone SDD, deliberately not a child: it consumes roadmap outputs rather than
+  gating any wave, and adding it late would reopen the current-equals-target gap). Relationship: the
+  site renders from the same authoritative sources as the guide and reference surfaces, never a
+  hand-maintained second copy, and its growth path (web-rendered guide topics, schema-derived
+  reference) consumes wave 2 and onboarding surfaces as they land on `main`. Launch timing may pair
+  with the 0.14.0 cut as an operator call without structural coupling.
