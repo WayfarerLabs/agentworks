@@ -107,17 +107,30 @@ in what emission WROTE. This one is not: every schema involved describes its mod
 divergence is that a JSON Schema never sees YAML, it sees whatever a parser already turned the YAML
 into, and the loader's parser is not the editor's parser.
 
-Measured, both sides, rather than read off the specs:
+Measured, both sides, rather than read off the specs (pyyaml 6.0.3, `yaml` npm 2.9.0):
 
 | source text           | loader (pyyaml `SafeLoader`, YAML 1.1) | editor (`yaml` npm, YAML 1.2 core) |
 | --------------------- | -------------------------------------- | ---------------------------------- |
 | `verify_ssl: no`      | `False`                                | the string `"no"`                  |
 | `expires: 2027-01-01` | `datetime.date(2027, 1, 1)`            | the string `"2027-01-01"`          |
+| `memory: 8_192`       | `8192`                                 | the string `"8_192"`               |
+| `memory: 1:30`        | `90`                                   | the string `"1:30"`                |
+| `memory: 010`         | `8`                                    | `10`                               |
+| `memory: 0o17`        | the string `"0o17"`                    | `15`                               |
 
 yaml-language-server parses with the `yaml` package at its defaults, verified to be `version: 1.2`,
 `schema: core`. So there is no single YAML version at which the emitted schema agrees with the
-loader on every loader-valid input, and the two halves are decided differently because they are not
-the same problem.
+loader on every loader-valid input, and the three halves are decided differently because they are
+not the same problem.
+
+**What this table is and is not.** It is not a list of every scalar type; it is every type where the
+two parsers disagree ON THE MANIFEST SURFACE, which is booleans, timestamps and integers. That set
+is derived, not surveyed: the surface's scalar types are `str`, `bool`, `int` and the `date` behind
+`expires`, and strings cannot disagree because a plain scalar that resolves to nothing else is a
+string under both versions. Floats would be a fourth and are not reachable, because no emitted field
+is one; `test_the_float_gap_is_still_unreachable` fails the day that changes. The first two rounds
+of this section each found one member of this set after declaring the previous list complete, so the
+claim here is stated with its derivation attached rather than as a count.
 
 **Booleans: fixed, by widening.** `verify_ssl: no` is ordinary YAML the loader reads as `False`, and
 a `"type": "boolean"` made the real yaml-language-server answer `Incorrect type. Expected "boolean"`
@@ -144,6 +157,57 @@ The nine field docstrings that warn about quoted booleans carry the weight inste
 corrected in the same pass (they claimed bare `no` was a string, which is true of TOML and false of
 this loader).
 
+**Integers: fixed the same way, one round later.** `memory: 8_192` is how an operator writes eight
+thousand of something in exactly this field, and the loader reads `8192` where a 1.2 editor holds
+the string `"8_192"`. Same over-reporting, same direction, so the same correction: an `int_schema`
+override on the same `_ManifestJsonSchema` subclass, emitting
+`{"type": ["integer", "string"], "pattern": ...}`.
+
+Three things differ from the boolean case, and each is a decision rather than a detail:
+
+- **A pattern, not a spelling list.** The boolean disagreement is twelve words; this one is
+  infinite, because underscores and sexagesimal groups repeat. So `YAML_11_ONLY_INTEGERS` is a
+  regex, derived rather than written: pyyaml's own `tag:yaml.org,2002:int` implicit resolver,
+  stripped of its `re.VERBOSE` layout, minus the language a 1.2 core parser resolves without help.
+  `test_the_widened_integer_pattern_is_pyyamls_own_language_minus_yaml_12` rebuilds it from those
+  two live halves, and checks the strip by behavior rather than by comparing text.
+- **The generator's own answer is widened, not replaced.** A boolean carries no constraints, so
+  `bool_schema` can return a literal. Integers carry `exclusiveMinimum` (`cpus`, `memory`) and
+  `examples` (`template_vmid`), which have to survive. Those numeric keywords then apply to the
+  integer arm alone, since JSON Schema's numeric keywords ignore string instances, so `cpus: 0_0`
+  passes the schema and the loader refuses it. That is this module's under-approximation working as
+  designed; restating every bound as a regex would be a second place to be wrong about `cpus`.
+- **The subtraction earns its keep here in a way it did not for booleans.** Under 1.2 a bare `no`
+  and a quoted `"no"` are the same instance, so excluding `true`/`false` from the boolean list
+  changes nothing an editor could act on. Integers are different: bare `5` reaches the editor as a
+  NUMBER and only the quoted `"5"` arrives as a string, so admitting plain decimals into the pattern
+  would have thrown away a real diagnostic against the strict loader. It is excluded, and `"5"` is
+  still flagged.
+
+The residual is the boolean one exactly, and no larger: a quoted `"8_192"` is the same parsed
+instance as a bare one, so no schema separates them. Under-reporting, which section 2 permits.
+
+Measured over a corpus run through both parsers, the disagreement sorts into three classes and only
+the first is a type error the schema can answer:
+
+| class                     | members                                                                              | schema                |
+| ------------------------- | ------------------------------------------------------------------------------------ | --------------------- |
+| loader int, editor string | underscores (`8_192`), sexagesimal (`1:30`), binary (`0b1010`), signed hex (`+0x1F`) | fixed by the pattern  |
+| both int, different value | leading-zero octal (`010` is 8 and 10, `0777` is 511 and 777)                        | unreachable           |
+| loader string, editor int | `0o17`, `1e3`                                                                        | silent, and permitted |
+
+**`010` is not fixable, and that is the honest answer rather than a deferral.** Both parsers hand
+the validator a conforming integer; they differ only in which one. A JSON Schema constrains the
+instance it is given and has no access to the source text, so there is no keyword that could see the
+difference, and widening the type does not help because the type was never wrong. It is pinned in
+`test_a_leading_zero_integer_is_a_value_disagreement_no_schema_can_reach` so it stays a known shape,
+and it is the reason `_EditorLoader` had to override pyyaml's int CONSTRUCTOR as well as its
+resolver: left alone the harness reports 8, which is the loader's answer, and the case disappears.
+
+The third class inverts: the editor resolves a number that the loader leaves a string and the strict
+models refuse, so the operator gets a load error the editor did not warn about. Under-reporting,
+which section 2 permits, and it is recorded here rather than left for a fourth round to rediscover.
+
 **Dates: not fixable in the schema, and not a defect against the documented editor.** `expires`
 emits string-typed arms, so a validator handed a `datetime.date` would reject it. No arm can fix
 that: JSON Schema's type system is JSON's, and a date is not a JSON type. Verified by execution
@@ -163,12 +227,21 @@ validates clean: checked against the real yaml-language-server, `expires: 2027-0
 diagnostic. The exposure is confined to a hypothetical YAML 1.1 validator, and is recorded in the
 guide under the declared target rather than worked around.
 
-**`tests/manifests/test_emit.py`'s `_EditorLoader` is where this class of bug hides.** It existed
-already and modelled the timestamp half of the 1.1/1.2 difference while leaving the boolean half
-resolving as pyyaml does, so no document the harness held ever exercised the disagreement (every
-rendered sample spells its booleans `true` / `false`, which is why following the samples never lands
-an operator here). It now models both, which is what makes the pairing test in section 2 a real
-oracle for this class rather than for one member of it.
+**`tests/manifests/test_emit.py`'s `_EditorLoader` is where this class of bug hides.** Twice now. It
+modelled the timestamp difference while leaving booleans resolving as pyyaml does, so no document
+the harness held exercised that disagreement; the boolean round fixed that and left integers
+resolving as pyyaml does, so the same thing happened again one type over. Every rendered sample
+spells its booleans `true` / `false` and its integers as plain decimals, which is why following the
+samples never lands an operator here and why the harness's own blind spots decide what the tests can
+see.
+
+The harness now models all three, and its integer fidelity is checked against the real `yaml` npm
+package over the corpus above rather than against a reading of the spec: it agrees on every member
+except `1e3`, which is the float it does not model and is inert while no emitted field is one. The
+lesson worth carrying past this SDD is that this file's coverage is bounded by `_EditorLoader`, so a
+claim about what an editor sees is only as good as what the harness is willing to produce. Widening
+the schema without widening the harness leaves a green suite that proves nothing about the case in
+hand.
 
 ## 3. The per-kind document schema
 

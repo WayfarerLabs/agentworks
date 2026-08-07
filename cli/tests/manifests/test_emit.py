@@ -29,6 +29,7 @@ from agentworks.manifests.emit import (
     ENVELOPE_SCHEMA_FILENAME,
     SCHEMA_DIRNAME,
     YAML_11_ONLY_BOOLEANS,
+    YAML_11_ONLY_INTEGERS,
     document_schema,
     envelope_schema,
     modeline,
@@ -56,10 +57,9 @@ class _EditorLoader(yaml.SafeLoader):
 
     yaml-language-server reads the document's syntax tree under YAML 1.2's
     core schema; the loader is pyyaml's safe loader, which resolves YAML
-    1.1. The two disagree on exactly two things a manifest can contain,
-    and this class is where the difference is modelled, because a test
-    validating pyyaml's answer would be testing a document no editor ever
-    holds:
+    1.1. The two disagree on three things a manifest can contain, and this
+    class is where the difference is modelled, because a test validating
+    pyyaml's answer would be testing a document no editor ever holds:
 
     - **timestamps.** 1.2 core has no implicit timestamp type, so
       ``2026-01-01`` reaches the editor's validator as a string where
@@ -71,17 +71,37 @@ class _EditorLoader(yaml.SafeLoader):
       an over-strict ``"type": "boolean"`` ship: every rendered sample
       spells its booleans ``true`` / ``false``, so no document this
       harness held ever exercised the difference.
+    - **integers.** 1.1 adds underscore separators (``8_192``),
+      sexagesimal (``1:30``), binary (``0b1010``) and signed hex
+      (``+0x1F``) on top of what 1.2 core resolves, so those reach the
+      validator as strings. The same blind spot as the booleans, found
+      the same way and one round later: modelling two of the three left
+      ``"type": "integer"`` over-reporting on ``memory: 8_192``.
+
+    Floats are NOT modelled, and the one visible consequence is that
+    ``1e3`` is a string here where a real editor makes it the number
+    1000. It is inert because the emitted surface holds no float field,
+    and ``test_the_float_gap_is_still_unreachable`` is what keeps that
+    true; adding one means finishing this harness as well as
+    ``emit._ManifestJsonSchema``.
     """
 
 
 _YAML_12_BOOLEANS = frozenset({"true", "True", "TRUE", "false", "False", "FALSE"})
 """The only plain scalars YAML 1.2 core resolves to a boolean."""
 
+_YAML_12_INTEGER = re.compile(r"^(?:[-+]?[0-9]+|0x[0-9a-fA-F]+|0o[0-7]+)$")
+"""The plain scalars YAML 1.2 core resolves to an integer.
+
+Note what is missing against 1.1 and what is added: no underscores and no
+sexagesimal, hex takes no sign, and ``0o17`` is an integer to 1.2 alone.
+"""
+
 _EditorLoader.yaml_implicit_resolvers = {
     first: [
         (tag, regexp)
         for tag, regexp in resolvers
-        if tag not in {"tag:yaml.org,2002:timestamp", "tag:yaml.org,2002:bool"}
+        if tag not in {"tag:yaml.org,2002:timestamp", "tag:yaml.org,2002:bool", "tag:yaml.org,2002:int"}
     ]
     for first, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
 }
@@ -90,6 +110,32 @@ for _first in "tTfF":
         0,
         ("tag:yaml.org,2002:bool", re.compile(f"^(?:{'|'.join(_YAML_12_BOOLEANS)})$")),
     )
+for _first in "-+0123456789":
+    _EditorLoader.yaml_implicit_resolvers[_first].insert(0, ("tag:yaml.org,2002:int", _YAML_12_INTEGER))
+
+
+def _construct_yaml_12_integer(_loader: yaml.SafeLoader, node: yaml.Node) -> int:
+    """1.2 core's VALUE for an integer, not merely its type.
+
+    The only member of this file's 1.2 modelling that has to touch a
+    CONSTRUCTOR rather than a resolver, and the reason is the one
+    disagreement no schema can catch: ``010`` is a leading-zero octal to
+    1.1 and a plain decimal to 1.2, so both parsers hand the validator an
+    integer and they differ only in that it is 8 or 10. Leaving pyyaml's
+    constructor in place would make this harness report 8 and hide it.
+
+    pyyaml's ``add_constructor`` copies the table onto the subclass before
+    writing, so ``SafeLoader`` is untouched by this.
+    """
+    text = str(node.value)
+    if text[:2].lower() == "0x":
+        return int(text, 16)
+    if text[:2].lower() == "0o":
+        return int(text, 8)
+    return int(text, 10)
+
+
+_EditorLoader.add_constructor("tag:yaml.org,2002:int", _construct_yaml_12_integer)
 
 
 def _uncomment(text: str) -> str:
@@ -661,6 +707,175 @@ def test_a_string_that_is_not_a_boolean_spelling_is_still_a_schema_error() -> No
 
     assert _errors(schema, nonsense)
     assert _errors(schema, number)
+
+
+# -- Integers: the same disagreement, one type over -------------------------
+
+
+def _loader_integer_pattern() -> str:
+    """pyyaml's own ``int`` implicit resolver, as an ECMA-262 pattern.
+
+    Read off the live resolver rather than transcribed, for the reason
+    ``_loader_boolean_spellings`` is derived: a pyyaml release that moves
+    the language should fail the assertion below rather than leave the
+    emitted schema quietly describing an older parser.
+
+    The pattern is compiled ``re.VERBOSE``, where unescaped whitespace is
+    layout, so stripping it is the whole conversion. That stripping is
+    what ``test_the_widened_integer_pattern_is_pyyamls_own_language``
+    checks by BEHAVIOR rather than by eye, since it would stop being
+    lossless the day pyyaml puts a space inside a character class.
+    """
+    for resolvers in yaml.SafeLoader.yaml_implicit_resolvers.values():
+        for tag, regexp in resolvers:
+            if tag == "tag:yaml.org,2002:int":
+                return re.sub(r"\s+", "", regexp.pattern)
+    raise AssertionError("pyyaml has no implicit int resolver")
+
+
+#: Every spelling below is measured against BOTH real parsers: pyyaml here,
+#: and the `yaml` npm package (yaml-language-server's own, at its 1.2 core
+#: defaults) at the versions recorded in the emission LLD's section 2.3.
+_OVER_REPORTING_INTEGERS = (
+    ("8_192", 8192),
+    ("1_000_000", 1000000),
+    ("1:30", 90),
+    ("1:30:00", 5400),
+    ("0b1010", 10),
+    ("0b1_010", 10),
+    ("0x1_F", 31),
+    ("+0x1F", 31),
+    ("-0x1F", -31),
+    ("0_7", 7),
+)
+"""``(source text, what the loader reads)`` where the editor sees a string.
+
+The direction section 2 forbids: a bare ``"type": "integer"`` flags every
+one of these, and all of them load.
+"""
+
+
+def test_the_widened_integer_pattern_is_pyyamls_own_language_minus_yaml_12() -> None:
+    """``YAML_11_ONLY_INTEGERS`` is derived, not hand-listed.
+
+    Rebuilt here from the two halves it is made of, the same shape as the
+    boolean assertion above: pyyaml's live resolver for what the loader
+    reads as an integer, and ``_YAML_12_INTEGER`` for what an editor
+    resolves without help. Neither half is maintained by hand.
+
+    The whitespace strip is checked by behavior over the corpus below
+    rather than by comparing pattern text, so a pyyaml pattern that
+    stopped surviving it would fail here instead of silently narrowing
+    every emitted integer.
+    """
+    loader_pattern = _loader_integer_pattern()
+    assert loader_pattern.startswith("^"), loader_pattern
+    rebuilt = f"^(?!{_YAML_12_INTEGER.pattern[1:-1]}$){loader_pattern[1:]}"
+
+    assert rebuilt == YAML_11_ONLY_INTEGERS
+
+    # The strip was lossless: pyyaml's compiled resolver and the stripped
+    # pattern agree on every spelling either might see.
+    stripped = re.compile(loader_pattern)
+    for text, _ in (*_OVER_REPORTING_INTEGERS, ("010", 8), ("5", 5), ("0o17", 0), ("_1", 0), ("1:60", 0)):
+        loader_reads_int = isinstance(yaml.safe_load(f"a: {text}")["a"], int)
+        assert bool(stripped.match(text)) is loader_reads_int, text
+
+
+def test_no_emitted_integer_type_is_narrower_than_the_loader() -> None:
+    """No bare ``"type": "integer"`` survives anywhere in the set.
+
+    The boolean guard's twin, and it is the assertion that was missing:
+    nothing pinned the integer shape, so the widening skipped a type
+    without any test noticing.
+    """
+    for filename, schema in schema_set().items():
+        for node in _every_subschema(schema):
+            assert node.get("type") != "integer", (filename, node)
+
+
+def test_the_float_gap_is_still_unreachable() -> None:
+    """No emitted field is a float, which is what lets there be no
+    ``float_schema`` override.
+
+    pyyaml reads ``1_000.5`` as a float where 1.2 core reads a string, so
+    a float field would arrive over-reporting exactly as integers did.
+    Rather than write a widening for a field that does not exist and
+    guess at its constraints, this fails the day one appears. Whoever
+    that is owes ``_ManifestJsonSchema`` a ``float_schema``, this file's
+    ``_EditorLoader`` the matching resolver, and the emission LLD a row.
+    """
+    for filename, schema in schema_set().items():
+        for node in _every_subschema(schema):
+            declared = node.get("type")
+            declared = declared if isinstance(declared, list) else [declared]
+            assert "number" not in declared, (filename, node)
+
+
+def _a_vm_template(memory: str) -> str:
+    return f"apiVersion: {API_VERSION}\nkind: vm-template\nmetadata:\n  name: dev\nspec:\n  memory: {memory}\n"
+
+
+@pytest.mark.parametrize(("spelling", "loaded"), _OVER_REPORTING_INTEGERS)
+def test_a_yaml_11_integer_spelling_is_not_a_schema_error(spelling: str, loaded: int, tmp_path: Path) -> None:
+    """The soundness contract at the second place the two parsers
+    disagree.
+
+    ``memory: 8_192`` is how an operator writes eight thousand of
+    something, and the loader reads ``8192``. The editor hands its
+    validator the STRING ``"8_192"``, so a bare ``"type": "integer"``
+    red-underlined valid configuration.
+
+    Both halves are asserted over the SAME text, as the boolean pairing
+    does: what the editor sees is accepted, and what the loader does with
+    it is what the operator meant.
+    """
+    text = _a_vm_template(spelling)
+
+    (document,) = _documents(text)
+    assert isinstance(document["spec"]["memory"], str), "the editor sees a string, or this proves nothing"
+    assert _errors(document_schema("vm-template"), document) == []
+    assert _errors(envelope_schema(), document) == []
+
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    (resources / "dev.yaml").write_text(text)
+    (entry,) = load_manifests(resources).entries
+    assert entry.resource.memory == loaded
+
+
+def test_a_string_that_is_not_an_integer_spelling_is_still_a_schema_error() -> None:
+    """The widening is a widening, not a hole.
+
+    A quoted integer is the case worth having: ``"5"`` is a string the
+    strict loader refuses, and the subtraction in
+    ``YAML_11_ONLY_INTEGERS`` is the only reason the schema can still say
+    so. Nothing distinguishes a quoted ``"8_192"`` from a bare one, which
+    is why that residual is recorded rather than tested away.
+    """
+    schema = document_schema("vm-template")
+    (nonsense,) = _documents(_a_vm_template("lots"))
+    (quoted,) = _documents(_a_vm_template('"5"'))
+
+    assert _errors(schema, nonsense)
+    assert _errors(schema, quoted)
+
+
+def test_a_leading_zero_integer_is_a_value_disagreement_no_schema_can_reach() -> None:
+    """``010`` is 8 to the loader and 10 to the editor, and both are
+    integers.
+
+    The one member of this class that the widening does NOT address, and
+    cannot: the schema sees a conforming integer either way, so there is
+    no keyword that could flag it. Pinned so it stays a known shape
+    rather than resurfacing as a surprise, and recorded in the emission
+    LLD beside the two the schema does answer.
+    """
+    (document,) = _documents(_a_vm_template("010"))
+
+    assert document["spec"]["memory"] == 10, "1.2 core reads a plain decimal"
+    assert yaml.safe_load(_a_vm_template("010"))["spec"]["memory"] == 8, "1.1 reads octal"
+    assert _errors(document_schema("vm-template"), document) == []
 
 
 def test_reference_markers_reach_emitted_schema() -> None:

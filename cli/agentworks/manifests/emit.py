@@ -92,22 +92,68 @@ YAML_11_ONLY_BOOLEANS: Final = (
     "OFF",
 )
 
+#: The plain scalars the LOADER reads as an integer but a schema-aware
+#: editor hands the validator as a string, as an ECMA-262 ``pattern``.
+#:
+#: The integer counterpart of :data:`YAML_11_ONLY_BOOLEANS`, and a pattern
+#: rather than a tuple for one reason: the boolean disagreement is twelve
+#: words, while this one is infinite (any number of underscores, any
+#: sexagesimal group). The membership rule is the same, though, and so is
+#: the derivation. It is the language pyyaml's own ``tag:yaml.org,2002:int``
+#: implicit resolver accepts, minus the spellings a YAML 1.2 core parser
+#: also resolves to a number; ``tests/manifests/test_emit.py`` rebuilds it
+#: from that live resolver so a pyyaml change cannot leave it quietly
+#: short, the way ``YAML_11_ONLY_BOOLEANS`` is re-derived there.
+#:
+#: What that leaves, measured against both parsers rather than read off
+#: the specs: underscore separators (``8_192``), sexagesimal (``1:30``),
+#: binary (``0b1010``), and SIGNED hex (``+0x1F``, which 1.2 core does not
+#: take a sign on). ``8_192`` in a ``memory`` field is the one an operator
+#: actually types.
+#:
+#: The subtraction is what keeps a QUOTED ``"5"`` flagged. Unquoted ``5``
+#: reaches a 1.2 editor as a number, so it never consults the string arm;
+#: admitting plain decimals here would only stop the schema noticing a
+#: quoted integer, which the strict loader does refuse. The residual that
+#: remains is the boolean one exactly: a quoted ``"8_192"`` is the same
+#: parsed instance as a bare ``8_192``, so no schema can separate them.
+#:
+#: Two disagreements this CANNOT reach are recorded in the emission LLD
+#: beside it, because neither is a type error: leading-zero octal
+#: (``010`` is 8 to the loader and 10 to the editor, the same JSON type
+#: with a different value), and ``0o17`` / ``1e3`` (a number to the
+#: editor, a string the strict loader refuses, which is the permitted
+#: under-reporting direction).
+YAML_11_ONLY_INTEGERS: Final = (
+    r"^(?!(?:[-+]?[0-9]+|0x[0-9a-fA-F]+|0o[0-7]+)$)"
+    r"(?:[-+]?0b[0-1_]+|[-+]?0[0-7_]+|[-+]?(?:0|[1-9][0-9_]*)"
+    r"|[-+]?0x[0-9a-fA-F_]+|[-+]?[1-9][0-9_]*(?::[0-5]?[0-9])+)$"
+)
+
 
 class _ManifestJsonSchema(GenerateJsonSchema):
-    """Pydantic's generator, with booleans widened to what YAML spells.
+    """Pydantic's generator, with scalars widened to what YAML spells.
 
     A JSON Schema never sees YAML; it sees whatever the editor's parser
     produced. The loader's parser and the editor's parser disagree about
-    which plain scalars are booleans (see
-    :data:`YAML_11_ONLY_BOOLEANS`), and that disagreement is not something
-    any per-field annotation can fix, because it is a property of the
-    PARSE rather than of the field. So it is corrected in the one place
-    every boolean in every emitted schema comes through.
+    which plain scalars are booleans and which are integers (see
+    :data:`YAML_11_ONLY_BOOLEANS` and :data:`YAML_11_ONLY_INTEGERS`), and
+    that disagreement is not something any per-field annotation can fix,
+    because it is a property of the PARSE rather than of the field. So it
+    is corrected in the one place every boolean and every integer in every
+    emitted schema comes through.
 
     Overriding the generator rather than post-walking the emitted dict so
-    a boolean added anywhere later (a new kind, a plugin's capability
+    a field added anywhere later (a new kind, a plugin's capability
     config, a nested block) is covered without anyone remembering to do
     it.
+
+    Floats would need the same treatment for the same reason: pyyaml
+    reads ``1_000.5`` as a float where 1.2 core reads a string. There is
+    no ``float_schema`` override because the emitted surface holds no
+    float, and writing one for a field that does not exist would be a
+    guess at its constraints. ``test_the_float_gap_is_still_unreachable``
+    fails the day one appears.
     """
 
     def bool_schema(self, schema: core_schema.BoolSchema) -> JsonSchemaValue:
@@ -125,6 +171,30 @@ class _ManifestJsonSchema(GenerateJsonSchema):
             "type": ["boolean", "string"],
             "pattern": f"^(?:{'|'.join(YAML_11_ONLY_BOOLEANS)})$",
         }
+
+    def int_schema(self, schema: core_schema.IntSchema) -> JsonSchemaValue:
+        """An integer, or the string an editor saw one of its YAML 1.1
+        spellings as.
+
+        The same correction ``bool_schema`` makes, for the same reason, at
+        the other place the two parsers disagree: ``memory: 8_192`` is
+        ``8192`` to the loader and the string ``"8_192"`` to the editor,
+        and a bare ``"type": "integer"`` red-underlines it.
+
+        Widening the generator's OWN answer rather than returning a
+        literal, which ``bool_schema`` can afford to do because a boolean
+        carries no constraints. An integer does: ``cpus`` is
+        ``exclusiveMinimum: 0`` and ``template_vmid`` carries an
+        ``examples``, and both have to survive.
+
+        Those numeric constraints then apply to the integer arm only,
+        because JSON Schema's numeric keywords ignore string instances. So
+        ``cpus: 0_0`` is accepted here and refused by the loader. That is
+        the under-approximation this module is built on rather than a
+        hole: the alternative is a second copy of every bound restated as
+        a regex, which would be a new place to be wrong about ``cpus``.
+        """
+        return {**super().int_schema(schema), "type": ["integer", "string"], "pattern": YAML_11_ONLY_INTEGERS}
 
 
 def schema_filename(kind: str) -> str:

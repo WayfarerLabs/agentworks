@@ -142,8 +142,8 @@ diagnostics can still fail to load. The direction is on purpose: a schema that u
 you a squiggle, while one that over-reports would underline valid configuration.
 
 **The schemas target YAML 1.2**, because that is the version every schema-aware editor parses. The
-loader is PyYAML, which is YAML 1.1, and the two versions disagree about exactly two things a
-manifest can hold:
+loader is PyYAML, which is YAML 1.1, and the two versions disagree about three things a manifest can
+hold:
 
 - **`yes` / `no` / `on` / `off` are booleans to the loader and plain strings under 1.2.** The
   emitted schemas accept both, so `verify_ssl: no` is not underlined. The cost is that a QUOTED
@@ -151,6 +151,15 @@ manifest can hold:
   string and nothing in the schema can tell them apart. That is the under-reporting direction, so it
   is a squiggle you do not get rather than one you get wrongly. `describe-kind` warns about the
   quoted spelling on every boolean field.
+- **1.1 knows more integer spellings than 1.2 does.** Underscore separators (`memory: 8_192`),
+  sexagesimal (`1:30`), binary (`0b1010`) and signed hex (`+0x1F`) are integers to the loader and
+  plain strings under 1.2. The emitted schemas accept both, so none of them is underlined. Two edges
+  are worth knowing about, because neither is something a schema can reach:
+  - A LEADING ZERO means octal to the loader and nothing at all to your editor: `memory: 010` loads
+    as 8 while your editor reads 10. Both are integers, so no squiggle is possible in either
+    direction. Write `10` or `8`; there is no reason to lead with a zero here.
+  - `0o17` and `1e3` go the other way. Your editor reads them as numbers, the loader reads them as
+    strings, and values are not coerced, so loading fails on a line the editor was happy with.
 - **A bare `expires: 2027-01-01` is a date to the loader and a string under 1.2.** This one is not
   expressible: JSON Schema's types are JSON's, and a date is not among them, so no schema can be
   written that a YAML 1.1 checker would accept here. Under 1.2 it is a string and validates cleanly,
