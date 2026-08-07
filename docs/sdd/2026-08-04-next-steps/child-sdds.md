@@ -27,18 +27,20 @@ is locked.
       `docs/sdd/2026-07-31-declarative-schema/roadmap-seed-notes.md` via new-file message passing;
       the adopted-child analog of a seed FRD)
 - [x] Effort lead launched (2026-08-05, seed notes merged via PR #411)
-- [ ] Phase 2 released from its hold (prerequisites landed via PRs #405 and #406; the effort lead's
+- [x] Phase 2 released from its hold (prerequisites landed via PRs #405 and #406; the effort lead's
       first commit records the release in that SDD's plan)
-- [ ] Phase 2 implementation complete (absorbs generic-discriminator removal and the migrator's
+- [x] Phase 2 implementation complete (absorbs generic-discriminator removal and the migrator's
       fate)
 - [x] Five-pass roadmap review of PR #414 delivered (2026-08-07): request changes, three blockers,
       structural core verified sound
-- [ ] Migrator deleted per the remediation-posture ruling (operator, 2026-08-07; see
-      `target-state.md` compatibility posture): both halves of `migrate/` removed on the branch,
-      error hints repointed at guide-led remediation, `locked.md` updated with a dated entry
-- [ ] Surviving review findings fixed on the branch (inheritance merge guard and restored coverage,
-      the schema silent-edge cluster, robustness items, SDD artifact corruption)
-- [ ] Locked
+- [x] Migrator deleted per the remediation-posture ruling (operator, 2026-08-07; see
+      `target-state.md` compatibility posture): both halves of `migrate/` removed, error hints
+      repointed at guide-led remediation, `locked.md` records the ruling
+- [x] Surviving review findings fixed and re-verified (execution re-review 2026-08-07: all fourteen
+      items fixed and pinned; final round closed the marker-refusal gap and the settings references;
+      two operator rulings recorded in place, settings hard errors and the deprecation-channel keep,
+      resolving the channel-gap ledger item)
+- [x] Merged to `main` and locked (PR #414, 2026-08-07; `locked.md` binds at merge)
 
 ### Design track: capability-kind descriptor contract
 
