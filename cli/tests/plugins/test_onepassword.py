@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
 from agentworks.bootstrap import build_registry
+from agentworks.capabilities.config import validate_capability_config
 from agentworks.config import load_config
 from agentworks.errors import (
     ConfigError,
@@ -27,8 +28,9 @@ from agentworks.errors import (
     SecretMappingError,
 )
 from agentworks.plugins.onepassword import backend as op_mod
-from agentworks.plugins.onepassword.backend import OnePasswordBackend, _OpResult
+from agentworks.plugins.onepassword.backend import _FORMS_HINT, OnePasswordBackend, _OpResult
 from agentworks.resources.graph import Readiness
+from agentworks.schema import RefOwner
 from agentworks.secrets import active_backends, resolve_secrets
 from agentworks.secrets.base import SecretDecl
 from agentworks.secrets.resolve import ActiveBackend, preview_resolution
@@ -78,13 +80,12 @@ def _backend_chain() -> list[ActiveBackend]:
 # -- would_attempt -----------------------------------------------------------
 
 
-def test_would_attempt_only_for_mapped_secret() -> None:
-    backend = OnePasswordBackend()
-    mapped = _decl("s1", backend_mappings={"onepassword": "op://Work/npm/token"})
-    unmapped = _decl("s2")
-    assert backend.would_attempt(mapped, mapped.backend_mappings["onepassword"])
-    # Unmapped secrets soft-skip (no derive-from-name convention).
-    assert not backend.would_attempt(unmapped, None)
+# That this backend attempts a mapped secret and soft-skips an unmapped one
+# (no derive-from-name convention) is pinned in
+# ``tests/secrets/test_backends.py::test_would_attempt_is_pure_of_secret_and_mapping``,
+# which makes the same two calls with ``is True`` / ``is False`` and sets
+# them beside env-var's and prompt's answers, where the contrast is the
+# point.
 
 
 # -- mapping resolution / describe_lookup ------------------------------------
@@ -136,7 +137,7 @@ def test_section_bearing_reference_validates_and_resolves(
     _install_runner(monkeypatch, runner)
     backend = OnePasswordBackend()
 
-    backend.validate_mapping("secret 's'", uri)
+    _validate(uri)
     secret = _decl("s-sec", backend_mappings={"onepassword": uri})
     got = backend.batch_get([(secret, secret.backend_mappings["onepassword"])])
     assert got == {"s-sec": "sectioned-value"}
@@ -163,22 +164,39 @@ def test_describe_lookup_none_when_unmapped() -> None:
     assert backend.describe_lookup(_decl("s"), None) is None
 
 
-# -- validate_mapping --------------------------------------------------------
+# -- Mapping validation ------------------------------------------------------
+#
+# Validation is the CORE's now, against the model this backend declares;
+# no backend code runs, which is why these go through the core entry
+# point rather than a method the backend no longer has.
 
 
-def test_validate_mapping_accepts_valid_forms() -> None:
-    backend = OnePasswordBackend()
-    backend.validate_mapping("secret 's'", "op://Work/npm/token")
-    backend.validate_mapping(
-        "secret 's'",
-        {"account": "my.1password.com", "reference": "op://Work/npm/token"},
+def _validate(mapping: object) -> None:
+    validate_capability_config(
+        kind="secret-backend",
+        name="onepassword",
+        config=mapping,  # type: ignore[arg-type]
+        owner=RefOwner(kind="secret", name="s", label="secret/s.backend_mappings.onepassword"),
     )
-    # A section segment (4 parts) is allowed, in both forms.
-    backend.validate_mapping("secret 's'", "op://Work/npm/section/token")
-    backend.validate_mapping(
-        "secret 's'",
-        {"account": "acct", "reference": "op://Work/npm/section/token"},
-    )
+
+
+@pytest.mark.parametrize(
+    "mapping",
+    [
+        pytest.param("op://Work/npm/token", id="string"),
+        pytest.param({"account": "my.1password.com", "reference": "op://Work/npm/token"}, id="table"),
+        # A section segment (4 parts) is allowed. Only the TABLE form here:
+        # the bare-string spelling is validated on the way in by
+        # ``test_section_bearing_reference_validates_and_resolves``, which
+        # goes on to read it.
+        pytest.param({"account": "acct", "reference": "op://Work/npm/section/token"}, id="table-with-section"),
+    ],
+)
+def test_mapping_accepts_valid_forms(mapping: Any) -> None:
+    """Parametrized rather than three calls in one body: the three are
+    independent claims, and unrolled they stop at the first failure, so a
+    regression in the table form hid behind one in the string form."""
+    _validate(mapping)
 
 
 @pytest.mark.parametrize(
@@ -186,44 +204,111 @@ def test_validate_mapping_accepts_valid_forms() -> None:
     [
         pytest.param(123, id="wrong-type"),
         pytest.param("", id="empty-string"),
-        pytest.param("Work/npm/token", id="missing-scheme"),
         pytest.param("op://Work/token", id="too-few-segments"),
         pytest.param("op://Work//token", id="blank-segment"),
-        pytest.param({"reference": "op://Work/npm/token"}, id="table-missing-account"),
         pytest.param(
             {"account": "", "reference": "op://Work/npm/token"},
             id="table-blank-account",
         ),
-        pytest.param({"account": "acct"}, id="table-missing-reference"),
         pytest.param({"account": "acct", "reference": ""}, id="table-blank-reference"),
         pytest.param(
             {"account": "acct", "reference": "not-a-ref"},
             id="table-bad-reference",
         ),
-        pytest.param(
-            {"account": "acct", "reference": "op://Work/npm/token", "x": 1},
-            id="table-unknown-key",
-        ),
     ],
 )
-def test_validate_mapping_rejects_bad_forms(mapping: Any) -> None:
-    backend = OnePasswordBackend()
+def test_mapping_rejects_bad_forms(mapping: Any) -> None:
+    """The malformed spellings whose only claim is THAT they are refused.
+
+    Four more used to sit here (a schemeless string, a table missing
+    ``account``, a table missing ``reference``, a table with an extra key)
+    and are gone rather than kept: ``_BAD_MAPPINGS`` below carries the same
+    four inputs and asserts the whole message at both producing sites, so
+    each of them raised twice over and said less the first time.
+    """
     with pytest.raises(ConfigError):
-        backend.validate_mapping("secret 's'", mapping)
+        _validate(mapping)
 
 
-def test_validate_mapping_rejects_vault_item_field_table() -> None:
-    """A {vault, item, field} table is rejected as a plain unknown-key
+_BAD_MAPPINGS = [
+    pytest.param(
+        {"account": "acct"},
+        "secret/s.backend_mappings.onepassword.reference: is required",
+        id="table-the-string-arm-rejected",
+    ),
+    pytest.param(
+        {"reference": "op://Work/npm/token"},
+        "secret/s.backend_mappings.onepassword.account: is required",
+        id="table-missing-account",
+    ),
+    pytest.param(
+        {"account": "acct", "reference": "op://Work/npm/token", "x": 1},
+        "secret/s.backend_mappings.onepassword.x: unknown field; expected one of: account, reference",
+        id="table-unknown-key",
+    ),
+    pytest.param(
+        "Work/npm/token",
+        "secret/s.backend_mappings.onepassword: onepassword reference 'Work/npm/token' "
+        "must start with 'op://' (an 'op://vault/item/field' reference, optionally "
+        "with a section: 'op://vault/item/section/field')",
+        id="string-the-table-arm-rejected",
+    ),
+]
+
+
+@pytest.mark.parametrize(("mapping", "expected"), _BAD_MAPPINGS)
+def test_a_bad_mapping_reads_the_same_way_wherever_it_is_caught(mapping: Any, expected: str) -> None:
+    """One message for a bad mapping, from both places that produce one.
+
+    **What it says.** The mapping is the framework's one undiscriminated
+    union, so it is where an arm's shape rejection reaches an operator as
+    noise. Pinned as the WHOLE message rather than a substring, because
+    the defect this guards was never a wrong line, it was a true line with
+    an irrelevant one stapled to it: a malformed table led with "must be a
+    string" (the ``op://`` arm's report) and a malformed string trailed
+    with "must be a table". A substring assertion passes with either still
+    present, which is how the framing fix shipped over a batch that still
+    read wrong.
+
+    **Where it says it.** ``_resolved_ref`` re-validates defensively, and
+    what IT reports has to be what the operator would have been told at
+    load. It used to read ``exc.errors()[0]["msg"]``, whichever arm
+    pydantic tried first, from the single ``model_validate`` in the
+    project that skipped the error bridge. An operator has no way to know
+    which path they reached, so the two are asserted against one expected
+    string rather than in two tests with two expectations, which is what
+    let them drift.
+    """
+    with pytest.raises(ConfigError) as at_load:
+        _validate(mapping)
+    secret = _decl("s", backend_mappings={"onepassword": mapping})
+    with pytest.raises(ConfigError) as revalidated:
+        OnePasswordBackend().describe_lookup(secret, secret.backend_mappings["onepassword"])
+
+    assert str(at_load.value) == expected
+    assert str(revalidated.value) == expected
+
+
+def test_an_absent_mapping_is_framed_like_a_malformed_one() -> None:
+    """The other exit from ``_resolved_ref``. Same owner framing, and the
+    two accepted forms ride the ConfigError's ``hint`` rather than being
+    parenthesized into the message, which is where every other framed
+    config error puts its way forward."""
+    with pytest.raises(ConfigError) as exc:
+        OnePasswordBackend()._resolved_ref(_decl("s"), None)
+    assert "secret/s.backend_mappings.onepassword" in str(exc.value)
+    assert exc.value.hint == _FORMS_HINT
+
+
+def test_mapping_rejects_vault_item_field_table() -> None:
+    """A {vault, item, field} table is rejected as a plain unknown-field
     ConfigError (naming the keys), with no migration language: those keys
     never shipped, so there is nothing to migrate from."""
-    backend = OnePasswordBackend()
-    with pytest.raises(ConfigError, match="unknown key") as excinfo:
-        backend.validate_mapping(
-            "secret 's'",
-            {"vault": "Work", "item": "npm", "field": "token"},
-        )
+    with pytest.raises(ConfigError, match="unknown field") as excinfo:
+        _validate({"vault": "Work", "item": "npm", "field": "token"})
     message = str(excinfo.value)
-    assert "'field', 'item', 'vault'" in message
+    for key in ("vault", "item", "field"):
+        assert f"{key}: unknown field; expected one of: account, reference" in message
     for word in ("no longer", "migrat", "legacy"):
         assert word not in message.lower()
 
@@ -299,14 +384,11 @@ def test_valid_mapping_passes_build_registry(tmp_path: Path) -> None:
 
 
 # -- batch_get: miss / failure semantics -------------------------------------
-
-
-def test_batch_get_returns_found_value(monkeypatch: pytest.MonkeyPatch) -> None:
-    _install_runner(monkeypatch, _fake_op(values={"op://Work/npm/token": "the-token"}))
-    backend = OnePasswordBackend()
-    secret = _decl("npm", backend_mappings={"onepassword": "op://Work/npm/token"})
-    got = backend.batch_get([(secret, secret.backend_mappings["onepassword"])])
-    assert got == {"npm": "the-token"}
+#
+# The HIT is ``test_bare_string_resolves_without_account_flag`` above: same
+# fake, same bare-string mapping, same ``{name: value}`` assertion, and it
+# goes on to pin the argv the value came out of. What is left for this
+# section is what happens when the read does not find one.
 
 
 def test_batch_get_absent_item_raises_secret_mapping_error(
@@ -483,15 +565,13 @@ def test_preview_returns_none_for_unmapped_secret(
 # -- registry ----------------------------------------------------------------
 
 
-def test_onepassword_seated_by_plugin() -> None:
-    """The onepassword backend ships as the ``onepassword`` system plugin,
-    whose adapter seats the backend instance into the code registry at import
-    (so ``_impl_for`` can stamp it onto the graph node)."""
-    from agentworks.plugins import SYSTEM_PLUGINS
-    from agentworks.secrets.backends import SECRET_BACKEND_REGISTRY
-
-    assert "onepassword" in SYSTEM_PLUGINS
-    assert "onepassword" in SECRET_BACKEND_REGISTRY
+# That the backend ships as the ``onepassword`` system plugin and that its
+# adapter seats the instance into the code registry at import are both
+# preconditions of the row test below (an unseated backend publishes no row
+# to look up, and a row cannot carry ``origin.plugin == "onepassword"``
+# without the plugin), so neither needs a membership assertion of its own.
+# ``test_plugin_framework.py::test_shipped_index_ships_migrated_plugins``
+# pins the index entry and what it declares.
 
 
 def test_onepassword_descriptor_row_is_disabled_system_plugin_by_default(
@@ -562,7 +642,7 @@ def test_secret_mapped_only_to_disabled_onepassword_fails_with_enable_hint(tmp_p
 
     config = _config(tmp_path, _op_only_settings(enabled=False), manifests=[_OP_ONLY_SECRET])
     registry = build_registry(config)
-    target = SecretTarget(vm={"TOKEN": EnvEntry(key="TOKEN", secret="op-only")})
+    target = SecretTarget(vm={"TOKEN": EnvEntry(secret="op-only")})
     with pytest.raises(SecretUnavailableError) as exc:
         resolve_for_command([target], config, registry)
     assert "enable plugin `onepassword`" in (exc.value.hint or "")
@@ -579,7 +659,7 @@ def test_enabling_the_plugin_resolves_the_onepassword_secret(tmp_path: Path, mon
     config = _config(tmp_path, _op_only_settings(enabled=True), manifests=[_OP_ONLY_SECRET])
     registry = build_registry(config)
     _install_runner(monkeypatch, _fake_op(values={"op://Vault/item/field": "the-token"}))
-    target = SecretTarget(vm={"TOKEN": EnvEntry(key="TOKEN", secret="op-only")})
+    target = SecretTarget(vm={"TOKEN": EnvEntry(secret="op-only")})
     values = resolve_for_command([target], config, registry)
     assert values["op-only"] == "the-token"
 
@@ -602,7 +682,7 @@ def test_non_plugin_secret_failure_message_is_unchanged(tmp_path: Path, monkeypa
         manifests=[ManifestDoc("secret", "plain", description="reachable via env-var's default convention, but unset")],
     )
     registry = build_registry(config)
-    target = SecretTarget(vm={"TOKEN": EnvEntry(key="TOKEN", secret="plain")})
+    target = SecretTarget(vm={"TOKEN": EnvEntry(secret="plain")})
     with pytest.raises(SecretUnavailableError) as exc:
         resolve_for_command([target], config, registry)
     assert "plain: tried env-var" in (exc.value.hint or "")
@@ -654,7 +734,7 @@ def test_explicit_false_opt_out_of_onepassword_gets_no_enable_hint(
         ],
     )
     registry = build_registry(config)
-    target = SecretTarget(vm={"TOKEN": EnvEntry(key="TOKEN", secret="opted-out")})
+    target = SecretTarget(vm={"TOKEN": EnvEntry(secret="opted-out")})
     with pytest.raises(SecretUnavailableError) as exc:
         resolve_for_command([target], config, registry)
     assert "enable plugin" not in (exc.value.hint or "")

@@ -11,21 +11,35 @@ persist on the VM.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal
+
+from pydantic import BeforeValidator, Field
+from pydantic.json_schema import SkipJsonSchema
 
 from agentworks.declared_resource import DeclaredResource
+from agentworks.naming import MAX_SECRET_NAME_LENGTH
+from agentworks.schema import RefOwner
 from agentworks.source_location import SourceLocation, synthesized
 
 if TYPE_CHECKING:
-    from agentworks.resources.graph import BuildContext
+    from agentworks.resources.graph import FinalizeContext
     from agentworks.resources.reference import ResourceReference
 
-MappingValue = str | dict[str, object] | Literal[False]
+
+def _refuse_true(value: Any) -> Any:
+    """``true`` keeps its own message: the alternatives list the union
+    would otherwise render says what IS accepted without teaching that
+    ``false`` is the opt-out an operator was reaching for."""
+    if value is True:
+        raise ValueError("boolean must be `false` (opt-out); `true` is not a valid value")
+    return value
+
+
+MappingValue = Annotated[str | dict[str, object] | Literal[False], BeforeValidator(_refuse_true)]
 """One entry in ``SecretDecl.backend_mappings``: an identifier override
 (string or structured), or ``False`` for an explicit opt-out."""
 
 
-@dataclass(frozen=True, kw_only=True)
 class SecretDecl(DeclaredResource):
     """A declared secret. Values are never stored here; only the existence,
     description, and per-backend identifier overrides.
@@ -44,18 +58,37 @@ class SecretDecl(DeclaredResource):
       soft-skip (backend reports as "no mapping" via ``would_attempt``).
     """
 
-    # Override the base's optional ``description``: a secret must carry one
-    # (it is the operator-facing prompt/hint text), so it is required here.
-    # ``= field()`` is load-bearing, NOT decoration: a bare ``description:
-    # str`` would inherit the base's ``description = None`` class attribute as
-    # its default (dataclass reads the default via ``getattr`` up the MRO), so
-    # the field would silently stay optional. ``field()`` with no default
-    # forces MISSING, making the argument required as intended.
-    description: str = field()
-    hint: str | None = None
-    backend_mappings: dict[str, MappingValue] = field(default_factory=dict)
+    # Secrets are never derived into Linux usernames, so they take the
+    # larger cap rather than the freeform one.
+    NAME_MAX_LENGTH: ClassVar[int | None] = MAX_SECRET_NAME_LENGTH
 
-    def dependencies(self, context: BuildContext) -> list[ResourceReference]:
+    # Override the base's optional ``description``: a secret must carry one
+    # (it is the operator-facing prompt text), so it is required here.
+    #
+    # Required, but deliberately NOT ``NonEmptyStr``, and the distinction
+    # is the one ``NAME_MAX_LENGTH`` above draws: the framework CONSTRUCTS
+    # secret rows with an empty description on purpose (``synthesize`` for
+    # every auto-declared secret, plus four placeholder sites for a secret
+    # nothing declared), and the registry's polish pass fills the
+    # auto-declared ones in afterwards. What has to be non-empty is what an
+    # OPERATOR wrote, which decode checks against this field's
+    # requiredness (``_check_declared_description``).
+    description: SkipJsonSchema[str] = Field(examples=["npm registry token"])
+    """What this secret is, in one line. Required on a secret where it is
+    optional on every other kind, because this is the text an operator
+    reads when they are being asked to type the value in."""
+
+    hint: str | None = Field(default=None, examples=["Generate at https://www.npmjs.com/settings/<user>/tokens"])
+    """Operator-facing text shown when the secret has to be entered by
+    hand: where to generate it, which account it belongs to."""
+
+    backend_mappings: dict[str, MappingValue] = Field(
+        default_factory=dict,
+        examples=[{"env-var": "NPM_TOKEN"}],
+    )
+    """Per-backend identifier overrides, keyed by backend name."""
+
+    def dependencies(self, context: FinalizeContext) -> list[ResourceReference]:
         """The secret's ``secret -> secret-backend`` edges: the candidate
         backends that could resolve it, frozen into the graph at finalize.
 
@@ -77,7 +110,7 @@ class SecretDecl(DeclaredResource):
         backend name in first-encountered order (present backends in registry
         order, then any extra explicit keys).
         """
-        from agentworks.resources.reference import ResourceReference
+        from agentworks.resources.reference import ResourceReference, sourced_references
 
         source = ("secret", self.name)
         seen: set[str] = set()
@@ -104,6 +137,29 @@ class SecretDecl(DeclaredResource):
                 continue
             if backend.would_attempt(self, mapping):
                 emit(backend_name)
+        # (a2) whatever each declared mapping itself NAMES. Every shipped
+        # backend's mapping is an external identifier (an env var name, an
+        # ``op://`` reference) that implies no agentworks resource, so this
+        # contributes nothing today. It is wired anyway so secret-backend is
+        # not the one kind whose config references are structurally
+        # underivable: the core reads them off the backend's declared model,
+        # exactly as it does for the other three kinds.
+        from agentworks.capabilities.config import capability_config_references
+
+        for backend_name, mapping in self.backend_mappings.items():
+            if mapping is False:
+                continue
+            refs.extend(
+                sourced_references(
+                    capability_config_references(
+                        kind="secret-backend",
+                        name=backend_name,
+                        config=mapping,
+                        owner=self.mapping_owner(backend_name),
+                    ),
+                    source,
+                )
+            )
         # (b) explicit non-false mapping keys, including any naming no present
         # backend (a dangling edge that the "error" miss policy hard-errors).
         for backend_name, mapping in self.backend_mappings.items():
@@ -112,34 +168,77 @@ class SecretDecl(DeclaredResource):
             emit(backend_name)
         return refs
 
-    def validate(self, enabled_backends: frozenset[str]) -> None:
+    def validate_config(self, context: FinalizeContext) -> None:
         """Throwing per-mapping spec check, run by the finalize ``validate``
-        pass: every declared ``backend_mappings`` entry addressed to a PRESENT
-        AND ENABLED backend is validated via that backend's ``validate_mapping``
-        (R9.9: every declared mapping, not just the opted-in ones, so a stale
-        mapping for a configured-but-not-opted-in backend now fails at build).
+        pass: EVERY declared ``backend_mappings`` entry is validated by the
+        CORE against its backend's declared model (R9.9: every declared
+        mapping, not just the opted-in ones, so a stale mapping for a
+        configured-but-not-opted-in backend fails at build). No backend code
+        runs.
 
-        ``enabled_backends`` is the set of enabled ``secret-backend`` names the
-        finalize pass threads from the graph's enablement axis. A mapping to a
-        present-but-DISABLED backend is INERT (not validated until enabled),
-        the same enablement seam materialization-gating and resolution already
-        consult; inert today (no disabled producer ships, R7). The generic
-        ``False`` opt-out is loop-owned and never validated; a mapping to an
-        ABSENT backend is the dangling edge the resolve pass already
-        hard-errored (R9.11), so it never reaches here.
+        UNCONDITIONAL over enablement, like the pass that calls it
+        (:meth:`~agentworks.resources.registry.Registry._validate_resources`).
+        A mapping addressed to a present-but-DISABLED backend is validated
+        exactly like one addressed to an enabled backend: whether a key is
+        accepted is the backend model's answer, and an operator must not be
+        able to bank invalid config that detonates at the moment they enable
+        the backend. That is the worst possible moment to learn the mapping
+        was never well-formed.
+
+        Being validated is a SEPARATE property from being live, and only the
+        latter tracks enablement. A mapping to a disabled backend is still
+        INERT for resolution: :func:`~agentworks.secrets.resolve.active_backends`
+        drops a disabled backend from the chain, so it is never selected and
+        never resolved through. Nothing about that changes here; this method
+        decides only when the shape is checked.
+
+        Two entries are still not validated against a backend model, neither
+        of them for an environmental reason:
+
+        - the ``False`` opt-out, which is LOOP-owned vocabulary rather than
+          backend config. It names no model to check it against, and it says
+          the same thing on every host, so skipping it is a fact about the
+          document, not about the environment.
+        - a mapping naming an ABSENT backend, which selects no model and so
+          validates vacuously (``validate_capability_config`` no-ops when no
+          implementation is seated). Checking it is not possible: the model
+          that would judge it does not exist on this host. It is not silently
+          accepted either, because the secret's dangling ``secret-backend``
+          edge reports it once as a hard finalize miss (R9.11), which is the
+          right vocabulary for "no such backend". Naming it a second time as
+          a config error would be one problem told twice.
         """
-        from agentworks.secrets.backends import SECRET_BACKEND_REGISTRY
+        from agentworks.capabilities.config import validate_capability_config
 
         for backend_name, mapping in self.backend_mappings.items():
             if mapping is False:
                 continue
-            if backend_name not in enabled_backends:
-                # Absent (dangling, already hard-errored) or present-but-disabled
-                # (inert until enabled): neither is validated here.
-                continue
-            backend = SECRET_BACKEND_REGISTRY.get(backend_name)
-            if backend is not None:
-                backend.validate_mapping(f"secret {self.name!r}", mapping)
+            validate_capability_config(
+                kind="secret-backend",
+                name=backend_name,
+                config=mapping,
+                owner=self.mapping_owner(backend_name),
+                location=self.error_location,
+            )
+
+    def mapping_owner(self, backend_name: str) -> RefOwner:
+        """Who owns one ``backend_mappings`` value, for error framing.
+
+        The secret alone would be ambiguous: a secret may map several
+        backends, and a root model's errors carry no field path of their
+        own, so without the key an operator reading "must not be empty"
+        would not know WHICH mapping to fix.
+
+        Public, because the finalize pass above is not the only validator
+        of a mapping: a backend that re-validates its own entry defensively
+        (``onepassword``) has to frame the result identically, and a second
+        spelling of this label would be a second thing to keep in sync.
+        """
+        return RefOwner(
+            kind="secret",
+            name=self.name,
+            label=f"secret/{self.name}.backend_mappings.{backend_name}",
+        )
 
 
 DEFAULT_BACKEND_CHAIN: tuple[str, ...] = ("env-var", "prompt")

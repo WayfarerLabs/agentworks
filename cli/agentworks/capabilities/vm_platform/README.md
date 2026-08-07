@@ -24,9 +24,9 @@ includes location, credentials, and other platform-specific settings.
 
 ## Available Platforms
 
-Five platforms ship today. This list can change, so
-`agw resource list --kind vm-platform --include-disabled` is the definitive set on any given
-install.
+Five platforms ship today. This list can change, so `agw resource describe-kind vm-platform` is the
+definitive set on any given install (it reads no config, so it answers even on a host that cannot
+load one), and `agw resource describe-kind vm-platform/<name>` is the definitive config for one.
 
 - **`lima`** (built in) runs fast local VMs on the operator's machine (commonly macOS, but any host
   Lima supports). It can also connect to a remote Linux host over SSH and drive `limactl` there,
@@ -135,10 +135,10 @@ has a concrete example, it names the platform and file that demonstrates it.
 A VM platform is the code capable of running VMs on a specific VM provider. Each subclasses
 `VMPlatform` (`base.py`), registers in `VM_PLATFORM_REGISTRY` (`__init__.py`), and publishes as a
 read-only `vm-platform` capability resource. Operators never invoke a platform directly: a
-declarable `vm-site` binds a platform to a config blob (`spec.platform` + `spec.platform_config`),
-and all invocation goes through site resolution (`agentworks.vms.sites`). ADR 0016 records the
-capability/declarable split; ADR 0019 records the orchestration layer that now drives the lifecycle
-(below).
+declarable `vm-site` binds a platform to a config blob (one tagged `spec.platform` table whose
+`name` key selects the platform), and all invocation goes through site resolution
+(`agentworks.vms.sites`). ADR 0016 records the capability/declarable split; ADR 0019 records the
+orchestration layer that now drives the lifecycle (below).
 
 ### Host Control and Platform Obligations
 
@@ -271,13 +271,18 @@ process having warmed a credential cache.
   one is not. WSL2 reports a site with no `wsl` on PATH not-ready even on Windows. The fold calls it
   off the graph-carried impl to fold into the vm-site's verdict.
 
-**Class-level contract methods**:
+**Class-level contract**. `contract_version`, `config_model`, `name`, and `description` are all
+REQUIRED and none is defaulted, because a default would let an unmigrated implementation inherit a
+claim it never made; registration refuses an implementation missing any of them, naming the plugin.
+`contract_version` must match exactly the version the vm-platform descriptor declares supported, so
+a contract change is a hard cutover rather than a silent re-certification.
 
-- `dependencies(owner, config) -> tuple[ConfigReference, ...]` (total, non-throwing) declares any
-  secret references the `platform_config` implies, and `validate(owner, config) -> None` is the
-  throwing shape check. Both are pure classmethods. Proxmox returns a
-  `ConfigReference(kind="secret", ...)` for its API token from `dependencies`; declaring it is what
-  later lets the op read it (below).
+- `config_model` declares what the platform's config IS (the keys a site writes beside `name` inside
+  `spec.platform`), as an `AgwModel` carrying the platform's own name as a `Literal` tag plus one
+  field per accepted key. The core validates against it (closed-world) and extracts the references
+  its `SecretRef` / `ResourceRef` markers imply (total, never raising); no platform code runs for
+  either. Proxmox marks its `token_secret` field; the marker is what later lets the op read that
+  secret (below).
 - `legacy_platform_metadata(cls, row, legacy) -> dict[str, str]` maps pre-migration DB rows into the
   `platform_metadata` shape, consumed only by the one-shot DB migration.
 
@@ -288,9 +293,9 @@ read back only by the owning platform (Lima stores `instance_name`, WSL2 `distro
 `backend_name`, and never the public IP, which it reads live). Add a platform-specific **input** by
 adding a field to `ProvisionRequest`, not by changing the protocol. But note the opposite pattern is
 also right: purely internal translation stays inside the platform. Azure's VM-size selection
-(mapping the request's `cpus`/`memory_gib`/`disk_gib` onto a concrete SKU, with a
-`platform_config.vm_sizes` override, per ADR 0018) lives entirely in `plugins/azure/platform.py` and
-adds nothing to `ProvisionRequest`.
+(mapping the request's `cpus`/`memory_gib`/`disk_gib` onto a concrete SKU, with a site-level
+`vm_sizes` override, per ADR 0018) lives entirely in `plugins/azure/platform.py` and adds nothing to
+`ProvisionRequest`.
 
 ### How an Op Gets Its Dependencies
 
@@ -306,8 +311,8 @@ author most needs to get right.
 accessor methods rather than bare fields so a future permission model can gate them without changing
 signatures: `admin_target()` / `agent_target()` return execution `Transport`s, and `secret(name)`
 returns a resolved secret value. `ctx.secret(name)` raises a typed `ConfigError` if the context was
-assembled without a resolve pass, and it is scoped: an op can read only the names its `dependencies`
-declared.
+assembled without a resolve pass, and it is scoped: an op can read only the names its config model
+marked.
 
 What differs between stages is timing, not shape. `preflight` gets the command-start slice (existing
 targets only, no resolved secrets, which is what makes it structurally dependency-blind); `runup`
@@ -335,16 +340,18 @@ and `access_key_secret` naming the secret that holds the secret access key (plus
 `assume_role_arn`). Read it alongside azure when adding the third. Four rules, in
 `plugins/azure/platform.py`:
 
-**1. Explicit credentials are an OPTIONAL nested table naming a secret.** The site's
-`platform_config` may carry a `service_principal` table:
+**1. Explicit credentials are an OPTIONAL nested table naming a secret.** The site's platform block
+may carry a `service_principal` table:
 
 ```yaml
-platform_config:
-  subscription_id: "..."
-  service_principal:
-    tenant_id: "..." # plain config: an identifier, not a secret
-    client_id: "..." # plain config
-    secret: azure-client-secret # the NAME of a secret, and the default
+spec:
+  platform:
+    name: azure-vm
+    subscription_id: "..."
+    service_principal:
+      tenant_id: "..." # plain config: an identifier, not a secret
+      client_id: "..." # plain config
+      secret: azure-client-secret # the NAME of a secret, and the default
 ```
 
 Three deliberate choices. The identifiers are plain config because they are identifiers, not
@@ -356,12 +363,13 @@ beside `secret` without a breaking change to declared sites. The `aws-ec2` platf
 analogue realized: a `credentials` table with the plain `access_key_id` and an `access_key_secret`
 naming the secret access key.
 
-**2. Declare the edge from `dependencies`, validate the shape in `validate`.** `dependencies` is
-total and non-throwing, so it emits the edge whenever it can derive the secret NAME (even if the
-table's other fields are malformed) and omits it only when the name itself is underivable.
-`validate` is where every shape error surfaces, including unknown keys inside the table. Declaring
-the edge is what puts the secret in the site node's `secret_refs`, which is what gets it into the
-boundary resolve and therefore delivered to `ctx.secret`.
+**2. Mark the field, and let the core do both halves.** Extraction is total and non-throwing, so it
+emits the edge whenever it can derive the secret NAME (even if the table's other fields are
+malformed) and omits it only when the name itself is underivable. Validation is where every shape
+error surfaces, including unknown keys inside the table. Marking the field is what puts the secret
+in the site node's `secret_refs`, which is what gets it into the boundary resolve and therefore
+delivered to `ctx.secret`, and the marker's `default_template` is where the well-known default name
+lives.
 
 **3. Explicit credentials never fall back.** `_get_credential(ctx)` forks on config, not on runtime
 luck: with the table present it builds exactly that credential and a failure is fatal; without it,
@@ -606,9 +614,9 @@ YAML block scalar, remote shell). Two traps that have already occurred:
    with a persistent client memoizes the derived client, not the secret (the Proxmox `_api`
    pattern). `create` is intentionally not `@idempotent_op`; the idempotent ops must land in-state
    themselves.
-2. `validate` checks the `platform_config` shape, and `dependencies` returns a `ConfigReference` for
-   each secret the implementation reads. Declaring a secret in `dependencies` authorizes the op to
-   read it later.
+2. `config_model` declares the shape of the platform's own config block, with a `SecretRef` marker
+   on each field naming a secret the implementation reads. Marking a field authorizes the op to read
+   that secret later.
 3. The class is registered in `VM_PLATFORM_REGISTRY` (`__init__.py`).
 4. `unsupported_reason` identifies platforms that cannot run on some hosts (WSL2 off Windows), while
    the non-constructing `not_ready(config)` handles per-site tool checks (Lima with no `limactl`).
@@ -625,9 +633,9 @@ YAML block scalar, remote shell). Two traps that have already occurred:
 
 The existing tests under `cli/tests/vms/` are the templates to copy from:
 
-- `test_platform_config_contract.py`: table-driven `validate` shape and `dependencies` edge
-  extraction across all platforms, plus a registry-name/class parity check. A good template for a
-  new platform's registration test.
+- `test_platform_config_contract.py`: table-driven validation and edge extraction across all
+  platforms, through the core entry points, plus a registry-name/class parity check. A good template
+  for a new platform's registration test.
 - `test_platform_support.py`: `unsupported_reason` (host-wide) vs. `not_ready` (per-site config) vs.
   the graph's stored `readiness_of` verdict (the fold composes the first two into the last). Uses
   the `stub_platform_support` fixture to pin platforms ready regardless of host, so dispatch-shape

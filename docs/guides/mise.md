@@ -29,24 +29,23 @@ spec:
 ```
 
 Resource declarations in `config.toml` are not loaded at runtime. If you still have a classic
-`[admin.config]` declaration, migrate it with `agw resource migrate`; see
-[resources.md](resources.md).
+`[admin.config]` declaration, rewrite it as an admin-template manifest; see
+[upgrading-to-0.14.md](upgrading-to-0.14.md).
 
 Run `agw vm create <name>` or `agw vm reinit <name>` and the tools will be available.
 
 ## Config reference
 
-These settings are available on the admin template (for the admin user) and on agent templates (for
-agents). Mise itself is always installed as a system package on every VM.
+The `mise_*` settings are available on the admin template (for the admin user) and on agent
+templates (for agents). Mise itself is always installed as a system package on every VM.
 
-| Setting                | Default | Description                                                 |
-| ---------------------- | ------- | ----------------------------------------------------------- |
-| `mise_activate`        | `true`  | Add `mise activate` to the user's shell profile             |
-| `mise_packages`        | `[]`    | List of `name@version` tool declarations                    |
-| `mise_lockfile`        | (none)  | [Source reference](source-refs.md) to a `mise.lock` file    |
-| `mise_allow_unlocked`  | `false` | Install packages not covered by the lockfile (with warning) |
-| `mise_install_before`  | `"7d"`  | Reject versions published more recently than this           |
-| `mise_prune_on_reinit` | `true`  | Remove stale tool versions on reinit                        |
+```bash
+agw resource describe-kind admin-template   # every field, with types and defaults
+agw resource describe-kind agent-template
+```
+
+The sections below cover what those field descriptions cannot: how the pieces combine, and what each
+one is for.
 
 ### Agents
 
@@ -118,9 +117,9 @@ When a lockfile is present:
 - Agentworks runs `mise install --locked`.
 - If all packages are in the lockfile, everything is verified and installed.
 - If some packages are missing from the lockfile:
-  - **`mise_allow_unlocked = false`** (default): the install fails for those packages. You see which
+  - **`mise_allow_unlocked: false`** (default): the install fails for those packages. You see which
     ones are missing.
-  - **`mise_allow_unlocked = true`**: a warning is logged for the missing packages, and they are
+  - **`mise_allow_unlocked: true`**: a warning is logged for the missing packages, and they are
     installed without verification.
 
 When no lockfile is present, `mise install` runs without `--locked` (no verification).
@@ -161,6 +160,6 @@ affects fuzzy version requests (e.g., `latest`, `node@20`). Explicitly pinned ve
 ## Disabling mise activation
 
 Mise is always installed as a system package. To disable shell activation (so mise tools are not
-automatically available in shells), set `mise_activate = false` in your admin or agent config. The
+automatically available in shells), set `mise_activate: false` in your admin or agent template. The
 `mise` binary will still be available but tools will not be on PATH unless explicitly invoked via
 `mise exec`.

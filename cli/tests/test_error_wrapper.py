@@ -270,7 +270,7 @@ def test_main_wrapper_renders_click_usage_error_cleanly(
     from agentworks.cli import _entry
 
     # A raw click.Choice option nested under a subcommand group reproduces the
-    # real surface (e.g. `resource migrate --toml`): the invalid value raises a
+    # real surface (e.g. `completion show --shell`): the invalid value raises a
     # BadParameter that Typer does not render itself, so it propagates to main().
     sub_app = typer.Typer()
 

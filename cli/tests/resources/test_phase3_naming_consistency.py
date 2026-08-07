@@ -19,8 +19,6 @@ from __future__ import annotations
 import inspect
 from types import ModuleType
 
-import pytest
-
 import agentworks.resources as resources_pkg
 from agentworks import apt as apt_mod
 from agentworks import install_commands as install_commands_mod
@@ -31,6 +29,7 @@ from agentworks.resources import inspect as inspect_mod
 from agentworks.resources import reference as reference_mod
 from agentworks.resources import registry as registry_mod
 from agentworks.resources import walk as walk_mod
+from agentworks.schema import CapabilityBlock
 from agentworks.secrets import kinds as secrets_kinds_mod
 from agentworks.sessions import kinds as sessions_kinds_mod
 from agentworks.vms import kinds as vms_kinds_mod
@@ -43,34 +42,45 @@ def _public_names(module: ModuleType) -> list[str]:
     return [name for name in dir(module) if not name.startswith("_")]
 
 
-@pytest.mark.parametrize(
-    "module",
-    [
-        resources_pkg,
-        reference_mod,
-        registry_mod,
-        walk_mod,
-        inspect_mod,
-        agents_kinds_mod,
-        apt_mod,
-        install_commands_mod,
-        git_credentials_kinds_mod,
-        secrets_kinds_mod,
-        sessions_kinds_mod,
-        vms_kinds_mod,
-        workspaces_kinds_mod,
-    ],
+#: Every module whose PUBLIC surface the rename swept.
+_SWEPT_MODULES = (
+    resources_pkg,
+    reference_mod,
+    registry_mod,
+    walk_mod,
+    inspect_mod,
+    agents_kinds_mod,
+    apt_mod,
+    install_commands_mod,
+    git_credentials_kinds_mod,
+    secrets_kinds_mod,
+    sessions_kinds_mod,
+    vms_kinds_mod,
+    workspaces_kinds_mod,
 )
-def test_framework_module_has_no_old_vocabulary(module: ModuleType) -> None:
+
+
+def test_no_framework_module_has_old_vocabulary() -> None:
     """No public symbol on a framework module carries the old
     ``Requirement`` / ``UsageEntry`` vocabulary. Phase 3a's rename is
     a public-surface change; a future edit that re-introduces either
     word is a regression.
+
+    One test rather than one per module, and reporting every offender
+    rather than the first: this is a lint over a module list, so an author
+    who reintroduced the vocabulary in three places is owed all three
+    addresses at once. Only two of the thirteen own a Reference-family
+    symbol at all today; the other eleven are here so that a NEW one
+    landing under the old name is caught wherever it lands.
     """
-    offenders = [name for name in _public_names(module) if any(banned in name for banned in _BANNED_SUBSTRINGS)]
+    offenders = [
+        f"{module.__name__}.{name}"
+        for module in _SWEPT_MODULES
+        for name in _public_names(module)
+        if any(banned in name for banned in _BANNED_SUBSTRINGS)
+    ]
     assert offenders == [], (
-        f"{module.__name__} exposes legacy-named symbols: {offenders}. "
-        f"Rename to the Phase 3a vocabulary (Reference / ReferenceEntry)."
+        f"legacy-named public symbols: {offenders}. Rename to the Phase 3a vocabulary (Reference / ReferenceEntry)."
     )
 
 
@@ -101,13 +111,13 @@ def test_graph_node_producers_expose_dependencies_not_referenced_resources() -> 
     """
     from agentworks.vms.sites import VMSiteDecl
 
-    site = VMSiteDecl(name="s", platform="lima")
+    site = VMSiteDecl(name="s", platform=CapabilityBlock(name="lima"))
     assert hasattr(site, "dependencies")
     assert not hasattr(site, "referenced_resources")
     assert not hasattr(site, "required_resources")
 
     # EnvEntry keeps its arg-taking aggregation variant, not the graph-node one.
-    entry = EnvEntry(key="K", secret="s")
+    entry = EnvEntry(secret="s")
     assert hasattr(entry, "referenced_resources")
     assert not hasattr(entry, "dependencies")
     sig = inspect.signature(entry.referenced_resources)
@@ -123,6 +133,7 @@ def test_resource_kinds_carry_no_inbound_reference_field() -> None:
     """
     from agentworks.agents.template import AgentTemplate
     from agentworks.apt import AptPackageEntry, AptSourceEntry
+    from agentworks.declared_resource import DeclaredResource
     from agentworks.git_credentials.credential import GitCredentialConfig
     from agentworks.install_commands import (
         SystemInstallCommandEntry,
@@ -134,7 +145,7 @@ def test_resource_kinds_carry_no_inbound_reference_field() -> None:
     from agentworks.vms.template import VMTemplate
     from agentworks.workspaces.template import WorkspaceTemplate
 
-    resource_types = [
+    resource_types: list[type[DeclaredResource]] = [
         AptSourceEntry,
         AptPackageEntry,
         SystemInstallCommandEntry,
@@ -148,10 +159,8 @@ def test_resource_kinds_carry_no_inbound_reference_field() -> None:
         WorkspaceTemplate,
         SecretDecl,
     ]
-    import dataclasses
-
     for cls in resource_types:
-        fields = {f.name for f in dataclasses.fields(cls)}
+        fields = set(cls.model_fields)
         assert "references" not in fields, (
             f"{cls.__name__} still carries an inbound `references` field; "
             f"inbound references live on the dependency graph now"

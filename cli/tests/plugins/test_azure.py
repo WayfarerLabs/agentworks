@@ -65,7 +65,7 @@ _AZURE_SITE = ManifestDoc(
 
 # An azdo git-credential (the R14 propagate hook makes the credential not-ready
 # when azdo is disabled).
-_AZDO_CRED = ManifestDoc("git-credential", "azdo", {"provider": "azdo", "provider_config": {"org": "my-org"}})
+_AZDO_CRED = ManifestDoc("git-credential", "azdo", {"provider": {"name": "azdo", "org": "my-org"}})
 
 # A vm-template whose system_install_commands draws on the az-cli row (the
 # Phase 7 recipe gate refuses the template while azure is disabled).

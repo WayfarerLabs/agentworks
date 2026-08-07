@@ -24,7 +24,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Sequence
 
 
 class AgentworksError(Exception):
@@ -164,6 +164,20 @@ class ConfigError(AgentworksError):
     """
 
 
+class InheritanceCycleError(ConfigError):
+    """An ``inherits`` chain that loops back on itself.
+
+    A distinct type because the finalize build walk has to tell this one
+    failure apart from every other ``ConfigError`` a merge can raise: a
+    cyclic chain has no effective declaration, so the walk degrades to the
+    row's own declaration rather than raising (its ``dependencies`` is
+    total by contract), and the canonical cycle pass reports the loop a
+    moment later, before anything reads the graph. Catching plain
+    ``ConfigError`` there would swallow real errors as well, which is how
+    a graph ends up quietly missing an edge.
+    """
+
+
 class UserAbort(AgentworksError):
     """User signaled they want to stop: declined a confirmation, hit Ctrl-C at an
     interactive prompt, or closed stdin (EOF).
@@ -171,6 +185,17 @@ class UserAbort(AgentworksError):
     Not really an error -- a control flow signal. Caught separately so the
     renderer can use a neutral phrasing instead of "Error: ...".
     """
+
+
+def inheritance_cycle_error(kind: str, chain: Sequence[str]) -> InheritanceCycleError:
+    """The error for an ``inherits`` loop, given the chain that closed it.
+
+    Shared by the four template resolvers so the four safety-net guards
+    cannot drift in shape from each other or from the framework's own
+    cycle pass (``resources/registry.py``), which renders the same
+    ``a -> b -> a`` path.
+    """
+    return InheritanceCycleError(f"{kind} inheritance cycle detected: {' -> '.join(chain)}")
 
 
 def unknown_template_error(

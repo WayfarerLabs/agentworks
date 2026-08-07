@@ -13,13 +13,21 @@ THE FOUR BANNED PATTERNS (each a way to re-derive the graph outside the build):
    OUTSIDE the graph build (was: cycle detection at ``registry.py``, the
    ``collect_secrets_for`` DFS in ``walk.py``, the ``secret_refs`` recompute in
    the two node factories). The honest path: cycle detection three-colors over
-   the built edge map, and every other consumer reads ``edges_of`` /
-   ``reachable_from``.
+   the built edge map, and every other consumer reads ``edges_of`` or one of
+   the two closures.
 2. A ``*_REGISTRY.get(...)`` availability probe in edge production or readiness
    (was: ``VM_PLATFORM_REGISTRY`` in ``vms/kinds.py``'s ``disabled_reason``,
    ``SECRET_BACKEND_REGISTRY`` in ``secrets/resolve.py``'s resolver). The honest
    path: readiness comes off the graph node, and a consumer that needs a
    capability's code reads ``impl_of``.
+   The pattern has TWO spellings and the guard watches both. Naming a registry
+   is the original one. The second is
+   ``descriptor_for(kind).registry().get(name)``: the capability-kind descriptor
+   carries a lazy accessor returning the very same live dict, so reaching it
+   that way is the same probe with the registry's name filed off. Watching only
+   the names would mean the allow-list tightened (three modules came off it in
+   declarative-schema step 2.0, having stopped naming registries) while the
+   spelling they moved to went unwatched.
 3. A lazy readiness recompute instead of reading ``readiness_of`` (was:
    ``inspect.disabled_reason_for``, the ``site_disabled_reason`` callers,
    ``doctor``). The honest path: ``not_ready`` is called only by the fold; every
@@ -33,32 +41,55 @@ are the same call). "Non-exempt module" is the guard's unit: a banned pattern
 reintroduced in any module NOT on the relevant allow-list fails the build. The
 allow-listed modules are trusted; each is justified inline on its allow-list.
 
-- ``capabilities/base.py``: the construct-time ``_secret_refs`` derivation, a
-  capability computing its OWN config-implied refs from its OWN config via
-  ``dependencies(config)`` (not a graph re-walk).
+An exemption is not a permanent grant. ``test_every_exemption_is_load_bearing``
+fails an entry whose module has stopped performing the banned operation, because
+such an entry is a HOLE rather than a leftover: the guard goes on trusting a
+module that has nothing left to trust it for. Declarative-schema step 2.3 left
+eight of them behind in one change, which is why the check exists.
+
 - ``resources/graph.py`` + ``resources/registry.py``: the graph BUILDER. It
   walks each resource's ``dependencies(context)`` (handing it the build
-  context), reads the four capability code registries to stamp each capability
+  context), reaches the capability code registries to stamp each capability
   node's impl (``_impl_for`` / ``build_context``), and calls ``not_ready`` in
-  the fold. This is the sanctioned builder-reads-registry path.
-- ``vms/sites.py`` / ``git_credentials/credential.py`` / ``sessions/template.py``:
-  edge production. A resource's own ``dependencies(context)`` fetches its
-  capability CLASS from the code registry (a host-agnostic type lookup, not an
-  availability probe; there is no graph node to read during the build that
-  produces the graph) and asks it for the config-implied edges; the finalize
-  ``validate`` pass fetches the same class to validate the owned blob. This is
-  the builder's edge-production primitive, invoked during the build.
-- ``secrets/base.py``: the secret's finalize ``validate`` fetches each present
-  backend to validate its mapping (R9.9).
+  the fold. This is the sanctioned builder-reads-registry path. It reaches
+  them through the descriptors' accessors now, so it NAMES no registry and is
+  no longer exempt from pattern 2's first spelling: that exempt spelling moved
+  to the four ``kinds.py`` modules below. It is absent from the SECOND
+  spelling's allow-list too, and that absence is real rather than an oversight:
+  ``_impl_for`` calls a loader it took out of its own private
+  ``_capability_registry_loaders`` map, never ``<descriptor>.registry()``, so
+  reintroducing the descriptor spelling here would (correctly) have to be
+  argued for on the allow-list.
+- ``capabilities/publish.py`` / ``plugins/adapters.py`` /
+  ``plugins/registration.py``: pattern 2's second spelling only. These are the
+  three capability-registry WRITE-and-mirror paths: the generic built-in
+  publisher mirrors a kind's registry into resource rows, the generic adapter
+  seats plugin impls into it (the plugin analog of the publishers) and builds
+  their rows, and the snapshot/restore helper saves and restores all four
+  around a test-seated plugin. None of them probes availability; each is the
+  registry's own machinery, reaching it through the descriptor because that is
+  where the accessor lives.
+- the four capability ``kinds.py`` modules (``capabilities/vm_platform``,
+  ``capabilities/harness_integration``, ``capabilities/git_credential``,
+  ``secrets``): each kind's ``CapabilityKindDescriptor`` carries the lazy
+  accessor for its own code registry, and the secret-backend record carries the
+  readiness callable that asks the backend instance. Both are the graph
+  BUILDER's own exempt code relocated beside the kind it serves (the builder's
+  per-kind loaders and its readiness fold derive from the descriptor table), so
+  this is the same exemption at a new address, not a new bypass.
+- ``vms/sites.py`` / ``git_credentials/credential.py`` / ``sessions/template.py``
+  / ``secrets/base.py``: NOT exempt, since declarative-schema step 2.3. Edge
+  production (``dependencies(context)``) and the finalize ``validate_config``
+  pass no longer fetch a capability class at all; each asks the core
+  (``capability_config_references`` / ``validate_capability_config``), which
+  reaches the registry once, in ``capabilities/config.py``. A registry read
+  reappearing in any of the four would be the probe this pattern bans, which is
+  why the allow-list below records their absence as deliberate rather than
+  simply omitting them.
 - ``git_credentials/__init__.py`` / ``vms/initializer/credentials.py``: op-time
   CONSTRUCTION of a capability instance to run an operation, not a graph query.
-- ``migrate/planning.py``: the migrate dry-run, not a finalized-registry path
-  (it keeps its explicit validation, caller inventory A).
 - ``manifests/decode.py``: a decode-time shadow check (a code-registry
   membership test), before the graph exists.
-- ``config/loaders_secrets.py``: load-time validation of the deprecated
-  ``[secret_backends]`` TOML section, before the graph exists (a config-shape
-  check, not an edge/readiness probe).
 - ``resources/inspect.py`` / ``secrets/inspect.py``: the describe-VIEW
   projections carry a ``references`` field, populated FROM ``dependents_of`` (the
   honest reader), distinct from the retired resource-dataclass field.
@@ -70,9 +101,13 @@ actually watching, not trivially green.
 
 WHAT THE DETECTORS CATCH, AND THE ACCEPTED RESIDUALS:
 
-- Pattern 2 catches the bare (``VM_PLATFORM_REGISTRY``), qualified
-  (``vm_platform.VM_PLATFORM_REGISTRY``), and aliased-import
-  (``... import VM_PLATFORM_REGISTRY as R``) read idioms.
+- Pattern 2's first spelling catches the bare (``VM_PLATFORM_REGISTRY``),
+  qualified (``vm_platform.VM_PLATFORM_REGISTRY``), and aliased-import
+  (``... import VM_PLATFORM_REGISTRY as R``) read idioms. Its second spelling
+  catches a ``<expr>.registry(...)`` CALL, which is the only way the descriptor
+  accessor yields the live dict; referencing the field without calling it
+  (``{d.kind: d.registry for d in ...}``, the graph's loader map) hands on a
+  callable rather than reaching a registry, so it is deliberately not flagged.
 - Pattern 4's declaration check catches a ``references`` member declared as an
   annotated field, a plain class attribute, or a method/property; this is the
   real defense, because the read side can only catch the literal
@@ -83,10 +118,13 @@ WHAT THE DETECTORS CATCH, AND THE ACCEPTED RESIDUALS:
   softest such module is ``vms/sites.py`` (exempt for patterns 1, 2, and 3 at
   once); ``test_vms_sites_exempt_reads_are_function_scoped`` pins its sanctioned
   reads to the functions that own them to close that one gap.
-- Patterns 1 and 3 match direct attribute calls, not deep indirection
-  (``fn = decl.dependencies; fn(ctx)``). That is a deliberate two-line form no
+- Patterns 1, 2's second spelling, and 3 match direct attribute calls, not deep
+  indirection (``fn = decl.dependencies; fn(ctx)``,
+  ``get = d.registry; get().get(name)``). That is a deliberate two-line form no
   accidental regression takes and is not currently exploitable, so it is an
-  ACCEPTED RESIDUAL, not a hole to chase.
+  ACCEPTED RESIDUAL, not a hole to chase. The one place the codebase does hold a
+  registry accessor in a local and call it is ``_impl_for``, inside the graph
+  builder that owns the loader map.
 """
 
 from __future__ import annotations
@@ -95,6 +133,8 @@ import ast
 from collections.abc import Callable
 from pathlib import Path
 from typing import TypeGuard
+
+import pytest
 
 import agentworks
 
@@ -170,6 +210,29 @@ def find_registry_reads(source: str) -> list[int]:
     return sorted({node.lineno for node in ast.walk(tree) if _is_registry_read(node, aliases)})
 
 
+def find_descriptor_registry_calls(source: str) -> list[int]:
+    """Line numbers of ``<expr>.registry(...)`` attribute calls: banned pattern
+    2 reached through a capability-kind descriptor rather than by naming the
+    registry.
+
+    ``CapabilityKindDescriptor.registry`` is a lazy accessor returning the LIVE
+    dict, so ``descriptor_for("vm-platform").registry().get(name)`` is the same
+    availability probe ``find_registry_reads`` was written about, spelled so that
+    scan cannot see it.
+
+    Only CALLS match. The four kinds modules' ``def _registry()`` accessor
+    definitions are not calls; ``registry.add(...)`` is a call on a resource
+    Registry, not of a ``registry`` member; and the loader-map comprehension
+    (``{d.kind: d.registry for d in ...}``) passes the callable on without
+    reaching a registry.
+    """
+    return sorted(
+        node.lineno
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "registry"
+    )
+
+
 def _is_not_ready_call(node: ast.AST) -> TypeGuard[ast.Call]:
     """Whether ``node`` is a ``<expr>.not_ready(...)`` attribute call."""
     return isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "not_ready"
@@ -240,41 +303,99 @@ _DEPENDENCIES_ALLOWLIST = frozenset(
     {
         "resources/graph.py",  # graph builder
         "resources/registry.py",  # graph builder (walks dependencies(context))
-        "capabilities/base.py",  # construct-time _secret_refs (own config)
-        "vms/sites.py",  # edge production (capability.dependencies)
-        "git_credentials/credential.py",  # edge production
-        "sessions/template.py",  # edge production
+        # Deliberately ABSENT since declarative-schema step 2.3, and each
+        # absence is the point of that step rather than an oversight. The
+        # three consuming resources and the capability base all used to call
+        # a CAPABILITY's ``dependencies(owner, config)``; that classmethod is
+        # gone, and the core reads a capability's references off its declared
+        # model instead. An attribute call to ``dependencies`` reappearing in
+        # any of them would be the invoked contract coming back, which is
+        # exactly what this guard should refuse:
+        #   capabilities/base.py, vms/sites.py,
+        #   git_credentials/credential.py, sessions/template.py
     }
 )
 
 _REGISTRY_READ_ALLOWLIST = frozenset(
     {
-        # Publishers (own the registry).
+        # Owners (each declares its kind's registry).
         "capabilities/vm_platform/__init__.py",
         "capabilities/harness_integration/__init__.py",
         "capabilities/git_credential/__init__.py",
         "secrets/backends.py",
-        # Plugin framework: the per-kind adapters SEAT plugin impls into the
-        # four registries (the plugin analog of the built-in publishers), and
-        # register_plugin snapshots/restores them for the seat/unseat helper.
-        "plugins/adapters.py",
-        "plugins/registration.py",
-        # Graph builder (stamps impls, assembles the build context, folds).
-        "resources/graph.py",
-        # Edge production + finalize validate (fetch the capability class).
-        "vms/sites.py",
-        "git_credentials/credential.py",
-        "sessions/template.py",
-        "secrets/base.py",
+        # The whole plugin framework is deliberately ABSENT. Its adapters
+        # still seat plugin impls into the four registries (the plugin analog
+        # of the built-in publishers), but the one generic adapter reaches
+        # them through the descriptor's registry accessor
+        # (declarative-schema step 2.0), exactly as the graph builder does,
+        # so ``plugins/adapters.py`` and ``plugins/registration.py`` name no
+        # registry at all and exempting either would only excuse a future
+        # probe.
+        # The four capability-kind descriptors (declarative-schema step 2.0).
+        # Each carries the lazy accessor for its own registry, which IS the
+        # builder's per-kind loader relocated beside the kind it belongs to:
+        # the graph builder's loader map derives from these, so the sanctioned
+        # builder-reads-registry path moved here, it did not multiply. Same
+        # exemption, new address, and ``resources/graph.py`` gave its own up
+        # (it names no registry now).
+        "capabilities/vm_platform/kinds.py",
+        "capabilities/harness_integration/kinds.py",
+        "capabilities/git_credential/kinds.py",
+        "secrets/kinds.py",
         # Op-time construction of a capability instance.
+        "vms/sites.py",  # resolve_site: the one chokepoint every VM op passes
         "git_credentials/__init__.py",
         "vms/initializer/credentials.py",
-        # Migrate dry-run (not a finalized-registry path).
-        "migrate/planning.py",
-        # Decode-time shadow check (code-registry membership).
-        "manifests/decode.py",
-        # Load-time validation of the deprecated [secret_backends] section.
-        "config/loaders_secrets.py",
+        # Deliberately ABSENT since declarative-schema step 2.3: edge
+        # production and finalize validate no longer fetch a capability
+        # class at all. Each of the four asks the core instead
+        # (``capability_config_references`` / ``validate_capability_config``),
+        # which reaches the registry once, in ``capabilities/config.py``, on
+        # the descriptor allow-list below. A registry read reappearing in any
+        # of them would be the probe this pattern bans:
+        #   git_credentials/credential.py, sessions/template.py,
+        #   secrets/base.py
+        # Also deliberately ABSENT: ``config/loaders_secrets.py``, which used
+        # to read SECRET_BACKEND_REGISTRY to judge the name on a
+        # ``[secret_backends.<name>]`` section. That check is gone (the
+        # section is a retired resource section, refused generically), and
+        # with it the only reason a settings loader ever touched a capability
+        # registry. Settings loaders validate SHAPE; what a name resolves to
+        # is settled after finalize, against the graph.
+    }
+)
+
+_DESCRIPTOR_REGISTRY_ALLOWLIST = frozenset(
+    {
+        # The three capability-registry write-and-mirror paths, and only
+        # those. Each is the registry's own machinery reaching it through the
+        # descriptor, which is where the accessor now lives; none of them
+        # probes availability.
+        "capabilities/publish.py",  # generic built-in publisher (registry -> rows)
+        "plugins/adapters.py",  # generic adapter: peek / seat / build_row
+        "plugins/registration.py",  # snapshot + restore around a seated plugin
+        # Core-driven capability config (declarative-schema step 2.3). It
+        # fetches the seated implementation CLASS to read the config model it
+        # declares, which is the edge-production-and-validate read the four
+        # consuming resources used to do by naming their kind's registry.
+        # Same sanctioned read, relocated: all four gave up their own
+        # exemptions above when they moved onto this module, so the exempted
+        # surface for that read is one call site rather than four.
+        # Availability is never what it asks: an absent name yields no model,
+        # and the dangling capability edge is what reports it.
+        "capabilities/config.py",
+        # Deliberately ABSENT, and each absence is load-bearing rather than an
+        # oversight:
+        #   resources/graph.py     -- the builder reaches registries through
+        #                             loaders taken from its OWN private
+        #                             _capability_registry_loaders map, never
+        #                             through <descriptor>.registry(), so it
+        #                             needs no exemption from this spelling.
+        #   the four kinds.py      -- they DEFINE their kind's accessor
+        #                             (``def _registry()``); defining it is not
+        #                             calling it, and their reads inside it are
+        #                             already pinned function-scoped by
+        #                             test_descriptor_exempt_reads_are_function_scoped.
     }
 )
 
@@ -282,6 +403,13 @@ _NOT_READY_ALLOWLIST = frozenset(
     {
         "resources/graph.py",  # the readiness fold
         "vms/sites.py",  # VMSite.not_ready hook -> platform impl off the graph
+        # The secret-backend descriptor's readiness callable: the fold's own
+        # secret-backend branch, relocated onto the descriptor so the fold
+        # stops enumerating kinds (declarative-schema step 2.0). It is fold
+        # code living beside its kind, not a projection surface recomputing
+        # a verdict, and it is now the SOLE implementation: the fold calls it
+        # rather than duplicating it.
+        "secrets/kinds.py",
     }
 )
 
@@ -318,18 +446,26 @@ def test_pattern1_no_dependencies_rewalk_outside_the_builder() -> None:
     assert not offenders, (
         "Banned pattern 1 (re-walking dependencies() to reconstruct edges "
         "outside the graph build). Read edges off the retained graph "
-        "(edges_of / reachable_from) instead, or add the module to the "
+        "(edges_of / the graph closures) instead, or add the module to the "
         "documented edge-production/builder allow-list if it is genuinely one:\n" + "\n".join(offenders)
     )
 
 
 def test_pattern2_no_registry_probe_outside_builder_and_publishers() -> None:
-    offenders = _scan(find_registry_reads, _REGISTRY_READ_ALLOWLIST)
-    assert not offenders, (
+    named_offenders = _scan(find_registry_reads, _REGISTRY_READ_ALLOWLIST)
+    descriptor_offenders = _scan(find_descriptor_registry_calls, _DESCRIPTOR_REGISTRY_ALLOWLIST)
+    assert not named_offenders, (
         "Banned pattern 2 (a *_REGISTRY availability probe outside the "
         "publishers, the graph builder, and the sanctioned "
         "construction/validation paths). Read readiness off the graph node "
-        "(readiness_of) and a capability's code via impl_of:\n" + "\n".join(offenders)
+        "(readiness_of) and a capability's code via impl_of:\n" + "\n".join(named_offenders)
+    )
+    assert not descriptor_offenders, (
+        "Banned pattern 2, second spelling (reaching a live capability registry "
+        "via <descriptor>.registry() rather than by naming it). The descriptor's "
+        "accessor returns the same dict, so this is the same probe with the "
+        "registry's name filed off. Read readiness off the graph node "
+        "(readiness_of) and a capability's code via impl_of:\n" + "\n".join(descriptor_offenders)
     )
 
 
@@ -392,10 +528,27 @@ def _enclosing_functions(source: str, predicate: Callable[[ast.AST], bool]) -> l
     return hits
 
 
-def test_collect_secrets_for_reads_reachable_from() -> None:
+def test_collect_secrets_for_reads_the_runtime_closure() -> None:
+    """The secret walk reads the graph, and reads the RUNTIME-need closure
+    specifically (FR17): a closure that crossed inheritance edges would
+    attribute a parent's standalone secrets to a child that overrode them.
+    Both halves matter, so both are asserted."""
     source = _function_source("resources/walk.py", "collect_secrets_for")
-    assert "reachable_from" in source
+    assert "runtime_reachable_from" in source
+    assert "composed_from" not in source
     assert find_dependencies_calls(source) == []
+
+
+def test_the_recipe_gate_reads_both_closures() -> None:
+    """The other side of the same call. A recipe is what the row NEEDS plus
+    what it is MADE OF, and it is the union rather than one or the other:
+    dropping ``composed_from`` would stop refusing a disabled parent
+    template (the FR17 enablement policy), while widening back to a
+    crosses-everything closure would refuse an operator over an ancestor
+    leaf the child overrode away."""
+    source = _function_source("resources/access.py", "ensure_recipe_enabled")
+    assert "composed_from" in source
+    assert "runtime_reachable_from" in source
 
 
 def test_node_factories_read_edges_of() -> None:
@@ -430,16 +583,18 @@ def test_vms_sites_exempt_reads_are_function_scoped() -> None:
     ``vms/kinds.py`` zero-read pin) so a stray read in any new function trips.
 
     Registry reads belong to edge production (``dependencies``), the finalize
-    ``validate`` pass, and op-time construction (``resolve_site``). The only
-    ``not_ready`` call is ``VMSite.not_ready`` delegating to the graph-stamped
-    platform impl.
+    ``validate_config`` pass, op-time construction (``resolve_site``), and the
+    platform-shadow rule (``_no_shadowed_platform``), which asks whether a
+    site's NAME collides with a platform's and reads the registry at exactly
+    the moment decode used to. The only ``not_ready`` call is
+    ``VMSite.not_ready`` delegating to the graph-stamped platform impl.
     """
     source = _read("vms/sites.py")
     aliases = _registry_aliases(ast.parse(source))
     reg_offenders = [
         f"{func}:{lineno}"
         for func, lineno in _enclosing_functions(source, lambda node: _is_registry_read(node, aliases))
-        if func not in {"dependencies", "validate", "resolve_site"}
+        if func not in {"dependencies", "validate_config", "resolve_site", "_no_shadowed_platform"}
     ]
     not_ready_offenders = [
         f"{func}:{lineno}"
@@ -454,6 +609,120 @@ def test_vms_sites_exempt_reads_are_function_scoped() -> None:
     assert not not_ready_offenders, (
         "vms/sites.py calls not_ready outside VMSite.not_ready (read the stored "
         "verdict via readiness_of instead):\n" + "\n".join(not_ready_offenders)
+    )
+
+
+def test_descriptor_exempt_reads_are_function_scoped() -> None:
+    """The four capability ``kinds.py`` modules are exempt only for the
+    descriptor accessors they carry, not wholesale.
+
+    Their exemption rests on "this is the graph builder's own code relocated
+    beside the kind it serves". Whole-file scoping does not say that: it would
+    equally excuse a readiness recompute or an availability probe added to a
+    kind strategy later, in the module whose PREDECESSOR
+    (``_VMSiteKind.disabled_reason``, reaching into ``VM_PLATFORM_REGISTRY``)
+    is one of the two sites banned pattern 2 was written about. So pin each
+    read to the accessor that owns it, exactly as ``vms/sites.py`` is pinned.
+
+    ``secrets/kinds.py`` needs it most: it is the only other module exempt for
+    two patterns at once, and it is where a "just ask the backend" recompute
+    would most naturally be written.
+    """
+    registry_owners = {
+        "capabilities/vm_platform/kinds.py": {"_registry"},
+        "capabilities/harness_integration/kinds.py": {"_registry"},
+        "capabilities/git_credential/kinds.py": {"_registry"},
+        "secrets/kinds.py": {"_backend_registry"},
+    }
+    offenders: list[str] = []
+    for rel, owners in registry_owners.items():
+        source = _read(rel)
+        aliases = _registry_aliases(ast.parse(source))
+
+        def _reads_registry(node: ast.AST, aliases: frozenset[str] = aliases) -> bool:
+            return _is_registry_read(node, aliases)
+
+        offenders += [
+            f"{rel}:{func}:{lineno}"
+            for func, lineno in _enclosing_functions(source, _reads_registry)
+            if func not in owners
+        ]
+    assert not offenders, (
+        "a capability kinds module reads a capability registry outside the "
+        "descriptor's registry accessor (the exemption covers that accessor, "
+        "not the module):\n" + "\n".join(offenders)
+    )
+
+    backend_source = _read("secrets/kinds.py")
+    not_ready_offenders = [
+        f"secrets/kinds.py:{func}:{lineno}"
+        for func, lineno in _enclosing_functions(backend_source, _is_not_ready_call)
+        if func != "_backend_readiness"
+    ]
+    assert not not_ready_offenders, (
+        "secrets/kinds.py calls not_ready outside the descriptor's readiness "
+        "callable (read the stored verdict via readiness_of instead):\n" + "\n".join(not_ready_offenders)
+    )
+
+
+# -- Allow-list hygiene: an exemption that stops firing is a hole -------------
+
+
+#: Allow-list entries kept even though nothing in them currently fires the
+#: detector, with the reason each is worth keeping. Both are the graph
+#: BUILDER, which walks every resource's ``dependencies(context)`` through
+#: the module-level ``_dependencies`` helper (a bare-name call the detector
+#: deliberately ignores). Spelling that walk as an attribute call again would
+#: be an ordinary refactor of the sanctioned path, not a regression, so the
+#: exemption stays ahead of it.
+_DELIBERATELY_QUIET = {
+    ("_DEPENDENCIES_ALLOWLIST", "resources/graph.py"),
+    ("_DEPENDENCIES_ALLOWLIST", "resources/registry.py"),
+}
+
+
+@pytest.mark.parametrize(
+    ("name", "finder", "allowlist"),
+    [
+        pytest.param("_DEPENDENCIES_ALLOWLIST", find_dependencies_calls, _DEPENDENCIES_ALLOWLIST, id="dependencies"),
+        pytest.param("_REGISTRY_READ_ALLOWLIST", find_registry_reads, _REGISTRY_READ_ALLOWLIST, id="registry-read"),
+        pytest.param(
+            "_DESCRIPTOR_REGISTRY_ALLOWLIST",
+            find_descriptor_registry_calls,
+            _DESCRIPTOR_REGISTRY_ALLOWLIST,
+            id="descriptor-registry",
+        ),
+        pytest.param("_NOT_READY_ALLOWLIST", find_not_ready_calls, _NOT_READY_ALLOWLIST, id="not-ready"),
+        pytest.param(
+            "_REFERENCES_FIELD_ALLOWLIST", find_references_fields, _REFERENCES_FIELD_ALLOWLIST, id="references-field"
+        ),
+    ],
+)
+def test_every_exemption_is_load_bearing(name: str, finder: object, allowlist: frozenset[str]) -> None:
+    """An exemption whose module no longer performs the banned operation is a
+    HOLE, not a harmless leftover: the guard goes on trusting a module that
+    has nothing left to trust it for, so a regression reintroducing the
+    pattern there passes silently.
+
+    This is the rot that follows a migration, and it is invisible without a
+    check like this one: declarative-schema step 2.3 moved four modules off
+    the capability registries and four off the invoked ``dependencies``
+    contract, and every one of those eight exemptions survived the change
+    reading as if it were still justified.
+
+    Deliberate exceptions are declared, not tolerated (:data:`_DELIBERATELY_QUIET`).
+    """
+    dead = sorted(
+        entry
+        for entry in allowlist
+        if (name, entry) not in _DELIBERATELY_QUIET and not _scan(finder, frozenset(allowlist - {entry}))
+    )
+
+    assert not dead, (
+        f"{name} exempts {dead}, but removing each changes nothing: those modules no longer "
+        f"perform the banned operation, so the exemption only widens what a future regression "
+        f"can slip through. Delete the entry, or add it to _DELIBERATELY_QUIET with the reason "
+        f"it is worth keeping ahead of a refactor."
     )
 
 
@@ -476,6 +745,16 @@ def test_detectors_are_not_vacuous() -> None:
     assert find_registry_reads("from agentworks.x import SECRET_BACKEND_REGISTRY") == []
     assert find_registry_reads('__all__ = ["HARNESS_INTEGRATION_REGISTRY"]') == []
     assert find_registry_reads('"""mentions GIT_CREDENTIAL_PROVIDER_REGISTRY in prose."""') == []
+
+    # Pattern 2's second spelling: reaching the same live dict through the
+    # descriptor's accessor is caught, whether the descriptor is looked up
+    # inline or already in hand. Defining the accessor, handing it on
+    # uncalled, and calling a method ON a resource Registry are not.
+    assert find_descriptor_registry_calls("impl = descriptor_for(kind).registry().get(name)") == [1]
+    assert find_descriptor_registry_calls("seated = self.descriptor.registry()[name]") == [1]
+    assert find_descriptor_registry_calls("def _registry():\n    return VM_PLATFORM_REGISTRY") == []
+    assert find_descriptor_registry_calls("loaders = {d.kind: d.registry for d in table}") == []
+    assert find_descriptor_registry_calls("registry.add(kind, name, row, origin)") == []
 
     # Pattern 3: a not_ready recompute call is caught; a not_ready dict is not.
     assert find_not_ready_calls("verdict = platform.not_ready(config)") == [1]

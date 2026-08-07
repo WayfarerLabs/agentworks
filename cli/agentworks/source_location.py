@@ -52,7 +52,21 @@ class SourceLocation:
     line: int
 
 
-_SYNTHESIZED_PATH = Path("<synthesized>")
+SYNTHESIZED_PATH = Path("<synthesized>")
+"""The ``file`` of a :func:`synthesized` location: there is no file, so a
+consumer that would navigate an operator to one renders nothing."""
+
+
+def format_file_path(file: Path) -> str:
+    """Render a file path operator-friendly: ``~/path`` when under
+    ``$HOME``, else the bare absolute path. Relative paths render as-is.
+    """
+    if file.is_absolute():
+        try:
+            return f"~/{file.relative_to(Path.home())}"
+        except ValueError:
+            return str(file)
+    return str(file)
 
 
 def synthesized() -> SourceLocation:
@@ -61,7 +75,7 @@ def synthesized() -> SourceLocation:
     paths, etc. Distinct from the loader's omitted-singleton
     sentinel: see ``SourceLocation`` docstring for the discriminator rule.
     """
-    return SourceLocation(file=_SYNTHESIZED_PATH, line=0)
+    return SourceLocation(file=SYNTHESIZED_PATH, line=0)
 
 
 # Matches a single TOML section-header line: optional leading whitespace,

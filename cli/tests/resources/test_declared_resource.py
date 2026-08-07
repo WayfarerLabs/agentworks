@@ -1,37 +1,39 @@
 """``DeclaredResource``: the shared metadata base every declared-resource
-dataclass inherits.
+row inherits.
 
 Two guarantees are pinned here. First, the base itself carries the four
 metadata fields with the right defaults and an empty ``dependencies``,
-and a plain subclass inherits that override-free. Second, every concrete
-declared-resource dataclass (the operator-declared templates plus the
-apt / install-command entries) actually descends from the base, so the
-"metadata (including ``description``) exists by construction" promise cannot
-silently regress for any one kind.
+and a plain subclass inherits that override-free. Second, what each row
+does with the base's ``description``: ``SecretDecl`` overrides it back to
+required and the apt / install-command entries take the base's optional
+one, which is a dataclass-inheritance trap two of them have already
+fallen into.
+
+THAT every concrete row descends from the base is not pinned here. It is
+pinned off the kind registry, in ``tests/manifests/test_kind_models.py``,
+where the sweep cannot go stale as kinds are added.
+
+A third guarantee is pinned as a consequence of the rows being MODELS:
+the two framework fields are not operator surface, so neither the emitted
+schema nor the field-reference stream carries them.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 import pytest
+from pydantic import ValidationError as PydanticValidationError
 
-from agentworks.agents.template import AgentTemplate
 from agentworks.apt import AptPackageEntry, AptSourceEntry
 from agentworks.declared_resource import DeclaredResource
-from agentworks.git_credentials.credential import GitCredentialConfig
 from agentworks.install_commands import (
     SystemInstallCommandEntry,
     UserInstallCommandEntry,
 )
-from agentworks.resources.graph import BuildContext
+from agentworks.resources.graph import FinalizeContext
 from agentworks.secrets.base import SecretDecl
-from agentworks.sessions.template import NamedConsoleConfig, SessionTemplate
 from agentworks.source_location import synthesized
 from agentworks.vms.admin import AdminConfig
-from agentworks.vms.sites import VMSiteDecl
 from agentworks.vms.template import VMTemplate
-from agentworks.workspaces.template import WorkspaceTemplate
 
 
 def test_base_carries_metadata_fields_with_defaults() -> None:
@@ -40,43 +42,39 @@ def test_base_carries_metadata_fields_with_defaults() -> None:
     assert resource.description is None
     assert resource.declared_at == synthesized()
     assert resource.origin is None
-    assert resource.dependencies(BuildContext()) == []
+    assert resource.dependencies(FinalizeContext()) == []
 
 
 def test_plain_subclass_inherits_empty_dependencies() -> None:
-    @dataclass(frozen=True, kw_only=True)
     class _NoOverride(DeclaredResource):
-        pass
+        """A row that adds nothing to the base."""
 
-    assert _NoOverride(name="x").dependencies(BuildContext()) == []
-
-
-# Every concrete declared-resource dataclass (all carrying name + description +
-# declared_at + origin via the base). Pinning the subclass relationship is what
-# keeps a kind from silently dropping a metadata field again. The last four are
-# the apt / install-command entries.
-_FULL_SHAPE_RESOURCES = [
-    VMTemplate,
-    AgentTemplate,
-    WorkspaceTemplate,
-    AdminConfig,
-    NamedConsoleConfig,
-    SessionTemplate,
-    SecretDecl,
-    GitCredentialConfig,
-    VMSiteDecl,
-    AptSourceEntry,
-    AptPackageEntry,
-    SystemInstallCommandEntry,
-    UserInstallCommandEntry,
-]
+    assert _NoOverride(name="x").dependencies(FinalizeContext()) == []
 
 
-@pytest.mark.parametrize("cls", _FULL_SHAPE_RESOURCES)
-def test_concrete_resource_subclasses_declared_resource(
-    cls: type[DeclaredResource],
-) -> None:
-    assert issubclass(cls, DeclaredResource)
+def test_only_the_kinds_own_fields_are_spec_surface() -> None:
+    """The row IS the kind's spec model, so neither emitted schema nor the
+    field-reference stream may offer the envelope metadata or the
+    framework's provenance as something an operator writes under
+    ``spec``."""
+    from agentworks.schema import iter_field_docs
+
+    class _Spec(DeclaredResource):
+        """A row with one spec field beside the base's metadata."""
+
+        cpus: int | None = None
+
+    assert set(_Spec.model_json_schema()["properties"]) == {"cpus"}
+    assert [doc.path for doc in iter_field_docs(_Spec)] == [("cpus",)]
+
+
+# That every concrete row descends from the base is pinned off the KIND
+# REGISTRY rather than off a hand-kept list here, in
+# ``tests/manifests/test_kind_models.py::test_a_declarable_kind_declares_its_row_as_its_model``:
+# a list written out in a test file goes stale the moment a kind is added,
+# and the registry-driven sweep is the one that cannot. What is left below
+# is what the sweep does NOT say, which is what each row does with the
+# base's ``description``.
 
 
 def test_secret_decl_description_is_required() -> None:
@@ -87,7 +85,7 @@ def test_secret_decl_description_is_required() -> None:
     override uses ``field()`` to force MISSING. Without the guard, secrets
     could be declared with no description.
     """
-    with pytest.raises(TypeError):
+    with pytest.raises(PydanticValidationError):
         SecretDecl(name="x")  # type: ignore[call-arg]
     assert SecretDecl(name="x", description="d").description == "d"
 
@@ -101,18 +99,18 @@ def test_secret_decl_description_is_required() -> None:
         (UserInstallCommandEntry, {"command": "c"}),
     ],
 )
-def test_apt_and_install_entry_description_is_required(
+def test_apt_and_install_entry_description_is_optional(
     cls: type[DeclaredResource], kind_kwargs: dict[str, object]
 ) -> None:
-    """All four apt / install-command entries carry the same
-    required-``description`` override as ``SecretDecl`` (same ``field()``
-    trap): omitting description is a construction error, providing it
-    round-trips, and the entry gains the base's ``declared_at``.
-    Parametrized so a future edit that reverts any one entry to a bare
-    ``description: str`` (which would silently make it optional) is
-    caught."""
-    with pytest.raises(TypeError):
-        cls(name="x", **kind_kwargs)  # type: ignore[call-arg]
+    """The four apt / install-command entries inherit the base's OPTIONAL
+    ``description``, unlike ``SecretDecl``.
+
+    They used to require it on the class while their loaders defaulted it
+    to ``""``, so a manifest that omitted ``metadata.description`` got an
+    empty string and a direct construction got a ``TypeError``: two
+    spellings of "no description", neither of them the base's. One value
+    now, and it is the base's."""
+    assert cls(name="x", **kind_kwargs).description is None
     entry = cls(name="x", description="d", **kind_kwargs)
     assert entry.description == "d"
     assert entry.declared_at == synthesized()

@@ -32,7 +32,15 @@ def config_init() -> None:
     sample = files("agentworks").joinpath("sample-config.toml")
     shutil.copy2(str(sample), CONFIG_PATH)
     typer.echo(f"Sample config written to {CONFIG_PATH}")
-    typer.echo("Edit it to match your setup, then run 'agw vm create' to get started.")
+    # The SSH key pair is called out by name because it is the only thing
+    # in the sample that must be true of the HOST before any command
+    # works: the sample ships a plausible default path, and on a machine
+    # with no key there, the next command an operator runs fails on it.
+    # Naming the fix here costs a line and saves that round trip.
+    typer.echo("Edit it to match your setup. Start with [operator]: ssh_public_key and ssh_private_key")
+    typer.echo("must name a key pair that exists on this machine. Point them at a key you already use,")
+    typer.echo("or create one with 'ssh-keygen -t ed25519'.")
+    typer.echo("Then run 'agw vm create' to get started.")
 
 
 @config_app.command("edit")

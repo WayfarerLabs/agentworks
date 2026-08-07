@@ -16,7 +16,7 @@ distinct is the design (ADR 0016):
   (``onepassword`` ships as the ``onepassword`` system plugin, whose
   adapter seats its instance here; its ROW, unlike the core two, is
   published by ``plugins.publish_plugins`` with a ``system-plugin``
-  origin, so ``publish_to`` below skips it). Capability kinds have no
+  origin, so the built-in publisher skips it). Capability kinds have no
   declarable form; ``SecretBackend`` is an ordinary well-defined API
   abstracting where secrets actually come from, consumed by the
   resolution loop (``agentworks.secrets.resolve``).
@@ -43,15 +43,14 @@ so nothing here needs it until then.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from agentworks.secrets.env_var import EnvVarBackend
 from agentworks.secrets.prompt import PromptBackend
 
 if TYPE_CHECKING:
     from agentworks.resources.graph import Readiness
-    from agentworks.resources.reference import ConfigReference
-    from agentworks.resources.registry import Registry
+    from agentworks.schema import AgwRootModel
     from agentworks.secrets.base import MappingValue, SecretDecl
 
 
@@ -92,6 +91,29 @@ class SecretBackend(Protocol):
     a separate backend or config, not this one.
     """
 
+    contract_version: int
+    """The secret-backend contract version this implementation is written
+    against, compared at registration to the version the kind's descriptor
+    declares supported. REQUIRED as a class attribute, not defaulted:
+    Protocol bodies are not inherited by structural implementers, so unlike
+    the ``Capability`` ABC kinds (whose base carries the default) every
+    backend spells it."""
+
+    config_model: type[AgwRootModel[Any]]
+    """The model this backend's per-secret ``backend_mappings`` value is
+    validated against, declared as a class attribute exactly as
+    ``contract_version`` is.
+
+    A ROOT model, and that is the kind's contract rather than this
+    backend's choice: a mapping value may be a bare string (env-var's is
+    an env var name), which no ``BaseModel`` can be. The core validates
+    against it and derives whatever references it implies; no backend
+    code runs for either.
+
+    The generic ``False`` opt-out is NOT part of what a model expresses:
+    the resolve loop strips it before any backend sees a mapping, so an
+    arm for it would declare a value that cannot arrive."""
+
     @property
     def name(self) -> str: ...
 
@@ -118,52 +140,6 @@ class SecretBackend(Protocol):
         interactive-optimism's concern at resolution time, kept optimistic).
         REQUIRED, not defaulted (Protocol bodies are not inherited by
         structural implementers): every registered backend implements it.
-        """
-        ...
-
-    def validate_mapping(
-        self,
-        owner: str,
-        mapping: MappingValue,
-    ) -> None:
-        """Validate one ``backend_mappings`` value addressed to this
-        backend -- capability-owned config in its per-secret host.
-        Invoked by the secret's own ``validate`` (run by the finalize
-        ``validate`` pass) for every PRESENT backend it addresses, so a
-        malformed mapping fails at ``build_registry`` with config vocabulary
-        instead of at first resolution (R9.9: every declared mapping, not just
-        the opted-in ones). The generic ``False`` opt-out never reaches this.
-        ``owner`` is display context.
-
-        REQUIRED, not defaulted: Protocol bodies are not inherited by
-        structural implementers, so every registered backend must
-        implement this (a backend with no mapping vocabulary rejects
-        everything, as prompt does).
-
-        NOTE: this invoked-validation API may be deprecated in favor of
-        capabilities pushing a declarative config schema definition at
-        registration time, letting the core engine validate (and derive
-        any implied references) without invoking the capability.
-        """
-        ...
-
-    def dependencies(
-        self,
-        mapping: MappingValue,
-    ) -> tuple[ConfigReference, ...]:
-        """The resource references one ``backend_mappings`` value implies:
-        the reference-deriving counterpart to :meth:`validate_mapping`
-        (this is the ``secret-backend`` half of the capability contract's
-        ``dependencies`` / ``validate`` split).
-
-        Total and non-throwing, like every capability's ``dependencies``.
-        Today every backend's mapping is a bare external identifier (an
-        env var name, an ``op://`` reference, or nothing) that implies no
-        agentworks resource, so all three shipped backends return ``()``;
-        the method exists so a ``secret``'s own ``dependencies`` can
-        compose its backends' implied edges uniformly when a future
-        backend implies one. REQUIRED, not defaulted (Protocol bodies are
-        not inherited by structural implementers).
         """
         ...
 
@@ -195,33 +171,3 @@ SECRET_BACKEND_REGISTRY: dict[str, SecretBackend] = {
 seats its instance here at import through the ``secret-backend`` adapter;
 future plugins register the same way (and publish their own capability
 resources with ``system-plugin`` origins)."""
-
-
-def publish_to(registry: Registry) -> None:
-    """Publish one ``secret-backend`` capability resource per registered
-    backend, ``built-in`` origin (except backends seated by a system plugin,
-    which are published by ``plugins.publish_plugins`` with a ``system-plugin``
-    origin and skipped here). Read-only rows: the chain and per-secret mappings
-    validate against them uniformly, and the backends list/describe like every
-    other resource.
-    """
-    from agentworks.plugins.registration import plugin_seated_names
-    from agentworks.resources import Origin
-    from agentworks.secrets.kinds import SecretBackendEntry
-
-    # A backend seated by a system plugin (e.g. onepassword) keeps its impl in
-    # this registry so ``_impl_for`` can stamp it onto the graph node, but its
-    # row is published by ``plugins.publish_plugins`` with a ``system-plugin``
-    # origin. Skip those names here so the plugin is the sole publisher of the
-    # row; publishing it here too would collide (built-in vs system-plugin).
-    seated_by_plugin = plugin_seated_names("secret-backend")
-    origin = Origin.built_in(source="agentworks.secrets")
-    for name, backend in SECRET_BACKEND_REGISTRY.items():
-        if name in seated_by_plugin:
-            continue
-        registry.add(
-            "secret-backend",
-            name,
-            SecretBackendEntry(name=name, description=backend.description),
-            origin,
-        )

@@ -77,7 +77,7 @@ def compose_env(
             user_env[key] = entry.value
     # Identity overlays user_env: AGENTWORKS_* names always reflect the
     # platform-set value when sshd injects the SetEnv'd vars into the
-    # user's shell. A collision in user env has already produced
-    # a load-time warning in config._parse_env_table; here we silently
-    # discard it.
+    # user's shell. A collision in user env has already produced a
+    # load-time advisory on the manifest that declared it
+    # (manifests.decode.advisory_issues); here we silently discard it.
     return {**user_env, **identity}

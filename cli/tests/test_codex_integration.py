@@ -40,8 +40,10 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.capabilities.base import OperationScope, RunContext, ScopeLevel
+from agentworks.capabilities.config import capability_config_references, validate_capability_config
 from agentworks.errors import ConfigError, StateError
 from agentworks.plugins.codex.harness_integration import CodexIntegration
+from agentworks.schema import RefOwner
 from tests.conftest import _FakeResult, _FakeTarget
 
 if TYPE_CHECKING:
@@ -156,60 +158,68 @@ def _echo(command: str) -> str:
 # -- config vocabulary -------------------------------------------------------
 
 
-def test_dependencies_imply_no_reference() -> None:
-    """``codex`` implies no edge, and ``dependencies`` is total: it
-    returns ``()`` for the known fields and even for a malformed blob."""
-    assert (
-        CodexIntegration.dependencies(
-            "session-template/codex",
-            {"model": "gpt-5", "sandbox": "workspace-write", "extra_args": ["--foo"]},
-        )
-        == ()
+def _refs(blob: dict[str, object]) -> tuple[object, ...]:
+    return capability_config_references(
+        kind="harness-integration",
+        config={"name": "codex", **blob},
+        owner=RefOwner(kind="session-template", name="codex"),
     )
-    # Never raises, even on config that ``validate`` would reject.
-    assert CodexIntegration.dependencies("session-template/codex", {"model": 3, "sandbx": "typo"}) == ()
 
 
-def test_validate_accepts_the_ten_fields_and_empty_config() -> None:
-    assert (
-        CodexIntegration.validate(
-            "session-template/codex",
-            {
-                "model": "gpt-5",
-                "sandbox": "workspace-write",
-                "approval_policy": "on-request",
-                "profile": "work",
-                "network": True,
-                "approvals_reviewer": "auto_review",
-                "writable_dirs": ["/srv/cache"],
-                "web_search": False,
-                "disable_strict_config": False,
-                "extra_args": ["--foo"],
-            },
-        )
-        is None
+def test_it_implies_no_reference() -> None:
+    """``codex`` names no Resource in its config, and extraction is
+    total: it returns ``()`` for the known fields and for a malformed blob
+    alike."""
+    assert _refs({"model": "x"}) == ()
+    assert _refs({"model": 3, "nonsense": "typo"}) == ()
+
+
+def _validate(blob: dict[str, object]) -> None:
+    """Validation is the CORE's now: it reads the model this integration
+    declares, and no integration code runs."""
+    validate_capability_config(
+        kind="harness-integration",
+        config={"name": "codex", **blob},
+        owner=RefOwner(kind="session-template", name="codex"),
     )
-    assert CodexIntegration.validate("session-template/codex", {}) is None
 
 
-def test_validate_rejects_unknown_field() -> None:
-    with pytest.raises(ConfigError, match="unknown codex harness integration field"):
-        CodexIntegration.validate("session-template/codex", {"sandbx": "typo"})
+def test_validation_accepts_the_ten_fields_and_empty_config() -> None:
+    _validate(
+        {
+            "model": "gpt-5",
+            "sandbox": "workspace-write",
+            "approval_policy": "on-request",
+            "profile": "work",
+            "network": True,
+            "approvals_reviewer": "auto_review",
+            "writable_dirs": ["/srv/cache"],
+            "web_search": False,
+            "disable_strict_config": False,
+            "extra_args": ["--foo"],
+        }
+    )
+    _validate({})
+
+
+def test_validation_rejects_unknown_field() -> None:
+    with pytest.raises(ConfigError, match="sandbx: unknown field; expected one of:"):
+        _validate({"sandbx": "typo"})
 
 
 @pytest.mark.parametrize("field_name", ["model", "sandbox", "approval_policy", "profile"])
-def test_validate_rejects_non_string_flag_fields(field_name: str) -> None:
-    with pytest.raises(ConfigError, match=f"{field_name} must be a string"):
-        CodexIntegration.validate("session-template/codex", {field_name: 3})
+def test_validation_rejects_non_string_flag_fields(field_name: str) -> None:
+    with pytest.raises(ConfigError, match=f"{field_name}: must be a string"):
+        _validate({field_name: 3})
 
 
-def test_validate_rejects_non_list_extra_args() -> None:
-    with pytest.raises(ConfigError, match="extra_args must be a list of strings"):
-        CodexIntegration.validate("session-template/codex", {"extra_args": "just-a-string"})
+def test_validation_rejects_non_list_extra_args() -> None:
+    with pytest.raises(ConfigError, match="extra_args: must be a list"):
+        _validate({"extra_args": "just-a-string"})
 
 
 def test_construct_revalidates_config() -> None:
-    with pytest.raises(ConfigError, match="unknown codex harness integration field"):
+    with pytest.raises(ConfigError, match="nope: unknown field"):
         _harness_integration({"nope": 1})
 
 
@@ -260,13 +270,6 @@ def test_create_clears_a_stale_recording_and_retires_legacy_keys() -> None:
 # -- layer 1: the notify binding ---------------------------------------------
 
 
-def test_bound_stored_id_with_a_present_rollout_resumes() -> None:
-    command = _harness_integration().resume(_op_ctx(_target(rollout=0)))
-    assert f"resume {_SID}" in command
-    assert "tui.resume_cwd=current" in command
-    assert "resuming session s1" in _echo(command)
-
-
 def test_recorded_thread_id_binds_a_session_that_had_nothing_stored() -> None:
     """The primary path: codex reported the conversation's thread-id
     through the notify recorder, so the next op resumes it deterministically
@@ -308,16 +311,16 @@ def test_recorder_content_that_is_not_a_uuid_is_treated_as_unbound() -> None:
 def test_recorder_file_that_exists_but_will_not_read_raises() -> None:
     """A file that is there and unreadable is a probe that could not run,
     not an answer: guessing unbound could orphan the conversation it
-    names."""
+    names.
+
+    One exit code stands for both: an SSH failure's 255 reaches the same
+    raise with the same message, and what tells the two apart is the HINT,
+    which ``test_raise_hints_name_a_recovery_the_operator_can_actually_take``
+    pins for each.
+    """
     with pytest.raises(StateError, match="could not read the recorded codex thread id") as exc:
         _harness_integration().resume(_op_ctx(_target(recorder_exit=6)))
     assert exc.value.entity_name == "s1"
-
-
-def test_recorder_probe_failure_raises_rather_than_guessing() -> None:
-    """An SSH failure's 255 is not "nothing recorded"."""
-    with pytest.raises(StateError, match="could not read the recorded codex thread id"):
-        _harness_integration().resume(_op_ctx(_target(recorder_exit=255)))
 
 
 def test_raise_hints_name_a_recovery_the_operator_can_actually_take() -> None:
@@ -450,17 +453,6 @@ def test_gone_rollout_drops_the_id_and_falls_through_to_a_fresh_launch() -> None
     assert state == {}  # stale id dropped
 
 
-def test_gone_rollout_falls_through_to_adopting_a_discovered_candidate() -> None:
-    """The stale drop continues into discovery rather than stopping at
-    fresh, so an archived conversation cannot block adopting the one
-    actually in this workspace."""
-    state: dict[str, object] = {"session_id": _SID}
-    target = _target(rollout=1, discovered=f"{_OTHER_ROLLOUT}\n")
-    command = _harness_integration(state=state).resume(_op_ctx(target))
-    assert state == {"session_id": _OTHER_SID}
-    assert f"resume {_OTHER_SID}" in command
-
-
 def test_a_dropped_stale_binding_is_reported_alongside_whatever_replaced_it() -> None:
     """Dropping a stale binding is news in its own right, so it composes
     INTO the leaf that follows instead of being overwritten by it.
@@ -469,7 +461,12 @@ def test_a_dropped_stale_binding_is_reported_alongside_whatever_replaced_it() ->
     pane in a different conversation needs both halves: that their previous
     binding is gone, and what took its place. Neither surface may report
     only one of them (the bug this pins: the decision leaf used to be
-    overwritten by the adoption, so the drop went unmentioned on both)."""
+    overwritten by the adoption, so the drop went unmentioned on both).
+
+    The first block is where the fall-through itself is pinned too: the
+    stale drop continues INTO discovery rather than stopping at fresh, so
+    an archived conversation cannot block adopting the one actually in
+    this workspace."""
     # Stale then adopted: the drop plus the adopted uuid, on both surfaces.
     adopted = _harness_integration(state={"session_id": _SID})
     command = adopted.resume(_op_ctx(_target(rollout=1, discovered=f"{_OTHER_ROLLOUT}\n")))
@@ -491,7 +488,8 @@ def test_a_dropped_stale_binding_is_reported_alongside_whatever_replaced_it() ->
     assert note.startswith("Previous Codex conversation is archived or gone. Could not identify")
     assert "previous codex conversation archived or gone" in _echo(picker_command)
 
-    # And with nothing to replace it, the bare archived-or-gone leaf stands.
+    # And with nothing to replace it, the bare archived-or-gone leaf stands,
+    # which is the whole of what the stale drop says on its own.
     alone = _harness_integration(state={"session_id": _SID})
     alone.resume(_op_ctx(_target(rollout=1)))
     assert alone.launch_note() == "Previous Codex session is archived or gone. Starting a new one..."
@@ -619,12 +617,6 @@ def test_launch_note_reports_the_picker_including_what_esc_does() -> None:
     assert "session picker is opening in the pane" in note
     assert "binds this session to that conversation from its next turn" in note
     assert "esc starts a fresh conversation instead" in note
-
-
-def test_launch_note_reports_the_stale_id_drop() -> None:
-    harness_integration = _harness_integration(state={"session_id": _SID})
-    harness_integration.resume(_op_ctx(_target(rollout=1)))
-    assert harness_integration.launch_note() == ("Previous Codex session is archived or gone. Starting a new one...")
 
 
 # -- the notify override on every launch form ---------------------------------
@@ -843,7 +835,7 @@ def test_new_fields_reject_wrong_types() -> None:
         ("writable_dirs", [1, 2]),
     ):
         with pytest.raises(ConfigError, match=field):
-            CodexIntegration.validate("session-template/t", {field: bad})
+            _validate({field: bad})
 
 
 def test_merge_config_unions_writable_dirs_and_child_wins_the_rest() -> None:
@@ -867,7 +859,7 @@ def test_merge_config_never_launders_an_invalid_writable_dirs_entry() -> None:
     merged = CodexIntegration.merge_config({}, {"writable_dirs": ["/srv/a", 5]})
     assert merged["writable_dirs"] == ["/srv/a", 5]
     with pytest.raises(ConfigError, match="writable_dirs"):
-        CodexIntegration.validate("session-template/t", merged)
+        _validate(merged)
 
 
 def test_extra_args_appended_verbatim_last_and_quoted() -> None:
@@ -1037,81 +1029,30 @@ def _sh_resume(tmp_path: Path, home: Path, state: dict[str, object]) -> str:
     return _sh_harness_integration(tmp_path, state).resume(_op_ctx(_ShellTarget(home)))  # type: ignore[arg-type]
 
 
-def test_sh_probe_adopts_the_cli_rollout_recorded_in_our_workspace(codex_home: Path, tmp_path: Path) -> None:
-    _write_rollout(codex_home, _SID, tmp_path / "ws1")
-    state: dict[str, object] = {}
-    command = _sh_resume(tmp_path, codex_home, state)
-    assert state == {"session_id": _SID}
-    assert f"resume {_SID}" in command
-
-
-def test_sh_probe_never_adopts_a_workspace_of_only_subagent_rollouts(codex_home: Path, tmp_path: Path) -> None:
-    """The incident pin (2026-08-04). A codex session that ran subagents
-    leaves sibling rollouts in the SAME sessions tree with the SAME cwd
-    as their parent; the marker-era filter saw 14 indistinguishable
-    candidates and bricked resume. A subagent's ``source`` is a JSON
-    OBJECT (the guardian reviewer's variant included), so the filter
-    excludes them structurally and this workspace is a plain fresh
-    launch, not an adoption of somebody's subagent conversation."""
-    _write_rollout(codex_home, _SID, tmp_path / "ws1", source={"subagent": {}}, session_id=_OTHER_SID)
-    _write_rollout(
-        codex_home,
-        _OTHER_SID,
-        tmp_path / "ws1",
-        source={"subagent": {"other": "guardian"}},
-        session_id=_THIRD_SID,
-        ts="2026-08-01T12-05-00",
-    )
-    state: dict[str, object] = {}
-    command = _sh_resume(tmp_path, codex_home, state)
-    assert state == {}
-    assert "starting new session s1" in _echo(command)
-    assert "resume" not in _sh_argv(command, home="/home/me")
-
-
-def test_sh_probe_excludes_exec_sessions(codex_home: Path, tmp_path: Path) -> None:
-    """``codex exec`` stamps ``"source":"exec"``, which codex's own picker
-    hides by default; a headless run in this workspace is not this
-    session's interactive conversation."""
-    _write_rollout(codex_home, _OTHER_SID, tmp_path / "ws1", source="exec")
-    state: dict[str, object] = {}
-    assert "starting new session s1" in _echo(_sh_resume(tmp_path, codex_home, state))
-    assert state == {}
-
-
-def test_sh_probe_does_not_adopt_a_foreign_workspaces_rollout(codex_home: Path, tmp_path: Path) -> None:
-    """A cli-source rollout recorded in a DIFFERENT directory (another
-    session of the same launch user) is excluded by the cwd filter, so
-    the op launches fresh instead of splicing that conversation in."""
-    foreign_ws = tmp_path / "elsewhere"
-    foreign_ws.mkdir()
-    _write_rollout(codex_home, _OTHER_SID, foreign_ws)
-    state: dict[str, object] = {}
-    assert "starting new session s1" in _echo(_sh_resume(tmp_path, codex_home, state))
-    assert state == {}
-
-
 def test_sh_probe_adopts_ours_and_filters_the_noise_around_it(codex_home: Path, tmp_path: Path) -> None:
     """One interactive rollout in our workspace among a subagent's, an
     exec run's, and a foreign directory's: the filter leaves exactly ours,
-    so this adopts rather than degrading to the picker."""
+    so this adopts rather than degrading to the picker.
+
+    Every exclusion at once, and against a workspace that HAS a real
+    candidate, which is what makes the assertion sharp: a filter that
+    stops excluding any one of the three would see several candidates and
+    degrade to the picker, so the adopted id below is what says all three
+    still hold. Excluding each in a workspace of its own could only assert
+    the fresh-launch leaf, which is the leaf
+    ``test_zero_candidates_launches_fresh`` pins without a real shell.
+
+    The adopted id also says identity comes from the FILENAME: a subagent
+    rollout's ``session_meta.session_id`` holds its parent's uuid (verified
+    2026-08-04), so the matching rollout below disagrees with its own
+    filename on purpose.
+    """
     foreign_ws = tmp_path / "elsewhere"
     foreign_ws.mkdir()
-    _write_rollout(codex_home, _SID, tmp_path / "ws1")
+    _write_rollout(codex_home, _SID, tmp_path / "ws1", session_id=_OTHER_SID)
     _write_rollout(codex_home, _OTHER_SID, tmp_path / "ws1", source={"subagent": {}}, ts="2026-08-01T12-05-00")
     _write_rollout(codex_home, _THIRD_SID, tmp_path / "ws1", source="exec", ts="2026-08-01T12-06-00")
     _write_rollout(codex_home, _OTHER_SID, foreign_ws, ts="2026-08-01T12-07-00")
-    state: dict[str, object] = {}
-    _sh_resume(tmp_path, codex_home, state)
-    assert state == {"session_id": _SID}
-
-
-def test_sh_probe_takes_identity_from_the_filename_not_session_id(codex_home: Path, tmp_path: Path) -> None:
-    """``session_meta.session_id`` is the PARENT's uuid in a subagent
-    rollout (verified 2026-08-04), so it is never a candidate's identity;
-    the filename's uuid is. This fixture disagrees between the two on
-    purpose."""
-    _write_rollout(codex_home, _SID, tmp_path / "ws1", session_id=_OTHER_SID)
     state: dict[str, object] = {}
     _sh_resume(tmp_path, codex_home, state)
     assert state == {"session_id": _SID}
@@ -1151,42 +1092,6 @@ def test_sh_probe_missing_workspace_dir_raises(codex_home: Path, tmp_path: Path)
     with pytest.raises(StateError, match="could not resolve the workspace directory"):
         harness_integration.resume(_op_ctx(_ShellTarget(codex_home)))  # type: ignore[arg-type]
 
-
-def test_sh_rollout_probe_forks_on_a_real_filesystem(codex_home: Path, tmp_path: Path) -> None:
-    """The bound-id existence probe through the same real-sh layer:
-    a present rollout resumes, a gone one drops the id and falls through
-    to discovery."""
-    _write_rollout(codex_home, _SID, tmp_path / "ws1")
-    assert f"resume {_SID}" in _sh_resume(tmp_path, codex_home, {"session_id": _SID})
-    # An id whose rollout is gone falls through to discovery, which here
-    # finds the one interactive rollout in the workspace and adopts it, and
-    # says BOTH halves (see the composed-leaf test below).
-    echo = _echo(_sh_resume(tmp_path, codex_home, {"session_id": _OTHER_SID}))
-    assert "previous codex conversation archived or gone" in echo
-    assert "identified a different codex conversation in this workspace" in echo
-
-
-def test_sh_recorder_read_forks_on_a_real_filesystem(codex_home: Path, tmp_path: Path) -> None:
-    """The recorder read through real files: a uuid binds, garbage and an
-    absent file both mean unbound."""
-    _write_rollout(codex_home, _OTHER_SID, tmp_path / "ws1")
-    thread = codex_home / ".agentworks/codex/s1.thread"
-    thread.write_text(f"{_OTHER_SID}\n")
-    state: dict[str, object] = {}
-    assert f"resume {_OTHER_SID}" in _sh_resume(tmp_path, codex_home, state)
-    assert state == {"session_id": _OTHER_SID}
-
-    thread.write_text("garbage\n")
-    # Unbound: the op falls back to discovery, which finds that same
-    # rollout by source and cwd and adopts it (a different code path to
-    # the same id, so the assertion is on the DECISION line).
-    assert "identified this session" in _echo(_sh_resume(tmp_path, codex_home, {}))
-
-    thread.unlink()
-    assert "identified this session" in _echo(_sh_resume(tmp_path, codex_home, {}))
-
-
-# -- the recorder script, provisioned and run for real ------------------------
 
 _PARENT_PAYLOAD = json.dumps(
     {

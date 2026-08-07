@@ -1,11 +1,13 @@
-# A DIRTY bundle: the unexpected spec key `bogus` on a warn-mode kind
-# (secret) makes `load_manifests` collect a spec-level issue rather than
-# raise, so it exercises `publish_manifest_package`'s issues-to-ConfigError
-# path (the assert-to-raise migration), not the loader's own hard errors.
+# A DIRTY bundle: an AGENTWORKS_* env key is a load-time ADVISORY (the
+# runtime prelude overrides it), so `load_manifests` collects a spec-level
+# issue rather than raising. That is what exercises
+# `publish_manifest_package`'s issues-to-ConfigError path (the
+# assert-to-raise migration), not the loader's own hard errors.
 apiVersion: agentworks/v1
-kind: secret
+kind: vm-template
 metadata:
-  name: fixture-dirty-secret
-  description: triggers a warn-level issue via an unexpected spec key
+  name: fixture-dirty-template
+  description: triggers a warn-level issue via an overridden identity variable
 spec:
-  bogus: 1
+  env:
+    AGENTWORKS_VM: override

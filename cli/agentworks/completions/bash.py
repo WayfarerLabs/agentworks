@@ -26,9 +26,6 @@ DYNAMIC_SNIPPETS: dict[str, str] = {
     "secrets": ("$(agw secret list --names-only 2>/dev/null)"),
     "resource_kinds": ("$(agw resource kinds --names-only 2>/dev/null)"),
     "resource_refs": ("$(agw resource list --names-only 2>/dev/null)"),
-    "migrate_selectors": (
-        "$(agw resource list --origin operator --names-only 2>/dev/null | awk -F/ '{print $1; print $0}' | sort -u)"
-    ),
 }
 
 

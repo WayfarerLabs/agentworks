@@ -9,7 +9,9 @@ import shlex
 import tempfile
 import textwrap
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
+
+from pydantic import Field
 
 from agentworks import output
 from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
@@ -20,9 +22,11 @@ from agentworks.capabilities.vm_platform.bootstrap_script import (
 )
 from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
 from agentworks.db import VMStatus
-from agentworks.errors import ConfigError, StateError
+from agentworks.errors import StateError
+from agentworks.schema import AgwModel, NonEmptyStr
 from agentworks.ssh import SSHError, SSHTarget, copy_to
 from agentworks.ssh import run as ssh_run
+from agentworks.topics import TopicProse
 from agentworks.transports import LimaTransport, RemoteLimaTransport, SSHTransport
 
 if TYPE_CHECKING:
@@ -32,7 +36,6 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import VMRow
     from agentworks.resources.graph import Readiness
-    from agentworks.resources.reference import ConfigReference
     from agentworks.ssh import SSHLogger
     from agentworks.transports import Transport
 
@@ -90,11 +93,37 @@ provision:
 """
 
 
+class LimaConfig(AgwModel):
+    """Where a Lima site's ``limactl`` runs."""
+
+    name: Literal["lima"]
+    """The platform this config is for."""
+
+    vm_host: NonEmptyStr | None = Field(default=None, examples=["me@gpu-box"])
+    """The SSH host running ``limactl`` for a REMOTE-Lima site (e.g.
+    ``user@host``). Omit for a local site, which needs ``limactl``
+    installed here."""
+
+
 class LimaPlatform(VMPlatform):
     """Runs VMs via limactl, locally or on a remote host over SSH."""
 
+    contract_version: ClassVar[int] = 1
     name: ClassVar[str] = "lima"
     description: ClassVar[str] = "Lima VMs (local, or on a remote host via SSH)"
+    config_model: ClassVar[type[LimaConfig]] = LimaConfig
+    prose: ClassVar[TopicProse | None] = TopicProse(
+        title="Lima",
+        overview="""
+        Lima runs Linux VMs through `limactl`. A site with no `vm_host` runs them on
+        this machine, which is the zero-config starting point and what the built-in
+        `lima-local` site is; a site WITH one runs `limactl` on that host over SSH, so
+        the VMs live on a shared box and nothing but SSH is needed here.
+
+        Local sites need `limactl` installed here and report not-ready without it.
+        Remote sites need nothing locally.
+        """,
+    )
     # No unsupported_reason override: the platform is supported on
     # every host, because remote-Lima sites run limactl on the vm_host
     # over SSH and need nothing locally.
@@ -109,7 +138,21 @@ class LimaPlatform(VMPlatform):
 
         Non-constructing (LLD c): reads ``config`` fields directly, never
         builds an instance, so the readiness fold stays total over
-        unvalidated ``platform_config``."""
+        unvalidated ``platform_config``.
+
+        Reading unvalidated config means this verdict is only trustworthy
+        because something else refuses the configs it would misread. A
+        missing ``vm_host`` and a MISSPELLED one are indistinguishable
+        here: both make a remote site look local, and this would then
+        report ``limactl not installed``, naming a problem the operator
+        does not have while their host setting silently does not apply.
+        What rules that out is that the finalize validate pass runs on
+        every present resource, whatever its readiness, so ``vm_hst``
+        never survives to be folded into a verdict an operator reads. That
+        pass used to be readiness-gated and this method was the exact
+        place the resulting circle closed. Keep the two facts together: if
+        validation is ever made conditional again, every presence-keyed
+        read below becomes a silent wrong answer."""
         from agentworks.resources.graph import Readiness
 
         if config.get("vm_host"):
@@ -120,22 +163,10 @@ class LimaPlatform(VMPlatform):
             return Readiness.blocked("limactl not installed")
         return Readiness.ready()
 
-    @classmethod
-    def dependencies(cls, owner: str, config: Mapping[str, object]) -> tuple[ConfigReference, ...]:
-        """``lima`` implies no resource reference, so its edge set is empty
-        (total, non-throwing per the ``dependencies`` contract)."""
-        return ()
-
-    @classmethod
-    def validate(cls, owner: str, config: Mapping[str, object]) -> None:
-        vm_host = config.get("vm_host")
-        if vm_host is not None and (not isinstance(vm_host, str) or not vm_host):
-            raise ConfigError(
-                f"{owner}.vm_host must be a non-empty SSH host string (e.g. 'user@host'), got {vm_host!r}"
-            )
-        unknown = sorted(set(config) - {"vm_host"})
-        if unknown:
-            raise ConfigError(f"{owner}: unknown lima platform field(s): {', '.join(unknown)}")
+    @property
+    def config(self) -> LimaConfig:
+        """This site's validated lima config."""
+        return self._config_as(LimaConfig)
 
     @classmethod
     def legacy_platform_metadata(cls, row: Mapping[str, Any], legacy: Mapping[str, Any]) -> dict[str, str]:
@@ -145,8 +176,7 @@ class LimaPlatform(VMPlatform):
 
     @property
     def _vm_host_ssh(self) -> str | None:
-        vm_host = self.platform_config.get("vm_host")
-        return str(vm_host) if vm_host else None
+        return self.config.vm_host
 
     @property
     def is_remote(self) -> bool:
@@ -209,7 +239,10 @@ class LimaPlatform(VMPlatform):
             # than a state mismatch on a managed entity.
             raise ConnectivityError(
                 "'limactl' not found. Lima is not installed on this machine.",
-                hint=("For remote Lima VMs, declare a vm-site with platform_config.vm_host and pass it via --site."),
+                hint=(
+                    "For remote Lima VMs, declare a vm-site whose "
+                    "`platform: {name: lima, vm_host: ...}` names the host, and pass it via --site."
+                ),
             )
 
     def create(self, request: ProvisionRequest, ctx: RunContext) -> ProvisionResult:
@@ -219,10 +252,10 @@ class LimaPlatform(VMPlatform):
             # error clear for direct callers.
             self._ensure_limactl()
 
-        cpus = request.cpus if request.cpus is not None else 4
-        memory = request.memory_gib if request.memory_gib is not None else 8
-        disk = request.disk_gib if request.disk_gib is not None else 50
-        swap = request.swap_gib if request.swap_gib is not None else 0
+        cpus = request.cpus
+        memory = request.memory_gib
+        disk = request.disk_gib
+        swap = request.swap_gib
 
         # The platform owns the backend-side name; the slug is
         # the namespacing token. Pre-flight collision check (lima

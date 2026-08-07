@@ -1,11 +1,23 @@
-"""Secrets-related settings loaders: the deprecated ``[secret_backends.*]``
-no-op sections, ``[secret_config]``, and ``[plugins]``.
+"""Secrets-related settings loaders: ``[secret_config]`` and ``[plugins]``.
 
-The ``[secrets.*]`` resource loader (``_load_secrets``) and the aggregated
-deprecated-TOML-resource-section warning relocated when config.toml stopped
-declaring resources (ADR 0022): ``_load_secrets`` moved to
-``agentworks.migrate.toml_resources``, and the warning became a raising
-check (``_raise_for_resource_sections``) in ``agentworks.config.load``.
+Both are genuine settings. ``[secret_config]`` decides WHICH backends are
+active and in what order; ``[plugins]`` is the system-plugin opt-in.
+
+Two neighbours are deliberately absent. The ``[secrets.*]`` resource loader
+(``_load_secrets``) is gone: config.toml stopped declaring resources
+(ADR 0022), and secrets are decoded from YAML manifests by
+``agentworks.manifests.decode``. ``[secret_backends.*]`` is gone the same
+way and for the same reason: it names a resource (a ``secret-backend`` row)
+rather than configuring anything, so it is swept by
+``_raise_for_resource_sections`` in ``agentworks.config.load`` alongside
+every other retired resource section, instead of being half-warned and
+half-refused here against the built-in backend registry.
+
+``[secret_config].backends`` NAMES those same backends and stays, because
+choosing and ordering them is configuration. Only its SHAPE is checked here:
+the registry does not exist at settings-load time, so whether the names
+resolve is settled after finalize, by
+``agentworks.config.references.validate_setting_references``.
 
 Split out of the former monolithic ``agentworks/config.py`` (see
 ``agentworks/config/__init__.py`` for the package overview).
@@ -21,49 +33,6 @@ from agentworks.secrets import SecretConfig
 
 if TYPE_CHECKING:
     from agentworks.config.models import _SectionLineMap
-
-
-def _load_secret_backends(
-    data: dict[str, object],
-    deprecations: list[str],
-) -> tuple[str, ...]:
-    """Warn ``[secret_backends.*]`` sections as deprecated no-ops.
-
-    The backend-keyed TOML sections never carried configuration (only
-    the backend name itself), and the backends are registered code
-    capabilities -- so a section here is semantically empty. Known
-    backends warn as deprecated; unknown ones (typo ``envvar`` for
-    ``env-var``) stay a hard ``ConfigError`` for typo protection.
-    Nothing is stored and nothing publishes.
-
-    Returns the display shapes of the sections found (facts for
-    surfaces that render their own tidy rows, mirroring
-    ``_warn_deprecated_resource_sections``).
-    """
-    raw = data.get("secret_backends", {})
-    if not isinstance(raw, dict):
-        raise ConfigError("[secret_backends] must be a table")
-
-    from agentworks.secrets.backends import SECRET_BACKEND_REGISTRY
-
-    known_backends = set(SECRET_BACKEND_REGISTRY)
-    found: list[str] = []
-    for key, bdata in raw.items():
-        backend_str = str(key)
-        if not isinstance(bdata, dict):
-            raise ConfigError(f"secret_backends.{backend_str} must be a table")
-        if backend_str not in known_backends:
-            raise ConfigError(
-                f"[secret_backends.{backend_str}] names an unknown secret backend; supported: {sorted(known_backends)}"
-            )
-        found.append(f"[secret_backends.{backend_str}]")
-        deprecations.append(
-            f"[secret_backends.{backend_str}] is deprecated and has no effect: "
-            f"the built-in backends ship with agentworks, and activation is "
-            f"[secret_config].backends. Remove the section, or run "
-            f"`agw resource migrate --all` to drop it."
-        )
-    return tuple(found)
 
 
 def _load_secret_config(
@@ -138,7 +107,9 @@ def _load_plugins(
     return tuple(system_raw)
 
 
-# Secret resolution lives in ``agentworks.secrets.resolve`` (ADR 0016):
-# the chain can name manifest-declared backends, which are unknowable at
-# config-load time, so the chain-name and unreachable-secret checks run
-# at the composition boundary instead of here.
+# Neither of the two post-load secret checks lives here, because neither can:
+# the chain names backends that plugins supply, which are unknowable at
+# config-load time. The chain-NAME check is the generic settings-reference
+# pass (``agentworks.config.references``); the unreachable-secret check is
+# ``agentworks.secrets.resolve.validate_chain`` (ADR 0016). Both run at the
+# composition boundary, in that order.

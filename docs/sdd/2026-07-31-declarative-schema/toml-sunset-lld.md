@@ -85,10 +85,20 @@ better cost.
 ### What `plan_migration` and verification become
 
 `plan_migration` drops its `registry` parameter and becomes pure over the config text
-(`planning.py:124`). `pre_rows` is no longer `normalized_rows(registry)` (`planning.py:221`); it is
-built from two independent sources, keyed by `(kind, name)` and passed through
-`strip_source_fields`, and FILTERED TO THE SELECTED MIGRATION UNITS (`plan.units`), NOT the full
-relocated-loader output:
+(`planning.py:124`).
+
+NOTE (superseded 2026-08-07, phase 2): planning is NOT pure any more, and the change was deliberate.
+`preflight.require_loadable_tree` builds a registry over the tree the run WOULD produce, which is
+what lets a dry run reach the real run's verdict. Purity was never the property that mattered; what
+mattered is that the migrator works on a config no other command can load, and that survives,
+because the two things that stop those configs loading are exactly the two the preflight
+neutralizes. `migrate/preflight.py` carries the full argument. Read every "pure over the config
+text" in this document as "reads the config text directly, without the registry the command used to
+build first".
+
+`pre_rows` is no longer `normalized_rows(registry)` (`planning.py:221`); it is built from two
+independent sources, keyed by `(kind, name)` and passed through `strip_source_fields`, and FILTERED
+TO THE SELECTED MIGRATION UNITS (`plan.units`), NOT the full relocated-loader output:
 
 - TOML units: the relocated loaders over the ORIGINAL config text, then filtered to the selected
   units' `(kind, name)`.
@@ -171,7 +181,8 @@ Escape hatch: `load_config(resources=False)` skips the check. `agw resource samp
 `agw resource edit`'s fallback already load this way (`config/load.py:96`, `resource.py:271`). The
 one that MOVES is `agw resource migrate`: `resource.py:384` changes from
 `load_config(warn_deprecations=False)` + `build_registry(config)` to `load_config(resources=False)`
-with no registry build (planning is now pure over text; the post-side builds its own registry).
+with no registry build at the command layer (the post-side builds its own registry). The "planning
+is now pure over text" clause that stood here is superseded; see the note in section 1.
 
 `--no-deprecations` channel afterward: the TOML resource nudge LEAVES (it is now an error). What
 REMAINS: the #349 tagged-shape warning (`decode.py:186` `capability_shape_deprecation`), the

@@ -23,30 +23,39 @@ kinds self-register into ``KIND_REGISTRY`` at load.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Literal
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Annotated, Any, Literal
+
+from pydantic import Field
 
 from agentworks.declared_resource import DeclaredResource
 from agentworks.errors import ConfigError
-from agentworks.resource_loading import (
-    _SYNTHESIZED_DECLS,
-    _require_field,
-    _require_list,
-)
+from agentworks.resource_loading import _require_field, _require_list
 from agentworks.resources.kind import KIND_REGISTRY, synthesize_no_default
+from agentworks.schema import ResourceRef
+from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from agentworks.config import _SectionLineMap
-    from agentworks.resources.graph import BuildContext
+    from agentworks.resources.graph import FinalizeContext
     from agentworks.resources.reference import ResourceReference
 
 
-# -- Data classes --------------------------------------------------------------
+# The ``source_file`` rule, authored once: a simple filename, no directory
+# separators and no shell metacharacters, because it is interpolated into a
+# shell command on the VM. Spelled as a pattern constraint rather than a
+# validator so it reaches emitted JSON Schema and the describe surface as a
+# fact rather than as behavior nobody outside this module can see.
+_SAFE_FILENAME_PATTERN = r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$"
+SimpleFilename = Annotated[str, Field(pattern=_SAFE_FILENAME_PATTERN)]
+
+_SAFE_FILENAME_RE = re.compile(_SAFE_FILENAME_PATTERN)
 
 
-@dataclass(frozen=True, kw_only=True)
+# -- Rows --------------------------------------------------------------
+
+
 class AptSourceEntry(DeclaredResource):
     """One apt repository source. Referenced by ``AptPackageEntry.apt_sources``
     when a package requires a source's key + list stanza before it can be
@@ -57,26 +66,64 @@ class AptSourceEntry(DeclaredResource):
     pass from the apt_packages that name it).
     """
 
-    # Required (the base makes it optional); see SecretDecl for why field().
-    description: str = field()
-    key_url: str
-    key_path: str
-    source: str
-    source_file: str
+    # The examples on these four are what a generated sample writes on the
+    # lines an operator MUST fill in: no default and no placeholder could
+    # be right for a URL, a path, or a stanza, and `source_file`'s pattern
+    # means a generic stand-in would not even load.
+    key_url: str = Field(examples=["https://apt.example.com/key.gpg"])
+    """Where to fetch the repository's signing key from."""
+
+    key_path: str = Field(examples=["/etc/apt/keyrings/my-repo.gpg"])
+    """Absolute path the fetched key is installed to on the VM."""
+
+    source: str = Field(
+        examples=[
+            "deb [arch={arch} signed-by=/etc/apt/keyrings/my-repo.gpg] https://apt.example.com/debian bookworm main"
+        ]
+    )
+    """The apt source-list stanza, verbatim (``deb [signed-by=...] ...``).
+
+    ``{arch}`` stands for the VM's architecture (``amd64`` or ``arm64``)."""
+
+    source_file: SimpleFilename = Field(examples=["my-repo.list"])
+    """Name of the file under ``/etc/apt/sources.list.d/`` the stanza is
+    written to. A simple filename: no directory separators and no shell
+    metacharacters, because it is interpolated into a shell command."""
+
     key_dearmor: bool = False
+    """Whether the fetched key is ASCII-armored and must be run through
+    ``gpg --dearmor`` before installation. A boolean, written unquoted:
+    ``false`` and YAML's ``no`` both read as false. A QUOTED ``"no"`` is
+    a string, refused now, and it used to mean TRUE, the opposite of
+    what it reads as."""
 
 
-@dataclass(frozen=True, kw_only=True)
 class AptPackageEntry(DeclaredResource):
-    # First-class, system-declared Registry citizen; the uniform metadata
-    # (name, origin, references, ...) comes from ``DeclaredResource``.
-    # ``description`` is required here (see field() note on
-    # ``AptSourceEntry``).
-    description: str = field()
-    apt: list[str]
-    apt_sources: list[str] = field(default_factory=list)
+    """A named group of apt packages, optionally requiring one or more
+    ``apt-source`` entries to be installed first.
 
-    def dependencies(self, context: BuildContext) -> list[ResourceReference]:
+    First-class, system-declared Registry citizen; the uniform metadata
+    (name, description, origin, ...) comes from ``DeclaredResource``.
+    """
+
+    apt: list[str] = Field(default_factory=list)
+    """The apt package names to install.
+
+    Optional, and deliberately so rather than by transcription: the loader
+    this replaces read it through ``_require_list``, whose ``get(key, [])``
+    made an omitted ``apt`` an empty list rather than an error. An
+    apt-package that installs nothing is a real declaration (it can carry
+    ``apt_sources`` alone, so a template gets the repository without a
+    package from it), so the model kept the tolerance rather than inventing
+    a requirement the old surface never had."""
+
+    apt_sources: list[Annotated[str, ResourceRef(kind="apt-source", usage="an apt source")]] = Field(
+        default_factory=list
+    )
+    """Names of ``apt-source`` entries whose key and stanza must be
+    installed before these packages can be."""
+
+    def dependencies(self, context: FinalizeContext) -> list[ResourceReference]:
         """Emit one ``ResourceReference`` per name in ``apt_sources``. The
         framework's ``apt-source`` kind uses an ``error`` miss policy, so
         an unknown source name surfaces as a clean ``ConfigError`` at
@@ -105,13 +152,9 @@ class AptPackageEntry(DeclaredResource):
 
 # -- Loading -------------------------------------------------------------------
 
-# source_file must be a simple filename (no slashes, no shell metacharacters)
-_SAFE_FILENAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
-
 
 def _load_apt_sources(
     raw: dict[str, object],
-    decls: _SectionLineMap = _SYNTHESIZED_DECLS,
 ) -> dict[str, AptSourceEntry]:
     entries: dict[str, AptSourceEntry] = {}
     for name, data in raw.items():
@@ -123,20 +166,18 @@ def _load_apt_sources(
             raise ConfigError(f"{ctx}.source_file must be a simple filename, got: {source_file}")
         entries[name] = AptSourceEntry(
             name=name,
-            description=str(data.get("description", "")),
+            description=str(data["description"]) if "description" in data else None,
             key_url=str(_require_field(data, "key_url", ctx)),
             key_path=str(_require_field(data, "key_path", ctx)),
             source=str(_require_field(data, "source", ctx)),
             source_file=source_file,
             key_dearmor=bool(data.get("key_dearmor", False)),
-            declared_at=decls.lookup("apt_sources", name),
         )
     return entries
 
 
 def _load_apt_packages(
     raw: dict[str, object],
-    decls: _SectionLineMap = _SYNTHESIZED_DECLS,
 ) -> dict[str, AptPackageEntry]:
     entries: dict[str, AptPackageEntry] = {}
     for name, data in raw.items():
@@ -145,10 +186,9 @@ def _load_apt_packages(
         ctx = f"apt_packages.{name}"
         entries[name] = AptPackageEntry(
             name=name,
-            description=str(data.get("description", "")),
+            description=str(data["description"]) if "description" in data else None,
             apt=_require_list(data, "apt", ctx),
             apt_sources=_require_list(data, "apt_sources", ctx) if "apt_sources" in data else [],
-            declared_at=decls.lookup("apt_packages", name),
         )
     return entries
 
@@ -183,7 +223,20 @@ class _AptSourceKind:
     """Implementation of ``ResourceKind`` for ``"apt-source"``."""
 
     kind: str = "apt-source"
-    description: str = "3rd party apt repository definitions (key, source line)"
+    description: str = "A third-party apt repository, with its signing key"
+    prose: TopicProse = TopicProse(
+        title="Apt sources",
+        overview="""
+        An apt-source is a third-party apt repository: where to fetch its signing key,
+        where to install that key, and the source-list stanza that points at it. VM init
+        writes the key and the stanza before installing anything that needs them.
+
+        Apt packages reference a source by name; nothing installs a source on its own.
+        In the stanza, `{arch}` stands for the VM's architecture (`amd64` or `arm64`).
+        Several sources ship built in; declaring one under a built-in's name replaces it.
+        """,
+    )
+    model: type[DeclaredResource] = AptSourceEntry
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None
     category: Literal["declarable", "capability"] = "declarable"
@@ -199,6 +252,19 @@ class _AptPackageKind:
 
     kind: str = "apt-package"
     description: str = "Named apt packages, optionally tied to apt-sources"
+    prose: TopicProse = TopicProse(
+        title="Apt packages",
+        overview="""
+        An apt-package is a named SET of apt packages, plus the apt-sources they need.
+        A vm-template refers to it by name through `apt_packages`, and VM init installs
+        the sources first and the packages after.
+
+        The indirection is what lets a template say `gh` without also knowing which
+        repository provides it. Several packages ship built in; declaring one under a
+        built-in's name replaces it.
+        """,
+    )
+    model: type[DeclaredResource] = AptPackageEntry
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None
     category: Literal["declarable", "capability"] = "declarable"

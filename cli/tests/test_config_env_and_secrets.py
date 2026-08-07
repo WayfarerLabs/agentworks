@@ -55,8 +55,8 @@ def _write_base(
 ) -> None:
     """Write a settings-only config.toml plus its resources/ manifests.
 
-    ``settings`` carries settings-only TOML ([secret_config], [plugins],
-    [secret_backends]); every resource under test goes in ``manifests``.
+    ``settings`` carries settings-only TOML ([secret_config], [plugins]);
+    every resource under test goes in ``manifests``.
     """
     pub = config_path.parent / "id.pub"
     priv = config_path.parent / "id"
@@ -281,10 +281,24 @@ def test_env_inline_table_unknown_key_rejected(tmp_path: Path) -> None:
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
-        manifests=[ManifestDoc("admin-template", "default", {"env": {"BAD": {"value": "x"}}})],
+        manifests=[ManifestDoc("admin-template", "default", {"env": {"BAD": {"secrit": "x"}}})],
     )
-    with pytest.raises(ConfigError, match="unexpected keys"):
+    with pytest.raises(ConfigError, match="env.BAD.secrit: unknown field; expected one of: secret, value"):
         _load(cfg_file)
+
+
+def test_env_inline_table_may_spell_the_plaintext_value(tmp_path: Path) -> None:
+    """A widening the model brings: ``{value: x}`` is the same entry as the
+    bare string ``x``, and the entry type genuinely has both fields, so
+    refusing the explicit spelling would be an arbitrary rule rather than
+    a shape check."""
+    cfg_file = tmp_path / "config.toml"
+    _write_base(
+        cfg_file,
+        manifests=[ManifestDoc("admin-template", "default", {"env": {"OK": {"value": "x"}}})],
+    )
+
+    assert _load(cfg_file).lookup("admin-template", "default").env["OK"].value == "x"
 
 
 def test_env_secret_must_be_string(tmp_path: Path) -> None:
@@ -323,8 +337,14 @@ def test_env_referencing_undeclared_secret_does_not_error(
 def test_secret_declared_with_all_mapping_forms(tmp_path: Path) -> None:
     """All three backend_mappings value shapes (string, inline table, false) parse
     onto SecretDecl. The chain uses prompt-only so even token-c (which opts out
-    of env-var) and token-b (mapping for a future backend) stay reachable through
-    the prompt backend."""
+    of env-var) and token-b (which maps a backend outside the chain) stay
+    reachable through the prompt backend.
+
+    token-b's inline table is a WELL-FORMED onepassword mapping (the pinned
+    ``{account, reference}`` form), and it has to be: the finalize validate pass
+    checks every declared mapping against its backend's model whether or not
+    that backend is opted in or enabled, so a placeholder table would fail the
+    build here rather than parsing."""
     cfg_file = tmp_path / "config.toml"
     _write_base(
         cfg_file,
@@ -339,8 +359,8 @@ def test_secret_declared_with_all_mapping_forms(tmp_path: Path) -> None:
             ManifestDoc(
                 "secret",
                 "token-b",
-                {"backend_mappings": {"onepassword": {"vault": "Shared", "item": "Tok", "field": "key"}}},
-                description="structured mapping (for future backend)",
+                {"backend_mappings": {"onepassword": {"account": "acme", "reference": "op://Shared/Tok/key"}}},
+                description="structured mapping for a backend outside the chain",
             ),
             ManifestDoc("secret", "token-c", {"backend_mappings": {"env-var": False}}, description="opt-out mapping"),
         ],
@@ -348,7 +368,7 @@ def test_secret_declared_with_all_mapping_forms(tmp_path: Path) -> None:
     registry = _load(cfg_file)
     assert registry.lookup("secret", "token-a").backend_mappings == {"env-var": "OVERRIDE_NAME"}
     assert registry.lookup("secret", "token-b").backend_mappings == {
-        "onepassword": {"vault": "Shared", "item": "Tok", "field": "key"}
+        "onepassword": {"account": "acme", "reference": "op://Shared/Tok/key"}
     }
     assert registry.lookup("secret", "token-c").backend_mappings == {"env-var": False}
 
@@ -372,7 +392,7 @@ def test_secret_name_over_secret_cap_rejected_from_manifest(tmp_path: Path) -> N
     """A secret name beyond the secret cap (253) is rejected, and the error
     reports the correct (secret) max, not 30. The name-validation error is a
     spec-level failure, so the decoder surfaces it as ConfigError."""
-    from agentworks.config import MAX_SECRET_NAME_LENGTH
+    from agentworks.naming import MAX_SECRET_NAME_LENGTH
 
     cfg_file = tmp_path / "config.toml"
     _write_base(
@@ -561,16 +581,19 @@ def test_unreachable_secret_error_message_and_hint(tmp_path: Path) -> None:
     assert "remove" in exc.value.hint
 
 
-def test_unknown_backend_kind_in_secret_backends_errors(
+def test_secret_backends_section_errors_whatever_it_names(
     tmp_path: Path,
 ) -> None:
-    """A typo in [secret_backends.<kind>] (e.g. 'env_var' or 'envvar'
-    for 'env-var') errors at config-load time. Phase 2b.2 elevated this
-    from a soft warning to a hard error so it matches the framework's
-    treatment of the git-credential provider typos.
+    """``[secret_backends.*]`` is a retired resource section, refused at load
+    regardless of the name it carries.
 
-    ``[secret_backends.*]`` stays a config.toml section (a no-op capability
-    hint, not a declarable resource), so this check remains at load_config.
+    This used to assert that a TYPO ('env_var' for 'env-var') was caught by a
+    name check against the built-in backend registry. That check is gone: it
+    could not tell a typo from a plugin backend, so it refused correctly
+    spelled ones too. The section is wrong whatever it names, which catches
+    the typo as a side effect and stops mis-reporting the plugin case (see
+    tests/test_config_deprecation_warnings.py for the three names side by
+    side).
     """
     cfg_file = tmp_path / "config.toml"
     _write_base(
@@ -580,41 +603,51 @@ def test_unknown_backend_kind_in_secret_backends_errors(
         # typo: kind is 'env-var' (kebab), not 'env_var' (snake)
         """,
     )
-    with pytest.raises(ConfigError, match="unknown secret backend"):
+    with pytest.raises(ConfigError, match="settings only"):
         load_config(cfg_file, warn_issues=False)
 
 
-@pytest.mark.parametrize(
-    ("manifest", "context_label"),
-    [
-        (ManifestDoc("vm-template", "default", {"env": {"AGENTWORKS_VM": "override"}}), "vm_templates.default.env"),
-        (ManifestDoc("admin-template", "default", {"env": {"AGENTWORKS_PLATFORM": "override"}}), "admin.env"),
-        (
-            ManifestDoc("agent-template", "claude", {"env": {"AGENTWORKS_AGENT": "override"}}),
-            "agent_templates.claude.env",
-        ),
-        (
-            ManifestDoc("workspace-template", "ws", {"env": {"AGENTWORKS_WORKSPACE": "override"}}),
-            "workspace_templates.ws.env",
-        ),
-        (
-            ManifestDoc("session-template", "shell", {"env": {"AGENTWORKS_SESSION": "override"}}),
-            "session_templates.shell.env",
-        ),
-    ],
-)
-def test_agentworks_prefix_warning_fires_for_every_scope(
-    tmp_path: Path,
-    manifest: ManifestDoc,
-    context_label: str,
-) -> None:
+#: Every scope that has an env table, with the address its warning frames
+#: under. One decode over all five below rather than one test each: the
+#: check finds its subject by ANNOTATION (``decode._env_hygiene_issues``
+#: matches a mapping of ``EnvEntry``), so there is no per-scope branch to
+#: exercise separately; what is worth pinning is that no scope is missed.
+_ENV_BEARING_SCOPES = [
+    (ManifestDoc("vm-template", "default", {"env": {"AGENTWORKS_VM": "override"}}), "vm-template/default.env"),
+    (
+        ManifestDoc("admin-template", "default", {"env": {"AGENTWORKS_PLATFORM": "override"}}),
+        "admin-template/default.env",
+    ),
+    (ManifestDoc("agent-template", "claude", {"env": {"AGENTWORKS_AGENT": "override"}}), "agent-template/claude.env"),
+    (
+        ManifestDoc("workspace-template", "ws", {"env": {"AGENTWORKS_WORKSPACE": "override"}}),
+        "workspace-template/ws.env",
+    ),
+    (
+        ManifestDoc("session-template", "shell", {"env": {"AGENTWORKS_SESSION": "override"}}),
+        "session-template/shell.env",
+    ),
+]
+
+
+def test_agentworks_prefix_warning_fires_for_every_scope(tmp_path: Path) -> None:
     """The AGENTWORKS_* override warning fires for every scope's env table,
     not just admin.env. Pin this so a future refactor that moves the check
-    into a per-scope code path doesn't silently miss some scopes."""
+    into a per-scope code path doesn't silently miss some scopes.
+
+    Every missed scope is named, rather than the first: a refactor that
+    dropped three of them should say so in one run.
+    """
     cfg_file = tmp_path / "config.toml"
-    _write_base(cfg_file, manifests=[manifest])
+    _write_base(cfg_file, manifests=[manifest for manifest, _label in _ENV_BEARING_SCOPES])
     issues = _manifest_issues(cfg_file)
-    assert any(context_label in issue and "identity variable" in issue for issue in issues), issues
+
+    unwarned = [
+        label
+        for _manifest, label in _ENV_BEARING_SCOPES
+        if not any(label in issue and "identity variable" in issue for issue in issues)
+    ]
+    assert unwarned == [], f"env tables whose AGENTWORKS_* override went unwarned: {unwarned}; issues were {issues}"
 
 
 def test_plaintext_env_with_newline_warns(tmp_path: Path) -> None:
@@ -672,8 +705,8 @@ def test_session_template_required_commands_parsed(tmp_path: Path) -> None:
     )
     registry = _load(cfg_file)
     tmpl = registry.lookup("session-template", "claude")
-    assert tmpl.harness_integration == "shell"
-    assert tmpl.harness_integration_config == {
+    assert tmpl.harness_integration.name == "shell"
+    assert tmpl.harness_integration.config == {
         "command": "claude --name {{session_name}}",
         "required_commands": ["claude"],
     }
@@ -693,7 +726,7 @@ def test_session_template_required_commands_must_be_list(tmp_path: Path) -> None
             )
         ],
     )
-    with pytest.raises(ConfigError, match="required_commands must be a list"):
+    with pytest.raises(ConfigError, match="required_commands: must be a list"):
         _load(cfg_file)
 
 
@@ -712,7 +745,7 @@ def test_session_template_required_commands_must_be_strings(tmp_path: Path) -> N
             )
         ],
     )
-    with pytest.raises(ConfigError, match="required_commands must be a list of strings"):
+    with pytest.raises(ConfigError, match=r"required_commands\[0\]: must be a string"):
         _load(cfg_file)
 
 
@@ -799,9 +832,8 @@ def test_vm_template_tailscale_auth_key_nonconforming_warns_but_loads(
     # The secret name is preserved exactly, still declared and usable.
     assert registry.lookup("vm-template", "tester").tailscale_auth_key == "GITHUB_TOKEN"
     issues = _manifest_issues(cfg_file)
-    assert any("GITHUB_TOKEN" in issue and "vm_templates.tester.tailscale_auth_key" in issue for issue in issues), (
-        issues
-    )
+    assert any("GITHUB_TOKEN" in issue and "vm-template/tester" in issue for issue in issues), issues
+    assert any("the Tailscale auth key" in issue for issue in issues), issues
 
 
 def test_env_secret_ref_nonconforming_warns_but_loads(tmp_path: Path) -> None:
@@ -815,7 +847,7 @@ def test_env_secret_ref_nonconforming_warns_but_loads(tmp_path: Path) -> None:
     registry = _load(cfg_file)
     assert registry.lookup("admin-template", "default").env["FOO"].secret == "Bad_Name"
     issues = _manifest_issues(cfg_file)
-    assert any("Bad_Name" in issue and "admin.env.FOO" in issue for issue in issues), issues
+    assert any("Bad_Name" in issue and "admin-template/default" in issue for issue in issues), issues
 
 
 def test_git_credential_token_nonconforming_warns_but_loads(tmp_path: Path) -> None:
@@ -827,9 +859,9 @@ def test_git_credential_token_nonconforming_warns_but_loads(tmp_path: Path) -> N
         manifests=[ManifestDoc("git-credential", "gh", {"provider": {"name": "github", "token": "GITHUB_TOKEN"}})],
     )
     registry = _load(cfg_file)
-    assert registry.lookup("git-credential", "gh").provider_config["token"] == "GITHUB_TOKEN"
+    assert registry.lookup("git-credential", "gh").provider.config["token"] == "GITHUB_TOKEN"
     issues = _manifest_issues(cfg_file)
-    assert any("GITHUB_TOKEN" in issue and "git_credentials.gh.token" in issue for issue in issues), issues
+    assert any("GITHUB_TOKEN" in issue and "git-credential/gh" in issue for issue in issues), issues
 
 
 def test_conforming_secret_ref_names_emit_no_warning(tmp_path: Path) -> None:

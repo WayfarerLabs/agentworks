@@ -1,5 +1,5 @@
-"""Site resolution: the only constructor of bound platform instances,
-plus the stranded-site ConfigError and validate_sites.
+"""Site resolution: the only constructor of bound platform instances, plus
+the stranded-site ConfigError.
 """
 
 from __future__ import annotations
@@ -13,11 +13,11 @@ from agentworks.errors import ConfigError, StateError
 from agentworks.manifests import builtin as builtin_manifests
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.resources import Origin, Registry
+from agentworks.schema import CapabilityBlock
 from agentworks.vms.sites import (
     VMSiteDecl,
     resolve_site,
     site_manifest_hint,
-    validate_sites,
 )
 
 
@@ -48,8 +48,7 @@ def test_resolve_site_binds_the_platform_config() -> None:
     registry = _registry(
         VMSiteDecl(
             name="gpu-box",
-            platform="lima",
-            platform_config={"vm_host": "me@box"},
+            platform=CapabilityBlock.of("lima", **{"vm_host": "me@box"}),
         )
     )
     platform = resolve_site("gpu-box", registry)
@@ -87,13 +86,17 @@ def _px_registry() -> Registry:
     return _registry(
         VMSiteDecl(
             name="px",
-            platform="proxmox",
-            platform_config={
-                "api_url": "https://pve:8006",
-                "node": "pve1",
-                "token_id": "t",
-                "template_vmid": 9000,
-            },
+            platform=CapabilityBlock.model_validate(
+                {
+                    "name": "proxmox",
+                    **{
+                        "api_url": "https://pve:8006",
+                        "node": "pve1",
+                        "token_id": "t",
+                        "template_vmid": 9000,
+                    },
+                }
+            ),
         )
     )
 
@@ -123,19 +126,13 @@ def test_ops_read_the_token_through_the_context() -> None:
         bare._api(RunContext(secrets=ScopedSecrets({}, ("other-name",))))
 
 
-def test_validate_sites_accepts_declared_and_absent() -> None:
-    registry = _registry()
-    config = SimpleNamespace(defaults=SimpleNamespace(site=None))
-    validate_sites(config, registry)  # type: ignore[arg-type]
-    config = SimpleNamespace(defaults=SimpleNamespace(site="lima-local"))
-    validate_sites(config, registry)  # type: ignore[arg-type]
-
-
-def test_validate_sites_rejects_unknown_with_config_vocabulary() -> None:
-    registry = _registry()
-    config = SimpleNamespace(defaults=SimpleNamespace(site="nope"))
-    with pytest.raises(ConfigError, match="defaults.site names an unknown site"):
-        validate_sites(config, registry)  # type: ignore[arg-type]
+# The two ``validate_sites`` cases that lived here moved to
+# tests/test_config_setting_references.py when that check became the generic
+# settings-reference pass. They are not lost: the new module parametrizes the
+# same two assertions (a declared or absent name builds, an unknown one is a
+# ConfigError) over every settings value that names a resource, and it drives
+# them through a real load_config + build_registry rather than the
+# SimpleNamespace stub config they used here.
 
 
 def test_site_manifest_hint_carries_the_vm_host() -> None:
@@ -169,7 +166,7 @@ def test_select_site_infers_the_single_declared_site(
     registry.add(
         "vm-site",
         "only-one",
-        VMSiteDecl(name="only-one", platform="lima"),
+        VMSiteDecl(name="only-one", platform=CapabilityBlock(name="lima")),
         Origin.built_in(source="test"),
     )
     registry.finalize()
@@ -240,7 +237,7 @@ def test_resolving_a_not_ready_site_names_the_requirement(
     )
     registry = _registry()
 
-    assert lookup_site("lima-local", registry).platform == "lima"
+    assert lookup_site("lima-local", registry).platform.name == "lima"
     with pytest.raises(StateError, match="not ready on this host") as exc:
         resolve_site("lima-local", registry)
     assert "limactl" in str(exc.value)

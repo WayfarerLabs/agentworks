@@ -37,6 +37,13 @@ def test_kind_registry_keys_are_lower_kebab() -> None:
 
 
 def test_kind_handlers_match_their_registry_key() -> None:
+    """Every handler answers to the key it is filed under.
+
+    The one place this is asserted. A per-kind test restating it for its
+    own kind is this sweep restricted to a constant, and goes stale the
+    moment a kind is added; what a per-kind test still pins is the literal
+    key, through the ``KIND_REGISTRY[...]`` subscript it has to do anyway.
+    """
     for key, handler in KIND_REGISTRY.items():
         assert handler.kind == key, f"KIND_REGISTRY[{key!r}] has mismatched handler.kind {handler.kind!r}"
 

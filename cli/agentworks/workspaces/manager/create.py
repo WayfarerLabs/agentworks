@@ -7,9 +7,9 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.agents.grants import MAX_WORKSPACE_NAME_LENGTH
-from agentworks.config import validate_name
 from agentworks.errors import AlreadyExistsError, NotFoundError
 from agentworks.name_filters import validate_name_filters
+from agentworks.naming import validate_name
 from agentworks.workspaces.manager._common import _guard_vm_status, _resolve_vm, _workspace_scope
 
 if TYPE_CHECKING:

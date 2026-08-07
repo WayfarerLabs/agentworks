@@ -75,7 +75,7 @@ within one flag and AND across flags, which is the inconsistency this rule exist
 Note the carve-out from the variadic-positional rule above: variadic positionals are for the things
 the command is operating on (the operands); filter options narrow what a list command considers.
 Operands keep their variadic-positional form (`agent grant-workspace my-agent ws1 ws2`); filters
-take CSV. Commas cannot appear in resource names (see `validate_name` in `agentworks.config`), so
+take CSV. Commas cannot appear in resource names (see `validate_name` in `agentworks.naming`), so
 CSV parsing is safe.
 
 An unknown name in a name filter is a hard error, not an empty result: the service-layer function

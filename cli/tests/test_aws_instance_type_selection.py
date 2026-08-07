@@ -8,14 +8,17 @@ from __future__ import annotations
 
 import pytest
 
+from agentworks.capabilities.config import validate_capability_config
 from agentworks.errors import ConfigError
 from agentworks.plugins.aws.platform import (
     _DEBIAN_ARCH_SEGMENT,
     _DEFAULT_INSTANCE_TYPES,
+    AwsEC2Config,
+    _instance_catalog,
     _InstanceType,
-    _parse_instance_catalog,
     _select_instance_type,
 )
+from agentworks.schema import RefOwner
 
 
 class TestSelectInstanceType:
@@ -55,20 +58,27 @@ class TestSelectInstanceType:
         assert {t.arch for t in _DEFAULT_INSTANCE_TYPES} == {"arm64"}
 
 
-class TestParseInstanceCatalog:
+class TestInstanceCatalog:
+    """The catalog RESOLVER: the shape is the model's business now, so
+    what is left here is the default (domain knowledge) and the mapping
+    onto the selection tuple. The shape rejections are asserted through
+    the core, so this file keeps proving a bad catalog never reaches
+    selection."""
+
     def test_no_override_returns_builtin(self) -> None:
-        assert _parse_instance_catalog({}, "vm-site/aws") is _DEFAULT_INSTANCE_TYPES
+        assert _instance_catalog(_config({})) is _DEFAULT_INSTANCE_TYPES
 
     def test_valid_override_parses(self) -> None:
-        cfg = {"instance_types": [{"cpus": 4, "memory": 16, "type": "m7i.xlarge", "arch": "x86_64"}]}
-        catalog = _parse_instance_catalog(cfg, "vm-site/aws")
+        catalog = _instance_catalog(
+            _config({"instance_types": [{"cpus": 4, "memory": 16, "type": "m7i.xlarge", "arch": "x86_64"}]})
+        )
         assert catalog == ((4, 16, "m7i.xlarge", "x86_64"),)
 
     @pytest.mark.parametrize(
         "bad",
         [
             {"instance_types": "t4g.small"},  # not a list
-            {"instance_types": []},  # empty
+            {"instance_types": []},  # empty: a site on which nothing can launch
             {"instance_types": [{"cpus": 4, "memory": 16, "type": "x"}]},  # missing arch
             {"instance_types": [{"cpus": 4, "memory": 16, "arch": "arm64"}]},  # missing type
             {"instance_types": [{"cpus": 0, "memory": 16, "type": "x", "arch": "arm64"}]},  # non-positive
@@ -81,14 +91,13 @@ class TestParseInstanceCatalog:
     )
     def test_malformed_override_raises(self, bad: dict[str, object]) -> None:
         with pytest.raises(ConfigError):
-            _parse_instance_catalog(bad, "vm-site/aws")
+            _config(bad)
 
     def test_arch_error_names_the_ec2_vocabulary(self) -> None:
         """The arch value must be the EC2 name; the message points the operator
         at the accepted spellings rather than silently mapping Debian's."""
-        bad = {"instance_types": [{"cpus": 4, "memory": 16, "type": "x", "arch": "aarch64"}]}
-        with pytest.raises(ConfigError, match="x86_64, arm64"):
-            _parse_instance_catalog(bad, "vm-site/aws")
+        with pytest.raises(ConfigError, match="arch: must be one of"):
+            _config({"instance_types": [{"cpus": 4, "memory": 16, "type": "x", "arch": "aarch64"}]})
 
 
 class TestArchToDebianSegment:
@@ -96,3 +105,14 @@ class TestArchToDebianSegment:
         """The EC2 arch names map to Debian's image-naming segments; the arm64
         spelling is shared, x86_64 becomes amd64."""
         assert _DEBIAN_ARCH_SEGMENT == {"x86_64": "amd64", "arm64": "arm64"}
+
+
+def _config(blob: dict[str, object]) -> AwsEC2Config:
+    """``blob`` validated as an aws-ec2 site's config, through the core."""
+    validated = validate_capability_config(
+        kind="vm-platform",
+        config={"name": "aws-ec2", "region": "us-east-1", **blob},
+        owner=RefOwner(kind="vm-site", name="aws"),
+    )
+    assert isinstance(validated, AwsEC2Config)
+    return validated

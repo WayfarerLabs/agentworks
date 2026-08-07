@@ -32,7 +32,7 @@ if TYPE_CHECKING:
     from agentworks.db import Database
 
 AGENT_MANIFESTS = [
-    ManifestDoc("git-credential", "gh", {"provider": "github"}),
+    ManifestDoc("git-credential", "gh", {"provider": {"name": "github"}}),
     ManifestDoc("agent-template", "default", {"git_credentials": ["gh"]}),
     ManifestDoc("agent-template", "other", {"git_credentials": ["gh"]}),
 ]

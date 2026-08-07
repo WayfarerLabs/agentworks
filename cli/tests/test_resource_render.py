@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from agentworks.resources.origin import Origin
+from agentworks.origin import Origin
 from agentworks.resources.render import format_file_path, format_origin_line, format_origin_location
 
 

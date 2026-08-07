@@ -10,15 +10,34 @@ chain entirely.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
+from pydantic import model_validator
 
 from agentworks import output
-from agentworks.errors import ConfigError
+from agentworks.schema import AgwRootModel
+from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
     from agentworks.resources.graph import Readiness
-    from agentworks.resources.reference import ConfigReference
     from agentworks.secrets.base import MappingValue, SecretDecl
+
+
+class PromptMapping(AgwRootModel[object]):
+    """Prompt has NO mapping vocabulary, so every value is rejected.
+
+    Not expressible as a type: ``typing.Never`` is not a shape pydantic
+    can build a schema for (verified), so the refusal is a validator. It
+    rejects an empty table too, deliberately: any value addressed to
+    prompt is dead config, almost certainly a typo for another backend,
+    and silently ignoring it would leave the operator believing something
+    was configured.
+    """
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_every_mapping(cls, value: object) -> object:
+        raise ValueError("the prompt backend has no mapping vocabulary; remove it, or use false to opt out")
 
 
 class PromptBackend:
@@ -36,8 +55,23 @@ class PromptBackend:
     backend -- calling ``batch_get`` IS the operator interaction.
     """
 
+    contract_version = 1
+    config_model: type[AgwRootModel[Any]] = PromptMapping
     name = "prompt"
     description = "prompts interactively at resolution time"
+    prose = TopicProse(
+        title="Interactive prompt",
+        overview="""
+        Asks the operator for the value, at the moment a command needs it. It is the
+        last backend in the default chain: whatever nothing else could resolve is what
+        you get asked for, with the secret's description and hint as the prompt text.
+
+        It needs no mapping and takes no configuration. Opting a secret out with
+        `backend_mappings.prompt: false` is mostly a testing tool: it proves another
+        backend really resolves the secret instead of quietly falling through to a
+        prompt. With no TTY (or under `--non-interactive`) prompting is skipped anyway.
+        """,
+    )
     interactive = True
 
     def not_ready(self) -> Readiness:
@@ -48,22 +82,6 @@ class PromptBackend:
         from agentworks.resources.graph import Readiness
 
         return Readiness.ready()
-
-    def validate_mapping(self, owner: str, mapping: MappingValue) -> None:
-        # Prompt has no mapping vocabulary, so any value that reaches
-        # here (the loop owns the generic ``false`` opt-out) is dead
-        # config -- almost certainly a typo for another backend. Reject
-        # rather than silently ignore (maintainer ruling: mappings are
-        # not yet in use in the wild, so strictness costs nothing).
-        raise ConfigError(
-            f"{owner}: backend_mappings for the prompt backend has no meaning; remove it, or use false to opt out"
-        )
-
-    def dependencies(self, mapping: MappingValue) -> tuple[ConfigReference, ...]:
-        """Prompt has no mapping vocabulary and resolves interactively; it
-        implies no agentworks resource, so the edge set is empty (total,
-        non-throwing)."""
-        return ()
 
     def would_attempt(
         self,

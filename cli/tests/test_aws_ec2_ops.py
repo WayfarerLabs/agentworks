@@ -42,9 +42,13 @@ def _request(
     cpus: int = 2,
     memory: int = 8,
     tailscale: str | None = None,
-    disk: int | None = None,
+    disk: int = 50,
+    swap: int = 4,
     ssh_key: str = "ssh-ed25519 AAAA test",
 ) -> ProvisionRequest:
+    """A request in the shape the orchestrated path builds: every
+    hardware field resolved, never None (the vm-template layer owns the
+    defaults, and ``disk`` / ``swap`` here carry its values)."""
     return ProvisionRequest(
         vm_name="dev",
         hostname="dev",
@@ -56,6 +60,7 @@ def _request(
         cpus=cpus,
         memory_gib=memory,
         disk_gib=disk,
+        swap_gib=swap,
     )
 
 
@@ -227,11 +232,15 @@ class TestCreate:
         assert bdm["DeviceName"] == "/dev/xvda"
         assert bdm["Ebs"]["VolumeSize"] == 40
 
-    def test_no_disk_request_skips_describe_images(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_every_create_sizes_the_root_volume(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """There is no unsized create: ``disk_gib`` is resolved by the
+        vm-template layer, so the AMI's own root size never stands. This
+        replaces a test that pinned the opposite, for a None branch the
+        request shape no longer admits."""
         rec = install_fakes(monkeypatch)
         _platform().create(_request(), RunContext(config=_config()))
-        assert "describe_images" not in rec.methods("ec2")
-        assert "BlockDeviceMappings" not in rec.kwargs_for("run_instances")
+        (bdm,) = rec.kwargs_for("run_instances")["BlockDeviceMappings"]
+        assert bdm["Ebs"]["VolumeSize"] == 50
 
     def test_disk_describe_images_failure_is_typed(self, monkeypatch: pytest.MonkeyPatch) -> None:
         install_fakes(monkeypatch)

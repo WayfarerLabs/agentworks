@@ -19,8 +19,8 @@ from typing import TYPE_CHECKING
 
 import agentworks.sessions.multi_console as _mc
 from agentworks import output
-from agentworks.config import MAX_FREEFORM_NAME_LENGTH, validate_name
 from agentworks.errors import AlreadyExistsError, NotFoundError, ValidationError
+from agentworks.naming import MAX_FREEFORM_NAME_LENGTH, validate_name
 from agentworks.resources.access import named_console_template
 from agentworks.sessions.multi_console_layout import (
     _apply_layout,

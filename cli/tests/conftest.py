@@ -18,6 +18,7 @@ from agentworks.db import Database
 from agentworks.manifests.envelope import API_VERSION
 from agentworks.manifests.loader import RESOURCES_DIRNAME
 from agentworks.output import Role, StatusStyle, _render_header
+from agentworks.schema import CapabilityBlock
 
 # The orchestrated-command suites' shared fixture trio (proxmox
 # section, make_config, resolve_counter) lives in its own module so it
@@ -93,6 +94,45 @@ def write_manifests(
     stream = "---\n".join(render_manifest(doc) for doc in docs)
     (resources_dir / filename).write_text(stream)
     return resources_dir
+
+
+def write_cfg(
+    config_dir: Path,
+    *manifests: ManifestDoc | str,
+    settings: str = "",
+    filename: str = "config.toml",
+) -> Path:
+    """Write a loadable settings-only config into ``config_dir``, with its
+    ``resources/`` manifests beside it, and return the config path.
+
+    The operator keypair is written here rather than taken as a parameter:
+    ``load_config`` requires the two paths to exist and nothing reads their
+    contents, so every caller wanted the same two throwaway files. A test
+    that cares what is IN a key writes its own and points ``settings`` at
+    it.
+
+    ``settings`` is settings-only TOML appended after the ``[operator]``
+    block (``[secret_config]``, ``[plugins]``, and so on). Resource
+    declarations are ``manifests``, never settings: config.toml carries no
+    resource topics (ADR 0022).
+    """
+    pub = config_dir / "id.pub"
+    priv = config_dir / "id"
+    pub.write_text("ssh-ed25519 AAAA...")
+    priv.write_text("-----BEGIN OPENSSH PRIVATE KEY-----")
+    path = config_dir / filename
+    path.write_text(
+        dedent(f"""\
+        [operator]
+        ssh_public_key = "{pub.as_posix()}"
+        ssh_private_key = "{priv.as_posix()}"
+
+        """)
+        + dedent(settings),
+    )
+    if manifests:
+        write_manifests(config_dir, *manifests)
+    return path
 
 
 @pytest.fixture(autouse=True)
@@ -591,7 +631,7 @@ class _StubRegistry:
 
             if name not in VM_PLATFORM_REGISTRY:
                 raise KeyError(name)
-            return VMSiteDecl(name=name, platform=name)
+            return VMSiteDecl(name=name, platform=CapabilityBlock(name=name))
         if kind not in self._KIND_ATTRS:
             raise KeyError(kind)
         return self._kind_dict(kind)[name]
@@ -616,29 +656,45 @@ class _StubGraph:
     """Minimal ``DependencyGraph`` double over a :class:`_StubRegistry`.
 
     ``edges_of`` recomputes a row's outbound edges from its ``dependencies``
-    (the stub is not finalized, so there is no frozen edge map to read);
-    ``reachable_from`` DFS-walks those; readiness is always ready. Enough for
-    the consumer reads the manager entries make against namespace fixtures.
+    (the stub is not finalized, so there is no frozen edge map to read); the
+    two closures DFS-walk those, filtered by relationship exactly as the real
+    graph does; readiness is always ready. Enough for the consumer reads the
+    manager entries make against namespace fixtures.
+
+    The double must carry EVERY closure the real graph offers, not only the
+    ones today's consumers reach: a missing one surfaces as an
+    ``AttributeError`` from a fixture rather than as behavior, which is a
+    confusing way to learn that the double is behind.
     """
 
     def __init__(self, registry: _StubRegistry) -> None:
         self._registry = registry
 
     def edges_of(self, kind: str, name: str):  # noqa: ANN201 - mirrors DependencyGraph
-        from agentworks.resources.graph import BuildContext
+        from agentworks.resources.graph import FinalizeContext
 
         row = self._registry.lookup(kind, name)  # KeyError on unknown, like the real graph
         method = getattr(row, "dependencies", None)
         if method is None:
             return ()
-        return tuple(method(BuildContext()))
+        return tuple(method(FinalizeContext()))
 
-    def reachable_from(self, kind: str, name: str) -> list[tuple[str, str]]:
-        # Tolerate a missing start node, exactly as the real graph does
-        # (graph.py:228-230): the DFS below catches the edges_of KeyError and
-        # yields an empty closure, so a consumer that walks a template resolved
-        # off a namespace fixture (not a registry row) gets [] rather than a
-        # KeyError. The recipe use-gate (ensure_recipe_enabled) relies on this.
+    def runtime_reachable_from(self, kind: str, name: str) -> list[tuple[str, str]]:
+        from agentworks.resources.reference import RefRelationship
+
+        return self._closure(kind, name, RefRelationship.USES)
+
+    def composed_from(self, kind: str, name: str) -> list[tuple[str, str]]:
+        from agentworks.resources.reference import RefRelationship
+
+        return self._closure(kind, name, RefRelationship.INHERITS)
+
+    def _closure(self, kind: str, name: str, crossing: object) -> list[tuple[str, str]]:
+        # Tolerate a missing start node, exactly as the real graph does: the
+        # DFS below catches the edges_of KeyError and yields an empty closure,
+        # so a consumer that walks a template resolved off a namespace fixture
+        # (not a registry row) gets [] rather than a KeyError. The recipe
+        # use-gate (ensure_recipe_enabled) relies on this.
         visited: set[tuple[str, str]] = {(kind, name)}
         ordered: list[tuple[str, str]] = []
         stack: list[tuple[str, str]] = [(kind, name)]
@@ -649,6 +705,8 @@ class _StubGraph:
             except KeyError:
                 continue
             for ref in edges:
+                if ref.relationship is not crossing:
+                    continue
                 target = (ref.kind, ref.name)
                 if target not in visited:
                     visited.add(target)

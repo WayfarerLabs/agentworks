@@ -2,7 +2,10 @@
 
 Pins the fold's verdicts (LLD c), the B1 property (the fold is total over a
 malformed ``platform_config`` because ``not_ready`` never constructs), the
-readiness gating of the finalize ``validate`` pass (R9.4) and of
+INDEPENDENCE of the finalize ``validate`` pass from both readiness and
+enablement (a not-ready resource's block, and a secret's mapping to a disabled
+backend, are validated like any other; what config is valid is the declared
+model's answer, not the host's), the readiness gating of
 materialization (R12, for both the not-ready and the disabled referrer), the
 enablement-axis DISTRIBUTION through the fold end to end via the injected
 enablement-source seam (R7/R13), and that readiness is independent of validity
@@ -24,9 +27,10 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.errors import ConfigError
+from agentworks.origin import Origin
 from agentworks.resources.graph import DependencyState, DisabledMark, Enablement, Readiness
-from agentworks.resources.origin import Origin
 from agentworks.resources.registry import Registry
+from agentworks.schema import CapabilityBlock
 from agentworks.vms.sites import VMSiteDecl
 
 if TYPE_CHECKING:
@@ -59,10 +63,11 @@ def _source_disabling(*keys: tuple[str, str], reason: str = "enable its unit") -
 def _finalized(*sites: VMSiteDecl) -> Registry:
     """A finalized registry with every vm-platform row published and the
     given sites added (operator origin)."""
-    from agentworks.capabilities import vm_platform as vp
+    from agentworks.capabilities.descriptor import descriptor_for
+    from agentworks.capabilities.publish import publish_capability_rows
 
     registry = Registry.empty()
-    vp.publish_to(registry)
+    publish_capability_rows(registry, descriptor_for("vm-platform"))
     for decl in sites:
         registry.add("vm-site", decl.name, decl, Origin.operator_declared(file=Path("sites.yaml"), line=1))
     registry.finalize()
@@ -88,13 +93,14 @@ def _finalized_with_proxmox(
     from types import SimpleNamespace
     from typing import cast
 
-    from agentworks.capabilities import vm_platform as vp
+    from agentworks.capabilities.descriptor import descriptor_for
+    from agentworks.capabilities.publish import publish_capability_rows
     from agentworks.config import Config
     from agentworks.plugins import publish_plugins
     from agentworks.plugins.enablement import plugin_enablement_source
 
     registry = Registry.empty()
-    vp.publish_to(registry)
+    publish_capability_rows(registry, descriptor_for("vm-platform"))
     config = cast("Config", SimpleNamespace(enabled_system_plugins=("proxmox",)))
     publish_plugins(registry, config)
     for decl in sites:
@@ -113,32 +119,13 @@ def _present(registry: Registry, kind: str, name: str) -> bool:
 # -- The fixture disabled node (R7): the enablement axis, modeled --------------
 
 
-def test_disabled_platform_dependency_propagates_enable_its_unit() -> None:
-    """The enablement branch of ``vm-site.not_ready``: a DISABLED platform
-    dependency yields the "enable its unit" hint read off the disabled node's
-    own state. No producer ships a disabled node this effort, so the axis is
-    proven by handing ``not_ready`` a disabled ``DependencyState`` directly
-    (the fold's job is only to distribute these states)."""
-    site = VMSiteDecl(name="x", platform="lima", platform_config={})
-    deps: dict[tuple[str, str], DependencyState] = {
-        ("vm-platform", "lima"): DependencyState(
-            enablement=Enablement.disabled,
-            readiness=None,  # None iff disabled
-            impl=None,
-        )
-    }
-    verdict = site.not_ready(deps)
-    assert not verdict.is_ready
-    assert verdict.reason == "depends on vm-platform 'lima', which is disabled; enable its unit"
-
-
 def test_not_ready_platform_dependency_propagates_its_reason() -> None:
     """An enabled-but-not-ready platform propagates its verdict verbatim into
     the site's verdict (the self-determined single-platform AND). The platform's
     readiness reason already names it ("platform 'wsl2' is unsupported here:
     ..."), so the site passes it through rather than re-wrapping (which would
     double the naming); the surface adds the "Not ready:" framing (R9.1)."""
-    site = VMSiteDecl(name="x", platform="wsl2", platform_config={})
+    site = VMSiteDecl(name="x", platform=CapabilityBlock.of("wsl2", **{}))
     deps: dict[tuple[str, str], DependencyState] = {
         ("vm-platform", "wsl2"): DependencyState(
             enablement=Enablement.enabled,
@@ -151,8 +138,13 @@ def test_not_ready_platform_dependency_propagates_its_reason() -> None:
 
 
 def test_disabled_platform_node_folds_end_to_end_to_enable_its_unit() -> None:
-    """R7 end-to-end: the FOLD distributes a disabled dependency's state, not
-    just the leaf ``not_ready`` logic. A registry is finalized with the lima
+    """R7: the enablement branch of ``vm-site.not_ready``, reached the way
+    production reaches it.
+
+    The FOLD distributes a disabled dependency's state, not just the leaf
+    ``not_ready`` logic, so going end to end covers both and handing
+    ``not_ready`` a hand-built disabled ``DependencyState`` covers only the
+    leaf. A registry is finalized with the lima
     platform node injected DISABLED via a stub enablement source; the fold then
     hands the (remote-ready) site a disabled platform ``DependencyState``, and
     the site's stored ``readiness_of`` verdict, the graph's source of truth, is
@@ -160,14 +152,15 @@ def test_disabled_platform_node_folds_end_to_end_to_enable_its_unit() -> None:
     were enabled, isolating the enablement propagation from the tool check. The
     stub's default reason reproduces the original "enable its unit" verdict; the
     plugin source's specific reason is pinned in the producer tests."""
-    from agentworks.capabilities import vm_platform as vp
+    from agentworks.capabilities.descriptor import descriptor_for
+    from agentworks.capabilities.publish import publish_capability_rows
 
     registry = Registry.empty()
-    vp.publish_to(registry)
+    publish_capability_rows(registry, descriptor_for("vm-platform"))
     registry.add(
         "vm-site",
         "s",
-        VMSiteDecl(name="s", platform="lima", platform_config={"vm_host": "me@box"}),
+        VMSiteDecl(name="s", platform=CapabilityBlock.of("lima", **{"vm_host": "me@box"})),
         Origin.operator_declared(file=Path("sites.yaml"), line=1),
     )
     registry.finalize(enablement_sources=[_source_disabling(("vm-platform", "lima"))])
@@ -188,13 +181,14 @@ def test_disabled_secret_backend_is_excluded_from_the_active_chain() -> None:
     from types import SimpleNamespace
     from typing import cast
 
+    from agentworks.capabilities.descriptor import descriptor_for
+    from agentworks.capabilities.publish import publish_capability_rows
     from agentworks.config import Config
     from agentworks.plugins import publish_plugins
-    from agentworks.secrets import backends as secret_backends
     from agentworks.secrets.resolve import active_backends
 
     registry = Registry.empty()
-    secret_backends.publish_to(registry)
+    publish_capability_rows(registry, descriptor_for("secret-backend"))
     # onepassword ships as a system plugin now (its built-in row is gone), so
     # publish its capability row through the plugin path; the stub source below
     # then disables it, exactly as the plugin opt-in source would.
@@ -234,31 +228,40 @@ def test_disabled_secret_backend_is_excluded_from_the_active_chain() -> None:
     assert chain == ["prompt"]  # onepassword excluded (disabled), never built into an ActiveBackend
 
 
-def test_r9_9_mapping_to_disabled_backend_is_inert_until_enabled() -> None:
-    """R9.9 disabled sub-clause: the finalize ``validate`` pass validates a
-    secret's mapping only for a present AND ENABLED backend. A malformed
-    onepassword mapping is INERT while onepassword is disabled (the build
-    succeeds) and FAILS once it is enabled. onepassword is injected disabled via
-    a stub enablement source, the same axis materialization-gating and
-    resolution consult, so validation no longer needs re-touching for the
-    plugin source's disabled units."""
+@pytest.mark.parametrize("disable_onepassword", [True, False], ids=["disabled", "enabled"])
+def test_r9_9_mapping_is_validated_whether_or_not_its_backend_is_enabled(disable_onepassword: bool) -> None:
+    """R9.9: the finalize ``validate`` pass validates a secret's mapping
+    against its backend's model regardless of the backend's ENABLEMENT.
+
+    A malformed onepassword mapping fails the build whether onepassword is
+    enabled or injected disabled through the shipped enablement-source seam.
+    Deferring the check to enablement time would let an operator accumulate
+    mappings that all detonate the moment they turn the backend on.
+
+    Non-vacuous on the disabled branch: it first finalizes the same shape with
+    a VALID mapping and reads the enablement axis off the graph, so a stub
+    source that stopped disabling could not leave this green by accident.
+    onepassword stays PRESENT on both branches (only the mark moves), which is
+    what keeps this off the absent-backend path, where no model exists to
+    validate against and the dangling edge answers instead."""
     from types import SimpleNamespace
     from typing import cast
 
+    from agentworks.capabilities.descriptor import descriptor_for
+    from agentworks.capabilities.publish import publish_capability_rows
     from agentworks.config import Config
     from agentworks.plugins import publish_plugins
-    from agentworks.secrets import backends as secret_backends
     from agentworks.secrets.base import SecretDecl
 
-    def _build(*, disable_onepassword: bool) -> Registry:
+    def _build(mapping: str) -> Registry:
         registry = Registry.empty()
-        secret_backends.publish_to(registry)
+        publish_capability_rows(registry, descriptor_for("secret-backend"))
         # onepassword's row now comes from the plugin path, not a built-in.
         publish_plugins(registry, cast("Config", SimpleNamespace(enabled_system_plugins=())))
         registry.add(
             "secret",
             "vaulted",
-            SecretDecl(name="vaulted", description="a vaulted key", backend_mappings={"onepassword": "not-an-op-uri"}),
+            SecretDecl(name="vaulted", description="a vaulted key", backend_mappings={"onepassword": mapping}),
             Origin.operator_declared(file=Path("c.toml"), line=1),
         )
         # Always disable the claude and codex plugins' weak install-command,
@@ -284,12 +287,16 @@ def test_r9_9_mapping_to_disabled_backend_is_inert_until_enabled() -> None:
         registry.finalize(enablement_sources=[_source_disabling(*disabled)])
         return registry
 
-    # Disabled onepassword: its malformed mapping is inert, the build succeeds.
-    _build(disable_onepassword=True)
+    # The precondition, proven rather than assumed: onepassword is present, and
+    # its axis reads whichever way this branch asked for.
+    precondition = _build("op://Vault/Item/field")
+    assert precondition.graph.enablement_of("secret-backend", "onepassword") is (
+        Enablement.disabled if disable_onepassword else Enablement.enabled
+    )
 
-    # Enabled onepassword (default): the same malformed mapping fails validation.
+    # The malformed mapping fails on both branches.
     with pytest.raises(ConfigError, match="onepassword"):
-        _build(disable_onepassword=False)
+        _build("not-an-op-uri")
 
 
 # -- B1: the fold is total over a malformed block ------------------------------
@@ -298,18 +305,20 @@ def test_r9_9_mapping_to_disabled_backend_is_inert_until_enabled() -> None:
 def test_fold_does_not_throw_on_malformed_platform_config() -> None:
     """B1 (the ready side): a READY site with a malformed ``platform_config``
     surfaces the bad block as a clean ConfigError from the finalize VALIDATE
-    pass (R5), carrying that pass's origin framing (``sites.yaml``). This alone
-    cannot fully pin B1: if the fold DID construct, construction would raise the
-    SAME validate ConfigError. The load-bearing B1 pin is
-    ``test_r9_4_not_ready_site_malformed_block_is_deferred`` below, where a
-    not-ready site's malformed block is folded WITHOUT validating (a
-    constructing fold would throw there, but the non-constructing one does
-    not). Here we additionally assert the origin framing to prove the error
-    came from the validate pass, not from a mid-fold construction."""
+    pass (R5), carrying that pass's origin framing (``sites.yaml``).
+
+    The origin framing is what carries the B1 signal here: a constructing fold
+    would raise from construction, which attaches no origin, so ``sites.yaml``
+    in the message proves the error came from the validate pass at 7 and not
+    from a mid-fold construction at 4. The direct pin on the fold's totality is
+    ``test_not_ready_is_total_over_malformed_config`` below, which hands
+    ``not_ready`` blocks no model would accept; end-to-end deferral can no
+    longer pin it, because validation is unconditional now and every malformed
+    block raises somewhere."""
     # vm_host as an int: lima.not_ready sees it truthy -> ready (no throw, no
     # construction); validate then rejects the non-string.
-    site = VMSiteDecl(name="bad", platform="lima", platform_config={"vm_host": 123})
-    with pytest.raises(ConfigError, match="vm_host must be a non-empty SSH host") as exc:
+    site = VMSiteDecl(name="bad", platform=CapabilityBlock.of("lima", **{"vm_host": 123}))
+    with pytest.raises(ConfigError, match="vm_host: must be a string") as exc:
         _finalized(site)
     # The validate pass re-attaches the resource origin; construction would not.
     assert "sites.yaml" in str(exc.value)
@@ -318,29 +327,60 @@ def test_fold_does_not_throw_on_malformed_platform_config() -> None:
 def test_r5_ready_site_with_unknown_field_fails_validation() -> None:
     """R5: readiness is not validity. A ready site (lima is supported
     everywhere; no vm_host but we make it ready) with an unknown config field
-    still fails the validate pass."""
-    site = VMSiteDecl(name="bad", platform="lima", platform_config={"vm_host": "me@box", "bogus": "x"})
-    with pytest.raises(ConfigError, match="unknown lima platform field"):
+    still fails the validate pass.
+
+    The NOT-ready host is not a second test: the typo case below runs its
+    whole assertion under both host states, which is where the direction
+    R9.4 originally had backwards is pinned (deferring validation until a
+    resource was ready meant a not-ready host silently accepted config a
+    ready host refused, so what "valid" meant depended on the machine
+    reading the document)."""
+    site = VMSiteDecl(name="bad", platform=CapabilityBlock.of("lima", **{"vm_host": "me@box", "bogus": "x"}))
+    with pytest.raises(ConfigError, match="bogus: unknown field"):
         _finalized(site)
 
 
-def test_r9_4_not_ready_site_malformed_block_is_deferred(monkeypatch: pytest.MonkeyPatch) -> None:
-    """R9.4: a NOT-ready site's malformed block is deferred, not validated.
-    With no local ``limactl`` the local-lima site is not-ready, so its unknown
-    config field is never validated and finalize does not raise (it would if
-    the block were validated: see R5 above). Exercises the real
-    non-constructing ``not_ready`` returning blocked."""
-    monkeypatch.setattr("shutil.which", lambda name: None)  # no limactl -> not-ready
-    site = VMSiteDecl(name="local", platform="lima", platform_config={"bogus": "x"})
-    registry = _finalized(site)  # no raise: the block is deferred
-    assert registry.graph.readiness_of("vm-site", "local").reason == "limactl not installed"
+def test_typo_in_vm_host_is_refused_rather_than_changing_readiness(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The defect this ungating fixes, end to end: a REMOTE lima site whose
+    ``vm_host`` key is misspelled.
+
+    ``lima.not_ready`` reads ``config.get("vm_host")`` off UNVALIDATED config,
+    so ``vm_hst`` is invisible to it and the site folds as local, hence
+    not-ready for want of ``limactl``. While the validate pass was
+    readiness-gated, that verdict suppressed the very error naming the typo:
+    the operator was told ``limactl not installed``, a problem they do not
+    have, and their host setting silently did not apply. Worse, the identical
+    document WAS refused on a host that happened to have ``limactl``, so the
+    closed world was only closed on some machines.
+
+    Both hosts must now refuse it, and name the key."""
+    for limactl in (None, "/usr/bin/limactl"):
+        monkeypatch.setattr("shutil.which", lambda name, found=limactl: found)
+        site = VMSiteDecl(name="gpu", platform=CapabilityBlock.of("lima", **{"vm_hst": "me@gpu-box"}))
+        with pytest.raises(ConfigError, match="vm_hst: unknown field"):
+            _finalized(site)
+
+
+def test_not_ready_is_total_over_malformed_config() -> None:
+    """B1, pinned directly on the hook the fold calls: ``not_ready`` returns a
+    verdict for blocks no model would accept, rather than raising.
+
+    It is a classmethod over best-effort config and never constructs, so it
+    cannot re-run the throwing construct-time validator. That is what keeps the
+    fold total (R1/R4) and what stops a malformed block from becoming a
+    permanent readiness reason (the R9.4 loop). Independent of the validate
+    pass, which is why ungating that pass leaves this contract untouched."""
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+
+    for config in ({"bogus": "x"}, {"vm_host": 123}, {"vm_host": {"nested": "junk"}}, {}):
+        assert LimaPlatform.not_ready(config).reason in (None, "limactl not installed")
 
 
 def test_r5_not_ready_site_with_valid_block_stays_not_ready(monkeypatch: pytest.MonkeyPatch) -> None:
     """R5, the other direction: a not-ready site with a perfectly valid block
     is still not-ready (a dependency/host verdict, blind to validity)."""
     monkeypatch.setattr("shutil.which", lambda name: None)
-    site = VMSiteDecl(name="local", platform="lima", platform_config={})  # valid (empty) block
+    site = VMSiteDecl(name="local", platform=CapabilityBlock.of("lima", **{}))  # valid (empty) block
     registry = _finalized(site)
     assert not registry.graph.is_ready("vm-site", "local")
 
@@ -355,14 +395,18 @@ def test_r12_ready_site_materializes_its_secret(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(ProxmoxPlatform, "not_ready", classmethod(lambda cls, config: Readiness.ready()))
     site = VMSiteDecl(
         name="ready-px",
-        platform="proxmox",
-        platform_config={
-            "api_url": "https://pve:8006",
-            "node": "pve1",
-            "token_id": "t",
-            "template_vmid": 9000,
-            "token_secret": "tok-ready",
-        },
+        platform=CapabilityBlock.model_validate(
+            {
+                "name": "proxmox",
+                **{
+                    "api_url": "https://pve:8006",
+                    "node": "pve1",
+                    "token_id": "t",
+                    "template_vmid": 9000,
+                    "token_secret": "tok-ready",
+                },
+            }
+        ),
     )
     registry = _finalized_with_proxmox(site)
     assert _present(registry, "secret", "tok-ready")
@@ -378,14 +422,18 @@ def test_r12_not_ready_site_secret_does_not_materialize(monkeypatch: pytest.Monk
     monkeypatch.setattr(ProxmoxPlatform, "not_ready", classmethod(lambda cls, config: Readiness.blocked("sick")))
     site = VMSiteDecl(
         name="sick-px",
-        platform="proxmox",
-        platform_config={
-            "api_url": "https://pve:8006",
-            "node": "pve1",
-            "token_id": "t",
-            "template_vmid": 9000,
-            "token_secret": "tok-sick",
-        },
+        platform=CapabilityBlock.model_validate(
+            {
+                "name": "proxmox",
+                **{
+                    "api_url": "https://pve:8006",
+                    "node": "pve1",
+                    "token_id": "t",
+                    "template_vmid": 9000,
+                    "token_secret": "tok-sick",
+                },
+            }
+        ),
     )
     registry = _finalized_with_proxmox(site)
     assert not registry.graph.is_ready("vm-site", "sick-px")
@@ -407,8 +455,8 @@ def test_r12_secret_referenced_by_both_ready_and_not_ready_materializes(
 
     monkeypatch.setattr(ProxmoxPlatform, "not_ready", classmethod(_readiness))
     common = {"api_url": "https://pve:8006", "token_id": "t", "template_vmid": 9000, "token_secret": "shared-token"}
-    ready = VMSiteDecl(name="ready-px", platform="proxmox", platform_config={**common, "node": "pve1"})
-    sick = VMSiteDecl(name="sick-px", platform="proxmox", platform_config={**common, "node": "SICK"})
+    ready = VMSiteDecl(name="ready-px", platform=CapabilityBlock.of("proxmox", **{**common, "node": "pve1"}))
+    sick = VMSiteDecl(name="sick-px", platform=CapabilityBlock.of("proxmox", **{**common, "node": "SICK"}))
     registry = _finalized_with_proxmox(ready, sick)
 
     assert _present(registry, "secret", "shared-token")
@@ -432,14 +480,18 @@ def test_r12_disabled_referrer_does_not_materialize_its_secret(monkeypatch: pyte
     registry = _finalized_with_proxmox(
         VMSiteDecl(
             name="off-px",
-            platform="proxmox",
-            platform_config={
-                "api_url": "https://pve:8006",
-                "node": "pve1",
-                "token_id": "t",
-                "template_vmid": 9000,
-                "token_secret": "tok-off",
-            },
+            platform=CapabilityBlock.model_validate(
+                {
+                    "name": "proxmox",
+                    **{
+                        "api_url": "https://pve:8006",
+                        "node": "pve1",
+                        "token_id": "t",
+                        "template_vmid": 9000,
+                        "token_secret": "tok-off",
+                    },
+                }
+            ),
         ),
         extra_disabled=(("vm-site", "off-px"),),
     )

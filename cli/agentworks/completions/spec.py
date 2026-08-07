@@ -104,14 +104,6 @@ class CommandSpec:
 #   "resource_refs"   -> agw resource list --names-only
 #                        (kind/name per line, verbatim -- the candidate
 #                        IS the token for `resource describe KIND/NAME`)
-#   "migrate_selectors" -> agw resource list --origin operator --names-only
-#                        (a cross-product completer for `resource
-#                        migrate`: each kind/name row emits BOTH the bare
-#                        kind and the kind/name selector form, sort -u'd.
-#                        Operator-origin includes YAML-declared rows that
-#                        are already migrated; selecting one produces the
-#                        clear already-migrated error, which beats adding
-#                        CLI surface just to filter completion candidates.)
 #
 # The template + git_credentials completers source from the Resource
 # Registry (via `agw resource list --kind X --names-only`) rather than
@@ -122,13 +114,11 @@ class CommandSpec:
 # completion also picks up the framework's always-materialized defaults
 # and auto-declared entries the raw config text doesn't have.
 #
-# The per-kind Registry queries don't need `sort -u` on the shell side
-# because the Registry stores one row per `(kind, name)` and the CLI's
-# `--names-only` walks in insertion order -- names are already unique
-# per kind. `resource_kinds` reads `agw resource kinds --names-only`
-# (one kind per line, already sorted and unique). `migrate_selectors`
-# still `sort -u`'s because it aggregates the kind prefix across all
-# rows of the full listing.
+# No completer needs `sort -u` on the shell side. The per-kind Registry
+# queries are already unique because the Registry stores one row per
+# `(kind, name)` and the CLI's `--names-only` walks in insertion order;
+# `resource_kinds` reads `agw resource kinds --names-only` (one kind per
+# line, already sorted and unique).
 # `/` is the parse-safe separator for the kind/name stream: it cannot
 # appear in resource names (enforced at Registry.add), while `:` can.
 #
@@ -238,14 +228,26 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("resource.list", "kind"): "resource_kinds",
     ("resource.describe", "ref"): "resource_refs",
     ("resource.edit", "ref"): "resource_refs",
-    # Resource migration + authoring. `resource sample`'s kind argument
+    # `resource describe-kind` takes KIND or KIND/NAME, and completes from
+    # the config-free kinds completer: every kind is a valid target, and
+    # the KIND/NAME form addresses a capability implementation, which the
+    # kind's own output lists. Completing implementations too would mean a
+    # completer that builds a registry (so it would go quiet on a broken
+    # config, which is exactly when this command is worth reaching for).
+    ("resource.describe-kind", "target"): "resource_kinds",
+    # Resource authoring. `resource sample`'s kind argument
     # is a plain string (no click.Choice: any typed kind must reach the
     # service layer for a clean domain error, issue #276), so it
     # completes via the same config-free kinds completer `resource list
     # --kind` uses. Capability kinds complete too, then fail with a
-    # kind-aware domain error (they have no bundled sample).
+    # kind-aware domain error pointing at `describe-kind` (a capability is
+    # not a document an operator writes, so there is nothing to sample).
     ("resource.sample", "kind"): "resource_kinds",
-    ("resource.migrate", "selectors"): "migrate_selectors",
+    # `resource schema`'s kind argument completes from the same config-free
+    # kinds completer for the same reason `resource sample`'s does: it is a
+    # plain string, so any typed kind reaches the service layer and gets a
+    # clean domain error rather than a click.Choice parse failure.
+    ("resource.schema", "kind"): "resource_kinds",
 }
 
 

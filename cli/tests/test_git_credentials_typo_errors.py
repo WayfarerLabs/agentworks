@@ -7,7 +7,6 @@ named.
 
 from __future__ import annotations
 
-from textwrap import dedent
 from typing import TYPE_CHECKING
 
 import pytest
@@ -15,53 +14,25 @@ import pytest
 from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
 from agentworks.errors import ConfigError
-from tests.conftest import ManifestDoc, write_manifests
+from tests.conftest import ManifestDoc, write_cfg
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from pathlib import Path
 
 
-@pytest.fixture()
-def ssh_keys(tmp_path: Path) -> tuple[Path, Path]:
-    pub = tmp_path / "id.pub"
-    priv = tmp_path / "id"
-    pub.write_text("ssh-ed25519 X")
-    priv.write_text("-----BEGIN-----")
-    return pub, priv
-
-
 def _write_cfg(
     tmp_path: Path,
-    ssh_keys: tuple[Path, Path],
     *,
     manifests: Sequence[ManifestDoc | str] = (),
 ) -> Path:
-    """Write a bare operator config.toml plus its resources/ manifests and
-    return the config path."""
-    pub, priv = ssh_keys
-    p = tmp_path / "c.toml"
-    p.write_text(
-        dedent(
-            f"""\
-            [operator]
-            ssh_public_key = "{pub}"
-            ssh_private_key = "{priv}"
-
-            """
-        )
-    )
-    if manifests:
-        write_manifests(tmp_path, *manifests)
-    return p
+    """``write_cfg`` under this file's keyword spelling."""
+    return write_cfg(tmp_path, *manifests, filename="c.toml")
 
 
-def test_admin_referencing_undeclared_git_credential_errors_at_finalize(
-    tmp_path: Path, ssh_keys: tuple[Path, Path]
-) -> None:
+def test_admin_referencing_undeclared_git_credential_errors_at_finalize(tmp_path: Path) -> None:
     cfg = _write_cfg(
         tmp_path,
-        ssh_keys,
         manifests=[
             ManifestDoc(
                 "admin-template",
@@ -80,12 +51,9 @@ def test_admin_referencing_undeclared_git_credential_errors_at_finalize(
     assert "admin-template" in str(exc.value)
 
 
-def test_agent_template_referencing_undeclared_git_credential_errors(
-    tmp_path: Path, ssh_keys: tuple[Path, Path]
-) -> None:
+def test_agent_template_referencing_undeclared_git_credential_errors(tmp_path: Path) -> None:
     cfg = _write_cfg(
         tmp_path,
-        ssh_keys,
         manifests=[ManifestDoc("agent-template", "claude", {"git_credentials": ["github-typo"]})],
     )
     config = load_config(cfg, warn_issues=False)
@@ -95,13 +63,12 @@ def test_agent_template_referencing_undeclared_git_credential_errors(
     assert "agent-template" in str(exc.value)
 
 
-def test_declared_git_credential_does_not_error(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
+def test_declared_git_credential_does_not_error(tmp_path: Path) -> None:
     """The positive case: a declared credential resolves cleanly
     through the framework.
     """
     cfg = _write_cfg(
         tmp_path,
-        ssh_keys,
         manifests=[
             ManifestDoc("git-credential", "github", {"provider": {"name": "github"}}),
             ManifestDoc(

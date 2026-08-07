@@ -4,7 +4,7 @@ readiness refactor, LLD a).
 The graph is a pure structural retention of the reference edge set the
 finalize walk already computes: ``edges_of`` (outbound), ``dependents_of``
 (inbound, the replacement for the removed per-resource ``references`` field),
-and ``reachable_from`` (transitive closure). This phase computes no real
+and ``runtime_reachable_from`` (transitive closure). This phase computes no real
 readiness, so every node is ready/enabled; that is asserted here too.
 """
 
@@ -12,7 +12,6 @@ from __future__ import annotations
 
 from dataclasses import FrozenInstanceError, dataclass
 from pathlib import Path
-from textwrap import dedent
 
 import pytest
 
@@ -27,7 +26,7 @@ from agentworks.resources import (
     collect_secrets_for,
 )
 from agentworks.resources.reference import ReferenceEntry
-from tests.conftest import ManifestDoc, write_manifests
+from tests.conftest import ManifestDoc, write_cfg
 
 
 @dataclass(frozen=True)
@@ -68,7 +67,7 @@ def _graph_from(edges: dict[str, list[str]]) -> Registry:
     return r
 
 
-# -- edges_of / dependents_of / reachable_from on a multi-hop chain ----------
+# -- edges_of / dependents_of / the closure on a multi-hop chain -------------
 
 
 def test_chain_edges_dependents_and_reachability() -> None:
@@ -83,9 +82,9 @@ def test_chain_edges_dependents_and_reachability() -> None:
     assert graph.dependents_of("node", "d") == (ReferenceEntry(source=("node", "c"), usage="c needs d"),)
     assert graph.dependents_of("node", "a") == ()
 
-    assert graph.reachable_from("node", "a") == [("node", "b"), ("node", "c"), ("node", "d")]
-    assert graph.reachable_from("node", "c") == [("node", "d")]
-    assert graph.reachable_from("node", "d") == []
+    assert graph.runtime_reachable_from("node", "a") == [("node", "b"), ("node", "c"), ("node", "d")]
+    assert graph.runtime_reachable_from("node", "c") == [("node", "d")]
+    assert graph.runtime_reachable_from("node", "d") == []
 
 
 # -- the diamond: dedupe + two inbound edges ---------------------------------
@@ -100,7 +99,7 @@ def test_diamond_reachability_dedupes_and_records_both_inbound_edges() -> None:
     assert [(r.kind, r.name) for r in graph.edges_of("node", "a")] == [("node", "b"), ("node", "c")]
 
     # D reached once, deduped, first-encountered order (b before c, d via b).
-    assert graph.reachable_from("node", "a") == [("node", "b"), ("node", "c"), ("node", "d")]
+    assert graph.runtime_reachable_from("node", "a") == [("node", "b"), ("node", "c"), ("node", "d")]
 
     # Both b and c point at d.
     inbound_sources = {entry.source for entry in graph.dependents_of("node", "d")}
@@ -126,8 +125,8 @@ def test_edges_of_preserves_source_emission_order_across_sources() -> None:
     ]
 
 
-def test_reachable_from_is_cycle_safe() -> None:
-    """``reachable_from`` tolerates a cycle via its visited set (it may be
+def test_the_closure_is_cycle_safe() -> None:
+    """The closure tolerates a cycle via its visited set (it may be
     called on a graph built before finalize's cycle pass in tests). The
     registry itself rejects cycles at finalize, so build the cyclic graph
     directly from the graph builder to exercise the query in isolation."""
@@ -144,7 +143,7 @@ def test_reachable_from_is_cycle_safe() -> None:
     graph = build_graph(resources, all_refs, all_outbound)
 
     # Does not loop; visits every other node once.
-    assert set(graph.reachable_from("node", "a")) == {("node", "b"), ("node", "c")}
+    assert set(graph.runtime_reachable_from("node", "a")) == {("node", "b"), ("node", "c")}
 
 
 # -- query error semantics + this-phase readiness defaults -------------------
@@ -176,29 +175,8 @@ def test_every_node_is_ready_and_enabled_this_phase() -> None:
 
 
 def _write_cfg(tmp_path: Path, settings: str = "", *manifests: ManifestDoc | str) -> Path:
-    """Write a settings-only config.toml plus its resources/ manifests and
-    return the config path. ``settings`` carries settings-only TOML (operator
-    block plus any ``[secret_config]`` / ``[plugins]``); the resources under
-    test are authored as ``manifests`` beside it (ADR 0022)."""
-    pub = tmp_path / "id.pub"
-    priv = tmp_path / "id"
-    pub.write_text("ssh-ed25519 X")
-    priv.write_text("-----BEGIN-----")
-    p = tmp_path / "c.toml"
-    p.write_text(
-        dedent(
-            f"""\
-            [operator]
-            ssh_public_key = "{pub}"
-            ssh_private_key = "{priv}"
-
-            """
-        )
-        + dedent(settings)
-    )
-    if manifests:
-        write_manifests(tmp_path, *manifests)
-    return p
+    """``write_cfg`` under this file's spelling."""
+    return write_cfg(tmp_path, *manifests, settings=settings, filename="c.toml")
 
 
 def _recompute_inbound(registry: Registry) -> dict[tuple[str, str], list[ReferenceEntry]]:
@@ -286,11 +264,11 @@ def test_capability_impls_are_stamped_on_nodes(tmp_path: Path) -> None:
     assert graph._nodes[("vm-template", "default")].impl is None
 
 
-# -- reachable_from reproduces collect_secrets_for ---------------------------
+# -- the runtime closure reproduces collect_secrets_for ----------------------
 
 
-def test_reachable_from_matches_collect_secrets_for(tmp_path: Path) -> None:
-    """``reachable_from`` (filtered to secrets) reproduces the set
+def test_runtime_closure_matches_collect_secrets_for(tmp_path: Path) -> None:
+    """The runtime closure (filtered to secrets) reproduces the set
     ``collect_secrets_for`` returns for representative roots, including a
     VM template whose bootstrap reaches the tailscale auth key."""
     cfg = _write_cfg(
@@ -304,11 +282,11 @@ def test_reachable_from_matches_collect_secrets_for(tmp_path: Path) -> None:
 
     for root in (("vm-template", "default"), ("admin-template", "default")):
         walk_names = {decl.name for decl in collect_secrets_for(registry, root)}
-        reachable_secret_names = {name for (kind, name) in graph.reachable_from(*root) if kind == "secret"}
-        assert reachable_secret_names == walk_names, f"reachable_from diverged from collect_secrets_for for {root}"
+        reachable_secret_names = {name for (kind, name) in graph.runtime_reachable_from(*root) if kind == "secret"}
+        assert reachable_secret_names == walk_names, f"the runtime closure diverged from collect_secrets_for for {root}"
 
     # The VM template reaches the auto-declared tailscale key (bootstrap edge).
-    vm_secrets = {name for (kind, name) in graph.reachable_from("vm-template", "default") if kind == "secret"}
+    vm_secrets = {name for (kind, name) in graph.runtime_reachable_from("vm-template", "default") if kind == "secret"}
     assert "tailscale-auth-key" in vm_secrets
     assert "vm-secret" in vm_secrets
 

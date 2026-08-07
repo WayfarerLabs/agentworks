@@ -11,8 +11,8 @@ from __future__ import annotations
 import shlex
 from typing import TYPE_CHECKING, Literal, NoReturn, Protocol
 
-from agentworks.config.validation import LINUX_USERNAME_MAX_LENGTH
 from agentworks.errors import StateError
+from agentworks.naming import LINUX_USERNAME_MAX_LENGTH
 
 if TYPE_CHECKING:
     from collections.abc import Callable

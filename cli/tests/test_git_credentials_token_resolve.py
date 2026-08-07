@@ -9,13 +9,12 @@ fallback.
 
 from __future__ import annotations
 
-from textwrap import dedent
 from typing import TYPE_CHECKING
 
 import pytest
 
 from agentworks.config import load_config
-from tests.conftest import ManifestDoc, write_manifests
+from tests.conftest import ManifestDoc, write_cfg
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -43,46 +42,18 @@ def _resolve_tokens(config: object, registry: object, names: list[str]) -> dict[
     }
 
 
-@pytest.fixture()
-def ssh_keys(tmp_path: Path) -> tuple[Path, Path]:
-    pub = tmp_path / "id.pub"
-    priv = tmp_path / "id"
-    pub.write_text("ssh-ed25519 X")
-    priv.write_text("-----BEGIN-----")
-    return pub, priv
-
-
 def _write_cfg(
     tmp_path: Path,
-    ssh_keys: tuple[Path, Path],
     *,
     settings: str = "",
     manifests: Sequence[ManifestDoc | str] = (),
 ) -> Path:
-    """Write a settings-only config.toml plus its resources/ manifests and
-    return the config path. ``settings`` carries settings-only TOML
-    ([secret_config], [plugins]); resources go in ``manifests``."""
-    pub, priv = ssh_keys
-    p = tmp_path / "c.toml"
-    p.write_text(
-        dedent(
-            f"""\
-            [operator]
-            ssh_public_key = "{pub}"
-            ssh_private_key = "{priv}"
-
-            """
-        )
-        + dedent(settings)
-    )
-    if manifests:
-        write_manifests(tmp_path, *manifests)
-    return p
+    """``write_cfg`` under this file's keyword spelling."""
+    return write_cfg(tmp_path, *manifests, settings=settings, filename="c.toml")
 
 
 def test_collect_git_tokens_resolves_default_secret_name(
     tmp_path: Path,
-    ssh_keys: tuple[Path, Path],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Default ``token = "git-token-<name>"`` resolves via the framework's
@@ -90,7 +61,6 @@ def test_collect_git_tokens_resolves_default_secret_name(
     """
     cfg = _write_cfg(
         tmp_path,
-        ssh_keys,
         settings="""
         [secret_config]
         backends = ["env-var"]
@@ -109,7 +79,6 @@ def test_collect_git_tokens_resolves_default_secret_name(
 
 def test_collect_git_tokens_resolves_custom_secret_name(
     tmp_path: Path,
-    ssh_keys: tuple[Path, Path],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Operator-typed ``token = "custom-tok"`` targets the custom secret
@@ -117,7 +86,6 @@ def test_collect_git_tokens_resolves_custom_secret_name(
     """
     cfg = _write_cfg(
         tmp_path,
-        ssh_keys,
         settings="""
         [secret_config]
         backends = ["env-var"]
@@ -136,7 +104,6 @@ def test_collect_git_tokens_resolves_custom_secret_name(
 
 def test_collect_git_tokens_batches_multiple_credentials(
     tmp_path: Path,
-    ssh_keys: tuple[Path, Path],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Multiple credentials resolve in one batched call; each gets its
@@ -144,7 +111,6 @@ def test_collect_git_tokens_batches_multiple_credentials(
     """
     cfg = _write_cfg(
         tmp_path,
-        ssh_keys,
         # ``azdo`` ships in the opt-in ``azure`` system plugin; enable it so the
         # azdo credential is ready and its token resolves.
         settings="""
@@ -170,8 +136,8 @@ def test_collect_git_tokens_batches_multiple_credentials(
     assert tokens == {"github": "ghp_aaa", "azdo": "azdo_bbb"}
 
 
-def test_collect_git_tokens_empty_list_returns_empty_dict(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
-    cfg = _write_cfg(tmp_path, ssh_keys)
+def test_collect_git_tokens_empty_list_returns_empty_dict(tmp_path: Path) -> None:
+    cfg = _write_cfg(tmp_path)
     config = load_config(cfg, warn_issues=False)
 
     from agentworks.bootstrap import build_registry
@@ -182,7 +148,6 @@ def test_collect_git_tokens_empty_list_returns_empty_dict(tmp_path: Path, ssh_ke
 
 def test_manifest_declared_credential_resolves_through_the_fold(
     tmp_path: Path,
-    ssh_keys: tuple[Path, Path],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A YAML-manifest-declared credential (here a scoped fine-grained
@@ -190,7 +155,6 @@ def test_manifest_declared_credential_resolves_through_the_fold(
     both declaration surfaces feed the graph identically."""
     cfg = _write_cfg(
         tmp_path,
-        ssh_keys,
         settings="""
         [secret_config]
         backends = ["env-var"]
@@ -211,7 +175,6 @@ def test_manifest_declared_credential_resolves_through_the_fold(
 
 def test_collect_git_tokens_credential_lines_use_resolved_value(
     tmp_path: Path,
-    ssh_keys: tuple[Path, Path],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The token value flows into ``provider.credential_lines(token)``
@@ -219,7 +182,6 @@ def test_collect_git_tokens_credential_lines_use_resolved_value(
     """
     cfg = _write_cfg(
         tmp_path,
-        ssh_keys,
         settings="""
         [secret_config]
         backends = ["env-var"]
@@ -242,7 +204,6 @@ def test_collect_git_tokens_credential_lines_use_resolved_value(
 
 def test_secret_name_equals_graph_secret_edge_single_derivation(
     tmp_path: Path,
-    ssh_keys: tuple[Path, Path],
 ) -> None:
     """LLD d single-derivation invariant: a git-credential provider's op-time
     ``secret_name`` (read from the construct-time ``_secret_refs`` cache, itself
@@ -252,7 +213,6 @@ def test_secret_name_equals_graph_secret_edge_single_derivation(
     needed."""
     cfg = _write_cfg(
         tmp_path,
-        ssh_keys,
         settings="""
         [secret_config]
         backends = ["env-var"]

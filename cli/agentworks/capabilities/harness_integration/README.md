@@ -58,8 +58,8 @@ session-scoped.
 ## Available Integrations
 
 Three integrations ship today. This list can change, so
-`agw resource list --kind harness-integration --include-disabled` is the definitive set on any given
-install.
+`agw resource describe-kind harness-integration` is the definitive set on any given install, and
+`agw resource describe-kind harness-integration/<name>` the definitive config for one.
 
 - **`shell`** (built in) is the default. By default it simply opens the configured shell for the
   session's target user (agent or admin user). It can further be configured to run a specific
@@ -69,9 +69,8 @@ install.
 - **`claude-code`** (via the `claude` system plugin) drives an interactive Claude Code session. It
   knows how to launch Claude Code and, on resume, how to check for an existing session and reattach
   if found so that the operator experience is seamless and they can pick up right where they left
-  off. Limited configuration is supported, expressed in Claude Code's own terms: `permission_mode`
-  and `model` map to the `--permission-mode` and `--model` CLI flags, and `extra_args` passes
-  additional Claude Code CLI arguments through verbatim.
+  off. Limited configuration is supported, expressed in Claude Code's own terms: its fields map to
+  Claude Code CLI flags, with an `extra_args` escape hatch that passes arguments through verbatim.
 - **`codex`** (via the `codex` system plugin) drives an interactive Codex session. Like
   `claude-code`, it launches the tool and, on resume, reattaches to the existing conversation
   instead of starting over when a Codex session exists, and offers limited configuration options.
@@ -148,8 +147,8 @@ A **harness integration** is a harness's runtime adapter: it knows how a session
 shell, Claude Code, Codex, ...) is configured, started, and resumed, and what the launch target must
 provide for that to work. The session is the rich consuming resource: a session node HOLDS an
 integration instance, composes its readiness, and the session manager invokes its ops. The
-integration never touches tmux, the database, or the CLI; it validates its config, probes its
-target, and returns pane command strings.
+integration never touches tmux, the database, or the CLI; it declares its config, probes its target,
+and returns pane command strings.
 
 Three integrations ship today and serve as references:
 
@@ -173,18 +172,18 @@ The capability ladder, harness-integration edition:
   `builtin_override="reserved"` (a plugin cannot replace `shell`).
 - A **capability** is a `HarnessIntegration` subclass registered in `HARNESS_INTEGRATION_REGISTRY`
   (`__init__.py`), plus a read-only `HarnessIntegrationEntry` registry row so it lists and describes
-  like any resource. Core built-ins publish their own rows (`publish_to`); a plugin-seated
-  integration's row is published by the plugin machinery with a `system-plugin` origin instead, and
-  `publish_to` skips it.
-- An **instance** is one integration bound to one session: the merged `harness_integration_config`
-  blob plus the session's identity (`session_name`, `vm_name`, `workspace_name`, the agent-or-admin
-  target) and its per-session state blob. Constructed fresh per operation by the session node
-  factories.
+  like any resource. Core built-ins' rows come from the generic capability publisher
+  (`capabilities/publish.py`, driven by the kind's descriptor); a plugin-seated integration's row is
+  published by the plugin machinery with a `system-plugin` origin instead, and the built-in
+  publisher skips it.
+- An **instance** is one integration bound to one session: the merged harness config blob plus the
+  session's identity (`session_name`, `vm_name`, `workspace_name`, the agent-or-admin target) and
+  its per-session state blob. Constructed fresh per operation by the session node factories.
 - The **consuming resource** is the `session-template` (it owns the config: in manifests,
   `spec.harness_integration` is one tagged table whose `name` key selects the integration and whose
-  remaining keys are that integration's config; the operator-facing shapes, including the TOML
-  spelling and the deprecated sibling form, are documented in `docs/guides/resources.md`) and, at
-  runtime, the session node that holds the instance.
+  remaining keys are that integration's config, which is the only accepted shape; the
+  operator-facing view is in `docs/guides/resources.md`) and, at runtime, the session node that
+  holds the instance.
 
 Layering is a hard rule: this package imports neither `sessions/` nor `orchestration/` (the `target`
 type is a local `Protocol` for exactly this reason), and `test_shell_integration.py` asserts it. An
@@ -199,32 +198,49 @@ A new harness integration implements this surface (see `base.py` for the full do
 `name` and `description` ClassVars (the registry row), inherited `owner_kind = "session-template"`
 (error framing: config errors render as `session-template/<name>`).
 
-#### Validation: Shape and Vocabulary Only
+Three class-level declarations are REQUIRED and none is defaulted, because a default would let an
+unmigrated implementation inherit a claim it never made. Registration refuses an implementation
+missing any of them, naming the plugin:
 
-Unknown fields raise `ConfigError` naming the integration and the field(s); each present field is
-type-checked. Two rules with teeth:
+- `contract_version`: the capability contract version this implementation is written against.
+  Registration requires an exact match with the version its kind's descriptor declares supported, so
+  a contract change is a hard cutover rather than a silent re-certification.
+- `config_model`: what the config IS (see below). A capability that accepts none declares a model
+  with no fields beyond its tag, which is closed-world by construction.
+- `name` / `description`: the registry row's identity.
 
-- **No completeness rules here.** `validate` runs per declared blob, and a child template may
-  declare a partial blob that only becomes complete after the inheritance merge. Required-field and
-  cross-field rules belong in the second `validate` call the resolver makes on the merged blob (no
-  shipped integration has any; the slot exists).
-- **Do not validate tool-owned choice sets.** `claude-code` forwards `permission_mode` and `model`
+#### Config: One Declared Model
+
+The integration declares `config_model`, an `AgwModel` carrying its own `name` as a `Literal` tag
+plus one field per accepted key, each with its type and an attribute docstring that IS its
+operator-facing description. The core validates against it (closed-world, so an unknown key is a
+hard error naming the valid fields) and extracts whatever references it marks. No integration code
+runs for either. Two rules with teeth:
+
+- **A required field is a claim about the whole lineage.** Validation runs at finalize on each
+  template's EFFECTIVE (merged) blob, so a child may declare a partial one that its parents
+  complete. What a required field does forbid is a template whose whole chain never supplies it,
+  including a base template that expects only its children to: every template is directly namable at
+  `session create`, so every template's chain has to be complete on its own. An error on an
+  inherited key names the template that declared it. No shipped integration has a required field.
+- **Do not model tool-owned choice sets.** `claude-code` forwards `permission_mode` and `model`
   values verbatim: the valid choices are the tool's and drift between its releases, so a stale
   integration-side enum would reject values a newer CLI accepts. An invalid value surfaces as the
   tool's own startup error in the pane, which is the right place. That promise holds even when the
   workload dies too fast for the pane to ever be attached: `session create` / `session resume`
   detect the instantly-dead pane, capture its output, and fold it into their own error message.
 
-#### Declaring Dependencies: Total and Pure
+#### Declaring References: A Marker, Not a Method
 
-`dependencies` returns the resource references the config blob implies, secrets above all. Never
-raises (malformed fields just omit their edge; `validate` owns the raising). Every shipped
-integration returns `()`; the plumbing behind it is live and tested at the framework level: the
-session node exposes the integration's declared references through its `config_secret_refs` (what
-the preflight sweep predicts resolvability over, with owner/usage framing sourced to the session
-template) and derives its bare-name `secret_refs` union from them, with values delivered through
-`ctx.secret(name)`. No shipped integration declares a secret yet, so a secret-declaring integration
-should expect to be the first real exerciser of that path.
+A field that names a secret (or any other resource) carries a `SecretRef` / `ResourceRef` marker,
+optionally with an owner-templated default. The core reads the markers off the model: total, never
+raising (a malformed field just omits its edge; validation owns the raising). No shipped integration
+marks a field, so extraction yields `()` for all three; the plumbing behind it is live and tested at
+the framework level: the session node exposes the integration's declared references through its
+`config_secret_refs` (what the preflight sweep predicts resolvability over, with owner/usage framing
+sourced to the session template) and derives its bare-name `secret_refs` union from them, with
+values delivered through `ctx.secret(name)`. No shipped integration declares a secret yet, so a
+secret-declaring integration should expect to be the first real exerciser of that path.
 
 #### Config Inheritance, Decided per Field
 
@@ -245,11 +261,22 @@ Every implementation must therefore accept an empty base. A different integratio
 in `base`: the resolver discards accumulated config on an integration switch, so a parent's config
 cannot leak across it.
 
+**`merge_config` runs inside the finalize build walk, which may not raise.** It must be a pure
+function of its two arguments: no I/O, no registry, no config, and no exception on a shape it does
+not like (the blob it is handed has not been validated yet, because the graph is built before
+anything is). This is deliberately NOT a registration conformance check, because neither purity nor
+non-raising is a property a check can establish, so what happens when an implementation breaks it is
+worth stating plainly instead: a raising `merge_config` takes `build_registry` down with that
+plugin's own traceback, and every command fails showing a stack trace rather than a config error. An
+unregistered name never reaches an implementation at all: it gets the base contract's own child-wins
+default, and the kind's miss policy reports the name.
+
 #### Construction: Cheap, No I/O
 
-The base `__init__` binds `(owner_name, config)` and re-runs `validate`; the integration constructor
-adds the session identity kwargs and the `state` blob. Nothing else: no probing, no network, no
-minting. Anything that needs the world happens in readiness or ops.
+The base `__init__` validates the blob into the declared model and binds the validated instance
+(reachable as `self.config`, typed); the integration constructor adds the session identity kwargs
+and the `state` blob. Nothing else: no probing, no network, no minting. Anything that needs the
+world happens in readiness or ops.
 
 #### Readiness: One Probe to Implement
 
@@ -502,13 +529,23 @@ authority on the descriptor, registration mechanics, and the enablement model; t
    `[plugins] system = ["<name>"]`; `agw doctor` shows the roster. No other installer machinery
    exists or is needed.
 
-The checklist beyond code, per the repo rules: the `[plugins]` block comment in
-`cli/agentworks/sample-config.toml`, the harness-integration section of `docs/guides/resources.md`,
-the sample manifest (`cli/agentworks/manifests/samples/session-template.yaml`) if it should
-demonstrate the new integration, the harness-integration material in `cli/README.md` (under "Session
-Templates"), `.cspell.json` for harness names, and a completions check (today no completer
-enumerates integration names, so there is nothing to regenerate unless the change also adds CLI
-surface; the rule still requires the check).
+The checklist beyond code, per the repo rules:
+
+- **The integration's own `prose`** (a `TopicProse` beside its class) plus the attribute docstring
+  on every config field. Between them those ARE the documentation:
+  `agw resource describe-kind harness-integration/<name>`, the generated sample, and the editor's
+  hover text all render them, and there is no sample manifest to hand-edit because samples are
+  rendered.
+- **Do not add a field list to a guide.** `docs/guides/resources.md` and `cli/README.md` carry
+  pointers to the rendered surfaces plus whatever an operator needs that is not a fact about a field
+  (a tool's own behavior, a choice worth explaining). Add there only if you have something of that
+  kind to say. A field list written out in a guide is a second description of the model, and the
+  ones that used to be there had already drifted.
+- **The `[plugins]` block comment** in `cli/agentworks/sample-config.toml`, if the integration
+  arrives with a new system plugin.
+- **`.cspell.json`** for harness names, and a completions check (today no completer enumerates
+  integration names, so there is nothing to regenerate unless the change also adds CLI surface; the
+  rule still requires the check).
 
 ### Reserved Directions (Recorded, Not Built)
 

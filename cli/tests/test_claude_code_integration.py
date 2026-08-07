@@ -16,8 +16,10 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.capabilities.base import OperationScope, RunContext, ScopeLevel
+from agentworks.capabilities.config import capability_config_references, validate_capability_config
 from agentworks.errors import ConfigError, StateError
 from agentworks.plugins.claude.harness_integration import ClaudeCodeIntegration
+from agentworks.schema import RefOwner
 from tests.conftest import _FakeResult, _FakeTarget
 
 if TYPE_CHECKING:
@@ -66,48 +68,54 @@ def _session_scope() -> OperationScope:
 # -- config vocabulary -------------------------------------------------------
 
 
-def test_dependencies_imply_no_reference() -> None:
-    """``claude-code`` implies no edge, and ``dependencies`` is total: it
-    returns ``()`` for the known fields and even for a malformed blob."""
-    assert (
-        ClaudeCodeIntegration.dependencies(
-            "session-template/claude",
-            {"permission_mode": "acceptEdits", "model": "opus", "extra_args": ["--foo"]},
-        )
-        == ()
+def _refs(blob: dict[str, object]) -> tuple[object, ...]:
+    return capability_config_references(
+        kind="harness-integration",
+        config={"name": "claude-code", **blob},
+        owner=RefOwner(kind="session-template", name="claude"),
     )
-    # Never raises, even on config that ``validate`` would reject.
-    assert ClaudeCodeIntegration.dependencies("session-template/claude", {"model": 3, "permision_mode": "typo"}) == ()
 
 
-def test_validate_accepts_the_three_fields_and_empty_config() -> None:
-    assert (
-        ClaudeCodeIntegration.validate(
-            "session-template/claude",
-            {"permission_mode": "acceptEdits", "model": "opus", "extra_args": ["--foo"]},
-        )
-        is None
+def test_it_implies_no_reference() -> None:
+    """``claude-code`` names no Resource in its config, and extraction is
+    total: it returns ``()`` for the known fields and for a malformed blob
+    alike."""
+    assert _refs({"model": "x"}) == ()
+    assert _refs({"model": 3, "nonsense": "typo"}) == ()
+
+
+def _validate(blob: dict[str, object]) -> None:
+    """Validation is the CORE's now: it reads the model this integration
+    declares, and no integration code runs."""
+    validate_capability_config(
+        kind="harness-integration",
+        config={"name": "claude-code", **blob},
+        owner=RefOwner(kind="session-template", name="claude"),
     )
-    assert ClaudeCodeIntegration.validate("session-template/claude", {}) is None
 
 
-def test_validate_rejects_unknown_field() -> None:
-    with pytest.raises(ConfigError, match="unknown claude-code harness integration field"):
-        ClaudeCodeIntegration.validate("session-template/claude", {"permision_mode": "typo"})
+def test_validation_accepts_the_three_fields_and_empty_config() -> None:
+    _validate({"permission_mode": "acceptEdits", "model": "opus", "extra_args": ["--foo"]})
+    _validate({})
 
 
-def test_validate_rejects_non_string_model() -> None:
-    with pytest.raises(ConfigError, match="model must be a string"):
-        ClaudeCodeIntegration.validate("session-template/claude", {"model": 3})
+def test_validation_rejects_unknown_field() -> None:
+    with pytest.raises(ConfigError, match="permision_mode: unknown field; expected one of:"):
+        _validate({"permision_mode": "typo"})
 
 
-def test_validate_rejects_non_list_extra_args() -> None:
-    with pytest.raises(ConfigError, match="extra_args must be a list of strings"):
-        ClaudeCodeIntegration.validate("session-template/claude", {"extra_args": "just-a-string"})
+def test_validation_rejects_non_string_model() -> None:
+    with pytest.raises(ConfigError, match="model: must be a string"):
+        _validate({"model": 3})
+
+
+def test_validation_rejects_non_list_extra_args() -> None:
+    with pytest.raises(ConfigError, match="extra_args: must be a list"):
+        _validate({"extra_args": "just-a-string"})
 
 
 def test_construct_revalidates_config() -> None:
-    with pytest.raises(ConfigError, match="unknown claude-code harness integration field"):
+    with pytest.raises(ConfigError, match="nope: unknown field"):
         _harness_integration({"nope": 1})
 
 

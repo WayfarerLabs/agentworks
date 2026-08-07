@@ -28,7 +28,10 @@ from agentworks.capabilities.base import RunContext
 from agentworks.db import VMStatus
 from agentworks.errors import ConfigError
 from agentworks.plugins.azure.network import AzureError
-from agentworks.plugins.azure.platform import DEFAULT_CLIENT_SECRET, AzureVMPlatform
+from agentworks.plugins.azure.platform import AzureVMPlatform
+
+#: The well-known default the model's SecretRef template names.
+DEFAULT_CLIENT_SECRET = "azure-client-secret"
 
 if TYPE_CHECKING:
     from agentworks.db import VMRow

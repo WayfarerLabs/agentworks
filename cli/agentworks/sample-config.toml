@@ -10,7 +10,7 @@
 # prints a commented starter; --all for every kind). Legacy TOML resource
 # sections are no longer supported: a config.toml that still declares
 # resources is a hard error at load now (they were previously deprecated
-# with a warning). Run `agw resource migrate` to move them to YAML. This
+# with a warning); the resources guide walks through rewriting them. This
 # file is the permanent home for SETTINGS: operator identity, paths,
 # defaults, enabled plugins, and the secret backend chain.
 #
@@ -60,7 +60,7 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # admin and agent homes there are kept private (mode 0750). Use a data volume path.
 #vm_workspaces = "/opt/agentworks/workspaces"  # workspace directory on VMs
 #vscode_workspaces = "~/aw-vscode-workspaces"   # .code-workspace file directory
-#backups = "~/.config/agentworks/backups"       # backup directory (vm backups, config.toml backups from `agw resource migrate`)
+#backups = "~/.config/agentworks/backups"       # backup directory (vm backups)
 
 # --- System plugins ---
 # `[plugins]` is the plugin-subsystem namespace, and `system` is its list of
@@ -94,6 +94,10 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
                                             # disable themselves where this host
                                             # lacks what they need; see
                                             # `agw doctor` for each site's state)
+                                            # Naming a site that does not exist is
+                                            # an error; naming one that exists but
+                                            # is not ready here is not (it warns in
+                                            # `agw doctor` and errors only on use).
 #runup_git_credentials = true               # run the git-credential runup: authenticate each
                                             # token against its provider API before it is
                                             # written (false for airgapped setups)
@@ -102,10 +106,10 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # Secrets
 # =============================================================================
 #
-# A pluggable, named-secret system. Anywhere a value can be a string, it can
-# also be `{ secret = "<name>" }`, referencing a declared secret. Backends
-# produce the value at command time; agentworks never persists secret values
-# to disk.
+# A pluggable, named-secret system. In a resource manifest, anywhere an env
+# value can be a string it can also be `{ secret: <name> }`, referencing a
+# declared secret. Backends produce the value at command time; agentworks
+# never persists secret values to disk.
 #
 # Use `agw secret list` to see how each active backend would look up each
 # declared secret. Use `agw secret describe <name>` for a full view including
@@ -136,8 +140,10 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 #   prompt      : interactive prompt. Always applies; you are never asked for
 #                 the same secret twice in one command, and all prompting
 #                 happens before the command starts changing anything.
-# Backends are registered code capabilities (agw resource list --kind
-# secret-backend); their names are the valid chain entries here.
+# Backends are registered code capabilities; their names are the valid chain
+# entries here. `agw resource describe-kind secret-backend` lists the ones this
+# build has (it reads no config, so it answers while you are still editing
+# this file), and naming one documents the per-secret mapping it expects.
 
 #[secret_config]
 #backends = ["env-var", "onepassword", "prompt"]    # example chain; the default is ["env-var", "prompt"].
@@ -149,7 +155,9 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # backends absent from this list are dormant. A backend that is not-ready on
 # this host (e.g. onepassword with no `op` installed) is skipped with a warning
 # and the chain falls through to the next one. An explicit empty list
-# `backends = []` disables resolution entirely.
+# `backends = []` disables resolution entirely. A name that matches no backend
+# at all is an error, the same as an unknown `defaults.site`: it is a typo, not
+# an opt-out.
 
 # =============================================================================
 # Sessions

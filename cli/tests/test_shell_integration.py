@@ -14,8 +14,10 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.capabilities.base import OperationScope, RunContext, ScopeLevel
+from agentworks.capabilities.config import capability_config_references, validate_capability_config
 from agentworks.capabilities.harness_integration import ShellIntegration
 from agentworks.errors import ConfigError, StateError
+from agentworks.schema import RefOwner
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -75,40 +77,70 @@ def _session_scope(
     )
 
 
-# -- config vocabulary: dependencies + validate ------------------------------
+# -- What a config model may declare ------------------------------------------
 
 
-def test_dependencies_imply_no_reference() -> None:
-    """``shell`` implies no edge, and ``dependencies`` is total: it
-    returns ``()`` for the known fields and even for a malformed blob."""
-    assert (
-        ShellIntegration.dependencies(
-            "session-template/claude",
-            {
-                "command": "claude",
-                "resume_command": "claude --resume",
-                "required_commands": ["claude", "rg"],
-            },
-        )
-        == ()
+def test_shells_config_is_entirely_optional_beyond_its_tag() -> None:
+    """``shell`` is the only integration that may not require anything.
+
+    It is the DEFAULT workload: a session template naming no integration
+    resolves to it, and finalize validates that template's effective
+    config against this model. That includes the reserved auto-declared
+    ``default`` row, which has no declaration to put a value in, so a
+    required field here would make every operator's config fail to load
+    with nothing they could write to fix it. Every OTHER integration may
+    require what it likes, because a template has to name it first.
+    """
+    from agentworks.capabilities.harness_integration.shell import ShellConfig
+
+    required = [name for name, field in ShellConfig.model_fields.items() if field.is_required()]
+    assert required == ["name"]  # the discriminator, which no template writes
+
+
+# -- config vocabulary: extraction + validation -------------------------------
+
+
+def _refs(blob: dict[str, object]) -> tuple[object, ...]:
+    return capability_config_references(
+        kind="harness-integration",
+        config={"name": "shell", **blob},
+        owner=RefOwner(kind="session-template", name="claude"),
     )
-    # Never raises, even on config that ``validate`` would reject.
-    assert ShellIntegration.dependencies("session-template/claude", {"commnad": "typo", "command": 3}) == ()
 
 
-def test_validate_accepts_the_known_fields_and_empty_config() -> None:
-    assert (
-        ShellIntegration.validate(
-            "session-template/claude",
-            {
-                "command": "claude",
-                "resume_command": "claude --resume",
-                "required_commands": ["claude", "rg"],
-            },
-        )
-        is None
+def test_it_implies_no_reference() -> None:
+    """``shell`` names no Resource in its config, and extraction is
+    total: it returns ``()`` for the known fields and for a malformed blob
+    alike."""
+    assert _refs({"model": "x"}) == ()
+    assert _refs({"model": 3, "nonsense": "typo"}) == ()
+
+
+def _validate(blob: dict[str, object]) -> None:
+    validate_capability_config(
+        kind="harness-integration",
+        config={"name": "shell", **blob},
+        owner=RefOwner(kind="session-template", name="claude"),
     )
-    assert ShellIntegration.validate("session-template/claude", {}) is None
+
+
+def test_validation_accepts_the_known_fields_and_empty_config() -> None:
+    _validate(
+        {
+            "command": "claude",
+            "resume_command": "claude --resume",
+            "required_commands": ["claude", "rg"],
+        }
+    )
+    _validate({})
+
+
+def test_omitted_fields_arrive_defaulted_not_none() -> None:
+    """FR15 on the most-omitted config there is: every field beyond the
+    tag is optional, and optional means the model hands the integration a
+    concrete value, never a ``None`` for it to fold to a literal."""
+    config = _harness_integration({}).config
+    assert (config.command, config.resume_command, config.required_commands) == ("", "", [])
 
 
 def test_shell_launch_note_is_silent() -> None:
@@ -116,30 +148,34 @@ def test_shell_launch_note_is_silent() -> None:
     assert _harness_integration().launch_note() is None
 
 
-def test_validate_rejects_unknown_field() -> None:
-    with pytest.raises(ConfigError, match="unknown shell harness integration field"):
-        ShellIntegration.validate("session-template/claude", {"commnad": "typo"})
+def test_validation_rejects_unknown_field() -> None:
+    with pytest.raises(ConfigError, match="commnad: unknown field; expected one of:"):
+        _validate({"commnad": "typo"})
 
 
-def test_validate_rejects_deprecated_runtime_field() -> None:
-    with pytest.raises(ConfigError, match="unknown shell harness integration field.*restart_command"):
-        ShellIntegration.validate("session-template/claude", {"restart_command": "old"})
+def test_validation_rejects_deprecated_runtime_field() -> None:
+    with pytest.raises(ConfigError, match="restart_command: unknown field"):
+        _validate({"restart_command": "old"})
 
 
-def test_validate_rejects_non_string_command() -> None:
-    with pytest.raises(ConfigError, match="command must be a string"):
-        ShellIntegration.validate("session-template/claude", {"command": 3})
+def test_validation_rejects_non_string_command() -> None:
+    # ``null`` is covered by the same declaration and the same message: the
+    # field is ``str`` with a default, so an explicit null is no longer a
+    # spelling of "omitted" (which is what
+    # ``test_omitted_fields_arrive_defaulted_not_none`` pins).
+    with pytest.raises(ConfigError, match="command: must be a string"):
+        _validate({"command": 3})
 
 
-def test_validate_rejects_non_string_required_commands() -> None:
-    with pytest.raises(ConfigError, match="required_commands must be a list"):
-        ShellIntegration.validate("session-template/claude", {"required_commands": [1, 2]})
+def test_validation_rejects_non_string_required_commands() -> None:
+    with pytest.raises(ConfigError, match=r"required_commands\[0\]: must be a string"):
+        _validate({"required_commands": [1, 2]})
 
 
 def test_construct_revalidates_config() -> None:
-    """A shape error dies at construction (the base re-runs
-    validate)."""
-    with pytest.raises(ConfigError, match="unknown shell harness integration field"):
+    """A shape error dies at construction: the base validates the blob
+    into the declared model and binds the result."""
+    with pytest.raises(ConfigError, match="nope: unknown field"):
         _harness_integration({"nope": 1})
 
 
@@ -171,7 +207,7 @@ def test_merge_never_launders_an_invalid_required_commands_entry() -> None:
     merged = ShellIntegration.merge_config({}, {"required_commands": ["rg", 5]})
     assert merged["required_commands"] == ["rg", 5]
     with pytest.raises(ConfigError, match="required_commands"):
-        ShellIntegration.validate("session-template/t", merged)
+        _validate(merged)
 
 
 def test_merge_child_overriding_only_command_keeps_parent_required() -> None:

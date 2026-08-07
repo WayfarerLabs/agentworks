@@ -19,16 +19,17 @@ import pytest
 
 from agentworks.agents.template import AgentTemplate
 from agentworks.capabilities.harness_integration import ensure_harness_integration_enabled
-from agentworks.capabilities.harness_integration.base import HarnessIntegration
 from agentworks.errors import ConfigError, StateError
 from agentworks.install_commands import UserInstallCommandEntry
+from agentworks.origin import Origin
 from agentworks.plugins import Plugin, plugin_enablement_source, publish_plugins, seated_plugin
 from agentworks.resources.access import ensure_recipe_enabled, ensure_reference_enabled
 from agentworks.resources.graph import Enablement
 from agentworks.resources.inspect import describe_resource, list_resources
-from agentworks.resources.origin import Origin
 from agentworks.resources.registry import Registry
+from agentworks.schema import CapabilityBlock
 from agentworks.sessions.template import SessionTemplate
+from tests.plugins._fixtures import ConformingHarnessIntegration
 
 if TYPE_CHECKING:
     from agentworks.config import Config
@@ -152,12 +153,12 @@ def test_ensure_recipe_enabled_is_noop_when_enabled(monkeypatch: pytest.MonkeyPa
 
 def test_ensure_recipe_enabled_is_noop_for_implicit_default(monkeypatch: pytest.MonkeyPatch) -> None:
     # A missing start node (an implicit default template) is a safe no-op:
-    # enablement_of tolerates it and reachable_from returns empty.
+    # enablement_of tolerates it and both closures return empty.
     registry = _build(monkeypatch)
     ensure_recipe_enabled(registry, "agent-template", "no-such-template")  # no raise
 
 
-class _FixtureHarnessIntegration(HarnessIntegration):
+class _FixtureHarnessIntegration(ConformingHarnessIntegration):
     name = "fixture-harness"
     description = "Fixture harness (manifest-parity capability-exclusion test)"
 
@@ -182,13 +183,13 @@ def test_ensure_recipe_enabled_excludes_capability_nodes(monkeypatch: pytest.Mon
         registry.add(
             "session-template",
             "op-session",
-            SessionTemplate(name="op-session", harness_integration="fixture-harness"),
+            SessionTemplate(name="op-session", harness_integration=CapabilityBlock(name="fixture-harness")),
             _operator(),
         )
         registry.finalize(enablement_sources=[plugin_enablement_source(config)])
 
         # The disabled harness integration IS in the enabled template's closure...
-        assert ("harness-integration", "fixture-harness") in registry.graph.reachable_from(
+        assert ("harness-integration", "fixture-harness") in registry.graph.runtime_reachable_from(
             "session-template", "op-session"
         )
         # ...but the recipe gate does NOT refuse on it (capability exclusion).

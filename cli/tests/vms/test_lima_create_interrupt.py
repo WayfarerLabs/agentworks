@@ -45,6 +45,12 @@ def _request() -> ProvisionRequest:
         ssh_public_key="ssh-ed25519 AAAA test",
         ssh_private_key=Path("/dev/null"),
         tailscale_auth_key="tskey-test",
+        # The vm-template layer's resolved defaults, which is the only
+        # shape a platform ever sees (the hardware fields are required).
+        cpus=4,
+        memory_gib=8,
+        disk_gib=50,
+        swap_gib=4,
     )
 
 

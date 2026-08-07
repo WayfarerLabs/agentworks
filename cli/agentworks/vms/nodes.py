@@ -194,8 +194,11 @@ class LiveVMNode:
         if self._repair_refs is None:
             from agentworks.vms.templates import resolve_template
 
+            # One ref, always: the resolved template's auth-key name is
+            # non-optional (the kind's default is "tailscale-auth-key"),
+            # so there is no absent case to fold to an empty tuple.
             tmpl = resolve_template(self._registry, self._row.template)
-            self._repair_refs = () if tmpl.tailscale_auth_key is None else (tmpl.tailscale_auth_key,)
+            self._repair_refs = (tmpl.tailscale_auth_key,)
         return self._repair_refs
 
     def confirmed_active(self) -> bool:

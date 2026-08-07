@@ -75,10 +75,10 @@ def remote_advisories(registry: Registry, url: str) -> list[str]:
         # graph (the propagate hook folded the provider's disabled state).
         if not registry.graph.is_ready("git-credential", name):
             continue
-        provider_cls = GIT_CREDENTIAL_PROVIDER_REGISTRY.get(cred.provider)
+        provider_cls = GIT_CREDENTIAL_PROVIDER_REGISTRY.get(cred.provider.name)
         if provider_cls is None:
             continue
-        provider = provider_cls(name, cred.provider_config, description=cred.description)
+        provider = provider_cls(name, cred.provider.config, description=cred.description)
         for msg in provider.review_remote(url):
             if msg not in seen:
                 seen.add(msg)

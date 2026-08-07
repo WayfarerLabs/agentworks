@@ -46,6 +46,8 @@ def test_admin_template_kind_builds_default_on_empty_requirements() -> None:
     admin_kind = KIND_REGISTRY["admin-template"]
     result = admin_kind.synthesize(())
     assert isinstance(result, AdminConfig)
+    # The reserved name is the whole reason this kind synthesizes at all.
+    assert result.name == "default"
     assert result.origin is not None
     assert result.origin.variant == "auto-declared"
     assert result.origin.source == ALWAYS_MATERIALIZE_SOURCE

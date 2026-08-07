@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from agentworks.declared_resource import METADATA_FIELDS
 from agentworks.errors import ConfigError
 from agentworks.resources import KIND_REGISTRY
 
@@ -20,7 +21,12 @@ if TYPE_CHECKING:
 API_VERSION = "agentworks/v1"
 
 _ENVELOPE_KEYS = {"apiVersion", "kind", "metadata", "spec"}
-_METADATA_KEYS = {"name", "description"}
+
+# Derived from the row base that DECLARES the metadata fields, not listed
+# here: the two used to be hand-kept lists that agreed only by luck, and a
+# fourth metadata field accepted by one layer and rejected by the other is
+# a mistake nobody would see until an operator wrote it.
+_METADATA_KEYS = METADATA_FIELDS
 
 # Kinds with no instance selector yet. named-console-template is
 # framework-plurified (named multi-instance) at the envelope layer, but
@@ -41,12 +47,30 @@ class Document:
     kind: str
     name: str
     description: str | None
+    expires: object | None
+    """When the operator says this resource stops being valid, as written.
+
+    Carried unvalidated: the row model owns what an expiry may be, so the
+    envelope's job is only to accept the key and hand the value over.
+    """
+
     spec: dict[str, object]
     location: SourceLocation
 
     @property
     def where(self) -> str:
         return f"{self.location.file}:{self.location.line}"
+
+
+def only_default_name(kind: str) -> bool:
+    """Whether ``kind`` accepts only ``metadata.name: default``.
+
+    Exposed rather than left as a set the validator reads, because the
+    rendered sample has to write a name that LOADS: a skeleton naming a
+    named-console-template ``my-named-console-template`` would be refused by
+    the very check below. One authority for the rule, two readers.
+    """
+    return kind in _NO_SELECTOR_KINDS
 
 
 def _err(location: SourceLocation, message: str, *, hint: str | None = None) -> ConfigError:
@@ -111,7 +135,7 @@ def validate_envelope(raw: object, location: SourceLocation) -> Document:
     if description is not None and not isinstance(description, str):
         raise _err(location, "metadata.description must be a string")
 
-    if kind in _NO_SELECTOR_KINDS and name != "default":
+    if only_default_name(kind) and name != "default":
         raise _err(
             location,
             f'{kind} accepts only metadata.name "default" for now: no '
@@ -131,6 +155,7 @@ def validate_envelope(raw: object, location: SourceLocation) -> Document:
         kind=kind,
         name=name,
         description=description,
+        expires=metadata.get("expires"),
         spec=spec,
         location=location,
     )

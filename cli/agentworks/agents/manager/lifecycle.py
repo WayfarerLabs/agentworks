@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING
 
 import agentworks.agents.manager as _mgr
 from agentworks import output
-from agentworks.config import validate_name
 from agentworks.errors import (
     AlreadyExistsError,
     ExternalError,
@@ -19,6 +18,7 @@ from agentworks.errors import (
     StateError,
     UserAbort,
 )
+from agentworks.naming import validate_name
 from agentworks.vms.manager import gated_vm_boundary
 
 from ._common import MAX_AGENT_NAME_LENGTH, _require_vm, agent_scope

@@ -54,8 +54,8 @@ def build_registry(config: Config, manifests: ManifestSet | None = None) -> Regi
 
     Publisher order: the bundled built-in manifests first
     (``builtin_manifests``, which supply the built-in apt/install-command
-    entries too), then the built-in capability rows (``git_credential``,
-    ``harness_integration``, ``secrets``, ``vm_platforms``), then the system
+    entries too), then the built-in capability rows (one generic publisher
+    per capability-kind descriptor), then the system
     plugins (``plugins.publish_plugins``: every shipped plugin's capability
     rows plus the enabled plugins' bundled manifests), then the operator's
     YAML ``ManifestSet`` (``Config.publish_to`` is a no-op now: config.toml
@@ -72,11 +72,11 @@ def build_registry(config: Config, manifests: ManifestSet | None = None) -> Regi
     the auto-load.
     """
     from agentworks import plugins, secrets
-    from agentworks.capabilities import git_credential, harness_integration
-    from agentworks.capabilities import vm_platform as vm_platforms
+    from agentworks.capabilities.descriptor import capability_descriptors
+    from agentworks.capabilities.publish import publish_capability_rows
+    from agentworks.config.references import validate_setting_references
     from agentworks.manifests import RESOURCES_DIRNAME, load_manifests
     from agentworks.manifests import builtin as builtin_manifests
-    from agentworks.vms import sites as vm_sites
 
     if manifests is None:
         resources_dir = config.source_path.parent / RESOURCES_DIRNAME
@@ -97,10 +97,11 @@ def build_registry(config: Config, manifests: ManifestSet | None = None) -> Regi
     # manifests now (config.toml is settings only, ADR 0022), so there is no
     # separate apt / install_commands operator publisher anymore.
     builtin_manifests.publish_to(registry)
-    git_credential.publish_to(registry)
-    harness_integration.publish_to(registry)
-    secrets.publish_to(registry)
-    vm_platforms.publish_to(registry)
+    # One generic publisher per capability kind, over the descriptor table:
+    # publication is membership, so a new capability kind publishes its
+    # built-in rows by existing rather than by being added here.
+    for descriptor in capability_descriptors():
+        publish_capability_rows(registry, descriptor)
     # System plugins publish here, after the built-in capability rows and
     # before the operator sources: every shipped plugin's capability rows
     # unconditionally (present-but-disabled when not opted in, via the
@@ -110,14 +111,27 @@ def build_registry(config: Config, manifests: ManifestSet | None = None) -> Regi
     config.publish_to(registry)
     manifests.publish_to(registry)
     registry.finalize(enablement_sources=[plugins.plugin_enablement_source(config)])
-    # Config consistency against the finalized graph: subsystems whose
-    # SETTINGS name resources validate them here, at the boundary that
-    # holds both worlds. The chain ([secret_config].backends) and
-    # defaults.site are config, not resources; this is each subsystem
-    # consuming its config in normal operation, so every
-    # resource-touching command fails fast with config vocabulary.
+    # Config consistency against the finalized graph, at the boundary that
+    # holds both worlds. The registry cannot do this itself: it is
+    # config-agnostic by construction and settings are never published as
+    # pseudo-resources (ADR 0016), so "does this settings value name a real
+    # row" can only be answered once BOTH exist, which is here.
+    #
+    # Two steps, in this order, because they answer different questions and
+    # the second reads the first's answer as given:
+    #
+    # 1. EXISTENCE, generically. Every settings value that names a resource
+    #    must resolve to one, or it is a hard error (operator ruling,
+    #    2026-08-07), in the same shape a dangling manifest reference gets at
+    #    finalize. One table covers every such setting, so a new one is a row
+    #    there rather than a new per-subsystem validator.
+    # 2. SEMANTICS, per subsystem. What a subsystem additionally requires of
+    #    names that DO resolve: here, that every declared secret is reachable
+    #    via some backend in the chain. Running this first would report a
+    #    misspelled backend as an "unreachable secret", because a name
+    #    matching no edge just drops out of the intersection.
+    validate_setting_references(config, registry)
     secrets.validate_chain(config, registry)
-    vm_sites.validate_sites(config, registry)
     return registry
 
 
@@ -134,7 +148,4 @@ def load_request_registry(config: Config, manifests: ManifestSet | None = None, 
         _warned_request_configs.set(_warned_request_configs.get() | {request_key})
         for issue in resolved.issues:
             output.warn(f"Manifest: {issue}")
-        if not output.deprecations_suppressed():
-            for issue in resolved.deprecation_issues:
-                output.warn(f"Manifest: {issue}")
     return registry

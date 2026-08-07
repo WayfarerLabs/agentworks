@@ -252,8 +252,8 @@ def _check_vm_platforms(registry: Registry) -> HealthGroup:
     from agentworks.resources.graph import Enablement
 
     g = HealthGroup("VM platforms")
-    # Registry-definition order (what ``publish_to`` established from
-    # ``VM_PLATFORM_REGISTRY``), preserved: the pre-refactor group rendered in
+    # Publication order (built-ins in name order, then plugin rows in
+    # plugin-publication order), preserved: the pre-refactor group rendered in
     # this order, and the reordering is not one of the R9 deltas.
     for name, _decl in registry.iter_kind_items("vm-platform"):
         if registry.graph.enablement_of("vm-platform", name) is Enablement.disabled:
@@ -370,11 +370,11 @@ def _check_vm_sites(config: Config, registry: Registry) -> HealthGroup:
             # operator's next command hits: warn.
             g.warn(
                 name,
-                f"platform {decl.platform}; preflight: {e}",
+                f"platform {decl.platform.name}; preflight: {e}",
                 hint=getattr(e, "hint", None),
             )
             continue
-        g.ok(name, f"platform {decl.platform}")
+        g.ok(name, f"platform {decl.platform.name}")
 
     default_site = config.defaults.site
     if default_site is not None and default_site in not_ready:
@@ -527,24 +527,14 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
             g.warn("Manifest", issue)
     if not config_load_failed and not config.config_issues and manifests is not None and not manifests.issues:
         g.ok("Config is valid")
-    # Deprecation nudges ride their own channel (so --no-deprecations
-    # can silence the ambient per-command warning), but doctor is the
-    # explicit full-health surface. Doctor rows are scannable one-liners
-    # (maintainer ruling, 2026-07-06): render the FACT with one next
-    # step; the full teaching text stays on the ambient command warning.
-    # (The old TOML-resource-declaration nudge is a hard error now, rendered
-    # as the Config fail row above, so it no longer has a warn row here.)
-    if manifests is not None and manifests.deprecated_shape_resources:
-        g.warn(
-            "Manifests use the deprecated capability config shape",
-            f"{', '.join(manifests.deprecated_shape_resources)}: fold the "
-            "sibling pair into one tagged table, e.g. platform: {name: lima, ...}",
-        )
-    for section in config.noop_secret_backend_sections:
-        g.warn(
-            f"Config has a no-op {section} section",
-            "deprecated and ignored; remove it, or `agw resource migrate --all` drops it",
-        )
+    # No deprecation rows here: every config.toml deprecation doctor used to
+    # render is a hard error now (the TOML resource declarations, the sibling
+    # capability-config shape, and the ``[secret_backends.*]`` no-op that was
+    # the last of them), so each arrives as the Config or Manifest fail row
+    # above instead. If a nudge is added back to ``Config.deprecation_issues``,
+    # render it here as a scannable one-liner (maintainer ruling, 2026-07-06):
+    # the FACT plus one next step, with the teaching text left on the ambient
+    # per-command warning.
 
     # SSH keys
     _check_ssh_key(g, config.operator.ssh_public_key, "public")

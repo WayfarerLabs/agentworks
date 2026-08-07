@@ -1,30 +1,32 @@
-"""The capability config contract.
+"""The capability config contract: declare a model, receive an instance.
 
-Capabilities are invoked during interpretation of the consuming
-resource: ``dependencies`` extracts the resource references its config
-block implies (``ConfigReference``, sourceless; the consuming resource
-emits them with itself as the source) and ``validate`` is the throwing
-shape check. Two shipped hosts exercise it: the git-credential
-``provider_config`` blob and per-secret ``backend_mappings`` values.
-(The API notes it may be superseded by registration-time schema
-declarations.)
+A capability DECLARES the shape of its config as a model and the core
+does the rest. Validation is ``model_validate`` against that model,
+reference extraction is a structural walk of its marked fields, and no
+capability code runs for either: that is the whole point of the flip, and
+it is what keeps a misbehaving plugin out of the finalize pass. Two
+shipped hosts exercise it here: the git-credential ``provider_config``
+blob and per-secret ``backend_mappings`` values.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 from textwrap import dedent
-from typing import Any
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 import pytest
 
 from agentworks.bootstrap import build_registry
-from agentworks.capabilities.git_credential import GIT_CREDENTIAL_PROVIDER_REGISTRY
-from agentworks.capabilities.git_credential.base import GitCredentialProvider
+from agentworks.capabilities.git_credential.base import GitCredentialProvider, HelperEntry
 from agentworks.config import load_config
 from agentworks.errors import ConfigError
-from agentworks.resources.reference import ConfigReference
+from agentworks.plugins import SYSTEM_PLUGINS, Plugin, seated_plugin
+from agentworks.schema import AgwModel, NonEmptyStr, SecretRef
 from tests.conftest import ManifestDoc, write_manifests
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 
 def _config(tmp_path: Path, settings: str = "", *, enabled: bool = False) -> Any:
@@ -74,7 +76,7 @@ def test_azdo_org_required(tmp_path: Path) -> None:
     origin, so the error frames the declaring document."""
     _manifest(tmp_path, ManifestDoc("git-credential", "ado", {"provider": {"name": "azdo"}}))
     config = _config(tmp_path, enabled=True)
-    with pytest.raises(ConfigError, match="org is required for the azdo provider") as exc:
+    with pytest.raises(ConfigError, match="org: is required") as exc:
         build_registry(config)
     assert "res.yaml" in str(exc.value)
 
@@ -92,31 +94,43 @@ def test_azdo_rejects_unknown_blob_fields_yaml(tmp_path: Path) -> None:
         metadata:
           name: ado
         spec:
-          provider: azdo
-          provider_config:
+          provider:
+            name: azdo
             org: my-org
             bogus: 1
         """,
     )
     config = _config(tmp_path, enabled=True)
-    with pytest.raises(ConfigError, match="unknown azdo provider field") as exc:
+    with pytest.raises(ConfigError, match="bogus: unknown field; expected one of: name, org, token") as exc:
         build_registry(config)
     assert "res.yaml" in str(exc.value)
 
 
-def test_base_class_accepts_no_configuration() -> None:
-    """The base-class default: capabilities without config reject any
-    blob content. (github grew scope fields in #166, so the pin uses a
-    minimal subclass.)"""
+def test_a_capability_with_no_config_rejects_every_key() -> None:
+    """What the retired base ``validate`` did, now a property of the
+    model a capability declares: closed world, so a model carrying only
+    its tag accepts an empty blob and nothing else."""
+
+    class _BareConfig(AgwModel):
+        name: Literal["bare"]
 
     class _Bare(GitCredentialProvider):
-        provider_name = "bare"
+        name = "bare"
+        description = "declares no configuration"
+        contract_version = 1
+        config_model = _BareConfig
+
+        def _verify_token(self, token: str) -> None: ...
+
+        def helper_entry(self) -> HelperEntry:
+            return HelperEntry(host="example.test", username="bare")
 
         def credential_lines(self, token: str) -> list[str]:
             return []
 
-    with pytest.raises(ConfigError, match="accepts no configuration"):
-        _Bare.validate("spec.provider_config", {"anything": 1})
+    _Bare("bare", {})
+    with pytest.raises(ConfigError, match="anything: unknown field"):
+        _Bare("bare", {"anything": 1})
 
 
 def test_github_rejects_unknown_blob_fields(tmp_path: Path) -> None:
@@ -130,13 +144,13 @@ def test_github_rejects_unknown_blob_fields(tmp_path: Path) -> None:
         metadata:
           name: gh
         spec:
-          provider: github
-          provider_config:
+          provider:
+            name: github
             org: nope
         """,
     )
     config = _config(tmp_path)
-    with pytest.raises(ConfigError, match="unknown github provider field"):
+    with pytest.raises(ConfigError, match="org: unknown field; expected one of: name, owner, repos, token"):
         build_registry(config)
 
 
@@ -147,6 +161,72 @@ def test_unknown_provider_defers_to_miss_policy(tmp_path: Path) -> None:
     config = _config(tmp_path)
     with pytest.raises(ConfigError, match="sourcehut"):
         build_registry(config)
+
+
+# -- Validity is the model's answer, not the host's --------------------------
+#
+# ``Registry.finalize`` pass 7 runs the throwing check over EVERY present
+# resource. It once ran over the READY and ENABLED set only (R3, R9.4), on
+# the reasoning that a malformed block on a resource the host cannot run
+# should not abort every command. The cost of that was worse than the
+# benefit: the same document was accepted on one host and refused on
+# another, and a typo big enough to change a resource's readiness thereby
+# suppressed its own error message. These pin the split that replaced it.
+# What a resource's config MEANS is the declared model's answer and is the
+# same everywhere; whether the resource can RUN is the fold's answer and is
+# a property of the host.
+
+
+def _azure_site(tmp_path: Path, *, enabled: bool, blob: dict[str, Any]) -> Any:
+    """A vm-site on the opt-in azure plugin's platform, carrying ``blob``."""
+    _manifest(tmp_path, ManifestDoc("vm-site", "lab", {"platform": {"name": "azure-vm", **blob}}))
+    return _config(tmp_path, enabled=enabled)
+
+
+#: Rejected by the azure-vm model on any host: ``regions`` is not a field.
+_BROKEN_BLOB = {"subscription_id": "s", "resource_group": "g", "regions": "eastus"}
+
+#: Accepted by the same model, so only the plugin's state can mark this row.
+_VALID_BLOB = {"subscription_id": "s", "resource_group": "g", "region": "eastus"}
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_a_broken_blob_is_refused_whatever_the_plugins_state(tmp_path: Path, *, enabled: bool) -> None:
+    """The headline property: an unknown key is a config error on every host.
+
+    The azure plugin's state decides whether this site can RUN; it has no say
+    in whether ``regions`` is a field, because that is the declared model's
+    answer. Both branches must produce the identical owner-framed error, since
+    a message that varies by plugin opt-in would send an operator hunting for a
+    difference between hosts that has nothing to do with their mistake."""
+    with pytest.raises(ConfigError, match="regions: unknown field") as exc:
+        build_registry(_azure_site(tmp_path, enabled=enabled, blob=_BROKEN_BLOB))
+
+    assert "res.yaml" in str(exc.value)
+
+
+def test_a_valid_blob_on_a_disabled_plugin_loads_with_the_row_marked(tmp_path: Path) -> None:
+    """The half of the old deferral that was right, and is kept: a WELL-FORMED
+    resource on a plugin the operator has not opted into still loads, so every
+    command that has nothing to do with this site works, and the row carries
+    the reason it is unusable rather than going silent.
+
+    Nothing here is a config error. Not-ready is the correct verdict for a
+    resource whose plugin is off, exactly as it stays the correct verdict for a
+    site whose ``region`` names somewhere unreachable. Refusing to load either
+    one would be the opposite mistake to the one the ungating fixed."""
+    registry = build_registry(_azure_site(tmp_path, enabled=False, blob=_VALID_BLOB))
+
+    reason = registry.graph.readiness_of("vm-site", "lab").reason
+    assert reason is not None, "a not-ready row must carry its reason, not just fail quietly later"
+    assert "azure-vm" in reason
+
+
+# An unregistered capability name staying a HARD finalize error (R9.2 /
+# R9.11, and the operator decision of 2026-08-01) is the third case the
+# fold-gated box names. It is pinned by
+# ``test_unknown_provider_defers_to_miss_policy`` above, end to end
+# through ``build_registry``, so it is not repeated here.
 
 
 # -- The finalize validate pass: timing + ordering (R3, R9.3) ----------------
@@ -174,63 +254,83 @@ def test_cycle_reported_before_malformed_block(tmp_path: Path) -> None:
     assert "unknown shell harness field" not in str(exc.value)
 
 
-def test_construct_time_validation_survives_the_move(tmp_path: Path) -> None:
-    """R3 invariant: moving validation into the finalize pass does not
-    relax the construct-time check. Constructing a capability directly
-    still re-runs ``validate`` and rejects a malformed blob (a provider
-    that reasons "validate ran at construct, so ``org`` is a valid str"
-    still holds)."""
+def test_construct_time_validation_survives_the_flip(tmp_path: Path) -> None:
+    """The construct-time invariant is unchanged in substance: a malformed
+    blob still dies at construction. What changed is that the check is
+    ``model_validate`` and its RESULT is kept, so a provider reading
+    ``self.config.org`` is reading a value the model proved is there."""
     from agentworks.plugins.azure.azdo import AzDOCredentialProvider
 
-    with pytest.raises(ConfigError, match="org is required for the azdo provider"):
+    with pytest.raises(ConfigError, match="org: is required"):
         AzDOCredentialProvider("ado", {})
+
+    assert AzDOCredentialProvider("ado", {"org": "my-org"}).config.org == "my-org"
 
 
 # -- The dependencies half ---------------------------------------------------
 
 
+class _SigningConfig(AgwModel):
+    """A config that NAMES a secret, with a constant default. The whole
+    of what used to be a hand-rolled ``dependencies`` plus its guard."""
+
+    name: Literal["test-signing"]
+    signing_key: Annotated[NonEmptyStr, SecretRef(usage="the signing key", default_template="code-signing-key")]
+
+
 class _SigningCredentialProvider(GitCredentialProvider):
     """Test-only capability whose config names a secret: exercises the
-    dependencies-extraction contract end to end."""
+    declare-and-receive contract end to end."""
 
-    provider_name = "test-signing"
+    name = "test-signing"
+    description = "signs with a declared secret"
+    contract_version = 1
+    config_model = _SigningConfig
 
-    @classmethod
-    def dependencies(cls, owner: str, config: Any) -> tuple[ConfigReference, ...]:
-        key = config.get("signing_key", "code-signing-key")
-        if not isinstance(key, str) or not key:
-            return ()
-        return (ConfigReference(kind="secret", name=key, usage="the signing key"),)
-
-    @classmethod
-    def validate(cls, owner: str, config: Any) -> None:
-        unknown = sorted(set(config) - {"signing_key"})
-        if unknown:
-            raise ConfigError(f"{owner}: unknown field(s): {', '.join(unknown)}")
-        key = config.get("signing_key", "code-signing-key")
-        if not isinstance(key, str) or not key:
-            raise ConfigError(f"{owner}.signing_key must be a secret name")
+    def _verify_token(self, token: str) -> None: ...
 
     def credential_lines(self, token: str) -> list[str]:
         return [f"https://signer:{token}@example.test"]
 
-    def helper_entry(self):  # noqa: ANN201
-        from agentworks.capabilities.git_credential.base import HelperEntry
-
+    def helper_entry(self) -> HelperEntry:
         return HelperEntry(host="example.test", username="signer")
 
 
+SIGNING_ENABLED = """
+[plugins]
+system = ["signing"]
+"""
+
+
+SIGNING_PLUGIN = Plugin(
+    name="signing",
+    description="a test-only plugin shipping the signing provider",
+    capabilities={"git-credential-provider": (_SigningCredentialProvider,)},
+)
+
+
 @pytest.fixture
-def signing_provider(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setitem(GIT_CREDENTIAL_PROVIDER_REGISTRY, "test-signing", _SigningCredentialProvider)
+def signing_provider(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """The fixture provider, seated and published the way a real plugin
+    is: ``seated_plugin`` puts it through ``register_plugin`` (which is
+    where registration conformance runs) and the patched index is what
+    publishes its capability row. Writing it straight into the registry
+    would skip conformance entirely, and this provider is the only thing
+    in this file declaring a marked field, so it is the one most worth
+    holding to the same bar as a shipped one.
+    """
+    monkeypatch.setitem(SYSTEM_PLUGINS, "signing", SIGNING_PLUGIN)
+    with seated_plugin(SIGNING_PLUGIN):
+        yield
 
 
 def test_capability_refs_attributed_to_consuming_resource(tmp_path: Path, signing_provider: None) -> None:
-    """The full contract: the capability returns the reference its blob
-    implies; the consuming resource emits it as source; the framework
+    """The full contract: the CORE reads the reference the blob implies
+    off the capability's declared model; the consuming resource emits it
+    as source; the framework
     auto-declares the secret with a per-consumer description."""
     _manifest(tmp_path, ManifestDoc("git-credential", "signer", {"provider": {"name": "test-signing"}}))
-    config = _config(tmp_path)
+    config = _config(tmp_path, SIGNING_ENABLED)
     registry = build_registry(config)
     # Defaulted secret name: auto-declared, attributed to THIS credential.
     decl = registry.lookup("secret", "code-signing-key")
@@ -255,7 +355,7 @@ def test_capability_ref_default_is_operator_overridable(tmp_path: Path, signing_
             {"provider": {"name": "test-signing", "signing_key": "corp-signing-key"}},
         ),
     )
-    config = _config(tmp_path)
+    config = _config(tmp_path, SIGNING_ENABLED)
     registry = build_registry(config)
     registry.lookup("secret", "corp-signing-key")
     sources = {entry.source for entry in registry.graph.dependents_of("secret", "corp-signing-key")}
@@ -277,7 +377,7 @@ def test_env_var_mapping_validated_at_build_registry(tmp_path: Path) -> None:
         ),
     )
     config = _config(tmp_path)
-    with pytest.raises(ConfigError, match="env-var backend must be a non-empty string"):
+    with pytest.raises(ConfigError, match="backend_mappings.env-var: must be a string"):
         build_registry(config)
 
 
@@ -285,13 +385,17 @@ def test_prompt_rejects_any_mapping(tmp_path: Path) -> None:
     """Prompt has no mapping vocabulary: any non-false value is dead
     config (a typo for another backend) and errors at build_registry.
     The generic false opt-out is loop-owned and never reaches the
-    capability."""
+    capability.
+
+    One value, and "any" is not an overclaim: ``PromptMapping``'s
+    before-validator raises without looking at the value at all, so a
+    table refuses for exactly the reason a string does."""
     _manifest(
         tmp_path,
         ManifestDoc("secret", "npm-token", {"backend_mappings": {"prompt": "ignored"}}, description="npm token"),
     )
     config = _config(tmp_path)
-    with pytest.raises(ConfigError, match="prompt backend has no meaning"):
+    with pytest.raises(ConfigError, match="prompt backend has no mapping vocabulary"):
         build_registry(config)
 
 
@@ -329,19 +433,7 @@ def test_declared_mapping_for_non_opted_in_backend_is_validated_at_build(tmp_pat
         backends = ["prompt"]
         """,
     )
-    with pytest.raises(ConfigError, match="env-var backend must be a non-empty string"):
-        build_registry(config)
-
-
-def test_prompt_rejects_structured_mapping_too(tmp_path: Path) -> None:
-    _manifest(
-        tmp_path,
-        ManifestDoc(
-            "secret", "npm-token", {"backend_mappings": {"prompt": {"vault": "Work"}}}, description="npm token"
-        ),
-    )
-    config = _config(tmp_path)
-    with pytest.raises(ConfigError, match="prompt backend has no meaning"):
+    with pytest.raises(ConfigError, match="backend_mappings.env-var: must be a string"):
         build_registry(config)
 
 

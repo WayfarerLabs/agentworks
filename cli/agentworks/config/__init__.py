@@ -4,8 +4,7 @@ Config lives at ~/.config/agentworks/config.toml. It is read-only at runtime.
 
 This package holds the settings dataclasses and the settings-section
 loaders; nothing else. config.toml is settings only now (ADR 0022): the
-TOML resource loaders relocated to ``agentworks.migrate.toml_resources``
-(the migrator's private oracle), so a resource-declaring section is a hard
+TOML resource loaders are gone and a resource-declaring section is a hard
 error at load. The declarable-resource dataclasses (VMTemplate,
 AgentTemplate, AdminConfig, WorkspaceTemplate, SessionTemplate,
 NamedConsoleConfig, GitCredentialConfig) live in their domain packages;
@@ -20,13 +19,15 @@ import path ``agentworks.config`` unchanged:
   validators. Has no dependency on any sibling submodule.
 - ``models``: the settings dataclasses, the ``Config`` object (and its
   now-empty ``publish_to``), and ``_SectionLineMap``.
-- ``loaders_core``: generic TOML-loading helpers, the ``[operator]`` /
-  ``[paths]`` / ``[defaults]`` settings loaders, and the two shared
-  nonconforming-secret-name helpers (used by both the migrator oracle and
-  the manifest decoders).
+- ``loaders_core``: generic TOML-loading helpers (the unknown-key pair) and
+  the ``[operator]`` / ``[paths]`` / ``[defaults]`` settings loaders.
 - ``loaders_sessions``: the ``[session.config]`` settings loader.
-- ``loaders_secrets``: ``[secret_backends.*]`` (deprecated no-op warning),
-  ``[secret_config]``, and ``[plugins]``.
+- ``loaders_secrets``: the ``[secret_config]`` and ``[plugins]`` settings
+  loaders.
+- ``references``: the settings values that NAME resource rows, and the
+  post-finalize check that they resolve. Not a loader: the registry does not
+  exist yet at load time, so the loaders validate shape and this validates
+  existence, from ``bootstrap.build_registry``.
 - ``load``: the ``load_config`` entry point (drives the settings loaders and
   the resource-section hard error).
 
@@ -53,14 +54,12 @@ from agentworks.config.loaders_core import (
     _load_defaults,
     _load_operator,
     _load_paths,
-    _parse_env_table,
     _require,
     _require_string_list,
     _warn_unexpected_keys,
 )
 from agentworks.config.loaders_secrets import (
     _load_plugins,
-    _load_secret_backends,
     _load_secret_config,
 )
 from agentworks.config.loaders_sessions import (
@@ -74,22 +73,15 @@ from agentworks.config.models import (
     SessionConfig,
     _SectionLineMap,
 )
+from agentworks.config.references import (
+    SettingReference,
+    setting_references,
+    validate_setting_references,
+)
 from agentworks.config.validation import (
-    AZURE_VNET_NAME_MAX_LENGTH,
     CONFIG_DIR,
     CONFIG_PATH,
-    DNS_LABEL_MAX_LENGTH,
-    LINUX_GROUPNAME_MAX_LENGTH,
-    LINUX_USERNAME_MAX_LENGTH,
-    MAX_FREEFORM_NAME_LENGTH,
-    MAX_SECRET_NAME_LENGTH,
-    MAX_SYSTEM_SLUG_LENGTH,
-    MAX_VM_NAME_LENGTH,
-    NAME_RE,
-    SSH_HOST_PREFIX_RE,
-    VM_USER_RE,
     validate_admin_username,
-    validate_name,
     validate_vm_workspaces,
 )
 
@@ -99,19 +91,8 @@ from agentworks.config.validation import (
 from agentworks.errors import ConfigError as ConfigError
 
 __all__ = [
-    "AZURE_VNET_NAME_MAX_LENGTH",
     "CONFIG_DIR",
     "CONFIG_PATH",
-    "DNS_LABEL_MAX_LENGTH",
-    "LINUX_GROUPNAME_MAX_LENGTH",
-    "LINUX_USERNAME_MAX_LENGTH",
-    "MAX_FREEFORM_NAME_LENGTH",
-    "MAX_SECRET_NAME_LENGTH",
-    "MAX_SYSTEM_SLUG_LENGTH",
-    "MAX_VM_NAME_LENGTH",
-    "NAME_RE",
-    "SSH_HOST_PREFIX_RE",
-    "VM_USER_RE",
     "Config",
     "ConfigError",
     "DefaultsConfig",
@@ -119,21 +100,21 @@ __all__ = [
     "OperatorConfig",
     "PathsConfig",
     "SessionConfig",
+    "SettingReference",
     "_SectionLineMap",
     "_load_defaults",
     "_load_operator",
     "_load_paths",
     "_load_plugins",
-    "_load_secret_backends",
     "_load_secret_config",
     "_load_session_config",
-    "_parse_env_table",
     "_require",
     "_require_string_list",
     "_warn_unexpected_keys",
     "_raise_unexpected_top_level_keys",
     "load_config",
+    "setting_references",
     "validate_admin_username",
-    "validate_name",
+    "validate_setting_references",
     "validate_vm_workspaces",
 ]

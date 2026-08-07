@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.capabilities.base import RunContext
-from agentworks.config import MAX_VM_NAME_LENGTH, validate_admin_username, validate_name
+from agentworks.config import validate_admin_username
 from agentworks.db import SYSTEM_SLUG_KEY, InitStatus, ProvisioningStatus
 from agentworks.errors import (
     AlreadyExistsError,
@@ -32,6 +32,7 @@ from agentworks.errors import (
     UserAbort,
     unknown_template_error,
 )
+from agentworks.naming import MAX_VM_NAME_LENGTH, validate_name
 
 from ._helpers import _require_vm
 

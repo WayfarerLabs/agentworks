@@ -17,11 +17,13 @@ from typing import TYPE_CHECKING
 import pytest
 
 from agentworks.bootstrap import build_registry
+from agentworks.capabilities.config import capability_config_references, validate_capability_config
 from agentworks.capabilities.git_credential.github import GitHubCredentialProvider
 from agentworks.config import load_config
 from agentworks.errors import ConfigError
 from agentworks.git_credentials import CredentialMaterials, build_credential_materials
 from agentworks.plugins.azure.azdo import AzDOCredentialProvider
+from agentworks.schema import RefOwner
 from agentworks.vms.initializer import resolve_git_credential_providers
 
 if TYPE_CHECKING:
@@ -63,63 +65,106 @@ def _azdo(
 
 
 # -- provider_config validation ----------------------------------------------
+#
+# Validation and reference extraction are the CORE's now, derived from the
+# provider's declared model, so these go through the core entry points
+# rather than through classmethods the providers no longer have.
+
+
+def _validate(blob: dict[str, object], name: str = "github", owner_name: str = "t") -> None:
+    validate_capability_config(
+        kind="git-credential-provider",
+        config={"name": name, **blob},
+        owner=RefOwner(kind="git-credential", name=owner_name),
+    )
+
+
+def _refs(blob: dict[str, object], owner_name: str = "t", name: str = "github") -> list[tuple[str, str]]:
+    return [
+        (ref.kind, ref.name)
+        for ref in capability_config_references(
+            kind="git-credential-provider",
+            config={"name": name, **blob},
+            owner=RefOwner(kind="git-credential", name=owner_name),
+        )
+    ]
 
 
 @pytest.mark.parametrize(
     "blob",
-    [{}, {"repos": ["acme/widgets"]}, {"repos": ["acme/widgets", "acme/gadgets"]}, {"owner": "acme"}],
+    [
+        {},
+        {"repos": ["acme/widgets"]},
+        {"owner": "acme"},
+        # A deliberate loosening, recorded rather than hidden: the shipped
+        # validator rejected ``repos: []`` and the model does not, because
+        # an empty list and an absent field mean the same thing to every
+        # consumer (``store_username`` and ``helper_entry`` both test
+        # truthiness). A ``min_length=1`` would restore the rejection; it is
+        # not worth an error an operator can only hit by writing something
+        # inert.
+        {"repos": []},
+    ],
 )
 def test_valid_scopes_accepted(blob: dict[str, object]) -> None:
-    # dependencies returns the token-secret reference the provider sources
-    # its PAT from (default git-token-<name>); validate passing (no raise)
+    # Extraction yields the token-secret reference the provider sources its
+    # PAT from (default git-token-<name>); validation passing (no raise)
     # means the scope is well-formed.
-    assert GitHubCredentialProvider.validate("git-credential/t", blob) is None
-    refs = GitHubCredentialProvider.dependencies("git-credential/t", blob)
-    assert [(r.kind, r.name) for r in refs] == [("secret", "git-token-t")]
+    _validate(blob)
+    assert _refs(blob) == [("secret", "git-token-t")]
 
 
 def test_token_override_in_provider_config() -> None:
-    refs = GitHubCredentialProvider.dependencies("git-credential/gh", {"token": "my-secret"})
-    assert [(r.kind, r.name) for r in refs] == [("secret", "my-secret")]
+    assert _refs({"token": "my-secret"}, owner_name="gh") == [("secret", "my-secret")]
 
 
-def test_empty_token_rejected_by_validate() -> None:
-    with pytest.raises(ConfigError, match="non-empty secret name"):
-        GitHubCredentialProvider.validate("git-credential/gh", {"token": ""})
+def test_empty_token_rejected_by_validation() -> None:
+    with pytest.raises(ConfigError, match="token: must not be empty"):
+        _validate({"token": ""}, owner_name="gh")
 
 
-def test_dependencies_total_on_malformed_config() -> None:
-    """``dependencies`` never raises: a malformed ``token`` field omits
-    the (now-underivable) token edge, and a malformed scope does not
-    raise here either (``validate`` owns the raising)."""
-    assert GitHubCredentialProvider.dependencies("git-credential/gh", {"token": ""}) == ()
-    assert GitHubCredentialProvider.dependencies("git-credential/gh", {"token": 3}) == ()
+def test_extraction_total_on_malformed_config() -> None:
+    """Extraction never raises: a malformed ``token`` field omits the
+    (now-underivable) token edge, and a malformed scope does not raise
+    here either, because validation owns the raising."""
+    assert _refs({"token": ""}, owner_name="gh") == []
+    assert _refs({"token": 3}, owner_name="gh") == []
     # A malformed scope still yields the default token edge (its identity
     # does not depend on the scope fields).
-    refs = GitHubCredentialProvider.dependencies("git-credential/gh", {"repos": "not-a-list"})
-    assert [(r.kind, r.name) for r in refs] == [("secret", "git-token-gh")]
+    assert _refs({"repos": "not-a-list"}, owner_name="gh") == [("secret", "git-token-gh")]
 
 
+# One case per RULE, not one per way of breaking it. Counting the rules is
+# the part that needs care: ``^[A-Za-z0-9._-]+$`` is TWO rules wearing one
+# regex, a charset and a non-emptiness quantifier, so it needs two cases.
+# An earlier pass read it as one and dropped the emptiness pair; relaxing
+# `+` to `*` then survived the entire suite. That is not a cosmetic hole.
+# ``store_username`` tests ``if self.config.repos or self.config.owner``,
+# so an empty-string owner is FALSY and a credential the operator wrote as
+# owner-scoped would silently fall through to the unscoped github.com
+# token. Scope-widening in the credential system, arrived at silently.
+#
+# The genuinely one-per-rule collapses stand: `no-slash` and `a/b/c` both
+# violate the single ``GitHubRepo`` shape and produce the one message, and
+# `repo` / `org` both hit closed-world.
 @pytest.mark.parametrize(
     ("blob", "match"),
     [
         ({"repos": ["acme/widgets"], "owner": "acme"}, "mutually exclusive"),
-        ({"repos": ["no-slash"]}, '"owner/name"'),
-        ({"repos": []}, '"owner/name"'),
-        ({"repos": "acme/widgets"}, '"owner/name"'),
-        ({"repo": "acme/widgets"}, "the field is 'repos'"),
-        ({"repos": ["a/b/c"]}, '"owner/name"'),
-        ({"repos": ["/leading"]}, '"owner/name"'),
-        ({"owner": "acme/"}, "no slash"),
-        ({"owner": ""}, "no slash"),
-        ({"org": "acme"}, "unknown github provider field"),
-        ({"repos": [123]}, '"owner/name"'),
-        ({"owner": 123}, "user/org name"),
+        ({"repos": ["no-slash"]}, "must match `"),
+        ({"owner": "acme/"}, "must match `"),
+        # The quantifier, not the charset. See the note above.
+        ({"owner": ""}, "must match `"),
+        ({"repos": ["/leading"]}, "must match `"),
+        ({"repos": "acme/widgets"}, "repos: must be a list"),
+        ({"repo": "acme/widgets"}, "unknown field; expected one of: name, owner, repos, token"),
+        ({"repos": [123]}, r"repos\[0\]: must be a string"),
+        ({"owner": 123}, "owner: must be a string"),
     ],
 )
 def test_invalid_scopes_rejected(blob: dict[str, object], match: str) -> None:
     with pytest.raises(ConfigError, match=match):
-        GitHubCredentialProvider.validate("t", blob)
+        _validate(blob)
 
 
 # -- per-credential emission --------------------------------------------------
@@ -321,8 +366,8 @@ def _registry_with_scoped_cred(tmp_path: Path):  # noqa: ANN202
         metadata:
           name: widgets-bot
         spec:
-          provider: github
-          provider_config:
+          provider:
+            name: github
             repos: [acme/widgets]
         """)
     )
@@ -366,12 +411,12 @@ def test_manifest_scope_validation_has_file_line(tmp_path: Path) -> None:
         metadata:
           name: bad
         spec:
-          provider: github
-          provider_config:
+          provider:
+            name: github
             repos: [not-a-repo]
         """)
     )
-    with pytest.raises(ConfigError, match='"owner/name"') as exc:
+    with pytest.raises(ConfigError, match="must match `") as exc:
         build_registry(load_config(cfg, warn_issues=False))
     assert "creds.yaml" in str(exc.value)
 
@@ -799,10 +844,8 @@ def test_unsafe_scope_values_rejected_at_build() -> None:
 
 
 def test_azdo_org_charset_validated() -> None:
-    with pytest.raises(ConfigError, match="organization name"):
-        from agentworks.plugins.azure.azdo import AzDOCredentialProvider as A
-
-        A.validate("t", {"org": "my org"})
+    with pytest.raises(ConfigError, match="must match `"):
+        _validate({"org": "my org"}, name="azdo")
 
 
 def test_two_unscoped_creds_first_wins(tmp_path: Path) -> None:

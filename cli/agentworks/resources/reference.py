@@ -44,12 +44,24 @@ future kinds may. Producers always instantiate a concrete subclass --
 ``ResourceReference`` itself is abstract-by-convention, not by ``ABC``;
 the framework consumes references through the base type but never builds
 one directly.
+
+The subclass types the TARGET; ``relationship`` types the EDGE. They are
+different questions and FR17 turns on the second one: an inheritance edge
+is source composition rather than a runtime need, and a traversal that
+means "what does this resource need at run time" must not cross it.
+``TemplateReference`` answers "points at a template", which coincides with
+inheritance only for as long as ``inherits`` is the sole reason to point
+at one, so :func:`inherits_reference` is the single spelling of an
+inheritance edge and ``RefRelationship.INHERITS`` is what every consumer
+keys on.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
+
+from agentworks.schema.reference import ConfigReference, RefRelationship
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -82,27 +94,42 @@ class ResourceReference:
       always source from ``"default"``; the framework treats those kinds
       as named-multi-instance under the hood, so a future plurified
       operator surface flows through the same shape unchanged.
+    - ``relationship``: what the source MEANS by the edge (FR17). It
+      defaults to ``USES``, a runtime need, which is what all but the
+      inheritance edge is; ``INHERITS`` says the target's declaration is
+      composed into the source's, and is emitted only through
+      :func:`inherits_reference`.
+    - ``declared_by``: the ``(kind, name)`` whose DECLARATION named the
+      target, when that is not ``source``. It is ``None`` on every edge a
+      row emits from its own declaration, which is all of them outside an
+      inheritance chain; read it through :attr:`declarer`, never
+      directly.
     """
 
     name: str
     kind: str
     usage: str
     source: tuple[str, str]
+    relationship: RefRelationship = RefRelationship.USES
+    declared_by: tuple[str, str] | None = None
 
+    @property
+    def declarer(self) -> tuple[str, str]:
+        """The row an operator has to go and edit to change this edge.
 
-@dataclass(frozen=True)
-class ConfigReference:
-    """A resource reference implied by a capability's config block,
-    returned by the capability's ``dependencies``. Sourceless by
-    design: the consuming resource that owns the config block attaches
-    itself as the ``source`` when it emits the corresponding
-    ``ResourceReference`` (whoever hosts the config that names the
-    resource emits the reference).
-    """
+        Usually ``source``, and on an INHERITING row usually not: such a
+        row publishes the runtime needs of its MERGED declaration (FR17),
+        so the edge exists because some ancestor wrote the name. Telling
+        an operator that ``vm-template/kid`` references an unknown apt
+        package sends them to a file with no ``apt_packages`` in it, and
+        which row gets blamed would otherwise depend on the order the
+        build walk happened to reach them in.
 
-    kind: str
-    name: str
-    usage: str
+        Every message that names WHO wanted a target reads this;
+        ``source`` stays the row that published the edge, which is what
+        the graph is keyed on.
+        """
+        return self.declared_by or self.source
 
 
 @dataclass(frozen=True)
@@ -120,13 +147,18 @@ class TemplateReference(ResourceReference):
     """Outbound reference targeting a template-kind Resource (``vm-template``,
     ``workspace-template``, ``agent-template``, ``session-template``).
 
-    Emitted by each template type's ``dependencies(context)`` for every
-    name in its ``inherits = [...]`` list. The framework's miss policy
-    resolves the name (auto-declaring ``default`` when reserved, erroring
-    on other typos) and cycle detection catches inheritance loops.
-    Per-template field-merging (the actual ``inherits`` semantics) stays
-    in the existing template resolvers; this class is purely the
-    framework's handle on the reference.
+    Emitted for every name in an inheriting resource's ``inherits = [...]``
+    list (through :func:`inherits_reference`, which is what marks the edge
+    ``INHERITS``). The framework's miss policy resolves the name
+    (auto-declaring ``default`` when reserved, erroring on other typos) and
+    cycle detection catches inheritance loops. Per-template field-merging
+    (the actual ``inherits`` semantics) stays in the existing template
+    resolvers; this class is purely the framework's handle on the target.
+
+    It says "the target is a template" and nothing more. It is NOT the
+    inheritance marker: a future uses-a-template edge would be this type
+    with ``relationship=USES``, which is exactly why FR17 keys on the
+    relationship instead (see the module docstring).
 
     No extra fields beyond the base today; the subclass exists so
     producers and the framework agree on the target kind via the type.
@@ -158,15 +190,51 @@ class ReferenceEntry:
     side are dropped here because they are implicit from the graph node
     the entry is stored on -- there is no ambiguity about which Resource an
     entry on the ``("vm-template", "default")`` node belongs to.
+
+    ``declared_by`` mirrors the outbound side's, for the same reason:
+    "Referenced by: vm-template/kid" on a secret an ANCESTOR of kid named
+    is true but unhelpful on its own, so describe renders the declarer
+    beside it.
     """
 
     source: tuple[str, str]
     usage: str
+    declared_by: tuple[str, str] | None = None
+
+    @property
+    def declarer(self) -> tuple[str, str]:
+        """The row whose declaration named this target; see
+        :attr:`ResourceReference.declarer`."""
+        return self.declared_by or self.source
+
+
+def inherits_reference(parent: str, source: tuple[str, str]) -> TemplateReference:
+    """The outbound edge an inheriting resource publishes for one name in
+    its ``inherits = [...]`` list.
+
+    The ONE spelling of an inheritance edge, so no producer can emit one
+    that forgets to say so. That matters more than saving four lines: an
+    edge left at the default ``USES`` is not a crash but a wrong answer,
+    silently pulling a parent's runtime needs into the child's (FR17).
+
+    The target kind comes from ``source`` rather than from a parameter
+    because inheritance composes a declaration into another declaration OF
+    THE SAME KIND, so the two can never legitimately differ and a
+    parameter would only be a way to get them out of step.
+    """
+    return TemplateReference(
+        name=parent,
+        kind=source[0],
+        usage="a parent template",
+        source=source,
+        relationship=RefRelationship.INHERITS,
+    )
 
 
 def sourced_references(
     config_refs: Iterable[ConfigReference],
     source: tuple[str, str],
+    declared_by: tuple[str, str] | None = None,
 ) -> list[ResourceReference]:
     """Promote sourceless ``ConfigReference``s (a capability's
     ``dependencies`` output) to sourced outbound ``ResourceReference``s.
@@ -178,6 +246,18 @@ def sourced_references(
     edges into its own outbound references through this one helper,
     centralizing what the three capability-config resources
     (``vm-site``, ``git-credential``, ``session-template``) duplicated.
+
+    The ``ConfigReference``'s ``relationship`` rides along: a model's field
+    marker is where a modeled inheritance edge would be declared, and
+    dropping it here would leave the graph unable to tell one from a
+    runtime need (FR17).
+
+    ``declared_by`` is for a host that assembled the blob by merging an
+    inheritance chain: it names the row whose declaration the BLOCK came
+    from. Block-level, not per key, because a ``ConfigReference`` does not
+    carry the field it was extracted from; see
+    ``SessionTemplate.dependencies`` for why that is precise in every
+    shape a template can currently write.
     """
     result: list[ResourceReference] = []
     for cref in config_refs:
@@ -188,6 +268,20 @@ def sourced_references(
                 kind=cref.kind,
                 usage=cref.usage,
                 source=source,
+                relationship=cref.relationship,
+                declared_by=declared_by,
             )
         )
     return result
+
+
+__all__ = [
+    "ConfigReference",
+    "RefRelationship",
+    "ReferenceEntry",
+    "ResourceReference",
+    "SecretReference",
+    "TemplateReference",
+    "inherits_reference",
+    "sourced_references",
+]

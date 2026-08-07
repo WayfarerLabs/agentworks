@@ -13,17 +13,18 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, NamedTuple
 
-# Importing the Linux username ceiling from the config layer (never the
-# reverse) keeps the dependency direction safe: config.validation depends on
-# nothing in the agents package, so this cannot cycle. It backs the derived
-# MAX_AGENT_NAME_LENGTH co-located with AGENT_PREFIX below.
-from agentworks.config.validation import LINUX_USERNAME_MAX_LENGTH
 from agentworks.errors import (
     AuthorizationError,
     NotFoundError,
     StateError,
     ValidationError,
 )
+
+# Importing the Linux username ceiling from the config layer (never the
+# reverse) keeps the dependency direction safe: config.validation depends on
+# nothing in the agents package, so this cannot cycle. It backs the derived
+# MAX_AGENT_NAME_LENGTH co-located with AGENT_PREFIX below.
+from agentworks.naming import LINUX_USERNAME_MAX_LENGTH
 
 if TYPE_CHECKING:
     from agentworks.capabilities.base import OperationScope

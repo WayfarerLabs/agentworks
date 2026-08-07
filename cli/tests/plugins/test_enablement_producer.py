@@ -11,7 +11,8 @@ Coverage, kind by kind through the ACTUAL consumer (R9 capability side, R14):
 - vm-platform: a ``vm-site`` on a disabled plugin platform is not-ready with the
   enable-plugin hint (existing fold), and ``resolve_site`` refuses it.
 - secret-backend: a disabled plugin backend is excluded from ``active_backends``
-  and from secret-mapping validation.
+  but NOT from secret-mapping validation, which is unconditional over
+  enablement (inert for resolution and validated are separate properties).
 - git-credential-provider: a ``git-credential`` on a disabled plugin provider is
   not-ready (new propagate hook), ``resolve_git_credential_providers`` refuses
   it, and ``remote_advisories`` skips it.
@@ -28,118 +29,102 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Annotated, Any, Literal, cast
 
 import pytest
 
-from agentworks.capabilities.git_credential.base import GitCredentialProvider
 from agentworks.capabilities.harness_integration import ensure_harness_integration_enabled
-from agentworks.capabilities.harness_integration.base import HarnessIntegration
-from agentworks.capabilities.vm_platform.base import VMPlatform
 from agentworks.errors import ConfigError, StateError
 from agentworks.git_credentials import remote_advisories
 from agentworks.git_credentials.credential import GitCredentialConfig
-from agentworks.plugins import CAPABILITY_ADAPTERS, Plugin, seated_plugin
+from agentworks.origin import Origin
+from agentworks.plugins import Plugin, capability_adapters, seated_plugin
 from agentworks.plugins.enablement import plugin_enablement_source
 from agentworks.resources.graph import (
     DependencyState,
     DisabledMark,
     Enablement,
-    Readiness,
     compose_enablement,
 )
-from agentworks.resources.origin import Origin
 from agentworks.resources.registry import Registry
+from agentworks.schema import AgwModel, AgwRootModel, CapabilityBlock, NonEmptyStr, SecretRef
 from agentworks.secrets.base import SecretDecl
 from agentworks.secrets.resolve import active_backends
 from agentworks.sessions.manager._env import _display_harness_integration
 from agentworks.sessions.template import SessionTemplate
 from agentworks.vms.initializer.credentials import resolve_git_credential_providers
 from agentworks.vms.sites import VMSiteDecl, resolve_site
+from tests.plugins._fixtures import (
+    ConformingGitCredentialProvider,
+    ConformingHarnessIntegration,
+    ConformingSecretBackend,
+    ConformingVMPlatform,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from agentworks.config import Config
     from agentworks.resources.graph import EnablementSource
-    from agentworks.resources.reference import ConfigReference
     from agentworks.secrets.base import MappingValue
 
 PLUGIN = "cap-plugin"
 
 
 # -- Fixture capability impls (REAL subclasses, so they fold through their
-#    consumers). Never instantiated by these tests except the secret backend,
-#    which the adapter constructs at seating; the other three are used as
-#    classes (host-support / dependencies classmethods only). ------------------
+#    consumers and pass registration's conformance check). Never instantiated
+#    by these tests except the secret backend, which the adapter constructs at
+#    seating; the other three are used as classes (host-support / dependencies
+#    classmethods only). ---------------------------------------------------
 
 
-class _FixtureVMPlatform(VMPlatform):
+class _FixturePlatformConfig(AgwModel):
+    """A config with a secret-naming field (like proxmox's
+    ``token_secret``), so the real producer can be shown to WITHHOLD the
+    implied secret when the platform is disabled: the site that names it
+    goes not-ready, and ``has_ready_referrer`` excludes a not-ready
+    referrer."""
+
+    name: Literal["fixture-platform"]
+    token_secret: Annotated[NonEmptyStr, SecretRef(usage="the fixture API token")] | None = None
+
+
+class _FixtureVMPlatform(ConformingVMPlatform):
     name = "fixture-platform"
     description = "Fixture VM platform (test plugin)"
-    # Abstract ops (create/start/stop/delete/status/display_backend_name) are
-    # left unimplemented: the fold uses only the classmethods below, never an
-    # instance.
-
-    @classmethod
-    def dependencies(cls, owner: str, config: Mapping[str, object]) -> tuple[ConfigReference, ...]:
-        """A config-implied secret edge (like proxmox's ``token_secret``), so the
-        real producer can be shown to WITHHOLD it when the platform is disabled
-        (the site that names it goes not-ready, and ``has_ready_referrer``
-        excludes a not-ready referrer)."""
-        from agentworks.resources.reference import ConfigReference
-
-        token = config.get("token_secret")
-        if not isinstance(token, str) or not token:
-            return ()
-        return (ConfigReference(kind="secret", name=token, usage="the fixture API token"),)
-
-    @classmethod
-    def validate(cls, owner: str, config: Mapping[str, object]) -> None:
-        # Accept the fixture's config blob (the inherited default rejects any
-        # non-empty config); the fixture platform validates nothing else.
-        return None
+    config_model = _FixturePlatformConfig
+    # The power ops come from the conforming base, which raises on each: the
+    # fold never builds an instance.
 
 
-class _FixtureHarnessIntegration(HarnessIntegration):
+class _FixtureHarnessIntegration(ConformingHarnessIntegration):
     name = "fixture-harness"
     description = "Fixture harness (test plugin)"
 
 
-class _FixtureProvider(GitCredentialProvider):
+class _FixtureProvider(ConformingGitCredentialProvider):
     name = "fixture-provider"
     description = "Fixture git credential provider (test plugin)"
-    # Inherits Capability.dependencies -> () (declares no token secret), keeping
-    # the fixture credential's edge set to just the provider edge.
+    # Its generated config model has no reference-marked field, so this
+    # provider declares no token secret and the fixture credential's edge
+    # set stays just the provider edge.
 
 
-class _FixtureBackend:
-    """A structural ``SecretBackend`` (Protocol, so a plain class). Trivial but
-    functional: ``validate_mapping`` rejects the sentinel ``"bad"`` so the
-    disabled-backend mapping-validation exclusion is provable."""
+class _FixtureBackendMapping(AgwRootModel[Literal["good"]]):
+    """A mapping vocabulary of exactly one accepted value, so the sentinel
+    ``"bad"`` is rejected and the disabled-backend
+    mapping-validation exclusion is provable."""
+
+
+class _FixtureBackend(ConformingSecretBackend):
+    """A structural ``SecretBackend`` (Protocol, so a plain class)."""
 
     name = "fixture-backend"
     description = "Fixture secret backend (test plugin)"
-    interactive = False
-
-    def not_ready(self) -> Readiness:
-        return Readiness.ready()
-
-    def validate_mapping(self, owner: str, mapping: MappingValue) -> None:
-        if mapping == "bad":
-            raise ConfigError(f"{owner}: fixture-backend mapping {mapping!r} is malformed")
-
-    def dependencies(self, mapping: MappingValue) -> tuple[ConfigReference, ...]:
-        return ()
+    config_model: type[AgwRootModel[Any]] = _FixtureBackendMapping
 
     def would_attempt(self, secret: SecretDecl, mapping: MappingValue | None) -> bool:
         return mapping is not None
-
-    def describe_lookup(self, secret: SecretDecl, mapping: MappingValue | None) -> str | None:
-        return None
-
-    def batch_get(self, wants: list[tuple[SecretDecl, MappingValue | None]]) -> dict[str, str]:
-        return {}
 
 
 def _capable_plugin(name: str = PLUGIN) -> Plugin:
@@ -159,7 +144,7 @@ def _publish_capability(registry: Registry, kind: str, name: str, plugin: str = 
     """Publish a seated fixture impl's capability row with a system-plugin
     origin (the shape ``publish_plugins`` will produce in Phase 5)."""
     origin = Origin.system_plugin(plugin=plugin, source=f"agentworks.plugins.{plugin}")
-    row = CAPABILITY_ADAPTERS[kind].build_row(name, origin)
+    row = capability_adapters()[kind].build_row(name, origin)
     registry.add(kind, name, row, origin)
 
 
@@ -170,7 +155,7 @@ def _publish_builtin_backend(registry: Registry, name: str) -> None:
     fixture backend in under a built-in origin (Phase 5's publisher split, not
     this phase's concern)."""
     origin = Origin.built_in(source="agentworks.secrets.backends")
-    row = CAPABILITY_ADAPTERS["secret-backend"].build_row(name, origin)
+    row = capability_adapters()["secret-backend"].build_row(name, origin)
     registry.add("secret-backend", name, row, origin)
 
 
@@ -212,7 +197,7 @@ def test_no_source_leaves_a_plugin_row_enabled_the_landed_default() -> None:
         registry.add(
             "vm-site",
             "s",
-            VMSiteDecl(name="s", platform="fixture-platform", platform_config={}),
+            VMSiteDecl(name="s", platform=CapabilityBlock.of("fixture-platform", **{})),
             _operator(),
         )
         registry.finalize()  # no sources -> all enabled
@@ -230,7 +215,7 @@ def test_vm_site_on_disabled_plugin_platform_is_not_ready_with_enable_plugin() -
         registry.add(
             "vm-site",
             "s",
-            VMSiteDecl(name="s", platform="fixture-platform", platform_config={}),
+            VMSiteDecl(name="s", platform=CapabilityBlock.of("fixture-platform", **{})),
             _operator(),
         )
         registry.finalize(enablement_sources=[_plugin_source()])
@@ -256,7 +241,10 @@ def test_disabled_plugin_platform_withholds_its_config_implied_secret() -> None:
         registry.add(
             "vm-site",
             "s",
-            VMSiteDecl(name="s", platform="fixture-platform", platform_config={"token_secret": "fixture-token"}),
+            VMSiteDecl(
+                name="s",
+                platform=CapabilityBlock.of("fixture-platform", **{"token_secret": "fixture-token"}),
+            ),
             _operator(),
         )
         registry.finalize(enablement_sources=[_plugin_source(*([PLUGIN] if enabled else []))])
@@ -277,7 +265,7 @@ def test_disabled_plugin_platform_withholds_its_config_implied_secret() -> None:
         registry.add(
             "vm-site",
             "s",
-            VMSiteDecl(name="s", platform="fixture-platform", platform_config={}),
+            VMSiteDecl(name="s", platform=CapabilityBlock.of("fixture-platform", **{})),
             _operator(),
         )
         registry.finalize(enablement_sources=[_plugin_source()])
@@ -289,39 +277,107 @@ def test_disabled_plugin_platform_withholds_its_config_implied_secret() -> None:
 # -- secret-backend -------------------------------------------------------------
 
 
-def test_disabled_plugin_backend_excluded_from_active_backends() -> None:
-    with seated_plugin(_capable_plugin()):
-        registry = Registry.empty()
-        _publish_builtin_backend(registry, "prompt")
+# That a disabled plugin's backend is dropped from the resolution chain is
+# ``test_a_valid_mapping_to_a_disabled_backend_builds_and_stays_inert``
+# below, which makes the same two assertions (the node is disabled, and the
+# chain comes back as ``["prompt"]`` alone) over a registry that also
+# carries a well-formed mapping to the dormant backend, so it pins the
+# harder half of the same seam.
+
+
+def _registry_mapping_fixture_backend(mapping: MappingValue, *, publish_backend: bool = True) -> Registry:
+    """A registry with one secret mapping ``fixture-backend``, unfinalized.
+
+    ``publish_backend=False`` omits the backend row, which is what makes the
+    backend ABSENT rather than merely disabled: the distinction the two cases
+    below turn on.
+    """
+    registry = Registry.empty()
+    if publish_backend:
         _publish_capability(registry, "secret-backend", "fixture-backend")
-        registry.finalize(enablement_sources=[_plugin_source()])
+    registry.add(
+        "secret",
+        "vaulted",
+        SecretDecl(name="vaulted", description="a vaulted key", backend_mappings={"fixture-backend": mapping}),
+        _operator("c.toml"),
+    )
+    return registry
+
+
+def test_mapping_to_a_disabled_plugin_backend_is_validated_like_any_other() -> None:
+    """A mapping addressed to a PRESENT-but-DISABLED backend is validated
+    exactly as one addressed to an enabled backend.
+
+    The invariant is that the verdict does not move when enablement does:
+    ``"bad"`` is not in the fixture backend's vocabulary, so it is refused on
+    both branches. Validity is the model's answer, and an operator must not be
+    able to bank a mapping no model would accept and have it detonate at the
+    moment they enable the backend.
+
+    The backend row is PUBLISHED on both branches (only the plugin opt-in
+    moves), so neither branch can pass through the absent-backend path below,
+    which would raise a different error for a different reason. Each branch
+    also PROVES which side of the axis it is on rather than assuming the
+    opt-in plumbing fired: it finalizes the same shape with a valid mapping
+    first and reads the axis off the graph. Without that, a source that
+    silently stopped disabling would leave this test green for the wrong
+    reason.
+
+    The two branches run in one body because "the verdict does not move" is
+    a claim ABOUT the pair, and reading it as one test is what says so.
+    """
+    for enabled, expected in ((False, Enablement.disabled), (True, Enablement.enabled)):
+        sources = [_plugin_source(*([PLUGIN] if enabled else []))]
+        with seated_plugin(_capable_plugin()):
+            precondition = _registry_mapping_fixture_backend("good")
+            precondition.finalize(enablement_sources=sources)
+            assert precondition.graph.enablement_of("secret-backend", "fixture-backend") is expected
+
+            registry = _registry_mapping_fixture_backend("bad")
+            with pytest.raises(ConfigError, match="backend_mappings.fixture-backend: must be one of"):
+                registry.finalize(enablement_sources=sources)
+
+
+def test_a_valid_mapping_to_a_disabled_backend_builds_and_stays_inert() -> None:
+    """The other half of the same seam: validating a disabled backend's mapping
+    does NOT make that backend live.
+
+    A WELL-FORMED mapping to a disabled backend builds (validation had nothing
+    to complain about), and the backend is still dropped from the resolution
+    chain, so the mapping is never selected or resolved through. Being
+    validated and being live are separate properties, and only the second one
+    tracks enablement.
+    """
+    with seated_plugin(_capable_plugin()):
+        registry = _registry_mapping_fixture_backend("good")
+        _publish_builtin_backend(registry, "prompt")
+        registry.finalize(enablement_sources=[_plugin_source()])  # PLUGIN not opted in
 
         assert registry.graph.enablement_of("secret-backend", "fixture-backend") is Enablement.disabled
         config = cast(
             "Config",
             SimpleNamespace(secret_config_data=SimpleNamespace(backends=("fixture-backend", "prompt"))),
         )
-        chain = [b.capability.name for b in active_backends(config, registry)]
-        assert chain == ["prompt"]  # fixture-backend excluded (disabled)
+        assert [b.capability.name for b in active_backends(config, registry)] == ["prompt"]
 
 
-def test_disabled_plugin_backend_mapping_validation_is_inert_until_enabled() -> None:
-    def _build(*, enabled: bool) -> Registry:
-        registry = Registry.empty()
-        _publish_capability(registry, "secret-backend", "fixture-backend")
-        registry.add(
-            "secret",
-            "vaulted",
-            SecretDecl(name="vaulted", description="a vaulted key", backend_mappings={"fixture-backend": "bad"}),
-            _operator("c.toml"),
-        )
-        registry.finalize(enablement_sources=[_plugin_source(*([PLUGIN] if enabled else []))])
-        return registry
+def test_mapping_to_an_absent_backend_reports_the_dangling_edge_not_a_shape_error() -> None:
+    """An ABSENT backend is a different case from a disabled one and keeps its
+    own answer.
 
-    with seated_plugin(_capable_plugin()):
-        _build(enabled=False)  # disabled: malformed mapping inert, build succeeds
-        with pytest.raises(ConfigError, match="fixture-backend mapping"):
-            _build(enabled=True)  # enabled: the same mapping fails validation
+    No row and no seated impl means no declared model, so there is nothing the
+    mapping could be checked against; ``validate_capability_config`` no-ops.
+    The mapping is not silently accepted, though: the secret's dangling
+    ``secret-backend`` edge reports it once as a hard finalize miss (R9.11),
+    in the "no such backend" vocabulary rather than a shape complaint about a
+    model that does not exist here. The mapping used is one the fixture
+    backend's model would REJECT, so a shape error would surface if the absent
+    path had been folded into the validated one.
+    """
+    registry = _registry_mapping_fixture_backend("bad", publish_backend=False)
+    with pytest.raises(ConfigError, match="references unknown secret-backend 'fixture-backend'") as exc:
+        registry.finalize(enablement_sources=[_plugin_source()])
+    assert "must be one of" not in str(exc.value)
 
 
 # -- git-credential-provider ----------------------------------------------------
@@ -333,7 +389,7 @@ def _git_registry() -> Registry:
     registry.add(
         "git-credential",
         "cred",
-        GitCredentialConfig(name="cred", provider="fixture-provider", provider_config={}),
+        GitCredentialConfig(name="cred", provider=CapabilityBlock.of("fixture-provider", **{})),
         _operator(),
     )
     return registry
@@ -354,7 +410,7 @@ def test_git_credential_not_ready_falls_back_when_mark_absent() -> None:
     """The propagate hook's mark-absent fallback (mirrors the vm-site leaf test):
     a disabled provider ``DependencyState`` with no carried reason yields the
     generic "enable its unit" tail. Direct call, no source involved."""
-    cred = GitCredentialConfig(name="c", provider="p", provider_config={})
+    cred = GitCredentialConfig(name="c", provider=CapabilityBlock.of("p", **{}))
     deps = {
         ("git-credential-provider", "p"): DependencyState(
             enablement=Enablement.disabled,
@@ -398,7 +454,7 @@ def _harness_integration_registry() -> Registry:
     registry.add(
         "session-template",
         "tmpl",
-        SessionTemplate(name="tmpl", harness_integration="fixture-harness"),
+        SessionTemplate(name="tmpl", harness_integration=CapabilityBlock(name="fixture-harness")),
         _operator(),
     )
     return registry
@@ -467,7 +523,7 @@ def test_second_stub_source_composes_through_finalize_and_precedence_holds() -> 
         registry.add(
             "vm-site",
             "s",
-            VMSiteDecl(name="s", platform="fixture-platform", platform_config={}),
+            VMSiteDecl(name="s", platform=CapabilityBlock.of("fixture-platform", **{})),
             _operator(),
         )
         # The plugin source disables both plugin rows. A stub ALSO disables the

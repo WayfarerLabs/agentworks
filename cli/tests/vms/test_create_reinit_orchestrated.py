@@ -39,7 +39,7 @@ PLUGINS_ENABLED = """
 system = ["proxmox"]
 """
 
-GIT_CRED_GH = ManifestDoc("git-credential", "gh", {"provider": "github"})
+GIT_CRED_GH = ManifestDoc("git-credential", "gh", {"provider": {"name": "github"}})
 
 
 @pytest.fixture

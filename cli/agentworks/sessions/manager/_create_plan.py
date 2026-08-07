@@ -31,12 +31,12 @@ import agentworks.sessions.manager as _mgr
 # so there is no sessions <-> agents module-load cycle.
 from agentworks.agents.grants import MAX_WORKSPACE_NAME_LENGTH
 from agentworks.agents.manager import MAX_AGENT_NAME_LENGTH
-from agentworks.config import validate_name
 from agentworks.errors import (
     AlreadyExistsError,
     NotFoundError,
     ValidationError,
 )
+from agentworks.naming import validate_name
 from agentworks.sessions.tmux import MAX_SESSION_NAME_LENGTH
 
 from ._create_types import SessionPlan

@@ -9,7 +9,7 @@ import pytest
 
 from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
-from agentworks.errors import NotFoundError
+from agentworks.errors import ConfigError, NotFoundError
 from agentworks.workspaces.templates import (
     resolve_template,
     resolve_ws_template_env_or_empty,
@@ -223,15 +223,18 @@ def test_git_identity_inherits_and_overrides(tmp_path: Path) -> None:
     assert result.git_user_email == "child@example.com"  # overridden
 
 
-def test_unknown_workspace_template_key_warns(tmp_path: Path) -> None:
-    # The unknown-key warning now rides the manifest issue channel
-    # (config.toml is settings only, ADR 0022): the workspace-template
-    # decoder emits it into the ManifestSet, not cfg.config_issues.
+def test_unknown_workspace_template_key_is_refused(tmp_path: Path) -> None:
+    """FR12's warn-to-error flip: a misspelled key used to load and do
+    nothing, which is a footgun rather than a kindness. The message names
+    the fields that ARE valid, so the typo is its own remedy."""
     from agentworks.manifests import RESOURCES_DIRNAME, load_manifests
 
     cfg_file = _identity_config(
         tmp_path,
         ManifestDoc("workspace-template", "default", {"git_user_emial": "typo@example.com"}),
     )
-    manifests = load_manifests(cfg_file.parent / RESOURCES_DIRNAME)
-    assert any("workspace_templates.default" in issue and "git_user_emial" in issue for issue in manifests.issues)
+    with pytest.raises(ConfigError) as caught:
+        load_manifests(cfg_file.parent / RESOURCES_DIRNAME)
+
+    assert "workspace-template/default.git_user_emial: unknown field; expected one of: " in str(caught.value)
+    assert "git_user_email" in str(caught.value)

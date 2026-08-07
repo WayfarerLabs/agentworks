@@ -256,3 +256,23 @@ def test_cli_describe_rejects_token_without_slash(tmp_path: Path, monkeypatch) -
         result = CliRunner().invoke(app, ["resource", "describe", token])
         assert result.exit_code != 0
         assert "expected KIND/NAME" in str(result.exception)
+
+
+def test_an_apt_entry_with_no_description_reads_the_same_as_before(tmp_path: Path) -> None:
+    """The four apt / install-command rows used to require ``description``
+    on the class while their loaders defaulted it to ``""``. They inherit
+    the base's optional field now, so the value is ``None``.
+
+    This pins that the change is invisible where an operator would see it:
+    both spellings are falsy, so the auto-declared-description polish
+    still skips a row that has one, and the inspect layer still hands the
+    renderer an empty string."""
+    cfg_file = tmp_path / "config.toml"
+    _write_base(
+        cfg_file,
+        manifests=[ManifestDoc("apt-package", "tools", {"apt": ["jq"]})],
+    )
+    registry = _load(cfg_file)
+
+    assert registry.lookup("apt-package", "tools").description is None
+    assert describe_resource(registry, "apt-package", "tools").description == ""

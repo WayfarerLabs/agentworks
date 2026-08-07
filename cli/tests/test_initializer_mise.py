@@ -8,8 +8,7 @@ import pytest
 
 from agentworks.agents.initializer import _run_agent_mise_setup
 from agentworks.agents.templates import ResolvedAgentTemplate
-from agentworks.config.validation import validate_mise_settings
-from agentworks.errors import ConfigError
+from agentworks.config.validation import check_mise_settings
 from agentworks.ssh import SSHError
 from agentworks.vms.initializer.mise import _run_mise_install, _write_mise_config
 
@@ -31,12 +30,14 @@ def test_write_mise_config_renders_settings_and_tools() -> None:
 
 
 def test_mise_validation_allows_scoped_backend_tool_name() -> None:
-    validate_mise_settings(["npm:@scope/tool@1.2.3"], None, "7d", context="agent_templates.default")
+    check_mise_settings(["npm:@scope/tool@1.2.3"], None, "7d")
 
 
 def test_mise_validation_rejects_control_characters() -> None:
-    with pytest.raises(ConfigError, match="name@version"):
-        validate_mise_settings(["tool\x00@1"], None, "7d", context="agent_templates.default")
+    # ValueError rather than ConfigError: this is what a model validator
+    # raises, and the error bridge frames it with the owning resource.
+    with pytest.raises(ValueError, match="name@version"):
+        check_mise_settings(["tool\x00@1"], None, "7d")
 
 
 def test_run_mise_install_without_lockfile_runs_unlocked() -> None:

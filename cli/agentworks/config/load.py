@@ -4,8 +4,8 @@ to compose a validated ``Config``.
 
 config.toml is settings only now (ADR 0022): a resource-declaring section
 is a hard error (``_raise_for_resource_sections``), gated on ``resources``
-so the migrator and other remediation commands can still read a config
-that carries them via the ``resources=False`` escape hatch.
+so the remediation commands can still read a config that carries them via
+the ``resources=False`` escape hatch.
 
 Split out of the former monolithic ``agentworks/config.py`` (see
 ``agentworks/config/__init__.py`` for the package overview).
@@ -18,11 +18,7 @@ import tomllib
 from typing import TYPE_CHECKING
 
 from agentworks.config.loaders_core import _load_defaults, _load_operator, _load_paths
-from agentworks.config.loaders_secrets import (
-    _load_plugins,
-    _load_secret_backends,
-    _load_secret_config,
-)
+from agentworks.config.loaders_secrets import _load_plugins, _load_secret_config
 from agentworks.config.loaders_sessions import _load_session_config
 from agentworks.config.models import Config, _SectionLineMap
 from agentworks.errors import ConfigError
@@ -60,9 +56,10 @@ EXPECTED_TOP_LEVEL_KEYS = {
 # ``[vm_templates.default]`` / ``[agent_templates.default]`` resource shape
 # before this effort, and those shapes are themselves now resources (ADR 0022).
 # The pointed rename error used to live in the vm/agent template loaders, which
-# relocated into the migrator; on a normal load they now fall through to the
-# generic unexpected-key path, so give them a targeted hint at the modern
-# destination (a YAML manifest) rather than the stale rename target.
+# were deleted with the TOML resource surface; on a normal load these keys now
+# fall through to the generic unexpected-key path, so give them a targeted hint
+# at the modern destination (a YAML manifest) rather than the stale rename
+# target.
 _LEGACY_SINGLETON_HINTS = {
     "vm": "[vm.config] is a legacy spelling of the vm-template resource; declare it as a YAML "
     "manifest (`agw resource sample vm-template`).",
@@ -94,22 +91,53 @@ def _raise_for_resource_sections(data: dict[str, object]) -> None:
 
     config.toml is settings only now: the resource-declaration path moved to
     YAML manifests. This is the replacement for the old deprecation nudge
-    (``_warn_deprecated_resource_sections``); it reuses the same shared
-    ``KIND_SECTIONS`` presence sweep (minus ``secret_backends``, which has
-    its own no-op warning) and the same grep-able display shapes, so the
-    error and ``agw resource migrate`` cannot disagree about what counts.
+    (``_warn_deprecated_resource_sections``); it reuses the shared
+    ``KIND_SECTIONS`` presence sweep and the same grep-able display shapes.
+
+    The rewrite is the operator's, so the error carries every part of it
+    they need: which sections are the problem, which kind each becomes
+    where the section name does not say, the two commands that print the
+    target shape, and the guide section that walks it through. There is no
+    tool to defer to (operator ruling, 2026-08-07).
+
+    ``[secret_backends.*]`` is swept here like every other section (it IS a
+    resource-declaring section: it is in ``KIND_SECTIONS``, keyed by the
+    ``secret-backend`` kind), but it is the one section whose remediation is
+    not "rewrite it as a manifest". It never carried configuration, only the
+    backend NAME, so there is nothing to move and no manifest to write:
+    delete it, and activate the backend in ``[secret_config].backends``
+    instead. Sending an operator to write a ``secret-backend`` manifest would
+    send them to a command that errors, since ``secret-backend`` is a
+    capability kind with no declarable form. Hence the two clauses below
+    rather than one message: a config carrying both kinds of section still
+    gets the whole job in one read.
 
     The escape hatch is ``load_config(resources=False)``: the commands that
-    ARE the remediation (``agw resource migrate``, ``resource sample
-    --write``, ``resource edit``'s fallback) load that way and so still read
-    a config that carries resource sections.
+    ARE the remediation (``resource sample --write``, ``resource edit``'s
+    fallback) load that way and so still read a config that carries
+    resource sections, which is what lets an operator author the
+    replacement manifests before deleting the sections. Folding
+    ``[secret_backends.*]`` into this sweep is what finally puts it behind
+    that hatch too: it used to be refused by the settings load, which no
+    escape hatch covers, so a section carrying no configuration could break
+    the very commands the rewrite depends on.
+
+    RELEASE-SCOPED, and paired with its guide. This check exists only to
+    carry hosts across the 0.14 TOML sunset, so it retires on the same
+    schedule as ``docs/guides/upgrading-to-0.14.md``, which its hint names.
+    Delete the two together, or the error outlives the document it sends
+    the operator to. The retirement is this function, the ``resources=``
+    escape hatch it is gated by, and the retired section names in
+    ``EXPECTED_TOP_LEVEL_KEYS`` (they sit in that set only so this error
+    fires instead of the generic unexpected-key one; leaving them there
+    would make ``[secrets.*]`` load silently again).
     """
     from agentworks.manifests.decode import KIND_SECTIONS
 
     present: list[str] = []
     for _kind, sections in KIND_SECTIONS.items():
         for section in sections:
-            if section == "secret_backends" or section not in data:
+            if section not in data:
                 continue
             # The header shape operators can grep for: [admin.config],
             # [named_console], and the legacy vm-site sections ([azure] /
@@ -124,20 +152,41 @@ def _raise_for_resource_sections(data: dict[str, object]) -> None:
     if not present:
         return
     noun = "section" if len(present) == 1 else "sections"
-    # The [azure]/[proxmox] sections migrate as vm-site, a kind name nothing
-    # on screen would suggest; name it only when one is present.
-    site_hint = (
-        " (the [azure]/[proxmox] sections migrate as vm-site)"
-        if any(s in ("[azure]", "[proxmox]") for s in present)
-        else ""
-    )
-    raise ConfigError(
+    rewritable = [s for s in present if s != "[secret_backends.*]"]
+
+    message = (
         f"config.toml declares resources, which config.toml no longer supports "
-        f"(it is settings only now): {', '.join(present)}. Move the {noun} to "
-        f"YAML manifests with `agw resource migrate <kind>` (or "
-        f"`agw resource migrate --all`){site_hint}, or author new manifests "
-        f"from `agw resource sample <kind>`. Then remove the {noun} from config.toml."
+        f"(it is settings only now): {', '.join(present)}."
     )
+    hint_parts: list[str] = []
+    if rewritable:
+        rewrite_noun = "section" if len(rewritable) == 1 else "sections"
+        # The [azure]/[proxmox] sections become vm-site, a kind name nothing
+        # on screen would suggest; name it only when one is present.
+        site_hint = (
+            " (the [azure]/[proxmox] sections become vm-site manifests)"
+            if any(s in ("[azure]", "[proxmox]") for s in rewritable)
+            else ""
+        )
+        message += (
+            f" Rewrite {', '.join(rewritable)} as YAML manifests{site_hint}, "
+            f"then remove the {rewrite_noun} from config.toml."
+        )
+        hint_parts.append(
+            "`agw resource sample <kind> --write <kind>s.yaml` writes a commented starter to edit, "
+            "and `agw resource describe-kind <kind>` lists every field with its type."
+        )
+    if "[secret_backends.*]" in present:
+        message += " [secret_backends.*] carries no configuration, so there is nothing to rewrite: delete it."
+        hint_parts.append(
+            "If you meant to ACTIVATE that backend, list its name in [secret_config].backends, "
+            "which is a setting and stays in config.toml."
+        )
+    hint_parts.append(
+        'The "TOML resource sections: removed" section of docs/guides/upgrading-to-0.14.md '
+        f"walks through the {noun} one by one."
+    )
+    raise ConfigError(message, hint=" ".join(hint_parts))
 
 
 def load_config(
@@ -157,10 +206,10 @@ def load_config(
             silenceable per-invocation via --no-deprecations).
         resources: Enforce the resource-section hard error (default: True).
             config.toml is settings only now; a resource-declaring section is
-            a hard error. The commands that ARE the remediation (``agw
-            resource migrate``, ``resource sample --write``, ``resource edit``
-            fallback) pass False to read a config that still carries such
-            sections. Settings load identically either way.
+            a hard error. The commands that ARE the remediation (``resource
+            sample --write``, ``resource edit``'s fallback) pass False to read
+            a config that still carries such sections. Settings load
+            identically either way.
 
     Returns:
         Validated Config object.
@@ -181,7 +230,7 @@ def load_config(
     config_path = path or CONFIG_PATH
     if not config_path.exists():
         print(f"Configuration file not found: {config_path}", file=sys.stderr)
-        print("Create it to get started. See the documentation for the schema.", file=sys.stderr)
+        print("Run `agw config init` to create one from the commented sample.", file=sys.stderr)
         raise SystemExit(1)
 
     raw_text = config_path.read_text()
@@ -218,8 +267,12 @@ def load_config(
 
     session_config = _load_session_config(data, issues)
 
+    # No settings loader produces a deprecation today (the last producer,
+    # the ``[secret_backends.*]`` no-op nudge, became part of the
+    # resource-section hard error above). The channel stays wired because it
+    # is generic machinery with an operator-facing flag (--no-deprecations),
+    # not because anything currently rides it.
     deprecations: list[str] = []
-    noop_backend_sections = _load_secret_backends(data, deprecations)
     secret_config_data = _load_secret_config(data, issues, decls)
     enabled_system_plugins = _load_plugins(data, issues, decls)
 
@@ -233,7 +286,6 @@ def load_config(
         enabled_system_plugins=enabled_system_plugins,
         config_issues=tuple(issues),
         deprecation_issues=tuple(deprecations),
-        noop_secret_backend_sections=noop_backend_sections,
     )
 
     if warn_issues and config.config_issues:

@@ -5,11 +5,23 @@ Date: 2026-08-05
 ## Status
 
 Accepted. Supersedes the "Dual-path: deprecate, don't break" stance of
-[ADR 0016](0016-yaml-resource-manifests.md) ONLY. Everything else ADR 0016 decides still stands: the
-two-layer config/resource split, the vocabulary law, resources-reference-capabilities (with the
-capability naming rule and the graduate-when-real clause), the Kubernetes envelope and auto-load,
-and the slash ban. This ADR narrows the resource-declaration frontend from two paths to one; it does
-not reopen the model.
+[ADR 0016](0016-yaml-resource-manifests.md) ONLY.
+
+> Amended 2026-08-07 (operator ruling): **`agw resource migrate` is deleted, and Agentworks
+> maintains no automated migration tooling.** Every reference to it below reads as history. The
+> decision this ADR records is unaffected: the frontend is still single, `config.toml` is still
+> settings only, and a resource-declaring section is still a hard error. What changed is the
+> remediation the error names. It now carries the rewrite itself, plus `agw resource sample` and
+> `agw resource describe-kind` (which print the target shape) and `docs/guides/upgrading-to-0.14.md`
+> (which walks it through). The settings-only escape hatch survives for `resource sample --write`
+> and `resource edit`'s fallback, so an operator can still author the replacement manifests against
+> a config the app would otherwise refuse to load. The migrator's deletability was designed in (a
+> separability guard kept it a leaf), which is what let it be removed before release rather than
+> maintained until a scheduled expiry. Everything else ADR 0016 decides still stands: the two-layer
+> config/resource split, the vocabulary law, resources-reference-capabilities (with the capability
+> naming rule and the graduate-when-real clause), the Kubernetes envelope and auto-load, and the
+> slash ban. This ADR narrows the resource-declaration frontend from two paths to one; it does not
+> reopen the model.
 
 ## Context
 
@@ -27,9 +39,9 @@ That stance has done its job, and the cost of keeping it has come due:
    keeps the abstraction honest; the plugin origins do.
 2. **Two frontends is a standing tax.** Every resource kind carried two decode surfaces (a flat TOML
    loader and a YAML decoder) that had to stay behavior-identical, and every reader had to learn
-   both spellings plus the unwritten rule about which applied where. The declarative-schema effort
-   (`docs/sdd/2026-07-31-declarative-schema/`) wants to model each kind's spec once; two frontends
-   would mean modeling it twice.
+   both spellings plus the unwritten rule about which applied where. The follow-on work that models
+   each kind's spec once ([ADR 0023](0023-declared-schemas-and-the-kind-descriptor.md)) would have
+   had to model it twice with two frontends.
 3. **The deprecation runway has shipped.** Declaring resources in `config.toml` was marked
    deprecated for removal at load time in 0.13.0 (PR #315, the aggregated load-time warning), and
    the tagged-capability-config pre-support landed in the same release (PR #349). The FRD's
@@ -69,14 +81,15 @@ config the app would otherwise refuse to load.
   error on the next command instead of a silent load-with-warning. The error names the sections and
   the exact remediation (`agw resource migrate --all`, or per kind), and the migrator can still run
   against the offending config via the settings-only load. The upgrade note lives in
-  `docs/guides/resources.md`; the removal commit carries a `feat(config)!:` marker with a
+  `docs/guides/upgrading-to-0.14.md`; the removal commit carries a `feat(config)!:` marker with a
   `BREAKING CHANGE` footer so release-please surfaces it.
 - **The runway is spent.** With the TOML resource path gone, the aggregated TOML-section deprecation
   warning and its `--no-deprecations` channel entry retire. The tagged-capability-config shape
   deprecation (PR #349) and the settings-side deprecations are unaffected and remain on the channel.
-- **Follow-on modeling is unblocked.** With a single frontend, the declarative-schema effort can
-  model each kind's spec once rather than reconciling a TOML loader against a YAML decoder for every
-  kind.
+- **Follow-on modeling is unblocked.** With a single frontend, each kind's spec is modeled once
+  rather than reconciled between a TOML loader and a YAML decoder. That is
+  [ADR 0023](0023-declared-schemas-and-the-kind-descriptor.md), which this ADR is the precondition
+  for.
 
 ## Relationship to ADR 0016
 

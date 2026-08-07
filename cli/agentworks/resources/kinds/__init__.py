@@ -7,6 +7,7 @@ domain): ``agentworks.apt`` (the apt-source / apt-package kinds),
 ``agentworks.install_commands`` (the system/user install-command kinds),
 ``agentworks.secrets.kinds``, ``agentworks.capabilities.git_credential.kinds``,
 ``agentworks.capabilities.harness_integration.kinds``,
+``agentworks.capabilities.vm_platform.kinds``,
 ``agentworks.vms.kinds``, ``agentworks.agents.kinds``,
 ``agentworks.workspaces.kinds``, ``agentworks.sessions.kinds``.
 
@@ -24,6 +25,7 @@ import agentworks.agents.kinds  # noqa: F401
 import agentworks.apt  # noqa: F401
 import agentworks.capabilities.git_credential.kinds  # noqa: F401
 import agentworks.capabilities.harness_integration.kinds  # noqa: F401
+import agentworks.capabilities.vm_platform.kinds  # noqa: F401
 import agentworks.install_commands  # noqa: F401
 import agentworks.secrets.kinds  # noqa: F401
 import agentworks.sessions.kinds  # noqa: F401

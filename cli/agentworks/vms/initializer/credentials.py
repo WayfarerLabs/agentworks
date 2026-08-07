@@ -91,19 +91,19 @@ def resolve_git_credential_providers(
                 entity_name=name,
                 hint="`agw doctor` lists each git-credential's state; enable the required plugin or use a ready one",
             )
-        provider_cls = GIT_CREDENTIAL_PROVIDER_REGISTRY.get(cred_config.provider)
+        provider_cls = GIT_CREDENTIAL_PROVIDER_REGISTRY.get(cred_config.provider.name)
         if provider_cls is None:
             # Unknown provider names are caught by the framework's
             # git-credential-provider miss policy at build_registry; this
             # guards direct callers that bypass that path.
             raise NotFoundError(
-                f"git credential '{name}' names unknown provider {cred_config.provider!r}",
+                f"git credential '{name}' names unknown provider {cred_config.provider.name!r}",
                 entity_kind="git-credential-provider",
-                entity_name=cred_config.provider,
+                entity_name=cred_config.provider.name,
             )
         providers[name] = provider_cls(
             name,
-            cred_config.provider_config,
+            cred_config.provider.config,
             description=cred_config.description,
         )
     return providers

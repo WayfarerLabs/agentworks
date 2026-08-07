@@ -113,6 +113,19 @@ spec (a `git-credential`'s `provider` selector is top-level, while its token sec
 or structured store addressing) and is validated the same way: same principle, capability-owned
 config at the reference site.
 
+> Amended 2026-08-06 per [ADR 0023](0023-declared-schemas-and-the-kind-descriptor.md). The PRINCIPLE
+> stands: capability-owned config lives at the reference site, and the consuming resource emits the
+> references it implies as its own, so the rest of the spec stays capability-agnostic. Two mechanics
+> in this paragraph do not:
+>
+> - **The sibling-key shape is retired.** A capability's config is not a `*_config` sibling of the
+>   naming field; it is the remaining keys of ONE tagged table on the naming field itself
+>   (`platform: {name: lima, vm_host: ...}`). The old sibling pair is a hard error whose message
+>   prints the exact tagged table that replaces the document's own pair.
+> - **The capability is not invoked.** It DECLARES its config as a model, and the core derives both
+>   the validation and the implied references from that declaration, reading the model and the raw
+>   blob and running no capability code. The config is no longer an opaque blob to the framework.
+
 The INTERNAL resource representation follows the nested shape too
 (`GitCredentialConfig.provider_config`) as this represents the best representation available. For
 backwards compatibility, we continue to support the legacy TOML shapes which aren't as clean.
@@ -120,6 +133,14 @@ However, the flat TOML section is the ONLY domain where provider-owned fields ar
 outside the `provider_config` blob. The TOML loaders translate into the nested shape at their
 boundary. Decoders reshape before calling the shared loaders, so validation stays TOML-shared while
 the YAML surface and the internal model stay uniform.
+
+> Amended 2026-08-06. This paragraph describes two things that no longer exist. There are no TOML
+> resource sections and no TOML loaders in the load path
+> ([ADR 0022](0022-single-resource-declaration-frontend.md)), so there is no second shape to
+> translate; and the internal representation is the tagged table as written (a `CapabilityBlock`
+> carrying the capability's name plus its config), not a `provider_config` attribute
+> ([ADR 0023](0023-declared-schemas-and-the-kind-descriptor.md)). The uniformity the paragraph was
+> arguing for is now structural: there is one shape, on the surface and inside.
 
 For secrets concretely: `SecretBackend` is an ordinary well-defined API (`would_attempt` /
 `describe_lookup` / `batch_get`) abstracting where secrets actually come from, and resolution is a
@@ -157,8 +178,11 @@ a config resource or a live instance.
 > Superseded by [ADR 0022](0022-single-resource-declaration-frontend.md) (2026-08-05): the dual-path
 > stance in this section is retired. YAML manifests are now the single resource-declaration
 > frontend; config.toml is settings only and hard-errors on any resource-declaring section. ADR 0022
-> supersedes ONLY this section; the rest of this ADR still stands. `agw resource migrate` remains
-> the escape hatch that moves legacy TOML declarations to YAML.
+> supersedes ONLY this section; the rest of this ADR still stands.
+>
+> Amended 2026-08-07 (operator ruling): `agw resource migrate` is deleted and Agentworks maintains
+> no automated migration tooling. References to it in this ADR read as history; see the status note
+> on ADR 0022 for what replaced it.
 
 TOML resource sections remain fully supported publishers into the same registry, with deprecation
 warnings at load. As originally accepted, removal was deferred to a future major release and the

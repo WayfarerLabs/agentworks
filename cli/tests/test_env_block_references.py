@@ -12,75 +12,48 @@ surfaces "no active backend resolved" if no backend yields a value.
 
 from __future__ import annotations
 
-from textwrap import dedent
 from typing import TYPE_CHECKING
 
 import pytest
+from pydantic import ValidationError
 
 from agentworks.agents.template import AgentTemplate
 from agentworks.bootstrap import build_registry
 from agentworks.config import load_config
 from agentworks.env.entry import EnvEntry
-from agentworks.resources.graph import BuildContext
+from agentworks.resources.graph import FinalizeContext
 from agentworks.sessions.template import SessionTemplate
 from agentworks.vms.admin import AdminConfig
 from agentworks.vms.template import VMTemplate
 from agentworks.workspaces.template import WorkspaceTemplate
-from tests.conftest import ManifestDoc, write_manifests
+from tests.conftest import ManifestDoc, write_cfg
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from pathlib import Path
 
 
-@pytest.fixture()
-def ssh_keys(tmp_path: Path) -> tuple[Path, Path]:
-    pub = tmp_path / "id.pub"
-    priv = tmp_path / "id"
-    pub.write_text("ssh-ed25519 X")
-    priv.write_text("-----BEGIN-----")
-    return pub, priv
-
-
 def _write_cfg(
     tmp_path: Path,
-    ssh_keys: tuple[Path, Path],
     *,
     settings: str = "",
     manifests: Sequence[ManifestDoc | str] = (),
 ) -> Path:
-    """Write a settings-only config.toml plus its resources/ manifests and
-    return the config path. ``settings`` carries settings-only TOML; the
-    env-block resources under test go in ``manifests``."""
-    pub, priv = ssh_keys
-    p = tmp_path / "c.toml"
-    p.write_text(
-        dedent(
-            f"""\
-            [operator]
-            ssh_public_key = "{pub}"
-            ssh_private_key = "{priv}"
-
-            """
-        )
-        + dedent(settings)
-    )
-    if manifests:
-        write_manifests(tmp_path, *manifests)
-    return p
+    """``write_cfg`` under this file's keyword spelling."""
+    return write_cfg(tmp_path, *manifests, settings=settings, filename="c.toml")
 
 
 # -- EnvEntry.referenced_resources --------------------------------------------
 
 
 def test_env_entry_plaintext_returns_empty_list() -> None:
-    entry = EnvEntry(key="FOO", value="bar")
-    assert entry.referenced_resources(("admin-template", "default")) == []
+    entry = EnvEntry(value="bar")
+    assert entry.referenced_resources("API_KEY", ("admin-template", "default")) == []
 
 
 def test_env_entry_secret_ref_emits_secret_requirement() -> None:
-    entry = EnvEntry(key="API_KEY", secret="anthropic-api-key")
-    reqs = entry.referenced_resources(("admin-template", "default"))
+    entry = EnvEntry(secret="anthropic-api-key")
+    reqs = entry.referenced_resources("API_KEY", ("admin-template", "default"))
     assert len(reqs) == 1
     req = reqs[0]
     assert req.name == "anthropic-api-key"
@@ -95,12 +68,12 @@ def test_env_entry_secret_ref_emits_secret_requirement() -> None:
 def test_admin_config_dependencies_aggregates_env() -> None:
     admin = AdminConfig(
         env={
-            "A": EnvEntry(key="A", secret="sec-a"),
-            "B": EnvEntry(key="B", value="plain"),
-            "C": EnvEntry(key="C", secret="sec-c"),
+            "A": EnvEntry(secret="sec-a"),
+            "B": EnvEntry(value="plain"),
+            "C": EnvEntry(secret="sec-c"),
         }
     )
-    reqs = admin.dependencies(BuildContext())
+    reqs = admin.dependencies(FinalizeContext())
     assert {r.name for r in reqs} == {"sec-a", "sec-c"}
     assert all(r.source == ("admin-template", "default") for r in reqs)
 
@@ -111,9 +84,9 @@ def test_vm_template_dependencies_uses_template_name_in_source() -> None:
     """
     tmpl = VMTemplate(
         name="azure-prod",
-        env={"KEY": EnvEntry(key="KEY", secret="ts-key")},
+        env={"KEY": EnvEntry(secret="ts-key")},
     )
-    reqs = tmpl.dependencies(BuildContext())
+    reqs = tmpl.dependencies(FinalizeContext())
     # 1 env-block + 1 tailscale (Phase 1c)
     assert len(reqs) == 2
     # All requirements carry the template's source.
@@ -131,52 +104,52 @@ def test_vm_template_dependencies_uses_template_name_in_source() -> None:
 def test_workspace_template_dependencies() -> None:
     tmpl = WorkspaceTemplate(
         name="default",
-        env={"K": EnvEntry(key="K", secret="ws-secret")},
+        env={"K": EnvEntry(secret="ws-secret")},
     )
-    reqs = tmpl.dependencies(BuildContext())
+    reqs = tmpl.dependencies(FinalizeContext())
     assert reqs[0].source == ("workspace-template", "default")
 
 
 def test_agent_template_dependencies() -> None:
     tmpl = AgentTemplate(
         name="claude",
-        env={"K": EnvEntry(key="K", secret="claude-key")},
+        env={"K": EnvEntry(secret="claude-key")},
     )
-    reqs = tmpl.dependencies(BuildContext())
+    reqs = tmpl.dependencies(FinalizeContext())
     assert reqs[0].source == ("agent-template", "claude")
 
 
-def test_session_template_dependencies_with_none_env() -> None:
-    """``SessionTemplate.env`` is ``Optional`` (uniquely so among the
-    template kinds). ``dependencies()`` handles ``env=None``
-    without erroring.
-    """
-    tmpl = SessionTemplate(name="t", env=None)
-    assert tmpl.dependencies(BuildContext()) == []
+def test_session_template_dependencies_with_omitted_env() -> None:
+    """``SessionTemplate.env`` defaults to an empty table, like the other
+    three template kinds, so an omitted env is a declaration with no
+    entries rather than a ``None`` every reader has to fold. Omitting it
+    yields no edges; writing ``env: null`` is now a type error."""
+    tmpl = SessionTemplate(name="t")
+    assert tmpl.env == {}
+    assert tmpl.dependencies(FinalizeContext()) == []
+    with pytest.raises(ValidationError):
+        SessionTemplate(name="t", env=None)  # type: ignore[arg-type]  # the point of the test
 
 
 def test_session_template_dependencies_with_secrets() -> None:
     tmpl = SessionTemplate(
         name="claude-coder",
-        env={"K": EnvEntry(key="K", secret="cc-secret")},
+        env={"K": EnvEntry(secret="cc-secret")},
     )
-    reqs = tmpl.dependencies(BuildContext())
+    reqs = tmpl.dependencies(FinalizeContext())
     assert reqs[0].source == ("session-template", "claude-coder")
 
 
 # -- End-to-end: undeclared secret auto-declares through the framework -------
 
 
-def test_undeclared_env_secret_auto_declares_through_build_registry(
-    tmp_path: Path, ssh_keys: tuple[Path, Path]
-) -> None:
+def test_undeclared_env_secret_auto_declares_through_build_registry(tmp_path: Path) -> None:
     """The defining behavior of Phase 1b: a typo'd or otherwise
     undeclared env-block secret no longer errors at config load; the
     Registry auto-declares it and tags it with the source.
     """
     cfg = _write_cfg(
         tmp_path,
-        ssh_keys,
         manifests=[ManifestDoc("admin-template", "default", {"env": {"API_KEY": {"secret": "anthropic-api-ky"}}})],
     )
     config = load_config(cfg, warn_issues=False)
@@ -192,9 +165,7 @@ def test_undeclared_env_secret_auto_declares_through_build_registry(
     assert dependents[0].usage == "the API_KEY env var"
 
 
-def test_operator_declared_secret_referenced_from_env_gets_usage_populated(
-    tmp_path: Path, ssh_keys: tuple[Path, Path]
-) -> None:
+def test_operator_declared_secret_referenced_from_env_gets_usage_populated(tmp_path: Path) -> None:
     """A secret operator-typed in ``[secrets.X]`` AND referenced from an
     env block ends up with usage attached after finalize. Origin stays
     operator-declared (publish-time stamp wins); usage records the
@@ -202,7 +173,6 @@ def test_operator_declared_secret_referenced_from_env_gets_usage_populated(
     """
     cfg = _write_cfg(
         tmp_path,
-        ssh_keys,
         manifests=[
             ManifestDoc("secret", "shared-key", description="Used by both admin and a template"),
             ManifestDoc("admin-template", "default", {"env": {"ADMIN_KEY": {"secret": "shared-key"}}}),
@@ -225,10 +195,9 @@ def test_operator_declared_secret_referenced_from_env_gets_usage_populated(
     ]
 
 
-def test_multiple_env_refs_from_one_resource_each_contribute_usage(tmp_path: Path, ssh_keys: tuple[Path, Path]) -> None:
+def test_multiple_env_refs_from_one_resource_each_contribute_usage(tmp_path: Path) -> None:
     cfg = _write_cfg(
         tmp_path,
-        ssh_keys,
         manifests=[
             ManifestDoc(
                 "admin-template",

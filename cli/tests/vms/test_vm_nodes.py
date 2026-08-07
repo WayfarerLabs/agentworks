@@ -274,7 +274,7 @@ def test_template_node_declares_only_the_tailscale_key() -> None:
 
     tmpl = ResolvedVMTemplate(
         name="default",
-        env={"API_KEY": EnvEntry(key="API_KEY", secret="api-key")},
+        env={"API_KEY": EnvEntry(secret="api-key")},
     )
     node = vm_template_node(tmpl)
     assert node.key == "vm-template/default"

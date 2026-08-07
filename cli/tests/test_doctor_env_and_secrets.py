@@ -33,8 +33,7 @@ def _write_config(
     the doctor tests assert on) and the ``default`` admin-template
     (shell=zsh). ``admin_env`` seeds that admin-template's env block,
     ``manifests`` adds further resources (secrets, sites), and ``settings``
-    carries settings-only TOML ([plugins], [secret_config], the no-op
-    [secret_backends.*] sections)."""
+    carries settings-only TOML ([plugins], [secret_config])."""
     pub = tmp_path / "id.pub"
     priv = tmp_path / "id"
     pub.write_text("ssh-ed25519 AAAA...")
@@ -276,7 +275,7 @@ def test_r9_3_manifest_malformed_block_surfaces_under_resource_registry(
 
     fails = {c.name: c for c in g.checks if c.status == Status.FAIL}
     assert "Resource registry" in fails
-    assert "unknown azdo provider field" in (fails["Resource registry"].message or "")
+    assert "bogus: unknown field" in (fails["Resource registry"].message or "")
     assert "Manifest" not in fails  # the malformed block is no longer a decode/load failure
     assert registry is None  # the registry-dependent tail is skipped after the failure
 
@@ -393,23 +392,35 @@ def test_doctor_resource_sections_fail_row_and_continues(tmp_path: Path, monkeyp
     assert registry is not None
 
 
-def test_doctor_shows_noop_secret_backend_sections(tmp_path: Path, monkeypatch) -> None:
-    # [secret_backends.*] is a settings-side no-op section (it does not
-    # hard-error like the resource sections); it stays in config.toml.
+def test_doctor_reports_secret_backends_as_a_fail_row_and_keeps_reporting(tmp_path: Path, monkeypatch) -> None:
+    """``[secret_backends.*]`` is a resource section now, so doctor renders
+    it as the Config FAIL row and the settings-only retry carries the rest of
+    the report.
+
+    Both halves matter. It used to be refused by the SETTINGS load, which the
+    retry cannot skip, so this section truncated the whole report to one fail
+    row with every later group reporting `skipped`, and nothing on screen said
+    a ``[secret_backends.*]`` section was the reason. That is the operator
+    doctor helps most, mid-migration, so the row-plus-report shape is the
+    point of the move, not a side effect of it.
+    """
     cfg = _write_config(tmp_path, settings="[secret_backends.env-var]\n")
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
-    g, _, _ = _check_config()
-    warns = [(c.name, c.message or "") for c in g.checks if c.status == Status.WARN]
-    assert any("[secret_backends.env-var]" in name and "remove it" in message for name, message in warns), warns
+    g, config, _ = _check_config()
+    fails = [(c.name, c.message or "") for c in g.checks if c.status == Status.FAIL]
+    assert any(name == "Config" and "[secret_backends.*]" in message for name, message in fails), fails
+    # The retry succeeded, so the report goes on rather than truncating.
+    assert config is not None
+    assert any(c.name.startswith("SSH") for c in g.checks), [c.name for c in g.checks]
 
 
 def test_manifest_issues_surface_as_doctor_rows(tmp_path: Path, monkeypatch, capsys) -> None:
-    """A typo'd key on a manifest-declared resource (e.g.
-    ``github_credentials`` for ``git_credentials`` on an agent-template)
-    used to warn ambiently above the report while the Config row said
-    ok. Doctor now renders manifest issues as warn rows, and passing
-    the pre-loaded set into build_registry keeps the ambient print out
-    of doctor's output entirely."""
+    """A load-time advisory on a manifest-declared resource (here an
+    ``AGENTWORKS_*`` env key the runtime prelude will override) used to
+    warn ambiently above the report while the Config row said ok. Doctor
+    now renders manifest issues as warn rows, and passing the pre-loaded
+    set into build_registry keeps the ambient print out of doctor's output
+    entirely."""
     cfg = _write_config(tmp_path)
     write_manifests(
         tmp_path,
@@ -419,7 +430,8 @@ def test_manifest_issues_surface_as_doctor_rows(tmp_path: Path, monkeypatch, cap
         metadata:
           name: other
         spec:
-          github_credentials: ["github"]
+          env:
+            AGENTWORKS_AGENT: override
         """),
         filename="agent.yaml",
     )
@@ -435,7 +447,7 @@ def test_manifest_issues_surface_as_doctor_rows(tmp_path: Path, monkeypatch, cap
     manifest_rows = [c for c in g.checks if c.name == "Manifest"]
     assert manifest_rows, [c.name for c in g.checks]
     assert manifest_rows[0].status == Status.WARN
-    assert "github_credentials" in (manifest_rows[0].message or "")
+    assert "AGENTWORKS_AGENT" in (manifest_rows[0].message or "")
     assert "agent.yaml" in (manifest_rows[0].message or "")
     # The ok row is withheld when any issue exists.
     assert not any(c.name == "Config is valid" for c in g.checks)
@@ -497,8 +509,8 @@ kind: vm-site
 metadata:
   name: azure-dev
 spec:
-  platform: azure-vm
-  platform_config:
+  platform:
+    name: azure-vm
     subscription_id: "0000"
     resource_group: agw-dev
     region: eastus

@@ -1,5 +1,6 @@
 """``_HarnessIntegrationKind``: the framework strategy for the ``"harness-integration"`` kind,
-plus the ``HarnessIntegrationEntry`` capability row.
+plus the ``HarnessIntegrationEntry`` capability row and the kind's
+``CapabilityKindDescriptor``.
 
 Lives in the ``capabilities.harness_integration`` package next to the harness integration
 implementations; ``agentworks.resources.kinds.__init__`` imports this
@@ -19,12 +20,22 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
+from agentworks.capabilities.descriptor import (
+    CapabilityKindDescriptor,
+    ConfigContract,
+    HostSurface,
+    RegistryPolicy,
+)
+from agentworks.capabilities.harness_integration.base import HarnessIntegration
+from agentworks.resources.graph import Readiness
 from agentworks.resources.kind import KIND_REGISTRY, NoUnreferencedDefaultError
+from agentworks.schema import AgwModel
+from agentworks.topics import TopicProse
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from agentworks.resources.origin import Origin
+    from agentworks.origin import Origin
     from agentworks.resources.reference import ResourceReference
 
 
@@ -51,7 +62,20 @@ class _HarnessIntegrationKind:
     """Implementation of ``ResourceKind`` for ``"harness-integration"``."""
 
     kind: str = "harness-integration"
-    description: str = "Capability for running a session workload (shell, claude-code)"
+    description: str = "Capability for running a session's workload"
+    prose: TopicProse = TopicProse(
+        title="Harness integrations",
+        overview="""
+        A harness-integration owns a session's workload: what starts in the pane, what a
+        resume does differently, and which commands have to exist on the target before
+        either is attempted.
+
+        Integrations are code, and a session-template selects one by writing its name
+        inside `spec.harness_integration`. The keys allowed beside that name are the
+        integration's own, which is why each documents its own config. A template that
+        selects none gets `shell`.
+        """,
+    )
     miss_policy: Literal["auto-declare", "error"] = "error"
     auto_declare_names: frozenset[str] | None = None
     category: Literal["declarable", "capability"] = "capability"
@@ -69,3 +93,46 @@ class _HarnessIntegrationKind:
 
 
 KIND_REGISTRY["harness-integration"] = _HarnessIntegrationKind()
+
+
+def _registry() -> dict[str, Any]:
+    from agentworks.capabilities.harness_integration import HARNESS_INTEGRATION_REGISTRY
+
+    return HARNESS_INTEGRATION_REGISTRY
+
+
+def _entry(name: str, impl: Any, origin: Origin | None) -> HarnessIntegrationEntry:
+    # The impl's ``description`` is deliberately not carried: this row is
+    # name-and-origin only, and giving it one would change row content.
+    return HarnessIntegrationEntry(name=name, origin=origin)
+
+
+def _readiness(name: str, impl: Any) -> Readiness:
+    """Always ready: a harness integration has no host-support concept (it
+    runs wherever the session's transport reaches)."""
+    return Readiness.ready()
+
+
+HARNESS_INTEGRATION_DESCRIPTOR = CapabilityKindDescriptor(
+    kind="harness-integration",
+    contract_version=1,
+    implementation_contract=HarnessIntegration,
+    registry_policy=RegistryPolicy.CLASS_BY_NAME,
+    registry=_registry,
+    required_operations=frozenset({"start", "resume"}),
+    # Empty: HarnessIntegration supplies every non-operation member a
+    # subclass needs.
+    required_attributes=frozenset(),
+    entry_factory=_entry,
+    kind_strategy=KIND_REGISTRY["harness-integration"],
+    readiness=_readiness,
+    publisher_source="agentworks.capabilities.harness_integration",
+    config_schema=ConfigContract(base=AgwModel, discriminator="name"),
+    manifest_section=HostSurface(
+        host_kind="session-template",
+        naming_field="harness_integration",
+        config_field="harness_integration_config",
+    ),
+)
+"""The harness-integration record in the capability-kind descriptor table
+(``agentworks.capabilities.descriptor``)."""

@@ -1,18 +1,44 @@
 """Framework-layer rendering helpers shared by every kind's CLI describe
-view. ``format_origin_line`` and ``format_file_path`` live here (not in
-any kind module) because the cross-kind ``agw resource describe`` and
-the per-kind commands (``agw secret describe``, future ``agw vm
-describe`` ...) all render the same ``Origin`` shape; defining the
-renderer next to ``Origin`` keeps the layer correct.
+view. ``format_origin_line`` lives here (not in any kind module) because
+the cross-kind ``agw resource describe`` and the per-kind commands
+(``agw secret describe``, future ``agw vm describe`` ...) all render the
+same ``Origin`` shape; defining the renderer next to ``Origin`` keeps the
+layer correct.
+
+``format_file_path`` is re-exported from ``agentworks.source_location``,
+which is where it moved so the schema error bridge can render a path the
+same way without importing this package: importing anything under
+``agentworks.resources`` runs that package's ``__init__``, which loads
+every kind module.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING
 
+from agentworks.source_location import format_file_path
+
 if TYPE_CHECKING:
-    from agentworks.resources.origin import Origin
+    from agentworks.origin import Origin
+    from agentworks.resources.reference import ReferenceEntry
+
+
+def format_reference_entry(entry: ReferenceEntry) -> str:
+    """One "Referenced by:" line: who points here, what for, and where the
+    name was actually written when those differ.
+
+    An inheriting row publishes the runtime needs of its MERGED
+    declaration (FR17), so "vm-template/kid: the BASE env var" can be
+    entirely true and still send an operator to a file with no such env
+    var in it. The tail names the template that wrote it.
+
+    Shared by ``agw resource describe`` and ``agw secret describe``, which
+    render the same list and must not drift.
+    """
+    line = f"{entry.source[0]}/{entry.source[1]}: {entry.usage}"
+    if entry.declared_by is None or entry.declared_by == entry.source:
+        return line
+    return f"{line} (inherited from {entry.declared_by[0]}/{entry.declared_by[1]})"
 
 
 def format_origin_line(origin: Origin | None) -> str:
@@ -62,13 +88,4 @@ def format_origin_location(origin: Origin | None) -> str:
     return format_origin_line(origin)
 
 
-def format_file_path(file: Path) -> str:
-    """Render a file path operator-friendly: ``~/path`` when under
-    ``$HOME``, else the bare absolute path. Relative paths render as-is.
-    """
-    if file.is_absolute():
-        try:
-            return f"~/{file.relative_to(Path.home())}"
-        except ValueError:
-            return str(file)
-    return str(file)
+__all__ = ["format_file_path", "format_origin_line", "format_origin_location"]

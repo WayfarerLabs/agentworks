@@ -187,6 +187,7 @@ def test_bootstrap_forces_private_group_idempotently() -> None:
         provisioning_packages=["curl"],
         tailscale_auth_key="tskey-auth-test123",
         hostname="lima--myvm",
+        swap=4,
     )
 
     assert 'groupadd -f "$VM_USER"' in script

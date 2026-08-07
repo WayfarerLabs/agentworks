@@ -23,8 +23,11 @@ from agentworks.capabilities.base import RunContext
 from agentworks.db import VMStatus
 from agentworks.errors import ConfigError
 from agentworks.plugins.aws.network import EC2Error
-from agentworks.plugins.aws.platform import DEFAULT_SECRET_ACCESS_KEY, EC2Platform
+from agentworks.plugins.aws.platform import EC2Platform
 from tests._aws_fakes import client_error, install_fakes
+
+#: The well-known default the model's SecretRef template names.
+DEFAULT_SECRET_ACCESS_KEY = "aws-secret-access-key"
 
 if TYPE_CHECKING:
     from agentworks.db import VMRow
@@ -114,11 +117,11 @@ class TestCredentialSelection:
         credentials makes no live call."""
         from botocore.credentials import DeferredRefreshableCredentials
 
-        from agentworks.plugins.aws.platform import _build_explicit_session, _Credentials
+        from agentworks.plugins.aws.platform import AwsCredentials, _build_explicit_session
 
-        creds = _Credentials(
+        creds = AwsCredentials(
             access_key_id="AKIAEXAMPLE",
-            secret_name="aws-secret",
+            access_key_secret="aws-secret",
             assume_role_arn="arn:aws:iam::111122223333:role/agw",
         )
         session = _build_explicit_session(creds, "secret-value", "aws-site", "us-east-1")

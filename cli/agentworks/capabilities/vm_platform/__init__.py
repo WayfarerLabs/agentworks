@@ -13,7 +13,7 @@ The ``proxmox`` platform (``agentworks.plugins.proxmox``) and the
 system plugins; each plugin's adapter re-seats its class into
 ``VM_PLATFORM_REGISTRY`` at import, so site resolution still finds it by
 registry name, while its ROW publishes with a ``system-plugin`` origin
-(see ``publish_to``).
+(the built-in publisher skips it).
 """
 
 from __future__ import annotations
@@ -30,8 +30,7 @@ from agentworks.capabilities.vm_platform.lima import LimaPlatform
 from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
 
 if TYPE_CHECKING:
-    from agentworks.resources.origin import Origin
-    from agentworks.resources.registry import Registry
+    from agentworks.origin import Origin
 
 __all__ = [
     "VM_PLATFORM_REGISTRY",
@@ -41,7 +40,6 @@ __all__ = [
     "VMPlatform",
     "VMPlatformEntry",
     "WSL2Platform",
-    "publish_to",
 ]
 
 VM_PLATFORM_REGISTRY: dict[str, type[VMPlatform]] = {
@@ -86,41 +84,3 @@ class VMPlatformEntry:
     name: str
     description: str = ""
     origin: Origin | None = None
-
-
-def publish_to(registry: Registry) -> None:
-    """Publish one ``vm-platform`` capability resource per registered
-    platform, UNCONDITIONALLY (R13), ``built-in`` origin. Read-only
-    rows: ``vm-site`` ``spec.platform`` references validate against
-    them uniformly, and the platforms list/describe like every other
-    resource.
-
-    Host support is READINESS, not absence: an installed-but-unsupported
-    platform (wsl2 off Windows) still publishes a row, and its
-    ``unsupported_reason`` becomes the readiness fold's input for that
-    node (a present, not-ready ``vm-platform``), so a site referencing it
-    is not-ready rather than dangling on an absent row. This replaces the
-    old edge-suppression's job of hiding the missing capability row.
-
-    A platform seated by a system plugin (``proxmox`` via the ``proxmox``
-    plugin, ``azure-vm`` via the ``azure`` plugin) keeps its impl in
-    ``VM_PLATFORM_REGISTRY`` so site resolution can construct it, but its row is
-    published by ``plugins.publish_plugins`` with a ``system-plugin`` origin.
-    Skip those names here so the plugin is the sole publisher of the row;
-    publishing it here too would collide (built-in vs system-plugin) at
-    ``Registry.add``.
-    """
-    from agentworks.plugins.registration import plugin_seated_names
-    from agentworks.resources import Origin
-
-    seated_by_plugin = plugin_seated_names("vm-platform")
-    origin = Origin.built_in(source="agentworks.capabilities.vm_platform")
-    for name, platform_cls in VM_PLATFORM_REGISTRY.items():
-        if name in seated_by_plugin:
-            continue
-        registry.add(
-            "vm-platform",
-            name,
-            VMPlatformEntry(name=name, description=platform_cls.description),
-            origin,
-        )

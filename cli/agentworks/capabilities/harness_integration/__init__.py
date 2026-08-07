@@ -2,7 +2,7 @@
 ``session-template`` ``spec.harness_integration`` value.
 
 Each harness integration implementation is a ``Capability`` (see
-``capabilities/README.md``): it validates its ``harness_integration_config``, owns the
+``capabilities/README.md``): it declares its own config block, owns the
 session's launch-target readiness, and produces the tmux pane command as its
 op (``start`` / ``resume``). The consuming resource is the ``session`` node,
 which HOLDS a harness integration instance and composes its readiness; that node lives in
@@ -26,6 +26,8 @@ from agentworks.capabilities.harness_integration.base import HarnessIntegration,
 from agentworks.capabilities.harness_integration.shell import ShellIntegration
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from agentworks.resources import Registry
 
 __all__ = [
@@ -34,7 +36,7 @@ __all__ = [
     "ShellIntegration",
     "ensure_harness_integration_enabled",
     "harness_integration_for",
-    "publish_to",
+    "merged_config",
     "require_commands",
 ]
 
@@ -49,7 +51,7 @@ __all__ = [
 # ``claude-code`` harness integration now ships as the ``claude`` system plugin
 # (``agentworks.plugins.claude``), whose adapter re-seats it here at import;
 # its ROW is published by ``plugins.publish_plugins`` with a ``system-plugin``
-# origin, so ``publish_to`` below skips it.
+# origin, so the built-in publisher skips it.
 HARNESS_INTEGRATION_REGISTRY: dict[str, type[HarnessIntegration]] = {
     ShellIntegration.name: ShellIntegration,
 }
@@ -72,6 +74,37 @@ def harness_integration_for(name: str) -> type[HarnessIntegration]:
     except KeyError:
         known = ", ".join(sorted(HARNESS_INTEGRATION_REGISTRY)) or "(none)"
         raise ConfigError(f"unknown harness integration {name!r}; known harness integrations: {known}") from None
+
+
+def merged_config(name: str, base: Mapping[str, object], child: Mapping[str, object]) -> dict[str, object]:
+    """``base`` under ``child``, merged by ``name``'s own inheritance
+    semantics, TOTALLY.
+
+    The same merge :meth:`HarnessIntegration.merge_config` defines, reached
+    by name instead of by class so the caller does not have to hold one,
+    and never raising on a name with no registration: the finalize build
+    walk merges an inheritance chain before anything has validated the
+    names in it, and it must not raise there (a ``dependencies`` walk is
+    total by contract). An unregistered name falls back to the base
+    contract's own default, shallow child-wins, which is the honest answer
+    when there is no capability to ask for a richer one. The name itself
+    is still reported: the kind's ``error`` miss policy fails the dangling
+    ``harness-integration`` edge at finalize, before any of this is used.
+
+    Distinct from :func:`harness_integration_for`, which is the lookup for
+    callers that need the CLASS and for whom an unknown name is a genuine
+    (defense-in-depth) error.
+
+    What this does NOT do is contain an implementation that misbehaves.
+    ``merge_config`` is contractually pure and non-raising (see this
+    package's ``README.md``), and neither property is checkable at
+    registration, so an implementation that raises here takes
+    ``build_registry`` down with its own traceback. Catching it would be
+    worse: the merge feeds edge extraction, so a swallowed exception means
+    a graph that builds while quietly missing a secret.
+    """
+    integration = HARNESS_INTEGRATION_REGISTRY.get(name, HarnessIntegration)
+    return integration.merge_config(base, child)
 
 
 def ensure_harness_integration_enabled(registry: Registry, name: str) -> None:
@@ -108,36 +141,3 @@ def ensure_harness_integration_enabled(registry: Registry, name: str) -> None:
         entity_name=name,
         hint="`agw doctor` lists each plugin's state; enable the plugin providing this harness integration",
     )
-
-
-def publish_to(registry: Registry) -> None:
-    """Publish the core built-in harness integration types into the registry.
-
-    Each entry lands as a ``HarnessIntegrationEntry`` row, built-in with source
-    ``"agentworks.capabilities.harness_integration"``. Read-only rows: a
-    ``session-template`` ``spec.harness_integration`` reference validates against
-    them uniformly, and the harness integrations list/describe like every other
-    resource.
-
-    A harness integration seated by a system plugin (``claude-code`` via the ``claude``
-    plugin) keeps its impl in ``HARNESS_INTEGRATION_REGISTRY`` so the resolver can stamp it
-    onto the graph node, but its row is published by ``plugins.publish_plugins``
-    with a ``system-plugin`` origin. Skip those names here so the plugin is the
-    sole publisher of the row; publishing it here too would collide (built-in vs
-    system-plugin) at ``Registry.add``.
-    """
-    from agentworks.capabilities.harness_integration.kinds import HarnessIntegrationEntry
-    from agentworks.plugins.registration import plugin_seated_names
-    from agentworks.resources import Origin
-
-    seated_by_plugin = plugin_seated_names("harness-integration")
-    code_origin = Origin.built_in(source="agentworks.capabilities.harness_integration")
-    for type_name in sorted(HARNESS_INTEGRATION_REGISTRY):
-        if type_name in seated_by_plugin:
-            continue
-        registry.add(
-            "harness-integration",
-            type_name,
-            HarnessIntegrationEntry(name=type_name),
-            code_origin,
-        )

@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from agentworks.capabilities.vm_platform.base import VMPlatform
+
 
 @dataclass
 class MigrationContext:
@@ -80,7 +82,7 @@ def _migrate_vm_sites(conn: sqlite3.Connection, context: MigrationContext) -> No
     from agentworks.plugins.azure.platform import AzureVMPlatform
     from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 
-    legacy_platform_classes = {
+    legacy_platform_classes: dict[str, type[VMPlatform]] = {
         "lima": LimaPlatform,
         "wsl2": WSL2Platform,
         "azure": AzureVMPlatform,

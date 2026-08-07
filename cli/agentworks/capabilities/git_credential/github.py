@@ -14,69 +14,61 @@ the full model.
 
 from __future__ import annotations
 
-import re
 from datetime import date
-from typing import TYPE_CHECKING
+from typing import Annotated, ClassVar, Literal
+
+from pydantic import Field, model_validator
 
 from agentworks.capabilities.git_credential.base import (
     GitCredentialProvider,
     HelperEntry,
-    token_dependency,
-    validate_token_field,
+    TokenSourcedConfig,
 )
-from agentworks.errors import ConfigError
-
-if TYPE_CHECKING:
-    from collections.abc import Mapping
-
-    from agentworks.resources.reference import ConfigReference
-
-_SCOPE_FIELDS = {"repos", "owner", "token"}
+from agentworks.topics import TopicProse
 
 # GitHub owner/repo name charset. Interpolated verbatim into gitconfig
 # section headers and store URLs, so anything outside this set (quotes,
-# whitespace, ...) would corrupt the VM's git config at first use.
-_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+# whitespace, ...) would corrupt the VM's git config at first use, which
+# is why the charset is a constraint rather than a courtesy.
+_NAME = r"[A-Za-z0-9._-]+"
+
+GitHubName = Annotated[str, Field(pattern=rf"^{_NAME}$")]
+"""A GitHub user or organization name."""
+
+GitHubRepo = Annotated[str, Field(pattern=rf"^{_NAME}/{_NAME}$")]
+"""A GitHub repository, as ``owner/name``."""
 
 
-def _validated_scope(owner_ctx: str, config: Mapping[str, object]) -> tuple[tuple[str, ...], str | None]:
-    """Shared shape validation for the github ``provider_config`` blob.
+class GitHubConfig(TokenSourcedConfig):
+    """Scope for a GitHub personal access token.
 
-    Returns ``(repos, owner)``; at most one is non-empty/non-None.
-    ``repos`` is always a list in the config (even for one repo, a
-    fine-grained PAT may cover several selected repos, and the plural
-    field makes that visible). Raises ``ConfigError`` with
-    ``owner_ctx`` framing on any violation.
+    ``repos`` and ``owner`` are mutually exclusive: a fine-grained PAT is
+    scoped to selected repositories OR to everything under one owner,
+    never both. An unscoped credential declares neither and serves the
+    host by default.
     """
-    unknown = sorted(set(config) - _SCOPE_FIELDS)
-    if unknown == ["repo"]:
-        raise ConfigError(
-            f"{owner_ctx}: unknown github provider field 'repo'; the field is 'repos' (a list, even for one repo)"
-        )
-    if unknown:
-        raise ConfigError(f"{owner_ctx}: unknown github provider field(s): {', '.join(unknown)}")
-    repos_raw = config.get("repos")
-    org = config.get("owner")
-    if repos_raw is not None and org is not None:
-        raise ConfigError(
-            f"{owner_ctx}: repos and owner are mutually exclusive (a fine-grained PAT is scoped to one or the other)"
-        )
 
-    def _valid_repo(value: object) -> bool:
-        return (
-            isinstance(value, str) and value.count("/") == 1 and all(_NAME_RE.match(part) for part in value.split("/"))
-        )
+    name: Literal["github"]
+    """The provider this config is for."""
 
-    repos: tuple[str, ...] = ()
-    if repos_raw is not None:
-        if not isinstance(repos_raw, list) or not repos_raw or not all(_valid_repo(entry) for entry in repos_raw):
-            raise ConfigError(
-                f'{owner_ctx}.repos must be a non-empty list of "owner/name" strings (GitHub name characters only)'
+    repos: list[GitHubRepo] = Field(default_factory=list, examples=[["my-org/my-repo"]])
+    """The repositories a fine-grained PAT covers, as "owner/name". A
+    list even for one repository, because a fine-grained PAT may select
+    several. Empty (the default) is unscoped."""
+
+    owner: GitHubName | None = Field(default=None, examples=["my-org"])
+    """The user or organization an owner-scoped PAT covers, including
+    repositories cloned ad hoc that no workspace declared. ``None`` is
+    the one field here with nothing to default to: there is no owner
+    that means "no owner scope"."""
+
+    @model_validator(mode="after")
+    def _scope_is_repos_or_owner(self) -> GitHubConfig:
+        if self.repos and self.owner is not None:
+            raise ValueError(
+                "repos and owner are mutually exclusive (a fine-grained PAT is scoped to one or the other)"
             )
-        repos = tuple(dict.fromkeys(repos_raw))  # preserve order, drop repeats
-    if org is not None and (not isinstance(org, str) or not _NAME_RE.match(org)):
-        raise ConfigError(f"{owner_ctx}.owner must be a GitHub user/org name (no slash)")
-    return (repos, org if isinstance(org, str) else None)
+        return self
 
 
 def _parse_expiration(raw: str | None) -> date | None:
@@ -93,40 +85,37 @@ def _parse_expiration(raw: str | None) -> date | None:
 class GitHubCredentialProvider(GitCredentialProvider):
     """Configures git credentials for GitHub via a personal access token.
 
-    Optionally scoped via ``provider_config``: ``repos: ["owner/name", ...]``
+    Optionally scoped in the ``spec.provider`` table: ``repos: ["owner/name", ...]``
     (the fine-grained PAT's selected repos) or ``owner: "org"`` (an
     owner-scoped PAT covering any repo under that owner, including
     repos cloned ad hoc that no workspace declared). Unscoped
     credentials keep the released host-level line verbatim.
     """
 
-    name = "github"
-    description = "GitHub personal access token"
+    contract_version: ClassVar[int] = 1
+    name: ClassVar[str] = "github"
+    description: ClassVar[str] = "GitHub personal access token"
+    config_model: ClassVar[type[GitHubConfig]] = GitHubConfig
+    prose: ClassVar[TopicProse | None] = TopicProse(
+        title="GitHub",
+        overview="""
+        Authenticates git operations against GitHub with a personal access token, taken
+        from the secret this credential names.
 
-    @classmethod
-    def dependencies(cls, owner: str, config: Mapping[str, object]) -> tuple[ConfigReference, ...]:
-        """The token-secret edge the scoped/unscoped PAT config implies
-        (total, non-throwing): a malformed ``token`` field omits the
-        edge, ``validate`` raises on it."""
-        ref = token_dependency(owner, config)
-        return (ref,) if ref is not None else ()
+        A classic token needs no scoping. A fine-grained token does: `repos` pins the
+        credential to specific repositories, and `owner` covers everything under one
+        user or organization, including repositories cloned ad hoc that no workspace
+        declared. The two are alternatives, not a pair.
 
-    @classmethod
-    def validate(cls, owner: str, config: Mapping[str, object]) -> None:
-        _validated_scope(owner, config)
-        validate_token_field(owner, config)
+        Declaring several credentials is normal. The managed credential helper picks the
+        one whose scope matches each remote, and an unscoped credential is the fallback.
+        """,
+    )
 
-    def __init__(
-        self,
-        owner_name: str,
-        config: Mapping[str, object] | None = None,
-        *,
-        description: str | None = None,
-    ) -> None:
-        super().__init__(owner_name, config or {}, description=description)
-        # Scope shape re-parsed from the bound config (validate already
-        # ran at construct, so this cannot raise).
-        self._repos, self._owner = _validated_scope(self._owner_display, self.config)
+    @property
+    def config(self) -> GitHubConfig:
+        """This credential's validated github provider config."""
+        return self._config_as(GitHubConfig)
 
     def _verify_token(self, token: str) -> None:
         """Check the PAT against ``GET /user``: 200 announces the login
@@ -171,7 +160,7 @@ class GitHubCredentialProvider(GitCredentialProvider):
         # username, the join key the credential helper selects by (GitHub
         # accepts any username with a PAT, verified against fine-grained
         # tokens). Unscoped keeps the released value.
-        if self._repos or self._owner:
+        if self.config.repos or self.config.owner:
             return self.owner_name
         return "x-access-token"
 
@@ -201,6 +190,6 @@ class GitHubCredentialProvider(GitCredentialProvider):
         return HelperEntry(
             host="github.com",
             username=self.store_username,
-            repos=self._repos,
-            owner=self._owner,
+            repos=tuple(dict.fromkeys(self.config.repos)),
+            owner=self.config.owner,
         )
