@@ -943,15 +943,33 @@ that is already built and a sweep that is already enumerated.
 
 ## Closeout
 
-- [ ] Full-suite gates green; end-to-end live verification (fresh config init, sample-driven
+- [x] Full-suite gates green; end-to-end live verification (fresh config init, sample-driven
       resource authoring with editor schema association, vm-site declare, migrate fixture, doctor).
-- [ ] Final `agentworks-reviewer` pass over the whole phase-2 branch; findings fixed. (The roadmap
+- [x] Final `agentworks-reviewer` pass over the whole phase-2 branch; findings fixed. (The roadmap
       lead reviews the phase-2 PRs before merge; this SDD does not edit the roadmap ledger, the
       roadmap lead checks off wave-2 status from the merged PRs.)
-- [ ] `locked.md` written summarizing final state across BOTH phases, decisions, and deviations; the
+- [x] `locked.md` written summarizing final state across BOTH phases, decisions, and deviations; the
       descriptor-contract concepts, the schema-model contract, and the four honored doors promoted
       to permanent homes (see 2.9) so the locked SDD is deletable; phase-2 PR ready; Copilot /
       roadmap-lead review triaged. The roadmap SDD locks separately once every child does.
+
+**Closeout record, 2026-08-07.** Gate at HEAD: 4986 tests, mypy clean over 576 files, ruff and
+lint-files clean. Merge into `main` is conflict-free.
+
+**Live verification ran as two rehearsals, not one.** An UPGRADE rehearsal built a real pre-phase-2
+config exercising nine of the eleven operator-visible changes, confirmed it loaded clean at the
+pre-phase-2 commit, and walked the shipped guide verbatim; it took 13 hand-edit rounds and 12
+refusals, and found that the guide's order was inverted and its dry run reported success where the
+real run failed. A GREENFIELD rehearsal then walked `config init` through authoring all 13 kinds
+from rendered samples to editor association and `doctor`, with 107 differential probes hunting
+schema/loader divergence. Both sets of findings were fixed, and the second review pass verified the
+fixes rather than the plan.
+
+**The final review ran twice, deliberately.** The first pass looked at `dfa7e3fc`; 32 commits and 87
+tests landed after it, including its own blocking finding. A closeout review that has not seen the
+final state is not a closeout review, so it was re-run at `a597997c`, and the re-run found a real
+regression: two fix commits collided, so an explicit `null` tripped a refusal added for data loss
+and rendered a heap address in an operator-facing message.
 
 ## Pressure-test notes (what writing this plan surfaced)
 

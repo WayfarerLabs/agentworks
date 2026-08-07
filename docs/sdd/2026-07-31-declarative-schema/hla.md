@@ -46,12 +46,19 @@ Small architecture, mostly deletion. Components:
   beautifying it.
 - **Migrator verification rework.** Planning becomes pure over the config file text (today it also
   takes the built registry for its pre-migration rows, a source that disappears when TOML rows stop
-  loading). The reworked verification decodes the emitted YAML through the manifest decoder, proving
-  the output actually loads, and compares it against a pre-side derived from the TOML text. The
-  pre-side derivation must be INDEPENDENT of the section-to-spec mapping that produced the emitted
-  YAML, or the comparison is tautological for exactly the mapping under test; defining that
-  independent derivation is the core of the phase 1 LLD. The check gains "the output loads" and must
-  not lose "the migration preserved meaning".
+  loading). **Superseded in phase 2 (2026-08-06):** planning is no longer pure. A closeout rehearsal
+  found that `--dry-run` reported success where the real run refused, because the only check that
+  could fail lived past the point a dry run returns. The precondition moved into `plan_migration`,
+  which both paths take, and it builds a registry over the tree the run WOULD produce via a
+  `load_manifests` overlay. The property that actually mattered was never purity; it was that the
+  migrator works on a config no other command can load, and that survives, because the overlay and
+  the settings-only load neutralize exactly the two things that stop those configs loading. The
+  reworked verification decodes the emitted YAML through the manifest decoder, proving the output
+  actually loads, and compares it against a pre-side derived from the TOML text. The pre-side
+  derivation must be INDEPENDENT of the section-to-spec mapping that produced the emitted YAML, or
+  the comparison is tautological for exactly the mapping under test; defining that independent
+  derivation is the core of the phase 1 LLD. The check gains "the output loads" and must not lose
+  "the migration preserved meaning".
 - **Record keeping.** A superseding ADR replaces ADR 0016's dual-path stance; guides and the
   capabilities README drop dual-path language; the resource-manifests SDD lockfile gains a dated
   entry (standing instruction: every PR advancing this effort appends lockfile entries to the locked
