@@ -120,8 +120,8 @@ config at the reference site.
 >
 > - **The sibling-key shape is retired.** A capability's config is not a `*_config` sibling of the
 >   naming field; it is the remaining keys of ONE tagged table on the naming field itself
->   (`platform: {name: lima, vm_host: ...}`). The old sibling pair is a hard error, and
->   `agw resource migrate --all` folds it.
+>   (`platform: {name: lima, vm_host: ...}`). The old sibling pair is a hard error whose message
+>   prints the exact tagged table that replaces the document's own pair.
 > - **The capability is not invoked.** It DECLARES its config as a model, and the core derives both
 >   the validation and the implied references from that declaration, reading the model and the raw
 >   blob and running no capability code. The config is no longer an opaque blob to the framework.
