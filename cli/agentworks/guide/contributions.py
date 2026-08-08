@@ -222,20 +222,34 @@ def _migration_actions() -> tuple[GuideAction, ...]:
         ),
         GuideAction(
             ActionId("review-null-secret-fields"),
-            "Site manifests exist and the three changed secret fields must be classified before cutover.",
-            (ActionInput("SITE_MANIFESTS", "The exact site manifest files to inspect.", True),),
+            "Every pre-existing and TOML-derived site manifest exists, and its authentication, placement, "
+            "and changed secret-reference intent must be classified before cutover.",
+            (
+                ActionInput(
+                    "SITE_MANIFESTS",
+                    "The exact pre-existing and TOML-derived vm-site manifest files to inspect.",
+                    True,
+                ),
+            ),
             ConsentBoundary.READ_CONFIGURED_STATE,
             None,
-            "Each token_secret, service_principal.secret, and credentials.access_key_secret occurrence has "
-            "a recorded default, custom-name, or supported ambient-auth intent.",
+            "Each current auth and placement mode plus each token_secret, service-principal auth.secret, and "
+            "access-key auth.access_key_secret occurrence has a recorded default, custom-name, ambient, or "
+            "local intent. Every written retired shape has its exact live rewrite recorded.",
             None,
             "Leave the site manifests unchanged and block cutover until the intent can be established.",
-            "Inspect only SITE_MANIFESTS for token_secret, service_principal.secret, and "
-            "credentials.access_key_secret, then record the intended choice for each occurrence.",
+            "Inspect only SITE_MANIFESTS. Use the live implementation field references to classify Proxmox "
+            "token_secret, Azure auth.mode and service-principal auth.secret, AWS auth.mode and access-key "
+            "auth.access_key_secret, and Lima placement.mode. Omitted auth selects ambient; omitted placement "
+            "selects local. For a written legacy service_principal, credentials, or vm_host field, use its hard "
+            "error's exact rewrite. An outer explicit null maps to auth ambient, auth ambient, or placement "
+            "local, respectively. Inside a credential arm, an omitted or null secret reference selects its "
+            "well-known default name. Record the intended choice for every site.",
         ),
         GuideAction(
             ActionId("remove-retired-sections"),
-            "Every manifest validates individually and null-secret choices have been reviewed.",
+            "Every manifest validates individually and all authentication, placement, and secret-reference "
+            "choices have been reviewed.",
             (ActionInput("CONFIG_PATH", "The config.toml file selected for final cutover.", True),),
             ConsentBoundary.MUTATE_AGENTWORKS,
             None,

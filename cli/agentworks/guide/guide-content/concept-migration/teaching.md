@@ -62,15 +62,35 @@ while continuing to report the retired-section failure. Fix closed-world fields,
 non-nullable nulls, and retired sibling capability shapes from that precise error and the live field
 reference.
 
-## Review changed secret references
+## Review authentication, placement, and changed secret references
 
-Inspect the site manifests for `token_secret`, `service_principal.secret`, and
-`credentials.access_key_secret`. For all three fields, omission and explicit null both select the
-default secret name. A custom string selects that named secret.
+Inspect every pre-existing and TOML-derived site manifest, not only the files created during this
+migration. Use each implementation's live field reference because authentication and placement are
+tagged choices now:
 
-Azure and AWS also support ambient authentication: remove the enclosing `service_principal` or
-`credentials` block, respectively. Proxmox has no no-secret mode, so its token reference must use
-the default name or a custom name.
+- Proxmox keeps `token_secret`. Omission or explicit null selects its well-known default secret
+  name; a custom string selects that named secret. Proxmox has no no-secret mode.
+- Azure uses `auth.mode`. Omitted `auth` defaults to ambient authentication, and
+  `auth: {mode: ambient}` records that choice explicitly. In the `service-principal` arm,
+  `auth.secret` names the client secret. Omitting that inner field or writing it as null selects the
+  well-known default secret name; a custom string selects that named secret.
+- AWS uses `auth.mode`. Omitted `auth` defaults to ambient authentication, and
+  `auth: {mode: ambient}` records that choice explicitly. In the `access-key` arm,
+  `auth.access_key_secret` names the secret access key. Omitting that inner field or writing it as
+  null selects the well-known default secret name; a custom string selects that named secret.
+- Lima uses `placement.mode`. Omitted `placement` defaults to local placement, and
+  `placement: {mode: local}` records that choice explicitly. The `ssh` arm also requires
+  `placement.host`.
+
+The old presence-shaped fields are retired. A manifest that wrote `service_principal`,
+`credentials`, or `vm_host` fails with an exact replacement derived from its own keys. Apply that
+hard-error guidance and confirm the result against the live field reference. A retired outer field
+written as explicit null selected the same mode as omission: `service_principal: null` maps to
+`auth: {mode: ambient}`, `credentials: null` maps to `auth: {mode: ambient}`, and `vm_host: null`
+maps to `placement: {mode: local}`. Delete the retired null line when writing the replacement. A
+manifest that omitted the old outer field needs no shape edit because the new tagged field has the
+same default. Do not confuse these outer-null rewrites with a null inner secret reference, which
+still selects the well-known secret name.
 
 ## Cut over once
 

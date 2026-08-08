@@ -12,6 +12,7 @@ from agentworks.guide import (
     FieldReference,
     GuideContributionError,
     GuideMode,
+    ImplementationAnchor,
     InvalidBlockError,
     KindAnchor,
     Overview,
@@ -29,6 +30,7 @@ from agentworks.guide.service import (
     _EmptyInventory,
     render_guide,
 )
+from agentworks.manifests.field_tree import Alternative
 from agentworks.manifests.reference import describable_targets, reference_for
 from agentworks.manifests.yaml_value import render_value
 
@@ -89,7 +91,7 @@ def test_schema_service_error_is_strict_for_ci_and_isolated_at_runtime(
     assert raised.value is service_error
 
     response = render_guide(
-        ("vm-template", "agent-template"),
+        ("vm-template", "agent-template", "vm-platform/azure-vm"),
         GuideMode.AGENT,
         load_config_fn=lambda: object(),  # type: ignore[arg-type,return-value]
         load_registry_fn=lambda _config: None,  # type: ignore[arg-type,return-value]
@@ -98,6 +100,7 @@ def test_schema_service_error_is_strict_for_ci_and_isolated_at_runtime(
     assert response.exit_code == 1
     assert "# vm-template\n\nThis guide topic is unavailable." in response.markdown
     assert "Reference target: `agent-template`" in response.markdown
+    assert "`config.auth.secret`" in response.markdown
     assert "invalid guide contribution from schema:vm-template: reference is unavailable" in response.markdown
     assert "vm-template" not in response.names
     assert "SCHEMA_SERVICE_PAYLOAD" not in response.markdown
@@ -121,6 +124,129 @@ def test_runtime_isolates_invalid_schema_target_in_explicit_multi_topic_render(
     assert "schema:vm-template" in response.markdown
     assert "title contains an expression delimiter" in response.markdown
     assert "SCHEMA_PAYLOAD" not in response.markdown
+
+
+def _implementation_field_topic(target: str, section: tuple[str, ...] = ()) -> TopicContribution:
+    kind, name = target.split("/", 1)
+    return TopicContribution(
+        TopicSlug(target),
+        target,
+        "Implementation schema.",
+        ImplementationAnchor(kind, name),
+        (FieldReference(BlockId("fields"), section),),
+    )
+
+
+@pytest.mark.parametrize(
+    ("target", "default", "arms", "fields"),
+    [
+        (
+            "vm-platform/azure-vm",
+            "default `{mode: ambient}`",
+            ("ambient", "service-principal"),
+            ("config.auth.tenant_id", "config.auth.client_id", "config.auth.secret"),
+        ),
+        (
+            "vm-platform/aws-ec2",
+            "default `{mode: ambient}`",
+            ("ambient", "access-key"),
+            ("config.auth.access_key_id", "config.auth.access_key_secret", "config.auth.assume_role_arn"),
+        ),
+        (
+            "vm-platform/lima",
+            "default `{mode: local}`",
+            ("local", "ssh"),
+            ("config.placement.host",),
+        ),
+    ],
+)
+def test_schema_fields_render_every_nested_union_arm_from_the_live_reference(
+    target: str,
+    default: str,
+    arms: tuple[str, ...],
+    fields: tuple[str, ...],
+) -> None:
+    rendered = render_topic(_implementation_field_topic(target), None, GuideMode.AGENT)
+    payload = rendered.blocks[0].source_payload
+
+    assert payload is not None
+    assert default in payload
+    for arm in arms:
+        assert f"Alternative `{arm}`" in payload
+    for field in fields:
+        assert f"`{field}`" in payload
+
+
+@pytest.mark.parametrize(
+    ("target", "section", "rendered_path"),
+    [
+        ("vm-platform/azure-vm", ("auth", "secret"), "config.auth.secret"),
+        ("vm-platform/aws-ec2", ("auth", "access_key_id"), "config.auth.access_key_id"),
+        ("vm-platform/lima", ("placement", "host"), "config.placement.host"),
+    ],
+)
+def test_field_section_selects_a_field_unique_to_one_union_arm(
+    target: str,
+    section: tuple[str, ...],
+    rendered_path: str,
+) -> None:
+    rendered = render_topic(_implementation_field_topic(target, section), None, GuideMode.AGENT)
+    payload = rendered.blocks[0].source_payload
+
+    assert rendered.issues == ()
+    assert payload is not None
+    assert f"`{rendered_path}`" in payload
+
+
+def test_field_section_refuses_a_name_repeated_across_union_arms() -> None:
+    rendered = render_topic(
+        _implementation_field_topic("vm-platform/azure-vm", ("auth", "mode")),
+        None,
+        GuideMode.AGENT,
+    )
+
+    assert rendered.issues == (
+        "schema content for vm-platform/azure-vm/fields is unavailable: "
+        "field-reference section 'auth.mode' is unavailable",
+    )
+    assert "Schema content unavailable" in rendered.markdown
+
+
+def test_union_arms_explain_recursion_and_point_to_addressable_references(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import agentworks.guide.render as guide_render
+
+    original = reference_for("secret")
+    entry = original.spec[0]
+    union = replace(
+        entry,
+        children=(),
+        alternatives=(
+            Alternative(name="recursive", summary="Repeats itself.", target=None, recurring=True),
+            Alternative(
+                name="external",
+                summary="Documented elsewhere.",
+                target="vm-platform/wsl2",
+            ),
+        ),
+    )
+    monkeypatch.setattr(guide_render, "reference_for", lambda _target: replace(original, spec=(union,)))
+    topic = TopicContribution(
+        TopicSlug("secret"),
+        "Secret",
+        "Secret schema.",
+        KindAnchor("secret"),
+        (FieldReference(BlockId("fields")),),
+    )
+
+    rendered = render_topic(topic, None, GuideMode.AGENT)
+    payload = rendered.blocks[0].source_payload
+
+    assert payload is not None
+    assert "Recurring arm: this alternative repeats the block already shown above." in payload
+    assert "Full reference: `agw guide vm-platform/wsl2`" in payload
+    assert "`agw resource describe-kind vm-platform/wsl2`" in payload
 
 
 def test_runtime_index_retains_other_topics_when_one_schema_target_is_invalid(

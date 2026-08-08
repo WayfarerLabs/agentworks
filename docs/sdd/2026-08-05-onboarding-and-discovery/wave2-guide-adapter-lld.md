@@ -1,7 +1,8 @@
 # Low-Level Design: Declarative-Schema Guide Adapter
 
-- Status: Proposed for Phase 1 release-gate implementation
-- Authoritative dependency: declarative-schema Phase 2 on `main` at merge commit `5c0b6e18`
+- Status: Implemented for Phase 1 release-gate review
+- Authoritative dependency: `main` at `75c6edd1`, including the field-tree contract from PR #444 and
+  boundary default filling from PR #446
 - Parent design: `hla.md` and `guide-contract-lld.md`
 
 ## Scope
@@ -33,6 +34,19 @@ The adapter consumes facts, never another command's rendered output:
 contract. Guide code does not call `manifests.describe.reference_lines`, invoke the resource CLI,
 walk Pydantic models, or retain a second list of fields.
 
+The landed field-tree contract keeps plain block fields in `FieldEntry.children` and tagged-union
+fields in `FieldEntry.alternatives`. Every `Alternative` is readable through its in-place `fields`,
+its addressable `target`, or its `recurring` marker. `FieldEntry.contents` is the single-arm view
+for one generated document, not the exhaustive view a field reference renders. Guide field rendering
+therefore enumerates every alternative, nests each `Alternative.fields` set under its arm, marks a
+recurring arm as the block already shown, and gives an addressable arm an explicit `agw guide` or
+`agw resource describe-kind` pointer.
+
+PR #446 moved owner-templated default filling to the decode boundary through `filled_defaults`. The
+guide does not fill a payload, validate a model, or pass Pydantic context. It renders the
+declarative `default_template` from `FieldDoc` with `<name>` as the owner placeholder, exactly as it
+did before that internal lifecycle change.
+
 ## Topic and block target resolution
 
 Schema blocks resolve their targets from the contribution anchor. Contributors do not supply a
@@ -48,7 +62,10 @@ callable, renderer name, or arbitrary lookup expression.
 Trusted and plugin contribution validation rejects an incompatible anchor/block combination as a
 scoped content issue. `FieldReference.section` is a tuple of field-path segments. An empty tuple
 renders the complete reference. A non-empty tuple selects one exact metadata or spec subtree and
-fails closed when the path is absent or ambiguous.
+fails closed when the path is absent or ambiguous. Selection descends through plain
+`FieldEntry.children` plus every `Alternative.fields` set. A field unique to one arm, such as
+`auth.secret`, is selectable. A field repeated across arms, such as `auth.mode`, remains unavailable
+because exact selection requires one match.
 
 Dynamic guide topics use the following block sets:
 
@@ -81,10 +98,11 @@ through `plain_text`.
 The field renderer then reads only the remaining `SchemaReference` records. Its Markdown names the
 target and emits stable rows for path, required or optional status, type, default or owner-templated
 default, description, choices, constraints, examples, and reference marker when those facts exist.
-Nested paths come from the existing `FieldEntry` tree. Capability-kind references render their live
-alternatives and exact `kind/name` targets. Root-valued implementation config renders its one root
-entry without inventing a `spec` wrapper. Only projected plain-text field facts and alternative
-summaries are escaped for Markdown.
+Defaults remain visible on block-valued tagged fields, including `auth: {mode: ambient}` and
+`placement: {mode: local}`. Nested paths come from the existing `FieldEntry` tree. Capability-kind
+references render their live alternatives and exact `kind/name` targets. Root-valued implementation
+config renders its one root entry without inventing a `spec` wrapper. Only projected plain-text
+field facts and alternative summaries are escaped for Markdown.
 
 Literal defaults, examples, choices, and constraints never pass through `plain_text`. Their document
 form comes from `agentworks.manifests.yaml_value.render_value`, the same wire-value serializer used
@@ -134,7 +152,7 @@ platform-native copy, inspection, and editing tools.
 | `verify-migration-inputs`     | `READ_CONFIGURED_STATE` | Manual: compare config backup with source, verify a matching resources copy or recorded absent baseline, and review the already-complete expected identity-and-origin set before any edit.                                                                                                                                                                                             | Every present backup must match; destinations must be outside active trees; verification must not add or rewrite expected entries. Otherwise stop.                                                                                       |
 | `edit-one-manifest`           | `MUTATE_AGENTWORKS`     | Manual: edit only the pre-recorded `MANIFEST_PATH` for `MANIFEST_KIND`, using its sample and, when tagged config is present, the separate field reference for optional `CAPABILITY_TARGET`.                                                                                                                                                                                            | Consume but never change the expected entry; leave the last validated manifests unchanged on refusal and do not remove TOML.                                                                                                             |
 | `validate-manifest-set`       | `EXAMINE_WORKSTATION`   | `agw doctor`                                                                                                                                                                                                                                                                                                                                                                           | The new manifest receives precise feedback while the retired-section config failure remains; refusal leaves the edit unverified and blocks cutover.                                                                                      |
-| `review-null-secret-fields`   | `READ_CONFIGURED_STATE` | Manual: inspect only the named site manifests for `token_secret`, `service_principal.secret`, and `credentials.access_key_secret`.                                                                                                                                                                                                                                                     | Record default, custom, or ambient-auth intent per hit; refusal leaves the site unchanged and blocks cutover.                                                                                                                            |
+| `review-null-secret-fields`   | `READ_CONFIGURED_STATE` | Manual: inspect every pre-existing and TOML-derived site manifest. Classify current `token_secret`, `auth.mode`, service-principal `auth.secret`, access-key `auth.access_key_secret`, and `placement.mode`. Rewrite a written legacy `service_principal`, `credentials`, or `vm_host` field from its exact hard error.                                                                | Record default, custom, ambient, or local intent. An outer legacy null maps to ambient, ambient, or local; an inner secret-reference null selects its well-known default. Refusal leaves the site unchanged and blocks cutover.          |
 | `remove-retired-sections`     | `MUTATE_AGENTWORKS`     | Manual: remove every retired resource section from `CONFIG_PATH` in one edit and update `[secret_config].backends` when needed.                                                                                                                                                                                                                                                        | Refusal restores or retains the untouched config and its hard error.                                                                                                                                                                     |
 | `compare-operator-inventory`  | `EXAMINE_WORKSTATION`   | `agw resource list --origin operator`                                                                                                                                                                                                                                                                                                                                                  | The normal inventory may probe host readiness. Compare identity, `operator-declared`, and manifest file with the expected set while ignoring source line; any missing or extra row stops completion and uses the backups to investigate. |
 | `finish-doctor`               | `EXAMINE_WORKSTATION`   | `agw doctor`                                                                                                                                                                                                                                                                                                                                                                           | Zero failures completes the migration; refusal leaves host readiness unverified.                                                                                                                                                         |
@@ -159,9 +177,12 @@ The teaching covers:
    `[secret_config].backends`;
 6. fix closed-world fields, strict types, non-nullable nulls, and the retired sibling capability
    shape from the emitted error and live field reference;
-7. scan explicitly for the three changed null-secret fields, then choose a custom secret name or
-   accept the default name; Azure and AWS may instead remove the enclosing credentials block for
-   ambient authentication, while Proxmox has no no-secret mode;
+7. inspect every pre-existing and TOML-derived site for current authentication and placement modes;
+   classify Proxmox `token_secret`, Azure service-principal `auth.secret`, and AWS access-key
+   `auth.access_key_secret` as the well-known default or a custom secret name; treat omitted `auth`
+   as ambient, omitted `placement` as local, and preserve Proxmox's required secret-backed mode;
+   rewrite written legacy presence-shaped fields from their exact hard errors, with outer nulls
+   mapping to ambient, ambient, and local rather than to the inner secret-reference null behavior;
 8. remove every retired TOML resource section in one pass, compare the normal
    `agw resource list --origin operator` inventory with the pre-migration identities, including
    origin variant and manifest file while ignoring source line, and finish only when `agw doctor`
@@ -171,13 +192,18 @@ The section-to-kind mapping is release-history teaching and may be authored beca
 schema cannot derive a retired TOML name. Target manifest fields and samples are never authored in
 the topic.
 
-## Known upstream documentation inconsistency
+## Post-rebase contract revalidation
 
-The permanent 0.14 upgrade guide first states correctly that omission and explicit null both select
-the default secret, then later says deleting the null line means no secret. Landed models and tests
-show that the later statement is false. This effort does not edit the locked declarative-schema SDD
-or silently take ownership of its permanent guide. The operator is notified, and `concept-migration`
-follows the implemented behavior described above.
+PR #444 resolved the earlier permanent-guide inconsistency and made the mode choice explicit without
+making old omission a break. A manifest that omitted `service_principal`, `credentials`, or
+`vm_host` still loads on the corresponding tagged-field default. A manifest that wrote one of those
+retired fields receives an exact rewrite, including `auth: {mode: ambient}` or
+`placement: {mode: local}` for an outer explicit null. The concept topic follows that same contract
+and does not copy the generated live field set.
+
+PR #446 changed where owner-templated defaults are filled, not what the declarative field reference
+reports. Revalidation therefore covers guide rendering and migration wording while leaving filling
+at the manifest and capability decode boundaries.
 
 ## Verification
 
@@ -195,12 +221,16 @@ The adapter is complete when tests prove:
 - capability references never reach the sample renderer;
 - resource and concept anchors reject schema blocks, while an explicit resource request still
   degrades to unavailable when config cannot build the registry;
-- section selection is exact and invalid selectors fail as scoped guide content;
+- section selection descends through every union arm, resolves a field unique to one arm, and fails
+  as scoped guide content when a selector is absent or repeated across arms;
 - onboarding and management link to migration without duplicating its teaching;
 - migration output renders validated consent-bearing action records, preserves fresh out-of-tree
   backups or an absent baseline, carries the union of existing and migrated operator identities,
   names the normal load, inventory, and per-manifest doctor loop, handles backend sections, and
-  contains the exact null-secret choices;
+  distinguishes legacy outer-null mode rewrites from current inner secret-reference null defaults;
+- Azure, AWS, and Lima field references render every anonymous union arm's fields under the arm,
+  preserve block defaults, mark recurring arms, and point unexpanded addressable arms to their full
+  guide or describe reference;
 - final inventory comparison accepts a preserved operator resource whose manifest source line moved
   while requiring its identity, operator-declared variant, and manifest file to match;
 - schema scalar rendering uses `render_value` for booleans, enums, collections, empty and whitespace

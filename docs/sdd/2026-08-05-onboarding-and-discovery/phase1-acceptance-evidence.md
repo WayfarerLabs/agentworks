@@ -1,6 +1,6 @@
 # Phase 1 Acceptance Evidence
 
-- Date: 2026-08-06, updated 2026-08-07 after declarative-schema adoption
+- Date: 2026-08-06, updated 2026-08-08 after the PR #444 and PR #446 rebase
 - Branch: `feat/onboarding-discovery-guide`
 - Environment: isolated temporary home, config, state, and fake executable directories
 - Budget: 20 commands and 10 minutes for the initial pass; 8 commands and 5 minutes for the focused
@@ -57,9 +57,11 @@ its teaching. Its ten inert actions establish an immutable pre-edit resource ide
 path baseline, preserve fresh out-of-tree backups, migrate and validate one manifest at a time,
 classify workstation-probing inventory accurately, review changed null-secret semantics, verify the
 complete operator inventory, and require a zero-failure doctor result. The topic teaches that
-omitted and explicit-null secret fields both select the default; Azure and AWS use ambient
-authentication only when the enclosing authentication block is absent, while Proxmox has no
-no-secret mode.
+omitted and explicit-null inner secret-reference fields both select the well-known default. Omitted
+Azure and AWS `auth` defaults to ambient, and omitted Lima `placement` defaults to local; those
+choices may also be declared explicitly through the tagged mode. Written legacy `service_principal`,
+`credentials`, and `vm_host` fields follow their exact hard-error rewrites, including the distinct
+ambient, ambient, and local mappings for outer explicit null. Proxmox has no no-secret mode.
 
 Tests cover broken configuration, strict all-target schema construction, disabled implementations,
 fail-soft explicit and index rendering, names-only and completion filtering, action bounds and
@@ -76,8 +78,18 @@ guide and completion runs each passed 457 tests. The repository-level release ga
 - locked-SDD check: clean;
 - mandatory file lint: Prettier, markdownlint, and cspell clean.
 
-One cross-SDD inconsistency remains owned by the merged declarative-schema effort. The permanent
-0.14 upgrade guide correctly states that omission selects the default secret, but a later decision
-branch incorrectly describes deleting only the field as a no-secret choice. This effort's topic
-follows the implemented models and tests and does not repeat that incorrect branch. The
-inconsistency was flagged to the operator for correction by the owning effort.
+## Post-rebase field-tree and default-filling evidence
+
+PR #444 resolved the previous upgrade-guide inconsistency and landed the exhaustive
+`FieldEntry.alternatives` contract. Guide rendering now shows Azure, AWS, and Lima union fields
+under the arm that owns them, preserves the defaulted tagged block, marks recursion explicitly, and
+gives addressable arms a full guide or describe pointer. Exact section traversal sees every arm:
+unique selectors such as `auth.secret`, `auth.access_key_id`, and `placement.host` resolve, while
+repeated `auth.mode` remains unavailable under the existing ambiguity guard. Runtime schema-catalog
+failure isolation still retains unrelated union-derived fields.
+
+PR #446 moved owner-templated filling out of Pydantic validation context and into the decode
+boundary. The guide needs no corresponding fill step: it renders `FieldDoc.default_template` with
+the neutral `<name>` placeholder and never creates or validates a payload. The focused post-rebase
+suite covered guide behavior, field reference and schema emission, manifest decode filling, retired
+presence-shape errors, and platform config contracts: 627 tests passed.

@@ -3,6 +3,8 @@ from __future__ import annotations
 from agentworks.guide import ActionList, ConsentBoundary, GuideMode, Teaching, TopicLinks
 from agentworks.guide.contributions import guide_contributions
 from agentworks.guide.render import render_topic
+from agentworks.manifests.field_tree import FieldEntry
+from agentworks.manifests.reference import reference_for
 
 
 def _topic(slug: str):
@@ -172,7 +174,61 @@ def test_manifest_origin_identity_ignores_only_a_shifted_source_line() -> None:
     assert "source line ignored" in comparison.expected_state
 
 
-def test_migration_teaching_covers_cutover_validation_backends_and_null_secret_choices() -> None:
+def _schema_paths(target: str) -> set[tuple[str, ...]]:
+    reference = reference_for(target)
+    found: set[tuple[str, ...]] = set()
+
+    def visit(entries: tuple[FieldEntry, ...], prefix: tuple[str, ...] = ()) -> None:
+        for entry in entries:
+            path = (*prefix, entry.name)
+            found.add(path)
+            visit(entry.children, path)
+            for alternative in entry.alternatives:
+                visit(alternative.fields, path)
+
+    visit(reference.spec)
+    if reference.root_value is not None:
+        visit((reference.root_value,))
+    return found
+
+
+def test_migration_secret_paths_match_the_live_implementation_references() -> None:
+    paths = {
+        target: _schema_paths(target)
+        for target in (
+            "vm-platform/proxmox",
+            "vm-platform/azure-vm",
+            "vm-platform/aws-ec2",
+            "vm-platform/lima",
+        )
+    }
+
+    assert ("token_secret",) in paths["vm-platform/proxmox"]
+    assert ("auth", "secret") in paths["vm-platform/azure-vm"]
+    assert ("auth", "access_key_secret") in paths["vm-platform/aws-ec2"]
+    assert ("placement", "host") in paths["vm-platform/lima"]
+    assert ("service_principal", "secret") not in paths["vm-platform/azure-vm"]
+    assert ("credentials", "access_key_secret") not in paths["vm-platform/aws-ec2"]
+    assert ("vm_host",) not in paths["vm-platform/lima"]
+
+
+def test_migration_review_action_covers_all_sites_and_distinguishes_outer_from_inner_null() -> None:
+    actions = next(block for block in _topic("concept-migration").blocks if isinstance(block, ActionList)).actions
+    review = next(action for action in actions if action.id == "review-null-secret-fields")
+    manual = review.manual_steps or ""
+
+    assert "pre-existing and TOML-derived vm-site manifest files" in review.required_inputs[0].description
+    assert "service-principal auth.secret" in manual
+    assert "access-key auth.access_key_secret" in manual
+    assert "Omitted auth selects ambient" in manual
+    assert "omitted placement selects local" in manual
+    assert "outer explicit null maps to auth ambient, auth ambient, or placement local" in manual
+    assert "Inside a credential arm, an omitted or null secret reference" in manual
+    for stale in ("service_principal.secret", "credentials.access_key_secret"):
+        assert stale not in manual
+
+
+def test_migration_teaching_covers_cutover_validation_backends_and_auth_choices() -> None:
     migration = _topic("concept-migration")
     markdown = "\n".join(block.markdown for block in migration.blocks if hasattr(block, "markdown"))
     flowed = " ".join(markdown.split())
@@ -191,8 +247,16 @@ def test_migration_teaching_covers_cutover_validation_backends_and_null_secret_c
         "after each edit",
         "`[secret_backends.*]`",
         "`[secret_config].backends`",
-        "omission and explicit null both select the default secret name",
-        "Azure and AWS also support ambient authentication",
+        "Inspect every pre-existing and TOML-derived site manifest",
+        "Omitted `auth` defaults to ambient authentication",
+        "`auth.secret` names the client secret",
+        "`auth.access_key_secret` names the secret access key",
+        "Omitted `placement` defaults to local placement",
+        "`placement.host`",
+        "`service_principal: null` maps to `auth: {mode: ambient}`",
+        "`credentials: null` maps to `auth: {mode: ambient}`",
+        "`vm_host: null` maps to `placement: {mode: local}`",
+        "Do not confuse these outer-null rewrites with a null inner secret reference",
         "Proxmox has no no-secret mode",
         "closed-world fields",
         "strict types",
@@ -200,6 +264,8 @@ def test_migration_teaching_covers_cutover_validation_backends_and_null_secret_c
         "`spec.provider`",
     ):
         assert required in flowed
+    for stale in ("`service_principal.secret`", "`credentials.access_key_secret`"):
+        assert stale not in flowed
     assert "migration command" not in flowed
 
 

@@ -124,15 +124,17 @@ def _field_rows(
     prefix: tuple[str, ...],
     *,
     root_value: bool = False,
+    indent: int = 0,
 ) -> list[str]:
     rows: list[str] = []
+    row_indent = " " * indent
     for entry in entries:
         path = prefix if root_value and entry.name == "root" else (*prefix, _field_name(entry))
         facts = ["required" if entry.writable else "optional", _code(entry.type_label)]
         if entry.doc.default_template is not None:
             owner_default = entry.doc.default_template.replace("{owner_name}", "<name>")
             facts.append(f"owner default {_schema_value(owner_default)}")
-        elif worth_showing(entry.doc.default) and not entry.children:
+        elif worth_showing(entry.doc.default):
             facts.append(f"default {_schema_value(entry.doc.default)}")
         if entry.doc.choices:
             facts.append("choices " + ", ".join(_schema_value(choice) for choice in entry.doc.choices))
@@ -147,15 +149,33 @@ def _field_rows(
             facts.append("examples " + ", ".join(_schema_value(example) for example in entry.doc.examples))
         if entry.doc.ref is not None:
             facts.append(f"references {_code(entry.doc.ref.kind)}")
-        rows.append(f"- {_code('.'.join(path))}: " + "; ".join(facts))
+        rows.append(f"{row_indent}- {_code('.'.join(path))}: " + "; ".join(facts))
         if entry.doc.description:
-            rows.append(f"  - Description: {_plain_description(plain_text(entry.doc.description))}")
+            rows.append(f"{row_indent}  - Description: {_plain_description(plain_text(entry.doc.description))}")
         for alternative in entry.alternatives:
-            target = _code(alternative.target) if alternative.target else _code(alternative.name)
+            target = f" ({_code(alternative.target)})" if alternative.target else ""
             summary = f": {_plain_description(plain_text(alternative.summary))}" if alternative.summary else ""
-            rows.append(f"  - Alternative {target}{summary}")
-        rows.extend(_field_rows(entry.children, path))
+            rows.append(f"{row_indent}  - Alternative {_code(alternative.name)}{target}{summary}")
+            if alternative.target:
+                rows.append(
+                    f"{row_indent}    - Full reference: {_code(f'agw guide {alternative.target}')} "
+                    f"or {_code(f'agw resource describe-kind {alternative.target}')}"
+                )
+            if alternative.recurring:
+                rows.append(f"{row_indent}    - Recurring arm: this alternative repeats the block already shown above.")
+            rows.extend(_field_rows(alternative.fields, path, indent=indent + 4))
+        rows.extend(_field_rows(entry.children, path, indent=indent))
     return rows
+
+
+def _selectable_fields(entry: FieldEntry) -> tuple[FieldEntry, ...]:
+    """Fields one exact section selector may descend into.
+
+    Plain blocks own ``children``. Tagged unions own one field set per
+    alternative, and every arm participates so a field unique to one arm
+    is addressable while a repeated tag such as ``mode`` stays ambiguous.
+    """
+    return (*entry.children, *(field for alternative in entry.alternatives for field in alternative.fields))
 
 
 def _selected_reference(
@@ -178,7 +198,7 @@ def _selected_reference(
             if index == len(section) - 1:
                 matches.append((entry, tuple(prefix)))
                 break
-            entries = entry.children
+            entries = _selectable_fields(entry)
             prefix.append(segment)
     if len(matches) != 1:
         raise GuideTraversalError(f"field-reference section {'.'.join(section)!r} is unavailable")
