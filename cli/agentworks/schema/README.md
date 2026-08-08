@@ -17,20 +17,20 @@ consumer; it is adding N new pairs that have to agree.
 
 Each of these walks the model graph itself, so each can be wrong on its own.
 
-|     | Derivation                                              | Where                                                                                                                         | What it walks with                                                                          |
-| --- | ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| D1  | Loader validation                                       | `manifests/decode.py`, `manifests/envelope.py`, `capabilities/config.py`                                                      | pydantic, plus the two before-validators in `base.py` (shorthand fold, owner-template fill) |
-| D2  | Emitted JSON Schema                                     | `manifests/emit.py`, `AgwModel.__get_pydantic_json_schema__`, `RefMarker.__get_pydantic_json_schema__`, `_ManifestJsonSchema` | `model_json_schema` plus three correction layers                                            |
-| D3  | Field-documentation stream                              | `fields.py::iter_field_docs`                                                                                                  | the classifier (`_shape.py::shape_of`, `accepted_annotation`)                               |
-| D4  | Reference extraction, which builds the dependency graph | `extract.py::extract_references`                                                                                              | the same classifier, over RAW blobs, before validation                                      |
-| D5  | Owner-template default fill                             | `base.py::_fill_owner_templated_defaults`                                                                                     | must agree with D4 on absent-versus-null; both call `marker.render_default`                 |
-| D6  | The error bridge                                        | `errors.py::_resolve_path`                                                                                                    | re-walks the model beside pydantic's `loc`                                                  |
-| D7  | Registration conformance                                | `base.py::reference_marker_error`, `model_is_complete`, `shorthand_field_error`                                               | the guard derivation: its job is making the other walkers' blind spots loud                 |
-| D8  | Readiness probes over raw config                        | `capabilities/vm_platform/lima.py::not_ready` and kin                                                                         | a hand-rolled read, deliberately non-constructing                                           |
-| D9  | Retired-shape advice                                    | `capabilities/retired_shapes.py`, decode's sibling-shape refusal                                                              | hand-authored knowledge of BOTH the old shape and the live model                            |
-| D10 | Guides and READMEs                                      | `docs/guides/`, capability `prose` ClassVars                                                                                  | prose restating model facts, including pasted console output                                |
-| D11 | The envelope's own document validation                  | `manifests/envelope.py`                                                                                                       | kept deliberately beside D2's `_document_model`; the shared fact is the top-level key set   |
-| D12 | The YAML 1.1 spelling tables                            | `emit.py::YAML_11_ONLY_BOOLEANS` and `_INTEGERS`                                                                              | pyyaml's own resolver, restating what D1's parser accepts                                   |
+|     | Derivation                                              | Where                                                                                                                                          | What it walks with                                                                          |
+| --- | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| D1  | Loader validation                                       | `manifests/decode.py`, `manifests/envelope.py`, `capabilities/config.py`                                                                       | pydantic, plus the two before-validators in `base.py` (shorthand fold, owner-template fill) |
+| D2  | Emitted JSON Schema                                     | `manifests/emit.py`, `AgwModel.__get_pydantic_json_schema__`, `RefMarker.__get_pydantic_json_schema__`, `_ManifestJsonSchema`                  | `model_json_schema` plus three correction layers                                            |
+| D3  | Field-documentation stream                              | `fields.py::iter_field_docs`                                                                                                                   | the classifier (`_shape.py::shape_of`, `accepted_annotation`)                               |
+| D4  | Reference extraction, which builds the dependency graph | `extract.py::extract_references`                                                                                                               | the same classifier, over RAW blobs, before validation                                      |
+| D5  | Owner-template default fill                             | `base.py::_fill_owner_templated_defaults`                                                                                                      | must agree with D4 on absent-versus-null; both call `marker.render_default`                 |
+| D6  | The error bridge                                        | `errors.py::_resolve_path`                                                                                                                     | re-walks the model beside pydantic's `loc`                                                  |
+| D7  | Registration conformance                                | `base.py::reference_marker_error`, `_shape.py::model_is_complete`, `shorthand.py::shorthand_field_error`, run by `capabilities/conformance.py` | the guard derivation: its job is making the other walkers' blind spots loud                 |
+| D8  | Readiness probes over raw config                        | `capabilities/vm_platform/lima.py::not_ready` and kin                                                                                          | a hand-rolled read, deliberately non-constructing                                           |
+| D9  | Retired-shape advice                                    | `capabilities/retired_shapes.py`, decode's sibling-shape refusal                                                                               | hand-authored knowledge of BOTH the old shape and the live model                            |
+| D10 | Guides and READMEs                                      | `docs/guides/`, capability `prose` ClassVars                                                                                                   | prose restating model facts, including pasted console output                                |
+| D11 | The envelope's own document validation                  | `manifests/envelope.py`                                                                                                                        | kept deliberately beside D2's `_document_model`; the shared fact is the top-level key set   |
+| D12 | The YAML 1.1 spelling tables                            | `emit.py::YAML_11_ONLY_BOOLEANS` and `_INTEGERS`                                                                                               | pyyaml's own resolver, restating what D1's parser accepts                                   |
 
 **Dependent derivations** consume D3 rather than the models, so they cannot drift from it
 separately: the field tree (`manifests/field_tree.py`) and, through it, `describe-kind`, the
@@ -45,17 +45,54 @@ A pair that should agree and has no comparator is a hole whether or not it curre
   gated, resolved, or reported. `tests/schema/test_extract_completeness.py` compares them with the
   validated object as oracle. That is fixture-scoped, so the real closure is D7 refusing the shapes
   D4 cannot reach.
+- **D7 against D1 and D4** is that closure, made concrete by
+  `tests/capabilities/test_conformance.py::test_a_marker_validation_accepts_and_no_walker_reads_is_refused`:
+  it validates a blob, asserts D4 finds no edge in it, and asserts D7 refuses the model. The middle
+  assertion is a premise check, so the test fails loudly rather than vacuously if D4 ever grows to
+  reach the shape.
+- **D2 against D1** is guarded by
+  `tests/manifests/test_emit.py::test_emitted_schemas_accept_every_document_the_full_load_path_accepts`,
+  which runs every uncommented sample through the FULL load path (registry build included, since
+  capability config is checked at finalize) and against the emitted schemas. Its sibling
+  `test_a_capability_key_the_schema_rejects_is_rejected_on_every_host` is the rejects direction, and
+  the rejects direction is the one the contract actually states.
 - **D2 against D3** is guarded by `tests/manifests/test_accepted_type_parity.py`, whose expectation
   comes from pydantic rather than from our classifier, which is why it cannot agree with a wrong
   answer. Its limit is granularity: it compares JSON type sets, so two `object`-typed derivations
   can still disagree structurally under it.
+- **D4 against D2** is guarded one-directionally by `tests/schema/test_extract_totality.py`: the
+  kinds it expects an edge to carry are read off `x-agw-ref` in emitted schema, deliberately the
+  OTHER derivation mechanism, so the oracle cannot inherit D4's own blind spots.
 - **D3 and the sample against D1** is guarded by uncommenting the real sample and loading it, for
   the FIRST arm of every union only, because a document holds one arm.
 - **D5 against D4** is single-source by construction.
 - **D9 against the live models** is pinned structurally, because pinning both sides as literals
   would let a rename leave the advice and its test stale together.
+- **D11 against D2** is guarded by
+  `tests/manifests/test_emit.py::test_the_document_schema_states_exactly_the_envelope_keys`, which
+  reads the key set off the hand-rolled envelope validator itself and asserts the emitted document
+  schema states exactly it, required and closed.
+- **D12 against D1** is guarded in the same file, by rebuilding both spelling tables from pyyaml's
+  live resolver: that resolver IS D1's parser, so neither table is maintained by hand on either
+  side.
+- **D1 through D5 over one declaration** is what
+  `tests/capabilities/test_declare_once_end_to_end.py` does, on a fixture capability seated through
+  the real plugin machinery. It is the only place the whole regime is read back off five derived
+  surfaces from a single authored field.
 - **D10 against live output** cannot be compared by any automated check. Console blocks in guides
   are re-pasted from real runs, never hand-edited.
+
+Two pairs are open holes. They are named here so the next person does not have to rediscover them:
+
+- **D6 against the models.** Every path `_resolve_path` renders is pinned as a hand-authored literal
+  in `tests/schema/test_errors.py`, so nothing asserts that an error's address is one D3 would ever
+  show an operator. D6 does share `_shape.py`'s classifier, which narrows the gap without closing
+  it.
+- **D8 against D1.** A readiness probe's raw-config read is compared to nothing. The blobs
+  `tests/vms/test_platform_support.py` hands `not_ready` are hand-spelled and never validated, and
+  the same literals are spelled a second time in `tests/vms/test_platform_config_contract.py` with
+  nothing tying the two together. A renamed union tag would leave `not_ready` reading a key the
+  model no longer has, report every site ready, and break no test.
 
 ## Three oracles, and why no single guard covers the class
 

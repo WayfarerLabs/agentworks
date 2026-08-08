@@ -627,10 +627,18 @@ def _hides_marker(model_cls: type[BaseModel], visiting: tuple[type[BaseModel], .
     field's own metadata (where an outermost ``Annotated`` marker is
     lifted) and the annotation tree (everywhere else).
 
-    ``visiting`` is the current path, exactly as :func:`_marker_error`
-    carries it. A model that cannot be built hides nothing this can see;
-    its own check (:func:`~agentworks.schema.model_is_complete`) already
-    refuses it.
+    ``visiting`` is this walk's OWN path, and the sole caller deliberately
+    starts it at ``()`` rather than handing down the path
+    :func:`_marker_error` is carrying. That difference is load-bearing:
+    the question here is about one stranded model's contents, not about
+    where the outer walk happened to reach it from. Threading the outer
+    path in would make this return ``False`` for any stranded model
+    already on it, silently skipping the very check the subtraction
+    exists to perform. Do not "tidy" the call to match the recursion.
+
+    A model that cannot be built hides nothing this can see; its own
+    check (:func:`~agentworks.schema.model_is_complete`) already refuses
+    it.
     """
     if model_cls in visiting:
         return False

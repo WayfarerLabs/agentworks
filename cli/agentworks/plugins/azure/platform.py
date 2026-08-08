@@ -286,10 +286,14 @@ class AzureServicePrincipalAuth(AgwModel):
 #: credential) that a boolean could not grow into. Pydantic emits this
 #: directly as ``oneOf`` with a ``discriminator`` mapping, so the loader
 #: and the emitted schema agree by construction, which a cross-field
-#: validator over nullable blocks could not achieve (JSON Schema cannot
-#: state one, so the emitted schema would accept mixed-arm configs the
-#: loader rejects, breaking the under-approximation contract in
-#: ``manifests/emit.py``).
+#: validator over nullable blocks could not achieve. Not because JSON
+#: Schema cannot state the constraint (it can, as ``oneOf`` over closed
+#: arms or as ``if``/``then`` on the tag), but because pydantic does not
+#: derive a validator's body into the schema it emits, so the emitted
+#: schema would go silent about it and accept mixed-arm configs the
+#: loader rejects. That is sanctioned under-approximation under
+#: ``manifests/emit.py``, not a breach of it; what it forfeits is the
+#: editor DIAGNOSTIC.
 AzureAuth = Annotated[AzureAmbientAuth | AzureServicePrincipalAuth, Field(discriminator="mode")]
 
 
