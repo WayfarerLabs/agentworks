@@ -15,6 +15,15 @@ come out unlocated; the finalize pass appends the origin, gluing it to
 the LAST line). Framing the batch here is the only shape in which no
 error line is unlocated.
 
+:func:`located` is the framing itself, exposed separately for the
+callers that raise a ``ConfigError`` about a document without a pydantic
+exception behind it: a pre-validation refusal is still one of the
+manifest errors an operator reads in a batch, and it has to carry the
+same ``<file>:<line>:`` prefix as its neighbors or it reads as being
+about something else. One renderer for the frame, so the sentinels
+(``line == 0``, the synthesized path) are honored the same way
+everywhere and no call site invents a second spelling of a path.
+
 A diagnostic surface wanting the same text WITHOUT an exception in hand
 (a doctor row, ``describe``) reads :func:`_problems`, the shared core the
 framing is built over, and frames the problems its own way. That is why
@@ -350,16 +359,24 @@ def _framed_batch(
     location: SourceLocation | None,
 ) -> str:
     if len(problems) == 1:
-        return _located(location, _owner_framed(owner, problems[0]))
-    lines = [_located(location, f"{owner.display}: {len(problems)} problems")]
+        return located(location, _owner_framed(owner, problems[0]))
+    lines = [located(location, f"{owner.display}: {len(problems)} problems")]
     lines.extend(f"  {problem.render()}" for problem in problems[:MAX_ERROR_LINES])
     if len(problems) > MAX_ERROR_LINES:
         lines.append(f"  ... and {len(problems) - MAX_ERROR_LINES} more")
     return "\n".join(lines)
 
 
-def _located(location: SourceLocation | None, text: str) -> str:
+def located(location: SourceLocation | None, text: str) -> str:
     """``text`` prefixed with where the operator can go and fix it.
+
+    Public because a config error does not have to come from pydantic to
+    deserve the same frame. A pre-validation refusal
+    (:mod:`agentworks.capabilities.retired_shapes`) raises its own
+    ``ConfigError`` about the same document, at the same moment, with the
+    same location in hand, and an operator reading a batch of manifest
+    errors should not find one of them unlocated because of where in the
+    pipeline it was raised.
 
     ``SourceLocation`` carries its own sentinels and they are honored
     rather than rendered: ``line == 0`` means the resource was not

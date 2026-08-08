@@ -145,8 +145,10 @@ def validate_capability_config(
         return None
     # Before validation, so a pre-migration document gets its exact
     # rewrite rather than the unconnected pair of problems the model layer
-    # would answer it with. Release-scoped; see the module it lives in.
-    retired_shape_error(getattr(impl, "retired_shape", None), config, owner)
+    # would answer it with. Framed with the same ``location`` the
+    # validation below is given, because it is an error about the same
+    # document. Release-scoped; see the module it lives in.
+    retired_shape_error(getattr(impl, "retired_shape", None), config, owner, location)
     hint = reference_hint(kind, selected)
     if descriptor.config_schema.discriminator is None:
         model = offered_model(impl)

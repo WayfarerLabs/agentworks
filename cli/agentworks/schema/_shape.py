@@ -72,13 +72,16 @@ class FieldShape:
 
     annotation: object
     """What an operator may WRITE here, as an annotation: reference
-    markers stripped out at every depth, and every model declaring a
-    scalar shorthand widened to the union it accepts (``EnvEntry`` reads
-    ``str | EnvEntry``). Optionality is preserved: ``str | None`` stays
+    markers stripped out at every depth, every model declaring a scalar
+    shorthand widened to the union it accepts (``EnvEntry`` reads
+    ``str | EnvEntry``), and an owner-templated reference widened to
+    accept ``null``. Optionality is preserved: ``str | None`` stays
     ``str | None``. See :func:`accepted_annotation`."""
 
     optional: bool
-    """Whether ``None`` is an accepted value."""
+    """Whether ``None`` is an accepted value. True for an owner-templated
+    reference, which reads an explicit ``null`` as the omission it
+    resolves; :attr:`annotation` says the same thing."""
 
     marker: RefMarker | None
     """The marker on the field itself: the field names one Resource."""
@@ -315,8 +318,11 @@ def shape_of(field: FieldInfo) -> FieldShape:
             union_model = _sole_model(union_members)
 
     return FieldShape(
-        annotation=accepted_annotation(field.annotation),
-        optional=optional,
+        annotation=accepted_annotation(field.annotation, marker),
+        # An owner-templated field accepts ``None`` whatever its
+        # annotation says, so the flag and the annotation are widened by
+        # the one answer rather than each deciding for itself.
+        optional=optional or (marker is not None and marker.default_template is not None),
         marker=marker,
         collection=collection,
         item_marker=item_marker,
@@ -527,27 +533,46 @@ def strip_markers(annotation: object) -> object:
     return stripped
 
 
-def accepted_annotation(annotation: object) -> object:
-    """``annotation`` as an operator may WRITE it: markers stripped, and
-    every model declaring a scalar shorthand widened to the union it
-    accepts (``dict[str, EnvEntry]`` reads ``dict[str, str | EnvEntry]``).
+def accepted_annotation(annotation: object, marker: RefMarker | None = None) -> object:
+    """``annotation`` as an operator may WRITE it: markers stripped, every
+    model declaring a scalar shorthand widened to the union it accepts
+    (``dict[str, EnvEntry]`` reads ``dict[str, str | EnvEntry]``), and an
+    owner-templated reference widened to accept ``null``.
 
-    The widening is what keeps the two derivations of a model saying the
-    same thing. A shorthand is a before-validator, which is invisible to
-    an annotation and to ``model_json_schema`` alike; emitted schema
-    learns it from
+    Both widenings are the same correction, and it is what keeps the two
+    derivations of a model saying the same thing. Each is a
+    before-validator, which is invisible to an annotation and to
+    ``model_json_schema`` alike; emitted schema learns it from
     :meth:`~agentworks.schema.AgwModel.__get_pydantic_json_schema__` and
-    every human surface learns it here, from the same declaration. Left
-    out, ``describe-kind`` renders a bare "table" for a field whose
-    emitted schema offers ``{anyOf: [string, object]}``, and an operator
-    who trusts the surface the resources guide calls the authority
-    rewrites every plaintext env value into a table for no reason.
+    every human surface learns it here, from the same declaration.
+
+    Left out, each has the same consequence, and both have shipped:
+    ``describe-kind`` rendered a bare "table" for a field whose emitted
+    schema offers ``{anyOf: [string, object]}``, so an operator who
+    trusted the surface the resources guide calls the authority rewrote
+    every plaintext env value into a table for no reason; and it rendered
+    a bare "string" for a secret-naming field whose emitted schema offers
+    ``{anyOf: [string, null]}`` and whose loader reads ``token: null`` as
+    the instruction to use the owner template. The parity guard
+    (``tests/manifests/test_accepted_type_parity.py``) is what holds this
+    function to the emitted side; ``null`` used to be subtracted there,
+    which is precisely how the second one hid.
 
     The MODEL is not replaced, only the annotation naming it: a walker
     still expands the block through ``nested_model`` or ``item_model``,
-    because a shorthand adds a spelling rather than removing one.
+    because a shorthand adds a spelling rather than removing one. The
+    same goes for ``null``: an operator who writes it gets the templated
+    name, so the field still names a Resource and still has a type.
+
+    ``marker`` is the field's OWN reference marker, which is where the
+    template lives; a collection's element marker cannot carry one
+    (:func:`~agentworks.schema.reference_marker_error` refuses it at
+    registration), so there is no depth for this widening to reach.
     """
-    return _widened(strip_markers(annotation))
+    widened = _widened(strip_markers(annotation))
+    if marker is None or marker.default_template is None:
+        return widened
+    return Union[widened, None]  # noqa: UP007
 
 
 def element_annotation(annotation: object) -> object | None:

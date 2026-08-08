@@ -555,9 +555,9 @@ from the keys your own document had:
 
 ```console
 $ agw resource list
-Configuration error: vm-site/azure-dev: 'service_principal' is no longer a supported field; the
-choice it used to carry by being present is written explicitly now: auth: {mode: service-principal,
-tenant_id: ..., client_id: ..., secret: ...}
+Configuration error: ~/.config/agentworks/resources/sites.yaml:1: vm-site/azure-dev:
+'service_principal' is no longer a supported field; the choice it used to carry by being present is
+written explicitly now: auth: {mode: service-principal, tenant_id: ..., client_id: ..., secret: ...}
   Hint: Apply the rewrite above; `agw resource describe-kind <kind>` documents the field, and `agw
   resource sample <kind>` prints it as a document to edit. See "Authentication and placement are
   declared, not inferred" in docs/guides/upgrading-to-0.14.md.
@@ -569,16 +569,18 @@ added. This is the common case on lima, where the zero-config local site said no
 
 ```console
 $ agw resource list
-Configuration error: vm-site/lima-here: 'placement' is required and this resource does not declare
-it. Omitting 'vm_host' used to mean 'local'; that choice is written down now rather than inferred
-from what is missing, so nothing was deleted from your document and one line is added to it:
-placement: {mode: local}
+Configuration error: ~/.config/agentworks/resources/lima.yaml:1: vm-site/lima-here: 'placement' is
+required and this resource does not declare it. Omitting 'vm_host' used to mean 'local'; that choice
+is written down now rather than inferred from what is missing, so nothing was deleted from your
+document and one line is added to it: placement: {mode: local}
+  Hint: Apply the rewrite above; `agw resource describe-kind <kind>` documents the field, and `agw
+  resource sample <kind>` prints it as a document to edit. See "Authentication and placement are
+  declared, not inferred" in docs/guides/upgrading-to-0.14.md.
 ```
 
-Both errors address the site as `vm-site/<name>` rather than by file and line, unlike the other
-manifest errors here, so find the site by its name. One site per pass, as everywhere else here, so
-three stale sites take three passes. `agw doctor` reports each as one fail row and carries on, which
-makes it the loop to work in.
+Both errors name the file, the line, and the site, like every other manifest error here. One site
+per pass, as everywhere else here, so three stale sites take three passes. `agw doctor` reports each
+as one fail row and carries on, which makes it the loop to work in.
 
 **Azure.** `auth` replaces `service_principal` at the same depth, and the keys you already had move
 into it beside a `mode` line:
@@ -716,7 +718,8 @@ problem you did not have. A `local` site needs `limactl` here and reports not-re
 built-in `lima-local` site is exactly `placement: {mode: local}` and needs no declaration.
 
 **Where the fields come from.** `agw resource describe-kind vm-platform/azure-vm` (and `/aws-ec2`,
-`/lima`) documents the union as a required table and lists both modes, but expands only one of them:
+`/lima`) documents the union as a required table and shows each mode's own fields under that mode,
+so the rewrites above are not the only place they are written down:
 
 ```console
 $ agw resource describe-kind vm-platform/azure-vm
@@ -725,18 +728,25 @@ $ agw resource describe-kind vm-platform/azure-vm
     How this site authenticates to Azure: `{mode: ambient}` for the ambient credential
     chain, or `{mode: service-principal, ...}` for an explicit principal. Required, with
     no default, so a site never selects an identity by leaving a key out.
-    - ambient (shown below): Authenticate with the ambient chain: `az login`, `AZURE_*`, or a managed identity.
+    - ambient: Authenticate with the ambient chain: `az login`, `AZURE_*`, or a managed identity.
+      mode  (one of: ambient, required)
+        Selects this arm.
     - service-principal: Authenticate as an explicit Entra ID service principal.
-    mode  (one of: ambient, required)
-      Selects this arm.
+      mode  (one of: service-principal, required)
+        Selects this arm.
+      tenant_id  (string, required, min length 1)
+        The Entra ID tenant the principal lives in.
+      client_id  (string, required, min length 1)
+        The principal's application (client) id.
+      secret  (string or null, optional, defaults to `azure-client-secret`, names a secret, min length 1)
+        The secret holding the principal's client secret. [...]
 ```
 
-`agw resource sample vm-site` behaves the same way, printing lima's `placement` under a
-`# One of: local, ssh. Shown here: local.` line with only the `local` arm's `mode` in the document.
-There is no address for the arm that is merely named, so for that one the rewrites above are the
-field list. What does carry both arms is the emitted schema: `agw resource schema --write` writes
-`oneOf` with a `const` per mode, so a schema-aware editor completes and checks whichever arm you are
-writing (see
+`agw resource sample vm-site` cannot do the same, because a document holds one arm: it prints lima's
+`placement` under a `# One of: local, ssh. Shown here: local.` line with only the `local` arm's
+`mode` in the document, and points at `agw resource describe-kind vm-site` for the rest. The emitted
+schema carries both arms too: `agw resource schema --write` writes `oneOf` with a `const` per mode,
+so a schema-aware editor completes and checks whichever arm you are writing (see
 ["Editing manifests with schema support"](resources.md#editing-manifests-with-schema-support) in the
 resources guide).
 

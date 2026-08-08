@@ -13,6 +13,8 @@ that module is deleted, this file goes with it and the generic
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from agentworks.capabilities.config import validate_capability_config
@@ -21,6 +23,7 @@ from agentworks.errors import ConfigError
 from agentworks.plugins.aws.platform import EC2Platform
 from agentworks.plugins.azure.platform import AzureVMPlatform
 from agentworks.schema import RefOwner
+from agentworks.source_location import SourceLocation
 
 # Importing the two plugin platforms SEATS them, which is what makes
 # ``azure-vm`` and ``aws-ec2`` selectable below.
@@ -31,10 +34,20 @@ OWNER = RefOwner(kind="vm-site", name="dev")
 _AZURE = {"subscription_id": "s", "resource_group": "g", "region": "eastus"}
 _AWS = {"region": "us-east-1"}
 
+_WHERE = SourceLocation(file=Path("/etc/agentworks/resources/sites.yaml"), line=12)
+"""A declaration site, for the tests about framing. Outside ``$HOME`` on
+purpose, so the rendered path is stable rather than depending on whose
+machine the suite runs on."""
 
-def _refuse(platform: str, blob: dict[str, object]) -> ConfigError:
+
+def _refuse(platform: str, blob: dict[str, object], location: SourceLocation | None = None) -> ConfigError:
     with pytest.raises(ConfigError) as exc:
-        validate_capability_config(kind="vm-platform", config={"name": platform, **blob}, owner=OWNER)
+        validate_capability_config(
+            kind="vm-platform",
+            config={"name": platform, **blob},
+            owner=OWNER,
+            location=location,
+        )
     return exc.value
 
 
@@ -127,6 +140,48 @@ def test_a_half_migrated_document_gets_the_ordinary_unknown_field_error(platform
     message = str(_refuse(platform, blob))
     assert "unknown field" in message
     assert "no longer a supported field" not in message
+
+
+def _frame_of(message: str) -> str:
+    """The ``<file>:<line>: <kind>/<name>`` an operator scans a manifest
+    error for, taken off the front of ``message``.
+
+    Stops at the owner rather than at the punctuation after it: the bridge
+    writes a dot before a field path and a colon before a whole-document
+    problem, and which of those follows is not what this is about.
+    """
+    head, marker, _rest = message.partition(OWNER.display)
+    assert marker, f"no owner frame in {message!r}"
+    return head + marker
+
+
+@pytest.mark.parametrize(
+    ("platform", "blob"),
+    [
+        pytest.param("lima", {"vm_host": "me@gpu-box"}, id="written"),
+        pytest.param("lima", {}, id="absent"),
+    ],
+)
+def test_a_retired_shape_refusal_is_framed_like_the_errors_beside_it(platform: str, blob: dict[str, object]) -> None:
+    """A refusal that runs BEFORE validation is still an error about a
+    document, and it reaches an operator in the same list as the ones that
+    run after. Framed differently it reads as being about something else,
+    and the operator whose azure, aws, and lima sites all broke at once is
+    the last one who should have to guess which file to open.
+
+    The expectation is read off a NEIGHBOR rather than spelled here: the
+    unknown-field error for the same owner at the same location is framed
+    by the error bridge, so this asserts the two agree rather than
+    asserting a string that would go stale the day the frame changes.
+    """
+    neighbor = _refuse(platform, {"placement": {"mode": "local"}, "bogus": 1}, _WHERE)
+    frame = _frame_of(str(neighbor))
+
+    # Not vacuous: a frame with no file and no line would be shared by two
+    # unlocated errors just as happily.
+    assert "sites.yaml:12" in frame
+
+    assert str(_refuse(platform, blob, _WHERE)).startswith(frame)
 
 
 def test_a_platform_with_no_retired_shape_is_untouched() -> None:

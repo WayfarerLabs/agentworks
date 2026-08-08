@@ -60,6 +60,7 @@ def reference_lines(reference: SchemaReference) -> Iterator[str]:
         yield ""
         yield "config: (a value, not a table)"
         yield from _wrapped(_facts_of(reference.root_value), depth=1)
+        yield from _alternatives(reference.root_value, depth=1)
         yield from _table_form(reference.root_value)
     if reference.alternatives:
         yield ""
@@ -102,6 +103,10 @@ def _table_form(entry: FieldEntry) -> Iterator[str]:
     "table" while the emitted schema beside it spells out both of the
     properties an operator has to write, which is the disagreement this
     surface exists to not have.
+
+    Nothing for a root value that is a tagged UNION: its contents belong
+    to its arms, and :func:`_alternatives` has already shown each of them
+    under the arm it belongs to.
     """
     if not entry.children:
         return
@@ -118,30 +123,38 @@ def _field(entry: FieldEntry, *, depth: int) -> Iterator[str]:
     yield f"{_INDENT * depth}{_key(entry)}  {_facts_of(entry)}"
     if entry.doc.description:
         yield from _wrapped(entry.doc.description, depth=depth + 1)
+    yield from _alternatives(entry, depth=depth + 1)
+    yield from _fields(entry.children, depth=depth + 1)
+
+
+def _alternatives(entry: FieldEntry, *, depth: int) -> Iterator[str]:
+    """Each thing that could go here, and how to read it.
+
+    Naming an arm raises one question, which is what to write if you pick
+    it, and this surface answers it for every arm rather than for one.
+    Listing four platforms by name and expanding one leaves an operator
+    with no address for the other three, and listing two modes by name
+    leaves them with no way to reach either: the generated sample cannot
+    answer that one (a document holds one arm, so it expands one and names
+    the rest), which makes this the only surface that can.
+
+    The three shapes are the record's, not this renderer's: see
+    :class:`~agentworks.manifests.field_tree.Alternative`.
+    """
     for alternative in entry.alternatives:
-        shown = " (shown below)" if alternative.name == entry.rendered else ""
         # plain_text here for the same reason _wrapped applies it: an arm's
         # summary is a capability's one-line ``description`` only when the
         # union's arms ARE capabilities. Any other tagged union falls back
         # to the arm model's own docstring, which is authored in RST, and
         # its double backticks would reach the terminal raw.
         summary = f": {plain_text(alternative.summary)}" if alternative.summary else ""
-        yield f"{_INDENT * (depth + 1)}- {alternative.name}{shown}{summary}"
-    yield from _other_arms_pointer(entry, depth=depth + 1)
-    yield from _fields(entry.children, depth=depth + 1)
-
-
-def _other_arms_pointer(entry: FieldEntry, *, depth: int) -> Iterator[str]:
-    """Where to read about the alternatives this field did not expand.
-
-    Listing four platforms by name and expanding one leaves an operator
-    with no address for the other three, which is exactly the question the
-    list provokes. The generated sample answers it; so should this.
-    """
-    other = next((alt for alt in entry.alternatives if alt.name != entry.rendered and alt.target), None)
-    if other is None:
-        return
-    yield f"{_INDENT * depth}`agw resource describe-kind {other.target}` for another one's fields."
+        yield f"{_INDENT * depth}- {alternative.name}{summary}"
+        if alternative.fields:
+            yield from _fields(alternative.fields, depth=depth + 1)
+        elif alternative.recurring:
+            yield f"{_INDENT * (depth + 1)}nests this same block again, so its fields are the ones above."
+        elif alternative.target:
+            yield f"{_INDENT * (depth + 1)}`agw resource describe-kind {alternative.target}` for its fields."
 
 
 def _key(entry: FieldEntry) -> str:
@@ -164,7 +177,7 @@ def _facts_of(entry: FieldEntry) -> str:
     facts = [entry.type_label, "required" if entry.writable else "optional"]
     if entry.doc.default_template is not None:
         facts.append(f"defaults to `{entry.doc.default_template.replace('{owner_name}', '<name>')}`")
-    elif worth_showing(entry.doc.default) and not entry.children:
+    elif worth_showing(entry.doc.default) and not entry.contents:
         facts.append(f"default {render_value(entry.doc.default)}")
     if entry.doc.ref is not None:
         facts.append(f"names a {entry.doc.ref.kind}")

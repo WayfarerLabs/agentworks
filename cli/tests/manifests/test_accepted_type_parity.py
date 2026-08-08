@@ -24,18 +24,23 @@ asked the classifier what a field accepts would agree with the classifier
 about a field it classified wrongly, which is the recorded way this
 effort's tests have passed for the wrong reason.
 
-Two subtractions, both deliberate widenings of the emitted side that this
-comparison must not read as arms:
+One subtraction, and it is dodged rather than subtracted: the YAML 1.1
+spelling correction is avoided by reading the DEFAULT schema generator
+instead of ``manifests/emit._ManifestJsonSchema``. That correction is a
+property of an editor's parser, not of the model, so it is not something
+the stream should be documenting.
 
-- ``null``, because an owner-templated field is emitted nullable on
-  purpose (``schema/base.py``'s ``_with_marker_corrections``), and
-  optionality is a fact the stream carries separately as
-  ``FieldDoc.required``;
-- the YAML 1.1 spelling correction, which is dodged rather than
-  subtracted by reading the DEFAULT generator instead of
-  ``manifests/emit._ManifestJsonSchema``. That correction is a property
-  of an editor's parser, not of the model, so it is not something the
-  stream should be documenting.
+``null`` used to be subtracted here too, on the grounds that an
+owner-templated field is emitted nullable on purpose
+(``schema/base.py``'s ``_with_marker_corrections``) and that optionality
+is a fact the stream carries separately as ``FieldDoc.required``. The
+second half of that was true and the first half was the defect: the
+emitted schema accepts ``token: null`` as a VALUE spelling, the loader
+reads it as the instruction to use the owner template, and
+``describe-kind`` rendered a bare "string". The subtraction is what let
+the two derivations disagree in the one place this module exists to
+watch, so it is gone and ``accepted_annotation`` states the widening
+instead.
 """
 
 from __future__ import annotations
@@ -159,7 +164,7 @@ def _disagreement(annotation: object, node: dict[str, Any], defs: dict[str, Any]
     only inside the annotation that holds it, which is where the shipped
     defect was.
     """
-    extra = _schema_types(node, defs) - _annotation_types(annotation) - {"null"}
+    extra = _schema_types(node, defs) - _annotation_types(annotation)
     if extra:
         return (
             f"{where} accepts {sorted(extra)} in emitted schema and not in the field stream; "

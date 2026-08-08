@@ -47,7 +47,17 @@ _PLACEHOLDER_KEY = "<key>"
 @dataclass(frozen=True, kw_only=True)
 class Alternative:
     """One of the several things that could go where one thing goes: an
-    implementation of a capability kind."""
+    implementation of a capability kind, or an arm of any other tagged
+    union.
+
+    **Every alternative is READABLE**, and at least one of the three
+    fields below says how: :attr:`target` addresses it, :attr:`fields`
+    shows it, or :attr:`recurring` says it is the block already open
+    above. Naming an arm and offering none of the three is the defect this
+    record is shaped to make impossible, and
+    ``tests/manifests/test_describe_kind.py`` asserts the property over
+    every describable target.
+    """
 
     name: str
     """The tag that selects it (``"azure-vm"``)."""
@@ -58,7 +68,30 @@ class Alternative:
 
     target: str | None
     """The address that describes it in full (``"vm-platform/azure-vm"``),
-    or ``None`` for a union that is not a capability."""
+    or ``None`` for an arm of a union that is not a capability."""
+
+    fields: tuple[FieldEntry, ...] = ()
+    """This arm's own fields, where this reference shows them.
+
+    Set for an arm of a PLAIN union, which has no address and never will
+    (it is an anonymous model inside one field, and no CLI form reaches
+    it), so here is the only place its fields can appear. Set for the arm
+    a DOCUMENT would be written against, addressable or not, because a
+    sample has to write one; that is :attr:`FieldEntry.rendered`.
+
+    Empty for any OTHER arm carrying a :attr:`target`, whose address
+    documents it in full and whose config may be as large as a whole
+    platform's, and for a :attr:`recurring` arm. :func:`_shows_fields` is
+    where the rule lives."""
+
+    recurring: bool = False
+    """Whether this arm is the block already open above this point.
+
+    A union arm reachable from itself (a group whose members are groups)
+    is not expanded again, because a document nests it to a depth the
+    model cannot know and one more level would be no more complete than
+    none. Its fields are on the page, higher up, which is why this counts
+    as readable and is not the same absence as an arm nobody expanded."""
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -74,15 +107,40 @@ class FieldEntry:
 
     doc: FieldDoc
     children: tuple[FieldEntry, ...]
-    """The fields inside this one: a nested block's, a collection
-    element's, or the fields of the union arm this entry renders."""
+    """The fields inside this one: a nested block's or a collection
+    element's.
+
+    Empty when this field is a union, whose contents belong to its ARMS
+    rather than to it: see :attr:`alternatives` and :attr:`contents`."""
 
     alternatives: tuple[Alternative, ...]
-    """The arms of a discriminated union, when this field is one."""
+    """The arms of a discriminated union, when this field is one. Each
+    carries its own fields where this reference shows them."""
 
-    rendered: str | None
-    """Which alternative ``children`` came from. One is expanded and the
-    rest are listed, because a document holds one."""
+    @property
+    def rendered(self) -> str | None:
+        """Which alternative a DOCUMENT would be written against: the
+        first arm whose fields are shown here, or ``None`` when none are.
+
+        A document holds one arm, so a sample has to pick, and this is the
+        pick. Derived from :attr:`alternatives` rather than stored beside
+        them, so the arm named here and the arm whose fields are available
+        cannot come apart."""
+        return next((alt.name for alt in self.alternatives if alt.fields), None)
+
+    @property
+    def contents(self) -> tuple[FieldEntry, ...]:
+        """The fields ONE document writes inside this one.
+
+        :attr:`children` for a plain block; for a union, the fields of the
+        arm :attr:`rendered` names. For the surfaces that write or measure
+        a single document (the generated sample, the value a field is
+        given): a reference showing every arm reads
+        :attr:`alternatives` instead.
+        """
+        if not self.alternatives:
+            return self.children
+        return next((alt.fields for alt in self.alternatives if alt.fields), ())
 
     @property
     def name(self) -> str:
@@ -120,7 +178,8 @@ class FieldEntry:
         In order: the author's first example, the ONE value a closed field
         can hold, the field's own default where it is worth showing, and
         finally a placeholder derived from the type. ``UNSET`` for a field
-        whose content is its children's.
+        whose content is what a document writes INSIDE it
+        (:attr:`contents`).
 
         The one-value step is the union arm's tag (``name: lima``), which is
         the value rather than a choice among values. A field with SEVERAL
@@ -138,7 +197,7 @@ class FieldEntry:
             return self.doc.examples[0]
         if len(self.doc.choices) == 1:
             return self.doc.choices[0]
-        if self.children:
+        if self.contents:
             return UNSET
         if worth_showing(self.doc.default):
             return self.doc.default
@@ -192,7 +251,7 @@ def _tree(
         siblings = by_path.get(parent)
         if siblings is None:
             raise StateError(f"the field stream reached {'.'.join(doc.path)} before its parent block")
-        siblings.append(FieldEntry(doc=doc, children=(), alternatives=(), rendered=None))
+        siblings.append(FieldEntry(doc=doc, children=(), alternatives=()))
         by_path[doc.path] = []
         _open_tagged_element(doc, by_path)
     expanding = (*expanding, model)
@@ -337,7 +396,7 @@ def _add_element(
         union_arms=union_arms,
         item_union_arms=(),
     )
-    by_path[holder.path].append(FieldEntry(doc=element, children=(), alternatives=(), rendered=None))
+    by_path[holder.path].append(FieldEntry(doc=element, children=(), alternatives=()))
     by_path[path] = []
 
 
@@ -387,43 +446,72 @@ def _expanded(
     capability_kind: str | None,
     expanding: tuple[type[BaseModel], ...],
 ) -> FieldEntry:
-    """A discriminated union rendered as ONE arm, with the rest listed.
+    """A discriminated union as its arms, each one readable.
 
-    The first registered arm, which is a built-in: the core's
-    implementations seat at import and plugins seat after them, so the
-    expanded arm is the one that needs no plugin and usually no
-    credentials. A document holds one arm, so rendering them all would
-    produce a sample that cannot be uncommented.
+    Every arm is named, and naming an arm raises exactly the question
+    :func:`_shows_fields` answers: what do I write if I pick that one. An
+    arm that has an address of its own is answered by the address; an arm
+    that has none is answered here, with its fields; an arm that is the
+    block already open above is answered by that block.
     """
     if not entry.doc.union_arms:
         return entry
     arms = entry.doc.union_arms
     implementations = _implementations(capability_kind)
     alternatives = tuple(
-        Alternative(
-            name=arm.tag,
-            # The IMPLEMENTATION's one-liner where the arm is one (what
-            # lima IS), falling back to the arm model's own docstring
-            # (what its config is) for a union that is not a capability.
-            summary=implementations.get(arm.tag) or arm.doc.description,
-            target=f"{capability_kind}/{arm.tag}" if arm.tag in implementations else None,
-        )
-        for arm in arms
+        _alternative(arm, first=index == 0, kind=capability_kind, implementations=implementations, expanding=expanding)
+        for index, arm in enumerate(arms)
     )
-    if arms[0].doc.model in expanding:
-        # The arm is already open above this point, so expanding it again
-        # would never finish. The alternatives are still named and
-        # ``rendered`` stays None, which says truthfully that nothing was
-        # expanded here: a document nests this shape to some finite depth
-        # the model cannot know, and a reference that showed one more
-        # level would be no more complete than one that shows none.
-        return replace(entry, alternatives=alternatives)
-    return replace(
-        entry,
-        children=_tree(arms[0].doc.model, capability_kind, expanding),
-        alternatives=alternatives,
-        rendered=arms[0].tag,
+    return replace(entry, alternatives=alternatives)
+
+
+def _alternative(
+    arm: UnionArm,
+    *,
+    first: bool,
+    kind: str | None,
+    implementations: dict[str, str | None],
+    expanding: tuple[type[BaseModel], ...],
+) -> Alternative:
+    """One arm, with whichever of the three ways of being readable it
+    has. See :class:`Alternative`."""
+    target = f"{kind}/{arm.tag}" if arm.tag in implementations else None
+    recurring = arm.doc.model in expanding
+    return Alternative(
+        name=arm.tag,
+        # The IMPLEMENTATION's one-liner where the arm is one (what lima
+        # IS), falling back to the arm model's own docstring (what its
+        # config is) for a union that is not a capability.
+        summary=implementations.get(arm.tag) or arm.doc.description,
+        target=target,
+        fields=() if recurring or not _shows_fields(target, first=first) else _tree(arm.doc.model, kind, expanding),
+        recurring=recurring,
     )
+
+
+def _shows_fields(target: str | None, *, first: bool) -> bool:
+    """Whether this reference expands an arm in place.
+
+    **An arm with no address is expanded**, because there is nowhere else
+    to read it. It is an anonymous model inside one field, so no
+    ``describe-kind`` form reaches it and no generated sample can show it
+    either (a document holds one arm, so the sample expands one and names
+    the rest). Left unexpanded it is a word an operator cannot act on,
+    which is what ``auth: {mode: service-principal}`` was: named in the
+    list, and its three required keys documented nowhere.
+
+    **An arm WITH an address is not**, unless it is the first. Its address
+    documents it in full, its config is as large as a whole platform's,
+    and inlining five of them would bury the field that holds one.
+
+    **The first arm is expanded whatever it is**, because one has to be:
+    the generated sample writes a document, a document holds one arm, and
+    :attr:`FieldEntry.rendered` names the one it writes. First rather than
+    chosen: the core's implementations seat at import and plugins seat
+    after them, so it is the arm that needs no plugin and usually no
+    credentials.
+    """
+    return first or target is None
 
 
 def _implementations(capability_kind: str | None) -> dict[str, str | None]:
