@@ -293,9 +293,11 @@ model and aws's nested `credentials` model, which is what existed when that step
 **What changed.** Azure's `service_principal` block, AWS's `credentials` block, and lima's `vm_host`
 field are replaced by required nested discriminated unions: `auth: {mode: ambient}` or
 `{mode: service-principal, ...}` on azure, `auth: {mode: ambient}` or `{mode: access-key, ...}` on
-aws, and `placement: {mode: local}` or `{mode: ssh, host: ...}` on lima. No default and no omission
-alias, so every existing manifest for those three platforms crosses the break. Proxmox is unchanged
-because it has one valid shape, and wsl2 has no choice to model.
+aws, and `placement: {mode: local}` or `{mode: ssh, host: ...}` on lima. Each defaults to its
+ambient or local arm (operator ruling, reversed from the no-default posture this entry originally
+recorded), so the break reaches only manifests that WROTE the old block or wrote it as null. A
+manifest that declared nothing keeps loading. Proxmox is unchanged because it has one valid shape,
+and wsl2 has no choice to model.
 
 **Why it belongs on THIS lockfile.** All three were the same defect this effort spent itself
 removing, in a shape it did not name: absence selecting a MECHANISM rather than supplying a default
@@ -303,6 +305,22 @@ value. Omitting azure's credential block chose the ambient chain; omitting aws's
 lima inferred local versus remote from whether `vm_host` was present. A manifest could not
 distinguish a deliberate choice from a forgotten one, and neither could a reviewer, `doctor`, or the
 graph.
+
+**Why the default is not a return to the defect.** The defect was never that absence selects a
+mechanism; it was that there was NO WAY TO DECLARE the choice. The union fixes the second, and once
+an explicit form exists a default is an ordinary default. The rule for which arm: whatever the field
+already does when omitted, which makes every default a strict no-op for existing manifests and
+forbids ever defaulting to a NEW arm. Ambient is not special; it is simply what omission already did
+on the clouds, which is also what the wrapped SDKs do (`DefaultAzureCredential`, boto3's chain).
+
+**It also found and closed a wider extraction gap.** An absent field carrying a default emitted no
+edges, on every default shape and not just unions, so a default that named a secret was validated
+and never gated. Extraction now reads an absent field as if the operator had written the default's
+value: the default is converted to its equivalent blob once per model and the EXISTING walker
+descends into it. Recursion is therefore free, and a union nested inside a union arm emits both
+edges with no arm-selection logic written for the occasion. A `default_factory` taking validated
+data is honestly out of scope and recorded as such, because its value is a function of neighboring
+fields rather than a static property of the class.
 
 **It closes the readiness self-masking case structurally, not just at the validation layer.** The
 "Validation is unconditional" decision above tells that story at length: a misspelled `vm_host` read
