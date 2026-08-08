@@ -319,6 +319,29 @@ def test_overlapping_structural_arms_are_refused_at_registration_without_markers
     assert "overlapping arms First and Second" in reason
 
 
+def test_a_discriminated_structural_union_is_refused_at_registration_without_markers() -> None:
+    class ValueArm(AgwModel):
+        mode: Literal["value"]
+        value: str
+
+    class NamedArm(AgwModel):
+        mode: Literal["named"]
+        named: str
+
+    class Selected(AgwModel):
+        name: Literal["fixture-platform"]
+        source: Annotated[
+            ValueArm | NamedArm,
+            StructuralUnion(),
+            Discriminator("mode"),
+        ]
+
+    reason = conformance_error(VM_PLATFORM, _impl(Selected))
+    assert reason is not None
+    assert "invalid structural union" in reason
+    assert "selector-free" in reason
+
+
 @pytest.mark.parametrize(
     ("config_model", "blob"),
     [

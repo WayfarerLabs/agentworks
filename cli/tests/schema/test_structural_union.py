@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Annotated, ClassVar
+from typing import Annotated, ClassVar, Literal
 
 import pytest
-from pydantic import AliasChoices, BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Discriminator, Field
 
 from agentworks.schema import (
     MAPPING_KEY,
@@ -140,3 +140,51 @@ def test_a_marker_free_validation_alias_is_still_loud() -> None:
     reason = structural_union_error(WithAlias)
     assert reason is not None
     assert "Aliased.value declares validation alias" in reason
+
+
+class TaggedValueArm(AgwModel):
+    mode: Literal["value"]
+    value: str
+
+
+class TaggedNamedArm(AgwModel):
+    mode: Literal["named"]
+    named: str
+
+
+def _assert_selector_is_refused(model: type[AgwModel]) -> None:
+    reason = structural_union_error(model)
+    assert reason is not None
+    assert "combines StructuralUnion with discriminator 'mode'" in reason
+    assert "selector-free" in reason
+
+
+def test_a_structural_union_cannot_also_carry_annotated_discriminator_metadata() -> None:
+    class Selected(AgwModel):
+        source: Annotated[
+            TaggedValueArm | TaggedNamedArm,
+            StructuralUnion(),
+            Discriminator("mode"),
+        ]
+
+    _assert_selector_is_refused(Selected)
+
+
+def test_a_structural_union_cannot_also_carry_a_field_discriminator() -> None:
+    class Selected(AgwModel):
+        source: Annotated[TaggedValueArm | TaggedNamedArm, StructuralUnion()] = Field(discriminator="mode")
+
+    _assert_selector_is_refused(Selected)
+
+
+def test_a_collection_element_structural_union_cannot_carry_a_field_discriminator() -> None:
+    class Selected(AgwModel):
+        sources: list[
+            Annotated[
+                TaggedValueArm | TaggedNamedArm,
+                StructuralUnion(),
+                Field(discriminator="mode"),
+            ]
+        ]
+
+    _assert_selector_is_refused(Selected)

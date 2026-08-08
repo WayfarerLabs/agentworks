@@ -14,6 +14,10 @@ reference marker. Registration also refuses validation aliases: raw-key
 selection and the emitted schema must name the same keys without a second
 alias vocabulary.
 
+The declaration is selector-free. Registration refuses a field or collection
+element that combines it with any discriminator spelling rather than silently
+letting tagged dispatch override structural selection.
+
 The metadata is intentionally content-free. Required and allowed keys remain
 facts of the arm models, so changing an arm changes validation, traversal,
 and emitted schema without updating a parallel selector table.

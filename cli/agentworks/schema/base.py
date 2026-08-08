@@ -40,13 +40,12 @@ from agentworks.schema._shape import (
     markers_in,
     model_fields_of,
     models_in,
-    scalar_shorthand_of,
     shape_of,
     structurally_addressable_arms,
     table_addresses_block,
 )
 from agentworks.schema.markers import REF_SCHEMA_KEY
-from agentworks.schema.shorthand import ScalarShorthand, shorthand_field_error
+from agentworks.schema.shorthand import ScalarShorthand, scalar_shorthand_of, shorthand_field_error
 
 if TYPE_CHECKING:
     from pydantic import GetJsonSchemaHandler

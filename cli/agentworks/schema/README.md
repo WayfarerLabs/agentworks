@@ -57,8 +57,9 @@ A pair that should agree and has no comparator is a hole whether or not it curre
   `structural_union_error` refuses that declaration at registration even when its arms carry no
   reference markers. Scalar shorthands remain valid for marker-free arms, while marker conformance
   refuses a shorthand-bearing arm with references because raw graph traversal selects structural
-  arms only from table keys. The shipped-surface sweep and marker-reachability tests cover both
-  halves.
+  arms only from table keys. Structural unions are selector-free, so the same guard refuses any
+  coexisting discriminator rather than allowing tagged dispatch to override shape selection. The
+  shipped-surface sweep and marker-reachability tests cover both halves.
 - **D2 against D1** is guarded by
   `tests/manifests/test_emit.py::test_emitted_schemas_accept_every_document_the_full_load_path_accepts`,
   which runs every uncommented sample through the FULL load path (registry build included, since

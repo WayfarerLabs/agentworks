@@ -442,9 +442,16 @@ def _structural_union_error(
             (f"{model_cls.__name__}.{name}", own),
             (f"{model_cls.__name__}.{name} elements", elements),
         )
-        for location, members in declarations:
-            if members is None:
+        for location, declaration in declarations:
+            if declaration is None:
                 continue
+            members, discriminator = declaration
+            if discriminator is not None:
+                return (
+                    f"{location} combines StructuralUnion with discriminator {discriminator!r}; "
+                    "a structural union is selector-free and must be addressed only by its "
+                    "arms' required and allowed keys"
+                )
             reason = _structural_members_error(location, members)
             if reason is not None:
                 return reason
@@ -455,20 +462,58 @@ def _structural_union_error(
     return None
 
 
-def _structural_declarations(field: FieldInfo) -> tuple[tuple[object, ...] | None, tuple[object, ...] | None]:
+_StructuralDeclaration = tuple[tuple[object, ...], object | None]
+
+
+def _structural_declarations(
+    field: FieldInfo,
+) -> tuple[_StructuralDeclaration | None, _StructuralDeclaration | None]:
     """Structural-union member declarations on a field and its elements."""
     inner, _optional = unwrap_optional(field.annotation)
     inner, _own_metadata = split_annotated(inner)
-    own = tuple(split_annotated(arg)[0] for arg in get_args(inner)) if _field_has_structural_union(field) else None
+    own = (
+        (
+            tuple(split_annotated(arg)[0] for arg in get_args(inner)),
+            _field_discriminator_declaration(field),
+        )
+        if _field_has_structural_union(field)
+        else None
+    )
     found = _collection_element(inner)
     if found is None:
         return own, None
     _collection, element = found
     element, element_metadata = split_annotated(element)
     elements = (
-        tuple(split_annotated(arg)[0] for arg in get_args(element)) if _has_structural_union(element_metadata) else None
+        (
+            tuple(split_annotated(arg)[0] for arg in get_args(element)),
+            _metadata_discriminator_declaration(element_metadata),
+        )
+        if _has_structural_union(element_metadata)
+        else None
     )
     return own, elements
+
+
+def _field_discriminator_declaration(field: FieldInfo) -> object | None:
+    """Any selector declared on a field, including callable ones."""
+    if field.discriminator is not None:
+        if isinstance(field.discriminator, Discriminator):
+            return field.discriminator.discriminator
+        return field.discriminator
+    return _metadata_discriminator_declaration(spine_metadata(field))
+
+
+def _metadata_discriminator_declaration(metadata: list[object]) -> object | None:
+    """Any discriminator selector written in one metadata sequence."""
+    for item in metadata:
+        if isinstance(item, UnionScalarShorthand):
+            return item.discriminator
+        if isinstance(item, Discriminator):
+            return item.discriminator
+        if isinstance(item, FieldInfo) and item.discriminator is not None:
+            return item.discriminator
+    return None
 
 
 def _structural_members_error(location: str, members: tuple[object, ...]) -> str | None:
