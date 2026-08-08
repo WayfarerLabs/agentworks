@@ -7,7 +7,7 @@ import pytest
 from agentworks.agents.grants import MAX_WORKSPACE_NAME_LENGTH, WS_GROUP_PREFIX, workspace_group
 from agentworks.agents.manager import AGENT_PREFIX, MAX_AGENT_NAME_LENGTH
 from agentworks.agents.manager._common import derive_linux_user
-from agentworks.config import (
+from agentworks.naming import (
     AZURE_VNET_NAME_MAX_LENGTH,
     LINUX_GROUPNAME_MAX_LENGTH,
     LINUX_USERNAME_MAX_LENGTH,

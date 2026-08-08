@@ -7,67 +7,57 @@ formats the URL line.
 
 from __future__ import annotations
 
-import re
-from typing import TYPE_CHECKING
+from typing import Annotated, ClassVar, Literal
+
+from pydantic import Field
 
 from agentworks.capabilities.git_credential.base import (
     GitCredentialProvider,
     HelperEntry,
-    token_dependency,
-    validate_token_field,
+    TokenSourcedConfig,
 )
-from agentworks.errors import ConfigError
+from agentworks.topics import TopicProse
 
-if TYPE_CHECKING:
-    from collections.abc import Mapping
+AzDOOrg = Annotated[str, Field(pattern=r"^[A-Za-z0-9._-]+$")]
+"""An Azure DevOps organization name. Constrained because it is
+interpolated into the generated credential helper and into the store
+URL, so anything outside this charset would corrupt them."""
 
-    from agentworks.resources.reference import ConfigReference
 
+class AzDOConfig(TokenSourcedConfig):
+    """Scope for an Azure DevOps personal access token."""
 
-_ORG_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+    name: Literal["azdo"]
+    """The provider this config is for."""
+
+    org: AzDOOrg = Field(examples=["my-org"])
+    """The Azure DevOps organization this credential serves."""
 
 
 class AzDOCredentialProvider(GitCredentialProvider):
     """Configures git credentials for Azure DevOps via a personal access token."""
 
-    name = "azdo"
-    description = "Azure DevOps personal access token"
+    contract_version: ClassVar[int] = 1
+    name: ClassVar[str] = "azdo"
+    description: ClassVar[str] = "Azure DevOps personal access token"
+    config_model: ClassVar[type[AzDOConfig]] = AzDOConfig
+    prose: ClassVar[TopicProse | None] = TopicProse(
+        title="Azure DevOps",
+        overview="""
+        Authenticates git operations against Azure DevOps with a personal access token,
+        taken from the secret this credential names.
 
-    @classmethod
-    def dependencies(cls, owner: str, config: Mapping[str, object]) -> tuple[ConfigReference, ...]:
-        """The token-secret edge the PAT config implies (total,
-        non-throwing): a malformed ``token`` field omits the edge,
-        ``validate`` raises on it."""
-        ref = token_dependency(owner, config)
-        return (ref,) if ref is not None else ()
+        Azure DevOps scopes tokens per organization, so the credential has to name the
+        organization it belongs to. Declare one credential per organization.
 
-    @classmethod
-    def validate(cls, owner: str, config: Mapping[str, object]) -> None:
-        org = config.get("org")
-        if not isinstance(org, str) or not _ORG_RE.match(org):
-            raise ConfigError(
-                f"{owner}.org is required for the azdo provider and must "
-                f"be an organization name (letters, digits, dot, dash, "
-                f"underscore); it is interpolated into the generated "
-                f"credential helper"
-            )
-        unknown = sorted(set(config) - {"org", "token"})
-        if unknown:
-            raise ConfigError(f"{owner}: unknown azdo provider field(s): {', '.join(unknown)}")
-        validate_token_field(owner, config)
+        Ships as part of the opt-in `azure` system plugin.
+        """,
+    )
 
-    def __init__(
-        self,
-        owner_name: str,
-        config: Mapping[str, object] | None = None,
-        *,
-        description: str | None = None,
-    ) -> None:
-        super().__init__(owner_name, config or {}, description=description)
-        # validate ran at construct and guarantees a str org.
-        org = self.config.get("org")
-        assert isinstance(org, str)
-        self._org = org
+    @property
+    def config(self) -> AzDOConfig:
+        """This credential's validated azdo provider config."""
+        return self._config_as(AzDOConfig)
 
     def _verify_token(self, token: str) -> None:
         """Check the PAT against the org's connectionData endpoint: 200
@@ -80,7 +70,7 @@ class AzDOCredentialProvider(GitCredentialProvider):
 
         basic = base64.b64encode(f":{token}".encode()).decode()
         result = self._probe_pat(
-            f"https://dev.azure.com/{self._org}/_apis/connectionData",
+            f"https://dev.azure.com/{self.config.org}/_apis/connectionData",
             {
                 "Authorization": f"Basic {basic}",
                 "Accept": "application/json",
@@ -95,12 +85,12 @@ class AzDOCredentialProvider(GitCredentialProvider):
 
     @property
     def store_username(self) -> str:
-        return self._org
+        return self.config.org
 
     def helper_entry(self) -> HelperEntry:
         # The org doubles as the owner scope: AzDO remote paths start
         # with the org segment, so multiple orgs route naturally.
-        return HelperEntry(host="dev.azure.com", username=self._org, owner=self._org)
+        return HelperEntry(host="dev.azure.com", username=self.config.org, owner=self.config.org)
 
     def review_remote(self, url: str) -> list[str]:
         from urllib.parse import urlsplit
@@ -113,14 +103,14 @@ class AzDOCredentialProvider(GitCredentialProvider):
         # correctly (the embedded org is exactly what the helper serves by).
         # Only a username that is NOT the org bypasses resolution: the helper
         # serves by it and finds no matching line.
-        if parts.username and parts.username != self._org:
+        if parts.username and parts.username != self.config.org:
             return [
                 f"the git remote {url!r} embeds username {parts.username!r}, "
-                f"not the {self._org!r} org, so the credential helper will not "
-                f"serve it; use https://dev.azure.com/{self._org}/... "
+                f"not the {self.config.org!r} org, so the credential helper will not "
+                f"serve it; use https://dev.azure.com/{self.config.org}/... "
                 f"(the org prefix is optional)"
             ]
         return []
 
     def credential_lines(self, token: str) -> list[str]:
-        return [f"https://{self._org}:{token}@dev.azure.com/{self._org}"]
+        return [f"https://{self.config.org}:{token}@dev.azure.com/{self.config.org}"]

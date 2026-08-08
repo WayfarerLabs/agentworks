@@ -16,6 +16,7 @@ from agentworks.capabilities.git_credential.github import GitHubCredentialProvid
 from agentworks.orchestration.node import CreatableNode, Node, Readiness
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.resources.reference import ResourceReference
+from agentworks.schema import AgwModel
 
 _PROXMOX_CONFIG = {
     "api_url": "https://pve:8006",
@@ -60,10 +61,16 @@ class _FakeCreatableNode(_FakeNode):
         self.torn_down = True
 
 
+class _NoConfig(AgwModel):
+    """A capability that accepts no configuration."""
+
+
 class _PlainCap(Capability):
     name: ClassVar[str] = "plain"
     description: ClassVar[str] = "no config"
     owner_kind: ClassVar[str] = "thing"
+    contract_version: ClassVar[int] = 1
+    config_model: ClassVar[type[AgwModel]] = _NoConfig
 
 
 def test_capability_base_is_readiness_only() -> None:

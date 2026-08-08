@@ -97,7 +97,7 @@ def realize_agent(
             output.warn(
                 f"rollback during agent create failed: {cleanup_err}. "
                 f"VM may have residual user/files for '{linux_user}'. "
-                f"SSH log: {ssh_logger.path}"
+                f"SSH log: {ssh_logger.display_path}"
             )
 
     # The logger's close() writes a "Finished" footer; defer it via finally so
@@ -124,7 +124,7 @@ def realize_agent(
                 f"creating agent: {e}",
                 entity_kind="agent",
                 entity_name=name,
-                hint=f"SSH log: {ssh_logger.path}",
+                hint=f"SSH log: {ssh_logger.display_path}",
             ) from e
     finally:
         ssh_logger.close()

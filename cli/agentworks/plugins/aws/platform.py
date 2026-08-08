@@ -2,7 +2,8 @@
 
 This is the second cloud platform, and it copies the azure-vm reference shape
 deliberately (see ``cli/agentworks/capabilities/vm_platform/README.md``): an
-optional ``credentials`` table that names a secret, an instance-type catalog
+required ``auth`` tagged union whose credential arm names a secret, an
+instance-type catalog
 with smallest-that-fits selection, and the baseline-deny / ephemeral-scoped-allow
 exposure model azure's redesign established (a security
 group that denies all inbound by default; SSH via ephemeral rules scoped to the
@@ -19,11 +20,13 @@ from __future__ import annotations
 
 import contextlib
 import gzip
-from typing import TYPE_CHECKING, Any, ClassVar, NamedTuple
+from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, NamedTuple
 
 import yaml
+from pydantic import Field
 
 from agentworks import output
+from agentworks.capabilities.retired_shapes import RetiredPresenceShape
 from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
 from agentworks.capabilities.vm_platform.bootstrap_script import generate_bootstrap_script
 from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
@@ -50,7 +53,9 @@ from agentworks.plugins.aws.network import (
     vm_tag,
     wrap_ec2_error,
 )
+from agentworks.schema import AgwModel, NonEmptyStr, PositiveInt, SecretRef
 from agentworks.ssh import SSHError
+from agentworks.topics import TopicProse
 from agentworks.transports import SSHTransport
 
 if TYPE_CHECKING:
@@ -59,31 +64,12 @@ if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
     from agentworks.config import Config
     from agentworks.db import VMRow
-    from agentworks.resources.reference import ConfigReference
     from agentworks.transports import Transport
 
 
-# The well-known secret NAME the credentials.access_key_secret field defaults
-# to, mirroring azure's DEFAULT_CLIENT_SECRET. The default env-var backend
-# convention reads AW_SECRET_AWS_SECRET_ACCESS_KEY. The config field is
-# `access_key_secret`: it pairs visually with `access_key_id`, follows
-# proxmox's `token_secret` convention (the framework-secret NAME for the
-# thing), and NAMES a secret rather than holding a value, so it is deliberately
-# distinct from AWS's own "secret access key" term (which a field called
-# `secret_access_key` would invite operators to paste literally into config).
-DEFAULT_SECRET_ACCESS_KEY = "aws-secret-access-key"
-
-_EC2_REQUIRED_KEYS = ("region",)
-_EC2_OPTIONAL_KEYS = ("credentials", "instance_types", "subnet_id")
-
-_CREDS_REQUIRED_KEYS = ("access_key_id",)
-_CREDS_OPTIONAL_KEYS = ("access_key_secret", "assume_role_arn")
-
-# The EC2 API vocabulary for CPU architecture, and the Debian-image naming the
-# public SSM release parameters use for the same thing. The mapping stays
-# internal: operators write the EC2 spelling (`arch = x86_64` / `arm64`) in the
-# catalog and never see Debian's `amd64`.
-_VALID_ARCHES = ("x86_64", "arm64")
+# Debian's image naming for the EC2 architecture vocabulary. The mapping
+# stays internal: operators write the EC2 spelling in the catalog and
+# never see Debian's ``amd64``.
 _DEBIAN_ARCH_SEGMENT = {"x86_64": "amd64", "arm64": "arm64"}
 
 # EC2 caps RunInstances user-data at 16 KiB in RAW form (before boto3's base64).
@@ -92,53 +78,126 @@ _DEBIAN_ARCH_SEGMENT = {"x86_64": "amd64", "arm64": "arm64"}
 _MAX_USER_DATA_BYTES = 16384
 
 
-class _Credentials(NamedTuple):
-    """A site's explicit AWS credential: the plain-config access key id, the
-    NAME of the framework secret holding the secret access key, and an optional
-    role to assume. Never the secret's value: the platform instance holds no
-    value source, and the value arrives per call through ``ctx.secret``."""
+# Why an arm with no fields but its tag exists at all: see azure's
+# ``AzureAmbientAuth``. It gives borrowing the host's identity a declared
+# form, and it is the union's default.
+class AwsAmbientAuth(AgwModel):
+    """Authenticate with boto3's ambient default credential chain.
 
-    access_key_id: str
-    secret_name: str
-    assume_role_arn: str | None
-
-
-def _parse_credentials(config: Mapping[str, object], owner: str) -> _Credentials | None:
-    """The site's explicit credentials, or ``None`` when the optional
-    ``credentials`` table is absent (the ambient path: boto3's default
-    credential chain of env vars, shared config, instance profile, SSO).
-
-    Raises ``ConfigError`` on a malformed table so the shape is validated at
-    registry build time (the finalize ``validate`` pass), not first ``vm
-    create``. Mirrors azure's ``_parse_service_principal``: one parser, called
-    from ``validate`` for the check and from the session build for the value.
+    That is environment variables, the shared config and credentials
+    files, an instance profile, and SSO.
     """
-    raw = config.get("credentials")
-    if raw is None:
-        return None
-    if not isinstance(raw, dict):
-        raise ConfigError(
-            f"{owner}.credentials must be a table of {{access_key_id, access_key_secret, assume_role_arn}}"
-        )
-    access_key_id = raw.get("access_key_id")
-    if not isinstance(access_key_id, str) or not access_key_id:
-        raise ConfigError(
-            f"{owner}.credentials.access_key_id is required and must be a non-empty string; "
-            f"omit the whole credentials table to use ambient AWS credentials"
-        )
-    secret_name = raw.get("access_key_secret", DEFAULT_SECRET_ACCESS_KEY)
-    if not isinstance(secret_name, str) or not secret_name:
-        raise ConfigError(
-            f"{owner}.credentials.access_key_secret must be a bare secret name (string), "
-            f"not the secret access key's value; omit the key to use the default '{DEFAULT_SECRET_ACCESS_KEY}'"
-        )
-    assume_role_arn = raw.get("assume_role_arn")
-    if assume_role_arn is not None and (not isinstance(assume_role_arn, str) or not assume_role_arn):
-        raise ConfigError(f"{owner}.credentials.assume_role_arn must be a non-empty string when set")
-    unknown = sorted(set(raw) - set(_CREDS_REQUIRED_KEYS) - set(_CREDS_OPTIONAL_KEYS))
-    if unknown:
-        raise ConfigError(f"{owner}.credentials: unknown field(s): {', '.join(unknown)}")
-    return _Credentials(access_key_id, secret_name, assume_role_arn)
+
+    mode: Literal["ambient"]
+    """Selects this arm."""
+
+
+# A tagged arm rather than an optional block on the config: a future
+# profile or web-identity mode, each with fields of its own, is a new arm
+# beside these two rather than another nullable table whose presence has
+# to be cross-checked against the others.
+class AwsAccessKeyAuth(AgwModel):
+    """Authenticate with an explicit IAM access key.
+
+    It replaces the ambient chain entirely for this site: a rejected key
+    fails the command rather than falling back to some other identity.
+    """
+
+    mode: Literal["access-key"]
+    """Selects this arm."""
+
+    access_key_id: NonEmptyStr
+    """The access key id, plain config."""
+
+    access_key_secret: Annotated[
+        NonEmptyStr,
+        SecretRef(usage="the AWS secret access key", default_template="aws-secret-access-key"),
+    ]
+    """The secret holding the secret access key. Never the value: the
+    field NAMES a secret in the framework's secret system, which is why
+    it is not spelled ``secret_access_key``. The default env-var
+    convention reads ``AW_SECRET_AWS_SECRET_ACCESS_KEY``."""
+
+    assume_role_arn: NonEmptyStr | None = None
+    """A role to assume with the key, via STS. Optional: omitted, the key
+    is the identity; named, an auto-refreshing AssumeRole is layered over
+    it (see :func:`_assume_role_session`)."""
+
+
+#: How an aws-ec2 site authenticates, as a tagged union DEFAULTING to the
+#: ambient arm.
+#:
+#: An earlier revision made this required with no default, and that
+#: reasoning is in the history, so here is why it reversed (operator
+#: ruling): the defect the union fixed was never "absence selects a
+#: mechanism", it was that there was no way to DECLARE the choice at all.
+#: The union fixes the second, and once an explicit form exists, a
+#: default is an ordinary default, carried in the emitted schema and in
+#: ``describe-kind`` like any other. Ambient is the right one because it
+#: is what the wrapped SDK already does: boto3's credential chain is
+#: ambient-first, so requiring explicit auth would make this site
+#: stricter than the tool it wraps, which is surprising in the other
+#: direction. The general pattern: ambient where the underlying tool has
+#: an ambient notion, required where it does not, which is why proxmox
+#: has no union at all rather than being an exception to one.
+#:
+#: The tag is a string ``Literal`` rather than a boolean for the same
+#: reason it is a union rather than an ``auth_mode`` field beside nullable
+#: blocks: each mode carries its OWN fields, and AWS has further modes
+#: worth naming later (a named shared-config profile, a web identity) that
+#: a boolean could not grow into. Pydantic emits this directly as
+#: ``oneOf`` with a ``discriminator`` mapping, so the loader and the
+#: emitted schema agree by construction, which a cross-field validator
+#: over nullable blocks could not achieve. Not because JSON Schema
+#: cannot state the constraint (it can, as ``oneOf`` over closed arms or
+#: as ``if``/``then`` on the tag), but because pydantic does not derive a
+#: validator's body into the schema it emits, so the emitted schema would
+#: go silent about it and accept mixed-arm configs the loader rejects.
+#: That is sanctioned under-approximation under ``manifests/emit.py``,
+#: not a breach of it; what it forfeits is the editor DIAGNOSTIC.
+AwsAuth = Annotated[AwsAmbientAuth | AwsAccessKeyAuth, Field(discriminator="mode")]
+
+
+class AwsInstanceType(AgwModel):
+    """One entry in an EC2 instance-type selection catalog."""
+
+    cpus: PositiveInt
+    """The vCPUs the type provides."""
+
+    memory: PositiveInt
+    """The memory (GiB) the type provides."""
+
+    type: NonEmptyStr
+    """The literal EC2 instance type (e.g. ``t4g.large``)."""
+
+    arch: Literal["x86_64", "arm64"]
+    """The CPU architecture, in EC2's vocabulary. The Debian image naming
+    for the same thing stays internal."""
+
+
+class AwsEC2Config(AgwModel):
+    """Where an aws-ec2 site creates instances, and as whom."""
+
+    name: Literal["aws-ec2"]
+    """The platform this config is for."""
+
+    region: NonEmptyStr = Field(examples=["us-east-1"])
+    """The region new instances are created in."""
+
+    subnet_id: NonEmptyStr | None = Field(default=None, examples=["subnet-00000000000000000"])
+    """The subnet new instances attach to. Omit for the region's default
+    VPC."""
+
+    instance_types: Annotated[list[AwsInstanceType], Field(min_length=1)] | None = None
+    """An override of the built-in Graviton catalog ``vm create`` picks
+    from. Need not be sorted: selection takes the smallest entry that
+    satisfies the request. Non-empty when present, because an empty
+    catalog is a site on which no instance can be created."""
+
+    auth: AwsAuth = AwsAmbientAuth(mode="ambient")
+    """How this site authenticates to AWS: ``{mode: ambient}`` for boto3's
+    default chain, or ``{mode: access-key, ...}`` for an explicit key.
+    Defaults to ambient, matching what boto3 does when told nothing."""
 
 
 class _InstanceType(NamedTuple):
@@ -160,7 +219,7 @@ class _InstanceType(NamedTuple):
 # an EC2-specific instance type. A template asking for an off-ratio shape (e.g.
 # 4 vCPU / 8 GiB) rounds UP to the nearest fitting type and warns. Ordered
 # small to large for readability; selection takes the minimum by
-# (cpus, memory), so an operator override in platform_config.instance_types
+# (cpus, memory), so an operator override in the site's instance_types
 # need not be pre-sorted. arm64 by default: Graviton is the cheaper, current
 # general-purpose silicon, and the fleet OS (Debian bookworm) ships arm64.
 _DEFAULT_INSTANCE_TYPES: tuple[_InstanceType, ...] = (
@@ -174,41 +233,13 @@ _DEFAULT_INSTANCE_TYPES: tuple[_InstanceType, ...] = (
 )
 
 
-def _parse_instance_catalog(config: Mapping[str, object], owner: str) -> tuple[_InstanceType, ...]:
-    """The site's instance-type catalog: the operator override
-    (``platform_config.instance_types``) when present, else the built-in
-    Graviton ladder. Raises ``ConfigError`` on a malformed override so the
-    shape is validated at registry build time, not first ``vm create``.
-    Mirrors azure's ``_parse_size_catalog``, with the extra ``type`` and
-    ``arch`` fields EC2 needs.
-    """
-    raw = config.get("instance_types")
-    if raw is None:
+def _instance_catalog(config: AwsEC2Config) -> tuple[_InstanceType, ...]:
+    """The site's instance-type catalog: its declared override, else the
+    built-in Graviton ladder. What is left here is the DEFAULT, which is
+    domain knowledge rather than schema."""
+    if config.instance_types is None:
         return _DEFAULT_INSTANCE_TYPES
-    if not isinstance(raw, (list, tuple)) or not raw:
-        raise ConfigError(f"{owner}.instance_types must be a non-empty list of {{cpus, memory, type, arch}} tables")
-    catalog: list[_InstanceType] = []
-    for i, entry in enumerate(raw):
-        if not isinstance(entry, dict):
-            raise ConfigError(f"{owner}.instance_types[{i}] must be a {{cpus, memory, type, arch}} table")
-        unknown = sorted(set(entry) - {"cpus", "memory", "type", "arch"})
-        if unknown:
-            raise ConfigError(f"{owner}.instance_types[{i}]: unknown field(s): {', '.join(unknown)}")
-        cpus, memory, itype, arch = entry.get("cpus"), entry.get("memory"), entry.get("type"), entry.get("arch")
-        # bool is an int subclass; reject it explicitly so `cpus = true` does
-        # not sneak through as 1.
-        if not isinstance(cpus, int) or isinstance(cpus, bool) or cpus <= 0:
-            raise ConfigError(f"{owner}.instance_types[{i}].cpus must be a positive integer")
-        if not isinstance(memory, int) or isinstance(memory, bool) or memory <= 0:
-            raise ConfigError(f"{owner}.instance_types[{i}].memory must be a positive integer")
-        if not isinstance(itype, str) or not itype:
-            raise ConfigError(f"{owner}.instance_types[{i}].type must be a non-empty string")
-        if arch not in _VALID_ARCHES:
-            raise ConfigError(
-                f"{owner}.instance_types[{i}].arch must be one of {', '.join(_VALID_ARCHES)} (EC2 architecture names)"
-            )
-        catalog.append(_InstanceType(cpus, memory, itype, arch))
-    return tuple(catalog)
+    return tuple(_InstanceType(e.cpus, e.memory, e.type, e.arch) for e in config.instance_types)
 
 
 def _select_instance_type(catalog: tuple[_InstanceType, ...], *, cpus: int, memory_gib: int) -> _InstanceType:
@@ -223,8 +254,7 @@ def _select_instance_type(catalog: tuple[_InstanceType, ...], *, cpus: int, memo
             f"no EC2 instance type satisfies the requested {cpus} vCPU / "
             f"{memory_gib} GiB (largest available is {largest.type}: "
             f"{largest.cpus} vCPU / {largest.memory_gib} GiB)",
-            hint="shrink the vm-template's cpus/memory, or add a larger entry "
-            "to the site's platform_config.instance_types catalog",
+            hint="shrink the vm-template's cpus/memory, or add a larger entry to the site's instance_types catalog",
         )
     return min(fits, key=lambda t: (t.cpus, t.memory_gib))
 
@@ -275,8 +305,47 @@ class EC2Platform(VMPlatform):
     services could plausibly back platforms of their own someday (the same
     one-service rationale ``azure-vm`` follows for Azure)."""
 
+    contract_version: ClassVar[int] = 1
     name: ClassVar[str] = "aws-ec2"
     description: ClassVar[str] = "Amazon EC2 instances (region + optional VPC subnet)"
+    config_model: ClassVar[type[AwsEC2Config]] = AwsEC2Config
+    # An aws-ec2 site that WROTE ``credentials`` (or wrote it null)
+    # crosses this break and gets its exact rewrite; a site that omitted
+    # it lands on the ambient default and was never broken. Release-scoped.
+    retired_shape: ClassVar[RetiredPresenceShape | None] = RetiredPresenceShape(
+        retired_field="credentials",
+        union_field="auth",
+        present_mode="access-key",
+        absent_mode="ambient",
+    )
+    prose: ClassVar[TopicProse | None] = TopicProse(
+        title="Amazon EC2",
+        overview="""
+        Launches EC2 instances in one region. Declare one vm-site per region you target.
+        Omit the subnet to use the region's default VPC; naming one puts instances there
+        and creates the security group in its VPC.
+
+        The image is always the current Debian 12 (bookworm) release for the instance
+        type's architecture, resolved from the public SSM release parameter at create
+        time; there is no image override. Instance types come from a built-in Graviton
+        catalog unless the site overrides it, and `vm create` picks the smallest entry
+        that satisfies the vm-template's request.
+
+        An instance keeps a permanent public IP. SSH exposure is not permanent: the
+        security group denies all inbound except ephemeral rules scoped to your detected
+        egress IP (plus `operator.ssh_allow_cidrs`) during bootstrap and each native
+        route.
+
+        `auth` says how the site authenticates and defaults to `{mode: ambient}`, the
+        ambient AWS credential chain (environment, shared config, instance profile,
+        SSO), which is what boto3 does when told nothing. `auth: {mode: access-key,
+        ...}` replaces that chain for this site; add `assume_role_arn` to layer an STS
+        AssumeRole on top.
+
+        Ships as the opt-in `aws` system plugin, so a site stays not-ready until
+        `[plugins] system` lists it.
+        """,
+    )
 
     # Warned by the transports factory when every reachability probe fails: the
     # ephemeral SSH allow is scoped to the DETECTED egress IP, so an operator
@@ -294,8 +363,8 @@ class EC2Platform(VMPlatform):
         # The boto3 session (credentials) and per-(service, region) clients,
         # built on FIRST need by the accessors below and reused for the
         # instance's remaining ops. The session's identity is fixed by the
-        # bound config (the site's credentials table, or the ambient chain when
-        # it declares none), so it caches once per instance. Clients key by
+        # bound config (whichever arm the site's auth.mode names), so it caches
+        # once per instance. Clients key by
         # (service, region): the config names one region, but power ops read
         # each VM's stored region, and rows created under an older region must
         # keep operating regardless of what the config says today.
@@ -309,53 +378,10 @@ class EC2Platform(VMPlatform):
     # credential comes from. Credential and reachability failures surface at
     # runup and at the op with typed errors.
 
-    @classmethod
-    def dependencies(cls, owner: str, config: Mapping[str, object]) -> tuple[ConfigReference, ...]:
-        """The secret-access-key reference a declared ``credentials`` table
-        implies: its ``access_key_secret`` field names it (default
-        ``aws-secret-access-key``). A site with no ``credentials`` table
-        authenticates ambiently and implies no reference, so its edge set is
-        empty.
-
-        Total and non-throwing: the edge's identity is the secret name alone,
-        so it emits even when the table's OTHER fields are absent or malformed,
-        and is omitted only when the table itself, or the ``access_key_secret``
-        field that names the edge, is malformed. ``validate`` is where those
-        shape errors surface.
-        """
-        raw = config.get("credentials")
-        if not isinstance(raw, dict):
-            return ()
-        secret_name = raw.get("access_key_secret", DEFAULT_SECRET_ACCESS_KEY)
-        if not isinstance(secret_name, str) or not secret_name:
-            return ()
-        from agentworks.resources.reference import ConfigReference
-
-        return (
-            ConfigReference(
-                kind="secret",
-                name=secret_name,
-                usage="the AWS secret access key",
-            ),
-        )
-
-    @classmethod
-    def validate(cls, owner: str, config: Mapping[str, object]) -> None:
-        for key in _EC2_REQUIRED_KEYS:
-            value = config.get(key)
-            if not isinstance(value, str) or not value:
-                raise ConfigError(f"{owner}.{key} is required for the aws-ec2 platform and must be a non-empty string")
-        unknown = sorted(set(config) - set(_EC2_REQUIRED_KEYS) - set(_EC2_OPTIONAL_KEYS))
-        if unknown:
-            raise ConfigError(f"{owner}: unknown aws-ec2 platform field(s): {', '.join(unknown)}")
-        # Optional string knob: shape-check here so a malformed subnet_id fails
-        # at config load, not first vm create.
-        subnet_id = config.get("subnet_id")
-        if subnet_id is not None and (not isinstance(subnet_id, str) or not subnet_id):
-            raise ConfigError(f"{owner}.subnet_id must be a non-empty string when set")
-        # Validate the optional blocks' shapes here too (same reason).
-        _parse_instance_catalog(config, owner)
-        _parse_credentials(config, owner)
+    @property
+    def config(self) -> AwsEC2Config:
+        """This site's validated aws-ec2 config."""
+        return self._config_as(AwsEC2Config)
 
     # legacy_platform_metadata: no pre-v27 EC2 rows ever existed (this platform
     # ships after the migration), so the base no-op return of {} is correct.
@@ -364,28 +390,28 @@ class EC2Platform(VMPlatform):
         """The boto3 session, built on first need and reused for the instance's
         remaining ops.
 
-        Which credential is a config decision, not a runtime one: a site that
-        declares a ``credentials`` table gets exactly that credential, built
-        from the secret access key ``ctx.secret`` delivers (then STS AssumeRole
-        when ``assume_role_arn`` is set), and NEVER falls back to the ambient
-        chain if it fails; a site that declares none gets boto3's ambient
-        default chain (env vars, shared config, instance profile, SSO). Falling
-        back would authenticate as a different identity than the operator
-        configured, which is worse than failing.
+        Which credential is a config decision, not a runtime one, and the site
+        states it outright: ``auth.mode`` selects the arm. An ``access-key``
+        site gets exactly that credential, built from the secret access key
+        ``ctx.secret`` delivers (then STS AssumeRole when ``assume_role_arn``
+        is set), and NEVER falls back to the ambient chain if it fails; an
+        ``ambient`` site gets boto3's default chain (env vars, shared config,
+        instance profile, SSO). Falling back would authenticate as a different
+        identity than the operator configured, which is worse than failing.
 
         Caching stays correct under the fork because the fork's inputs are
-        fixed per instance: the access key id and the secret NAME come from the
-        bound ``platform_config``, so a given instance resolves the same session
-        every time. See :func:`_build_explicit_session`.
+        fixed per instance: the mode, the access key id, and the secret NAME
+        come from the bound config, so a given instance resolves the same
+        session every time. See :func:`_build_access_key_session`.
         """
         session = self._session_cached
         if session is None:
-            creds = _parse_credentials(self.platform_config, self._owner_display)
-            region = str(self.platform_config["region"])
-            if creds is None:
+            auth = self.config.auth
+            region = self.config.region
+            if isinstance(auth, AwsAmbientAuth):
                 session = _build_ambient_session(region)
             else:
-                session = _build_explicit_session(creds, ctx.secret(creds.secret_name), self.site_name, region)
+                session = _build_access_key_session(auth, ctx.secret(auth.access_key_secret), self.site_name, region)
             self._session_cached = session
         return session
 
@@ -432,17 +458,15 @@ class EC2Platform(VMPlatform):
         """
         from botocore.exceptions import BotoCoreError, ClientError
 
-        region = str(self.platform_config["region"])
-        subnet_id = self.platform_config.get("subnet_id")
-        creds = _parse_credentials(self.platform_config, self._owner_display)
-        if creds is None:
+        region = self.config.region
+        subnet_id = self.config.subnet_id
+        auth = self.config.auth
+        if isinstance(auth, AwsAmbientAuth):
             cred_label = "the ambient AWS credentials (env, shared config, instance profile, SSO)"
             cred_hint = "check the credentials in the active AWS credential chain"
         else:
-            cred_label = f"the AWS credentials for access key {creds.access_key_id} (secret '{creds.secret_name}')"
-            cred_hint = (
-                f"check credentials.access_key_id and the value / permissions of the '{creds.secret_name}' secret"
-            )
+            cred_label = f"the AWS credentials for access key {auth.access_key_id} (secret '{auth.access_key_secret}')"
+            cred_hint = f"check auth.access_key_id and the value / permissions of the '{auth.access_key_secret}' secret"
 
         output.info(f"Performing runup test for vm-site/{self.site_name}...")
         # Client build sits OUTSIDE the try: it is where the credential is
@@ -494,17 +518,16 @@ class EC2Platform(VMPlatform):
                 output.warn(f"could not reach AWS for '{self.site_name}' ({exc}); continuing unverified")
 
     def create(self, request: ProvisionRequest, ctx: RunContext) -> ProvisionResult:
-        region = str(self.platform_config["region"])
-        subnet_id = self.platform_config.get("subnet_id")
-        subnet_id = subnet_id if isinstance(subnet_id, str) and subnet_id else None
+        region = self.config.region
+        subnet_id = self.config.subnet_id
 
         # Select the smallest EC2 instance type that satisfies the template's
         # compute/memory request (the standard cross-platform model); the
         # catalog is the built-in Graviton ladder or the site's
-        # platform_config.instance_types override.
-        catalog = _parse_instance_catalog(self.platform_config, self._owner_display)
-        req_cpus = request.cpus if request.cpus is not None else 4
-        req_memory = request.memory_gib if request.memory_gib is not None else 8
+        # instance_types override.
+        catalog = _instance_catalog(self.config)
+        req_cpus = request.cpus
+        req_memory = request.memory_gib
         selected = _select_instance_type(catalog, cpus=req_cpus, memory_gib=req_memory)
         size_summary = f"{selected.type} ({selected.cpus} vCPU / {selected.memory_gib} GiB)"
         if selected.cpus > req_cpus or selected.memory_gib > req_memory:
@@ -513,12 +536,11 @@ class EC2Platform(VMPlatform):
                 f"({selected.cpus} vCPU / {selected.memory_gib} GiB) "
                 f"for requested {req_cpus} vCPU / {req_memory} GiB."
             )
-        # Root-volume sizing is driven by request.disk_gib. It is None only when
-        # a caller omits it entirely; the orchestrated path always sets it
-        # (ResolvedVMTemplate defaults 50), so the None branch (AMI's own root
-        # size, no DescribeImages call) is the rare direct-API case, not the norm.
+        # Root-volume sizing is driven by request.disk_gib, which the
+        # vm-template layer always resolves (FR15), so the root volume is
+        # always sized explicitly rather than left at the AMI's own.
         disk = request.disk_gib
-        swap = request.swap_gib if request.swap_gib is not None else 0
+        swap = request.swap_gib
 
         # Platform-owned naming with the slug as the namespacing token; the
         # backend name is the tag agentworks stamps on every resource, so a
@@ -843,7 +865,7 @@ class EC2Platform(VMPlatform):
 
         ``ctx`` is the create op's own scoped context, whose secrets were
         resolved before Phase A began, so even the interrupt path never resolves
-        a secret here for the first time; on a credentials-configured site the
+        a secret here for the first time; on an ``access-key`` site the
         network call authenticates as the configured access key, with no ambient
         fallback.
         """
@@ -905,7 +927,7 @@ class EC2Platform(VMPlatform):
         """The VM's region: the recorded one (decouples existing VMs from config
         edits) falling back to the site's configured region for rows that
         predate the metadata key."""
-        return str(vm.platform_metadata.get("region") or self.platform_config["region"])
+        return str(vm.platform_metadata.get("region") or self.config.region)
 
     def _close_provisioning_access(self, vm: VMRow, ctx: RunContext) -> None:
         """Revoke EXACTLY the bootstrap allow's tuples on the VM's per-VM
@@ -986,7 +1008,7 @@ class EC2Platform(VMPlatform):
                 f"{', '.join(supported) or 'nothing'}",
                 entity_kind="vm-site",
                 entity_name=self.site_name,
-                hint=f"correct the arch on the '{selected.type}' entry in platform_config.instance_types",
+                hint=f"correct the arch on the '{selected.type}' entry in the site's instance_types",
             )
 
     def _resolve_ami(self, ctx: RunContext, region: str, arch: str) -> str:
@@ -1045,23 +1067,20 @@ class EC2Platform(VMPlatform):
                 detail="describe_subnets found no default-for-az subnet and the site configured none",
                 entity_kind="vm-site",
                 entity_name=self.site_name,
-                hint=f"set platform_config.subnet_id to a subnet in your VPC for region {region}",
+                hint=f"set the site's subnet_id to a subnet in your VPC for region {region}",
             )
         # Deterministic pick: lowest AZ, then subnet id, independent of the
         # order describe_subnets happens to return.
         chosen = min(subnets, key=lambda s: (str(s.get("AvailabilityZone", "")), str(s.get("SubnetId", ""))))
         return str(chosen["SubnetId"]), str(chosen["VpcId"])
 
-    def _disk_block_devices(self, ec2: Any, ami: str, disk_gib: int | None) -> list[dict[str, Any]]:
-        """The BlockDeviceMappings to resize the root volume to ``disk_gib``, or
-        an empty list when no disk was requested (the AMI's own root size stands
-        and no DescribeImages call is made). When a size IS requested, the AMI's
-        real root device name is read from DescribeImages rather than hard-coded:
-        Debian's published root device could change across image releases, and a
-        wrong constant would attach the sized volume to the wrong device and
-        silently drop the operator's request."""
-        if disk_gib is None:
-            return []
+    def _disk_block_devices(self, ec2: Any, ami: str, disk_gib: int) -> list[dict[str, Any]]:
+        """The BlockDeviceMappings to resize the root volume to ``disk_gib``.
+
+        The AMI's real root device name is read from DescribeImages rather
+        than hard-coded: Debian's published root device could change across
+        image releases, and a wrong constant would attach the sized volume
+        to the wrong device and silently drop the operator's request."""
         root_device = self._root_device_name(ec2, ami)
         return [
             {
@@ -1135,9 +1154,9 @@ class EC2Platform(VMPlatform):
 
 
 def _build_ambient_session(region: str) -> Any:
-    """The AMBIENT boto3 session (the path taken when the site declares no
-    ``credentials`` table): boto3's default credential chain (env vars, shared
-    config, instance profile, SSO), zero-config. No probe and no fallback
+    """The AMBIENT boto3 session (the path a site selects by declaring
+    ``auth: {mode: ambient}``): boto3's default credential chain (env vars,
+    shared config, instance profile, SSO). No probe and no fallback
     decision, unlike azure's ambient path: AWS has no interactive-browser
     equivalent, so the chain is used as-is and any failure surfaces at runup or
     at the op."""
@@ -1146,16 +1165,17 @@ def _build_ambient_session(region: str) -> Any:
     return boto3.session.Session(region_name=region)
 
 
-def _build_explicit_session(creds: _Credentials, secret_value: str, site_name: str, region: str) -> Any:
-    """The EXPLICIT boto3 session, built from the site's configured access key
-    id and the resolved secret access key, with STS AssumeRole layered on when
-    ``assume_role_arn`` is set.
+def _build_access_key_session(auth: AwsAccessKeyAuth, secret_value: str, site_name: str, region: str) -> Any:
+    """The ACCESS-KEY boto3 session, built from the site's configured access
+    key id and the resolved secret access key, with STS AssumeRole layered on
+    when ``assume_role_arn`` is set.
 
     Raises :class:`EC2Error` (site- and secret-named) on the one credential
     failure reachable at BUILD time, an empty resolved secret, for the same
-    reason azure's explicit path raises a typed error: an operator who
-    configured credentials means those and no other, so a failure here is fatal
-    and must not fall through to the ambient chain. The empty resolved secret is
+    reason azure's service-principal path raises a typed error: an operator who
+    selected ``mode: access-key`` means that credential and no other, so a
+    failure here is fatal and must not fall through to the ambient chain (which
+    the site did not select). The empty resolved secret is
     reachable in a way ``validate`` cannot catch (the config names a secret; a
     backend hands back the value), so it is checked explicitly here. The secret
     VALUE is never interpolated into any message.
@@ -1180,23 +1200,23 @@ def _build_explicit_session(creds: _Credentials, secret_value: str, site_name: s
     if not secret_value:
         raise EC2Error(
             f"could not authenticate the AWS credentials for vm-site '{site_name}' "
-            f"(access key {creds.access_key_id}, secret '{creds.secret_name}'): the resolved secret is empty",
+            f"(access key {auth.access_key_id}, secret '{auth.access_key_secret}'): the resolved secret is empty",
             detail="the framework resolved the configured secret to an empty string",
             entity_kind="vm-site",
             entity_name=site_name,
             hint=(
-                f"check the value of the '{creds.secret_name}' secret (its default env-var backend key is "
+                f"check the value of the '{auth.access_key_secret}' secret (its default env-var backend key is "
                 f"AW_SECRET_AWS_SECRET_ACCESS_KEY)"
             ),
         )
     base = boto3.session.Session(
-        aws_access_key_id=creds.access_key_id,
+        aws_access_key_id=auth.access_key_id,
         aws_secret_access_key=secret_value,
         region_name=region,
     )
-    if creds.assume_role_arn is None:
+    if auth.assume_role_arn is None:
         return base
-    return _assume_role_session(base, creds.assume_role_arn, region)
+    return _assume_role_session(base, auth.assume_role_arn, region)
 
 
 def _assume_role_session(base: Any, role_arn: str, region: str) -> Any:

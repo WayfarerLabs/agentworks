@@ -140,18 +140,18 @@ Two config-shaped inputs feed it. A capability's config-**independent** host sup
 capability node's own readiness: `VMPlatform.unsupported_reason()` answers "could any configuration
 ever work here" (wsl2 off Windows), and the fold reads it off the graph-carried impl. A capability's
 config-**dependent** check is keyed on the consuming resource's config (a local-Lima site without
-`limactl`; a remote site with a `vm_host` needs nothing locally). A consuming resource then decides
-its own verdict from its dependencies' states: the fold hands each node a `DependencyState` per
-dependency (that dep's enablement, its readiness when enabled, its carried disabled reason, and its
-impl), and the resource-level `not_ready(deps)` hook folds them however it likes. The fold imposes
-no propagation rule of its own; it only distributes the states. Two consumers propagate from a
-single dependency today, `vm-site` from its platform and `git-credential` from its provider (a
-disabled dependency propagates the carried remediation reason, e.g. "enable plugin `<name>`",
-falling back to "enable its unit"; a not-ready dependency propagates its readiness reason; otherwise
-the resource re-asks with its own config). A resource that implements no `not_ready` hook simply
-opts out and is always ready: a `secret` and a `session-template` both do this, and a
-`session-template`'s harness integration is gated at use instead
-(`ensure_harness_integration_enabled`, the secret model) rather than folded here.
+`limactl`; an ssh-placed site needs nothing locally). A consuming resource then decides its own
+verdict from its dependencies' states: the fold hands each node a `DependencyState` per dependency
+(that dep's enablement, its readiness when enabled, its carried disabled reason, and its impl), and
+the resource-level `not_ready(deps)` hook folds them however it likes. The fold imposes no
+propagation rule of its own; it only distributes the states. Two consumers propagate from a single
+dependency today, `vm-site` from its platform and `git-credential` from its provider (a disabled
+dependency propagates the carried remediation reason, e.g. "enable plugin `<name>`", falling back to
+"enable its unit"; a not-ready dependency propagates its readiness reason; otherwise the resource
+re-asks with its own config). A resource that implements no `not_ready` hook simply opts out and is
+always ready: a `secret` and a `session-template` both do this, and a `session-template`'s harness
+integration is gated at use instead (`ensure_harness_integration_enabled`, the secret model) rather
+than folded here.
 
 Enablement (`enabled` / `disabled`) is a **separate axis** from readiness, for operator opt-in
 rather than host capability, and `finalize` now **produces** it: it composes injected enablement

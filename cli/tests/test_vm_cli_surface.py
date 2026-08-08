@@ -12,6 +12,7 @@ import pytest
 from typer.testing import CliRunner
 
 from agentworks.cli import app
+from agentworks.schema import CapabilityBlock
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -155,7 +156,8 @@ def test_doctor_vm_sites_defers_on_pending_migration(db: Database, monkeypatch: 
     into the report and stealing the Database group's deliberate
     migration row); the group defers with a pointer instead."""
     from agentworks import doctor
-    from agentworks.capabilities import vm_platform as vm_platforms
+    from agentworks.capabilities.descriptor import descriptor_for
+    from agentworks.capabilities.publish import publish_capability_rows
     from agentworks.manifests import builtin as builtin_manifests
     from agentworks.resources import Registry
     from tests.conftest import stub_platform_support
@@ -163,7 +165,7 @@ def test_doctor_vm_sites_defers_on_pending_migration(db: Database, monkeypatch: 
     stub_platform_support(monkeypatch)
     registry = Registry.empty()
     builtin_manifests.publish_to(registry)
-    vm_platforms.publish_to(registry)
+    publish_capability_rows(registry, descriptor_for("vm-platform"))
     registry.finalize()
 
     class _DbFactory:
@@ -240,7 +242,8 @@ def test_doctor_vm_sites_group(db: Database, monkeypatch: pytest.MonkeyPatch, tm
     """Declared sites report ok; a stranded VM row fails with the
     paste-ready manifest hint."""
     from agentworks import doctor
-    from agentworks.capabilities import vm_platform as vm_platforms
+    from agentworks.capabilities.descriptor import descriptor_for
+    from agentworks.capabilities.publish import publish_capability_rows
     from agentworks.manifests import builtin as builtin_manifests
     from agentworks.resources import Registry
     from tests.conftest import stub_platform_support
@@ -248,7 +251,7 @@ def test_doctor_vm_sites_group(db: Database, monkeypatch: pytest.MonkeyPatch, tm
     stub_platform_support(monkeypatch)
     registry = Registry.empty()
     builtin_manifests.publish_to(registry)
-    vm_platforms.publish_to(registry)
+    publish_capability_rows(registry, descriptor_for("vm-platform"))
     registry.finalize()
 
     db.insert_vm("good", site="lima-local", hostname="good")
@@ -271,7 +274,12 @@ def test_doctor_vm_sites_group(db: Database, monkeypatch: pytest.MonkeyPatch, tm
 
     by_name = {c.name: c for c in group.checks}
     assert by_name["lima-local"].status is doctor.Status.OK
+    # The row names the platform AND the resolved mode, because the mode
+    # can be implicit now (the unions carry declared defaults): this row
+    # is where a reviewer sees the choice without opening the manifest.
+    assert by_name["lima-local"].message == "platform lima (placement: local)"
     assert by_name["wsl2"].status is doctor.Status.OK
+    assert by_name["wsl2"].message == "platform wsl2"
     stranded = by_name["VM 'lost'"]
     assert stranded.status is doctor.Status.FAIL
     assert "gone-box" in (stranded.message or "")
@@ -289,7 +297,8 @@ def test_doctor_vm_sites_not_ready_and_preflight_rows(
     from pathlib import Path as _Path
 
     from agentworks import doctor
-    from agentworks.capabilities import vm_platform as vm_platforms
+    from agentworks.capabilities.descriptor import descriptor_for
+    from agentworks.capabilities.publish import publish_capability_rows
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
     from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
     from agentworks.errors import ConfigError
@@ -304,18 +313,20 @@ def test_doctor_vm_sites_not_ready_and_preflight_rows(
     from agentworks.resources.graph import Readiness
 
     def _lima_readiness(cls: type, config: dict[str, object]) -> Readiness:
-        return Readiness.ready() if config.get("vm_host") else Readiness.blocked("limactl not installed")
+        placement = config.get("placement")
+        mode = placement.get("mode") if isinstance(placement, dict) else None
+        return Readiness.blocked("limactl not installed") if mode == "local" else Readiness.ready()
 
     monkeypatch.setattr(LimaPlatform, "not_ready", classmethod(_lima_readiness))
     monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
 
     registry = Registry.empty()
     builtin_manifests.publish_to(registry)
-    vm_platforms.publish_to(registry)
+    publish_capability_rows(registry, descriptor_for("vm-platform"))
     registry.add(
         "vm-site",
         "mybox",
-        VMSiteDecl(name="mybox", platform="lima", platform_config={"vm_host": "me@box"}),
+        VMSiteDecl(name="mybox", platform=CapabilityBlock.of("lima", placement={"mode": "ssh", "host": "me@box"})),
         Origin.operator_declared(file=_Path("sites.yaml"), line=1),
     )
     registry.finalize()
@@ -357,7 +368,8 @@ def test_doctor_warns_on_references_to_not_ready_sites(
     failures: the VM row and defaults.site each get one, with the
     reason. An undeclared site stays the stranded FAIL."""
     from agentworks import doctor
-    from agentworks.capabilities import vm_platform as vm_platforms
+    from agentworks.capabilities.descriptor import descriptor_for
+    from agentworks.capabilities.publish import publish_capability_rows
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
     from agentworks.manifests import builtin as builtin_manifests
     from agentworks.resources import Registry
@@ -375,7 +387,7 @@ def test_doctor_warns_on_references_to_not_ready_sites(
 
     registry = Registry.empty()
     builtin_manifests.publish_to(registry)
-    vm_platforms.publish_to(registry)
+    publish_capability_rows(registry, descriptor_for("vm-platform"))
     registry.finalize()
 
     db.insert_vm("boxed", site="lima-local", hostname="boxed")

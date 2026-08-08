@@ -52,12 +52,6 @@ DYNAMIC_SNIPPETS: dict[str, str] = {
     "secrets": ('(agw secret list --names-only 2>$null | Where-Object { $_ -like "$wordToComplete*" })'),
     "resource_kinds": ('(agw resource kinds --names-only 2>$null | Where-Object { $_ -like "$wordToComplete*" })'),
     "resource_refs": ('(agw resource list --names-only 2>$null | Where-Object { $_ -like "$wordToComplete*" })'),
-    "migrate_selectors": (
-        "(agw resource list --origin operator --names-only 2>$null"
-        " | ForEach-Object { ($_ -split '/', 2)[0]; $_ }"
-        " | Sort-Object -Unique |"
-        ' Where-Object { $_ -like "$wordToComplete*" })'
-    ),
 }
 
 

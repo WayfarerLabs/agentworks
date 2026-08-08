@@ -15,6 +15,8 @@ the full set of publishers. The lower-level ``Registry.empty()`` / ``add`` /
 
 from __future__ import annotations
 
+from agentworks.origin import Origin
+
 # Importing .kinds populates KIND_REGISTRY at module-load time via each kind
 # module's self-registration. New kinds slot in by adding new files
 # under kinds/ and importing them from kinds/__init__.py.
@@ -31,7 +33,6 @@ from agentworks.resources.kind import (
     NoUnreferencedDefaultError,
     ResourceKind,
 )
-from agentworks.resources.origin import Origin
 from agentworks.resources.reference import (
     ReferenceEntry,
     ResourceReference,

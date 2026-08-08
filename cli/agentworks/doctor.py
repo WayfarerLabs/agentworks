@@ -14,9 +14,12 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from agentworks.path_rendering import format_host_path
+
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.resources.registry import Registry
+    from agentworks.vms.sites import VMSiteDecl
 
 
 class Status(Enum):
@@ -252,8 +255,8 @@ def _check_vm_platforms(registry: Registry) -> HealthGroup:
     from agentworks.resources.graph import Enablement
 
     g = HealthGroup("VM platforms")
-    # Registry-definition order (what ``publish_to`` established from
-    # ``VM_PLATFORM_REGISTRY``), preserved: the pre-refactor group rendered in
+    # Publication order (built-ins in name order, then plugin rows in
+    # plugin-publication order), preserved: the pre-refactor group rendered in
     # this order, and the reordering is not one of the R9 deltas.
     for name, _decl in registry.iter_kind_items("vm-platform"):
         if registry.graph.enablement_of("vm-platform", name) is Enablement.disabled:
@@ -305,6 +308,27 @@ def _check_plugins(config: Config) -> HealthGroup:
             levels = ", ".join(level.value for level in plugin.required_scopes)
             g.info(f"plugin {name} least privilege", levels)
     return g
+
+
+def _platform_summary(decl: VMSiteDecl) -> str:
+    """The site row's platform clause: the platform's name plus the
+    resolved tag of each of its mode unions, e.g.
+    ``platform lima (placement: local)``.
+
+    The modes render here because they can be IMPLICIT now: the unions
+    carry declared defaults (azure and aws's ``auth``, lima's
+    ``placement``), so a site that wrote nothing has still resolved to
+    an arm, and this row is where a reviewer checks a fleet's sites
+    without opening manifests. Total: a site whose modes cannot be read
+    renders the bare platform name it always did.
+    """
+    from agentworks.capabilities.config import resolved_capability_modes
+
+    modes = resolved_capability_modes(kind="vm-platform", config=decl.platform.tagged)
+    summary = f"platform {decl.platform.name}"
+    if modes:
+        summary += " (" + ", ".join(f"{field}: {tag}" for field, tag in modes) + ")"
+    return summary
 
 
 def _check_vm_sites(config: Config, registry: Registry) -> HealthGroup:
@@ -370,11 +394,11 @@ def _check_vm_sites(config: Config, registry: Registry) -> HealthGroup:
             # operator's next command hits: warn.
             g.warn(
                 name,
-                f"platform {decl.platform}; preflight: {e}",
+                f"{_platform_summary(decl)}; preflight: {e}",
                 hint=getattr(e, "hint", None),
             )
             continue
-        g.ok(name, f"platform {decl.platform}")
+        g.ok(name, _platform_summary(decl))
 
     default_site = config.defaults.site
     if default_site is not None and default_site in not_ready:
@@ -458,11 +482,21 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
     g = HealthGroup("Configuration")
     config = None
 
+    # Home-relative like every other path doctor prints. Doctor is the
+    # command whose output gets pasted into an issue, which is the one
+    # argument for spelling paths absolutely here, and it does not hold
+    # up: an operator's home is not the ambiguous part of a bug report,
+    # and `~/` avoids pasting their username into a public tracker. The
+    # decisive point is that this row and the Manifest row render a few
+    # lines apart in the same group, naming files in the same directory
+    # tree. Whatever they do they must do together, and the Manifest row
+    # is framed by `located()`, which is shared with every non-doctor
+    # surface that reports the same error, so it is not doctor's to change.
     if not CONFIG_PATH.exists():
-        g.fail("Config file", f"not found: {CONFIG_PATH}. Run 'agw config init' to create one.")
+        g.fail("Config file", f"not found: {format_host_path(CONFIG_PATH)}. Run 'agw config init' to create one.")
         return g, None, None
 
-    g.ok("Config file", str(CONFIG_PATH))
+    g.ok("Config file", format_host_path(CONFIG_PATH))
 
     config_load_failed = False
     try:
@@ -527,24 +561,14 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
             g.warn("Manifest", issue)
     if not config_load_failed and not config.config_issues and manifests is not None and not manifests.issues:
         g.ok("Config is valid")
-    # Deprecation nudges ride their own channel (so --no-deprecations
-    # can silence the ambient per-command warning), but doctor is the
-    # explicit full-health surface. Doctor rows are scannable one-liners
-    # (maintainer ruling, 2026-07-06): render the FACT with one next
-    # step; the full teaching text stays on the ambient command warning.
-    # (The old TOML-resource-declaration nudge is a hard error now, rendered
-    # as the Config fail row above, so it no longer has a warn row here.)
-    if manifests is not None and manifests.deprecated_shape_resources:
-        g.warn(
-            "Manifests use the deprecated capability config shape",
-            f"{', '.join(manifests.deprecated_shape_resources)}: fold the "
-            "sibling pair into one tagged table, e.g. platform: {name: lima, ...}",
-        )
-    for section in config.noop_secret_backend_sections:
-        g.warn(
-            f"Config has a no-op {section} section",
-            "deprecated and ignored; remove it, or `agw resource migrate --all` drops it",
-        )
+    # No deprecation rows here: every config.toml deprecation doctor used to
+    # render is a hard error now (the TOML resource declarations, the sibling
+    # capability-config shape, and the ``[secret_backends.*]`` no-op that was
+    # the last of them), so each arrives as the Config or Manifest fail row
+    # above instead. If a nudge is added back to ``Config.deprecation_issues``,
+    # render it here as a scannable one-liner (maintainer ruling, 2026-07-06):
+    # the FACT plus one next step, with the teaching text left on the ambient
+    # per-command warning.
 
     # SSH keys
     _check_ssh_key(g, config.operator.ssh_public_key, "public")
@@ -596,13 +620,13 @@ def _check_ssh_key(g: HealthGroup, path: object, label: str) -> None:
         g.fail(f"SSH {label} key", "invalid path")
         return
     if not path.exists():
-        g.fail(f"SSH {label} key", f"not found: {path}")
+        g.fail(f"SSH {label} key", f"not found: {format_host_path(path)}")
         return
     if not os.access(path, os.R_OK):
-        g.fail(f"SSH {label} key", f"not readable: {path}")
+        g.fail(f"SSH {label} key", f"not readable: {format_host_path(path)}")
         return
 
-    g.ok(f"SSH {label} key", str(path))
+    g.ok(f"SSH {label} key", format_host_path(path))
 
     # Check permissions on private key. Skipped on Windows: st_mode there is
     # synthesized from the read-only attribute (typically reports 0o666) and
@@ -772,7 +796,7 @@ def _report_db_contents(g: HealthGroup, db: object) -> None:
         if not LOG_DIR.exists():
             return ""
         logs = sorted(LOG_DIR.glob(f"{vm_name}-*.log"), reverse=True)
-        return f" Log: {logs[0]}" if logs else ""
+        return f" Log: {format_host_path(logs[0])}" if logs else ""
 
     for vm in vms:
         if vm.init_status == InitStatus.FAILED.value:

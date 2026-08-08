@@ -1,8 +1,11 @@
 """Kind registrations for the vms domain: ``vm-template``,
 ``admin-template`` (the admin user is a per-VM concept, provisioned by
-``vms/initializer``, one per VM; its ``instances()`` iterates VMs),
-``vm-site`` (the declarable "configured place to create VMs"), and
-``vm-platform`` (the capability kind backing sites).
+``vms/initializer``, one per VM; its ``instances()`` iterates VMs), and
+``vm-site`` (the declarable "configured place to create VMs").
+
+The ``vm-platform`` capability kind backing sites registers from
+``agentworks.capabilities.vm_platform.kinds``, beside the platform
+implementations, like every other capability kind.
 
 Lives in the ``vms`` domain package next to the code that implements VM
 templates; ``agentworks.resources.kinds.__init__`` imports this module so
@@ -27,19 +30,22 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
+from agentworks.origin import Origin
 from agentworks.resources.kind import (
     ALWAYS_MATERIALIZE_SOURCE,
     KIND_REGISTRY,
     InstanceRef,
 )
-from agentworks.resources.origin import Origin
+from agentworks.topics import TopicProse
 from agentworks.vms.admin import AdminConfig
+from agentworks.vms.sites import VMSiteDecl
 from agentworks.vms.template import VMTemplate
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
     from agentworks.db import Database
+    from agentworks.declared_resource import DeclaredResource
     from agentworks.resources.reference import ResourceReference
     from agentworks.resources.registry import Registry
 
@@ -49,7 +55,21 @@ class _VMTemplateKind:
     """Implementation of ``ResourceKind`` for ``"vm-template"``."""
 
     kind: str = "vm-template"
-    description: str = "VM configuration (sizing, installed tools, ...)"
+    model: type[DeclaredResource] = VMTemplate
+    description: str = "How a VM is sized, and what is installed on it"
+    prose: TopicProse = TopicProse(
+        title="VM templates",
+        overview="""
+        A vm-template is the system-level configuration of a VM: how big it is, what
+        system packages it carries, and which system-wide install commands run during
+        init. `agw vm create --template` selects one, and the `default` template applies
+        when the flag is omitted.
+
+        Templates compose through `inherits`, nearest last: a child's values win, and
+        `env` tables merge key by key. That is how a small `dev` template says only what
+        differs from `default`.
+        """,
+    )
     miss_policy: Literal["auto-declare", "error"] = "auto-declare"
     auto_declare_names: frozenset[str] | None = frozenset({"default"})
     category: Literal["declarable", "capability"] = "declarable"
@@ -99,7 +119,22 @@ class _AdminTemplateKind:
     """Implementation of ``ResourceKind`` for ``"admin-template"``."""
 
     kind: str = "admin-template"
-    description: str = "VM admin user environment configuration (shell, tools, dotfiles, mise, ...)"
+    model: type[DeclaredResource] = AdminConfig
+    description: str = "How the admin user on a VM is set up"
+    prose: TopicProse = TopicProse(
+        title="Admin templates",
+        overview="""
+        An admin-template configures the operator's own user on a VM: its shell, the
+        dotfiles it clones, the per-user install commands it runs, the mise packages it
+        activates, and the git credentials it can use. It is applied during
+        `agw vm create` and re-applied by `agw vm reinit`, so every field should be safe
+        to apply twice.
+
+        `agw vm create --admin-template` selects one per VM; the `default` template
+        applies when the flag is omitted. Unlike the three inheriting template kinds,
+        every field here carries a concrete default rather than inheriting one.
+        """,
+    )
     miss_policy: Literal["auto-declare", "error"] = "auto-declare"
     auto_declare_names: frozenset[str] | None = frozenset({"default"})
     category: Literal["declarable", "capability"] = "declarable"
@@ -137,45 +172,28 @@ KIND_REGISTRY["admin-template"] = _AdminTemplateKind()
 
 
 @dataclass(frozen=True)
-class _VMPlatformKind:
-    """Implementation of ``ResourceKind`` for ``"vm-platform"``."""
-
-    kind: str = "vm-platform"
-    description: str = "Capability for running VMs on one backend kind (lima, wsl2, azure-vm, aws-ec2, proxmox)"
-    miss_policy: Literal["auto-declare", "error"] = "error"
-    auto_declare_names: frozenset[str] | None = None
-    category: Literal["declarable", "capability"] = "capability"
-    # Not load-bearing: manifests of a capability kind are rejected
-    # wholesale by category before the override policy is consulted.
-    # Set to the conservative value for uniformity with vm-site.
-    builtin_override: Literal["allow", "reserved"] = "reserved"
-
-    def synthesize(self, references: Sequence[ResourceReference]) -> Any:
-        # Unreachable under the error miss policy; honors the
-        # empty-references contract via the typed framework error.
-        from agentworks.resources.kind import NoUnreferencedDefaultError
-
-        raise NoUnreferencedDefaultError(
-            "the vm-platform kind has miss_policy='error'; synthesize "
-            "should never be invoked (the framework raises ConfigError "
-            "first)"
-        )
-
-    # No per-kind readiness hook: readiness projection is unified on
-    # ``inspect.not_ready_reason_for`` reading ``graph.readiness_of`` directly
-    # (Phase 4 retired the per-kind shim, including the Phase-3 vm-platform
-    # projection pulled forward to render the now-published not-ready row).
-
-
-KIND_REGISTRY["vm-platform"] = _VMPlatformKind()
-
-
-@dataclass(frozen=True)
 class _VMSiteKind:
     """Implementation of ``ResourceKind`` for ``"vm-site"``."""
 
     kind: str = "vm-site"
+    model: type[DeclaredResource] = VMSiteDecl
     description: str = "Configured places to create VMs (a platform plus its settings)"
+    prose: TopicProse = TopicProse(
+        title="VM sites",
+        overview="""
+        A vm-site is a configured place VMs come from: one vm-platform capability plus
+        the settings that platform needs. `agw vm create --site` selects one, and
+        `defaults.site` picks the site used when the flag is omitted.
+
+        The `lima-local` and `wsl2` sites ship built in and need no declaration; they
+        disable themselves on a host that lacks what they need. Declare a site for a
+        remote or cloud backend, one per subscription, region, or cluster you target.
+        The cloud platforms ship as opt-in system plugins, so an azure-vm, aws-ec2, or
+        proxmox site stays not-ready with an "enable plugin" hint until its plugin is
+        listed under `[plugins] system` in config.toml. `agw doctor` shows each site's
+        state.
+        """,
+    )
     # Error, never auto-declare: a typo'd site reference must not
     # synthesize a site.
     miss_policy: Literal["auto-declare", "error"] = "error"

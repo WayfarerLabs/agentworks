@@ -57,8 +57,8 @@ _INSTALLED_MODULES: tuple[_PluginModule, ...] = (
 )
 ```
 
-The index ships the installed system plugins (`onepassword`, `claude`, `proxmox`, `azure`, `codex`);
-each listed module is registered and seated at import. On import the index:
+Every module listed there is registered and seated at import; `agw doctor`'s **System plugins**
+roster is what a given build actually ships. On import the index:
 
 - registers each plugin, wrapping any failure with the real module name (a bad descriptor is a
   curation bug that reads as `system plugin '<module>' failed to register: ...`, not an opaque
@@ -66,11 +66,114 @@ each listed module is registered and seated at import. On import the index:
 - rejects a duplicate plugin name as a typed error.
 
 `register_plugin` validates the **whole** descriptor first (name shape; every capability kind has an
-adapter; every impl is a class with a non-empty, `/`-free `name`; no intra-descriptor name
-collisions), then seats every impl **atomically**: no capability registry is touched until every
-impl across the descriptor is known seatable, so a mid-descriptor failure can never leave orphaned
-impls behind. Registration is idempotent per impl name; a cross-plugin or plugin-versus-built-in
-name clash on the same capability is a typed error naming the occupant's real origin.
+adapter; every impl is a class with a non-empty, `/`-free `name`; every impl **conforms to its
+kind's contract**, see below; no intra-descriptor name collisions), then seats every impl
+**atomically**: no capability registry is touched until every impl across the descriptor is known
+seatable, so a mid-descriptor failure can never leave orphaned impls behind. Registration is
+idempotent per impl name; a cross-plugin or plugin-versus-built-in name clash on the same capability
+is a typed error naming the occupant's real origin.
+
+### Contract conformance
+
+Every impl is checked against its kind's descriptor (`agentworks/capabilities/descriptor.py`) before
+anything is seated, so a class that merely looks plausible is refused at registration rather than
+failing far from the mistake. The checks:
+
+- **Contract**: derives from the kind's capability base. `secret-backend`'s contract is a `Protocol`
+  rather than a base class, so it cannot be checked nominally; the attribute and operation checks
+  below are its enforcement, which is what a Protocol's enforcement is anyway.
+- **Metadata**: `name` (non-empty, `/`-free) and `description`, readable as class attributes.
+- **Attributes**: the kind's other non-operation members are present (`secret-backend`'s
+  `interactive`, which the resolve loop reads on every chain pass). Empty for the three base-class
+  kinds, whose base supplies these to every subclass.
+- **Constructibility**: nothing would stop the class being constructed (no unimplemented
+  `@abstractmethod`). Checked structurally; the impl is never constructed to find out.
+- **Operations**: the domain operations the framework depends on are present and callable.
+- **Config model**: the impl declares a `config_model` (see [Declaring config](#declaring-config)),
+  it extends the base its kind's contract names, it can be built, and for a kind dispatched by a
+  tagged union it tags itself with its own name. A model that could never be reached from a manifest
+  is refused where its author can see it rather than going quietly unaddressable.
+- **Contract version**: the impl's `contract_version` equals the version this build supports. Every
+  impl of every kind spells it; nothing defaults it, so a version claim is always made rather than
+  inherited. Exact equality, so a contract change is a hard cutover.
+
+Each failure is a `PluginError` naming the plugin, the kind, the impl, and what is missing.
+
+## Declaring config
+
+A capability implementation DECLARES the shape of its config as a model, and the core does
+everything else with it: shape validation, reference extraction, defaulting, JSON Schema emission,
+`agw resource sample`, and `agw resource describe-kind` are all derived views of that one
+declaration. **No plugin code is invoked for any of them**, which is what keeps a misbehaving plugin
+out of the registry's finalize pass and what makes it impossible for a plugin's validator and its
+documentation to disagree.
+
+```python
+from typing import Annotated, ClassVar, Literal
+
+from pydantic import Field
+
+from agentworks.schema import AgwModel, NonEmptyStr, SecretRef
+
+
+class ExampleCloudConfig(AgwModel):
+    """An Example Cloud region, as one vm-site points at it."""
+
+    name: Literal["example-cloud"]
+    """The platform this config is for."""
+
+    region: NonEmptyStr = Field(examples=["us-west-2"])
+    """The region new VMs are created in."""
+
+    api_token: Annotated[
+        NonEmptyStr,
+        SecretRef(usage="the Example Cloud API token", default_template="example-cloud-token"),
+    ]
+    """The secret holding the API token's value. Never the value itself:
+    the field NAMES a secret in the framework's secret system."""
+
+    instance_prefix: NonEmptyStr = "agw"
+    """The name prefix new VMs are created under."""
+
+
+class ExampleCloudPlatform(VMPlatform):
+    name: ClassVar[str] = "example-cloud"
+    description: ClassVar[str] = "Example Cloud VMs (region-scoped)"
+    contract_version: ClassVar[int] = 1
+    config_model: ClassVar[type[AgwModel]] = ExampleCloudConfig
+```
+
+A site then writes `platform: {name: example-cloud, region: us-west-2}`, and `api_token` resolves to
+the `example-cloud-token` secret because the field was omitted. An OMITTED reference field and an
+explicit `null` both mean "the owner-templated default", so leaving it out is how an operator takes
+the default rather than how they opt out of the dependency.
+
+What the base and the markers buy you:
+
+- **`AgwModel` is strict, frozen, and closed-world.** A key the model does not declare is a load
+  error naming the fields it does, a wrong type is an error rather than a coercion, and the operator
+  reads it framed as their resource with the file and line they wrote it on.
+- **The attribute docstring IS the field's operator-facing description.** It is what
+  `agw resource describe-kind`, the generated sample, and the editor's hover text render, so write
+  it for an operator. Do not restate the field list anywhere else; a second copy is free to drift.
+- **`SecretRef` / `ResourceRef` mark a field that NAMES another resource**, optionally with an
+  owner-templated default (`git-token-{owner_name}`). That marker is the single authored place the
+  reference semantics live: extraction reads it to build the dependency graph, validation fills the
+  default from it, emitted JSON Schema carries it as `x-agw-ref`, and it is what later authorizes an
+  op to read that secret through `ctx.secret(name)`.
+- **A capability that accepts no configuration still declares a model**, one with no fields beyond
+  its tag. "Accepts nothing" has to be something an author SAYS, not something they get by
+  forgetting.
+
+Whether the model carries a `name` tag depends on how the kind is dispatched: `vm-platform`,
+`harness-integration`, and `git-credential-provider` are selected by a `name` key inside their
+tagged table, so their models tag themselves; `secret-backend` is selected by the map key its value
+sits under, so its mapping model carries no tag, and it extends `AgwRootModel` rather than
+`AgwModel` because a mapping may be a bare string. Conformance checks whichever applies.
+
+The capability model as a whole, including how a config is offered per facet and what the framework
+does with the declaration at each lifecycle stage, is
+[`../capabilities/README.md`](../capabilities/README.md).
 
 ## The enablement model: opt-in, present-but-disabled
 
@@ -120,9 +223,11 @@ A plugin contributes implementations of existing capability kinds only:
 - **`git-credential-provider`**: how a git token is obtained and served.
 - **`secret-backend`**: where a secret's value is read from.
 
-Each impl subclasses the kind's capability base class and exposes `name` / `description` class
-attributes. The published row is read-only and lists, describes, and is referenced like any other
-resource of that kind.
+Each impl subclasses the kind's capability base class (except `secret-backend`, whose contract is a
+`Protocol`, so its impls satisfy it structurally) and exposes `name` / `description` class
+attributes. Registration checks that conformance before seating anything; see
+[Contract conformance](#contract-conformance). The published row is read-only and lists, describes,
+and is referenced like any other resource of that kind.
 
 **Bundled manifests** are ordinary YAML resource documents the plugin ships, under the `manifests/`
 subdirectory of the package `manifests` points at. Only declarable kinds whose consumption sites are

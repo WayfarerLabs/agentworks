@@ -10,9 +10,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from agentworks.errors import ConfigError, unknown_template_error
+from agentworks.errors import unknown_template_error
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from agentworks.agents.template import AgentTemplate
     from agentworks.env import EnvEntry
     from agentworks.resources.registry import Registry
@@ -68,37 +70,34 @@ def resolve_template(registry: Registry, template_name: str | None = None) -> Re
     return resolve_from_dict(kind_dict(registry, "agent-template"), template_name)
 
 
-def _resolve(
-    templates: dict[str, AgentTemplate],
-    name: str,
-    _visiting: tuple[str, ...] = (),
-) -> ResolvedAgentTemplate:
-    """Depth-first, left-to-right resolution.
+def effective_template(templates: Mapping[str, AgentTemplate], name: str) -> ResolvedAgentTemplate:
+    """The effective (merged) declaration of ``name``, for the finalize
+    passes. TOTAL; see ``vms/templates.effective_template`` for why the
+    degradation on a cyclic chain is never observed."""
+    from agentworks.errors import InheritanceCycleError
 
-    ``_visiting`` carries the chain of in-progress resolves so cycles
-    raise a clean ``ConfigError`` instead of crashing with
-    ``RecursionError``. The framework's ``Registry.finalize`` cycle pass
-    is the canonical check at build_registry time; this resolver-internal
-    guard is the safety net for the load-time eager-resolve path (Phase
-    2a.2; mirrors the vm_template resolver guard).
-    """
-    if name in _visiting:
-        path = " -> ".join((*_visiting, name))
-        raise ConfigError(f"agent_templates inheritance cycle detected: {path}")
-
-    if name not in templates:
+    try:
+        return _resolve(templates, name)
+    except InheritanceCycleError:
         return ResolvedAgentTemplate(name=name)
 
-    tmpl = templates[name]
+
+def _resolve(
+    templates: Mapping[str, AgentTemplate],
+    name: str,
+) -> ResolvedAgentTemplate:
+    """Resolve ``name``'s chain, defaults applied: one accumulator folded
+    over the chain's declarations. See ``vms.templates._resolve_from_dict``
+    for why the fold reads the DECLARATIONS rather than each parent's
+    resolved template.
+    """
+    # Imported here, not at module level: ``agentworks.resources``'s package
+    # init loads every kind module, and every kind module reaches this one.
+    from agentworks.resources.inheritance import resolution_layers
+
     result = ResolvedAgentTemplate(name=name)
-    next_visiting = (*_visiting, name)
-
-    for parent_name in tmpl.inherits:
-        parent = _resolve(templates, parent_name, next_visiting)
-        _merge(result, parent)
-
-    _merge_template(result, tmpl)
-    result.name = name
+    for layer in resolution_layers(templates, name, "agent-template"):
+        _merge_template(result, layer)
     return result
 
 
@@ -113,28 +112,10 @@ def _append_dedupe(target: list[str], source: list[str]) -> list[str]:
     return result
 
 
-def _merge(target: ResolvedAgentTemplate, source: ResolvedAgentTemplate) -> None:
-    """Merge source into target. Scalars: source wins. Lists: append with dedupe."""
-    target.shell = source.shell
-    target.git_credentials = _append_dedupe(target.git_credentials, source.git_credentials)
-    target.user_install_commands = _append_dedupe(target.user_install_commands, source.user_install_commands)
-    target.dotfiles_source = source.dotfiles_source
-    target.dotfiles_destination = source.dotfiles_destination
-    target.dotfiles_install_cmd = source.dotfiles_install_cmd
-    target.mise_activate = source.mise_activate
-    target.mise_packages = _append_dedupe(target.mise_packages, source.mise_packages)
-    target.mise_lockfile = source.mise_lockfile
-    target.mise_allow_unlocked = source.mise_allow_unlocked
-    target.mise_install_before = source.mise_install_before
-    target.mise_prune_on_reinit = source.mise_prune_on_reinit
-    target.claude_marketplaces = _append_dedupe(target.claude_marketplaces, source.claude_marketplaces)
-    target.claude_plugins = _append_dedupe(target.claude_plugins, source.claude_plugins)
-    target.env = {**target.env, **source.env}
-
-
 def _merge_template(target: ResolvedAgentTemplate, tmpl: AgentTemplate) -> None:
-    """Merge a raw AgentTemplate into a ResolvedAgentTemplate. None = not set, skip.
-    Scalars: child overrides. Lists: append with dedupe."""
+    """Fold one declared AgentTemplate into the accumulator. None = not
+    set, skip. Scalars: later layer overrides. Lists: append with dedupe.
+    The only writer of a ``ResolvedAgentTemplate``'s fields."""
     if tmpl.shell is not None:
         target.shell = tmpl.shell
     if tmpl.git_credentials is not None:

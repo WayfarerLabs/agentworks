@@ -5,12 +5,12 @@ A capability instance moves through stages with sharply different
 contracts (the full capability model is documented in
 ``capabilities/README.md``):
 
-1. ``dependencies`` / ``validate``: pure classmethods; ``dependencies``
-   extracts a config blob's implied resource references (total,
-   non-throwing) and ``validate`` is the throwing shape check.
-2. construct: cheap, config-valid by construction (re-runs
-   ``validate``); binds ``(name, config)``, never resolved
-   secret values. No network, no resolution, no prompt.
+1. declaration: a capability DECLARES its config as a model
+   (``config_model``) and the core does the rest, invoking no capability
+   code to validate a blob or to derive the references it implies.
+2. construct: cheap, config-valid by construction (the blob validates
+   into the declared model, and the validated INSTANCE is what binds),
+   never resolved secret values. No network, no resolution, no prompt.
 3. ``preflight``: pre-resolve, read-only, best-effort readiness;
    checks unauthenticated reachability / tools (the declared secrets'
    resolvability is predicted centrally by the holding node, not by
@@ -41,13 +41,18 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any, ClassVar, Protocol
 
 from agentworks.errors import ConfigError, StateError
+from agentworks.schema import RefOwner
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
+    from pydantic import BaseModel
+
+    from agentworks.capabilities.retired_shapes import RetiredPresenceShape
     from agentworks.config import Config
     from agentworks.resources.graph import Readiness
     from agentworks.resources.reference import ConfigReference
+    from agentworks.topics import TopicProse
     from agentworks.transports import Transport
 
 
@@ -285,83 +290,171 @@ class Capability(ABC):
 
     name: ClassVar[str]
     description: ClassVar[str]
+    """One operator-facing line: what this implementation IS.
+
+    Also its SUMMARY on every schema-derived surface (the implementation
+    list under ``agw resource describe-kind <kind>``, its own field
+    reference, the guide's topic pages), which is why nothing authors a
+    second one-liner beside ``prose``."""
+
     owner_kind: ClassVar[str]
 
-    def __init__(
-        self,
-        owner_name: str,
-        config: Mapping[str, object],
-    ) -> None:
-        """Bind to ``(owner_name, config)``.
+    prose: ClassVar[TopicProse | None] = None
+    """The authored paragraphs about this implementation: what it needs,
+    what it assumes, what an operator should know before choosing it.
 
-        Config validity is a construct-time invariant: ``validate``
-        re-runs here, so a shape error dies at construction, never later
-        in preflight. Construction is otherwise cheap: no network, no
-        secret resolution, no prompt, and no secret machinery at all:
-        the operation's boundary union comes from the plan's declared
-        ``secret_refs`` (the walk), and resolved values arrive per call
-        through the context (``ctx.secret``, scoped delivery). The
-        instance never holds a value source.
+    Optional, unlike a resource kind's, and defaulted rather than declared:
+    the topic contract's rule is that a participant with no useful content
+    contributes nothing, and a plugin author must be able to register a
+    capability without writing an essay. Field facts never go here; those
+    come from ``config_model``."""
+
+    contract_version: ClassVar[int]
+    """The capability contract version this implementation is written
+    against. Registration requires it to equal the version its kind's
+    descriptor declares supported, so an impl on an older contract is refused
+    with a version message instead of failing somewhere downstream.
+
+    Declared, never defaulted, for the same reason ``name`` and
+    ``description`` are: a default would make the version claim inherited
+    rather than made, and bumping this base alongside a descriptor would then
+    silently re-certify every impl that had not actually been migrated. Each
+    implementation states its own, exactly as the ``SecretBackend`` Protocol
+    kind's impls must."""
+
+    config_model: ClassVar[type[BaseModel]]
+    """The config this capability OFFERS, as a model.
+
+    Declared, never defaulted, for the same reason ``contract_version`` is:
+    defaulting it to an empty model would make "I accept no configuration"
+    the thing an author gets by FORGETTING, which is exactly how the retired
+    invoked ``validate`` behaved and is what would make an unmigrated
+    implementation look migrated.
+
+    The core reads it and does the rest: shape validation, reference
+    extraction, defaulting, schema emission, and rendering all derive from
+    this one declaration, and capability code is invoked for none of them.
+    Registration-time conformance checks it against the kind's model
+    contract (``CapabilityKindDescriptor.config_schema``)."""
+
+    retired_shape: ClassVar[RetiredPresenceShape | None] = None
+    """A config spelling this implementation used to accept, so a
+    pre-migration document is refused with its exact rewrite rather than
+    with a generic unknown key.
+
+    Defaulted to ``None``, unlike the declarations above: an
+    implementation with no retired spelling is the normal case, and having
+    to say so would be noise on every capability that has never broken its
+    config. Declared only for the length of one migration; see
+    :mod:`agentworks.capabilities.retired_shapes`, which is release-scoped
+    and meant to be deleted whole."""
+
+    @classmethod
+    def config_for(cls) -> type[BaseModel]:
+        """The config model this capability offers.
+
+        A capability DECLARES the config it offers the way it declares its
+        API methods, and the core reads the declaration rather than asking
+        the capability to do anything with it. This hook is the override
+        point for a capability whose answer is not simply ``config_model``,
+        and reading the config THROUGH it is what makes such a capability
+        an ordinary registration rather than a framework change.
+
+        Config is offered per FACET by contract, a facet being the LEVEL a
+        capability is driven at (vm, user, workspace, session): the pairing
+        of that level's API methods with that level's config. CONSUMERS
+        choose the facet they drive, so a producer never has to know who is
+        asking. Facets are deliberately NOT scopes and core owns the
+        mapping between them: admin and agent both drive the user level,
+        and session start and resume share the session level, so two
+        surfaces that mean the same level get the same answer by
+        construction rather than by each capability encoding the
+        equivalence. Nothing under ``capabilities/`` spells a scope.
+
+        **The parameter selecting a facet is not on this signature, because
+        nothing yet offers more than one config.** Every capability shipped
+        today shares a single config across all of its operations, so a
+        facet parameter would be a signature every reader has to decode and
+        no caller can use. It arrives, additively, with the first
+        capability whose methods run at several levels (a harness
+        integration is the expected one), which is the same change that
+        brings the consumers that would pass it.
+
+        Note what offering a config does NOT say: it is not a claim to
+        support a level, and offering none is not a claim to lack one.
+        Support is carried by the implementation. Reading a config offering
+        as a support signal would rebuild the declaration-contract
+        mechanism that was rescinded on 2026-08-05, under a new name.
         """
+        return cls.config_model
+
+    def __init__(self, owner_name: str, config: Mapping[str, object]) -> None:
+        """Bind to ``(owner_name, config)``, validated.
+
+        Config validity is a construct-time invariant: the blob is
+        validated here, so a shape error dies at construction rather than
+        later in preflight, and what is BOUND is the validated,
+        fully-defaulted model instance, which is what lets an operation
+        read a typed field instead of a dict key with a fallback beside
+        it. Construction is otherwise cheap: no network, no secret
+        resolution, no prompt, and no secret machinery at all. The
+        operation's boundary union comes from the plan's declared
+        ``secret_refs`` (the walk), and resolved values arrive per call
+        through the context (``ctx.secret``, scoped delivery); the
+        instance never holds a value source.
+
+        What is validated is whatever :meth:`config_for` answers with, so a
+        capability that overrides the hook is bound to the model it
+        actually offers rather than to its ``config_model`` declaration.
+        """
+        from agentworks.capabilities.config import validate_own_config
+        from agentworks.schema import extract_references, filled_defaults
+
         self.owner_name = owner_name
-        self.config = config
-        # Validate first (the construct-time invariant), then extract the
-        # config-implied edges: ``validate`` guarantees validity, so the
-        # total ``dependencies`` sees a valid blob and yields the same
-        # refs it would at finalize.
-        type(self).validate(self._owner_display, config)
+        owner = RefOwner(kind=self.owner_kind, name=owner_name)
+        model = type(self).config_for()
+        self._config = validate_own_config(type(self), config, owner=owner)
+        # Extracted from the FILLED blob, exactly as the finalize pass
+        # extracts: the boundary fill is the one renderer of templated
+        # defaults (validation above applies the same fill), so an
+        # instance's declared secrets are the same set the graph carries
+        # for it.
         self._secret_refs: tuple[ConfigReference, ...] = tuple(
-            ref for ref in type(self).dependencies(self._owner_display, config) if ref.kind == "secret"
+            ref for ref in extract_references(model, filled_defaults(model, config, owner)) if ref.kind == "secret"
         )
+
+    @property
+    def config(self) -> BaseModel:
+        """This instance's bound config: the validated, fully-defaulted
+        model instance.
+
+        Every capability narrows this to its own model type through
+        :meth:`_config_as`, so an operation reads a typed field and mypy
+        checks it.
+        """
+        return self._config
+
+    def _config_as[M: BaseModel](self, model: type[M]) -> M:
+        """This instance's bound config, as ``model``.
+
+        The narrowing every capability's own typed ``config`` property
+        goes through. It is an ``isinstance`` check rather than a
+        ``cast`` because the invariant is worth ENFORCING: construction
+        validated the blob against exactly the model the class declares,
+        so a mismatch here is a framework bug, and a cast would let it
+        surface as an ``AttributeError`` somewhere in an operation
+        instead.
+        """
+        if not isinstance(self._config, model):
+            raise StateError(
+                f"{type(self).__name__} bound a {type(self._config).__name__} config "
+                f"where its own declared model is {model.__name__}"
+            )
+        return self._config
 
     @property
     def _owner_display(self) -> str:
         return f"{self.owner_kind}/{self.owner_name}"
-
-    @classmethod
-    def dependencies(cls, owner: str, config: Mapping[str, object]) -> tuple[ConfigReference, ...]:
-        """The resource references ``config`` (the blob owned by ``owner``)
-        implies: this capability's config-derived graph out-edges.
-
-        Total and non-throwing: it never raises on a malformed blob and
-        emits every edge it can derive best-effort, omitting only an edge
-        whose identity depends on a field that is itself malformed (the
-        throwing correctness check is :meth:`validate`). Invoked by the
-        consuming resource's ``dependencies(context)`` at finalize and,
-        for the secret sub-refs, at construct. MUST be pure. ``owner`` is
-        display context (host-agnostic, never dispatched on); most kinds
-        that imply an edge derive its default name from it.
-
-        Base behavior: accepts no configuration, so it implies no
-        references. Subclasses with config-implied edges override
-        wholesale.
-        """
-        return ()
-
-    @classmethod
-    def validate(cls, owner: str, config: Mapping[str, object]) -> None:
-        """Validate ``config`` (the blob owned by ``owner``): the throwing
-        correctness check for the config block, raising ``ConfigError`` on
-        a malformed blob.
-
-        Invoked at each source's blob boundary (manifest decode with
-        ``file:line`` framing; legacy TOML loaders) and again at construct
-        (the construct-time invariant); MUST be pure. ``owner`` is display
-        context for error messages: host-agnostic, never dispatched on.
-
-        Base behavior: accepts no configuration. Subclasses with config
-        override wholesale.
-
-        NOTE: this invoked-validation API may be deprecated in favor of
-        capabilities pushing a declarative config schema definition at
-        registration time (fields typed as resource references to
-        specific kinds, with usage information), letting the core
-        engine validate and derive references without invoking the
-        capability.
-        """
-        if config:
-            display = getattr(cls, "name", cls.__name__)
-            raise ConfigError(f"{owner}: the {display} capability accepts no configuration; got {sorted(config)}")
 
     @classmethod
     def not_ready(cls, config: Mapping[str, object]) -> Readiness:
@@ -369,7 +462,7 @@ class Capability(ABC):
         ready when it can. The config-dependent half of readiness: the
         readiness fold (LLD c) calls this off the capability's graph-carried
         impl to decide a consuming resource's verdict (a local-Lima site
-        without ``limactl``, keyed on the site's ``platform_config``).
+        without ``limactl``, keyed on the site's platform config).
 
         NON-CONSTRUCTING and total by contract: a classmethod that reads
         ``config`` fields best-effort, tolerates malformed ones, and NEVER

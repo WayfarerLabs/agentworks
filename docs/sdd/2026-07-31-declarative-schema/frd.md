@@ -49,10 +49,40 @@ builds against a single declaration frontend.
 
 - **FR1.** Resources are no longer loaded from config.toml. The presence of any resource-declaring
   TOML section is a hard, actionable error at config load (not a silent ignore, not a warning)
-  naming the sections found and pointing at `agw resource migrate` and `agw resource sample`.
-- **FR2.** `agw resource migrate` keeps working after removal; it is the stranded operator's escape
-  hatch and reads the TOML file directly rather than requiring the sections to load into the
-  registry. Sunsetting the migrator itself is explicitly out of scope.
+  naming the sections found, the exact rewrite for each, and the surfaces that render the target
+  shape (`agw resource sample`, `agw resource describe-kind`).
+- **FR2.** Remediation is precise errors plus guide content, not a migration tool (operator ruling,
+  2026-08-07, which REVERSES this requirement's original text: it previously held that
+  `agw resource migrate` keeps working and that sunsetting it was out of scope).
+  `agw resource migrate` is deleted, both halves. In its place: the load error names every offending
+  section and the exact rewrite for it; `agw resource sample` and `agw resource describe-kind`
+  render the target shape live from the registry; and the upgrade section of
+  `docs/guides/upgrading-to-0.14.md` walks the rewrite (release-scoped, and split out of
+  `resources.md` so it can be deleted rather than unpicked when the sunset is behind us). The
+  agent-oriented `agw guide` command (owned by the onboarding effort) is the intended vehicle, and
+  it is why this effort ships `describable_targets`, `implementation_reference`, and
+  `capability_kind_reference` with no in-tree caller: an agent walks the operator through the
+  rewrite against live registry state rather than against prose.
+
+**`agw guide` is NOT built at this effort's merge, and the guide does not name it.** Verified at
+HEAD: no command module, no registration, every Phase 1 box in
+`docs/sdd/2026-08-05-onboarding-and-discovery/plan.md` unchecked, `guide-contract-lld.md` unwritten,
+and no migration or upgrading TOPIC contracted by name anywhere. Its surface is contracted
+(`agw guide [topic ...]`, `--agent`/`--human`, `--names-only`) but its content is not. So what ships
+here is the human path plus an agent-led route written against surfaces that exist today, as a brief
+the operator pastes to their agent. The service API above is the seam `agw guide` consumes when it
+arrives; until then it has no caller, which is a real cost and is recorded rather than hidden.
+
+**Sequencing risk, for the roadmap to own.** `phasing.md` gates the 0.14.0 cut on the guide's first
+slice, but that slice as planned ships `concept-onboarding`, not a migration topic. If the TOML
+sunset reaches operators before a topic covering it, the vehicle this requirement names is absent at
+exactly the moment it is needed, and the human path in `docs/guides/upgrading-to-0.14.md` is
+carrying the break alone. That is survivable, because the human path is written to stand on its own,
+but it should be a decision rather than a discovery. The ruling's rationale is recorded in the
+roadmap's `target-state.md`: the migrator required a frozen re-implementation of the old shapes as a
+verification oracle, and every divergence between oracle and model surfaced to the operator as a
+self-blaming failure.
+
 - **FR3.** Settings sections (`[operator]`, `[paths]`, `[plugins]`, `[defaults]`, `[secret_config]`,
   `[session.config]`) are unaffected. config.toml remains the settings file.
 - **FR4.** The permanent record moves with the change: a superseding ADR replaces ADR 0016's
@@ -71,7 +101,7 @@ Declaration:
   The invoked `validate`/`dependencies` classmethods are retired.
 - **FR6.** The schema vocabulary covers agentworks' semantic needs beyond plain types: fields that
   are references to resources of a named kind, fields that are secret references with
-  owner-templated default names (e.g. `git-token-<owner>`), and per-field operator-facing
+  owner-templated default names (e.g. `git-token-{owner_name}`), and per-field operator-facing
   descriptions. These semantics survive into every derived surface (validation, extraction, docs,
   samples, emitted schema).
 - **FR7.** Resource kinds' own manifest specs are declared the same way, replacing the per-kind
@@ -101,17 +131,33 @@ Declaration:
   because the schema model makes it cheapest now. Pre-support shipped ahead of this SDD (PR #349):
   decode accepts both shapes with an aggregated deprecation warning on the old one, and
   `agw resource migrate` already emits the tagged form. This effort's remaining job is hardening:
-  the old shape becomes a hard error naming the exact rewrite, and `agw resource migrate` gains a
-  manifest-upgrade mode that rewrites YAML files in place under its existing backup-first
-  discipline.
+  the old shape becomes a hard error naming the exact rewrite. A manifest-upgrade mode was
+  originally specified here and shipped; it was deleted with the rest of the migrator under the
+  2026-08-07 ruling (FR2), so the hard error and the guide carry this break alone.
 - **FR17.** Inheritance is not a dependency. An inheritance edge (a session template's `inherits`,
   and any future inheriting surface) is source composition: it participates in existence checking,
   cycle detection, and merge ordering, and is EXCLUDED from runtime-need traversal (the secret
-  resolve union, preflight's resolvability prediction, dependency listings). A resource's runtime
-  dependencies derive from its EFFECTIVE config only (FR12's merged blob), so a child overriding a
-  parent's secret name depends on the override alone; the parent's own edge to its default secret
-  describes the parent's standalone use and never attributes to the child. Without this rule, a
-  transitive walk would prompt the operator for a secret the child does not use.
+  resolve union, preflight's resolvability prediction, and OUTBOUND dependency listings). **Amended
+  2026-08-06:** INBOUND listings (`dependents_of`, the REFS count) deliberately still cross, because
+  a parent template genuinely IS referenced by its children and hiding that would misreport the
+  parent, which is the opposite error. A resource's runtime dependencies derive from its EFFECTIVE
+  config only (FR12's merged blob), so a child overriding a parent's secret name depends on the
+  override alone; the parent's own edge to its default secret describes the parent's standalone use
+  and never attributes to the child. Without this rule, a transitive walk would prompt the operator
+  for a secret the child does not use.
+
+  **Correction (2026-08-06, found by the step 2.3b implementation and verified by the lead): this
+  requirement has TWO halves, and excluding the edge is only the second.** The framing above, and
+  the plan's, treated inheritance as a capability-config surface ("a chain of length one everywhere
+  but session templates"). That is true of capability config and FALSE of the graph. The edges that
+  actually cross an inheritance edge in the shipped runtime-need traversal are the NON-capability
+  ones: `vm-template`'s `env` and `tailscale_auth_key`, `agent-template`'s `git_credentials` and
+  `user_install_commands`, `workspace-template`'s `env`. So excluding the edge ALONE is itself a
+  regression: a child would stop reporting its inherited env secrets, a silent under-answer, which
+  is the failure class this whole effort treats as worse than a crash. The requirement is therefore
+  that every inheriting kind PRODUCES the runtime needs of its EFFECTIVE declaration, and only then
+  is the inheritance edge excluded from the runtime closure. FR17 is not scoped to session
+  templates; it applies to every inheriting kind.
 
 Derived surfaces:
 
@@ -141,28 +187,73 @@ Derived surfaces:
   registry's finalize order, which this effort preserves: dependencies are extracted first, totally
   and never raising (a blob the extractor cannot make sense of just contributes no edges);
   enablement and readiness are then computed without validating (the fold is non-constructing); and
-  the throwing validate pass runs on the resources that emerge READY and ENABLED. A resource that
-  emerges disabled or not-ready skips hard validation at load, so a broken blob on a disabled-plugin
-  resource can never sink the whole config; its problems become hard errors the moment it is enabled
-  or used, when finalize validates it like any other. Validation operates on the EFFECTIVE config:
+  the throwing validate pass then runs on EVERY declared resource, with no readiness or enablement
+  gate (revised 2026-08-07, review finding 16). What config is valid is the declared model's answer
+  alone, so it cannot vary by host: an unexpected key is an error everywhere unless the capability's
+  own model accepts it, and openness is a declared property of that model rather than an accident of
+  environment. The earlier READY-and-ENABLED scope let a typo decide its own fate, because readiness
+  is computed from config the validate pass had not yet checked, so a misspelled key read as an
+  absent one and suppressed the error that named it. Validation operates on the EFFECTIVE config:
   where a surface supports inheritance (session templates), declared blobs merge along the graph's
   declared chain first and the merged blob is what validates, because a declared blob may be
-  legitimately partial (completed by a parent or child) and has no completeness of its own to check.
-  Every other surface is a chain of length one, so effective-config validation is one uniform rule,
-  not a special case; it also moves the merged-blob completeness check from first use (today's
-  session-resolve timing) to load, where the rest of hard validation lives. A capability name with
-  no registration on this host stays what it is today: a hard finalize error (the registry-readiness
-  refactor's R9.2/R9.11 rulings, preserved). Every host registers every shipped plugin's
-  capabilities, enablement being a separate axis, so an unregistered name can only be a typo, and
-  the cross-host sharing story rides the enablement axis above, not name tolerance. Revisit only if
-  out-of-tree plugins ever make unregistered-but-real names possible. Error quality does not
-  regress: errors keep owner-scoped framing (`<owner>.<field>: ...`) and file/position context at
-  least as good as today's.
+  legitimately partial (completed by a PARENT) and has no completeness of its own to check.
+  **Amended 2026-08-06:** this clause originally said "completed by a parent or child", and the
+  shipped rule is parent-completion only. Validation is per row over that row's OWN chain, so an
+  abstract base whose blob only a child completes is a load error. That is a deliberate amendment,
+  not a reading: `--template` is a plain string on all four create commands, there is no `abstract`
+  marker and no leaf-only filter, so a base that cannot stand alone is directly namable and would
+  fail at `session create` anyway. Failing at load, uniformly, with no hidden second mode, is the
+  more debuggable answer and costs nothing today because no capability declares a required field
+  yet. If abstract bases are ever wanted, the right shape is an explicit `abstract: true` on the
+  template envelope, refused by name at create time, rather than scoping validation to leaves, which
+  would let a broken base be named directly and fail late. Flagged to the operator; cheap to
+  overturn until a capability ships a required field. Every other surface is a chain of length one,
+  so effective-config validation is one uniform rule, not a special case; it also moves the
+  merged-blob completeness check from first use (today's session-resolve timing) to load, where the
+  rest of hard validation lives. A capability name with no registration on this host stays what it
+  is today: a hard finalize error (the registry-readiness refactor's R9.2/R9.11 rulings, preserved).
+  Every host registers every shipped plugin's capabilities, enablement being a separate axis, so an
+  unregistered name can only be a typo, and the cross-host sharing story rides the enablement axis
+  above, not name tolerance. Revisit only if out-of-tree plugins ever make unregistered-but-real
+  names possible. Error quality does not regress: errors keep owner-scoped framing
+  (`<owner>.<field>: ...`) and file/position context at least as good as today's.
 - **FR13.** Drift is structurally impossible or test-caught: schema facts appear in exactly one
   authored place (the model), samples and describe output are rendered from it (so they cannot drift
   by construction), the renderer is pinned by tests over fixture schemas plus every bundled kind
   (rendered samples load cleanly and build a registry), and any remaining checked-in derived docs
   are pinned by tests that fail when regeneration would change them.
+
+Wave 2 additions (folded in from the roadmap seed, 2026-08-05; the roadmap is
+`docs/sdd/2026-08-04-next-steps/`):
+
+- **FR18.** Structural secret-name reference extraction (rolls in issue #311). Secret references are
+  derived structurally from the model's reference-annotated fields (the `SecretRef` marker and its
+  owner-templated default), not by string-scraping the blob. This is FR6's reference typing carried
+  to secret-name derivation specifically: adding or renaming a secret-bearing field changes the
+  extracted references with no other edit, and the capabilities' current ad hoc secret-name logic is
+  deleted.
+- **FR19.** Contributed-sample uniform validation (rolls in issue #214). Operator-authored and
+  plugin-contributed manifests validate through the single model regime exactly as first-party ones
+  do, and unknown keys are hard errors there. FR12's strict closed-world direction is the resolution
+  of #214's open warn-versus-error tradeoff; there is not a second, looser validation path for
+  contributed content.
+- **FR20.** Envelope `metadata.expires` rider (rolls in issue #170). An optional `expires` field is
+  modeled once on the shared envelope `metadata` (beside `name` and `description`), so every kind
+  inherits it uniformly rather than each kind re-modeling it. This effort models and validates the
+  field only (a datetime); any behavior that acts on expiry is a separate effort and out of scope.
+- **FR21.** Forward-compatibility with the living-graph roadmap. This effort keeps open the four
+  doors the roadmap's `target-state.md` requires, and closes none: (a) reference extraction stays
+  source-agnostic (a pure function of model, blob, and owner, indifferent to whether the blob is
+  declared config or a future persisted instance spec); (b) the effective-config merge is a general
+  layer-stack operation, not a template-inheritance-only chain, so a future runtime instance-spec
+  layer composes on top; (c) the graph's post-finalize immutability stays a registry/fold property,
+  not a model-layer assumption, so a future living-graph effort can relax it without touching the
+  models; (d) nothing precludes one shared instance-state store (instance specs, facet
+  applied-state, artifact-ownership records). FR15 and FR17 already realize parts of (a) and (b);
+  FR21 records the whole set as an explicit non-regression constraint the design honors. Door (c)
+  gained its first external consumer (roadmap ruling, 2026-08-05): the guide surface's gated
+  read-side graph access modes expose only already-materialized data, which assumes exactly that
+  immutability stays a registry/fold property.
 
 Stretch (in scope only if phase 2 lands cleanly; may be descoped to a follow-up without
 renegotiating this FRD):
@@ -175,7 +266,8 @@ renegotiating this FRD):
 - Adopting pydantic-settings or changing config file discovery, layering, or precedence.
 - New capability kinds, changes to the capability lifecycle (preflight/runup/ops), or plugin
   protocol changes beyond how config schema is declared.
-- Removing `agw resource migrate` or `agw config` compatibility surfaces beyond FR1.
+- Removing `agw config` compatibility surfaces beyond FR1. (Removing `agw resource migrate` was out
+  of scope as originally written and became in scope under the 2026-08-07 ruling; see FR2.)
 - Publishing schemas externally (SchemaStore or hosted URLs); emitted schemas are local artifacts.
 - Generating doc content inside the prose guides (embedded generated field tables, a guide
   generation pipeline, drift tests over prose). Guides defer to the rendered samples and describe
@@ -190,8 +282,10 @@ renegotiating this FRD):
 - Zero hand-maintained duplication of schema facts remains for migrated kinds: the hand-authored
   sample files are gone, prose blurbs carry no field lists, and the FR13 renderer tests are in
   place.
-- The TOML resource loaders and the decoder shim layer are deleted (phase 1), with the full test
-  suite green and the migrator verified working against a fixture config.
+- The TOML resource loaders and the decoder shim layer are deleted, with the full test suite green.
+  Phase 1 met this with the loaders relocated into the migrator to serve as its verification oracle;
+  under the 2026-08-07 ruling (FR2) the migrator and that oracle are both deleted, so the deletion
+  is now total.
 - Operator-facing error output for the reworked validation passes review against a corpus of
   representative mistakes (unknown key, wrong type, missing required field, bad capability name)
   with file/position framing preserved.
@@ -237,7 +331,8 @@ Decided with the operator on 2026-08-01:
   rides the enablement axis.
 - **Tagged-union shape break.** The naming-field-plus-blob pair collapses into one
   `name`-discriminated table (FR8), accepted as a breaking manifest change now, shipped with hard
-  actionable errors on the old shape plus a manifest-upgrade mode in `agw resource migrate`.
+  actionable errors on the old shape. (The manifest-upgrade mode shipped and was then deleted with
+  the migrator under the 2026-08-07 ruling; see FR2.)
 
 Decided with the operator on 2026-08-02:
 

@@ -9,12 +9,6 @@ consumes the ``SecretBackend`` API directly.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from agentworks.resources import Registry
-
-
 from agentworks.secrets.backends import SECRET_BACKEND_REGISTRY
 from agentworks.secrets.base import (
     SecretConfig,
@@ -33,18 +27,6 @@ from agentworks.secrets.resolve import (
     validate_chain,
 )
 
-
-def publish_to(registry: Registry) -> None:
-    """Publish the ``secret-backend`` capability resources -- the
-    resource-registry projection of the capability registry
-    (``SECRET_BACKEND_REGISTRY``), which remains the source of truth for
-    the implementations themselves.
-    """
-    from agentworks.secrets.backends import publish_to as publish_backends
-
-    publish_backends(registry)
-
-
 __all__ = [
     "SECRET_BACKEND_REGISTRY",
     "ActiveBackend",
@@ -54,7 +36,6 @@ __all__ = [
     "active_backends",
     "compute_needed_secrets",
     "env_var_name_for",
-    "publish_to",
     "resolve_for_command",
     "resolve_secrets",
     "validate_chain",

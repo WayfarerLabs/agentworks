@@ -8,8 +8,9 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.agents.grants import MAX_WORKSPACE_NAME_LENGTH
-from agentworks.config import validate_name
 from agentworks.errors import AlreadyExistsError, ExternalError, NotFoundError, StateError
+from agentworks.naming import validate_name
+from agentworks.path_rendering import format_host_path
 from agentworks.vms.manager import gated_vm_boundary
 from agentworks.workspaces.backends.vm import default_workspace_path
 from agentworks.workspaces.manager._common import _guard_vm_status, _resolve_vm, _workspace_scope
@@ -221,7 +222,7 @@ def copy_workspace(
                     timeout=10,
                 )
                 vscode_path = generate_vscode_workspace(dest_vm, config, dest_name, workspace_path)
-                output.detail(f"VS Code workspace: {vscode_path}")
+                output.detail(f"VS Code workspace: {format_host_path(vscode_path)}")
             finally:
                 # Exactly-once close, in a finally so a cancellation (the
                 # sanctioned KeyboardInterrupt re-raise out of

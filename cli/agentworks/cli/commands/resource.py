@@ -10,11 +10,15 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Annotated, cast
 
-import click
 import typer
 
 from agentworks.cli._app import app
 from agentworks.cli._helpers import get_db
+
+# Module-level because three commands in this file render a host path and
+# `path_rendering` is a leaf module (pathlib only), so hoisting it costs
+# no startup time.
+from agentworks.path_rendering import format_host_path
 
 # Module-level so the sample-kind Choice below can be built at decoration
 # time. This is intentional and adds no startup cost over the pre-fix
@@ -34,8 +38,6 @@ resource_app = typer.Typer(
 )
 app.add_typer(resource_app)
 
-_LAYOUT_CHOICES = click.Choice(["per-kind", "single", "per-resource"])
-_TOML_CHOICES = click.Choice(["comment", "delete"])
 # The sample-kind argument is deliberately a plain string, not a
 # click.Choice: ANY kind the operator types (a capability kind, a typo,
 # anything) must reach the service layer, which rejects with a clean,
@@ -195,9 +197,9 @@ def resource_describe(
         render_resource_description,
     )
 
-    # One KIND/NAME grammar across the resource group (same token shape
-    # as `resource migrate` selectors); '/' cannot appear in names, so
-    # the first-slash split is unambiguous.
+    # One KIND/NAME grammar across the resource group (`resource edit`
+    # and `resource list --names-only` use the same token); '/' cannot
+    # appear in names, so the first-slash split is unambiguous.
     kind, slash, name = ref.partition("/")
     if not slash or not name:
         raise ValidationError(
@@ -210,6 +212,39 @@ def resource_describe(
     db = get_db()
     desc = describe_resource(registry, kind, name, db=db)
     render_resource_description(desc)
+
+
+@resource_app.command("describe-kind")
+def resource_describe_kind(
+    target: Annotated[
+        str,
+        typer.Argument(
+            help=(
+                "What to document: a kind (secret, vm-site, vm-platform) or "
+                "one implementation of a capability kind "
+                "(vm-platform/azure-vm)."
+            ),
+        ),
+    ],
+) -> None:
+    """Show what a kind (or one capability implementation) accepts.
+
+    The field reference: every field an operator may write, with its type,
+    whether it is required, its default, and what it means, rendered from
+    the same declaration the loader validates against and the editor
+    schema is emitted from. A capability kind lists its implementations;
+    naming one documents its config.
+
+    Reads no config and builds no registry, so it answers on a host whose
+    config is broken, and it documents a capability whose plugin is not
+    enabled. `agw resource sample KIND` prints the same fields as a
+    document to edit; `agw resource describe KIND/NAME` describes a
+    declared resource rather than a kind.
+    """
+    from agentworks.manifests.describe import render_reference
+    from agentworks.manifests.reference import reference_for
+
+    render_reference(reference_for(target))
 
 
 @resource_app.command("edit")
@@ -251,6 +286,8 @@ def resource_edit(
         raise typer.Exit(1)
 
     from agentworks.errors import ConfigError
+    from agentworks.schema import location_text
+    from agentworks.source_location import SourceLocation
 
     try:
         config = load_config()
@@ -272,7 +309,7 @@ def resource_edit(
         found = locate_document(resources_dir, kind, name)
         if found.location is None:
             if found.unreadable:
-                files = ", ".join(str(p) for p in found.unreadable)
+                files = ", ".join(format_host_path(p) for p in found.unreadable)
                 exc.hint = (
                     f"{exc.hint + ' ' if exc.hint else ''}Also: {files} "
                     f"failed to parse and could not be searched; edit "
@@ -283,142 +320,10 @@ def resource_edit(
         path, line = found.location.file, found.location.line
     # Per-kind layout files hold many documents; the line tells the
     # operator where to look. (No editor +line heuristics -- keep it
-    # simple, per the maintainer's scope ruling.)
-    output.info(f"Editing {kind}/{name} ({path}:{line})")
+    # simple, per the maintainer's scope ruling.) Framed by the shared
+    # helper so this reads the same as the errors that sent them here.
+    output.info(f"Editing {kind}/{name} ({location_text(SourceLocation(file=path, line=line))})")
     raise typer.Exit(subprocess.call([editor, str(path)]))
-
-
-@resource_app.command("migrate")
-def resource_migrate(
-    selectors: Annotated[
-        list[str] | None,
-        typer.Argument(
-            help=(
-                "What to migrate: KIND (one kind) or KIND/NAME (one "
-                "resource). Repeatable; overlaps union. Required unless "
-                "--all is passed."
-            ),
-        ),
-    ] = None,
-    all_resources: Annotated[
-        bool,
-        typer.Option(
-            "--all",
-            help=(
-                "Migrate every TOML-declared resource. Required for a "
-                "whole-config run; a bare invocation is an error, never "
-                "an accidental full migration."
-            ),
-        ),
-    ] = False,
-    layout: Annotated[
-        str,
-        typer.Option(
-            "--layout",
-            click_type=_LAYOUT_CHOICES,
-            help=(
-                "How resources map to files: per-kind (default; "
-                "vm-templates.yaml), single (resources.yaml), or per-resource "
-                "(vm-template/small.yaml)."
-            ),
-        ),
-    ] = "per-kind",
-    toml: Annotated[
-        str,
-        typer.Option(
-            "--toml",
-            click_type=_TOML_CHOICES,
-            help=(
-                "What happens to the migrated TOML sections: comment "
-                "(default; commented out in place with a marker) or delete."
-            ),
-        ),
-    ] = "comment",
-    dry_run: Annotated[
-        bool,
-        typer.Option(
-            "--dry-run",
-            help=(
-                "Print what would migrate where; write nothing. Summary by "
-                "default; add --full for the YAML documents and the "
-                "config.toml diff."
-            ),
-        ),
-    ] = False,
-    full: Annotated[
-        bool,
-        typer.Option(
-            "--full",
-            help=("With --dry-run: include the full YAML documents and the config.toml diff in the output."),
-        ),
-    ] = False,
-    yes: Annotated[bool, typer.Option("--yes", help="Skip the confirmation prompt.")] = False,
-) -> None:
-    """Migrate TOML-declared resources to YAML manifests.
-
-    A recurring, incremental mover: run it any time you want to move
-    resources (or a subset) from TOML to YAML. New
-    TOML-derived documents append without rewriting existing files. The
-    original config.toml is backed up first, and every real run verifies the
-    resulting registry is identical before it counts as done.
-    """
-    from agentworks import output
-    from agentworks.config import load_config
-    from agentworks.errors import UserAbort, ValidationError
-    from agentworks.migrate import execute_plan, plan_migration
-    from agentworks.migrate.render import render_dry_run, render_preview
-
-    if full and not dry_run:
-        raise ValidationError(
-            "--full only applies to --dry-run",
-            hint="A real run prints the summary and asks for confirmation.",
-        )
-
-    # This command IS the remediation for the resource-section hard error, so
-    # it loads settings-only (resources=False) to read a config that still
-    # carries resource sections. Planning is pure over the config text (no
-    # registry build); the post-run verification builds its own registry from
-    # the rewritten config.
-    config = load_config(resources=False)
-    plan = plan_migration(
-        config,
-        list(selectors or []),
-        all_resources=all_resources,
-        layout=layout,
-        toml_mode=toml,
-    )
-
-    if plan.nothing_to_do:
-        output.info("Nothing to migrate: no migratable TOML-declared resources remain.")
-        return
-
-    if dry_run:
-        for line in render_dry_run(plan, full=full):
-            output.info(line)
-        output.info("")
-        output.info("Dry run: nothing was written.")
-        return
-
-    for line in render_preview(plan):
-        output.info(line)
-    if not yes and not output.confirm("Proceed?", default=False):
-        raise UserAbort("migration cancelled")
-
-    output.info("Applying migration...")
-    result = execute_plan(plan, config)
-    for path in result.created:
-        output.detail(f"Created {path}")
-    for path in result.appended:
-        output.detail(f"Appended to {path}")
-    if result.config_rewritten:
-        output.detail(f"Rewrote {plan.config_path} (backup: {result.backup_path})")
-    else:
-        output.detail(f"Backup: {result.backup_path}")
-    if result.yaml_backup_path is not None:
-        output.detail(f"YAML recovery copies: {result.yaml_backup_path}")
-    if result.dropped_secret_backends:
-        output.detail("Dropped deprecated [secret_backends.*] sections.")
-    output.result(f"verified: registry unchanged ({result.verified_rows} resources)")
 
 
 @resource_app.command("sample")
@@ -433,10 +338,7 @@ def resource_sample(
         bool,
         typer.Option(
             "--all",
-            help=(
-                "Print every kind's sample. Required for the full set; a "
-                "bare invocation is an error, matching `resource migrate`."
-            ),
+            help=("Print every kind's sample. Required for the full set; a bare invocation is an error."),
         ),
     ] = False,
     write: Annotated[
@@ -473,7 +375,94 @@ def resource_sample(
     # deprecation nudge -- this command is the remediation path) stay out.
     config = load_config(resources=False)
     resources_dir = config.source_path.parent / RESOURCES_DIRNAME
-    path, appended = write_sample(resources_dir, write, kind, all_kinds=all_kinds)
-    verb = "Appended sample to" if appended else "Wrote sample to"
-    output.info(f"{verb} {path}")
+    path, outcome = write_sample(resources_dir, write, kind, all_kinds=all_kinds)
+    verb = "Appended sample to" if outcome == "appended" else "Wrote sample to"
+    output.info(f"{verb} {format_host_path(path)}")
     output.info("Uncomment the document lines (delete one leading '#') to activate.")
+    # Each arm names something that IS in the file. A blank file that was
+    # already there ("filled") gets neither a separator nor a modeline, so
+    # it gets neither line; claiming the separator there pointed the
+    # operator at a '#---' that was not written.
+    if outcome == "appended":
+        output.detail(
+            "The '#---' above the new sample is one of those document lines: it separates it from what was already "
+            "in the file, so uncomment it too."
+        )
+    elif outcome == "created":
+        output.detail(
+            "The first line associates a schema, so a schema-aware editor checks the file as you type. Leave it as a "
+            "comment."
+        )
+
+
+@resource_app.command("schema")
+def resource_schema(
+    kind: Annotated[
+        str | None,
+        typer.Argument(
+            help=(
+                "Kind to print the schema for (e.g. secret, vm-template). "
+                "Omit for the any-kind schema, which describes a manifest "
+                "document of every kind at once."
+            ),
+        ),
+    ] = None,
+    write: Annotated[
+        bool,
+        typer.Option(
+            "--write",
+            help=(
+                "Write the whole set (the any-kind schema plus one per kind) "
+                "under the resources directory instead of printing. The "
+                "destination is fixed, because the modeline written into "
+                "manifests refers to it by that path."
+            ),
+        ),
+    ] = False,
+) -> None:
+    """Print (or write) the JSON Schema for resource manifests.
+
+    Point a schema-aware editor at these and manifests get completions,
+    hover docs, and diagnostics as you type. Files written by
+    `agw resource sample --write` already carry the association, as a
+    `# yaml-language-server: $schema=...` line; add that line to a
+    hand-written manifest to get the same.
+
+    The schema describes THIS host: a capability contributed by a plugin
+    appears in it once that plugin is installed, so re-run --write after
+    installing one.
+    """
+    from agentworks import output
+    from agentworks.errors import ValidationError
+    from agentworks.manifests.emit import (
+        SCHEMA_DIRNAME,
+        document_schema,
+        envelope_schema,
+        schema_json,
+        write_schema_set,
+    )
+
+    if not write:
+        schema = envelope_schema() if kind is None else document_schema(kind)
+        output.info(schema_json(schema).rstrip("\n"))
+        return
+
+    if kind is not None:
+        raise ValidationError(
+            "--write writes the whole schema set, so it takes no kind",
+            hint=(
+                "A partial set would leave some manifest's modeline pointing "
+                "at a file that is not there. Drop the kind, or print one "
+                "kind's schema without --write."
+            ),
+        )
+
+    from agentworks.config import load_config
+    from agentworks.manifests.loader import RESOURCES_DIRNAME
+
+    # Settings-only, like `sample --write`: locating the resources
+    # directory needs `source_path` and nothing else.
+    config = load_config(resources=False)
+    schema_dir = config.source_path.parent / RESOURCES_DIRNAME / SCHEMA_DIRNAME
+    written = write_schema_set(schema_dir)
+    output.info(f"Wrote {len(written)} schemas to {format_host_path(schema_dir)}")

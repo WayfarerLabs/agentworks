@@ -17,6 +17,7 @@ import yaml
 from agentworks.errors import ConfigError
 from agentworks.manifests.decode import decode_document
 from agentworks.manifests.envelope import validate_envelope
+from agentworks.schema import located, location_text
 from agentworks.source_location import SourceLocation
 
 if TYPE_CHECKING:
@@ -88,20 +89,34 @@ class ManifestEntry:
 class ManifestSet:
     """All operator manifests, decoded, in config-load order.
 
-    ``issues`` mirrors ``Config.config_issues``: spec-level warnings
-    (unknown keys on warn-mode kinds, env hygiene) prefixed with the
-    document's ``file:line``. ``deprecation_issues`` mirrors
-    ``Config.deprecation_issues``: ambient teaching messages, silenced
-    per-invocation by --no-deprecations. ``deprecated_shape_resources``
-    is the underlying fact (the ``kind/name`` tokens still spelling the
-    deprecated sibling capability-config shape), for surfaces that
-    render their own tidy rows (doctor).
+    ``issues`` mirrors ``Config.config_issues``: the load-time ADVISORIES
+    a document earns (a non-conforming secret name, env hygiene), prefixed
+    with the document's ``file:line``. Everything that used to warn about
+    the SHAPE of a spec is a hard error now (FR12), so what rides this
+    channel is only what an operator should act on without the config
+    refusing to load.
+
+    There is no deprecation channel here YET, and that is a statement
+    about consumers rather than about the design. The one manifest
+    deprecation that ever rode one (the sibling capability-config shape)
+    is a hard error now, so building the carrier today would add a field
+    nothing writes.
+
+    When the next manifest-shape deprecation arrives, and the roadmap
+    ledger says one is expected because this effort removed the warn
+    window that used to exist, the pattern to copy is
+    ``Config.deprecation_issues``: a per-SOURCE carrier feeding the shared
+    surface, so ``--no-deprecations`` and
+    ``output.deprecations_suppressed`` serve it without changes. That
+    field is kept deliberately for the same reason (operator ruling,
+    2026-08-07) even though it is empty today: a warn window is exactly
+    the thing you cannot build at the moment you discover you need it. Do
+    NOT read its emptiness, or this absence, as evidence the mechanism was
+    a mistake.
     """
 
     entries: tuple[ManifestEntry, ...]
     issues: tuple[str, ...]
-    deprecation_issues: tuple[str, ...] = ()
-    deprecated_shape_resources: tuple[str, ...] = ()
 
     @classmethod
     def empty(cls) -> ManifestSet:
@@ -160,12 +175,16 @@ def _iter_documents(path: Path) -> Iterator[tuple[object, SourceLocation]]:
     mark; values are constructed from the composed node with the safe
     constructor so per-document line numbers survive.
     """
+    # A file that cannot be read or parsed has no document, so there is
+    # no declaration line to point at: ``line=0`` is exactly that case,
+    # and the shared framing renders the file alone.
+    whole_file = SourceLocation(file=path, line=0)
     try:
         text = path.read_text(encoding="utf-8")
     except UnicodeDecodeError as exc:
-        raise ConfigError(f"{path}: not valid UTF-8: {exc}") from exc
+        raise ConfigError(located(whole_file, f"not valid UTF-8: {exc}")) from exc
     except OSError as exc:
-        raise ConfigError(f"{path}: cannot read manifest: {exc}") from exc
+        raise ConfigError(located(whole_file, f"cannot read manifest: {exc}")) from exc
     try:
         for node in yaml.compose_all(text, Loader=_StrictLoader):
             if node is None:
@@ -182,8 +201,8 @@ def _iter_documents(path: Path) -> Iterator[tuple[object, SourceLocation]]:
             yield value, location
     except yaml.YAMLError as exc:
         mark = getattr(exc, "problem_mark", None)
-        line = f":{mark.line + 1}" if mark is not None else ""
-        raise ConfigError(f"{path}{line}: invalid YAML: {exc}") from exc
+        at = whole_file if mark is None else SourceLocation(file=path, line=mark.line + 1)
+        raise ConfigError(located(at, f"invalid YAML: {exc}")) from exc
 
 
 @dataclass(frozen=True)
@@ -231,7 +250,6 @@ def load_manifests(resources_dir: Path) -> ManifestSet:
     """
     entries: list[ManifestEntry] = []
     issues: list[str] = []
-    deprecated_shapes: list[str] = []
     seen: dict[tuple[str, str], SourceLocation] = {}
 
     for path in _iter_manifest_files(resources_dir):
@@ -239,17 +257,18 @@ def load_manifests(resources_dir: Path) -> ManifestSet:
             doc = validate_envelope(value, location)
             key = (doc.kind, doc.name)
             if key in seen:
-                first = seen[key]
+                # Two locations, one message: the frame points at the
+                # SECOND declaration (the one to delete), and the first
+                # is named inline. Both render through the same helper,
+                # so a first declaration with nowhere to point drops the
+                # clause instead of offering an unopenable path.
+                first = location_text(seen[key])
+                also = f" (also declared at {first})" if first is not None else ""
                 raise ConfigError(
-                    f"{location.file}:{location.line}: duplicate {doc.kind} "
-                    f'"{doc.name}" (also declared at {first.file}:{first.line})',
+                    located(location, f'duplicate {doc.kind} "{doc.name}"{also}'),
                 )
             seen[key] = location
-            resource = decode_document(
-                doc,
-                issues,
-                deprecated_shapes,
-            )
+            resource = decode_document(doc, issues)
             entries.append(
                 ManifestEntry(
                     kind=doc.kind,
@@ -259,18 +278,4 @@ def load_manifests(resources_dir: Path) -> ManifestSet:
                 )
             )
 
-    # Aggregate each deprecation class once across the whole set, mirroring
-    # the TOML resource-section nudge. A warning per document would be
-    # obnoxious on real configs.
-    deprecation_messages: list[str] = []
-    if deprecated_shapes:
-        from agentworks.manifests.decode import capability_shape_deprecation
-
-        deprecation_messages.append(capability_shape_deprecation(deprecated_shapes))
-
-    return ManifestSet(
-        entries=tuple(entries),
-        issues=tuple(issues),
-        deprecation_issues=tuple(deprecation_messages),
-        deprecated_shape_resources=tuple(deprecated_shapes),
-    )
+    return ManifestSet(entries=tuple(entries), issues=tuple(issues))

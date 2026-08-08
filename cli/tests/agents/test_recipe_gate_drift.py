@@ -10,7 +10,8 @@ themselves gated. The runner call graph is multi-hop and fans out, so a shallow
 open (notably the ``session create --new-agent`` path, whose realize happens in
 ``_realize_ephemerals`` while the gate lives in ``_build_session_graph``). This
 guard is therefore two structural assertions, mirroring the
-``CAPABILITY_ADAPTERS.keys()`` / harness-integration-factory-caller pattern:
+capability-switchboard drift guard (which asserts every switchboard site derives
+from the descriptor table) and the harness-integration-factory-caller pattern:
 
 1. The CALLER SETS of the two runners and the two choreography functions are
    exactly the enumerated set, so a NEW caller of any of them fails the test

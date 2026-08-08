@@ -52,6 +52,10 @@ agent up on a machine and let it work: where it runs, what it runs, how it gets 
 it authenticates to git hosts. Each kind is an independent extension point with its own shipped
 options, allowing an operator to enable only those needed in a particular environment.
 
+The implementations named below are the ones that shipped when this was written, as illustration.
+`agw resource describe-kind <capability-kind>` is the set a given install actually has, and naming
+one documents its config; the per-kind READMEs linked below carry the implementation detail.
+
 ### VM Platform
 
 The `vm-platform` capability decides where agent VMs live and how they are brought up, torn down,
@@ -259,37 +263,73 @@ created yet. (A future permission model omits fields the same way: a capability 
 or a secret just finds it absent.) The rule that pairs with it: pre-resolve concerns read `self`
 (config bound at construct); runup and ops read the context.
 
-#### Stage 1: Declare and Validate
+#### Stage 1: Declare
 
 ```python
-dependencies(owner: str, config: Mapping[str, object]) -> tuple[ConfigReference, ...]
-validate(owner: str, config: Mapping[str, object]) -> None
+config_model: ClassVar[type[BaseModel]]          # what this capability's config IS
+config_for() -> type[BaseModel]                  # which config the core reads, the override point
 ```
 
-The config-declaration contract is split in two. `dependencies` extracts the resource references the
-config blob implies (secrets it names, other resources it points at); `validate` is the throwing
-_shape_ check. This separation is what lets the registry build its dependency graph without
-validating: graph construction runs `dependencies` alone, and validation is a distinct pass. They
-are:
+A capability DECLARES the shape of its config as a model, and the core does everything else with it:
+shape validation, reference extraction, defaulting, schema emission, and rendering are all derived
+views of that one declaration. **No capability code is invoked for any of them**, which is what
+keeps a misbehaving plugin out of the finalize pass, and what makes it impossible for the validator
+and the documentation to disagree.
 
-- **Total vs throwing.** `dependencies` **never raises**: it emits every edge it can derive
-  best-effort, omitting only an edge whose _identity_ depends on a field that is itself malformed.
-  All the raising lives in `validate`. Together, for a valid blob, they reproduce what the earlier
-  fused method did: the same refs from `dependencies`, the same errors from `validate`.
-- **Pure.** No I/O, no secret resolution, no network. They are called repeatedly and in varied
-  contexts (registry finalize, construct), so they have to be cheap and side-effect-free everywhere;
-  finalize in particular is a pure graph-building pass where I/O has no place. (`validate` used to
-  also run at manifest decode / TOML load; it moved into a dedicated finalize pass so graph
-  construction never depends on a block being valid.)
-- **Classmethods.** They have no instance; they read a blob to declare refs (`dependencies`) or
-  check its shape (`validate`).
-- **Host-agnostic.** `owner` is a label used only for error framing and reference attribution, never
-  dispatched on, so the same methods serve config hosted in a dedicated kind, inline in a consumer,
-  or in a keyed map (see hosting shapes under Related). They are _not_ the consuming resource; if
-  they were, they could serve only one host. Examples: `git-credential/ado`, or a session template's
-  `harness_integration_config` site.
+The model is an `AgwModel` (`agentworks.schema`): strict, frozen, closed-world. A field that names
+another resource carries a `SecretRef` / `ResourceRef` marker, optionally with an owner-templated
+default (`git-token-{owner_name}`), and that marker is the single authored place the reference
+semantics live: the boundary fill (`filled_defaults`) renders the default into the blob before
+validation and extraction read it, and emitted JSON Schema carries it as `x-agw-ref`.
 
-The references `dependencies` returns are sourceless. The consuming resource attaches itself as the
+The two halves the core derives keep the contracts the split classmethods used to carry:
+
+- **Extraction is total.** It emits every edge it can derive best-effort, omitting only an edge
+  whose _identity_ depends on a field that is itself malformed, and it never raises for any input.
+  That is what lets the registry build its dependency graph without validating: graph construction
+  extracts, and validation is a distinct, later pass.
+- **Validation throws**, and only in the finalize pass over the READY and ENABLED set (plus at
+  construct). It never runs at decode, so graph construction never depends on a blob being valid.
+- **Both read the EFFECTIVE blob on a host that inherits.** A `session-template` merges its
+  `inherits` chain and the merged result is what its edges and its shape check are computed from, so
+  a required field is a claim about the whole lineage rather than about one declaration (see
+  `harness_integration/README.md`). Every other host is a chain of one, so this is a uniform rule
+  rather than a special case, and it is why the inheritance edge itself is excluded from
+  runtime-need traversal: the child already carries what it inherited.
+- **Both are pure**, and structurally so: they read `model_fields` and a raw blob, and invoke no
+  user code at all.
+- **Host-agnostic.** The owner is a `(kind, name)` pair used for error framing, reference
+  attribution, and rendering an owner-templated default. It is never dispatched on, so the same
+  model serves config hosted in a dedicated kind, inline in a consumer, or in a keyed map (see
+  hosting shapes under Related).
+
+**How the config reaches the model, on a manifest surface.** A host kind's spec selects a capability
+with ONE tagged table on its naming field (`platform: {name: lima, placement: {mode: local}}`),
+which the row carries as a `CapabilityBlock`. That table has two owners, and the split is the
+contract: **`name` belongs to the HOST kind** (it is the selector, and the host's own model
+validates it), and **every other key belongs to the capability** the tag names. Decode deliberately
+does NOT check the extras, even though it could see them: they are checked closed-world at finalize
+against the capability's own declared model. Validating them twice, against two models, is how a
+host kind would end up encoding what its capabilities accept, which is the coupling this whole layer
+exists to avoid.
+
+`config_for()` is how the core asks which config a capability offers, and every read of a
+capability's config goes through it rather than off `config_model` directly. Every capability today
+offers ONE config shared by all of its operations, so it declares `config_model` and the base hook
+answers with it.
+
+Config is offered per FACET by contract: a facet is the level a capability is driven at (`vm`,
+`user`, `workspace`, `session`), pairing that level's methods with that level's config. CONSUMERS
+choose which facet they drive, so a producer never has to know who is asking, and facets are
+deliberately **not** scopes, with core owning the mapping between them (admin and agent both drive
+the `user` level; session start and resume share `session`). Nothing under `capabilities/` spells a
+scope. The parameter that names a facet is not on the signature yet, because nothing offers more
+than one config; it arrives additively with the first capability whose methods run at several
+levels, which is the same change that brings the consumers able to pass it. Offering a config at a
+facet is **not** a claim to support that level, and offering none is not a claim to lack it: support
+is carried by the implementation.
+
+The references the core extracts are sourceless. The consuming resource attaches itself as the
 source when it emits them, in its `dependencies()` at finalize ("whoever hosts the config that names
 the secret emits the reference"). The framework consumes those references two ways: statically, they
 feed the registry's reference graph and doctor's resolvability prediction; at runtime, their
@@ -301,9 +341,11 @@ command entry.
 
 The instance is constructed bound to its `(owner_name, config)`: its config, _not_ resolved secret
 values, and no secret machinery at all (the operation's boundary union comes from the plan's
-declared references; values arrive later through the context). Construction re-runs `validate` and
-**fails on an invalid config shape**: an instance is not built around an invalid blob, so a shape
-error dies here, at construction, never later in preflight. (Errors that need the world to detect,
+declared references; values arrive later through the context). Construction validates the blob into
+the declared model and **fails on an invalid config shape**: an instance is not built around an
+invalid blob, so a shape error dies here, at construction, never later in preflight. What binds is
+the validated, fully-defaulted model INSTANCE, reachable as `self.config`, so an operation reads a
+typed field rather than a dict key with a fallback beside it. (Errors that need the world to detect,
 an unreachable API, a missing tool, are preflight's job, not this.) Construction is otherwise cheap:
 no network, no secret resolution, no prompt.
 
@@ -458,9 +500,9 @@ authentication never falls through into a mutation) are spelled out in
 Provisioning re-runs: `reinit` re-applies everything, and a failed command is retried. So the
 lifecycle has to be safe to re-run, and the five stages divide cleanly on how they get there:
 
-- `dependencies` / `validate` (pure), `construct` (cheap, side-effect-free), and both readiness
-  stages, `preflight` and `runup` (read-only), are idempotent _by their existing contracts_. Their
-  stated re-runnability is idempotency by another name; nothing extra is required.
+- declaration (pure data), `construct` (cheap, side-effect-free), and both readiness stages,
+  `preflight` and `runup` (read-only), are idempotent _by their existing contracts_. Their stated
+  re-runnability is idempotency by another name; nothing extra is required.
 - **ops** are the mutation phase, so idempotency there is an _explicit_ contract, not a free
   consequence. Each kind's ABC **flags the ops that must be idempotent** (a marker plus the standing
   docstring note), and implementations must conform: a flagged op, run twice, lands in the same
@@ -489,42 +531,186 @@ capability author's contract, so it lives in
 The shared surface is real (it is a lifecycle, not a boilerplate default), so it earns a base class
 (`capabilities/base.py`). The base owns the contract above and nothing domain-specific:
 
-- the `dependencies` / `validate` classmethods, with sensible defaults (no implied references,
-  accepts no config) and the standing NOTE that this invoked-validation API may later be superseded
-  by capabilities declaring their config schema at registration time;
+- the `config_model` declaration and the `config_for()` hook whose default answers with it;
 - the construct, `preflight`, and `runup` instance contract (both readiness stages no-op by default:
   resolvability prediction belongs to the operation's preflight sweep, not to the instance or its
   node, and the capabilities with nothing to check or authenticate get the right behavior for free);
-- the capability's identity (`name`, `description`) as the registry sees it.
+- the capability's identity (`name`, `description`) as the registry sees it, and the
+  `contract_version` it is written against.
 
 Subclasses add their ops. `GitHubCredentialProvider`, `VMPlatform`, and `HarnessIntegration` extend
 it. Consuming resources do not.
 
+**Four class-level declarations are required and none is defaulted:** `name`, `description`,
+`contract_version`, and `config_model`. A default on any of them would let an implementation inherit
+a claim it never made, which is exactly how the retired invoked `validate` behaved: an author who
+forgot it got "accepts anything" for free, and an unmigrated implementation looked migrated.
+Registration refuses an implementation missing any of the four, naming it.
+
 The base lives at the top of the `capabilities/` subtree, not in `resources/`: it is capability
 machinery, not framework machinery.
+
+### The Kind Descriptor: One Table, Core-Owned
+
+A capability KIND is declared data too, and the same rule holds one rung up: the framework READS
+what it needs to know about a kind rather than asking code. `CapabilityKindDescriptor`
+(`capabilities/descriptor.py`) is one frozen record per kind, and `capability_descriptors()` is the
+single enumeration of the four. Each capability package contributes its own record beside its kind
+strategy (`vm_platform/kinds.py`, `harness_integration/kinds.py`, `git_credential/kinds.py`,
+`secrets/kinds.py`), so nothing central knows a kind's internals.
+
+The table exists because the alternative was a switchboard. Seven sites used to enumerate the four
+kinds independently (the plugin adapter table, the graph's kind set, its readiness dispatch, the
+per-kind registry loaders, bootstrap publication, the plugin snapshot/restore tuple, and manifest
+decode's capability-field map), so adding a kind meant finding all seven and a disagreement between
+any two was invisible. They derive from the table now.
+
+What a record carries, and why each field is a fact about the kind rather than about one
+implementation of it:
+
+- **`contract_version`**, the single implementation contract version this build supports. Every
+  implementation declares its own and registration requires an EXACT match, so a contract change is
+  a hard cutover: bumping the number refuses every implementation still on the old one until each is
+  migrated. Supporting two at once would need a supported-range field and a compatibility rule,
+  which is a decision to make when a real migration needs it, not before.
+- **`config_schema`** (a `ConfigContract`), what a config model offered for this kind must BE: the
+  base it extends (`AgwModel` where the config is mapping-shaped, `AgwRootModel` where it is not,
+  because a secret backend's per-secret mapping may be a bare string), and the discriminator field
+  for a kind whose config is dispatched by a tagged union. **The kind states the contract;
+  implementations declare the models.** That is what makes a per-facet declaration a capability's
+  own business rather than a framework change.
+- **`implementation_contract`, `required_operations`, `required_attributes`**, what an
+  implementation must satisfy. Not uniform in shape: three kinds declare an ABC and are checked
+  nominally, while `SecretBackend` is a `Protocol` whose members include properties, so it is
+  checked structurally and the attribute and operation sets ARE its enforcement.
+- **`registry`, `registry_policy`, `entry_factory`, `readiness`, `publisher_source`**, how the
+  kind's implementations are stored, published as read-only rows, and asked whether this host
+  supports them.
+- **`manifest_section`** (a `HostSurface`), which declarable kind's spec selects this capability and
+  under which field. `None` for `secret-backend`, whose `backend_mappings` map key already names it.
+
+The kind list is fixed by the core and the descriptors are frozen: a plugin contributes
+IMPLEMENTATIONS of existing kinds, never a kind. Domain operations stay domain-owned, too. Nothing
+here touches `VMPlatform.create` or `SecretBackend.batch_get`; the descriptor wires a kind into the
+framework without absorbing what makes the kind itself.
+
+#### Registration-Time Conformance
+
+Because the descriptor states the contract, the contract is checkable, and it is checked before
+anything is seated. Every implementation is run against its kind's record
+(`capabilities/conformance.py`) at registration: the base it derives from, its metadata, the
+non-operation members the framework reads off it, that nothing would stop it being constructed, the
+domain operations, the config model against `config_schema`, and the contract version.
+[`../plugins/README.md`](../plugins/README.md#contract-conformance) enumerates the checks; this is
+the one place they are listed.
+
+The check is **structural and never constructs the implementation**, so it says the same thing for
+every kind regardless of how that kind's registry stores things. It replaced an
+`isinstance(impl, type)` gate and a `cast`, under which a class that merely looked plausible seated
+fine and failed later, far from the mistake. `register_plugin` runs it in its validation pass before
+any registry is mutated, so a non-conforming implementation is a typed error naming the plugin and
+seating stays all-or-nothing. Built-in implementations are held to the same contract by the
+descriptor table's own self-test.
+
+### Modeling a Config That Has Variants
+
+When a capability can be driven more than one way, the choice must be DECLARABLE. That is the whole
+rule, and it is narrower than it first appears: the failure is not that absence selects a mechanism,
+it is that there is no way to WRITE the choice down. Azure and AWS sites once worked that way.
+Omitting the credential block selected the platform's ambient chain, and no spelling existed that
+said so, so a manifest could not distinguish a deliberate choice from a forgotten one and neither
+could a reviewer, `doctor`, or the graph. Lima was worse, because presence of `vm_host` selected
+between two transports, which is why a typo in that one key silently turned a remote site into a
+not-ready local one and suppressed the error naming the typo.
+
+Once an explicit form exists, a default is an ordinary default, like `storage: local-lvm`. All three
+of those fields carry one today. **The rule for which arm: whatever the field already does when
+omitted.** That makes every default a strict no-op for existing manifests, which is what makes
+adding one non-breaking, and it forbids the dangerous move directly: **never default to a NEW arm.**
+When a capability grows a mode it did not have, defaulting to it would silently change behavior for
+configurations already in the field. Ambient is not privileged here; it is simply what omission
+already did on the clouds, which is also what the wrapped SDKs do.
+
+The shape for this is a nested discriminated union with a string `Literal` tag per arm, required or
+defaulted as above:
+
+```python
+auth: Annotated[AmbientAuth | ServicePrincipalAuth, Field(discriminator="mode")]
+```
+
+Not a boolean, and not a mode field sitting beside optional credential fields. Pydantic emits this
+as `oneOf` over closed object shapes with `discriminator.propertyName` and a `const` per arm, so one
+authoritative declaration serves runtime validation, editor validation, samples, the field
+reference, and the guide. The alternative needs cross-field constraints ("`mode: ssh` requires
+`host`, `mode: local` forbids it"), and it loses on DERIVATION, not on expressiveness. JSON Schema
+states that constraint perfectly well: as `oneOf` over closed arms, which is exactly what we ship,
+or as `if`/`then` on the discriminator. What does not survive the trip is imperative code. The enum
+design has to put the rule in a `model_validator`, and pydantic does not derive a validator's body
+into the schema it emits, so the emitted schema would say nothing at all about the one rule that
+design added. The union states the same rule declaratively, so emission reads it off the same
+declaration the loader validates against.
+
+That silence is not unsound, since a schema more permissive than the loader is sanctioned
+under-approximation, but it forfeits the DIAGNOSTIC: a mixed-arm config gets silence from the editor
+and fails at load instead. Emitting schema exists to move that feedback earlier, so the enum spends
+the point of it.
+
+**The discriminator selects a SHAPE, not a concept, and the operational test is whether the required
+field sets differ.** Two ways of driving a capability that need different required fields are two
+arms even when they feel like one mechanism, and two that need the same fields are one arm even when
+they feel like two. Worked example: Azure service principals authenticating by certificate rather
+than by secret are conceptually the same mechanism, but they need a certificate in place of a secret
+name, so they would be their own arm. Merging them would need "exactly one of `secret` or
+`certificate_path`", which is the same validator-only cross-field constraint one level down, inside
+the arm that exists to eliminate it.
+
+**Adding an arm is the extension path, and it is additive.** Existing manifests keep validating, the
+emitted schema grows a branch and a mapping entry, and nothing restructures. So do not pre-group
+fields against a variant that does not exist yet: that is mechanism without a consumer, and this
+codebase deletes those. Name each arm for the MECHANISM it selects rather than for a position
+(`ssh`, not `remote`; `ambient`, `service-principal`, `access-key`), because a positional name
+leaves the mechanism implicit and reintroduces one layer up exactly what the union removes. A name
+that is fully specified today is fine even if a future sibling would make it ambiguous; implicitness
+is judged against what exists, not against what might.
+
+**Pick the DISCRIMINATOR key by the field's grammar, and expect `mode`.** Every union shipped today
+spells it `mode`, and a new one probably should: `auth` and `placement` both name an ACTION, and an
+action is done in a mode. That is why `placement.mode` reads and `placement.type` does not. A field
+named for a STATE rather than an action takes `type` instead, because a state has a kind and not a
+manner, and forcing `mode` onto one would be the same category error in reverse. So
+`<mechanism>.mode` is the dominant pattern rather than a rule: follow it unless your field is a noun
+of the other sort, and if you diverge, say at the site which it is so the next reader sees a
+decision rather than an inconsistency.
+
+**Name the FIELD for what it selects, and let sibling capabilities diverge.** `auth` on `azure-vm`
+and `aws-ec2` and `placement` on `lima` are the same shape doing different jobs: one selects an
+identity, the other selects where `limactl` runs. Naming both of them the same thing for symmetry's
+sake would make one of the two names a lie, so the divergence is deliberate and is not a consistency
+defect to be tidied away.
 
 ### Secrets Are Just Declared References
 
 A capability's config may name secrets (a Proxmox API token, a git PAT, an AWS client secret).
-Nothing special happens: the secret is an ordinary `ConfigReference` returned by `dependencies`. The
-framework owns everything after the declaration: non-prompting _prediction_ during the operation's
-preflight sweep (is this resolvable on this run?, computed centrally over the declarations by
-`orchestration.readiness.preflight_all`, never by the instance or the node holding it), _resolution_
-at the preflight boundary (everything the command declared, one batched prompt session, cached), and
-_delivery_ through the context, scoped to the declared names. The default secret name is the
-capability's to choose: a per-consumer default (`git-token-<name>`, derived from `owner`) where
-credentials are many, a shared well-known name (`proxmox-token`) where one is typical. Either way
-the capability owns the default; the framework only resolves what was declared.
+Nothing special happens: the secret is an ordinary `ConfigReference` the core reads off a
+`SecretRef`-marked field of the capability's model. The framework owns everything after the
+declaration: non-prompting _prediction_ during the operation's preflight sweep (is this resolvable
+on this run?, computed centrally over the declarations by `orchestration.readiness.preflight_all`,
+never by the instance or the node holding it), _resolution_ at the preflight boundary (everything
+the command declared, one batched prompt session, cached), and _delivery_ through the context,
+scoped to the declared names. The default secret name is the capability's to choose: a per-consumer
+default (`git-token-<name>`, derived from `owner`) where credentials are many, a shared well-known
+name (`proxmox-token`) where one is typical. Either way the capability owns the default, as the
+marker's `default_template`; the framework only resolves what was declared.
 
 #### Declare, Then Receive: The Contract That Keeps a Capability Forward-Compatible
 
 Everything above reduces, for a capability author, to two obligations at two moments, with the
 framework owning everything in between:
 
-1. **Declare, purely.** Name every secret (and every other resource reference) in `dependencies`: no
-   resolver, no I/O, no resolution. This is the capability's _entire_ input side. The framework
-   reads those references to build the resolvability prediction the preflight sweep runs and to
-   scope the one batched resolve pass.
+1. **Declare, purely.** Mark every field that names a secret (or any other resource) in the
+   capability's config model: no resolver, no I/O, no resolution, and no code at all. This is the
+   capability's _entire_ input side. The framework reads those markers to build the resolvability
+   prediction the preflight sweep runs and to scope the one batched resolve pass.
 2. **Receive, from the context.** Read resolved secret values only via `ctx.secret(name)`, in
    `runup` and in ops (their signatures converged on `RunContext`; a VM platform's power ops take
    the op-start context beside the row). There is no other value source: the instance holds no
@@ -614,10 +800,10 @@ in ways worth recording before that change, because it is a different animal:
 - **Hosting shapes.** A consuming resource can host a capability's config three ways: as a dedicated
   kind (reference + a config blob, like `vm-site`), inline in a richer consumer (like a
   session-template's inline harness-integration block), or in a map keyed by name (the planned shape
-  for an agent template's feature map, once `agent-feature` ships). `dependencies` / `validate`'s
-  host-agnostic `owner` is exactly what lets one capability serve any of these without knowing which
-  consumer hosts it.
-- `owner` is a host-agnostic string today. If a second consumer (preflight's richer context is the
-  likely trigger) needs more than a name, the right evolution is a small host-agnostic context
-  value, not passing the consuming resource, designed once, when two real consumers reveal its
-  shape.
+  for an agent template's feature map, once `agent-feature` ships). The host-agnostic owner the core
+  frames with is exactly what lets one capability serve any of these without knowing which consumer
+  hosts it.
+- `owner` is a host-agnostic `(kind, name)` pair today. If a second consumer (preflight's richer
+  context is the likely trigger) needs more than that, the right evolution is a small host-agnostic
+  context value, not passing the consuming resource, designed once, when two real consumers reveal
+  its shape.

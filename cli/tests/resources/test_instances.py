@@ -635,11 +635,31 @@ def test_describe_resource_returns_none_used_by_for_no_instance_kinds(
         )
 
 
+def _column_cells(stdout: str, header: str, next_header: str) -> list[str]:
+    """The ``header`` CELL of every data row of the rendered table.
+
+    Read by the column's own offsets rather than by splitting on runs of
+    whitespace, because a cell is left-justified into a fixed width and a
+    cell may be empty: the header line's offsets are the only thing that
+    says where a column starts and stops. The rule line under the header
+    is dropped, and so is everything before the table (``resource list``
+    prints a count line first).
+    """
+    lines = stdout.splitlines()
+    heading = next(line for line in lines if header in line and next_header in line)
+    start, stop = heading.index(header), heading.index(next_header)
+    body = lines[lines.index(heading) + 2 :]
+    return [line[start:stop].strip() for line in body if line.strip()]
+
+
 def test_list_view_renders_dash_for_no_instance_kinds(tmp_path: Path, monkeypatch) -> None:
     """The list-view renderer turns ``used_by_count = None`` into ``-``
     in the USED BY column. The contract is that ``-`` distinguishes
     "this kind has no instance concept" from ``0`` ("there are zero
-    instances right now").
+    instances right now"), so the CELL is what has to be read: a
+    ``"-" in stdout`` would be satisfied by the kind name alone
+    (``secret-backend`` has a hyphen in it), and by a ``0`` renderer with
+    any dash anywhere on the page.
     """
     from unittest.mock import patch
 
@@ -657,11 +677,12 @@ def test_list_view_renders_dash_for_no_instance_kinds(tmp_path: Path, monkeypatc
     with patch("agentworks.cli.commands.resource.get_db", return_value=db):
         result = CliRunner().invoke(app, ["resource", "list", "--kind", "secret-backend"])
     assert result.exit_code == 0, result.stdout
-    assert "USED BY" in result.stdout
-    # secret-backend rows render ``-`` in the USED BY column (kind has
-    # no instance concept). Conservative assertion: at least one ``-``
-    # appears in the rendered output.
-    assert "-" in result.stdout
+
+    cells = _column_cells(result.stdout, "USED BY", "DESCRIPTION")
+    assert cells, "no secret-backend rows rendered, so the column says nothing"
+    assert set(cells) == {"-"}, (
+        f"USED BY cells were {cells}; a kind with no instance concept renders '-', never a count"
+    )
 
 
 def test_kinds_without_instances_hook_inherit_dash(tmp_path: Path) -> None:

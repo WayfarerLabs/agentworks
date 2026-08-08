@@ -193,6 +193,12 @@ def _request(*, tailscale: bool) -> ProvisionRequest:
         ssh_public_key="ssh-ed25519 AAAA test",
         ssh_private_key=None,
         tailscale_auth_key="tskey-test" if tailscale else None,
+        # The vm-template layer's resolved defaults, which is the only
+        # shape a platform ever sees (the hardware fields are required).
+        cpus=4,
+        memory_gib=8,
+        disk_gib=50,
+        swap_gib=4,
     )
 
 
@@ -525,7 +531,7 @@ class TestPlainFailure:
 class TestProvisionResultTransport:
     """The transport a successful ``create`` hands back (#345): every
     guest-facing ``SSHTransport`` construction passes
-    ``force_tty=sys.platform == "win32"`` (the Windows-zsh workaround
+    ``force_tty=sys.platform.name == "win32"`` (the Windows-zsh workaround
     documented on the class); Proxmox's provisioning transport omitted
     it, so interactive use from a Windows host misbehaved."""
 

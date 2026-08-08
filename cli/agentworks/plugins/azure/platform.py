@@ -7,9 +7,12 @@ import contextlib
 import logging
 import os
 import sys
-from typing import TYPE_CHECKING, Any, ClassVar, NamedTuple, Protocol
+from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, NamedTuple, Protocol
+
+from pydantic import Field
 
 from agentworks import output
+from agentworks.capabilities.retired_shapes import RetiredPresenceShape
 from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
 from agentworks.capabilities.vm_platform.bootstrap_script import generate_bootstrap_script
 from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES, generate_cloud_init
@@ -38,7 +41,9 @@ from agentworks.plugins.azure.network import (
     verify_vm_deleted,
     wrap_azure_error,
 )
+from agentworks.schema import AgwModel, NonEmptyStr, PositiveInt, SecretRef
 from agentworks.ssh import SSHError
+from agentworks.topics import TopicProse
 from agentworks.transports import SSHTransport
 
 if TYPE_CHECKING:
@@ -51,7 +56,6 @@ if TYPE_CHECKING:
     from agentworks.capabilities.base import RunContext
     from agentworks.config import Config
     from agentworks.db import VMRow
-    from agentworks.resources.reference import ConfigReference
     from agentworks.transports import Transport
 
 
@@ -117,8 +121,8 @@ _ARM_SCOPE = "https://management.azure.com/.default"
 
 
 def _build_ambient_credential() -> object:
-    """Build the AMBIENT Azure credential (the path taken when the site
-    declares no ``service_principal``), deciding the interactive-browser
+    """Build the AMBIENT Azure credential (the path a site selects by
+    declaring ``auth: {mode: ambient}``), deciding the interactive-browser
     fallback with a single live probe.
 
     Tries DefaultAzureCredential first (picks up az login, env vars,
@@ -150,14 +154,14 @@ def _build_ambient_credential() -> object:
         return InteractiveBrowserCredential()
 
 
-def _build_service_principal_credential(sp: _ServicePrincipal, client_secret: str, site_name: str) -> object:
-    """Build the EXPLICIT service-principal credential from the site's
-    configured tenant / client and the resolved client secret, probed
-    once against ARM.
+def _build_service_principal_credential(sp: AzureServicePrincipalAuth, client_secret: str, site_name: str) -> object:
+    """Build the service-principal credential from the site's configured
+    tenant / client and the resolved client secret, probed once against
+    ARM.
 
     The probe mirrors the ambient path's, but for a different reason:
-    there is no fallback to decide here (an operator who configured a
-    service principal means that credential and no other, so falling
+    there is no fallback to decide here (an operator who selected
+    ``mode: service-principal`` means that credential and no other, so falling
     through to ambient or to a browser prompt would silently authenticate
     as the wrong identity). It exists purely to turn a bad credential
     into a clear, site-and-secret-named error at the point of
@@ -202,13 +206,13 @@ def _build_service_principal_credential(sp: _ServicePrincipal, client_secret: st
         raise AzureError(
             f"could not authenticate the Azure service principal for "
             f"vm-site '{site_name}' (client {sp.client_id} in tenant "
-            f"{sp.tenant_id}, secret '{sp.secret_name}')",
+            f"{sp.tenant_id}, secret '{sp.secret}')",
             detail=str(exc),
             entity_kind="vm-site",
             entity_name=site_name,
             hint=(
-                f"Check service_principal.tenant_id / client_id and the "
-                f"value of the '{sp.secret_name}' secret (an expired client "
+                f"Check auth.tenant_id / auth.client_id and the "
+                f"value of the '{sp.secret}' secret (an expired client "
                 f"secret is the usual cause; `az ad app credential list` "
                 f"shows expiry). If Entra ID is simply unreachable this "
                 f"fails the same way, because azure-identity reports both "
@@ -218,74 +222,129 @@ def _build_service_principal_credential(sp: _ServicePrincipal, client_secret: st
     return cred
 
 
-# The well-known secret name the service_principal.secret field defaults
-# to, mirroring proxmox's DEFAULT_TOKEN_SECRET. The default env-var
-# backend convention reads AW_SECRET_AZURE_CLIENT_SECRET. The config
-# field is `secret`, NOT `client_secret`: it names a secret in the
-# framework's secret system, and a field called client_secret would
-# invite operators to paste the literal value into plaintext config.
-DEFAULT_CLIENT_SECRET = "azure-client-secret"
+# Why an arm with no fields but its tag exists at all: it gives
+# borrowing the host's identity a DECLARED form, which the old optional
+# ``service_principal`` block never had. A site can now write the choice
+# down and a reviewer can read it, and the union's default is this arm,
+# carried in ``describe-kind`` and the emitted schema rather than
+# implied by a missing key.
+class AzureAmbientAuth(AgwModel):
+    """Authenticate with the ambient chain: ``az login``, ``AZURE_*``, or a managed identity.
 
-_AZURE_REQUIRED_KEYS = ("subscription_id", "resource_group", "region")
-_AZURE_OPTIONAL_KEYS = ("vm_sizes", "service_principal")
-
-_SP_REQUIRED_KEYS = ("tenant_id", "client_id")
-_SP_OPTIONAL_KEYS = ("secret",)
-
-
-class _ServicePrincipal(NamedTuple):
-    """A site's explicit Azure service-principal credential: the two
-    plain-config identifiers plus the NAME of the framework secret
-    holding the client secret. Never the secret's value: the platform
-    instance holds no value source, and the value arrives per call
-    through ``ctx.secret``."""
-
-    tenant_id: str
-    client_id: str
-    secret_name: str
-
-
-def _parse_service_principal(config: Mapping[str, object], owner: str) -> _ServicePrincipal | None:
-    """The site's explicit service principal, or ``None`` when the
-    optional ``service_principal`` table is absent (the ambient
-    credential path, which is what every azure-vm site did before issue
-    #199 and what every site that omits the table still does).
-
-    Raises ``ConfigError`` on a malformed table so the shape is validated
-    at registry build time (the finalize ``validate`` pass), not at first
-    ``vm create``. Mirrors :func:`_parse_size_catalog`: one parser, called
-    from ``validate`` for the check and from the credential build for the
-    value.
-
-    The nested-table shape is deliberate. A future certificate-based
-    variant (``service_principal.certificate``) slots in beside
-    ``secret`` without touching the top-level ``platform_config``
-    namespace or breaking a declared site.
+    The interactive-browser fallback runs when none of those can get a
+    token.
     """
-    raw = config.get("service_principal")
-    if raw is None:
-        return None
-    if not isinstance(raw, dict):
-        raise ConfigError(f"{owner}.service_principal must be a table of {{tenant_id, client_id, secret}}")
-    parsed: dict[str, str] = {}
-    for key in _SP_REQUIRED_KEYS:
-        value = raw.get(key)
-        if not isinstance(value, str) or not value:
-            raise ConfigError(
-                f"{owner}.service_principal.{key} is required and must be a non-empty string; "
-                f"omit the whole service_principal table to use ambient Azure credentials"
-            )
-        parsed[key] = value
-    secret_name = raw.get("secret", DEFAULT_CLIENT_SECRET)
-    if not isinstance(secret_name, str) or not secret_name:
-        raise ConfigError(
-            f"{owner}.service_principal.secret must be a bare secret name (string), "
-            f"not the client secret's value; omit the key to use the default '{DEFAULT_CLIENT_SECRET}'"
-        )
-    unknown = sorted(set(raw) - set(_SP_REQUIRED_KEYS) - set(_SP_OPTIONAL_KEYS))
-    if unknown:
-        raise ConfigError(f"{owner}.service_principal: unknown field(s): {', '.join(unknown)}")
-    return _ServicePrincipal(parsed["tenant_id"], parsed["client_id"], secret_name)
+
+    mode: Literal["ambient"]
+    """Selects this arm."""
+
+
+# A tagged arm rather than an optional block on the config: a future
+# certificate-based service principal, or a managed-identity mode with
+# fields of its own, is a new arm beside these two rather than another
+# nullable table whose presence has to be cross-checked against the
+# others.
+class AzureServicePrincipalAuth(AgwModel):
+    """Authenticate as an explicit Entra ID service principal.
+
+    It replaces the ambient chain entirely for this site: a rejected
+    client secret fails the command rather than falling back to some other
+    identity.
+    """
+
+    mode: Literal["service-principal"]
+    """Selects this arm."""
+
+    tenant_id: NonEmptyStr
+    """The Entra ID tenant the principal lives in."""
+
+    client_id: NonEmptyStr
+    """The principal's application (client) id."""
+
+    secret: Annotated[
+        NonEmptyStr,
+        SecretRef(usage="the Azure service-principal client secret", default_template="azure-client-secret"),
+    ]
+    """The secret holding the principal's client secret. Never the value:
+    the field NAMES a secret in the framework's secret system, which is
+    why it is ``secret`` and not ``client_secret``. The default env-var
+    convention reads ``AW_SECRET_AZURE_CLIENT_SECRET``."""
+
+
+#: How an azure-vm site authenticates, as a tagged union DEFAULTING to
+#: the ambient arm.
+#:
+#: An earlier revision made this required with no default, and that
+#: reasoning is in the history, so here is why it reversed (operator
+#: ruling): the defect the union fixed was never "absence selects a
+#: mechanism", it was that there was no way to DECLARE the choice at all.
+#: The union fixes the second, and once an explicit form exists, a
+#: default is an ordinary default, carried in the emitted schema and in
+#: ``describe-kind`` like any other. Ambient is the right one because it
+#: is what the wrapped SDK already does: ``DefaultAzureCredential`` is
+#: ambient-first, so requiring explicit auth would make this site
+#: stricter than the tool it wraps, which is surprising in the other
+#: direction. The general pattern: ambient where the underlying tool has
+#: an ambient notion, required where it does not, which is why proxmox
+#: has no union at all rather than being an exception to one.
+#:
+#: The tag is a string ``Literal`` rather than a boolean for the same
+#: reason it is a union rather than an ``auth_mode`` field beside nullable
+#: blocks: each mode carries its OWN fields, and azure has further modes
+#: worth naming later (a user-assigned managed identity, a certificate
+#: credential) that a boolean could not grow into. Pydantic emits this
+#: directly as ``oneOf`` with a ``discriminator`` mapping, so the loader
+#: and the emitted schema agree by construction, which a cross-field
+#: validator over nullable blocks could not achieve. Not because JSON
+#: Schema cannot state the constraint (it can, as ``oneOf`` over closed
+#: arms or as ``if``/``then`` on the tag), but because pydantic does not
+#: derive a validator's body into the schema it emits, so the emitted
+#: schema would go silent about it and accept mixed-arm configs the
+#: loader rejects. That is sanctioned under-approximation under
+#: ``manifests/emit.py``, not a breach of it; what it forfeits is the
+#: editor DIAGNOSTIC.
+AzureAuth = Annotated[AzureAmbientAuth | AzureServicePrincipalAuth, Field(discriminator="mode")]
+
+
+class AzureVMSize(AgwModel):
+    """One Azure VM size in a site's selection catalog."""
+
+    cpus: PositiveInt
+    """The vCPUs the SKU provides."""
+
+    memory: PositiveInt
+    """The memory (GiB) the SKU provides."""
+
+    size: NonEmptyStr
+    """The Azure SKU name (e.g. ``Standard_B2ms``)."""
+
+
+class AzureVMConfig(AgwModel):
+    """Where an azure-vm site creates VMs, and as whom."""
+
+    name: Literal["azure-vm"]
+    """The platform this config is for."""
+
+    subscription_id: NonEmptyStr = Field(examples=["00000000-0000-0000-0000-000000000000"])
+    """The subscription new VMs are created in."""
+
+    resource_group: NonEmptyStr = Field(examples=["agw-dev"])
+    """The resource group new VMs are created in."""
+
+    region: NonEmptyStr = Field(examples=["eastus"])
+    """The Azure region new VMs are created in."""
+
+    vm_sizes: Annotated[list[AzureVMSize], Field(min_length=1)] | None = None
+    """An override of the built-in B-series catalog ``vm create`` picks
+    from. Need not be sorted: selection takes the smallest entry that
+    satisfies the request. Non-empty when present, because an empty
+    catalog is a site on which no VM can be created."""
+
+    auth: AzureAuth = AzureAmbientAuth(mode="ambient")
+    """How this site authenticates to Azure: ``{mode: ambient}`` for the
+    ambient credential chain, or ``{mode: service-principal, ...}`` for an
+    explicit principal. Defaults to ambient, matching what
+    ``DefaultAzureCredential`` does when told nothing."""
 
 
 class _VMSize(NamedTuple):
@@ -304,7 +363,7 @@ class _VMSize(NamedTuple):
 # ratios are fixed by Azure (a template asking for an off-ratio shape, e.g.
 # 4 vCPU / 8 GiB, rounds UP to the nearest fitting SKU and warns). Ordered
 # small to large for readability; selection takes the minimum by
-# (cpus, memory), so an operator override in platform_config.vm_sizes
+# (cpus, memory), so an operator override in the site's vm_sizes
 # need not be pre-sorted.
 _DEFAULT_VM_SIZES: tuple[_VMSize, ...] = (
     _VMSize(1, 2, "Standard_B1ms"),
@@ -318,36 +377,14 @@ _DEFAULT_VM_SIZES: tuple[_VMSize, ...] = (
 )
 
 
-def _parse_size_catalog(config: Mapping[str, object], owner: str) -> tuple[_VMSize, ...]:
-    """The site's VM-size catalog: the operator override
-    (``platform_config.vm_sizes``) when present, else the built-in
-    B-series ladder. Raises ``ConfigError`` on a malformed override so
-    the shape is validated at registry build time (the finalize
-    ``validate`` pass), not first ``vm create``.
-    """
-    raw = config.get("vm_sizes")
-    if raw is None:
+def _size_catalog(config: AzureVMConfig) -> tuple[_VMSize, ...]:
+    """The site's VM-size catalog: its declared override, else the
+    built-in B-series ladder. A plain read now that the shape is the
+    model's business; what is left here is the DEFAULT, which is domain
+    knowledge (this ladder) rather than schema."""
+    if config.vm_sizes is None:
         return _DEFAULT_VM_SIZES
-    if not isinstance(raw, (list, tuple)) or not raw:
-        raise ConfigError(f"{owner}.vm_sizes must be a non-empty list of {{cpus, memory, size}} tables")
-    catalog: list[_VMSize] = []
-    for i, entry in enumerate(raw):
-        if not isinstance(entry, dict):
-            raise ConfigError(f"{owner}.vm_sizes[{i}] must be a {{cpus, memory, size}} table")
-        unknown = sorted(set(entry) - {"cpus", "memory", "size"})
-        if unknown:
-            raise ConfigError(f"{owner}.vm_sizes[{i}]: unknown field(s): {', '.join(unknown)}")
-        cpus, memory, size = entry.get("cpus"), entry.get("memory"), entry.get("size")
-        # bool is an int subclass; reject it explicitly so `cpus = true`
-        # does not sneak through as 1.
-        if not isinstance(cpus, int) or isinstance(cpus, bool) or cpus <= 0:
-            raise ConfigError(f"{owner}.vm_sizes[{i}].cpus must be a positive integer")
-        if not isinstance(memory, int) or isinstance(memory, bool) or memory <= 0:
-            raise ConfigError(f"{owner}.vm_sizes[{i}].memory must be a positive integer")
-        if not isinstance(size, str) or not size:
-            raise ConfigError(f"{owner}.vm_sizes[{i}].size must be a non-empty string")
-        catalog.append(_VMSize(cpus, memory, size))
-    return tuple(catalog)
+    return tuple(_VMSize(entry.cpus, entry.memory, entry.size) for entry in config.vm_sizes)
 
 
 def _select_vm_size(catalog: tuple[_VMSize, ...], *, cpus: int, memory_gib: int) -> _VMSize:
@@ -390,8 +427,42 @@ class AzureVMPlatform(VMPlatform):
     one specific Azure service, and other Azure services could plausibly
     back platforms of their own someday."""
 
+    contract_version: ClassVar[int] = 1
     name: ClassVar[str] = "azure-vm"
     description: ClassVar[str] = "Azure Virtual Machines (subscription + resource group)"
+    config_model: ClassVar[type[AzureVMConfig]] = AzureVMConfig
+    # An azure-vm site that WROTE ``service_principal`` (or wrote it
+    # null) crosses this break and gets its exact rewrite; a site that
+    # omitted it lands on the ambient default and was never broken.
+    # Release-scoped.
+    retired_shape: ClassVar[RetiredPresenceShape | None] = RetiredPresenceShape(
+        retired_field="service_principal",
+        union_field="auth",
+        present_mode="service-principal",
+        absent_mode="ambient",
+    )
+    prose: ClassVar[TopicProse | None] = TopicProse(
+        title="Azure VMs",
+        overview="""
+        Creates Azure Virtual Machines in one subscription and resource group. Declare
+        one vm-site per subscription and group you target.
+
+        The resource group must already exist: `vm create` checks it at runup, with an
+        authenticated read-only probe, and fails cleanly before provisioning anything.
+        Sizes come from a built-in B-series catalog unless the site overrides it, and
+        `vm create` picks the smallest entry that satisfies the vm-template's request
+        (an off-ratio request rounds up and warns).
+
+        `auth` says how the site authenticates and defaults to `{mode: ambient}`, the
+        ambient Azure credential chain (`az login`, `AZURE_*` variables, managed
+        identity), which is what `DefaultAzureCredential` does when told nothing.
+        `auth: {mode: service-principal, ...}` replaces that chain entirely for this
+        site: a rejected client secret then fails the command rather than falling back.
+
+        Ships as the opt-in `azure` system plugin, so a site stays not-ready until
+        `[plugins] system` lists it.
+        """,
+    )
 
     # Warned by the transports factory when every reachability probe
     # fails: the ephemeral NSG allow is scoped to the DETECTED egress
@@ -417,8 +488,8 @@ class AzureVMPlatform(VMPlatform):
         # Azure credential and SDK clients, built on FIRST need by the
         # accessors below and reused for the instance's remaining ops.
         # The credential is subscription-independent AND its identity is
-        # fixed by the bound config (the site's service_principal, or
-        # the ambient chain when it declares none), so it caches once
+        # fixed by the bound config (whichever arm the site's auth.mode
+        # names), so it caches once
         # per instance (one live get_token probe per command, given the
         # vms/nodes.py site memo shares one instance per site). The
         # clients are keyed by subscription_id: the site's config names
@@ -432,8 +503,8 @@ class AzureVMPlatform(VMPlatform):
         self._network_cached: dict[str, NetworkManagementClient] = {}
         self._resource_cached: dict[str, ResourceManagementClient] = {}
 
-    # No preflight override, on either credential path. A site with a
-    # ``service_principal`` DOES declare a config secret, and an
+    # No preflight override, on either credential path. A
+    # ``service-principal`` site DOES declare a config secret, and an
     # unresolvable client secret does fail before any prompt or
     # mutation, but that check is the OPERATION's preflight sweep
     # predicting over the site's declared references, not this class's
@@ -451,51 +522,10 @@ class AzureVMPlatform(VMPlatform):
     # errors, which is the contract: preflight is capped at what it can
     # check without resolved credentials.
 
-    @classmethod
-    def dependencies(cls, owner: str, config: Mapping[str, object]) -> tuple[ConfigReference, ...]:
-        """The client-secret reference a declared ``service_principal``
-        implies: its ``secret`` field names it (default
-        ``azure-client-secret``). A site with no ``service_principal``
-        authenticates ambiently and implies no reference, so its edge
-        set is empty, as every azure-vm site's was before issue #199.
-
-        Total and non-throwing: the edge's identity is the secret name
-        alone, so it emits even when the table's OTHER fields are absent
-        or malformed (their absence does not change what the edge points
-        at), and is omitted only when the table itself, or the ``secret``
-        field that names the edge, is malformed. ``validate`` is where
-        those shape errors surface.
-        """
-        raw = config.get("service_principal")
-        if not isinstance(raw, dict):
-            return ()
-        secret_name = raw.get("secret", DEFAULT_CLIENT_SECRET)
-        if not isinstance(secret_name, str) or not secret_name:
-            return ()
-        from agentworks.resources.reference import ConfigReference
-
-        return (
-            ConfigReference(
-                kind="secret",
-                name=secret_name,
-                usage="the Azure service-principal client secret",
-            ),
-        )
-
-    @classmethod
-    def validate(cls, owner: str, config: Mapping[str, object]) -> None:
-        for key in _AZURE_REQUIRED_KEYS:
-            value = config.get(key)
-            if not isinstance(value, str) or not value:
-                raise ConfigError(f"{owner}.{key} is required for the azure-vm platform and must be a non-empty string")
-        unknown = sorted(set(config) - set(_AZURE_REQUIRED_KEYS) - set(_AZURE_OPTIONAL_KEYS))
-        if unknown:
-            raise ConfigError(f"{owner}: unknown azure-vm platform field(s): {', '.join(unknown)}")
-        # Validate the optional blocks' shapes here so a malformed
-        # vm_sizes or service_principal fails at config load, not first
-        # vm create.
-        _parse_size_catalog(config, owner)
-        _parse_service_principal(config, owner)
+    @property
+    def config(self) -> AzureVMConfig:
+        """This site's validated azure-vm config."""
+        return self._config_as(AzureVMConfig)
 
     @classmethod
     def legacy_platform_metadata(cls, row: Mapping[str, Any], legacy: Mapping[str, Any]) -> dict[str, str]:
@@ -507,31 +537,32 @@ class AzureVMPlatform(VMPlatform):
         """The Azure credential, built on first need (one live probe) and
         reused for the instance's remaining ops.
 
-        Which credential is a config decision, not a runtime one: a site
-        that declares a ``service_principal`` gets exactly that
-        credential, built from the client secret ``ctx.secret`` delivers
-        (the declare/receive contract: the instance never holds a
-        resolver or a raw reader, only the credential derived from the
-        delivered value), and NEVER falls back to the ambient chain or a
-        browser prompt if it fails; a site that declares none gets the
-        ambient chain with its browser fallback, byte-for-byte as before.
-        Falling back would authenticate as a different identity than the
-        operator configured, which is worse than failing.
+        Which credential is a config decision, not a runtime one, and the
+        site states it outright: ``auth.mode`` selects the arm. A
+        ``service-principal`` site gets exactly that credential, built
+        from the client secret ``ctx.secret`` delivers (the
+        declare/receive contract: the instance never holds a resolver or
+        a raw reader, only the credential derived from the delivered
+        value), and NEVER falls back to the ambient chain or a browser
+        prompt if it fails; an ``ambient`` site gets the ambient chain
+        with its browser fallback. Falling back would authenticate as a
+        different identity than the operator configured, which is worse
+        than failing.
 
         Caching stays correct under the fork because the fork's inputs
-        are fixed per instance: the site's tenant, client, and secret
-        NAME come from the bound ``platform_config``, so a given instance
+        are fixed per instance: the site's mode, tenant, client, and
+        secret NAME come from the bound config, so a given instance
         resolves the same credential every time. See
         :func:`_build_ambient_credential` and
         :func:`_build_service_principal_credential`.
         """
         cred = self._credential_cached
         if cred is None:
-            sp = _parse_service_principal(self.platform_config, self._owner_display)
-            if sp is None:
+            auth = self.config.auth
+            if isinstance(auth, AzureAmbientAuth):
                 cred = _build_ambient_credential()
             else:
-                cred = _build_service_principal_credential(sp, ctx.secret(sp.secret_name), self.site_name)
+                cred = _build_service_principal_credential(auth, ctx.secret(auth.secret), self.site_name)
             self._credential_cached = cred
         return cred
 
@@ -595,8 +626,8 @@ class AzureVMPlatform(VMPlatform):
 
         Post-resolve and authenticated: the credential is whatever
         :meth:`_get_credential` resolves off the site's config, and this
-        is where BOTH paths first pay for it. On a site with a declared
-        ``service_principal`` that means the client secret is read from
+        is where BOTH paths first pay for it. On a ``service-principal``
+        site that means the client secret is read from
         the context here and the credential is probed here, so a bad or
         expired one aborts ``vm create`` with a typed, secret-naming
         error before the DB row or any Azure resource exists, which is
@@ -625,9 +656,9 @@ class AzureVMPlatform(VMPlatform):
         from types import SimpleNamespace
 
         az = SimpleNamespace(
-            subscription_id=str(self.platform_config["subscription_id"]),
-            resource_group=str(self.platform_config["resource_group"]),
-            region=str(self.platform_config["region"]),
+            subscription_id=self.config.subscription_id,
+            resource_group=self.config.resource_group,
+            region=self.config.region,
         )
         output.info(f"Performing runup test for vm-site/{self.site_name}...")
         # The client build sits OUTSIDE the try, here and at every op
@@ -658,21 +689,21 @@ class AzureVMPlatform(VMPlatform):
     def create(self, request: ProvisionRequest, ctx: RunContext) -> ProvisionResult:
         from types import SimpleNamespace
 
-        # The site's platform_config, shaped like the old AzureConfig so
-        # the SDK-call body below stays byte-identical.
+        # The site's config, shaped like the old AzureConfig so the
+        # SDK-call body below stays byte-identical.
         az = SimpleNamespace(
-            subscription_id=str(self.platform_config["subscription_id"]),
-            resource_group=str(self.platform_config["resource_group"]),
-            region=str(self.platform_config["region"]),
+            subscription_id=self.config.subscription_id,
+            resource_group=self.config.resource_group,
+            region=self.config.region,
         )
 
         # Select the smallest Azure SKU that satisfies the template's
         # compute/memory request (the standard cross-platform model);
         # the catalog is the built-in B-series ladder or the site's
-        # platform_config.vm_sizes override.
-        catalog = _parse_size_catalog(self.platform_config, f"vm-site/{self.site_name}")
-        req_cpus = request.cpus if request.cpus is not None else 4
-        req_memory = request.memory_gib if request.memory_gib is not None else 8
+        # site's vm_sizes override.
+        catalog = _size_catalog(self.config)
+        req_cpus = request.cpus
+        req_memory = request.memory_gib
         selected = _select_vm_size(catalog, cpus=req_cpus, memory_gib=req_memory)
         azure_vm_size = selected.name
         # The provisioning line always names the selected SKU and its spec. A
@@ -685,14 +716,14 @@ class AzureVMPlatform(VMPlatform):
                 f"({selected.cpus} vCPU / {selected.memory_gib} GiB) "
                 f"for requested {req_cpus} vCPU / {req_memory} GiB."
             )
-        requested_disk = request.disk_gib if request.disk_gib is not None else 50
+        requested_disk = request.disk_gib
         # Clamp the OS disk up to the image's minimum, mirroring the cpu/memory
         # round-up above: Azure rejects a VM whose OS disk is smaller than the
         # disk baked into the image, so a below-floor template disk grows to it.
         disk = max(requested_disk, IMAGE_OS_DISK_FLOOR_GIB)
         if disk != requested_disk:
             output.warn(f"Rounded up to {disk} GiB OS disk (image minimum) for requested {requested_disk} GiB.")
-        swap = request.swap_gib if request.swap_gib is not None else 0
+        swap = request.swap_gib
         admin_username = request.admin_username
         tailscale_auth_key = request.tailscale_auth_key
         ssh_pub_key = request.ssh_public_key

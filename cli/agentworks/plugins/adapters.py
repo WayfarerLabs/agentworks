@@ -2,45 +2,54 @@
 
 One adapter per core capability kind, reconciling the four heterogeneous
 capability registries behind a uniform peek / match / prepare / seat /
-build-row contract. The adapters are the single place that knows each
-kind's registry, its ``Entry`` dataclass, and the one asymmetry that
-matters: ``secret-backend`` holds a constructed instance, the other three
-hold the class.
+build-row contract. There used to be four hand-written adapters; there is
+now one :class:`_DescriptorAdapter`, parameterized by the kind's
+``CapabilityKindDescriptor``, because everything the four copies differed
+in (which registry, which ``Entry`` row, whether the registry holds the
+class or a constructed instance) is a descriptor field.
 
-Three design points the LLD (and the Phase 2 review) pin:
+Three design points the LLD (and the Phase 2 review) pin, preserved here by
+construction: they are exactly the ``registry_policy`` branch plus the
+seated read.
 
 - **The instance trap is confined to ``prepare``.** ``secret-backend`` is
-  the one kind whose registry holds a constructed instance, so its adapter
-  alone calls ``impl_cls()`` (once). Crucially that construction happens in
+  the one kind whose registry holds a constructed instance
+  (``RegistryPolicy.CONSTRUCTED_SINGLETON``), so it alone calls
+  ``impl_cls()`` (once). Crucially that construction happens in
   ``prepare`` (fallible, no mutation), NOT in ``seat``: ``register_plugin``
   runs every ``prepare`` during its collision precheck, before touching any
   registry, so the seat phase is pure dict writes that cannot fail partway.
   That is what makes atomicity true by construction rather than by hope.
 - **``matches`` is exact identity.** The idempotency rule is "the SAME
-  class"; ``secret-backend`` compares ``type(occupant) is impl_cls`` (the
-  occupant is a constructed instance), never ``isinstance`` (which would
-  merge a subclass under the same name).
-- **``build_row`` reads description off the SEATED impl** (the live
-  registry occupant), never re-instantiating and never trusting an
-  unseated descriptor claim. If the name is unseated, ``build_row`` raises
-  ``StateError`` (a publisher-invariant violation), the by-construction tie
-  between publication and seating.
+  class"; under the constructed-singleton policy the occupant is an
+  instance, so the comparison is ``type(occupant) is impl_cls``, never
+  ``isinstance`` (which would merge a subclass under the same name).
+- **``build_row`` reads the SEATED impl** (the live registry occupant),
+  never re-instantiating and never trusting an unseated descriptor claim.
+  If the name is unseated, ``build_row`` raises ``StateError`` (a
+  publisher-invariant violation), the by-construction tie between
+  publication and seating.
+
+Reaching the registries through ``descriptor.registry()`` means this module
+names none of them: the sanctioned registry read moved to the four
+capability ``kinds.py`` modules that own the descriptors, and the graph
+guard's allow-list no longer exempts this file.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from functools import cache
+from types import MappingProxyType
+from typing import TYPE_CHECKING, Any, Protocol
 
+from agentworks.capabilities.descriptor import RegistryPolicy, capability_descriptors
 from agentworks.errors import StateError
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from agentworks.capabilities.git_credential.base import GitCredentialProvider
-    from agentworks.capabilities.harness_integration.base import HarnessIntegration
-    from agentworks.capabilities.vm_platform.base import VMPlatform
-    from agentworks.resources.origin import Origin
-    from agentworks.secrets.backends import SecretBackend
+    from agentworks.capabilities.descriptor import CapabilityKindDescriptor
+    from agentworks.origin import Origin
 
 
 class CapabilityAdapter(Protocol):
@@ -50,9 +59,10 @@ class CapabilityAdapter(Protocol):
     payload, no mutation) and a PURE ``seat`` (write the prepared payload),
     so all failure-prone work happens before any registry is touched.
     ``matches`` is the per-kind idempotency check: the class-vs-instance
-    reconciliation the descriptor deliberately leaves to the adapter.
-    Keeping both here confines the one asymmetry to the adapters rather
-    than leaking a ``secret-backend`` special-case into ``register_plugin``.
+    reconciliation the descriptor's ``registry_policy`` records and this
+    contract acts on. Keeping both here confines the one asymmetry to the
+    adapter rather than leaking a ``secret-backend`` special-case into
+    ``register_plugin``.
     """
 
     kind: str
@@ -88,124 +98,51 @@ class CapabilityAdapter(Protocol):
         ...
 
 
-class _VMPlatformAdapter:
-    kind = "vm-platform"
+class _DescriptorAdapter:
+    """The ``CapabilityAdapter`` for whichever kind ``descriptor`` describes.
+
+    Every method reads a descriptor field. Only the class-vs-instance
+    asymmetry branches, on ``registry_policy``, and only in ``matches`` and
+    ``prepare``. Retiring ``CONSTRUCTED_SINGLETON`` is therefore a matter of
+    flipping ``secret-backend``'s field and deleting each branch's second
+    arm.
+    """
+
+    def __init__(self, descriptor: CapabilityKindDescriptor) -> None:
+        self.descriptor = descriptor
+        self.kind = descriptor.kind
+
+    def _constructs(self) -> bool:
+        return self.descriptor.registry_policy is RegistryPolicy.CONSTRUCTED_SINGLETON
 
     def peek(self, name: str) -> object | None:
-        from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
-
-        return VM_PLATFORM_REGISTRY.get(name)
+        return self.descriptor.registry().get(name)
 
     def matches(self, occupant: object, impl_cls: type) -> bool:
+        # Under the constructed-singleton policy the occupant is an
+        # instance, so identity is asked of its TYPE. Exact either way,
+        # never isinstance: a subclass under the same name is a genuine
+        # collision, not an idempotent match.
+        if self._constructs():
+            return type(occupant) is impl_cls
         return occupant is impl_cls
 
     def prepare(self, impl_cls: type) -> object:
-        return impl_cls
-
-    def seat(self, name: str, payload: object) -> None:
-        from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
-
-        VM_PLATFORM_REGISTRY[name] = cast("type[VMPlatform]", payload)
-
-    def build_row(self, name: str, origin: Origin) -> Any:
-        from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY, VMPlatformEntry
-
-        seated = VM_PLATFORM_REGISTRY.get(name)
-        if seated is None:
-            raise StateError(_unseated_message(self.kind, name))
-        return VMPlatformEntry(name=name, description=seated.description, origin=origin)
-
-
-class _HarnessIntegrationAdapter:
-    kind = "harness-integration"
-
-    def peek(self, name: str) -> object | None:
-        from agentworks.capabilities.harness_integration import HARNESS_INTEGRATION_REGISTRY
-
-        return HARNESS_INTEGRATION_REGISTRY.get(name)
-
-    def matches(self, occupant: object, impl_cls: type) -> bool:
-        return occupant is impl_cls
-
-    def prepare(self, impl_cls: type) -> object:
-        return impl_cls
-
-    def seat(self, name: str, payload: object) -> None:
-        from agentworks.capabilities.harness_integration import HARNESS_INTEGRATION_REGISTRY
-
-        HARNESS_INTEGRATION_REGISTRY[name] = cast("type[HarnessIntegration]", payload)
-
-    def build_row(self, name: str, origin: Origin) -> Any:
-        from agentworks.capabilities.harness_integration import HARNESS_INTEGRATION_REGISTRY
-        from agentworks.capabilities.harness_integration.kinds import HarnessIntegrationEntry
-
-        if HARNESS_INTEGRATION_REGISTRY.get(name) is None:
-            raise StateError(_unseated_message(self.kind, name))
-        return HarnessIntegrationEntry(name=name, origin=origin)
-
-
-class _GitCredentialProviderAdapter:
-    kind = "git-credential-provider"
-
-    def peek(self, name: str) -> object | None:
-        from agentworks.capabilities.git_credential import GIT_CREDENTIAL_PROVIDER_REGISTRY
-
-        return GIT_CREDENTIAL_PROVIDER_REGISTRY.get(name)
-
-    def matches(self, occupant: object, impl_cls: type) -> bool:
-        return occupant is impl_cls
-
-    def prepare(self, impl_cls: type) -> object:
-        return impl_cls
-
-    def seat(self, name: str, payload: object) -> None:
-        from agentworks.capabilities.git_credential import GIT_CREDENTIAL_PROVIDER_REGISTRY
-
-        GIT_CREDENTIAL_PROVIDER_REGISTRY[name] = cast("type[GitCredentialProvider]", payload)
-
-    def build_row(self, name: str, origin: Origin) -> Any:
-        from agentworks.capabilities.git_credential import GIT_CREDENTIAL_PROVIDER_REGISTRY
-        from agentworks.capabilities.git_credential.kinds import GitCredentialProviderEntry
-
-        if GIT_CREDENTIAL_PROVIDER_REGISTRY.get(name) is None:
-            raise StateError(_unseated_message(self.kind, name))
-        return GitCredentialProviderEntry(name=name, origin=origin)
-
-
-class _SecretBackendAdapter:
-    kind = "secret-backend"
-
-    def peek(self, name: str) -> object | None:
-        from agentworks.secrets.backends import SECRET_BACKEND_REGISTRY
-
-        return SECRET_BACKEND_REGISTRY.get(name)
-
-    def matches(self, occupant: object, impl_cls: type) -> bool:
-        # The occupant is a constructed instance, not the class. EXACT
-        # identity, never isinstance: a subclass under the same name is a
-        # genuine collision, not an idempotent match.
-        return type(occupant) is impl_cls
-
-    def prepare(self, impl_cls: type) -> object:
-        # The one kind whose registry holds a constructed INSTANCE; the
-        # instance trap (``impl_cls()``) is confined here, and it runs
-        # during the precheck so a throwing constructor never leaves a
+        # The instance trap lives here and nowhere else, and it runs during
+        # the precheck, so a throwing constructor never leaves a
         # partially-seated descriptor behind.
-        return cast("SecretBackend", impl_cls())
+        if self._constructs():
+            return impl_cls()
+        return impl_cls
 
     def seat(self, name: str, payload: object) -> None:
-        from agentworks.secrets.backends import SECRET_BACKEND_REGISTRY
-
-        SECRET_BACKEND_REGISTRY[name] = cast("SecretBackend", payload)
+        self.descriptor.registry()[name] = payload
 
     def build_row(self, name: str, origin: Origin) -> Any:
-        from agentworks.secrets.backends import SECRET_BACKEND_REGISTRY
-        from agentworks.secrets.kinds import SecretBackendEntry
-
-        seated = SECRET_BACKEND_REGISTRY.get(name)
+        seated = self.descriptor.registry().get(name)
         if seated is None:
             raise StateError(_unseated_message(self.kind, name))
-        return SecretBackendEntry(name=name, description=seated.description, origin=origin)
+        return self.descriptor.entry_factory(name, seated, origin)
 
 
 def _unseated_message(kind: str, name: str) -> str:
@@ -215,13 +152,24 @@ def _unseated_message(kind: str, name: str) -> str:
     )
 
 
-CAPABILITY_ADAPTERS: Mapping[str, CapabilityAdapter] = {
-    "vm-platform": _VMPlatformAdapter(),
-    "harness-integration": _HarnessIntegrationAdapter(),
-    "git-credential-provider": _GitCredentialProviderAdapter(),
-    "secret-backend": _SecretBackendAdapter(),
-}
-"""Keyed by capability kind. A guard test pins this key set equal to the
-``category == "capability"`` kinds in ``KIND_REGISTRY``, so a future
-capability kind fails until its adapter exists (R6: plugins contribute
-existing kinds only, by construction not convention)."""
+@cache
+def capability_adapters() -> Mapping[str, CapabilityAdapter]:
+    """The adapter per capability kind, keyed by kind.
+
+    Derived from the descriptor table, so the key set cannot drift from the
+    capability kinds and a future kind arrives with a working adapter rather
+    than a missing one. Read-only and cached: the adapters are stateless
+    views onto their descriptors, so one per kind is enough.
+
+    An accessor rather than a module-level constant, for UNIFORMITY with the
+    derived sites where laziness is forced. Verified, rather than assumed:
+    no cycle is reachable here today, because none of the four contributing
+    ``kinds.py`` modules loads anything under ``agentworks.plugins``. The
+    graph's accessors are the forced ones (the capability packages do load
+    ``resources.graph``), and every switchboard site reading the table the
+    same way is worth more than each site relitigating whether its own
+    import graph happens to permit a constant. It also keeps the load
+    boundary where the descriptor module puts it: the table is collected on
+    first use, not at import of whoever imports this.
+    """
+    return MappingProxyType({d.kind: _DescriptorAdapter(d) for d in capability_descriptors()})

@@ -1,0 +1,170 @@
+"""One declared shorthand, three derivations that cannot disagree.
+
+``ScalarShorthand`` exists because the fact "this table may also be
+written as a bare string" had been authored twice on ``EnvEntry`` (a
+before-validator and a hand-rolled ``__get_pydantic_json_schema__``) and
+the third consumer, the field-documentation stream, had no way to learn
+it at all. So these tests ask the same question of each derivation and
+compare the answers, rather than pinning three copies of an expectation.
+"""
+
+from __future__ import annotations
+
+from typing import Annotated, ClassVar
+
+import pytest
+from pydantic import Field
+
+from agentworks.errors import StateError
+from agentworks.schema import (
+    MAPPING_KEY,
+    AgwModel,
+    RefOwner,
+    ScalarShorthand,
+    SecretRef,
+    filled_defaults,
+    iter_field_docs,
+    render_type,
+)
+
+from ._fixture_models import ShorthandHolder, ShorthandLike, ShorthandTemplatedLike
+
+OWNER = RefOwner(kind="vm-template", name="dev")
+
+
+def test_the_shorthand_spelling_validates_to_the_long_one() -> None:
+    assert ShorthandLike.model_validate("a value") == ShorthandLike(value="a value")
+
+
+def test_the_long_spelling_still_validates() -> None:
+    assert ShorthandLike.model_validate({"secret": "npm-token"}).secret == "npm-token"
+
+
+def test_a_value_that_is_neither_spelling_is_still_refused() -> None:
+    """The fold widens what is accepted by exactly one shape. An integer
+    is not it, and the closed-world posture has to survive the widening."""
+    with pytest.raises(ValueError, match="valid dictionary"):
+        ShorthandLike.model_validate(7)
+
+
+def test_a_boolean_is_not_an_integer_shorthand() -> None:
+    """``bool`` is a subclass of ``int``, so a fold asked with
+    ``isinstance`` would take ``true`` for an integer shorthand: the
+    silent coercion the strict posture exists to refuse."""
+
+    class Counted(AgwModel):
+        scalar_shorthand: ClassVar = ScalarShorthand(annotation=int, field="count")
+
+        count: int | None = None
+
+    assert Counted.model_validate(7) == Counted(count=7)
+    with pytest.raises(ValueError, match="valid dictionary"):
+        Counted.model_validate(True)
+
+
+def test_the_shorthand_is_folded_before_owner_templated_defaults_are_filled() -> None:
+    """The order the two rewrites happen in, asserted through what it
+    decides rather than through which function runs first.
+
+    The boundary fill acts on a mapping, so it folds a bare-scalar value
+    itself before filling: folded after, an owner-templated field would
+    resolve for the operator who wrote the table form and silently not
+    for the one who wrote the scalar, which is the same value spelled two
+    ways.
+    """
+    short = ShorthandTemplatedLike.model_validate(filled_defaults(ShorthandTemplatedLike, "a value", OWNER))
+    long = ShorthandTemplatedLike.model_validate(filled_defaults(ShorthandTemplatedLike, {"value": "a value"}, OWNER))
+
+    assert short.token == "shorthand-dev"
+    assert short == long
+
+
+def test_the_emitted_schema_offers_the_shorthand_arm() -> None:
+    """The arm an editor needs, without which every plaintext env value an
+    operator writes is red-underlined."""
+    emitted = ShorthandLike.model_json_schema()
+
+    assert emitted["anyOf"][0] == {"type": "string"}
+    assert emitted["anyOf"][1]["type"] == "object"
+
+
+def test_the_marker_corrections_still_apply_inside_the_shorthand_arm() -> None:
+    """The two derivations compose: the shorthand widens the model and the
+    reference marker still lands on the property, one level in."""
+    table = ShorthandLike.model_json_schema()["anyOf"][1]
+
+    assert "x-agw-ref" in table["properties"]["secret"]
+
+
+def test_the_stream_names_both_spellings_wherever_the_model_is_held() -> None:
+    """One declaration reaches a field, a table, and a list alike. The
+    shipped case is the table (five spec models hold an ``EnvEntry``
+    one), and nothing about the declaration is per-field."""
+    rendered = {doc.path: render_type(doc.annotation) for doc in iter_field_docs(ShorthandHolder)}
+
+    assert rendered[("entry",)] == "string or table or null"
+    assert rendered[("entries",)] == "table of string or table"
+    assert rendered[("entry_list",)] == "list of string or table"
+
+
+def test_the_stream_still_expands_the_table_form() -> None:
+    """A shorthand ADDS a spelling; it does not remove the block. An
+    operator who needs the secret form still has to be told what is in
+    it."""
+    paths = [doc.path for doc in iter_field_docs(ShorthandHolder)]
+
+    assert ("entries", MAPPING_KEY, "secret") in paths
+    assert ("entry", "value") in paths
+
+
+def test_a_shorthand_folding_into_a_field_that_does_not_exist_is_refused_at_import() -> None:
+    """An author's typo, caught where the author is. It would otherwise
+    surface as a closed-world ``extra_forbidden`` on a key no operator
+    wrote, at the moment some operator happened to use the short form."""
+    with pytest.raises(StateError, match="not one of its fields"):
+
+        class Mistyped(AgwModel):
+            scalar_shorthand: ClassVar = ScalarShorthand(annotation=str, field="valeu")
+
+            value: str | None = None
+
+
+def test_a_shorthand_spelled_as_something_no_document_carries_is_refused() -> None:
+    with pytest.raises(StateError, match="a scalar shorthand may be spelled as"):
+        ScalarShorthand(annotation=dict, field="value")
+
+
+def test_a_marked_field_inside_a_shorthand_model_still_reaches_the_graph() -> None:
+    """The fold changes the shape a blob arrives in, not what it means.
+    A secret named the long way is the same edge it always was."""
+    from agentworks.schema import extract_references
+
+    class Holder(AgwModel):
+        entries: dict[str, ShorthandLike] = Field(default_factory=dict)
+
+    found = extract_references(Holder, {"entries": {"A": {"secret": "npm-token"}, "B": "plaintext"}})
+
+    assert [(ref.kind, ref.name) for ref in found] == [("secret", "npm-token")]
+
+
+def test_the_declaration_is_the_only_place_the_spelling_is_written() -> None:
+    """The anti-drift pin, and the reason this class exists: the string
+    arm in emitted schema, the value the loader accepts, and the type the
+    stream renders all trace to one declaration, so a model that declares
+    none offers none anywhere.
+    """
+
+    class Plain(AgwModel):
+        value: str | None = None
+        secret: Annotated[str, SecretRef(usage="a plain secret")] | None = None
+
+    assert Plain.scalar_shorthand is None
+    assert "anyOf" not in Plain.model_json_schema()
+    with pytest.raises(ValueError, match="valid dictionary"):
+        Plain.model_validate("a value")
+
+    class Holder(AgwModel):
+        entries: dict[str, Plain] = Field(default_factory=dict)
+
+    rendered = {doc.path: render_type(doc.annotation) for doc in iter_field_docs(Holder)}
+    assert rendered[("entries",)] == "table of table"

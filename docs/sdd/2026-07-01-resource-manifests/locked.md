@@ -260,3 +260,43 @@ incremental, selector-scoped moves; its backup-first ordering (config.toml backe
 copies of rewritten YAML under `paths.backups`); its digest/CAS guards; and its rollback on a
 verification mismatch all stand. Only the internal source of the verification pre-side changed; the
 operator sees the same behavior.
+
+## 2026-08-06: declared schema models replace the invoked contract (declarative-schema phase 2)
+
+Phase 5.7's late pre-lock addition, recorded above as "the capability config-validation contract --
+`validate_config` returning implied `ConfigReference`s, invoked at blob boundaries and finalize,
+plus `SecretBackend.validate_mapping`; both noted as potentially superseded by registration-time
+schemas" is now superseded, exactly as that note anticipated. The permanent record is
+[ADR 0023](../../adrs/0023-declared-schemas-and-the-kind-descriptor.md); the author-facing contract
+is in `cli/agentworks/capabilities/README.md` and `cli/agentworks/plugins/README.md`.
+
+What this SDD shipped that phase 2 retires:
+
+- **The invoked contract itself.** A capability declares `config_model` and the core derives shape
+  validation, reference extraction, defaulting, schema emission, and rendering from that one
+  declaration, invoking no capability code for any of them. `validate` / `dependencies` and
+  `SecretBackend.validate_mapping` are deleted, and with them the per-capability hand-rolled
+  validation this SDD's contract required each implementation to write.
+- **The sibling-key config shape.** The 2026-08-01 entry above recorded the move to one tagged table
+  with the old sibling pair still loading under a deprecation warning. That warning window is
+  closed: the sibling pair is a hard error naming the rewrite, the dual-shape normalization and its
+  aggregated `ManifestSet.deprecation_issues` channel are gone, and `agw resource migrate` gained an
+  in-place manifest-upgrade mode that folds the pair (comments and unrelated documents intact). This
+  is the follow-on that entry said would come.
+- **The per-kind decoders.** Each declarable kind's spec is now a model and the decl classes are
+  frozen models, so the hand-rolled per-kind decode this SDD introduced is gone, along with its
+  `_warn_unexpected_keys` machinery: an unknown key in a kind's spec is a hard error, not a warning.
+- **`agw resource sample`'s bundled sample files.** This SDD shipped one fully-commented sample YAML
+  per manifest-declarable kind, hand-authored and hand-maintained. They are deleted. The command
+  renders live from the same declarations the loader validates against, so a sample cannot describe
+  a field the loader would refuse, and a plugin's kinds and capabilities render on the same terms as
+  first-party ones. The sample-pinning tests (including the strip-one-`#` convention) are replaced
+  by renderer tests.
+- **The `agw resource kinds` inventory keeps its job**, but is no longer the only kind-level
+  surface: `agw resource describe-kind` renders the field reference for a kind or a capability, and
+  `agw resource schema` emits JSON Schema per kind for editor association.
+
+What SURVIVES unchanged: the resource model itself. The config/resource split, the Kubernetes
+envelope and auto-load, `kind` + `name` identity, the origins, the capability/declarable category
+split, `agw resource migrate`'s whole operator-facing contract, and the manifest loader's boundaries
+all stand. Phase 2 changed how a spec is DESCRIBED, not what a resource is.

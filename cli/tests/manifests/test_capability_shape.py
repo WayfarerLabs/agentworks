@@ -1,11 +1,11 @@
-"""The tagged capability-config shape (declarative-schema pre-support).
+"""The tagged capability-config shape: the ONE way to name a capability.
 
-The two stable hosting surfaces (vm-site's platform and git-credential's
-provider) accept the capability as ONE tagged table whose ``name`` key
-selects it and whose remaining keys are its config. Session templates use
-their distinct ``harness_integration`` selector. Old forms still load
-identically but record deprecation facts; mixing old and canonical forms
-on one resource is a hard error.
+Every hosting surface (vm-site's platform, git-credential's provider,
+session-template's harness_integration) takes the capability as one
+tagged table whose ``name`` key selects it and whose remaining keys are
+its config. The legacy sibling shape (a naming string plus a ``*_config``
+table) was accepted with a deprecation warning through 0.14 and is a hard
+error now, naming the exact rewrite the operator applies by hand.
 """
 
 from __future__ import annotations
@@ -17,12 +17,24 @@ import pytest
 
 from agentworks.errors import ConfigError
 from agentworks.manifests import load_manifests
-from agentworks.migrate.verify import strip_source_fields
 
-_OLD_NEW_PAIRS = [
+_REWRITE_HINT = (
+    "Apply the rewrite above; `agw resource describe-kind <kind>` documents the field, "
+    "and `agw resource sample <kind>` prints it as a document to edit. "
+    'See "The retired sibling capability shape" in docs/guides/upgrading-to-0.14.md.'
+)
+"""The operator-facing text, spelled out rather than imported.
+
+The remediation is the operator's own edit now (operator ruling,
+2026-08-07), so what the hint SAYS is the whole remedy rather than a
+pointer to a command that would do it. Importing the constant would assert
+it equals itself; this is the representative-mistakes corpus, and the text
+is what it is pinning."""
+
+_SURFACES = [
     (
         "vm-site",
-        "gpu-box",
+        "platform",
         """
         apiVersion: agentworks/v1
         kind: vm-site
@@ -33,20 +45,11 @@ _OLD_NEW_PAIRS = [
           platform_config:
             vm_host: me@gpu-box
         """,
-        """
-        apiVersion: agentworks/v1
-        kind: vm-site
-        metadata:
-          name: gpu-box
-        spec:
-          platform:
-            name: lima
-            vm_host: me@gpu-box
-        """,
+        "platform: {name: lima, vm_host: ...}",
     ),
     (
         "git-credential",
-        "ado",
+        "provider",
         """
         apiVersion: agentworks/v1
         kind: git-credential
@@ -58,19 +61,26 @@ _OLD_NEW_PAIRS = [
             org: my-org
             token: git-token-ado
         """,
+        "provider: {name: azdo, org: ..., token: ...}",
+    ),
+    (
+        "session-template",
+        "harness_integration",
         """
         apiVersion: agentworks/v1
-        kind: git-credential
+        kind: session-template
         metadata:
-          name: ado
+          name: htop
         spec:
-          provider:
-            name: azdo
-            org: my-org
-            token: git-token-ado
+          harness_integration: shell
+          harness_integration_config:
+            command: htop
         """,
+        "harness_integration: {name: shell, command: ...}",
     ),
 ]
+"""Per host surface: kind, naming field, a document in the retired sibling
+shape, and the exact rewrite its error must print."""
 
 
 def _load_one(tmp_path: Path, name: str, text: str):  # noqa: ANN202 - test helper
@@ -80,72 +90,75 @@ def _load_one(tmp_path: Path, name: str, text: str):  # noqa: ANN202 - test help
     return load_manifests(resources)
 
 
-@pytest.mark.parametrize(("kind", "name", "old_doc", "new_doc"), _OLD_NEW_PAIRS)
-def test_tagged_shape_decodes_identically_to_sibling_shape(
-    tmp_path: Path, kind: str, name: str, old_doc: str, new_doc: str
+@pytest.mark.parametrize(("kind", "field", "old_doc", "rewrite"), _SURFACES)
+def test_sibling_shape_is_rejected_with_the_exact_rewrite(
+    tmp_path: Path, kind: str, field: str, old_doc: str, rewrite: str
 ) -> None:
-    """Both shapes normalize to the same internal fields, so the config
-    reaches the finalize capability validation identically."""
-    old = _load_one(tmp_path, "old", old_doc)
-    new = _load_one(tmp_path, "new", new_doc)
-    assert [e.kind for e in new.entries] == [kind]
-    assert strip_source_fields(old.entries[0].resource) == strip_source_fields(new.entries[0].resource)
+    """The error shows the operator THEIR resource in the shape it needs:
+    the capability they named, plus the config keys they wrote, folded into
+    one table. A generic "use a tagged table" would leave them to work out
+    the fold themselves.
+
+    Every surface answers the same way. Session templates hardened a
+    release earlier than their siblings and kept a fold of their own
+    through that window; there is one fold now, so this is one table-driven
+    expectation rather than an asymmetry to describe.
+
+    **This is the representative-mistakes corpus's old-sibling-shape
+    entry**, and it is deliberately end to end (a manifest on disk, not a
+    model and a blob) rather than living beside the other four in
+    ``tests/schema/test_errors.py``. Under the kind spec models this input
+    is just two problems the model layer has no reason to connect, an
+    unknown ``platform_config`` key and a ``platform`` that is not a table,
+    which is exactly the generic pair this sentence exists to beat. Pinning
+    it at the surface an operator actually types is what stops the swap
+    from quietly degrading it.
+    """
+    with pytest.raises(ConfigError) as excinfo:
+        _load_one(tmp_path, "old", old_doc)
+    assert f"spec.{field} names the capability as a string" in str(excinfo.value)
+    assert rewrite in str(excinfo.value)
+    assert excinfo.value.hint == _REWRITE_HINT
 
 
-@pytest.mark.parametrize(("kind", "name", "old_doc", "new_doc"), _OLD_NEW_PAIRS)
-def test_old_shape_warns_and_new_shape_does_not(
-    tmp_path: Path, kind: str, name: str, old_doc: str, new_doc: str
-) -> None:
-    old = _load_one(tmp_path, "old", old_doc)
-    assert old.deprecated_shape_resources == (f"{kind}/{name}",)
-    assert len(old.deprecation_issues) == 1
-    # Deprecation rides its own channel, not the issue channel (which
-    # bundles treat as fatal and doctor renders as generic warnings).
-    assert not old.issues
-
-    new = _load_one(tmp_path, "new", new_doc)
-    assert not new.deprecation_issues
-    assert not new.deprecated_shape_resources
-    assert not new.issues
-
-
-def test_old_shape_warning_aggregates_once_and_names_resources(tmp_path: Path) -> None:
-    resources = tmp_path / "resources"
-    resources.mkdir()
-    docs = "\n---\n".join(dedent(doc) for _kind, _name, doc, _new in _OLD_NEW_PAIRS)
-    (resources / "res.yaml").write_text(docs)
-    manifests = load_manifests(resources)
-    assert manifests.deprecated_shape_resources == (
-        "vm-site/gpu-box",
-        "git-credential/ado",
-    )
-    (message,) = manifests.deprecation_issues
-    for token in manifests.deprecated_shape_resources:
-        assert token in message
-    assert "deprecated" in message
-    assert "will be removed" in message
-    assert "platform: {name: <capability>, <config keys...>}" in message
+def test_bare_naming_string_is_rejected_with_a_one_key_rewrite(tmp_path: Path) -> None:
+    """`platform: lima` alone is the old shape too; the rewrite is
+    `platform: {name: lima}` with nothing to fold in."""
+    with pytest.raises(ConfigError, match=r"platform: \{name: lima\}"):
+        _load_one(
+            tmp_path,
+            "old",
+            """
+            apiVersion: agentworks/v1
+            kind: vm-site
+            metadata:
+              name: bare
+            spec:
+              platform: lima
+            """,
+        )
 
 
-def test_old_string_without_sibling_config_counts_as_old_shape(tmp_path: Path) -> None:
-    """`platform: lima` alone is still the old shape; the rewrite is
-    `platform: {name: lima}`."""
-    manifests = _load_one(
-        tmp_path,
-        "old",
-        """
-        apiVersion: agentworks/v1
-        kind: vm-site
-        metadata:
-          name: bare
-        spec:
-          platform: lima
-        """,
-    )
-    assert manifests.deprecated_shape_resources == ("vm-site/bare",)
+def test_sibling_config_alone_names_the_unsupported_field(tmp_path: Path) -> None:
+    """A ``*_config`` table with no naming field beside it: the message
+    names the field that is not supported rather than reporting the
+    capability as missing, which is what the kind's own required-field
+    error would say.
+
+    Looped over ``_SURFACES`` rather than parametrized: the expectation is
+    derived from the surface's own field name, so all three make one claim
+    of the shared refusal and a report naming every surface that stopped
+    making it is the useful failure. The sweep above keeps its cases
+    because each carries its own rendered REWRITE.
+    """
+    for kind, field, old_doc, _rewrite in _SURFACES:
+        config_field = f"{field}_config"
+        document = "\n".join(line for line in dedent(old_doc).splitlines() if not line.strip().startswith(f"{field}:"))
+        with pytest.raises(ConfigError, match=f"spec.{config_field} is not a supported YAML field"):
+            _load_one(tmp_path, f"ownerless-{kind}", document)
 
 
-def test_session_template_canonical_selector_is_not_a_capability_shape_deprecation(tmp_path: Path) -> None:
+def test_session_template_canonical_selector_decodes_to_the_internal_pair(tmp_path: Path) -> None:
     manifests = _load_one(
         tmp_path,
         "canonical",
@@ -161,176 +174,162 @@ def test_session_template_canonical_selector_is_not_a_capability_shape_deprecati
         """,
     )
     (entry,) = manifests.entries
-    assert entry.resource.harness_integration == "shell"
-    assert entry.resource.harness_integration_config == {"command": "htop"}
-    assert not manifests.deprecation_issues
+    assert entry.resource.harness_integration.name == "shell"
+    assert entry.resource.harness_integration.config == {"command": "htop"}
+    assert not manifests.issues
 
 
-def test_legacy_session_harness_config_without_selector_is_rejected(tmp_path: Path) -> None:
-    with pytest.raises(
-        ConfigError,
-        match=r"unexpected keys in \[session_templates.htop\]: harness_config",
-    ):
-        _load_one(
-            tmp_path,
-            "ownerless-config",
-            """
+#: The two retired session-template selector keys, and the spellings that
+#: used to be pinned one test each. The VALUE cannot matter: both keys are
+#: gone from the row, so ``extra="forbid"`` refuses the key before anything
+#: looks at what is under it. Four separate tests spelled `harness` as an
+#: empty string, a number, a valid name, and a valid name beside the
+#: canonical selector; re-admitting `harness` as a field is the only
+#: mutation any of them catches, and it reddens all four at once. So the
+#: spellings that differ only in the unread value are gone, and what is
+#: left is one case per distinct claim: each retired KEY, and the mixture
+#: that might have been thought to rescue one.
+_RETIRED_SELECTORS = [
+    ("config-without-a-selector", "harness_config:\n    command: htop", "harness_config"),
+    ("a-name-that-used-to-work", "harness: shell", "harness"),
+    # A canonical selector beside it does not rescue the retired one.
+    ("old-and-canonical-mixed", "harness: shell\n  harness_integration:\n    name: shell", "harness"),
+]
+
+
+def test_a_retired_session_selector_is_an_unknown_field_at_its_own_location(tmp_path: Path) -> None:
+    """The retired keys read as what they are, with the document's
+    ``file:line`` on the front so an operator with several templates knows
+    which one to open.
+
+    One loop, because the note above is the whole reason these are
+    together: they all land on ``extra="forbid"``, so re-admitting a key
+    reddens the lot. The label is carried into the failure so the spelling
+    that stopped being refused still names itself.
+    """
+    for label, spec_body, key in _RETIRED_SELECTORS:
+        # The literal keeps its original indentation: ``dedent`` strips the
+        # COMMON prefix, and ``spec_body``'s own continuation lines carry
+        # only their nesting, so indenting the block further would leave
+        # dedent nothing to strip and change the document.
+        document = f"""
             apiVersion: agentworks/v1
             kind: session-template
             metadata:
               name: htop
             spec:
-              harness_config:
-                command: htop
-            """,
-        )
-
-
-def test_legacy_session_harness_empty_scalar_is_rejected(tmp_path: Path) -> None:
-    with pytest.raises(ConfigError, match=r"unexpected keys.*harness"):
-        _load_one(
-            tmp_path,
-            "empty-selector",
+              {spec_body}
             """
-            apiVersion: agentworks/v1
-            kind: session-template
-            metadata:
-              name: htop
-            spec:
-              harness: ""
-            """,
-        )
+        with pytest.raises(ConfigError, match=rf"res\.yaml:2:.*{key}: unknown field; expected one of: "):
+            _load_one(tmp_path, f"retired-selector-{label}", document)
 
 
-def test_legacy_session_harness_non_string_scalar_is_rejected(tmp_path: Path) -> None:
-    with pytest.raises(ConfigError, match=r"unexpected keys.*harness"):
-        _load_one(
+def test_session_template_without_selector_remains_a_valid_default_or_inheriting_template(tmp_path: Path) -> None:
+    """A template that names no integration loads, whether it is the
+    default one an operator configures or a child that inherits its
+    parent's. Both spellings make the one claim, so they are one loop."""
+    for label, spec in (("a-default", "env:\n    TERM: xterm-256color"), ("an-inheritor", "inherits: [parent]")):
+        manifests = _load_one(
             tmp_path,
-            "non-string-selector",
-            """
-            apiVersion: agentworks/v1
-            kind: session-template
-            metadata:
-              name: htop
-            spec:
-              harness: 42
-            """,
+            f"no-selector-{label}",
+            "\n".join(
+                (
+                    "apiVersion: agentworks/v1",
+                    "kind: session-template",
+                    "metadata:",
+                    "  name: child",
+                    "spec:",
+                    *(f"  {line}" for line in spec.splitlines()),
+                )
+            ),
         )
+        (entry,) = manifests.entries
+        assert entry.resource.harness_integration is None, label
 
 
-def test_legacy_session_harness_is_rejected_with_location(tmp_path: Path) -> None:
-    with pytest.raises(
-        ConfigError,
-        match=r"res.yaml:2:.*unexpected keys.*harness",
-    ):
-        _load_one(
-            tmp_path,
-            "valid-selector",
-            """
-            apiVersion: agentworks/v1
-            kind: session-template
-            metadata:
-              name: htop
-            spec:
-              harness: shell
-            """,
-        )
+#: A tagged table AND its retired sibling, on each hosting surface.
+_MIXED_SHAPES = [
+    (
+        "platform",
+        """
+        apiVersion: agentworks/v1
+        kind: vm-site
+        metadata:
+          name: gpu-box
+        spec:
+          platform:
+            name: lima
+            vm_host: me@gpu-box
+          platform_config:
+            vm_host: elsewhere
+        """,
+    ),
+    (
+        "provider",
+        """
+        apiVersion: agentworks/v1
+        kind: git-credential
+        metadata:
+          name: ado
+        spec:
+          provider:
+            name: azdo
+          provider_config:
+            org: my-org
+        """,
+    ),
+    (
+        "harness_integration",
+        """
+        apiVersion: agentworks/v1
+        kind: session-template
+        metadata:
+          name: htop
+        spec:
+          harness_integration:
+            name: shell
+          harness_integration_config:
+            command: htop
+        """,
+    ),
+]
 
 
-def test_session_template_old_and_canonical_selectors_cannot_mix(tmp_path: Path) -> None:
-    with pytest.raises(ConfigError, match=r"unexpected keys.*harness"):
-        _load_one(
-            tmp_path,
-            "mixed-selector",
-            """
-            apiVersion: agentworks/v1
-            kind: session-template
-            metadata:
-              name: htop
-            spec:
-              harness: shell
-              harness_integration:
-                name: shell
-            """,
-        )
+def test_mixed_shape_is_a_hard_error_with_no_rewrite_hint(tmp_path: Path) -> None:
+    """A tagged table beside a sibling ``*_config``: the message names the
+    field that is not supported, so the operator's next move is to fold
+    those keys in rather than to guess which half won.
+
+    And it carries NO hint at all. The hint reads "apply the rewrite
+    above", and no rewrite is printed here: which half of a mixed document
+    wins is the operator's call, so any rewrite would be a guess. The
+    sample hint every model-layer error carries is not reached either,
+    because this refusal runs ahead of validation.
+
+    One loop over the three surfaces: the expectation is derived from each
+    one's own field name, so all three make the one claim.
+    """
+    for field, doc in _MIXED_SHAPES:
+        with pytest.raises(ConfigError) as excinfo:
+            _load_one(tmp_path, f"mixed-{field}", doc)
+        assert f"spec.{field}_config is not a supported YAML field" in str(excinfo.value)
+        assert excinfo.value.hint is None, field
 
 
 @pytest.mark.parametrize(
-    "spec",
-    ["env:\n    TERM: xterm-256color", "inherits: parent"],
-)
-def test_session_template_without_selector_remains_a_valid_default_or_inheriting_template(
-    tmp_path: Path, spec: str
-) -> None:
-    manifests = _load_one(
-        tmp_path,
-        "no-selector",
-        "\n".join(
-            (
-                "apiVersion: agentworks/v1",
-                "kind: session-template",
-                "metadata:",
-                "  name: child",
-                "spec:",
-                *(f"  {line}" for line in spec.splitlines()),
-            )
-        ),
-    )
-    (entry,) = manifests.entries
-    assert entry.resource.harness_integration is None
-    assert entry.resource.harness_integration_config is None
-
-
-@pytest.mark.parametrize(
-    ("doc", "field"),
+    ("name_line", "message"),
     [
-        (
-            """
-            apiVersion: agentworks/v1
-            kind: vm-site
-            metadata:
-              name: gpu-box
-            spec:
-              platform:
-                name: lima
-                vm_host: me@gpu-box
-              platform_config:
-                vm_host: elsewhere
-            """,
-            "platform",
-        ),
-        (
-            """
-            apiVersion: agentworks/v1
-            kind: git-credential
-            metadata:
-              name: ado
-            spec:
-              provider:
-                name: azdo
-              provider_config:
-                org: my-org
-            """,
-            "provider",
-        ),
+        ("vm_host: me@gpu-box", "platform.name: is required"),
+        ("name: 123", "platform.name: must be a string"),
+        ("name: [lima]", "platform.name: must be a string"),
+        ("name: ''", "platform.name: must not be empty"),
     ],
 )
-def test_mixed_shape_is_a_hard_error(tmp_path: Path, doc: str, field: str) -> None:
-    with pytest.raises(ConfigError, match=f"spec.{field} is a tagged table"):
-        _load_one(tmp_path, "mixed", doc)
-
-
-@pytest.mark.parametrize(
-    "name_line",
-    [
-        "vm_host: me@gpu-box",  # no name key at all
-        "name: 123",  # non-string name
-        "name: [lima]",  # non-string name (sequence)
-        "name: ''",  # empty-string name
-    ],
-)
-def test_tagged_table_requires_a_string_name_key(tmp_path: Path, name_line: str) -> None:
-    with pytest.raises(ConfigError, match="requires a 'name' key"):
+def test_tagged_table_requires_a_string_name_key(tmp_path: Path, name_line: str, message: str) -> None:
+    """The tag is a field of the block now, so each way of getting it
+    wrong reads as that field's own problem rather than as one
+    hand-written sentence covering four cases."""
+    with pytest.raises(ConfigError, match=message):
         _load_one(
             tmp_path,
             "nameless",
@@ -344,21 +343,6 @@ def test_tagged_table_requires_a_string_name_key(tmp_path: Path, name_line: str)
                 {name_line}
             """,
         )
-
-
-def test_migrator_tagged_table_refuses_name_config_key() -> None:
-    """The migrator's emission guard: a config key literally named
-    'name' would collide with the tagged table's discriminator. Known
-    capabilities reject it via pre-write validation; this guard is the
-    backstop for capabilities the run cannot validate, so it is pinned
-    directly."""
-    from agentworks.migrate.planning import _tagged_capability_table
-
-    with pytest.raises(ConfigError, match="collides with the tagged table's discriminator"):
-        _tagged_capability_table("vm-site", "weird", "future-platform", {"name": "sneaky"})
-    # Without the collision the table folds name-first.
-    table = _tagged_capability_table("vm-site", "ok", "lima", {"vm_host": "me@box"})
-    assert table == {"name": "lima", "vm_host": "me@box"}
 
 
 def test_tagged_shape_reaches_finalize_validation(tmp_path: Path) -> None:
@@ -380,29 +364,40 @@ def test_tagged_shape_reaches_finalize_validation(tmp_path: Path) -> None:
         """,
     )
     (entry,) = manifests.entries
-    assert entry.resource.platform == "lima"
-    assert entry.resource.platform_config == {"vm_host": "me@gpu-box"}
+    assert entry.resource.platform.name == "lima"
+    assert entry.resource.platform.config == {"vm_host": "me@gpu-box"}
 
 
-def test_tagged_table_still_hits_reserved_field_check(tmp_path: Path) -> None:
-    """The vm-site kind-owned shadow check keeps firing for the tagged
-    shape: a `platform` key inside the table would silently re-pick the
-    capability."""
-    with pytest.raises(ConfigError, match="may not contain kind-owned field"):
-        _load_one(
-            tmp_path,
-            "shadow",
-            """
-            apiVersion: agentworks/v1
-            kind: vm-site
-            metadata:
-              name: gpu-box
-            spec:
-              platform:
-                name: lima
-                platform: wsl2
-            """,
-        )
+def test_a_kind_owned_key_inside_the_table_is_the_platforms_to_refuse(tmp_path: Path) -> None:
+    """decode carried a shadow check while the sibling pair existed,
+    because a ``platform`` key inside ``platform_config`` could silently
+    re-pick the capability. It cannot inside ONE tagged table: ``name`` is
+    the selector and it is a real field of the block, so a stray
+    ``platform`` key is config the platform does not accept, and the
+    platform's own model says so at finalize rather than decode
+    duplicating the rule."""
+    from agentworks.bootstrap import build_registry
+    from agentworks.config import load_config
+
+    cfg = _write_config(tmp_path)
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    (resources / "res.yaml").write_text(
+        dedent("""
+        apiVersion: agentworks/v1
+        kind: vm-site
+        metadata:
+          name: gpu-box
+        spec:
+          platform:
+            name: lima
+            placement: { mode: ssh, host: me@gpu-box }
+            platform: wsl2
+        """)
+    )
+
+    with pytest.raises(ConfigError, match="platform: unknown field"):
+        build_registry(load_config(cfg, warn_issues=False))
 
 
 def _write_config(tmp_path: Path) -> Path:
@@ -433,35 +428,16 @@ spec:
 """
 
 
-def test_cli_warns_ambiently_and_no_deprecations_silences(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The aggregated warning rides the ambient deprecation channel:
-    printed by the registry auto-load, silenced by --no-deprecations."""
-    from typer.testing import CliRunner
-
-    from agentworks import output
-    from agentworks.cli import app
-
-    cfg = _write_config(tmp_path)
-    resources = tmp_path / "resources"
-    resources.mkdir()
-    (resources / "res.yaml").write_text(dedent(_OLD_SHAPE_MANIFEST))
-    monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
-    monkeypatch.setattr(output, "_suppress_deprecations", False)
-
-    with_warning = CliRunner().invoke(app, ["resource", "list", "--names-only"])
-    assert with_warning.exit_code == 0, with_warning.output
-    assert "deprecated capability config shape in: vm-site/gpu-box" in with_warning.output
-    assert "harness/harness_config" not in with_warning.output
-
-    silenced = CliRunner().invoke(app, ["--no-deprecations", "resource", "list", "--names-only"])
-    assert silenced.exit_code == 0, silenced.output
-    assert "deprecated capability config shape" not in silenced.output
-
-
-def test_cli_aggregates_multiple_generic_old_shapes_into_one_warning(
+def test_cli_fails_on_the_old_shape_and_no_deprecations_does_not_silence_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The retained generic warning aggregates across manifest files."""
+    """End to end through a real command: the old shape stops the run and
+    prints the rewrite plus the remediation command.
+
+    ``--no-deprecations`` silences ambient nudges. This is not one any
+    more, so the flag must not hide it: a silenced load error would leave
+    the operator with a command that fails for no visible reason.
+    """
     from typer.testing import CliRunner
 
     from agentworks import output
@@ -471,27 +447,19 @@ def test_cli_aggregates_multiple_generic_old_shapes_into_one_warning(
     resources = tmp_path / "resources"
     resources.mkdir()
     (resources / "res.yaml").write_text(dedent(_OLD_SHAPE_MANIFEST))
-    (resources / "res2.yaml").write_text(
-        dedent("""
-        apiVersion: agentworks/v1
-        kind: git-credential
-        metadata:
-          name: ado
-        spec:
-          provider: azdo
-        """)
-    )
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
     monkeypatch.setattr(output, "_suppress_deprecations", False)
 
-    result = CliRunner().invoke(app, ["resource", "list", "--names-only"])
-    assert result.exit_code == 0, result.output
-    assert result.output.count("deprecated capability config shape in:") == 1
-    assert "git-credential/ado" in result.output
-    assert "vm-site/gpu-box" in result.output
+    for argv in (["resource", "list"], ["--no-deprecations", "resource", "list"]):
+        result = CliRunner().invoke(app, argv)
+        assert result.exit_code != 0, result.output
+        assert isinstance(result.exception, ConfigError)
+        assert "res.yaml:2:" in str(result.exception)
+        assert "platform: {name: lima, vm_host: ...}" in str(result.exception)
+        assert result.exception.hint == _REWRITE_HINT
 
 
-def test_cli_new_shape_does_not_warn(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cli_tagged_shape_loads_cleanly(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from typer.testing import CliRunner
 
     from agentworks import output
@@ -517,12 +485,13 @@ def test_cli_new_shape_does_not_warn(tmp_path: Path, monkeypatch: pytest.MonkeyP
 
     result = CliRunner().invoke(app, ["resource", "list", "--names-only"])
     assert result.exit_code == 0, result.output
-    assert "deprecated session-template selector" not in result.output
+    assert "session-template/htop" in result.output
 
 
-def test_doctor_surfaces_deprecated_shape_row(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Doctor renders the fact as a tidy one-liner naming the affected
-    resources with the rewrite pattern as the one next step."""
+def test_doctor_reports_the_old_shape_as_a_manifest_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Doctor carried a tidy WARN row for the old shape while it still
+    loaded. It is a load failure now, so the row it gets is the Manifest
+    FAIL row every unloadable manifest gets, carrying the same rewrite."""
     from agentworks.doctor import Status, _check_config
 
     cfg = _write_config(tmp_path)
@@ -532,16 +501,20 @@ def test_doctor_surfaces_deprecated_shape_row(tmp_path: Path, monkeypatch: pytes
     monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
 
     g, _, _ = _check_config()
-    warns = [(c.name, c.message or "") for c in g.checks if c.status == Status.WARN]
-    ((name, message),) = [w for w in warns if "deprecated capability config shape" in w[0]]
-    assert name == "Manifests use the deprecated capability config shape"
-    assert "vm-site/gpu-box" in message
-    assert "platform: {name: lima, ...}" in message
+    fails = [(c.name, c.message or "") for c in g.checks if c.status == Status.FAIL]
+    ((name, message),) = [f for f in fails if "platform" in f[1]]
+    assert name == "Manifest"
+    assert "platform: {name: lima, vm_host: ...}" in message
+    assert not [c for c in g.checks if c.status == Status.WARN and "capability config shape" in c.name]
 
 
 def test_builtin_bundle_publishes_cleanly() -> None:
-    """The shipped built-in bundle spells the tagged shape, so it clears
-    the deprecated-shape gate."""
+    """The shipped built-in bundle spells the tagged shape.
+
+    It needs no bundle-specific gate to prove it: a first-party bundle
+    loads through ``load_manifests`` like any other manifest source, so
+    the old shape would fail this publish outright.
+    """
     from agentworks.manifests.package import publish_manifest_package
     from agentworks.resources import Origin, Registry
 
@@ -553,19 +526,129 @@ def test_builtin_bundle_publishes_cleanly() -> None:
     )
 
 
-def test_bundled_manifests_reject_deprecated_shape(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Shipped bundles are the pattern book: a bundle spelling the old
-    shape fails loudly instead of teaching it."""
-    from agentworks.manifests import ManifestSet
-    from agentworks.manifests.package import publish_manifest_package
-    from agentworks.resources import Origin, Registry
+# -- The rewrite is only printed when it would be an honest one ---------------
 
-    dirty = ManifestSet(entries=(), issues=(), deprecation_issues=("deprecated capability config shape in: ...",))
-    monkeypatch.setattr("agentworks.manifests.package.load_manifests", lambda _dir: dirty)
-    with pytest.raises(ConfigError, match="must not use deprecated shapes"):
-        publish_manifest_package(
-            Registry.empty(),
-            anchor="agentworks.manifests",
-            subdir="builtin",
-            origin_for=lambda name: Origin.built_in(source=name),
+
+def test_a_sibling_carrying_its_own_name_gets_no_rewrite_and_no_hint(tmp_path: Path) -> None:
+    """Folding this document would emit ``platform: {name: a, name: b}``,
+    which is not valid YAML and hides that two keys claim to select the
+    capability. Which one wins is the operator's call, so no rewrite is
+    printed, and with no rewrite on screen the hint that says to apply it
+    would be pointing at nothing.
+    """
+    with pytest.raises(ConfigError) as excinfo:
+        _load_one(
+            tmp_path,
+            "collision",
+            """
+            apiVersion: agentworks/v1
+            kind: vm-site
+            metadata:
+              name: gpu-box
+            spec:
+              platform: future-platform
+              platform_config:
+                name: sneaky
+            """,
         )
+
+    message = str(excinfo.value)
+    assert "carries its own 'name' ('sneaky')" in message
+    assert "merge them by hand" in message
+    assert "{name:" not in message, "an unusable rewrite is worse than none"
+    assert excinfo.value.hint is None
+
+
+def test_a_non_table_sibling_names_the_value_it_cannot_fold(tmp_path: Path) -> None:
+    """There are no keys to fold, so printing the tag alone would quietly
+    discard what the operator wrote."""
+    with pytest.raises(ConfigError) as excinfo:
+        _load_one(
+            tmp_path,
+            "scalar-sibling",
+            """
+            apiVersion: agentworks/v1
+            kind: vm-site
+            metadata:
+              name: gpu-box
+            spec:
+              platform: lima
+              platform_config: oops
+            """,
+        )
+
+    message = str(excinfo.value)
+    assert "spec.platform_config is 'oops' rather than a table" in message
+    assert excinfo.value.hint is None
+
+
+def test_an_empty_sibling_is_shown_the_rewrite(tmp_path: Path) -> None:
+    """An empty sibling holds nothing, so the rewrite is printable, so it
+    is printed.
+
+    The refusal above prints none, because folding a non-table value would
+    discard what the operator wrote. That reasoning does not reach a null:
+    there are no keys to lose. Withholding the rewrite here told an
+    operator to put a value where it belongs when they had written no
+    value at all.
+
+    The extra instruction over the absent-sibling case is real work: the
+    empty key still has to go, or the next load answers with the ORPHAN
+    refusal instead.
+
+    All three YAML spellings of "empty" in one loop: they reach one branch
+    and the expectation does not vary, so a spelling that stopped being
+    read as empty is what the failure has to name, and it does.
+    """
+    for spelling in ("", " null", " ~"):
+        with pytest.raises(ConfigError) as excinfo:
+            _load_one(
+                tmp_path,
+                f"empty-sibling{len(spelling)}",
+                f"""
+            apiVersion: agentworks/v1
+            kind: vm-site
+            metadata:
+              name: gpu-box
+            spec:
+              platform: lima
+              platform_config:{spelling}
+            """,
+            )
+
+        message = str(excinfo.value)
+        assert "spec.platform_config is empty, so there are no keys to fold" in message, spelling
+        assert "platform: {name: lima}" in message, f"{spelling!r}: the rewrite is printable here"
+        assert "remove it" in message, spelling
+        assert excinfo.value.hint == _REWRITE_HINT, spelling
+
+
+def test_decode_refuses_exactly_the_three_retired_sibling_shapes() -> None:
+    """The retired shapes, pinned by hand against the derived table.
+
+    Decode refuses the sibling pair from ONE generic guard driven by
+    ``HostSurface``, so what it refuses is whatever the descriptor table
+    says: nothing in the refusal path would notice a renamed
+    ``config_field``, because both halves would move together. That field
+    exists only so the refusal can name a spelling operators have already
+    typed, and renaming it would leave the guard looking for a key nobody
+    ever wrote.
+
+    Hand-written expectations for that reason, field names included. A
+    fourth hosting kind lands here as a failure, which is the point: it
+    inherits the refusal and the hint automatically, and this is where
+    someone decides whether the sibling pair was ever a spelling for it.
+    """
+    from agentworks.manifests.decode import _hosting_descriptors
+
+    core = {
+        kind: (descriptor.manifest_section.naming_field, descriptor.manifest_section.config_field)
+        for kind, descriptor in _hosting_descriptors().items()
+        if descriptor.manifest_section is not None
+    }
+
+    assert core == {
+        "vm-site": ("platform", "platform_config"),
+        "git-credential": ("provider", "provider_config"),
+        "session-template": ("harness_integration", "harness_integration_config"),
+    }

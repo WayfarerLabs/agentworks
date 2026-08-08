@@ -24,21 +24,12 @@ from agentworks.resources.inspect import (
     list_kinds,
     list_resources,
 )
+from tests.conftest import write_cfg
 
 
 def _write_cfg(path: Path) -> Path:
-    pub = path.parent / "id.pub"
-    priv = path.parent / "id"
-    pub.write_text("ssh-ed25519 AAAA...")
-    priv.write_text("-----BEGIN OPENSSH PRIVATE KEY-----")
-    path.write_text(
-        dedent("""\
-        [operator]
-        ssh_public_key = "{pub}"
-        ssh_private_key = "{priv}"
-        """).format(pub=pub.as_posix(), priv=priv.as_posix())
-    )
-    return path
+    """``write_cfg`` under this file's path-taking spelling."""
+    return write_cfg(path.parent, filename=path.name)
 
 
 def _write_manifest(root: Path, rel: str, text: str) -> None:
@@ -52,7 +43,6 @@ def _write_manifest(root: Path, rel: str, text: str) -> None:
 
 def test_kind_attributes() -> None:
     kind = KIND_REGISTRY["harness-integration"]
-    assert kind.kind == "harness-integration"
     assert "harness" not in KIND_REGISTRY
     assert kind.category == "capability"
     assert kind.miss_policy == "error"

@@ -285,8 +285,8 @@ metadata:
   name: proxmox-b
   description: Second proxmox site with its own token secret
 spec:
-  platform: proxmox
-  platform_config:
+  platform:
+    name: proxmox
     api_url: "https://pve-b:8006"
     node: pve1
     token_id: "agw@pam!agw"

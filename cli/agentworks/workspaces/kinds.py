@@ -12,18 +12,20 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
+from agentworks.origin import Origin
 from agentworks.resources.kind import (
     ALWAYS_MATERIALIZE_SOURCE,
     KIND_REGISTRY,
     InstanceRef,
 )
-from agentworks.resources.origin import Origin
+from agentworks.topics import TopicProse
 from agentworks.workspaces.template import WorkspaceTemplate
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
     from agentworks.db import Database
+    from agentworks.declared_resource import DeclaredResource
     from agentworks.resources.reference import ResourceReference
     from agentworks.resources.registry import Registry
 
@@ -33,7 +35,21 @@ class _WorkspaceTemplateKind:
     """Implementation of ``ResourceKind`` for ``"workspace-template"``."""
 
     kind: str = "workspace-template"
-    description: str = "Workspace configuration (repo, env, ...)"
+    model: type[DeclaredResource] = WorkspaceTemplate
+    description: str = "What a workspace clones, and the environment it runs in"
+    prose: TopicProse = TopicProse(
+        title="Workspace templates",
+        overview="""
+        A workspace-template says what a workspace IS: which repository it clones, the
+        git identity commits are made under, and the environment its sessions run in.
+        `agw workspace create --template` selects one, and `default` applies when the
+        flag is omitted.
+
+        Repository URLs are HTTPS; authentication comes from the git credentials
+        configured on the admin or agent template, never from the URL. Templates compose
+        through `inherits`, nearest last, with `env` tables merging key by key.
+        """,
+    )
     miss_policy: Literal["auto-declare", "error"] = "auto-declare"
     auto_declare_names: frozenset[str] | None = frozenset({"default"})
     category: Literal["declarable", "capability"] = "declarable"

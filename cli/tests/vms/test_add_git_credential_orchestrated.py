@@ -38,7 +38,7 @@ if TYPE_CHECKING:
     from agentworks.capabilities.base import OperationScope, RunContext
     from agentworks.db import Database, VMRow
 
-GIT_CRED_GH = ManifestDoc("git-credential", "gh", {"provider": "github"})
+GIT_CRED_GH = ManifestDoc("git-credential", "gh", {"provider": {"name": "github"}})
 
 
 @pytest.fixture
@@ -160,8 +160,8 @@ def test_scoped_credential_refused_before_any_resolve_or_gate(
         "metadata:\n"
         "  name: widgets-bot\n"
         "spec:\n"
-        "  provider: github\n"
-        "  provider_config:\n"
+        "  provider:\n"
+        "    name: github\n"
         "    repos: [acme/widgets]\n"
     )
     config = make_config(git_cred=False)

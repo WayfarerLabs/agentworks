@@ -321,7 +321,7 @@ def test_r11_hostname_and_vnet_bound_by_construction() -> None:
     (inside the 63-char DNS-label limit), and the tighter {slug}-{name}-vnet
     Azure virtual-network name is exactly 64 (its cap). The vnet sink is what
     binds the cap at 38."""
-    from agentworks.config import AZURE_VNET_NAME_MAX_LENGTH, DNS_LABEL_MAX_LENGTH, MAX_VM_NAME_LENGTH, validate_name
+    from agentworks.naming import AZURE_VNET_NAME_MAX_LENGTH, DNS_LABEL_MAX_LENGTH, MAX_VM_NAME_LENGTH, validate_name
     from agentworks.plugins.azure.network import VNET_NAME_SUFFIX
 
     slug = "a" * 20

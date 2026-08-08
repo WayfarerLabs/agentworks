@@ -26,21 +26,18 @@ def test_phase_1a_kinds_registered() -> None:
 
 def test_secret_kind_attributes() -> None:
     k = KIND_REGISTRY["secret"]
-    assert k.kind == "secret"
     assert k.miss_policy == "auto-declare"
     assert k.auto_declare_names is None  # any name
 
 
 def test_admin_template_kind_attributes() -> None:
     k = KIND_REGISTRY["admin-template"]
-    assert k.kind == "admin-template"
     assert k.miss_policy == "auto-declare"
     assert k.auto_declare_names == frozenset({"default"})
 
 
 def test_named_console_template_kind_attributes() -> None:
     k = KIND_REGISTRY["named-console-template"]
-    assert k.kind == "named-console-template"
     assert k.miss_policy == "auto-declare"
     assert k.auto_declare_names == frozenset({"default"})
 

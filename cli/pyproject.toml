@@ -27,8 +27,16 @@ dependencies = [
     "azure-mgmt-network>=29.0.0",
     "azure-mgmt-resource>=26.0.0",
     "boto3>=1.43.62",
+    # pydantic is the declaration-model layer (agentworks/schema/): every
+    # kind spec and capability config model derives from AgwModel. The
+    # upper bound excludes a v3, which would be a re-litigation of that design
+    # rather than a drop-in upgrade.
+    "pydantic>=2.13.4,<3",
+    # PyYAML reads manifests. Nothing round-trips YAML any more: ruamel
+    # was here only for the migrator's in-place rewrites, and tomlkit only
+    # for its comment-preserving config.toml edits. Both went with it
+    # (operator ruling, 2026-08-07). Settings parse through stdlib tomllib.
     "pyyaml>=6.0.3",
-    "tomlkit>=0.15.0",
 ]
 
 [project.urls]
@@ -66,6 +74,18 @@ select = [
     "TCH", # flake8-type-checking
 ]
 
+[tool.ruff.lint.flake8-type-checking]
+# A pydantic model resolves its FIELD annotations at class-definition time,
+# so a type named by one has to be a runtime import even though it appears
+# only in an annotation. Declared by base class rather than per file, so a
+# new model gets the rule without anyone remembering it. Method annotations
+# on those same classes are still checked normally.
+runtime-evaluated-base-classes = [
+    "pydantic.BaseModel",
+    "agentworks.schema.AgwModel",
+    "agentworks.declared_resource.DeclaredResource",
+]
+
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["TCH"]
 # Import order in this file is meaningful: it controls the order command
@@ -82,6 +102,16 @@ python_version = "3.12"
 strict = true
 warn_return_any = true
 warn_unused_configs = true
+# The pydantic plugin teaches mypy about model construction (synthesized
+# ``__init__`` signatures, field types, validators). It is additive checking on
+# top of ``strict``, never a relaxation: if a model shape cannot be expressed
+# under strict mypy, the model shape is wrong, not this config.
+plugins = ["pydantic.mypy"]
+
+[tool.pydantic-mypy]
+init_forbid_extra = true
+init_typed = true
+warn_required_dynamic_aliases = true
 
 # Tests: relax the noisy strict-mode + stub-pattern codes while still
 # catching the load-bearing checks (``[attr-defined]`` catches renamed
@@ -123,4 +153,14 @@ dev = [
     "mypy>=1.19.1",
     "pytest>=9.0.0",
     "types-pyyaml>=6.0.12.20260518",
+    # The reference JSON Schema implementation, for the emission tests only:
+    # agentworks/manifests/emit.py has no runtime dependency on it, and
+    # nothing under agentworks/ imports it. Emission's failure mode is a
+    # schema that is subtly wrong, which an editor turns into a confident
+    # red underline on valid config, and assertions hand-written by the
+    # author of the emitter would encode the same misunderstanding. This is
+    # the independent oracle: it meta-validates what we emit against the
+    # 2020-12 metaschema, and validates real sample documents against it.
+    "jsonschema>=4.26.0",
+    "types-jsonschema>=4.26.0.20260518",
 ]

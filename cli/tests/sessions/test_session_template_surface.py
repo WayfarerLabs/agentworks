@@ -1,14 +1,21 @@
 """The template surface: the internal
 ``(harness_integration, harness_integration_config)`` pair,
-the TOML hoist and strict unknown-key errors, the manifest flat-field
-rejection, the pair-inheritance rules (FRD R5, including the multi-parent
-divergence), and the harness-integration reference / describe surfaces.
+the manifest flat-field rejection, the pair-inheritance rules (FRD R5,
+including the multi-parent divergence), and the harness-integration
+reference / describe surfaces.
+
+The flat-TOML hoist and its two conflict errors (FRD R6) were pinned here
+against the migrator's frozen TOML reader. Both are gone (operator ruling,
+2026-08-07): config.toml declares no session templates, so there is no
+flat shape left to hoist. The manifest-side equivalents survive below
+(``test_yaml_restart_command_is_rejected``, the flat-field rejection).
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 from textwrap import dedent
+from typing import Literal
 
 import pytest
 
@@ -17,12 +24,21 @@ from agentworks.capabilities.harness_integration import HARNESS_INTEGRATION_REGI
 from agentworks.config import load_config
 from agentworks.errors import ConfigError
 from agentworks.manifests import load_manifests
-from agentworks.resources.graph import BuildContext
+from agentworks.resources.graph import FinalizeContext
 from agentworks.resources.inspect import describe_resource
+from agentworks.schema import AgwModel, CapabilityBlock
 from agentworks.sessions.template import SessionTemplate
 from agentworks.sessions.templates import resolve_from_dict
 
 # -- a second registered harness integration, for the cross-integration R5 case --
+
+
+class _FakeConfig(AgwModel):
+    """The fake integration's config: its tag plus one field the
+    inheritance tests can put a recognizable value in."""
+
+    name: Literal["fake"]
+    marker: str | None = None
 
 
 class _FakeHarnessIntegration(HarnessIntegration):
@@ -32,14 +48,8 @@ class _FakeHarnessIntegration(HarnessIntegration):
 
     name = "fake"
     description = "test double harness"
-
-    @classmethod
-    def dependencies(cls, owner, config):  # type: ignore[no-untyped-def]
-        return ()
-
-    @classmethod
-    def validate(cls, owner, config):  # type: ignore[no-untyped-def]
-        return None
+    contract_version = 1
+    config_model = _FakeConfig
 
     def start(self, ctx):  # type: ignore[no-untyped-def]
         return ""
@@ -74,203 +84,28 @@ def _config(tmp_path: Path, body: str):  # type: ignore[no-untyped-def]
     return load_config(cfg, warn_issues=False)
 
 
-def _templates(config) -> dict[str, SessionTemplate]:  # type: ignore[no-untyped-def]
-    from agentworks.resources.access import kind_dict
-
-    return kind_dict(build_registry(config), "session-template")
-
-
-# The flat-TOML session-template hoist is no
-# longer reachable on the normal load path: config.toml is settings-only (ADR
-# 0022), so a ``[session_templates.*]`` section hard-errors as a resource
-# section. That reader (``_session_harness_integration_pair`` and the
-# ``_load_session_templates`` normalization around it) relocated to the
-# migrator's pre-side oracle, so these pins exercise the surviving reader.
-
-
-def _oracle_row(tmp_path: Path, body: str, name: str) -> SessionTemplate:
-    """The flat-TOML session template ``name``, read through the migrator's
-    oracle."""
-    from typing import cast
-
-    from agentworks.migrate.toml_resources import toml_resource_rows
-
-    cfg = tmp_path / "legacy.toml"
-    cfg.write_text(dedent(body))
-    return cast("SessionTemplate", toml_resource_rows(cfg)[("session-template", name)])
-
-
-def _oracle_rows(tmp_path: Path, body: str) -> object:
-    """Run the migrator oracle over ``body`` (the raising path for the
-    conflict pins)."""
-    from agentworks.migrate.toml_resources import toml_resource_rows
-
-    cfg = tmp_path / "legacy.toml"
-    cfg.write_text(dedent(body))
-    return toml_resource_rows(cfg)
-
-
-def _pair(body: str, name: str) -> tuple[str | None, dict[str, object] | None]:
-    """The raw canonical pair for one flat-TOML template."""
-    import tomllib
-
-    from agentworks.migrate.toml_resources import _session_harness_integration_pair
-
-    data = tomllib.loads(dedent(body))
-    return _session_harness_integration_pair(name, data["session_templates"][name])  # type: ignore[index]
-
-
-# -- TOML hoist + the two conflict errors (FRD R6) ---------------------------
-
-
-def test_flat_toml_restart_command_is_rejected(tmp_path: Path) -> None:
-    with pytest.raises(
-        ConfigError,
-        match=r"unexpected keys in \[session_templates.claude\]: restart_command",
-    ):
-        _oracle_row(
-            tmp_path,
-            """
-            [session_templates.claude]
-            command = "claude"
-            restart_command = "claude --resume"
-            """,
-            "claude",
-        )
-
-
-def test_flat_toml_resume_command_is_canonical(tmp_path: Path) -> None:
-    tmpl = _oracle_row(
-        tmp_path,
-        """
-        [session_templates.claude]
-        command = "claude"
-        resume_command = "claude --resume"
-        """,
-        "claude",
-    )
-    assert tmpl.harness_integration_config == {
-        "command": "claude",
-        "resume_command": "claude --resume",
-    }
-
-
-def test_local_resume_and_restart_command_conflict(tmp_path: Path) -> None:
-    with pytest.raises(ConfigError, match=r"unexpected keys.*restart_command"):
-        _oracle_rows(
-            tmp_path,
-            """
-            [session_templates.bad]
-            resume_command = "new"
-            restart_command = "old"
-            """,
-        )
-
-
-def test_nested_toml_harness_config_passes_through(tmp_path: Path) -> None:
-    tmpl = _oracle_row(
-        tmp_path,
-        """
-        [session_templates.htop]
-        harness_integration = "shell"
-        [session_templates.htop.harness_integration_config]
-        command = "htop"
-        required_commands = ["htop"]
-        """,
-        "htop",
-    )
-    assert tmpl.harness_integration == "shell"
-    assert tmpl.harness_integration_config == {"command": "htop", "required_commands": ["htop"]}
-
-
-def test_canonical_toml_harness_integration_pair_normalizes_to_internal_pair(tmp_path: Path) -> None:
-    integration, config = _pair(
-        """
-        [session_templates.htop]
-        harness_integration = "shell"
-        [session_templates.htop.harness_integration_config]
-        command = "htop"
-        required_commands = ["htop"]
-        """,
-        "htop",
-    )
-    assert integration == "shell"
-    assert config == {"command": "htop", "required_commands": ["htop"]}
-    # The canonical spelling is not flagged as a deprecated selector.
-
-
-def test_toml_harness_old_and_canonical_pairs_cannot_mix(tmp_path: Path) -> None:
-    with pytest.raises(ConfigError, match=r"unexpected keys.*harness"):
-        _oracle_rows(
-            tmp_path,
-            """
-            [session_templates.bad]
-            harness = "shell"
-            harness_integration = "shell"
-            """,
-        )
-
-
-def test_undeclared_template_leaves_the_pair_none(tmp_path: Path) -> None:
-    tmpl = _oracle_row(
-        tmp_path,
-        """
-        [session_templates.plain]
-        description = "just a login shell"
-        """,
-        "plain",
-    )
-    assert tmpl.harness_integration is None
-    assert tmpl.harness_integration_config is None
-
-
-def test_flat_fields_with_non_shell_harness_is_an_error(tmp_path: Path) -> None:
-    with pytest.raises(ConfigError, match="cannot combine with harness"):
-        _oracle_rows(
-            tmp_path,
-            """
-            [session_templates.bad]
-            harness_integration = "claude-code"
-            command = "claude"
-            """,
-        )
-
-
-def test_flat_fields_with_explicit_harness_config_is_an_error(
-    tmp_path: Path,
-) -> None:
-    with pytest.raises(ConfigError, match=r"unexpected keys.*harness_config"):
-        _oracle_rows(
-            tmp_path,
-            """
-            [session_templates.bad]
-            command = "claude"
-            [session_templates.bad.harness_config]
-            command = "claude"
-            """,
-        )
-
-
-def test_harness_config_without_harness_is_an_error(tmp_path: Path) -> None:
-    with pytest.raises(ConfigError, match=r"unexpected keys.*harness_config"):
-        _oracle_rows(
-            tmp_path,
-            """
-            [session_templates.bad]
-            [session_templates.bad.harness_config]
-            command = "claude"
-            """,
-        )
-
-
-def test_unknown_shell_field_errors_at_build(tmp_path: Path) -> None:
-    """The declared blob is shape-validated by the finalize ``validate``
+@pytest.mark.parametrize(
+    "field",
+    [
+        pytest.param("nope", id="a-plain-typo"),
+        # The retired TOML spelling of a real setting, and the case that
+        # keeps it retired: re-adding ``restart_command`` to ``ShellConfig``
+        # fails this row alone. It earns no migration steer of its own
+        # either, which is why the expectation is the same unknown-key line
+        # the typo gets.
+        pytest.param("restart_command", id="a-retired-key"),
+    ],
+)
+def test_an_unknown_key_in_the_harness_block_errors_at_build(tmp_path: Path, field: str) -> None:
+    """The effective blob is shape-validated by the finalize ``validate``
     pass (R3), so a malformed shell block fails at build_registry, not at
-    load. The error keeps the harness-integration vocabulary and gains the source
-    location (re-attached from the resource origin, the manifest file now)."""
+    load (this template inherits nothing, so effective and declared are the
+    same blob). The error keeps the harness-integration vocabulary and gains
+    the source location (re-attached from the resource origin, the manifest
+    file now)."""
     root = _manifest(
         tmp_path,
-        """
+        f"""
         apiVersion: agentworks/v1
         kind: session-template
         metadata:
@@ -278,11 +113,11 @@ def test_unknown_shell_field_errors_at_build(tmp_path: Path) -> None:
         spec:
           harness_integration:
             name: shell
-            nope: x
+            {field}: x
         """,
     )
     config = _config(tmp_path, "")
-    with pytest.raises(ConfigError, match="unknown shell harness integration field") as exc:
+    with pytest.raises(ConfigError, match=f"{field}: unknown field; expected one of:") as exc:
         build_registry(config, load_manifests(root))
     assert "res.yaml" in str(exc.value)
 
@@ -309,7 +144,7 @@ def test_manifest_flat_field_is_rejected(tmp_path: Path) -> None:
           command: claude
         """,
     )
-    with pytest.raises(ConfigError, match=r"unexpected keys.*command"):
+    with pytest.raises(ConfigError, match=r"command: unknown field; expected one of: "):
         load_manifests(root)
 
 
@@ -347,17 +182,20 @@ def test_child_same_harness_integration_merges_child_wins_and_unions_required() 
     templates = {
         "base": SessionTemplate(
             name="base",
-            harness_integration="shell",
-            harness_integration_config={"command": "claude", "required_commands": ["claude"]},
+            harness_integration=CapabilityBlock.of("shell", **{"command": "claude", "required_commands": ["claude"]}),
         ),
         "child": SessionTemplate(
             name="child",
             inherits=["base"],
-            harness_integration="shell",
-            harness_integration_config={
-                "command": "claude --resume",
-                "required_commands": ["rg"],
-            },
+            harness_integration=CapabilityBlock.model_validate(
+                {
+                    "name": "shell",
+                    **{
+                        "command": "claude --resume",
+                        "required_commands": ["rg"],
+                    },
+                }
+            ),
         ),
     }
     resolved = resolve_from_dict(templates, "child")
@@ -368,9 +206,7 @@ def test_child_same_harness_integration_merges_child_wins_and_unions_required() 
 
 def test_child_silent_inherits_the_pair_unchanged() -> None:
     templates = {
-        "base": SessionTemplate(
-            name="base", harness_integration="shell", harness_integration_config={"command": "claude"}
-        ),
+        "base": SessionTemplate(name="base", harness_integration=CapabilityBlock.of("shell", **{"command": "claude"})),
         "child": SessionTemplate(name="child", inherits=["base"]),
     }
     resolved = resolve_from_dict(templates, "child")
@@ -378,41 +214,47 @@ def test_child_silent_inherits_the_pair_unchanged() -> None:
     assert resolved.harness_integration_config == {"command": "claude"}
 
 
-def test_yaml_restart_command_is_rejected(tmp_path: Path) -> None:
-    root = _manifest(
-        tmp_path,
-        """
-        apiVersion: agentworks/v1
-        kind: session-template
-        metadata:
-          name: old-shell
-        spec:
-          harness_integration:
-            name: shell
-            restart_command: old-resume
-        """,
-    )
-    with pytest.raises(ConfigError, match="unknown shell harness integration field.*restart_command"):
-        build_registry(_config(tmp_path, ""), load_manifests(root))
+# A child naming a DIFFERENT harness integration starting from an empty
+# blob is the first move of the test below, which runs the switch across a
+# chain that also switches BACK and so pins the flat fold order on top of
+# the discard. The two-template version of it made the same assertion off
+# the same line and caught nothing the harder one does not.
 
 
-def test_child_different_harness_integration_starts_fresh(fake_harness_integration: None) -> None:
-    """A child naming a DIFFERENT harness integration starts from an empty blob; the
-    parent's blob was addressed to the wrong capability and never leaks."""
+def test_a_switch_inside_one_parents_chain_discards_an_earlier_parents_blob(
+    fake_harness_integration: None,
+) -> None:
+    """The rule above, applied across a chain that switches away and back:
+    ``fake`` discards the ``shell`` blob accumulated so far, and naming
+    ``shell`` again afterwards starts fresh rather than recovering it.
+
+    Worth pinning because the merge could plausibly go the other way. The
+    resolver folds the chain's declarations FLAT, in one merge order, so
+    the switch sits between the two ``shell`` layers and separates them.
+    Merging each parent's already-merged pair instead would hide the
+    switch inside ``back-to-shell``'s own result and hand the fold a
+    plain ``shell`` pair, resurrecting ``from-first`` across a capability
+    that had already discarded it.
+    """
     templates = {
-        "base": SessionTemplate(
-            name="base", harness_integration="shell", harness_integration_config={"command": "sh-cmd"}
+        "shell-parent": SessionTemplate(
+            name="shell-parent",
+            harness_integration=CapabilityBlock.of("shell", **{"command": "from-first"}),
         ),
-        "child": SessionTemplate(
-            name="child",
-            inherits=["base"],
-            harness_integration="fake",
-            harness_integration_config={"k": "v"},
+        "detour": SessionTemplate(
+            name="detour",
+            harness_integration=CapabilityBlock.of("fake", **{"marker": "detour"}),
         ),
+        "back-to-shell": SessionTemplate(
+            name="back-to-shell",
+            inherits=["detour"],
+            harness_integration=CapabilityBlock.of("shell", **{"resume_command": "from-second"}),
+        ),
+        "child": SessionTemplate(name="child", inherits=["shell-parent", "back-to-shell"]),
     }
     resolved = resolve_from_dict(templates, "child")
-    assert resolved.harness_integration == "fake"
-    assert resolved.harness_integration_config == {"k": "v"}  # no leak of the shell blob
+    assert resolved.harness_integration == "shell"
+    assert resolved.harness_integration_config == {"resume_command": "from-second"}
 
 
 def test_multi_parent_silent_parent_does_not_wipe(tmp_path: Path) -> None:
@@ -468,8 +310,8 @@ def test_undeclared_default_resolves_to_shell_empty() -> None:
 
 
 def test_declared_harness_integration_emits_a_reference() -> None:
-    tmpl = SessionTemplate(name="claude", harness_integration="shell", harness_integration_config={"command": "claude"})
-    refs = tmpl.dependencies(BuildContext())
+    tmpl = SessionTemplate(name="claude", harness_integration=CapabilityBlock.of("shell", **{"command": "claude"}))
+    refs = tmpl.dependencies(FinalizeContext())
     harness_refs = [r for r in refs if r.kind == "harness-integration"]
     assert len(harness_refs) == 1
     assert harness_refs[0].name == "shell"
@@ -478,7 +320,7 @@ def test_declared_harness_integration_emits_a_reference() -> None:
 
 def test_undeclared_harness_integration_emits_no_reference() -> None:
     tmpl = SessionTemplate(name="plain")
-    assert [r for r in tmpl.dependencies(BuildContext()) if r.kind == "harness-integration"] == []
+    assert [r for r in tmpl.dependencies(FinalizeContext()) if r.kind == "harness-integration"] == []
 
 
 def test_harness_integration_row_lists_its_declaring_template(tmp_path: Path) -> None:

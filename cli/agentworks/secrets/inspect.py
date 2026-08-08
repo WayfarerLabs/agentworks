@@ -17,15 +17,15 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.resources.inspect import used_by_for
-from agentworks.resources.render import format_origin_line
+from agentworks.resources.render import format_origin_line, format_reference_entry
 from agentworks.secrets.kinds import SECRET_KIND_NAME
 
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database
+    from agentworks.origin import Origin
     from agentworks.resources import Registry
     from agentworks.resources.kind import InstanceRef
-    from agentworks.resources.origin import Origin
     from agentworks.resources.reference import ReferenceEntry
 
 
@@ -349,8 +349,13 @@ def describe_secret(
             entity_name=name,
             hint="check `agw secret list` for declared and auto-declared names",
         ) from None
-    origin = getattr(decl, "origin", None)
-    description = getattr(decl, "description", "") or ""
+    # Plain reads: ``decl`` is a validated ``SecretDecl``, whose
+    # ``description`` the kind re-declares as REQUIRED. A getattr default
+    # here would turn a future rename into an empty string on screen
+    # instead of an error (FR15: nothing downstream re-defaults a
+    # modeled field).
+    origin = decl.origin
+    description = decl.description
     # Inbound references come off the dependency graph (one entry per
     # reference that resolved here), populated by the finalize pass.
     references: tuple[ReferenceEntry, ...] = registry.graph.dependents_of(SECRET_KIND_NAME, name)
@@ -396,7 +401,7 @@ def describe_secret(
         kind=SECRET_KIND_NAME,
         origin=origin,
         description=description,
-        hint=getattr(decl, "hint", None),
+        hint=decl.hint,
         references=references,
         used_by=used_by_for(db, registry, SECRET_KIND_NAME, decl),
         backend_mappings=tuple(mappings),
@@ -431,14 +436,13 @@ def render_secret_description(desc: SecretDescription) -> None:
         output.detail("(none recorded)")
     else:
         # Dedupe by (source, usage) preserving first-encounter order.
-        seen: set[tuple[tuple[str, str], str]] = set()
+        seen: set[str] = set()
         for entry in desc.references:
-            key = (entry.source, entry.usage)
-            if key in seen:
+            line = format_reference_entry(entry)
+            if line in seen:
                 continue
-            seen.add(key)
-            src = f"{entry.source[0]}/{entry.source[1]}"
-            output.detail(f"- {src} -- {entry.usage}")
+            seen.add(line)
+            output.detail(f"- {line}")
 
     # --- Used by (dynamic, per current config) ---
     # Only rendered when describe_secret was called with a db. Same

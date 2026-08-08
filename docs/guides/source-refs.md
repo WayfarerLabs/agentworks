@@ -63,19 +63,23 @@ repos work as long as the appropriate `git-credential` resources are declared (s
 
 ## Examples
 
-```toml
-# Local file
-mise_lockfile = "~/.config/agentworks/mise.lock"
+A source reference is an ordinary string field in a YAML manifest:
 
-# File at repo root (defaults to mise.lock)
-mise_lockfile = "git::https://github.com/myorg/tool-locks.git"
+```yaml
+apiVersion: agentworks/v1
+kind: agent-template
+metadata:
+  name: dev
+spec:
+  mise_lockfile: "git::https://github.com/myorg/infra.git//mise/prod.lock?ref=v2.1"
+```
 
-# File in a subdirectory
-mise_lockfile = "git::https://github.com/myorg/infra.git//mise/prod.lock"
+Values it accepts:
 
-# Pinned to a tag
-mise_lockfile = "git::https://github.com/myorg/tool-locks.git?ref=v2.1"
-
-# Private repo (requires git credentials)
-mise_lockfile = "git::https://github.com/myorg/private-locks.git//mise.lock?ref=main"
+```text
+~/.config/agentworks/mise.lock                                       local file
+git::https://github.com/myorg/tool-locks.git                         repo root (defaults to mise.lock)
+git::https://github.com/myorg/infra.git//mise/prod.lock              file in a subdirectory
+git::https://github.com/myorg/tool-locks.git?ref=v2.1                pinned to a tag
+git::https://github.com/myorg/private-locks.git//mise.lock?ref=main  private repo (needs git credentials)
 ```

@@ -1,4 +1,12 @@
-"""Tests for ``ResourceReference``, ``SecretReference``, ``ReferenceEntry``."""
+"""Tests for ``ResourceReference``, ``SecretReference``, ``ReferenceEntry``.
+
+What these types are is a frozen dataclass, so what is pinned here is what
+the dataclass decorator does NOT give us for free: the subclass relation,
+and the freezing. Field round-trips and the generated ``__eq__`` /
+``__hash__`` are the decorator's own behavior; that the field NAMES are the
+post-rename ones is pinned in ``test_phase3_naming_consistency.py``, and
+every finalize test reads them for real.
+"""
 
 from __future__ import annotations
 
@@ -11,19 +19,6 @@ from agentworks.resources import (
     ResourceReference,
     SecretReference,
 )
-
-
-def test_resource_reference_fields() -> None:
-    ref = ResourceReference(
-        name="tailscale-auth-key",
-        kind="secret",
-        usage="the Tailscale auth key",
-        source=("vm-template", "default"),
-    )
-    assert ref.name == "tailscale-auth-key"
-    assert ref.kind == "secret"
-    assert ref.usage == "the Tailscale auth key"
-    assert ref.source == ("vm-template", "default")
 
 
 def test_resource_reference_is_immutable() -> None:
@@ -43,22 +38,7 @@ def test_secret_reference_is_a_resource_reference() -> None:
     assert sec.kind == "secret"
 
 
-def test_reference_entry_fields() -> None:
-    entry = ReferenceEntry(source=("vm-template", "default"), usage="the auth key")
-    assert entry.source == ("vm-template", "default")
-    assert entry.usage == "the auth key"
-
-
 def test_reference_entry_is_immutable() -> None:
     entry = ReferenceEntry(source=("k", "n"), usage="t")
     with pytest.raises(FrozenInstanceError):
         entry.usage = "new"  # type: ignore[misc]
-
-
-def test_reference_entry_equality_and_hashability() -> None:
-    a = ReferenceEntry(source=("k", "n"), usage="t")
-    b = ReferenceEntry(source=("k", "n"), usage="t")
-    c = ReferenceEntry(source=("k", "n"), usage="other")
-    assert a == b
-    assert a != c
-    assert hash(a) == hash(b)
