@@ -34,9 +34,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from agentworks.errors import ConfigError
+from agentworks.schema import located
 
 if TYPE_CHECKING:
     from agentworks.schema import RefOwner
+    from agentworks.source_location import SourceLocation
 
 RETIRED_SHAPE_HINT = (
     "Apply the rewrite above; `agw resource describe-kind <kind>` documents the field, "
@@ -110,7 +112,12 @@ class RetiredPresenceShape:
         return f"{self.union_field}: {{mode: {self.absent_mode}}}"
 
 
-def retired_shape_error(shape: RetiredPresenceShape | None, config: object, owner: RefOwner) -> None:
+def retired_shape_error(
+    shape: RetiredPresenceShape | None,
+    config: object,
+    owner: RefOwner,
+    location: SourceLocation | None = None,
+) -> None:
     """Refuse a config written in ``shape``'s retired spelling, naming the
     exact rewrite; return silently for anything else.
 
@@ -119,6 +126,16 @@ def retired_shape_error(shape: RetiredPresenceShape | None, config: object, owne
     answers the retired document with two problems it has no reason to
     connect (an unknown ``service_principal`` key and a missing ``auth``),
     and connecting them is the whole job here.
+
+    ``location`` frames the message the way every other manifest error is
+    framed, through :func:`~agentworks.schema.located`, and it is the same
+    location the validation path two lines down is given. Running earlier
+    in the pipeline is not a reason for an error to arrive without a file
+    and a line: these two carry an operator across a break that reaches
+    every azure, aws, and lima manifest, so they are the LAST errors that
+    should make someone grep for which document they are about. Defaulted
+    for the construct-time caller, which is validating a config that came
+    from code and has no declaration site.
 
     A config that already carries the union field is left entirely alone,
     even when the retired field sits beside it. That document is a
@@ -129,21 +146,26 @@ def retired_shape_error(shape: RetiredPresenceShape | None, config: object, owne
     """
     if shape is None or not isinstance(config, Mapping) or shape.union_field in config:
         return
-    where = f"{owner.kind}/{owner.name}"
     if shape.retired_field in config:
         raise ConfigError(
-            f"{where}: '{shape.retired_field}' is no longer a supported field; the choice it used to "
-            f"carry by being present is written explicitly now: "
-            f"{shape.rewrite_for(config[shape.retired_field])}",
+            located(
+                location,
+                f"{owner.display}: '{shape.retired_field}' is no longer a supported field; the choice it "
+                f"used to carry by being present is written explicitly now: "
+                f"{shape.rewrite_for(config[shape.retired_field])}",
+            ),
             entity_kind=owner.kind,
             entity_name=owner.name,
             hint=RETIRED_SHAPE_HINT,
         )
     raise ConfigError(
-        f"{where}: '{shape.union_field}' is required and this resource does not declare it. Omitting "
-        f"'{shape.retired_field}' used to mean '{shape.absent_mode}'; that choice is written down now "
-        f"rather than inferred from what is missing, so nothing was deleted from your document and "
-        f"one line is added to it: {shape.absent_rewrite}",
+        located(
+            location,
+            f"{owner.display}: '{shape.union_field}' is required and this resource does not declare it. "
+            f"Omitting '{shape.retired_field}' used to mean '{shape.absent_mode}'; that choice is written "
+            f"down now rather than inferred from what is missing, so nothing was deleted from your document "
+            f"and one line is added to it: {shape.absent_rewrite}",
+        ),
         entity_kind=owner.kind,
         entity_name=owner.name,
         hint=RETIRED_SHAPE_HINT,

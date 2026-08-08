@@ -58,6 +58,7 @@ from agentworks.schema.block import CapabilityBlock
 from agentworks.schema.errors import (
     MAX_ERROR_LINES,
     config_error_from,
+    located,
 )
 from agentworks.schema.extract import extract_references
 from agentworks.schema.fields import (
@@ -103,6 +104,7 @@ __all__ = [
     "element_annotation",
     "extract_references",
     "iter_field_docs",
+    "located",
     "marker_of",
     "model_doc",
     "model_is_complete",

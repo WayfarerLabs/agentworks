@@ -95,6 +95,12 @@ agw resource describe-kind vm-platform/aws-ec2   # one platform's own config
 It reads no config and builds no registry, so it answers on a host whose `config.toml` does not
 load, and it documents a capability whose plugin is not enabled yet.
 
+It also answers for every arm of a tagged table, which a sample cannot: where the arms are
+capabilities it names each one and gives its address
+(`agw resource describe-kind vm-platform/wsl2`), and where they are not (a lima site's
+`placement: {mode: local}` against `{mode: ssh, host: ...}`) it shows each arm's own fields under
+that arm, because no other command reaches them.
+
 `agw resource edit KIND/NAME` opens the manifest declaring a resource in `$EDITOR`.
 
 ## Editing manifests with schema support

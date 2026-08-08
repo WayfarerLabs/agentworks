@@ -262,7 +262,12 @@ def test_the_field_reference_makes_the_same_templated_subtraction(seated: None) 
     because the model fills it from its owner. Emitted schema already
     stopped calling it required (above); the human surfaces make the same
     subtraction from the same marker, and say what the omission
-    resolves to."""
+    resolves to.
+
+    Emitted schema also widens the field to accept ``null``, because the
+    filling reads an explicit ``null`` as that same omission, and this
+    surface says so too. It did not, and the two rendered one model two
+    ways until the parity guard stopped subtracting ``null``."""
     rendered = "\n".join(reference_lines(reference_for("vm-platform/declare-once")))
 
-    assert "token  (string, optional, defaults to `declare-once-<name>`" in rendered
+    assert "token  (string or null, optional, defaults to `declare-once-<name>`" in rendered

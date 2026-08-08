@@ -120,9 +120,17 @@ def _entries_by_name(reference: SchemaReference) -> dict[str, FieldEntry]:
 
 
 def _walk(entries: tuple[FieldEntry, ...]) -> Iterator[FieldEntry]:
+    """Every entry in the tree, arms included.
+
+    A union's fields hang off its ARMS rather than off the union, so a
+    walk that followed ``children`` alone would stop at every union and
+    quietly stop asserting anything about what is under one.
+    """
     for entry in entries:
         yield entry
         yield from _walk(entry.children)
+        for alternative in entry.alternatives:
+            yield from _walk(alternative.fields)
 
 
 # --- what a value is -------------------------------------------------------
@@ -285,7 +293,7 @@ def test_the_rendered_arm_is_the_first_registered_one() -> None:
 
     assert entry.rendered == "lima"
     assert [alt.name for alt in entry.alternatives] == ["lima", "proxmox"]
-    assert {child.name for child in entry.children} == {"name", "vm_host"}
+    assert {child.name for child in entry.contents} == {"name", "vm_host"}
 
 
 # "a union that is not a capability offers no pointer" stood here and was
@@ -342,15 +350,18 @@ def test_a_union_arm_reachable_from_itself_stops_rather_than_recurring() -> None
     guide's field reference all died on the same model.
 
     One level is expanded and the second is not, and ``rendered`` says so
-    rather than claiming an arm whose fields are absent.
+    rather than claiming an arm whose fields are absent. The arm still
+    says WHY it has none, which is the third way an alternative is
+    readable: its fields are the ones one level up.
     """
     entry = _entries_by_name(_reference(SelfReaching))["group"]
 
     assert entry.rendered == "group"
-    inner = {child.name: child for child in entry.children}["member"]
+    inner = {child.name: child for child in entry.contents}["member"]
     assert [alt.name for alt in inner.alternatives] == ["group"]
-    assert inner.children == ()
+    assert inner.contents == ()
     assert inner.rendered is None
+    assert inner.alternatives[0].recurring
 
 
 # --- a collection whose ELEMENTS are a union -------------------------------
@@ -420,7 +431,7 @@ def test_a_table_of_tagged_blocks_hangs_its_element_under_a_placeholder_key() ->
 
     assert element.name == MAPPING_KEY
     assert element.rendered == "lima"
-    assert {child.name for child in element.children} == {"name", "vm_host"}
+    assert {child.name for child in element.contents} == {"name", "vm_host"}
 
 
 def test_the_tree_offers_every_element_arm_the_stream_does() -> None:
@@ -459,21 +470,25 @@ def test_a_tagged_collection_arm_reachable_from_itself_stops_rather_than_recurri
     ``sample``, and the guide's field reference down together.
     """
     (element,) = _entries_by_name(_reference(Nodes))["nodes"].children
-    inner = {child.name: child for child in element.children}["members"]
+    inner = {child.name: child for child in element.contents}["members"]
     (deeper,) = inner.children
 
     assert element.rendered == "group"
     assert [alt.name for alt in deeper.alternatives] == ["group", "leaf"]
-    assert deeper.children == ()
-    assert deeper.rendered is None, "nothing was expanded here, and the record says so"
+    # ``group`` is the block already open above, so it is not reopened;
+    # ``leaf`` is not, so it is expanded where it stands.
+    assert deeper.alternatives[0].recurring
+    assert deeper.alternatives[0].fields == ()
+    assert {child.name for child in deeper.alternatives[1].fields} == {"name", "value"}
+    assert deeper.rendered == "leaf", "the arm that WAS expanded is the one a document would write"
 
 
 def test_an_unexpanded_arm_does_not_name_what_is_shown() -> None:
-    """``rendered`` is None there, and "Shown here: None." is Python
-    talking to an operator."""
-    flowed = " ".join(_spec_lines(Nodes))
+    """``rendered`` is None where the ONLY arm is the block already open
+    above, and "Shown here: None." is Python talking to an operator."""
+    flowed = " ".join(_spec_lines(SelfReaching))
 
-    assert "One of: group, leaf." in flowed
+    assert "One of: group." in flowed
     assert "Shown here: None" not in flowed
 
 
@@ -528,7 +543,7 @@ def test_a_root_model_wrapper_contributes_no_path_segment() -> None:
     entry = _entries_by_name(_reference(WrappedSite))["platform"]
 
     assert entry.rendered == "lima"
-    assert {child.name for child in entry.children} == {"name", "vm_host"}
+    assert {child.name for child in entry.contents} == {"name", "vm_host"}
     assert "root" not in {found.name for found in _walk((entry,))}
 
 
@@ -550,21 +565,24 @@ def test_an_implementation_documents_the_model_it_declares() -> None:
     assert {entry.name for entry in reference.spec} == {"name", "placement"}
 
 
-def test_a_nested_tagged_union_lists_its_arms_and_expands_one() -> None:
+def test_a_nested_tagged_union_expands_every_arm_because_none_is_addressable() -> None:
     """lima's ``placement`` is the framework's first discriminated union
     that is NOT a capability-config union, so this pins that the shared
-    field-tree machinery expands it with no special casing: both arms are
-    offered, the first is expanded, and its own fields are the children.
+    field-tree machinery expands it with no special casing.
 
     ``target`` is None on both, unlike a capability arm's: there is no
     ``describe-kind`` address for one arm of an ordinary union, and
-    inventing one would print a command that fails."""
+    inventing one would print a command that fails. That is exactly why
+    BOTH arms carry their fields here: an arm with no address and no
+    fields is a word an operator cannot act on, and ``ssh`` was one, with
+    its required ``host`` documented nowhere any CLI form could reach."""
     (placement,) = [e for e in reference_for("vm-platform/lima").spec if e.name == "placement"]
 
     assert [alt.name for alt in placement.alternatives] == ["local", "ssh"]
     assert all(alt.target is None for alt in placement.alternatives)
     assert placement.rendered == "local"
-    assert [child.name for child in placement.children] == ["mode"]
+    assert [field.name for field in placement.alternatives[0].fields] == ["mode"]
+    assert [field.name for field in placement.alternatives[1].fields] == ["mode", "host"]
     # The arm summaries come from the arm MODELS' docstrings (a capability
     # union reads its impls' one-liners instead), so they are real prose.
     assert placement.alternatives[1].summary == "Run limactl on another host over SSH."
