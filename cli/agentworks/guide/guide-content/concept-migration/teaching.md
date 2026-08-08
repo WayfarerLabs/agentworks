@@ -1,9 +1,25 @@
-## Preserve the migration evidence
+## Inventory and preserve the migration evidence
 
-Before editing, preserve untouched copies of the selected `config.toml` and resources directory.
-Read the precise load error, inventory every retired TOML resource section it names, and record the
-expected resource names from those untouched sections. An inventory captured before upgrading can be
-useful additional evidence, but the procedure does not assume one exists.
+Before any backup or edit, read only the selected `config.toml` and record one canonical `kind/name`
+for each manifest-producing retired section. Collapse nested tables into their parent resource.
+Exclude `[secret_backends.*]`, which produces no manifest. The caller owns this TOML identity set.
+An inventory captured before upgrading can be useful additional evidence, but the procedure does not
+assume one exists.
+
+Next, preserve the selected `config.toml` and resources directory as separate untouched backups at
+fresh operator-selected destinations. Each destination must be distinct from its source and outside
+the active config and resources trees. Treat each copy as its own mutation boundary. A pure-TOML
+installation can have no resources directory; record an explicit absent resources baseline without
+creating a directory in that case.
+
+Before editing, use a separate read boundary to verify that the config backup matches its source
+byte for byte and that the resources backup contains exactly the same paths and file bytes as its
+source, or that both sides match the explicit absent baseline. Extend the caller-owned expected
+identities with every pre-existing baseline manifest. Keep the canonical TOML identities in that
+same working set. A baseline identity carries its canonical `kind/name`, the `operator-declared`
+origin variant, and its manifest file path. As each TOML identity receives a manifest, add the
+intended file path and operator-declared variant. Ignore the source line because edits to a
+multi-document file can shift it without changing origin.
 
 ## Rewrite one resource at a time
 
@@ -37,10 +53,12 @@ live implementation reference: `[azure]` selects `spec.platform.name: azure-vm`,
 `spec.platform.name: proxmox`, and a legacy git credential provider moves under the tagged
 `spec.provider` table.
 
-Write one manifest at a time while leaving every retired TOML section in place. Run `agw doctor`
-after each edit. Its degraded configuration path validates the growing manifest set while continuing
-to report the retired-section failure. Fix closed-world fields, strict types, non-nullable nulls,
-and retired sibling capability shapes from that precise error and the live field reference.
+Write one manifest at a time while leaving every retired TOML section in place. Use the manifest
+kind's sample and field reference. When the manifest contains tagged capability configuration, use
+that implementation's separate `kind/name` field reference. Run `agw doctor` after each edit. Its
+degraded configuration path validates the growing manifest set while continuing to report the
+retired-section failure. Fix closed-world fields, strict types, non-nullable nulls, and retired
+sibling capability shapes from that precise error and the live field reference.
 
 ## Review changed secret references
 
@@ -59,6 +77,8 @@ empty declarations during the final TOML cutover, and activate desired backends 
 `[secret_config].backends`.
 
 After every new manifest has passed its per-manifest doctor loop, remove all retired resource
-sections from `config.toml` in one edit. Run `agw resource list --origin operator --names-only` and
-compare the result with the preserved names. Any missing or extra resource restores the untouched
-backup before further work. Finish only when a final `agw doctor` reports zero failures.
+sections from `config.toml` in one edit. Run `agw resource list --origin operator` and compare the
+result with the caller-owned expected identities by `kind/name`, operator-declared origin variant,
+and intended manifest file path, ignoring source line. Any missing, extra, or wrongly originated
+resource returns to the untouched backups for investigation. Finish only when a final `agw doctor`
+reports zero failures.

@@ -105,6 +105,45 @@ def test_expression_markers_outside_closed_literal_code_are_rejected(markdown: s
         parse_topic_contribution(_topic("concept-safe", markdown=markdown), "core")
 
 
+@pytest.mark.parametrize("field", ["title", "summary"])
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "Literal `{{name}}` stays inert.",
+        "Literal `${name}` stays inert.",
+        "Literal `<% name %>` stays inert.",
+    ],
+)
+def test_title_and_summary_allow_only_closed_same_line_literal_markers(field: str, payload: str) -> None:
+    value = _topic("concept-safe")
+    value[field] = payload
+
+    parsed = parse_topic_contribution(value, "plugin:safe")
+
+    assert getattr(parsed, field) == payload
+
+
+@pytest.mark.parametrize("field", ["title", "summary"])
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "Forged {{prose}} marker",
+        "Unclosed `{{marker}}",
+        r"Escaped \`{{marker}}\`",
+        "Multi ``{{marker}}`` span",
+        "Multiline `{{marker}}\n` span",
+    ],
+)
+def test_title_and_summary_reject_expression_markers_outside_exact_literal_spans(field: str, payload: str) -> None:
+    value = _topic("concept-safe")
+    value[field] = payload
+
+    with pytest.raises(GuideContributionError) as raised:
+        parse_topic_contribution(value, "plugin:bad")
+
+    assert raised.value.field_path == field
+
+
 @pytest.mark.parametrize(
     ("field", "payload", "field_path"),
     [
@@ -446,6 +485,40 @@ def test_action_list_never_interpolates_sensitive_inputs() -> None:
     inputs[0]["sensitive"] = True
     with pytest.raises(GuideContributionError, match="sensitive input"):
         parse_topic_contribution(_action_topic([action]), "core")
+
+
+@pytest.mark.parametrize(
+    ("field", "path"),
+    [
+        ("precondition", "blocks[0].actions[0].precondition"),
+        ("expected_state", "blocks[0].actions[0].expected_state"),
+        ("refusal_alternative", "blocks[0].actions[0].refusal_alternative"),
+        ("manual_steps", "blocks[0].actions[0].manual_steps"),
+        ("input_description", "blocks[0].actions[0].required_inputs[0].description"),
+    ],
+)
+def test_action_list_prose_cannot_bypass_expression_delimiter_validation(field: str, path: str) -> None:
+    action = _action_value(manual=field == "manual_steps")
+    if field == "input_description":
+        inputs = cast("list[dict[str, object]]", action["required_inputs"])
+        inputs[0]["description"] = "Render {{danger()}}."
+    else:
+        action[field] = "Render {{danger()}}."
+
+    with pytest.raises(GuideContributionError) as raised:
+        parse_topic_contribution(_action_topic([action]), "plugin:bad")
+
+    assert raised.value.field_path == path
+
+
+def test_action_list_prose_preserves_exact_inert_inline_literals() -> None:
+    action = _action_value(manual=True)
+    action["manual_steps"] = "Write `{{literal_name}}` exactly."
+
+    parsed = parse_topic_contribution(_action_topic([action]), "plugin:safe")
+
+    block = cast("ActionList", parsed.blocks[0])
+    assert block.actions[0].manual_steps == "Write `{{literal_name}}` exactly."
 
 
 def test_action_list_count_and_cumulative_byte_bounds_fail_closed() -> None:

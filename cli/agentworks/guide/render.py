@@ -96,11 +96,12 @@ def _fact_line(fact: GuideResourceFact) -> str:
 
 
 def _code(value: object) -> str:
-    """Render one projected scalar as a Markdown-safe code span."""
-    text = plain_text(str(value))
+    """Render one exact projected scalar as a Markdown-safe code span."""
+    text = str(value)
     longest = max((len(run) for run in re.findall(r"`+", text)), default=0)
     delimiter = "`" * (longest + 1)
-    return f"{delimiter} {text} {delimiter}" if longest else f"`{text}`"
+    padding = " " if text.startswith(("`", " ")) or text.endswith(("`", " ")) else ""
+    return f"{delimiter}{padding}{text}{padding}{delimiter}"
 
 
 def _field_name(entry: FieldEntry) -> str:
@@ -122,7 +123,8 @@ def _field_rows(
         path = prefix if root_value and entry.name == "root" else (*prefix, _field_name(entry))
         facts = ["required" if entry.writable else "optional", _code(entry.type_label)]
         if entry.doc.default_template is not None:
-            facts.append(f"owner default {_code(entry.doc.default_template.replace('{owner_name}', '<name>'))}")
+            owner_default = entry.doc.default_template.replace("{owner_name}", "<name>")
+            facts.append(f"owner default {_code(render_value(owner_default))}")
         elif worth_showing(entry.doc.default) and not entry.children:
             facts.append(f"default {_code(render_value(entry.doc.default))}")
         if entry.doc.choices:
@@ -131,7 +133,7 @@ def _field_rows(
             facts.append(
                 "constraints "
                 + ", ".join(
-                    f"{key.replace('_', ' ')} {_plain_description(str(value))}"
+                    f"{key.replace('_', ' ')} {_code(render_value(value))}"
                     for key, value in entry.doc.constraints.items()
                 )
             )
