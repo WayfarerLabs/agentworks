@@ -177,7 +177,7 @@ to `main`. It has no provisional branch dependency.
 - [x] Every migration read, probe, and mutation crossing a consent boundary is a validated inert
       action record with exact scope, expected result, verification, and refusal behavior; backups
       and the complete pre-migration identity-and-origin inventory precede edits.
-- [ ] Reconcile schema rendering and migration teaching with the final PR #444 union surfaces,
+- [x] Reconcile schema rendering and migration teaching with the final PR #444 union surfaces,
       confirm PR #446's context-free validation boundary adds no guide-side filling, then rerun the
       full Phase 1 and CI gates before requesting roadmap-lead re-review.
 

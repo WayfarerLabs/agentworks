@@ -102,3 +102,15 @@ pre-existing or TOML-derived manifest. `review-null-secret-fields` only inspects
 confirms. If it finds a retired shape, it records the exact required rewrite and routes the manifest
 back to the mutation and validation loop without changing the file. The expanded focused suite
 passed 632 tests.
+
+Both independent post-rebase reviewers approved the corrected branch with no remaining findings.
+They reran 49 direct schema-adapter and migration tests, and the fresh-eyes pass also compared exact
+field-row multiplicities across all 30 live schema targets. Final combined validation passed:
+
+- guide, schema, migration, platform, Lima, and SSH focused suite: 675 tests;
+- full non-integration suite: 6,470 passed and 3 deselected;
+- Ruff check and format check: 611 files clean;
+- mypy: 611 source files clean;
+- Rulesync generated-output check: clean;
+- locked-SDD check: clean;
+- mandatory file lint: Prettier, markdownlint, and cspell clean.
