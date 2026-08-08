@@ -103,6 +103,14 @@ defaulted choice is graph-visible exactly like a written one. Permanent homes: t
 docstring, the default posture's reasoning at the union sites themselves; the retirement pattern for
 old shapes is the exact-rewrite hard error plus the upgrade guide.
 
+Two companion rulings (operator, 2026-08-08): **secret sources are simple KV stores with shared
+config**; creation specifications (a minted credential's scopes, repos, permissions) belong to the
+consuming capability's domain, never the source or per-secret mapping, so credential minting models
+as a git-credential variant. Consequently **git-credential joins the variant contract before the
+0.14.0 cut**: a one-arm union restructure (defaulting to the stored arm per the omission-history
+rule, with the scalar shorthand as the stored arm's spelling) so minting later lands as a purely
+additive arm.
+
 ### Capability descriptor (destination 3)
 
 A core-owned, typed capability-kind descriptor registered once per kind, from which graph stamping,
