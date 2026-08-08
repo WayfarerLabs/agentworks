@@ -79,7 +79,7 @@ Each implementation declares:
   contract;
 - `config_model`, the tagged per-source config model;
 - `mapping_model`, the per-secret lookup-address model;
-- a cheap config-independent host-support verdict for the capability row;
+- a cheap config-independent backend-readiness verdict for the capability row;
 - pure mapping preview and attemptability operations;
 - a bounded client factory for runtime resolution.
 
@@ -159,6 +159,13 @@ rejects a `SecretRef` marker anywhere in the source `config_model`. This is expr
 forbidden-reference-kinds property on `ConfigContract`, set to `{"secret"}` for `secret-backend`,
 rather than as a kind-name conditional.
 
+The mapping contract also declares a JSON-native input domain. The common conformance walker rejects
+Python-only wire annotations (for example dates, bytes, sets, tuples, enums, custom classes, or
+non-string mapping keys), including nested occurrences, while allowing JSON primitives, string-keyed
+objects, arrays, literals, `Any`/`object`, and model composition. Validators may still reject any or
+every value—the prompt mapping intentionally does—so this guarantees the wire type vocabulary, not
+that a model is satisfiable.
+
 Runtime validation is exact: resolve the mapping key to a `secret-source`, read that source's
 backend class, and validate the value against that class's `mapping_model`. Extraction follows the
 same selected model and remains total.
@@ -176,7 +183,9 @@ split.
 
 ## Secret mappings and graph edges
 
-`SecretDecl.backend_mappings` keeps its public spelling and value envelope. Its keys now name
+`SecretDecl.backend_mappings` keeps its public spelling. Its raw carrier broadens to every
+JSON-compatible value so JSON-native addresses reach the selected model unchanged for
+backend-specific runtime narrowing; `false` remains the framework-owned opt-out. Its keys now name
 `secret-source` rows. The permanent graph edges are `secret -> secret-source`; the special
 `FinalizeContext.available_backends` list disappears.
 
@@ -185,6 +194,20 @@ A secret's dependency pass emits:
 - every explicit non-`false` mapping key as a source edge;
 - every present source whose backend says it has a default mapping for that secret, excluding an
   explicit `false` opt-out.
+
+Source-name validation is separate from candidate-edge emission: every explicit key is checked,
+including a `false` opt-out. Thus `onepassword: false` still receives the 0.14 direct-backend
+migration diagnostic when no source named `onepassword` exists, while a known source's `false` entry
+suppresses its candidate edge and runtime attempt exactly as today.
+
+The descriptor-derived key checker collects references for each map-host row as that row enters the
+Registry build or fixed-point walk, then resolves them in the corresponding existing resolve stage.
+This keeps build total and preserves cycle/error precedence while ensuring late-materialized host
+rows cannot bypass validation. One target schedule interleaves validation-only and ordinary targets
+in first encounter order while their reference maps remain separate, so existing ordinary misses
+retain their relative precedence. These are validation-only references rather than graph edges:
+descriptor conformance therefore permits map hosts only for `USES` markers targeting an error-policy
+kind. They neither auto-declare a target nor duplicate the candidate edges above.
 
 Activity remains settings-owned and is filtered only by chain validation and runtime resolution; the
 Registry stays config-agnostic. `FinalizeContext.available_backends` is replaced by a generic,

@@ -64,26 +64,43 @@ stable before implementation delegation begins.
 
 ### Phase 1: source and backend contract LLD
 
-- [ ] Delegate `source-contract-lld.md`. It pins:
-  - final `SecretBackend` abstract capability and registration conformance, including runtime
-    rejection of `preflight` or `runup` overrides;
+- [x] Delegate `source-contract-lld.md`. It pins:
+  - final non-client `SecretBackend` abstract capability and registration conformance, including
+    runtime rejection of `preflight` or `runup` overrides, while assigning the exact client-factory
+    signature to Phase 2 before any implementation begins;
   - `config_model` versus `mapping_model`, descriptor `mapping_schema`/`mapping_host`, and the one
     shared source-to-backend selector used by validation and extraction;
   - `SecretSourceDecl`, its tagged `backend` block, readiness derivation, built-in publication
     order, override provenance, graph dependencies, and exact direct-backend error framing;
   - the class-registry and module-relocation sequence, including which package exports survive;
   - JSON Schema's union-of-all-mapping-models limitation and exact runtime narrowing.
-- [ ] Lead reviews the LLD against the HLA and migration strategy; `agentworks-reviewer` finds no
+- [x] Lead reviews the LLD against the HLA and migration strategy; `agentworks-reviewer` finds no
       remaining valid issue.
 
-**Definition of done:** the source contract has one owner for every selection and lifecycle
-decision; no implementation choice remains hidden in a migration step.
+**Definition of done:** the source contract has one owner for every selection and source/backend
+identity decision, and the remaining client-lifecycle contract is explicitly assigned to Phase 2.
 
-### Phase 2: capability contract, registry, and relocation scaffold
+### Phase 2: resolution lifecycle LLD and typed core
+
+- [ ] Delegate `resolution-lifecycle-lld.md`. It pins:
+  - frozen `SecretLookupRequest`, caller-owned `InteractionBroker`, `ActiveSource`, the final
+    `SecretBackend.create_client` signature, context-manager, and cleanup protocols;
+  - monotonic budget ownership and remaining-time behavior across factory, entry, `prepare`,
+    `resolve`, and exit, with human prompt wait excluded;
+  - value-free outcome/detail enums, private redacted `ResolutionBatch`, soft/hard miss semantics,
+    batch-failure attribution, and complete-or-raise behavior;
+  - how the current dict-returning operation callers cross the temporary adapter until Phase 7.
+- [ ] Lead reviews the LLD; `agentworks-reviewer` finds no remaining valid issue.
+
+**Definition of done:** lifecycle, timeout, error attribution, value authority, and the client
+factory are precise before any backend contract or implementation changes.
+
+### Phase 3: capability contract, registry, and relocation scaffold
 
 - [ ] Add the dual backend model contract and descriptor map-host records, with registration-time
-      conformance for model type/constructibility, forbidden secret references in source config,
-      fixed no-op capability lifecycle, and class-by-name storage.
+      conformance for model type/constructibility, JSON-native mapping input annotations, forbidden
+      secret references in source config, fixed no-op capability lifecycle, and class-by-name
+      storage.
 - [ ] Move capability-owned modules with `git mv` under `agentworks.capabilities.secret_backend`;
       repoint the descriptor, plugin adapter, registration snapshot/restore, graph publication, and
       imports; remove the `CONSTRUCTED_SINGLETON` policy and constructed adapter branch.
@@ -97,7 +114,7 @@ decision; no implementation choice remains hidden in a migration step.
 **Definition of done:** backend code is an ordinary class-registered capability under its permanent
 package; the descriptor has no constructed-instance exception.
 
-### Phase 3: declarable sources and schemas
+### Phase 4: declarable sources and schemas
 
 - [ ] Add `SecretSourceDecl` and its resource kind to discovery, manifest decoding, samples,
       schema-set membership, reference metadata, kind-name completion, and describe-kind.
@@ -105,30 +122,21 @@ package; the descriptor has no constructed-instance exception.
       built-in origins and `builtin_override="allow"`; tests pin discovery and operator override
       provenance.
 - [ ] Extend shared spec projection and emission to consume `mapping_host`: property names reference
-      `secret-source`, every value uses the union of registered mapping models plus `false`, and
-      fixture-plugin tests prove the mechanism is descriptor-derived rather than secret-specific.
+      `secret-source`, every value uses the union of registered mapping models and the host's
+      declared opt-out arm, and fixture-plugin tests prove the mechanism is descriptor-derived
+      rather than secret-specific.
+- [ ] Broaden the raw secret mapping carrier to all JSON-compatible values while reserving `false`
+      as opt-out; tests prove scalar, mapping, collection, and `true` plugin mapping models reach
+      exact backend-specific narrowing.
 - [ ] Add source validation and extraction helpers that use the same backend selector without yet
-      repointing production settings, graph, or runtime consumers.
+      repointing production settings, graph, or runtime consumers. Add the descriptor-derived
+      map-key existence helper, constrained to `USES` references targeting error-policy kinds, but
+      do not invoke it from Registry finalize in this phase.
 - [ ] Keep the feature PR draft: this additive phase is a review checkpoint on the feature branch,
       not a separately mergeable product. Run Green and phase review.
 
 **Definition of done:** the final source model, built-in publication, and descriptor-derived schema
 machinery exist on the feature branch; the atomic production cutover remains owned by Phase 5.
-
-### Phase 4: resolution lifecycle LLD and typed core
-
-- [ ] Delegate `resolution-lifecycle-lld.md`. It pins:
-  - frozen `SecretLookupRequest`, caller-owned `InteractionBroker`, `ActiveSource`, client factory,
-    context-manager, and cleanup protocols;
-  - monotonic budget ownership and remaining-time behavior across factory, entry, `prepare`,
-    `resolve`, and exit, with human prompt wait excluded;
-  - value-free outcome/detail enums, private redacted `ResolutionBatch`, soft/hard miss semantics,
-    batch-failure attribution, and complete-or-raise behavior;
-  - how the current dict-returning operation callers cross the temporary adapter until Phase 7.
-- [ ] Lead reviews the LLD; `agentworks-reviewer` finds no remaining valid issue.
-
-**Definition of done:** lifecycle, timeout, error attribution, and value authority are precise
-enough to implement without backend-specific policy leaking into the orchestrator.
 
 ### Phase 5: bounded clients and typed resolution core
 
@@ -147,10 +155,14 @@ enough to implement without backend-specific policy leaking into the orchestrato
 - [ ] In one atomic cutover, repoint `[secret_config].backends`, `SecretDecl.dependencies`, mapping
       validation/extraction, graph candidate edges, chain validation, inspection, and runtime chain
       construction from backend names to source names. Replace the finalize backend-instance tuple
-      with the generic read-only capability-class projection.
+      with the generic read-only capability-class projection. Activate collection of validation-only
+      map-key references as each host row enters the registry build or fixed-point walk, resolving
+      them in the corresponding existing resolve stage so initially published and later materialized
+      rows follow the same source-first rule without changing error precedence.
 - [ ] Only after source lookup misses, if the unknown name exactly matches a backend, hard-error
       with the exact config- or manifest-specific source rewrite. Pin that a same-name synthesized
-      or operator-declared source wins. Do not add a deprecation producer, manifest carrier,
+      or operator-declared source wins; every explicit mapping key is checked even when `false`
+      suppresses candidate-edge emission. Do not add a deprecation producer, manifest carrier,
       compatibility source, or legacy parser.
 - [ ] OnePassword source config owns `account` and a positive external-operation `timeout`; its
       permanent mapping is an `op://` reference. Update plugin fixtures and the 0.14 upgrade guide
