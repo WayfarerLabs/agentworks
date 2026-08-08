@@ -267,6 +267,66 @@ def test_a_collection_union_documents_only_its_selected_scalar_arm() -> None:
     assert union_scalar_shorthand_error(Holder) is None
 
 
+def test_a_collapsed_collection_union_keeps_scalar_dispatch_explicit() -> None:
+    """A one-arm union is a model at runtime but remains tagged surface.
+
+    With the union declaration, every derivation selects and folds the
+    stored arm. With only the arm's standalone shorthand, tag dispatch
+    rejects the scalar and no framework surface may infer otherwise.
+    """
+
+    class Stored(AgwModel):
+        scalar_shorthand: ClassVar = ScalarShorthand(annotation=str, field="secret")
+
+        mode: Literal["stored"]
+        secret: Annotated[
+            str,
+            SecretRef(usage="a collection token", default_template="collection-token-{owner_name}"),
+        ]
+
+    ExplicitElement = Annotated[
+        Stored,
+        UnionScalarShorthand(discriminator="mode", arm=Stored),
+    ]
+
+    class ExplicitHolder(AgwModel):
+        tokens: list[ExplicitElement] = Field(default_factory=list)
+
+    assert ExplicitHolder.model_validate({"tokens": ["named"]}).tokens == [Stored(mode="stored", secret="named")]
+    assert filled_defaults(ExplicitHolder, {"tokens": ["named"]}, OWNER) == {"tokens": ["named"]}
+    assert [(ref.kind, ref.name) for ref in extract_references(ExplicitHolder, {"tokens": ["named"]})] == [
+        ("secret", "named")
+    ]
+
+    defaulted = filled_defaults(ExplicitHolder, {"tokens": [{"mode": "stored"}]}, OWNER)
+    assert defaulted == {"tokens": [{"mode": "stored", "secret": "collection-token-dev"}]}
+    assert [(ref.kind, ref.name) for ref in extract_references(ExplicitHolder, defaulted)] == [
+        ("secret", "collection-token-dev")
+    ]
+
+    explicit_schema = ExplicitHolder.model_json_schema()["properties"]["tokens"]["items"]
+    assert explicit_schema["anyOf"][0] == {"type": "string"}
+    (explicit_doc,) = [doc for doc in iter_field_docs(ExplicitHolder) if doc.path == ("tokens",)]
+    assert render_type(explicit_doc.annotation) == "list of string or table"
+    assert [arm.tag for arm in explicit_doc.item_union_arms] == ["stored"]
+    assert union_scalar_shorthand_error(ExplicitHolder) is None
+
+    class TaggedOnlyHolder(AgwModel):
+        tokens: list[Annotated[Stored, Discriminator("mode")]] = Field(default_factory=list)
+
+    with pytest.raises(ValueError, match="valid dictionary"):
+        TaggedOnlyHolder.model_validate({"tokens": ["named"]})
+    assert filled_defaults(TaggedOnlyHolder, {"tokens": ["named"]}, OWNER) == {"tokens": ["named"]}
+    assert extract_references(TaggedOnlyHolder, {"tokens": ["named"]}) == ()
+
+    tagged_schema = TaggedOnlyHolder.model_json_schema()["properties"]["tokens"]["items"]
+    assert "anyOf" not in tagged_schema
+    (tagged_doc,) = [doc for doc in iter_field_docs(TaggedOnlyHolder) if doc.path == ("tokens",)]
+    assert render_type(tagged_doc.annotation) == "list of table"
+    assert [arm.tag for arm in tagged_doc.item_union_arms] == ["stored"]
+    assert "declares no UnionScalarShorthand" in (union_scalar_shorthand_error(TaggedOnlyHolder) or "")
+
+
 def test_union_scalar_conformance_refuses_ambiguous_and_mismatched_declarations() -> None:
     class Stored(AgwModel):
         scalar_shorthand: ClassVar = ScalarShorthand(annotation=str, field="secret")

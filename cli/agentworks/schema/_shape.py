@@ -312,18 +312,19 @@ def shape_of(field: FieldInfo) -> FieldShape:
         collection, element = found
         element, element_meta = split_annotated(element)
         item_marker = _first_marker(element_meta)
-        item_model = element if _is_model(element) else None
-        if item_model is None and _is_union(element):
+        item_discriminator = _element_discriminator(element_meta) if _is_model(element) or _is_union(element) else None
+        if item_discriminator is not None:
             # Same order as the field-level branch below, and for the same
             # reason: a tagged union addresses one arm from a raw blob and
             # an untagged one addresses none, so asking about the tag first
-            # is what keeps a collection of tagged blocks from reading as
-            # an opaque union nothing walks into.
-            item_discriminator = _element_discriminator(element_meta)
-            if item_discriminator is not None:
-                item_arms = _arms_of(element, item_discriminator)
-                item_union_scalar_shorthand = _sole_union_scalar_shorthand(element_meta)
-            elif _has_structural_union(element_meta):
+            # is what keeps both a many-arm union and pydantic's collapsed
+            # one-arm model from reading as an ordinary nested block.
+            item_arms = _arms_of(element, item_discriminator)
+            item_union_scalar_shorthand = _sole_union_scalar_shorthand(element_meta)
+        elif _is_model(element):
+            item_model = element
+        elif _is_union(element):
+            if _has_structural_union(element_meta):
                 item_union_members = tuple(split_annotated(arg)[0] for arg in get_args(element))
                 item_structural_arms = _closed_model_arms(item_union_members)
             else:
@@ -1114,7 +1115,7 @@ def _widened(annotation: object, expanding_roots: tuple[type[BaseModel], ...]) -
     markers are already stripped."""
     base, metadata = split_annotated(annotation)
     widened: object
-    discriminator = _element_discriminator(metadata) if _is_union(base) else None
+    discriminator = _element_discriminator(metadata) if _is_model(base) or _is_union(base) else None
     if discriminator is not None:
         # A tagged union nested inside a collection keeps its dispatch
         # metadata on the element's Annotated wrapper. Treat it exactly
