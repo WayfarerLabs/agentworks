@@ -1,0 +1,285 @@
+# Low-Level Design: Machine-Readable Operational Output
+
+- Status: Draft for Phase 2 implementation
+- Parent design: frd.md R7 and AC4, hla.md machine-readable output contract, and plan Phase 2
+- Baseline: main at 0cabf37b
+
+## Scope
+
+This LLD adds JSON v1 to selected read-only operational commands. It makes the facts their human
+renderers already present available without parsing terminal tables, display sentinels, or prose.
+
+| CLI command                                     | Contract command                   |
+| ----------------------------------------------- | ---------------------------------- |
+| agw resource list                               | resource.list                      |
+| agw resource kinds                              | resource.kinds                     |
+| agw resource describe KIND/NAME                 | resource.describe                  |
+| agw vm list, agw vm describe NAME               | vm.list, vm.describe               |
+| agw workspace list, agw workspace describe NAME | workspace.list, workspace.describe |
+| agw agent list, agw agent describe NAME         | agent.list, agent.describe         |
+| agw session list, agw session describe NAME     | session.list, session.describe     |
+| agw console list, agw console describe NAME     | console.list, console.describe     |
+| agw secret list, agw secret describe NAME       | secret.list, secret.describe       |
+| agw doctor                                      | doctor                             |
+
+Guide is Markdown-only. Resource field-reference and sample commands, schema emission, verification
+commands, logs, interactive attachment, and every mutation command are outside v1. The reusable
+option must not suggest that an unsupported command has a JSON contract.
+
+The implementation does not redesign agentworks.output.OutputHandler, replace the Typer handler, or
+add a global output setting. It must not run remote work solely because JSON was requested. It must
+not expose raw configuration, secret values or resolver results, session harness state, session
+socket paths, boot identifiers, or opaque VM platform metadata.
+
+## Current paths and extraction seams
+
+The command module parses options and chooses a renderer. The service constructs an immutable fact
+record. Human and JSON renderers consume that one record and never parse one another's output.
+
+| Surface                        | CLI path                                 | Current service path                                            | Phase 2 seam                                                              |
+| ------------------------------ | ---------------------------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Resource list, kinds, describe | cli/agentworks/cli/commands/resource.py  | resources.inspect.list_resources, list_kinds, describe_resource | Reuse ResourceListing, ResourceSummary, KindRow, and ResourceDescription. |
+| Secret list, describe          | cli/agentworks/cli/commands/secret.py    | secrets.inspect.build_secret_table, describe_secret             | Reuse SecretTable, SecretRow, SecretCell, and SecretDescription.          |
+| VM list, describe              | cli/agentworks/cli/commands/vm.py        | vms.manager.power.list_vms, describe_vm                         | Extract DB and existing bounded live-read facts before rendering.         |
+| Workspace list, describe       | cli/agentworks/cli/commands/workspace.py | workspaces.manager.create.list_workspaces, describe_workspace   | Extract facts from existing rows, sessions, and grants.                   |
+| Agent list, describe           | cli/agentworks/cli/commands/agent.py     | agents.manager.inspect.list_agents, describe_agent              | Extract facts from existing rows, grants, and sessions.                   |
+| Session list, describe         | cli/agentworks/cli/commands/session.py   | sessions.manager.\_queries.list_sessions, describe_session      | Extract facts while preserving current bounded status work.               |
+| Console list, describe         | cli/agentworks/cli/commands/console.py   | sessions.multi_console.attach.list_consoles, describe_console   | Extract DB facts for counts, members, and shells.                         |
+| Doctor                         | cli/agentworks/cli/commands/doctor.py    | doctor.run_checks                                               | Reuse HealthReport, HealthGroup, and HealthCheck.                         |
+
+A small module below Typer, such as agentworks.machine_output, owns the closed output enum, envelope
+writer, and safe projections. It is not a global output framework. Domain records remain
+domain-owned.
+
+## Option and envelope
+
+Each covered command has a local --output human|json option, defaulting to human. The output enum is
+closed and has exactly human and json. Unknown formats are usage errors before config, registry,
+database, network, or service work starts.
+
+Every successful JSON response is exactly one UTF-8 document followed by one line feed, without BOM,
+ANSI, table padding, headings, warnings, progress lines, or friendly empty-state prose. The encoder
+uses explicit projections, never a generic dataclass or **dict** dump. It retains Unicode rather
+than escaping it and writes object members in their declared order.
+
+Example envelope:
+
+    {
+      "schema_version": 1,
+      "command": "resource.list",
+      "data": {}
+    }
+
+Envelope order is always schema_version, command, data. schema_version is integer 1, command is one
+of the exact strings in the scope table, and data is always an object. Object fields use the order
+listed below. Arrays follow their stated ordering rule. Timestamps retain stored ISO 8601 text.
+Missing facts are JSON null, never a display sentinel. Counts are integers and flags are booleans.
+
+## Shared JSON records
+
+All fields below are always present and in listed order.
+
+    origin = { variant, file, line, source, source_resource, plugin }
+    reference = { source_kind, source_name, usage }
+    instance_reference = { kind, name }
+    status_issue = { scope, reason }
+
+origin is nullable. When present, variant is exactly operator-declared, auto-declared, built-in, or
+system-plugin. file, line, source, source_resource, and plugin are null when inapplicable.
+source_resource is null or {kind, name} and represents an auto-declared tuple source. source is a
+code-source string. This keeps its type stable across origin variants.
+
+References are deduplicated by all three fields in first existing graph order. Instance references
+are the current InstanceRef values. JSON never groups them for display.
+
+status_issue appears only when a successful current inspection already degrades after a bounded
+attempted read. scope is a stable lowercase service identifier; reason is the existing sanitized
+diagnostic. The human renderer keeps its existing stderr warning, while JSON writes facts on stdout.
+
+## Data schemas
+
+### Resources and kinds
+
+resource.list.data is {resources, counts}.
+
+    resources[] = {
+      kind, name, origin, reference_count, used_by_count, description,
+      not_ready_reason, disabled
+    }
+    counts = { operator_declared, auto_declared, built_in, system_plugin }
+
+origin, used_by_count, and not_ready_reason may be null. disabled is boolean. Rows retain
+ResourceListing order: explicit kinds retain request order, otherwise kinds sort lexically, then
+names sort within kind. Counts are post-filter values. Current kind, origin, and disabled filters
+retain their exact behavior.
+
+resource.kinds.data is {kinds}, where each item is {kind, category, resource_count, description}.
+category is exactly declarable or capability. Kinds sort lexically.
+
+resource.describe.data is {resource}, where resource is {kind, name, origin, description,
+references, used_by, not_ready_reason, disabled_reason}. references uses reference; used_by is an
+array of instance_reference or null when no instance concept exists. Both reason fields are
+nullable. Explicit disabled-resource lookup remains supported.
+
+### Secrets
+
+secret.list.data is {backends, secrets, counts}. backends preserves active backend precedence. Each
+secret is {name, description, backends}, with backends[] equal to {backend, would_attempt,
+identifier, not_ready_reason} in that precedence order. identifier and not_ready_reason are
+nullable. counts is {operator_declared, auto_declared}. Secrets sort by name. This reports lookup
+prediction only, never a secret value.
+
+secret.describe.data is {secret}. secret is {name, kind, origin, description, hint, references,
+used_by, backend_mappings, resolution}. backend_mappings[] is {backend, would_attempt, identifier,
+not_ready_reason}. resolution is {resolved_by, available, skipped_not_ready}, where
+skipped_not_ready[] is {backend, reason}. hint, used_by, identifier, not_ready_reason, and
+resolved_by use null as appropriate. available equals whether resolved_by is non-null. Backend
+collections retain chain order.
+
+### VMs
+
+vm.list.data is {vms}. Each VM is {name, site, template, provisioning_status, initialization_status,
+workspace_count, agent_count, session_count, tailscale_host, created_at}. template and
+tailscale_host are nullable. Provisioning is one of pending, in_progress, complete, failed;
+initialization is one of pending, in_progress, complete, partial, failed. VMs sort by name.
+
+vm.describe.data is {vm, issues}. vm field order is:
+
+    {
+      name, created_at, site, platform, backend, observed_status, status_disposition,
+      operator_stopped, hostname, system_slug, system_slug_state, template,
+      admin_template, admin_username, provisioning_status, initialization_status,
+      tailscale_host, last_seen_at, provisioned_resources, live_resources,
+      agents, workspaces, events
+    }
+
+platform, backend, observed_status, status_disposition, system_slug, template, admin_template,
+tailscale_host, last_seen_at, and live_resources are nullable. observed_status is running, stopped,
+deallocated, or unknown. status_disposition is manual or idle only for stopped or deallocated VMs.
+system_slug_state is set, declined, or unset, retaining the current empty-versus-absent distinction
+without a display sentinel.
+
+provisioned_resources is {cpus, memory_gib, disk_gib, swap_gib} with nullable integers.
+live_resources is null or {cpus, load_average, memory_total, memory_used, memory_percent,
+swap_total, swap_used, swap_percent, disk_total, disk_used, disk_percent}. These retain current
+bounded live-read text and units. agents[] is {name, linux_user, grant_all, grant_count}.
+workspaces[] is {name, path, sessions}, and sessions[] is {name, template, mode, agent_name}.
+events[] is {created_at, event, detail} with nullable detail. mode is admin or agent; agent_name is
+nullable. These arrays retain current DB ordering. issues[] uses status_issue in encounter order.
+
+### Workspaces and agents
+
+workspace.list.data is {workspaces} with {name, vm_name, template, created_at} entries. template is
+nullable. It preserves current post-filter workspace-name order.
+
+workspace.describe.data is {workspace}. workspace is {name, vm_name, template, path, created_at,
+sessions, agents}. sessions[] is {name, template, mode, agent_name}; agents[] is {name, linux_user}.
+template and agent_name are nullable; mode is admin or agent. Collections retain current DB order.
+
+agent.list.data is {agents} with {name, vm_name, template, grant_all, grants} entries. template is
+nullable and grant_all is boolean. grants[] is {workspace_name, grant_type}, where grant_type is
+explicit, implicit, or both. It replaces the human-only comma string with the same grant facts.
+Agent ordering remains VM name then agent name.
+
+agent.describe.data is {agent}. agent is {name, vm_name, linux_user, template, grant_all,
+created_at, explicit_grants, sessions}. template is nullable. explicit_grants is a string array, and
+sessions[] is {name, template, workspace_name}. Both retain current service order.
+
+### Sessions and consoles
+
+session.list.data is {sessions}. Each session is {name, workspace_name, vm_name, template,
+harness_integration, mode, agent_name, status}. mode is admin or agent; agent_name is nullable.
+status is exactly running, stopped, broken, unknown, or unavailable. unavailable represents current
+--no-status behavior or a current status probe without a result, rather than a human display
+sentinel. Ordering remains workspace name then session name. Existing human warnings for broken and
+unknown state stay on stderr only.
+
+session.describe.data is {session}. session is {name, workspace_name, vm_name, template,
+harness_integration, mode, agent_name, status, pid, created_at, updated_at}. agent_name and pid are
+nullable. Opaque harness state, boot identifier, and socket path are excluded.
+
+console.list.data is {consoles}, where entries are {name, vm_name, session_count} in current name
+order after filter validation. console.describe.data is {console}. console is {name, vm_name,
+admin_shell, created_at, updated_at, sessions}. sessions[] is {position, session_name, shells}, and
+shells[] is {cwd, admin}. The booleans remain booleans and cwd is nullable. Members keep ascending
+position and shell order. This is configured DB state, never live tmux state.
+
+### Doctor
+
+doctor.data is {groups, counts}. groups[] is {name, checks}; checks[] is {name, status, message,
+hint}; counts is {ok, info, warn, fail}. status is exactly ok, info, warn, or fail; message and hint
+are nullable. Group and check order is HealthReport construction order. Counts are integers from the
+complete report. JSON is emitted for a failing report, then doctor exits 1 exactly when it does
+today. Reports with no failed checks exit 0.
+
+## Ordering, error, and terminal behavior
+
+The service alone selects collection order. Serializers never re-sort an ordered collection and
+renderers never mutate fact records. No JSON field comes from a table cell, formatted origin, or
+terminal label.
+
+On a domain failure, no envelope is written. Existing entry handling writes the framed error and
+optional hint to stderr and exits nonzero. This includes bad resource references, unknown names or
+filters, configuration errors, and failed dependencies. Invalid --output follows normal usage
+handling before work begins.
+
+Doctor is the only report-with-failure exception. A successful inspection that currently degrades
+after a bounded attempted read uses null for unavailable facts and a status_issue; it is not a
+business-error envelope. JSON contains no ANSI on either output stream. The serializer writes stdout
+directly, rather than output.info, so the ambient handler cannot add presentation. --output human
+executes the exact current human renderer path.
+
+--names-only remains completion plumbing and is mutually exclusive with --output json on every
+covered list or kinds command that already has it. Validate that conflict before service work. It
+has no JSON interpretation. Existing completion snippets continue to call only --names-only.
+
+## Compatibility, tests, docs, and completions
+
+JSON v1 is additive. Optional fields may be added only when documented as optional and existing
+values retain type and meaning. Removing a field, requiring an optional field, changing type,
+meaning, collection ordering, or enum spelling requires a new schema version and explicit
+compatibility period. A new command requires its own documented data schema.
+
+Implementation must add:
+
+1. Parse-and-assert fixtures for every command string and schema, including empty lists, nulls,
+   disabled resources, unready backend cells, unavailable sessions, and a complete failing doctor
+   report.
+2. Repeat-run raw-byte tests that prove deterministic array and key order.
+3. A human byte-compatibility fixture for every covered command: no option and explicit --output
+   human both match pre-Phase-2 stdout and stderr in a non-interactive no-color fixture. VM and
+   session fixtures cover existing bounded status and degraded paths.
+4. Mutual exclusion, no-ANSI, stderr-routing, error-empty-stdout, and doctor-report-before-exit
+   tests.
+5. Safety tests proving JSON excludes secret values, raw config, opaque platform metadata, harness
+   state, sockets, and boot identifiers.
+6. An end-to-end guide-action fixture that parses each applicable v1 document rather than human
+   output.
+
+cli/README.md gains the permanent JSON v1 contract: envelope, supported commands, resource and
+doctor examples, null and ordering rules, errors, doctor exit behavior, --names-only exclusion, and
+compatibility policy. Related command guidance links to it. Applicable guide action records use
+--output json and require the envelope schema_version, command, and data checks.
+
+The new public option requires generated Typer help and Bash, Zsh, and PowerShell completion
+expectations in the same commits. Dynamic completion maps remain names-only contracts. Sample config
+has no new setting and is recorded as unaffected in the Phase 2 handoff.
+
+## Implementation sequence
+
+1. Add the local output enum, explicit envelope writer, safe shared projections, and serializer
+   tests. Do not modify output.py or the global Typer handler.
+2. Wire resource, kinds, secret, and doctor first, reusing existing fact records to establish the
+   renderer, null, enum, error, and human-fixture patterns.
+3. Extract read facts for VM, workspace, agent, console, and session. Preserve existing queries and
+   live status behavior, but make fact construction independently testable.
+4. Wire command options, permanent docs, completion expectations, and guide-action consumption, then
+   run focused and full gates. This LLD changes no plan checkbox.
+
+## Coordination note: declarative-schema PR #455
+
+PR #455 changes schema structural unions and related model sources, but does not touch covered
+operational command modules, resource inspection services, doctor, or database rows. Phase 2 should
+not wait. Rebase after it merges and rerun focused JSON fixtures. Adapt only if Phase 2 deliberately
+projects a changed model shape. The safe projections above expose no raw manifest or opaque
+capability model, so no adaptation is expected from the current PR scope.
