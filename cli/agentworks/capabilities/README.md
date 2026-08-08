@@ -660,6 +660,21 @@ Pydantic emits this as `oneOf` over closed object shapes with `discriminator.pro
 samples, field documentation, and graph extraction. Adding a real mechanism is additive: add an arm
 rather than pre-grouping fields for an implementation that does not exist yet.
 
+For a selector-free structural choice, make the structural intent explicit:
+
+```python
+source: Annotated[PlaintextSource | SecretSource, StructuralUnion()]
+```
+
+`StructuralUnion` is narrower than an ordinary untagged union. It requires at least two closed model
+arms whose required and allowed keys cannot overlap, and it emits them as plain `oneOf`. Structural
+arms use their field names as operator-written keys, so validation aliases are refused. Put a
+resource marker on the field inside its arm, never on the union holder or a collection element that
+holds the union. A scalar shorthand is allowed only on a marker-free structural arm because raw
+graph traversal selects these arms from table keys. Registration checks all of these constraints,
+including on unions whose arms currently contain no resource markers, before an implementation is
+seated.
+
 A union default may select only what omission historically selected, never a new arm. This makes the
 default a no-op for existing manifests. Scalar shorthands must dispatch through the same union-level
 declaration used by validation, filling, extraction, schema emission, and conformance; an arm-local
