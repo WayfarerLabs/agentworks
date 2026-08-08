@@ -108,8 +108,9 @@ picked off whenever bandwidth allows, on its own merits and its own schedule.
   in the same window, it folds in: one well-cushioned breaking release instead of two. The
   vm-platform mode contract (PR #444, merged 2026-08-08) folds in the same way: its
   written-old-shape hard errors ride the cushioned release, and its omission-equals-historical-
-  default posture means untouched 0.13 manifests cross without edits. While `main` holds unreleased
-  breaking changes, urgent operator fixes ship from a `0.13.x` backport branch.
+  default posture means manifests that never wrote the retired blocks cross without edits. While
+  `main` holds unreleased breaking changes, urgent operator fixes ship from a `0.13.x` backport
+  branch.
 - **Later:** remaining waves map to releases as they prove out; no need to pin numbers now.
 
 ## Open ordering decisions

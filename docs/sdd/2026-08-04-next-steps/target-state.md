@@ -92,14 +92,16 @@ and one instance-state store designed once for instance specs, integration appli
 artifact ownership records (three perspectives converge on that store).
 
 **The variant-modeling contract** (operator rulings, 2026-08-07 and 2026-08-08): config that has
-variants is a discriminated union on a `mode` string Literal, one arm per required-field shape (the
-discriminator tracks shape, not concept), the union field named for what it selects (sibling
+variants is a discriminated union on a string `Literal` discriminator (spelled `mode` on today's
+action-named fields; the README's grammar rule governs the key), one arm per required-field shape
+(the discriminator tracks shape, not concept), the union field named for what it selects (sibling
 capabilities may diverge, as `auth` versus `placement` do), and new variants added as arms, never by
 pre-grouped mechanism awaiting a consumer. A union may default only to the mode its omission
 historically selected, never to a new arm, and extraction reads declared defaults as if written so a
-defaulted choice is graph-visible exactly like a written one. The permanent home for the rule is
-`cli/agentworks/capabilities/README.md`; the retirement pattern for old shapes is the exact-rewrite
-hard error plus the upgrade guide.
+defaulted choice is graph-visible exactly like a written one. Permanent homes: the shape rule in
+`cli/agentworks/capabilities/README.md`, the extraction invariant in `schema/extract.py`'s
+docstring, the default posture's reasoning at the union sites themselves; the retirement pattern for
+old shapes is the exact-rewrite hard error plus the upgrade guide.
 
 ### Capability descriptor (destination 3)
 
