@@ -86,6 +86,13 @@ alternatives and exact `kind/name` targets. Root-valued implementation config re
 entry without inventing a `spec` wrapper. Only projected plain-text field facts and alternative
 summaries are escaped for Markdown.
 
+Literal defaults, examples, choices, and constraints never pass through `plain_text`. Their document
+form comes from `agentworks.manifests.yaml_value.render_value`, the same wire-value serializer used
+by live samples, and is then wrapped in a safe Markdown code span whose backtick delimiter is one
+character longer than the longest backtick run in the value. Values that begin or end with a
+backtick or space are space-padded inside that delimiter. `plain_text` remains limited to authored
+model prose such as descriptions and alternative summaries.
+
 The sample renderer calls `sample_text` only for a declarable kind and embeds the returned text in a
 fenced YAML block. It never calls `write_sample`, touches the filesystem, or treats a capability
 reference as a manifest.
@@ -109,30 +116,36 @@ exceptional operation, not as the normal upgrade experience. `concept-onboarding
 Static prose explains sequencing and interpretation, but every suggested read, workstation probe, or
 mutation that crosses a consent boundary is also a validated `GuideAction`. The records name the
 exact file, directory, kind, or manifest input; use `READ_CONFIGURED_STATE`, `EXAMINE_WORKSTATION`,
-or `MUTATE_AGENTWORKS` as appropriate; state the expected result and verification command; and give
-a refusal alternative that preserves the last known-safe state. They are rendered instructions and
-are never executed by `agw guide`.
+or `MUTATE_AGENTWORKS` as appropriate; state the expected result and verification step; and give a
+refusal alternative that preserves the last known-safe state. They are rendered instructions and are
+never executed by `agw guide`.
 
 The core topic contributes these records in order. Command actions use only the current portable
 Agentworks CLI. Manual actions name their exact inputs and outcomes but let the operator choose
 platform-native copy, inspection, and editing tools.
 
-| Action ID                    | Consent                 | Operation                                                                                                                                                       | Verification or refusal boundary                                                                                                                    |
-| ---------------------------- | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `preserve-migration-inputs`  | `MUTATE_AGENTWORKS`     | Manual: copy the selected `CONFIG_PATH` and `RESOURCES_PATH`, then record expected resource names from the untouched retired sections in `EXPECTED_NAMES_PATH`. | Confirm all three preserved artifacts exist; refusal stops before any edit.                                                                         |
-| `edit-one-manifest`          | `MUTATE_AGENTWORKS`     | Manual: edit only `MANIFEST_PATH`, using the config-free sample and field-reference topics for `TARGET`.                                                        | Leave the last validated manifests unchanged on refusal and do not remove TOML.                                                                     |
-| `validate-manifest-set`      | `EXAMINE_WORKSTATION`   | `agw doctor`                                                                                                                                                    | The new manifest receives precise feedback while the retired-section config failure remains; refusal leaves the edit unverified and blocks cutover. |
-| `review-null-secret-fields`  | `READ_CONFIGURED_STATE` | Manual: inspect only the named site manifests for `token_secret`, `service_principal.secret`, and `credentials.access_key_secret`.                              | Record default, custom, or ambient-auth intent per hit; refusal leaves the site unchanged and blocks cutover.                                       |
-| `remove-retired-sections`    | `MUTATE_AGENTWORKS`     | Manual: remove every retired resource section from `CONFIG_PATH` in one edit and update `[secret_config].backends` when needed.                                 | Refusal restores or retains the untouched config and its hard error.                                                                                |
-| `compare-operator-inventory` | `READ_CONFIGURED_STATE` | `agw resource list --origin operator --names-only`                                                                                                              | Compare with `EXPECTED_NAMES_PATH`; any missing or extra name restores the backup before further work.                                              |
-| `finish-doctor`              | `EXAMINE_WORKSTATION`   | `agw doctor`                                                                                                                                                    | Zero failures completes the migration; refusal leaves host readiness unverified.                                                                    |
+| Action ID                     | Consent                 | Operation                                                                                                                                                                                                                                                                                                | Verification or refusal boundary                                                                                                                                                          |
+| ----------------------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `inventory-retired-resources` | `READ_CONFIGURED_STATE` | Manual: read `CONFIG_PATH` and the optional `RESOURCES_PATH` baseline. Record the union of pre-existing manifest identities and manifest-producing retired sections as canonical `kind/name`, `operator-declared`, and intended manifest file. Exclude `[secret_backends.*]` and collapse nested tables. | The caller owns the expected identity-and-origin set; refusal stops before backup or editing.                                                                                             |
+| `backup-config`               | `MUTATE_AGENTWORKS`     | Manual: copy `CONFIG_PATH` to a fresh operator-selected `CONFIG_BACKUP_PATH` outside and distinct from the active config and resources trees.                                                                                                                                                            | Refusal leaves config untouched and stops migration.                                                                                                                                      |
+| `backup-resources`            | `MUTATE_AGENTWORKS`     | Manual: when `RESOURCES_PATH` exists, copy it to a fresh `RESOURCES_BACKUP_PATH` outside and distinct from both active trees. Otherwise record an absent resources baseline and create no active path.                                                                                                   | Refusal leaves resources untouched and stops migration.                                                                                                                                   |
+| `verify-migration-inputs`     | `READ_CONFIGURED_STATE` | Manual: compare config backup with source, verify a matching resources copy or recorded absent baseline, and review the expected identity-and-origin set before any edit.                                                                                                                                | Every present backup must match; destinations must be outside active trees; the expected set must include the baseline union and exclude backend declarations. Otherwise stop.            |
+| `edit-one-manifest`           | `MUTATE_AGENTWORKS`     | Manual: edit only `MANIFEST_PATH`, using the sample for `MANIFEST_KIND` and, when tagged config is present, the separate field reference for optional `CAPABILITY_TARGET`.                                                                                                                               | Leave the last validated manifests unchanged on refusal and do not remove TOML.                                                                                                           |
+| `validate-manifest-set`       | `EXAMINE_WORKSTATION`   | `agw doctor`                                                                                                                                                                                                                                                                                             | The new manifest receives precise feedback while the retired-section config failure remains; refusal leaves the edit unverified and blocks cutover.                                       |
+| `review-null-secret-fields`   | `READ_CONFIGURED_STATE` | Manual: inspect only the named site manifests for `token_secret`, `service_principal.secret`, and `credentials.access_key_secret`.                                                                                                                                                                       | Record default, custom, or ambient-auth intent per hit; refusal leaves the site unchanged and blocks cutover.                                                                             |
+| `remove-retired-sections`     | `MUTATE_AGENTWORKS`     | Manual: remove every retired resource section from `CONFIG_PATH` in one edit and update `[secret_config].backends` when needed.                                                                                                                                                                          | Refusal restores or retains the untouched config and its hard error.                                                                                                                      |
+| `compare-operator-inventory`  | `READ_CONFIGURED_STATE` | `agw resource list --origin operator`                                                                                                                                                                                                                                                                    | Compare identity, `operator-declared`, and manifest file with the expected set while ignoring source line; any missing or extra row stops completion and uses the backups to investigate. |
+| `finish-doctor`               | `EXAMINE_WORKSTATION`   | `agw doctor`                                                                                                                                                                                                                                                                                             | Zero failures completes the migration; refusal leaves host readiness unverified.                                                                                                          |
 
 The teaching covers:
 
-1. before editing, preserve an untouched `config.toml` and resources-directory backup and derive the
-   expected resource names from those untouched retired sections; an inventory captured before the
-   upgrade may be used as additional evidence but is never assumed to be available;
-2. inventory every retired TOML resource section from the precise load error;
+1. before editing, record the expected final operator set as the union of pre-existing manifest
+   identities and manifest-producing retired sections, including canonical `kind/name`, the
+   `operator-declared` variant, and intended manifest file; exclude source line from equality,
+   exclude `[secret_backends.*]`, and collapse nested tables into their parent;
+2. preserve config and, when present, resources-directory backups at fresh destinations outside the
+   active trees; record an absent resources baseline when appropriate, then verify the copies or
+   absence plus the expected identity set before editing;
 3. use `agw resource sample KIND` or `agw guide KIND` for the live manifest shape and use
    `agw resource describe-kind KIND/NAME` or `agw guide KIND/NAME` for tagged capability config;
 4. write one manifest at a time while leaving all retired TOML sections in place, then run
@@ -179,8 +192,13 @@ The adapter is complete when tests prove:
   degrades to unavailable when config cannot build the registry;
 - section selection is exact and invalid selectors fail as scoped guide content;
 - onboarding and management link to migration without duplicating its teaching;
-- migration output renders validated consent-bearing action records, preserves backups and old
-  names, names the normal load, inventory, and per-manifest doctor loop, handles backend sections,
-  and contains the exact null-secret choices;
+- migration output renders validated consent-bearing action records, preserves fresh out-of-tree
+  backups or an absent baseline, carries the union of existing and migrated operator identities,
+  names the normal load, inventory, and per-manifest doctor loop, handles backend sections, and
+  contains the exact null-secret choices;
+- final inventory comparison accepts a preserved operator resource whose manifest source line moved
+  while requiring its identity, operator-declared variant, and manifest file to match;
+- schema scalar rendering uses `render_value` for booleans, enums, collections, empty and whitespace
+  strings, and embedded backticks before safe code-span wrapping;
 - guide power-boundary, mode-parity, completion, package-data, full Phase 1, and repository gates
   remain green.

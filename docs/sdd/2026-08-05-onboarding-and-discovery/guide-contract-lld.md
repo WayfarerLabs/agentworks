@@ -173,8 +173,9 @@ closed and recursive. It rejects:
   blank titles or summaries, and non-string markdown;
 - unknown anchor or block discriminators;
 - functions, callable objects, import references, renderer names, and object instances;
-- `{{`, `}}`, `${`, `<%`, `%>`, `{%`, or `%}` placeholder delimiters outside the exact inline-code
-  form below;
+- `{{`, `}}`, `${`, `<%`, `%>`, `{%`, or `%}` placeholder delimiters in an authored title, summary,
+  static Markdown block, action precondition, input description, expected state, refusal
+  alternative, or manual instruction outside the exact inline-code form below;
 - either reserved `⟦AGW framework⟧` marker delimiter in an authored title, summary, or static
   markdown block, including an HTML-entity encoding of a delimiter;
 - invalid slugs, IDs, anchor/topic mismatches, duplicate block IDs, and repeated related links;
@@ -182,7 +183,8 @@ closed and recursive. It rejects:
 - plugin ownership of `concept-*`, a bare kind, another plugin's namespace, or a resource not
   contributed through its registered owner adapter.
 
-The only exemption is a marker between a same-line pair of single backticks. Each delimiter is one
+Command and verification tokens use their separate closed token grammar. For rendered prose, the
+only exemption is a marker between a same-line pair of single backticks. Each delimiter is one
 unescaped backtick not adjacent to another backtick. Multi-backtick runs, fenced blocks, multiline
 spans, backslash-escaped backticks, and unmatched openers grant no exemption. The scanner runs on
 the final authored Markdown given to `parse_topic_contribution`, identically for trusted and plugin
