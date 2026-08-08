@@ -25,6 +25,36 @@ from agentworks.resources.kind import InstanceRef
 from agentworks.resources.reference import ReferenceEntry
 
 
+class _ShortWriteStream:
+    def __init__(self) -> None:
+        self.document = bytearray()
+        self.write_calls = 0
+
+    def write(self, data: bytes) -> int:
+        self.write_calls += 1
+        accepted = min(3, len(data))
+        self.document.extend(data[:accepted])
+        return accepted
+
+
+class _PartialThenZeroStream:
+    def __init__(self) -> None:
+        self.document = bytearray()
+        self._wrote_once = False
+
+    def write(self, data: bytes) -> int:
+        if self._wrote_once:
+            return 0
+        self._wrote_once = True
+        self.document.extend(data[:1])
+        return 1
+
+
+class _NoneWriteStream:
+    def write(self, data: bytes) -> None:
+        return None
+
+
 def test_output_formats_are_closed_to_human_and_json() -> None:
     assert list(OutputFormat) == [OutputFormat.HUMAN, OutputFormat.JSON]
     assert OutputFormat("human") is OutputFormat.HUMAN
@@ -74,6 +104,23 @@ def test_envelope_is_utf8_deterministic_and_has_one_trailing_newline() -> None:
     assert list(json.loads(first)) == ["schema_version", "command", "data"]
 
 
+def test_envelope_escapes_del_and_c1_controls_without_changing_text() -> None:
+    text = "~\x7f\u009b\u009f\u00a0☃"
+
+    encoded = encode_json_envelope(MachineOutputCommand.DOCTOR, {"text": text})
+
+    assert b"\\u007f" in encoded
+    assert b"\\u009b" in encoded
+    assert b"\\u009f" in encoded
+    assert b"\x7f" not in encoded
+    assert "\u009b".encode("utf-8") not in encoded
+    assert "\u009f".encode("utf-8") not in encoded
+    assert b"~" in encoded
+    assert "\u00a0".encode("utf-8") in encoded
+    assert "☃".encode() in encoded
+    assert json.loads(encoded)["data"]["text"] == text
+
+
 def test_writer_writes_directly_without_ansi_presentation_bytes() -> None:
     stream = io.BytesIO()
 
@@ -89,6 +136,25 @@ def test_writer_writes_directly_without_ansi_presentation_bytes() -> None:
         "command": "doctor",
         "data": {"message": "\x1b[31mnot terminal formatting\x1b[0m"},
     }
+
+
+def test_writer_retries_short_writes_until_the_document_is_complete() -> None:
+    stream = _ShortWriteStream()
+    expected = encode_json_envelope(MachineOutputCommand.DOCTOR, {"count": 3})
+
+    write_json_envelope(MachineOutputCommand.DOCTOR, {"count": 3}, stream)
+
+    assert bytes(stream.document) == expected
+    assert stream.write_calls > 1
+
+
+@pytest.mark.parametrize("stream", [_PartialThenZeroStream(), _NoneWriteStream()])
+def test_writer_fails_when_the_stream_makes_no_progress(stream: object) -> None:
+    with pytest.raises(OSError, match="JSON output stream made no progress"):
+        write_json_envelope(MachineOutputCommand.DOCTOR, {"count": 3}, stream)  # type: ignore[arg-type]
+
+    if isinstance(stream, _PartialThenZeroStream):
+        assert bytes(stream.document) == encode_json_envelope(MachineOutputCommand.DOCTOR, {"count": 3})[:1]
 
 
 def test_invalid_or_unserializable_input_writes_no_partial_document() -> None:
@@ -154,6 +220,34 @@ def test_origin_projection_has_fixed_safe_order_and_variant_fields() -> None:
         for projection in projections
         if projection is not None
     )
+
+
+@pytest.mark.parametrize(
+    ("origin", "message"),
+    [
+        (Origin(variant="operator-declared", file=None, line=7), "operator-declared origins require a file and line"),
+        (Origin(variant="built-in", source=None), "built-in origins require a code source"),
+        (
+            Origin(variant="auto-declared", source=()),
+            "auto-declared origins require a two-string source resource",
+        ),
+        (
+            Origin(variant="auto-declared", source=("kind", cast(str, 7))),
+            "auto-declared origins require a two-string source resource",
+        ),
+        (
+            Origin(variant="system-plugin", plugin=None, source="agentworks.plugins.example"),
+            "system-plugin origins require a plugin and code source",
+        ),
+        (
+            Origin(variant="system-plugin", plugin="example", source=None),
+            "system-plugin origins require a plugin and code source",
+        ),
+    ],
+)
+def test_origin_projection_rejects_malformed_variant_contracts(origin: Origin, message: str) -> None:
+    with pytest.raises(AssertionError, match=message):
+        project_origin(origin)
 
 
 def test_reference_projections_preserve_graph_order_duplicates_and_nullable_declarers() -> None:

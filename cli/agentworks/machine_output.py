@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 from enum import StrEnum
+from pathlib import Path
 from typing import TYPE_CHECKING, BinaryIO
 
 if TYPE_CHECKING:
@@ -68,7 +69,15 @@ def encode_json_envelope(command: MachineOutputCommand, data: JsonObject) -> byt
         "command": command.value,
         "data": data,
     }
-    return json.dumps(envelope, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8") + b"\n"
+    encoded = json.dumps(envelope, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+    return _escape_terminal_control_characters(encoded).encode("utf-8") + b"\n"
+
+
+def _escape_terminal_control_characters(document: str) -> str:
+    """Escape DEL and C1 controls that terminals could interpret specially."""
+    return "".join(
+        f"\\u{ord(character):04x}" if 0x7F <= ord(character) <= 0x9F else character for character in document
+    )
 
 
 def write_json_envelope(command: MachineOutputCommand, data: JsonObject, stream: BinaryIO) -> None:
@@ -77,7 +86,13 @@ def write_json_envelope(command: MachineOutputCommand, data: JsonObject, stream:
     Callers pass stdout's binary buffer, never the presentation output handler,
     so terminal formatting cannot enter a machine-readable response.
     """
-    stream.write(encode_json_envelope(command, data))
+    document = encode_json_envelope(command, data)
+    offset = 0
+    while offset < len(document):
+        written = stream.write(document[offset:])
+        if written is None or written <= 0:
+            raise OSError("JSON output stream made no progress")
+        offset += written
 
 
 def project_origin(origin: Origin | None) -> JsonObject | None:
@@ -86,17 +101,23 @@ def project_origin(origin: Origin | None) -> JsonObject | None:
         return None
 
     if origin.variant == "operator-declared":
+        if not isinstance(origin.file, Path) or type(origin.line) is not int:
+            raise AssertionError("operator-declared origins require a file and line")
         return {
             "variant": origin.variant,
-            "file": str(origin.file) if origin.file is not None else None,
+            "file": str(origin.file),
             "line": origin.line,
             "source": None,
             "source_resource": None,
             "plugin": None,
         }
     if origin.variant == "auto-declared":
-        if not isinstance(origin.source, tuple):
-            raise AssertionError("auto-declared origins require a source resource")
+        if not (
+            isinstance(origin.source, tuple)
+            and len(origin.source) == 2
+            and all(isinstance(part, str) for part in origin.source)
+        ):
+            raise AssertionError("auto-declared origins require a two-string source resource")
         return {
             "variant": origin.variant,
             "file": None,
@@ -117,8 +138,8 @@ def project_origin(origin: Origin | None) -> JsonObject | None:
             "plugin": None,
         }
     if origin.variant == "system-plugin":
-        if not isinstance(origin.source, str):
-            raise AssertionError("system-plugin origins require a code source")
+        if not isinstance(origin.plugin, str) or not isinstance(origin.source, str):
+            raise AssertionError("system-plugin origins require a plugin and code source")
         return {
             "variant": origin.variant,
             "file": None,
