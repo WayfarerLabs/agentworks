@@ -1,6 +1,6 @@
 # Plan: Onboarding, Discovery, and Management
 
-- Status: Draft for pre-implementation review
+- Status: Active, Phase 2
 - FRD: `docs/sdd/2026-08-05-onboarding-and-discovery/frd.md`
 - HLA: `docs/sdd/2026-08-05-onboarding-and-discovery/hla.md`
 
@@ -190,7 +190,7 @@ blocks and the migration workflow only; the broader registry-inventory scope rem
 
 ## Phase 2: machine-readable operational output
 
-- [ ] `machine-output-lld.md` inventories every covered list/describe service, pins JSON v1 schemas,
+- [x] `machine-output-lld.md` inventories every covered list/describe service, pins JSON v1 schemas,
       enum spellings, ordering, nullability, error behavior, and human-output compatibility
       fixtures.
 - [ ] Shared `--output human|json` option and v1 envelope serializer implemented without changing
