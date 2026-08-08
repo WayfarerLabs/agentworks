@@ -96,6 +96,35 @@ class _ViaItemUnionModel(AgwModel):
     things: dict[str, str | _MisplacedMarker] = Field(default_factory=dict)
 
 
+class _MarkerFreePlainArm(AgwModel):
+    """A structural arm with no marker of its own."""
+
+    value: str
+
+
+class _MarkerFreeNamedArm(AgwModel):
+    """A disjoint structural arm with no marker of its own."""
+
+    named: str
+
+
+_MARKER_FREE_SOURCE = Annotated[_MarkerFreePlainArm | _MarkerFreeNamedArm, StructuralUnion()]
+
+
+class _MarkedStructuralHolder(AgwModel):
+    """A marker misplaced on a field-level structural union."""
+
+    name: Literal["fixture-platform"]
+    source: Annotated[_MARKER_FREE_SOURCE, SecretRef(usage="the source")]
+
+
+class _MarkedStructuralItems(AgwModel):
+    """A marker misplaced on each structural-union collection element."""
+
+    name: Literal["fixture-platform"]
+    sources: list[Annotated[_MARKER_FREE_SOURCE, SecretRef(usage="a source")]]
+
+
 # -- The name rule, which only the self-test path reaches --------------------
 
 
@@ -263,6 +292,33 @@ def test_overlapping_structural_arms_are_refused_at_registration_without_markers
     assert reason is not None
     assert "invalid structural union" in reason
     assert "overlapping arms First and Second" in reason
+
+
+@pytest.mark.parametrize(
+    ("config_model", "blob"),
+    [
+        pytest.param(
+            _MarkedStructuralHolder,
+            {"name": "fixture-platform", "source": {"named": "secret-name"}},
+            id="field",
+        ),
+        pytest.param(
+            _MarkedStructuralItems,
+            {"name": "fixture-platform", "sources": [{"named": "secret-name"}]},
+            id="collection-element",
+        ),
+    ],
+)
+def test_a_marker_on_a_structural_union_holder_is_refused_at_registration(
+    config_model: type[AgwModel], blob: object
+) -> None:
+    """A holder marker shadows arm traversal even when both arms are innocent."""
+    config_model.model_validate(blob)
+    assert extract_references(config_model, blob) == ()
+
+    reason = conformance_error(VM_PLATFORM, _impl(config_model))
+    assert reason is not None
+    assert "selects a structural union arm" in reason
 
 
 #: The two blocks of a kind document, by the function that builds each.

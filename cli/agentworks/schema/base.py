@@ -422,7 +422,14 @@ _UNMARKABLE_SHAPES: Final = (
     ("collection", "holds many values"),
     ("nested_model", "opens a nested block"),
     ("arms", "selects a discriminated union arm"),
+    ("structural_arms", "selects a structural union arm"),
 )
+
+#: How one collection element that cannot carry a marker holds its value.
+#: Kept separate from :data:`_UNMARKABLE_SHAPES` because the attributes
+#: describe a different annotation level: ``marker`` names the whole field,
+#: while ``item_marker`` names one element.
+_UNMARKABLE_ITEM_SHAPES: Final = (("item_structural_arms", "selects a structural union arm"),)
 
 
 def _marker_error(model_cls: type[BaseModel], visiting: tuple[type[BaseModel], ...]) -> str | None:
@@ -446,6 +453,16 @@ def _marker_error(model_cls: type[BaseModel], visiting: tuple[type[BaseModel], .
                 f"{model_cls.__name__}.{name} carries a reference marker on a field that {held}, "
                 f"where nothing can honor it; a marker names one Resource, so move it onto the "
                 f"value that names one"
+            )
+        item_held = next(
+            (prose for attribute, prose in _UNMARKABLE_ITEM_SHAPES if getattr(shape, attribute)),
+            None,
+        )
+        if shape.item_marker is not None and item_held is not None:
+            return (
+                f"{model_cls.__name__}.{name} carries a reference marker on each collection "
+                f"element that {item_held}, where nothing can honor it; a marker names one "
+                f"Resource, so move it onto the value that names one"
             )
         if _has_unplaceable_marker(field, shape):
             return (
