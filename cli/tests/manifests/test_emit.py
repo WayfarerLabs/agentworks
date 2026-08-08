@@ -271,6 +271,44 @@ def test_every_metadata_field_of_every_kind_carries_hover_text() -> None:
     assert not blank
 
 
+def test_env_sources_emit_as_an_untagged_structural_one_of() -> None:
+    schema = document_schema("vm-template")
+    env_entry = schema["$defs"]["EnvEntry"]
+
+    assert "anyOf" not in env_entry
+    assert env_entry["oneOf"] == [
+        {"$ref": "#/$defs/PlaintextEnvEntry"},
+        {"$ref": "#/$defs/SecretEnvEntry"},
+    ]
+    assert schema["$defs"]["PlaintextEnvEntry"]["anyOf"][1]["required"] == ["value"]
+    assert schema["$defs"]["SecretEnvEntry"]["required"] == ["secret"]
+
+
+@pytest.mark.parametrize(
+    "entry",
+    ["text", {"value": "text"}, {"secret": "api-token"}],
+)
+def test_the_emitted_schema_accepts_every_env_source_spelling(entry: object) -> None:
+    document = {
+        "apiVersion": API_VERSION,
+        "kind": "vm-template",
+        "metadata": {"name": "env-shape"},
+        "spec": {"env": {"TOKEN": entry}},
+    }
+    assert _errors(document_schema("vm-template"), document) == []
+
+
+@pytest.mark.parametrize("entry", [{}, {"value": "text", "secret": "api-token"}])
+def test_the_emitted_schema_rejects_env_tables_that_match_no_arm(entry: object) -> None:
+    document = {
+        "apiVersion": API_VERSION,
+        "kind": "vm-template",
+        "metadata": {"name": "env-shape"},
+        "spec": {"env": {"TOKEN": entry}},
+    }
+    assert _errors(document_schema("vm-template"), document)
+
+
 def _metadata_properties(kind: str) -> dict[str, Any]:
     schema = document_schema(kind)
     metadata: dict[str, Any] = schema["$defs"][schema["properties"]["metadata"]["$ref"].rsplit("/", 1)[-1]]

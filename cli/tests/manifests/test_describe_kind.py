@@ -135,8 +135,10 @@ def test_a_field_that_folds_a_scalar_offers_both_spellings() -> None:
 
     assert "  env  (table of string or table, optional)" in text
     assert "    <key>  (string or table, required)" in text
-    assert "      value  (string or null, optional)" in text
-    assert "      secret  (string or null, optional, names a secret)" in text
+    assert "      - plaintext: An env var whose exported value is written as plaintext." in text
+    assert "        value  (string, required)" in text
+    assert "      - secret: An env var whose exported value comes from a declared secret." in text
+    assert "        secret  (string, required, names a secret)" in text
 
 
 def test_a_config_that_may_be_a_table_says_what_is_in_the_table() -> None:

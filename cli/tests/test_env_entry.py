@@ -5,7 +5,8 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from agentworks.env import EnvEntry
+from agentworks.env import EnvEntry, PlaintextEnvEntry, SecretEnvEntry
+from agentworks.schema import reference_marker_error, structural_union_error
 
 
 def test_plaintext_entry() -> None:
@@ -27,12 +28,12 @@ def test_a_bare_string_is_the_plaintext_form() -> None:
 
 
 def test_neither_value_nor_secret_raises() -> None:
-    with pytest.raises(ValueError, match="must set exactly one of value or secret"):
+    with pytest.raises(ValueError, match=r"(?s)PlaintextEnvEntry\.value.*SecretEnvEntry\.secret"):
         EnvEntry()
 
 
 def test_both_value_and_secret_raises() -> None:
-    with pytest.raises(ValueError, match="cannot set both value and secret"):
+    with pytest.raises(ValueError, match=r"(?s)PlaintextEnvEntry\.secret.*SecretEnvEntry\.value"):
         EnvEntry(value="literal", secret="some-name")
 
 
@@ -52,7 +53,7 @@ def test_an_unknown_key_is_refused() -> None:
         EnvEntry(key="EDITOR", value="vim")  # type: ignore[call-arg]
 
 
-def test_both_spellings_validate_against_the_emitted_schema() -> None:
+def test_all_spellings_are_exposed_by_a_structural_one_of() -> None:
     """A shorthand is invisible to ``model_json_schema``, which would emit
     the table form alone and let a schema-aware editor flag every
     plaintext entry an operator writes. The arm comes from the declaration
@@ -60,10 +61,28 @@ def test_both_spellings_validate_against_the_emitted_schema() -> None:
     written here, which is what put the same fact into the field
     documentation too."""
     emitted = EnvEntry.model_json_schema()
-    shapes = emitted["anyOf"]
+    assert "anyOf" not in emitted
+    assert emitted["oneOf"] == [
+        {"$ref": "#/$defs/PlaintextEnvEntry"},
+        {"$ref": "#/$defs/SecretEnvEntry"},
+    ]
+    plaintext = emitted["$defs"]["PlaintextEnvEntry"]
+    secret = emitted["$defs"]["SecretEnvEntry"]
+    assert plaintext["anyOf"][0] == {"type": "string"}
+    assert plaintext["anyOf"][1]["required"] == ["value"]
+    assert set(plaintext["anyOf"][1]["properties"]) == {"value"}
+    assert secret["required"] == ["secret"]
+    assert set(secret["properties"]) == {"secret"}
 
-    assert shapes[0] == {"type": "string"}
-    assert set(shapes[1]["properties"]) == {"value", "secret"}
+
+def test_the_runtime_wrapper_contains_one_closed_arm() -> None:
+    assert isinstance(EnvEntry(value="vim").root, PlaintextEnvEntry)
+    assert isinstance(EnvEntry(secret="token").root, SecretEnvEntry)
+
+
+def test_the_secret_arm_is_structurally_reachable() -> None:
+    assert structural_union_error(EnvEntry) is None
+    assert reference_marker_error(EnvEntry) is None
 
 
 def test_the_two_spellings_are_one_declaration() -> None:
