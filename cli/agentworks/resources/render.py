@@ -73,20 +73,4 @@ def format_origin_line(origin: Origin | None) -> str:
     raise AssertionError(f"unhandled Origin variant: {origin.variant!r}")
 
 
-def format_origin_location(origin: Origin | None) -> str:
-    """Render an ``Origin`` as a bare source location for inline error
-    framing, dropping the variant prefix ``format_origin_line`` carries
-    for the describe / doctor views. An operator-declared row renders as
-    ``~/path:42`` (an operator reading a config error already knows it is
-    their config, so the ``operator-declared`` prefix is redundant noise
-    inside the message). Other variants fall back to the full
-    ``format_origin_line`` rendering: a built-in ``source`` or an
-    auto-declared ``kind/name`` carries no bare file location, so the
-    labelled form stays the informative one.
-    """
-    if origin is not None and origin.variant == "operator-declared" and origin.file is not None and origin.line:
-        return f"{format_file_path(origin.file)}:{origin.line}"
-    return format_origin_line(origin)
-
-
-__all__ = ["format_origin_line", "format_origin_location"]
+__all__ = ["format_origin_line"]

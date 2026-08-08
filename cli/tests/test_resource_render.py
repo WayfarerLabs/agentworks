@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from agentworks.origin import Origin
-from agentworks.resources.render import format_origin_line, format_origin_location
+from agentworks.resources.render import format_origin_line
 
 
 def test_format_origin_line_handles_none() -> None:
@@ -71,14 +71,6 @@ def test_format_origin_line_system_plugin_without_plugin_degrades_gracefully() -
     """
     origin = Origin(variant="system-plugin", plugin=None, source="agentworks.plugins.apt")
     assert format_origin_line(origin) == "system-plugin (agentworks.plugins.apt)"
-
-
-def test_format_origin_location_system_plugin_falls_through_to_line() -> None:
-    """A system-plugin origin carries no file:line, so the bare-location
-    renderer falls through to the labelled ``format_origin_line`` form.
-    """
-    origin = Origin.system_plugin(plugin="apt", source="agentworks.plugins.apt")
-    assert format_origin_location(origin) == "system-plugin apt (agentworks.plugins.apt)"
 
 
 def test_format_origin_line_raises_on_unknown_variant() -> None:
