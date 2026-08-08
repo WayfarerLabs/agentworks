@@ -52,6 +52,14 @@ A pair that should agree and has no comparator is a hole whether or not it curre
 - **D3 and the sample against D1** is guarded by uncommenting the real sample and loading it, for
   the FIRST arm of every union only, because a document holds one arm.
 - **D5 against D4** is single-source by construction.
+- **D8 against D1** is guarded per-blob by `_readiness` in `tests/vms/test_platform_support.py`:
+  every config handed to a real `not_ready` is validated through the platform's own model first. The
+  exposure it closes is a RENAME, not an unguarded read. Change a tag and the production manifests
+  move with the model because validation forces them to, while the hand-rolled read and a test's
+  hand-spelled literal can both keep the old spelling and agree with each other. Validating the
+  literal is what makes that combination impossible. The MALFORMED blobs are deliberately exempt:
+  answering a config no model accepts is the totality `not_ready` exists for, so those call sites
+  pass the blob raw and say so.
 - **D9 against the live models** is pinned structurally, because pinning both sides as literals
   would let a rename leave the advice and its test stale together.
 - **D10 against live output** cannot be compared by any automated check. Console blocks in guides
