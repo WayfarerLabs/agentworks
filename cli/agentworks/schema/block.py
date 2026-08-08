@@ -1,7 +1,7 @@
 """``CapabilityBlock``: the tagged table an operator writes to select a
 capability and configure it in one place.
 
-``spec.platform: {name: lima, vm_host: ...}`` is one table with two
+``spec.platform: {name: lima, placement: {...}}`` is one table with two
 owners: ``name`` is the HOST kind's selector, and every other key belongs
 to the capability the tag names. This class is the host's half, declared
 once and shared by every hosting surface, so the split is spelled in one

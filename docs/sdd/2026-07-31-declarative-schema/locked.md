@@ -282,3 +282,134 @@ frozen oracle, two runtime dependencies whose justifying comment named a file th
 existed, four completion providers, a settings overlay, and five newly-dead helpers. What made that
 a deletion rather than an excavation was a guard written a day earlier for exactly this, which is
 the case for building deletability into anything shipped as runway.
+
+## 2026-08-08: authentication and placement became explicit on three platforms
+
+Recorded here because it supersedes shapes this effort shipped. The plan, FRD, and HLA are NOT
+edited: they describe what this effort built, accurately, and a completed checkbox is not corrected
+by a later change. In particular the 2.3 inventory still names azure's nested `service_principal`
+model and aws's nested `credentials` model, which is what existed when that step ran.
+
+**What changed.** Azure's `service_principal` block, AWS's `credentials` block, and lima's `vm_host`
+field are replaced by nested discriminated unions: `auth: {mode: ambient}` or
+`{mode: service-principal, ...}` on azure, `auth: {mode: ambient}` or `{mode: access-key, ...}` on
+aws, and `placement: {mode: local}` or `{mode: ssh, host: ...}` on lima. Each defaults to its
+ambient or local arm (operator ruling, reversed from the no-default posture this entry originally
+recorded), so the break reaches only manifests that WROTE the old block or wrote it as null. A
+manifest that declared nothing keeps loading. Proxmox is unchanged because it has one valid shape,
+and wsl2 has no choice to model.
+
+**Why it belongs on THIS lockfile.** All three were the same defect this effort spent itself
+removing, in a shape it did not name: absence selecting a MECHANISM rather than supplying a default
+value. Omitting azure's credential block chose the ambient chain; omitting aws's did the same; and
+lima inferred local versus remote from whether `vm_host` was present. A manifest could not
+distinguish a deliberate choice from a forgotten one, and neither could a reviewer, `doctor`, or the
+graph.
+
+**Why the default is not a return to the defect.** The defect was never that absence selects a
+mechanism; it was that there was NO WAY TO DECLARE the choice. The union fixes the second, and once
+an explicit form exists a default is an ordinary default. The rule for which arm: whatever the field
+already does when omitted, which makes every default a strict no-op for existing manifests and
+forbids ever defaulting to a NEW arm. Ambient is not special; it is simply what omission already did
+on the clouds, which is also what the wrapped SDKs do (`DefaultAzureCredential`, boto3's chain).
+
+**It also found and closed a wider extraction gap.** An absent field carrying a default emitted no
+edges, on every default shape and not just unions, so a default that named a secret was validated
+and never gated. Extraction now reads an absent field as if the operator had written the default's
+value: the default is converted to its equivalent blob once per model and the EXISTING walker
+descends into it. Recursion is therefore free, and a union nested inside a union arm emits both
+edges with no arm-selection logic written for the occasion. A `default_factory` taking validated
+data is honestly out of scope and recorded as such, because its value is a function of neighboring
+fields rather than a static property of the class.
+
+**It closes the readiness self-masking case structurally, not just at the validation layer.** The
+"Validation is unconditional" decision above tells that story at length: a misspelled `vm_host` read
+as an absent one, which made a remote lima site look local, which made it not-ready for want of
+`limactl`, which suppressed the very error that named the typo. This effort fixed the layer that
+SUPPRESSED the error. The placement union removes the shape that made a typo look like a choice, so
+there is no longer an inference to mis-fire. Both fixes are load-bearing and neither replaces the
+other.
+
+**What was promoted, per the SDD-is-not-permanent rule.** The modeling rule that came out of the
+design is in `cli/agentworks/capabilities/README.md` ("Modeling a Config That Has Variants"): the
+choice must be DECLARABLE, which is narrower than forbidding a default (see the 2026-08-08 entry
+below, which reversed the required posture this line originally summarized); the discriminator
+selects a SHAPE rather than a concept, and the operational test is whether the required field sets
+differ; adding an arm is the additive extension path, so pre-grouping against a variant that does
+not exist is mechanism without a consumer; and arm names select a mechanism rather than a position.
+
+**Two claims in this effort's code were made false by it and corrected there.** `_shape.py`'s
+`_tags_of` justified its non-string-tag boundary on "every discriminator in this framework is a
+capability or kind NAME", which stopped being true when `mode` arrived; the boundary now stands on
+the reason that survives, which is that a tag is an identifier the operator writes. And `item_arms`
+said all four discriminated unions were top-level capability configs; three now are not, so what
+remains unshipped is the COLLECTION of tagged blocks rather than the nesting.
+
+### The same landing strengthened this effort's registration guard
+
+`reference_marker_error` shipped here as a set of checks against shapes someone had thought of, and
+it was extended three times by three separate findings, each after a walker gap let a marker
+through. It now states one invariant instead: **every model pydantic can select is a model some
+walker reaches, or no reference marker hides inside it.** Implemented as a subtraction, the models
+an annotation offers validation minus the models the walkers reach, so a position nobody enumerated
+is refused automatically rather than becoming a fourth finding. It caught two on arrival that this
+effort had silently accepted: a model under a nested collection, and a fixed-length tuple member.
+
+The conformance walk now shares `table_addresses_block` verbatim with extraction's own refusal, so
+it cannot claim reach the extractor does not have. That coupling is the point: the guard derivation
+has to ask the walkers what they can read rather than keep its own opinion.
+
+An audit of this layer found the enumeration of derivations was the thing missing, not any one
+check, so it now lives permanently at `cli/agentworks/schema/README.md` with the comparator map:
+what derives from the model, which pairs are compared and by what, and the rule that adding a
+derivation adds N pairs that have to agree.
+
+**One thing this effort's union machinery got right, worth recording as evidence.** The three new
+unions needed NO change to `_shape.py`'s classification, `extract.py`'s arm walk, `base.py`'s marker
+refusal, or `field_tree.py`'s expansion, despite being the first discriminated unions here whose
+arms are not capability configs. The one thing that did break was downstream of them:
+`manifests/describe.py` built its alternatives line as a raw f-string, the only description in that
+renderer skipping `plain_text`, which nothing had noticed because capability arms carry plain
+one-line summaries while a plain union falls back to a docstring.
+
+## 2026-08-08: model construction no longer takes external context
+
+Recorded here because it removes a mechanism this effort built, and because several of this
+directory's LLDs describe that mechanism and now disagree with the code. Those LLDs are left alone:
+they record what the effort built, and a mechanism being removed later is not a defect in them. The
+stale references, for a reader who follows one: `schema-foundation-lld.md` around lines 566, 671,
+706-724, and 1140; `kind-spec-models-lld.md:173` and `:186`; `capability-contract-lld.md:409`;
+`emission-lld.md:63` and `:90`.
+
+**What changed.** `validation_context(owner)`, `OWNER_CONTEXT_KEY`, the
+`_fill_owner_templated_defaults` before-validator, and the `StateError` raised when a templated
+model was validated without an owner are all gone. Resolving an owner-templated default was the ONLY
+thing the context carried. The marker still DECLARES the template; a new `schema/fill.py` applies it
+at the boundary where the model, the blob, and the owner first come together, and validation then
+runs on a filled blob. So the resolved name is still validated rather than the template, which was
+the property the before-validator existed to protect.
+
+**Why, in the operator's terms.** Building an object should have no regard for content, and needing
+the owner's name is a builder problem rather than a validation one. Threading it through validation
+made a model non-constructible standalone, which is why an arm carrying a templated field could not
+be a default INSTANCE. It now can, and the failure for one relying on the template for its content
+is an ordinary "field required" rather than a special error about context.
+
+**The part worth keeping, which is larger than the removal.** `extract_references` lost its `owner`
+parameter entirely and is now a pure function of the model and the blob. Extraction and validation
+used to render the same template INDEPENDENTLY: two derivations of one fact, the defect class this
+effort spent itself on. Extraction is now structurally incapable of rendering, so they cannot
+disagree, and the precedence rules (a written name outranks a template, a template outranks a
+declared default, a written null equals absence) exist in exactly one place.
+
+**Not a single decode-time enrichment, deliberately.** A capability config rides its host row as a
+raw block and is validated later against a model that requires a registry lookup of seated
+implementations, so enriching it at host-row decode would put registry reads inside the model layer:
+the same layering defect the context was, relocated. The fill is instead applied at each point the
+triple is complete, which is two production modules, and it is idempotent so overlapping paths are
+safe.
+
+**A pre-existing gap closed as a side effect.** A block written in its scalar shorthand form with a
+templated field validated to the rendered name while extraction, which never folded shorthand,
+emitted no edge. The fill folds before filling, so both readers see the same mapping. Fixture-only
+today, and now pinned.

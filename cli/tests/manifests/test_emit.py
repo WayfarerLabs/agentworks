@@ -456,11 +456,11 @@ def test_the_shapes_the_envelope_tolerates_are_not_schema_errors() -> None:
         assert _errors(schema, _a_document("admin-template", {}, expires=spelling)) == [], spelling
 
 
-def test_a_field_the_model_fills_is_neither_required_nor_non_nullable() -> None:
+def test_a_field_the_fill_resolves_is_neither_required_nor_non_nullable() -> None:
     """An unscoped github credential writes nothing but the tag, because
-    the marker's owner template supplies the token, and writing
-    ``token: null`` says the same thing out loud. Both load, so both have
-    to validate.
+    the boundary fill renders the marker's owner template into the
+    token, and writing ``token: null`` says the same thing out loud.
+    Both load, so both have to validate.
 
     ``AgwModel`` owns the correction; this is the end-to-end proof that it
     survives the splice into a hosting kind's document.
@@ -548,24 +548,30 @@ def test_a_capability_key_the_schema_rejects_is_rejected_on_every_host(
     tools.
 
     ``limactl`` is what made the two disagree. The finalize validate pass was
-    readiness-gated, and ``lima.not_ready`` reads ``vm_host`` off unvalidated
+    readiness-gated, and ``lima.not_ready`` read the host key off unvalidated
     config, so the typo made the site look local, a local site without
     ``limactl`` is not-ready, and a not-ready site was not validated. The
     schema said no and the loader said yes, but only on hosts without Lima
     installed. Both spellings of the host are pinned here so the parametrize
-    fails loudly if validation is ever gated on the environment again."""
+    fails loudly if validation is ever gated on the environment again.
+
+    The typo now sits INSIDE the placement arm, which is where a host key
+    lives; the required ``placement`` union has since removed the other
+    half of the original defect, since ``not_ready`` keys on the tag
+    rather than on the key's presence and so cannot be fooled by a
+    misspelling at all."""
     from agentworks.bootstrap import build_registry
     from agentworks.config import load_config
     from agentworks.errors import ConfigError
 
     monkeypatch.setattr("shutil.which", lambda name, found=limactl: found if name == "limactl" else None)
-    typo = _a_document("vm-site", {"platform": {"name": "lima", "vm_hst": "me@box"}})
+    typo = _a_document("vm-site", {"platform": {"name": "lima", "placement": {"mode": "ssh", "hst": "me@box"}}})
     assert _errors(document_schema("vm-site"), typo), "premise: the schema must reject this document"
 
     resources = tmp_path / "resources"
     resources.mkdir()
     (resources / "sites.yaml").write_text(yaml.safe_dump(typo))
-    with pytest.raises(ConfigError, match="vm_hst: unknown field"):
+    with pytest.raises(ConfigError, match="placement.hst: unknown field"):
         build_registry(load_config(_a_config(tmp_path), warn_issues=False))
 
 

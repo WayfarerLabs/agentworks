@@ -29,7 +29,7 @@ from agentworks.schema import (
     AgwRootModel,
     RefOwner,
     config_error_from,
-    validation_context,
+    filled_defaults,
 )
 from agentworks.schema.errors import _problems
 from agentworks.source_location import SourceLocation, synthesized
@@ -81,12 +81,12 @@ class Bounded(AgwModel):
 def _fails(model_cls: type[BaseModel], blob: object) -> PydanticValidationError:
     """The ``ValidationError`` ``blob`` raises against ``model_cls``.
 
-    The owner rides the validation context, as it does at every real call
-    site: a model with an owner-templated field refuses to validate
-    without it.
+    The boundary fill runs first, as it does at every real call site, so
+    an owner-templated field never reports itself missing here and every
+    failure is one the operator's own document earns.
     """
     with pytest.raises(PydanticValidationError) as caught:
-        model_cls.model_validate(blob, context=validation_context(OWNER))
+        model_cls.model_validate(filled_defaults(model_cls, blob, OWNER))
     return caught.value
 
 
@@ -140,14 +140,77 @@ def test_a_missing_required_field_says_it_is_required() -> None:
     assert _lines(PrincipalLike, {"tenant_id": "t"}) == ["vm-site/lab.client_id: is required"]
 
 
+def test_a_missing_required_UNION_also_names_the_choices_it_is_between() -> None:
+    """A missing ``client_id`` is a value to supply; a missing ``platform``
+    is a CHOICE to make, and the choice is the only hard part.
+
+    ``platform: is required`` sends an operator to ``describe-kind`` to
+    learn something this error is holding. That gap is invisible today
+    because ``retired_shapes`` intercepts exactly these three unions with
+    a much richer message, and that module is release-scoped: when it is
+    deleted, its own docstring's "the ABSENT case needs the most help"
+    lands here.
+
+    A missing ORDINARY field is left alone, which is the same assertion
+    above: there is nothing else true to say about a missing string.
+    """
+    assert _lines(SiteLike, {}) == ["vm-site/lab.platform: is required; its 'name' is one of: 'lima', 'proxmox'"]
+
+
 def test_a_bad_capability_name_lists_the_names_that_are_registered() -> None:
     lines = _lines(SiteLike, {"platform": {"name": "lmia", "vm_host": "h"}})
 
     assert lines == ["vm-site/lab.platform: unknown name 'lmia'; registered: 'lima', 'proxmox'"]
 
 
-def test_an_absent_capability_name_reads_as_a_missing_field() -> None:
-    assert _lines(SiteLike, {"platform": {"vm_host": "h"}}) == ["vm-site/lab.platform: name is required"]
+def test_an_absent_capability_name_lists_the_same_names_a_wrong_one_does() -> None:
+    """A missing tag and a misspelled one are the same question ("which
+    of these is this block?") and used to get different answers: pydantic
+    supplies ``expected_tags`` only for the wrong one, so an operator who
+    typed nothing was told ``name is required`` and left to go find the
+    list. The names come from the loc walk instead, which is standing on
+    the union at that moment.
+
+    Asserted AGAINST the wrong-tag line rather than against a second
+    literal: the point is that one union answers with one list, and two
+    spelled lists could drift apart while both tests still passed.
+    """
+    absent = _lines(SiteLike, {"platform": {"vm_host": "h"}})
+    misspelled = _lines(SiteLike, {"platform": {"name": "lmia", "vm_host": "h"}})
+
+    assert absent == ["vm-site/lab.platform: name is required; registered: 'lima', 'proxmox'"]
+    # Not vacuous: an empty registry would leave both lines listing nothing.
+    assert "'lima', 'proxmox'" in misspelled[0]
+    assert absent[0].endswith(misspelled[0].split("; ", 1)[1])
+
+
+@pytest.mark.parametrize("written", [True, False], ids=["true", "false"])
+def test_a_capability_name_the_loader_read_as_a_boolean_is_not_quoted_back_as_python_wrote_it(
+    written: bool,
+) -> None:
+    """``platform: {name: true}`` is a name the LOADER changed on the way
+    in, and pydantic then stringifies it, so the tag arrives as ``True``.
+    Quoting that back prints Python's spelling of a word the document
+    spells ``true``, and it points an operator at a line they cannot find.
+
+    The message names the spellings that would have produced this
+    boolean, and the assertion derives them from pyyaml rather than
+    spelling them, so a pyyaml release that changes its table changes
+    this test's expectation and not just the prose.
+    """
+    import yaml
+
+    line = _lines(SiteLike, {"platform": {"name": written, "vm_host": "h"}})[0]
+    spellings = {
+        text for text in yaml.constructor.SafeConstructor.bool_values if yaml.safe_load(f"a: {text}")["a"] is written
+    }
+
+    assert spellings, "pyyaml resolves no plain scalar to this boolean, so the message has nothing to name"
+    assert all(f"'{text}'" in line for text in spellings), line
+    # The defect itself: Python's repr of a word nobody typed.
+    assert repr(str(written)) not in line, line
+    assert "quote it to name one" in line, line
+    assert "registered: 'lima', 'proxmox'" in line, line
 
 
 # Owner framing is not asserted separately for the corpus: each of the four

@@ -11,15 +11,22 @@ doctor warnings instead of breaking every command.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from agentworks.bootstrap import build_registry
+from agentworks.capabilities.config import validate_capability_config
 from agentworks.capabilities.vm_platform.lima import LimaPlatform
 from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
 from agentworks.config import load_config
 from agentworks.errors import ConfigError, StateError, ValidationError
+from agentworks.schema import RefOwner
 from agentworks.vms.sites import resolve_site, select_site
+
+if TYPE_CHECKING:
+    from agentworks.capabilities.vm_platform import VMPlatform
+    from agentworks.resources.graph import Readiness
 
 
 @pytest.fixture
@@ -40,6 +47,24 @@ def make_config(tmp_path: Path):
     return _make
 
 
+def _placement_mode(config: object) -> str | None:
+    """The placement tag off an UNVALIDATED lima config, mirroring what
+    the real ``LimaPlatform.not_ready`` reads.
+
+    A third statement of that read, and it needs no ``_readiness`` guard
+    of its own: every test built on it asserts that ``lima-local`` is
+    NOT-ready, and the only way this stub can deliver that is by matching
+    the tag in the bundled ``vm-sites.yaml``, which the validate pass
+    already holds to the model. A tag renamed underneath this leaves the
+    stub answering ready and those assertions fire."""
+    from collections.abc import Mapping
+
+    if not isinstance(config, Mapping):
+        return None
+    placement = config.get("placement")
+    return placement.get("mode") if isinstance(placement, Mapping) else None
+
+
 def _site_doc(name: str, platform: str, **config: str) -> str:
     """One vm-site manifest in the canonical tagged shape."""
     keys = "".join(f"    {key}: {value}\n" for key, value in config.items())
@@ -54,7 +79,7 @@ def _site_doc(name: str, platform: str, **config: str) -> str:
     )
 
 
-_GPU_BOX = _site_doc("gpu-box", "lima", vm_host="me@box")
+_GPU_BOX = _site_doc("gpu-box", "lima", placement="{ mode: ssh, host: me@box }")
 
 
 def _support(
@@ -66,8 +91,9 @@ def _support(
     """Pin the two host-dependent checks to explicit outcomes.
 
     ``wsl2`` pins the platform-level host-support gate; ``lima_local``
-    pins the config-dependent requirement for LOCAL lima sites only (remote
-    sites with a ``vm_host`` stay ready, mirroring the real check).
+    pins the config-dependent requirement for LOCAL lima sites only (ssh
+    sites stay ready, mirroring the real check, which keys on the
+    placement TAG rather than on a host being present).
     """
     from agentworks.resources.graph import Readiness
 
@@ -78,7 +104,9 @@ def _support(
         "not_ready",
         classmethod(
             lambda cls, config: (
-                Readiness.ready() if (config.get("vm_host") or lima_local is None) else Readiness.blocked(lima_local)
+                Readiness.ready()
+                if (_placement_mode(config) != "local" or lima_local is None)
+                else Readiness.blocked(lima_local)
             )
         ),
     )
@@ -156,8 +184,8 @@ def test_supported_host_has_everything_enabled(make_config, monkeypatch: pytest.
 
 
 def test_remote_lima_site_enabled_without_local_limactl(make_config, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The load-bearing split: a remote-Lima site runs limactl on the
-    vm_host over SSH, so only the LOCAL site disables."""
+    """The load-bearing split: an ssh-placed Lima site runs limactl on
+    the placement host over SSH, so only the LOCAL site disables."""
     _support(monkeypatch, wsl2="Windows only", lima_local="limactl not installed")
     registry = build_registry(make_config(resources=_GPU_BOX))
     graph = registry.graph
@@ -305,6 +333,36 @@ def test_doctor_shows_enabled_plugin_platform_with_real_readiness(make_config, m
 
 # -- The real methods (both branches, deterministically) ----------------------
 
+#: Owner frame for the validation in :func:`_readiness`. These blobs back no
+#: real site, so this only shapes the message when one is refused.
+_PROBE_OWNER = RefOwner(kind="vm-site", name="readiness-probe")
+
+
+def _readiness(platform: type[VMPlatform], config: dict[str, object]) -> Readiness:
+    """``platform.not_ready(config)``, over a blob the platform's own
+    declared model accepts.
+
+    The comparator for D8 (see ``agentworks/schema/README.md``).
+    ``not_ready`` reads raw config BY HAND, deliberately, so the readiness
+    fold stays total over a malformed ``platform_config``; the cost is that
+    nothing inside it can notice a tag the model no longer spells.
+    Validating here is what ties the two. Rename the literal in
+    ``LimaLocalPlacement.mode`` and this refuses the stale spelling, where
+    an unvalidated blob would go on agreeing with an equally stale read
+    while both disagreed with the model.
+
+    ``not_ready`` still gets the RAW mapping and the validated instance is
+    discarded, so what is under test stays the non-constructing read the
+    fold calls, called the way the fold calls it. The tag comes from
+    ``platform.name``, so this reads identically for every platform.
+
+    Deliberately NOT for malformed blobs: an absent or unreadable
+    ``placement`` is a case ``not_ready`` exists to answer and the model
+    refuses it by design, so those call sites pass the blob raw and say so.
+    """
+    validate_capability_config(kind="vm-platform", config={"name": platform.name, **config}, owner=_PROBE_OWNER)
+    return platform.not_ready(config)
+
 
 def test_wsl2_unsupported_reason_is_the_real_os_check(
     monkeypatch: pytest.MonkeyPatch,
@@ -327,32 +385,60 @@ def test_wsl2_not_ready_additionally_needs_wsl_exe(
 ) -> None:
     """The config-dependent requirement on a supported host: wsl.exe is
     an optional Windows feature. ``not_ready`` is a NON-constructing
-    classmethod over the site's config (no instance built)."""
+    classmethod over the site's config (no instance built).
+
+    Through :func:`_readiness`, so the empty blob this reads nothing out
+    of is still one the wsl2 model accepts: taking no configuration at all
+    is the assumption its ``not_ready`` is built on."""
     monkeypatch.setattr("shutil.which", lambda name: None)
-    verdict = WSL2Platform.not_ready({})
+    verdict = _readiness(WSL2Platform, {})
     assert not verdict.is_ready
     assert verdict.reason is not None
     assert "wsl.exe" in verdict.reason
 
     monkeypatch.setattr("shutil.which", lambda name: "/x/wsl")
-    assert WSL2Platform.not_ready({}).is_ready
+    assert _readiness(WSL2Platform, {}).is_ready
 
 
 def test_lima_not_ready_is_local_only(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """lima the platform is supported everywhere; the limactl
-    requirement binds to LOCAL sites only (remote sites run limactl on
-    the vm_host over SSH). ``not_ready`` reads the config directly,
-    non-constructing."""
+    requirement binds to LOCAL sites only (ssh-placed sites run limactl
+    on the placement host over SSH). ``not_ready`` reads the config
+    directly, non-constructing.
+
+    Keyed on the TAG saying local, never on a guess: a WRITTEN placement
+    that does not say local is not treated as local, so a shape error is
+    reported against ``placement`` by the validate pass rather than
+    surfacing here as a missing ``limactl`` the operator does not need.
+    An ABSENT placement resolves to the field's declared local default,
+    the same answer validation gives it, so the limactl verdict applies
+    to it exactly as to a written ``mode: local``.
+
+    The well-formed blobs go through :func:`_readiness`, which is what
+    stops the tags spelled here from drifting away from the model
+    alongside the read they are pinning. The malformed one cannot, and
+    the comment on it says why."""
     assert LimaPlatform.unsupported_reason() is None
 
     monkeypatch.setattr("shutil.which", lambda name: None)
-    local = LimaPlatform.not_ready({})
+    local = _readiness(LimaPlatform, {"placement": {"mode": "local"}})
     assert not local.is_ready
     assert local.reason is not None
     assert "limactl" in local.reason
-    assert LimaPlatform.not_ready({"vm_host": "me@box"}).is_ready
+    assert _readiness(LimaPlatform, {"placement": {"mode": "ssh", "host": "me@box"}}).is_ready
+    # Absent: the declared default is local, so the verdict matches the
+    # written local's rather than inventing a different site.
+    absent = _readiness(LimaPlatform, {})
+    assert not absent.is_ready
+    assert absent.reason == local.reason
+    # Unreadable: NOT local, so no limactl verdict is invented. Raw
+    # rather than through _readiness, deliberately: the model refuses
+    # this, and answering it anyway is the totality that ``not_ready``
+    # exists for.
+    assert LimaPlatform.not_ready({"placement": "junk"}).is_ready
 
     monkeypatch.setattr("shutil.which", lambda name: "/x/limactl")
-    assert LimaPlatform.not_ready({}).is_ready
+    assert _readiness(LimaPlatform, {"placement": {"mode": "local"}}).is_ready
+    assert _readiness(LimaPlatform, {}).is_ready

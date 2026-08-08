@@ -2,7 +2,10 @@
 
 This is the property the whole dependency graph rests on. The registry
 builds edges before it validates anything, so a config with both a
-malformed blob and a cycle must still report the cycle.
+malformed blob and a cycle must still report the cycle. Every call here
+runs the boundary fill first, as production's graph-building paths do,
+so the quantification covers ``filled_defaults`` under the same
+contract: the pipeline as a whole never raises.
 
 The property is quantified over BOTH inputs, not just the blob. The blob
 axis is an explicit adversarial corpus plus a seeded generator; the model
@@ -28,7 +31,7 @@ import pytest
 from pydantic import BaseModel
 from pydantic.errors import PydanticSchemaGenerationError, PydanticUndefinedAnnotation, PydanticUserError
 
-from agentworks.schema import REF_SCHEMA_KEY, RefOwner, extract_references
+from agentworks.schema import REF_SCHEMA_KEY, RefOwner, extract_references, filled_defaults
 
 from ._fixture_models import ALL_FIXTURES
 
@@ -169,7 +172,7 @@ def _generated_blobs(model_cls: type[BaseModel], count: int = 800) -> list[objec
 
 
 def _assert_sane(model_cls: type[BaseModel], blob: object, declared: set[str]) -> None:
-    for ref in extract_references(model_cls, blob, OWNER):
+    for ref in extract_references(model_cls, filled_defaults(model_cls, blob, OWNER)):
         assert isinstance(ref.name, str) and ref.name, f"{model_cls.__name__} produced an unnamed edge from {blob!r}"
         assert ref.kind in declared, f"{model_cls.__name__} produced an undeclared {ref.kind} edge from {blob!r}"
 
@@ -205,6 +208,7 @@ _EDGELESS_BY_DESIGN = {
     "UndiscriminatedSite": "no discriminator, so no arm is addressable",
     "OneArmSite": "its one arm is the arm that names nothing",
     "NumericallyTaggedSite": "tagged by something other than a name",
+    "OtherNumericallyTaggedArm": "nothing in the version-2 arm names a Resource",
     "NeverResolved": "the model cannot be built",
     "ResolvesToUnbuildable": "the model cannot be built",
     "TableWithConstrainedKeys": "a constrained key names nothing, and neither does its value",
@@ -219,7 +223,7 @@ def test_the_inputs_reach_an_edge_on_every_model_that_has_one(model_cls: type[Ba
     # vacuous for any model whose inputs never reach an edge, and a
     # whole-suite check would be satisfied by one fixture out of twenty.
     blobs = [*_ADVERSARIAL, *_generated_blobs(model_cls)]
-    produced = [ref for blob in blobs for ref in extract_references(model_cls, blob, OWNER)]
+    produced = [ref for blob in blobs for ref in extract_references(model_cls, filled_defaults(model_cls, blob, OWNER))]
     reason = _EDGELESS_BY_DESIGN.get(model_cls.__name__)
     if reason is None:
         assert produced, f"no input ever reached an edge on {model_cls.__name__}; its assertions are vacuous"
@@ -231,3 +235,22 @@ def test_the_kind_oracle_is_not_vacuous() -> None:
     from ._fixture_models import TemplateLike
 
     assert _kinds_declared_by(TemplateLike) == {"vm-template"}
+
+
+def test_all_fixtures_lists_every_model_the_fixture_module_defines() -> None:
+    """The tuple is authored by hand, so a fixture defined and never
+    listed would quietly sit outside every suite quantified over it; three
+    arm models drifted out exactly that way. The module's own definitions
+    are the oracle, so adding a fixture without listing it fails here by
+    name rather than passing by omission."""
+    from tests.schema import _fixture_models
+
+    defined = {
+        obj
+        for obj in vars(_fixture_models).values()
+        if isinstance(obj, type) and issubclass(obj, BaseModel) and obj.__module__ == _fixture_models.__name__
+    }
+    missing = defined - set(ALL_FIXTURES)
+    assert not missing, f"defined but not in ALL_FIXTURES: {sorted(cls.__name__ for cls in missing)}"
+    stray = set(ALL_FIXTURES) - defined
+    assert not stray, f"in ALL_FIXTURES but not defined by the module: {sorted(cls.__name__ for cls in stray)}"

@@ -1,9 +1,10 @@
 # Upgrading to 0.14
 
 Everything an operator has to change to cross the 0.14 release boundary: the retired TOML resource
-sections, the vendor capabilities that became opt-in system plugins, and the manifest validation
-that tightened. It is a companion to [resources.md](resources.md), which describes the system as it
-stands and assumes none of this is in flight.
+sections, the vendor capabilities that became opt-in system plugins, the vm-site fields that now
+state what they used to infer, and the manifest validation that tightened. It is a companion to
+[resources.md](resources.md), which describes the system as it stands and assumes none of this is in
+flight.
 
 **This guide is release-scoped.** It exists only to carry hosts from 0.13 to 0.14, and it is deleted
 outright a release or two after 0.14 ships, along with the compatibility errors that point at it.
@@ -62,7 +63,7 @@ than it is:
 ```console
 $ agw doctor    # config.toml still declares every section
 Configuration:
-  [ok]   Config file: /home/you/.config/agentworks/config.toml
+  [ok]   Config file: ~/.config/agentworks/config.toml
   [FAIL] Config: config.toml declares resources, which config.toml no longer supports (it is
          settings only now): [secrets.*], [vm_templates.*], [agent_templates.*], ...
   [FAIL] Manifest: ~/.config/agentworks/resources/vm-templates.yaml:1: vm-template/default.memory_gib:
@@ -214,6 +215,16 @@ resources guide before editing an appended file.
   directly under `spec`. Take the platform's `name` from `agw resource describe-kind vm-platform`
   rather than from the section header: `[proxmox]` does select the `proxmox` platform, but `[azure]`
   selects `azure-vm`, so only one of the two matches its old section name.
+
+  An `azure-vm` site also carries one key no `[azure]` section had: it says how it authenticates, in
+  a tagged `auth` table. A site on the ambient Azure credentials (`az login`, `AZURE_*`, a managed
+  identity) writes `auth: {mode: ambient}`, or writes nothing: ambient is the declared default. A
+  site on an explicit principal writes
+  `auth: {mode: service-principal, tenant_id: ..., client_id: ..., secret: ...}`, where `secret`
+  NAMES the secret holding the client secret and defaults to `azure-client-secret`.
+  ["Authentication and placement are one tagged field now"](#authentication-and-placement-are-one-tagged-field-now)
+  below has both rewrites in full. `[proxmox]` needs nothing extra: proxmox has one authentication
+  shape.
 
   ```toml
   # config.toml, before
@@ -374,7 +385,7 @@ file, a resource, and a field.
 
 ```console
 Configuration:
-  [ok]   Config file: /home/you/.config/agentworks/config.toml
+  [ok]   Config file: ~/.config/agentworks/config.toml
   [ok]   Config is valid
 
 Secrets:
@@ -407,6 +418,11 @@ procedure above as its brief. What matters is that it gets the constraints, not 
   recalled. Where a `spec` selects a capability implementation, the fields come from
   `agw resource describe-kind <capability-kind>/<name>` (`vm-platform/proxmox`,
   `git-credential-provider/azdo`), because the kind's own output only details one implementation.
+- `describe-kind` is the AUTHORITATIVE field list, and for mode unions it is complete. Where a
+  platform's config carries one (`auth` on `azure-vm` and `aws-ec2`, `placement` on `lima`), the
+  per-implementation output expands EVERY arm with that arm's own fields, so nothing about the modes
+  has to be reconstructed from prose or from a second surface. `agw resource sample` is the surface
+  that shows one arm only; it says so in a comment naming the `describe-kind` that prints them all.
 - `describe-kind`, `sample`, and `schema --write` work while `config.toml` is refused. `list` and
   `secret list` do not. `agw doctor` DOES: it reports the refusal as one fail row and goes on to
   validate the manifests written so far, so it is the iteration loop, not just the final check.
@@ -426,9 +442,12 @@ your own document:
 
 ```console
 $ agw resource list
-Configuration error: resources/git-credentials.yaml:1: spec.provider names the capability as a
-string, which is no longer supported; write one tagged table instead: provider: {name: github,
-token: ..., owner: ...}
+Configuration error: ~/.config/agentworks/resources/git-credentials.yaml:1: spec.provider names
+the capability as a string, which is no longer supported; write one tagged table instead:
+provider: {name: github, token: ..., owner: ...}
+  Hint: Apply the rewrite above; `agw resource describe-kind <kind>` documents the field, and `agw
+  resource sample <kind>` prints it as a document to edit. See "The retired sibling capability
+  shape" in docs/guides/upgrading-to-0.14.md.
 ```
 
 The keys it lists are the ones your document actually had, in order, with the values elided as
@@ -517,6 +536,197 @@ carries its own `name` key, two keys claim to select the capability and which on
 decide. If it holds something that is not a table, there are no keys to fold and printing the tag
 alone would discard what you wrote. Both errors say so and name the field.
 
+### Authentication and placement are one tagged field now
+
+Three platforms used to let the PRESENCE of an optional block choose a mechanism: an `azure-vm`
+site's `service_principal`, an `aws-ec2` site's `credentials`, and a `lima` site's `vm_host`. There
+was no way to write the choice itself down, so no document could say "I chose the omitted one", and
+a misspelled key silently selected the wrong mechanism. Each is now a tagged union whose `mode`
+names the mechanism outright: `auth` on the two clouds, `placement` on lima. Each defaults to the
+mode omission always selected (`{mode: ambient}` on the clouds, `{mode: local}` on lima), which is
+also what the wrapped tool does when told nothing, so a site that wrote no block still loads and
+still means what it always meant. `agw doctor`'s site row shows the resolved mode either way
+(`platform azure-vm (auth: ambient)`), so the choice is reviewable without opening the manifest.
+
+**Only a site that WROTE the old field crosses this**, with a value or as an explicit `null`; a site
+that omitted it was never broken. Proxmox and wsl2 are unaffected, having no choice to express
+(proxmox has one authentication shape, wsl2 takes no config at all). Like every other declaration,
+this is checked wherever the manifest loads, whether or not the platform's plugin is enabled, per
+["Every host checks every declaration now"](#every-host-checks-every-declaration-now) above.
+
+**What you see.** A site that WROTE the old block is refused by name, with the replacement rendered
+from the keys your own document had:
+
+```console
+$ agw resource list
+Configuration error: ~/.config/agentworks/resources/sites.yaml:1: vm-site/azure-dev:
+'service_principal' is no longer a supported field; the choice it used to carry by being present is
+written explicitly now: auth: {mode: service-principal, tenant_id: ..., client_id: ..., secret: ...}
+  Hint: Apply the rewrite above; `agw resource describe-kind <kind>` documents the field, and `agw
+  resource sample <kind>` prints it as a document to edit. See "Authentication and placement are
+  one tagged field now" in docs/guides/upgrading-to-0.14.md.
+```
+
+A site that wrote the old key as an explicit `null` gets its own message, and it is the one worth
+reading closest. On 0.13 a null meant exactly what omitting the key meant, so `vm_host: null` was a
+LOCAL site and `service_principal: null` was ambient auth. A retired field is still a retired field,
+so the line has to go; the message says what the null was doing and names the line to write in its
+place:
+
+```console
+$ agw resource list
+Configuration error: ~/.config/agentworks/resources/sites.yaml:1: vm-site/lima-here: 'vm_host:
+null' is a retired spelling. It selected 'local', exactly as omitting the key did, and ending that
+conflation is why the field is gone; delete the null line and write the choice instead: placement:
+{mode: local}
+  Hint: Apply the rewrite above; `agw resource describe-kind <kind>` documents the field, and `agw
+  resource sample <kind>` prints it as a document to edit. See "Authentication and placement are
+  one tagged field now" in docs/guides/upgrading-to-0.14.md.
+```
+
+Note which arm it names. A null selected the AMBIENT and LOCAL modes, never the credentialed ones,
+so `service_principal: null` becomes `auth: {mode: ambient}` and `vm_host: null` becomes
+`placement: {mode: local}` (each is the union's default, so deleting the null line alone also loads;
+writing the line keeps the choice visible in the document). If you are working from the null scan in
+["An explicit `null` secret name now means the DEFAULT secret"](#one-meaning-changed-rather-than-one-shape)
+below, these three keys are the ones whose nulls were doing something different from the secret
+fields that section covers.
+
+Both errors name the file, the line, and the site, like every other manifest error here. One site
+per pass, as everywhere else here, so three stale sites take three passes. `agw doctor` reports each
+as one fail row and carries on, which makes it the loop to work in.
+
+**Azure.** `auth` replaces `service_principal` at the same depth, and the keys you already had move
+into it beside a `mode` line:
+
+```yaml
+# before
+spec:
+  platform:
+    name: azure-vm
+    subscription_id: "00000000-0000-0000-0000-000000000000"
+    resource_group: agw-dev
+    region: eastus
+    service_principal:
+      tenant_id: 11111111-1111-1111-1111-111111111111
+      client_id: 22222222-2222-2222-2222-222222222222
+      secret: azure-client-secret
+```
+
+```yaml
+# after
+spec:
+  platform:
+    name: azure-vm
+    subscription_id: "00000000-0000-0000-0000-000000000000"
+    resource_group: agw-dev
+    region: eastus
+    auth:
+      mode: service-principal
+      tenant_id: 11111111-1111-1111-1111-111111111111
+      client_id: 22222222-2222-2222-2222-222222222222
+      secret: azure-client-secret
+```
+
+`mode`, `tenant_id`, and `client_id` are required in the `service-principal` arm. `secret` is not:
+it names the secret holding the client secret and falls back to `azure-client-secret` when you leave
+it out, exactly as it did inside the old block. A site with no `service_principal` key anywhere in
+it needs no edit: it lands on the `auth: {mode: ambient}` default, the `az login` / `AZURE_*` /
+managed-identity chain with the interactive-browser fallback, which is what it was using all along.
+Write the line anyway if you want the choice visible in the document.
+
+**AWS.** `auth` replaces `credentials`. The three keys keep their spellings:
+
+```yaml
+# before
+spec:
+  platform:
+    name: aws-ec2
+    region: us-east-1
+    credentials:
+      access_key_id: AKIAEXAMPLE
+      access_key_secret: aws-secret-access-key
+      assume_role_arn: arn:aws:iam::123456789012:role/agentworks
+```
+
+```yaml
+# after
+spec:
+  platform:
+    name: aws-ec2
+    region: us-east-1
+    auth:
+      mode: access-key
+      access_key_id: AKIAEXAMPLE
+      access_key_secret: aws-secret-access-key
+      assume_role_arn: arn:aws:iam::123456789012:role/agentworks
+```
+
+`mode` and `access_key_id` are required in the `access-key` arm. `access_key_secret` names the
+secret holding the secret access key and falls back to `aws-secret-access-key`; `assume_role_arn` is
+optional and layers an STS AssumeRole over the key. A site with no `credentials` key anywhere in it
+needs no edit: it lands on the `auth: {mode: ambient}` default, boto3's own chain (environment,
+shared config, instance profile, SSO), which is what it was using all along.
+
+**Lima.** `placement` replaces `vm_host`, and this is the one where a field is also renamed: inside
+the `ssh` arm it is `host`, because the arm already says which host this is.
+
+```yaml
+# before
+spec:
+  platform:
+    name: lima
+    vm_host: me@gpu-box
+```
+
+```yaml
+# after
+spec:
+  platform:
+    name: lima
+    placement: { mode: ssh, host: me@gpu-box }
+```
+
+`host` is required in the `ssh` arm, which is the whole point of the change: a misspelled host key
+used to turn an ssh site into a not-ready local one, reporting `limactl not installed` about a
+problem you did not have. A site with no `vm_host` key anywhere in it needs no edit: it lands on the
+`placement: {mode: local}` default and keeps running `limactl` on this machine. A `local` site needs
+`limactl` here and reports not-ready without it; the built-in `lima-local` site is exactly
+`placement: {mode: local}` and needs no declaration.
+
+**Where the fields come from.** `agw resource describe-kind vm-platform/azure-vm` (and `/aws-ec2`,
+`/lima`) documents the union with its default in the parenthetical and shows each mode's own fields
+under that mode, so the rewrites above are not the only place they are written down:
+
+```console
+$ agw resource describe-kind vm-platform/azure-vm
+[...]
+  auth  (table, optional, default {mode: ambient})
+    How this site authenticates to Azure: `{mode: ambient}` for the ambient credential
+    chain, or `{mode: service-principal, ...}` for an explicit principal. Defaults to
+    ambient, matching what `DefaultAzureCredential` does when told nothing.
+    - ambient: Authenticate with the ambient chain: `az login`, `AZURE_*`, or a managed identity.
+      mode  (one of: ambient, required)
+        Selects this arm.
+    - service-principal: Authenticate as an explicit Entra ID service principal.
+      mode  (one of: service-principal, required)
+        Selects this arm.
+      tenant_id  (string, required, min length 1)
+        The Entra ID tenant the principal lives in.
+      client_id  (string, required, min length 1)
+        The principal's application (client) id.
+      secret  (string or null, optional, defaults to `azure-client-secret`, names a secret, min length 1)
+        The secret holding the principal's client secret. [...]
+```
+
+`agw resource sample vm-site` cannot do the same, because a document holds one arm: it prints lima's
+`placement` under a `# One of: local, ssh. Shown here: local.` line with only the `local` arm's
+`mode` in the document, and points at `agw resource describe-kind vm-site` for the rest. The emitted
+schema carries both arms too: `agw resource schema --write` writes `oneOf` with a `const` per mode,
+so a schema-aware editor completes and checks whichever arm you are writing (see
+["Editing manifests with schema support"](resources.md#editing-manifests-with-schema-support) in the
+resources guide).
+
 ### Types are checked now
 
 Values are no longer coerced. A quoted number is a string, and a string is not a boolean.
@@ -539,11 +749,15 @@ Values are no longer coerced. A quoted number is a string, and a string is not a
   the exception: THEIR own scalars are nullable by design, where `null` means "not set here,
   inherit". Almost nothing else is. Their `env` tables and `inherits` lists are not nullable, and
   neither is anything on the `admin-template`, the apt kinds, the install-command kinds, or a
-  harness integration's or platform's config block. The ones most likely to be sitting in an
-  existing file are `shell`'s `command`, `resume_command`, and `required_commands`, `extra_args` on
-  `claude-code` and `codex`, `codex`'s `writable_dirs`, a github credential's `repos`, and a
-  `session-template`'s `env`. `agw resource describe-kind` marks each field "or null" when null is
-  legal, so it settles any case not listed here.
+  harness integration's config block. The ones most likely to be sitting in an existing file are
+  `shell`'s `command`, `resume_command`, and `required_commands`, `extra_args` on `claude-code` and
+  `codex`, `codex`'s `writable_dirs`, a github credential's `repos`, and a `session-template`'s
+  `env`. `agw resource describe-kind` marks a field "or null" when null is legal, so it settles any
+  case not listed here, with one exception it does not mark: a field that NAMES a secret renders as
+  "optional, defaults to `<name>`, names a secret" and takes an explicit `null` as well, which is
+  what ["One meaning changed rather than one shape"](#one-meaning-changed-rather-than-one-shape)
+  below is about. A platform's config block is mixed for that reason and because several of its
+  fields are genuinely optional (an aws site's `subnet_id`, a proxmox site's `bridge`).
 
 **Every quoted boolean meant `true`.** That is the whole class, not just the three named above:
 `key_dearmor`, `tmuxinator`, and `mise_activate` / `mise_allow_unlocked` / `mise_prune_on_reinit` /
@@ -577,13 +791,20 @@ fields the kind does declare.
 `proxmox`.** This is the change least likely to announce itself, so read it even if nothing else
 here applies.
 
-Those three platforms each name a secret in their config, defaulting to a well-known name when the
-field is omitted: proxmox's `token_secret` (default `proxmox-token`), an azure site's
-`service_principal.secret` (default `azure-client-secret`), an aws site's
-`credentials.access_key_secret` (default `aws-secret-access-key`). Writing an explicit `null` there
-used to be a hard error whose message told you to OMIT the key instead. The rule is now that absent
-and `null` mean the same thing, so that same input quietly resolves to the default-named secret and
-the site declares a dependency on it.
+Those three platforms each name a secret where they configure a credential, defaulting to a
+well-known name when the field is omitted: proxmox's `token_secret` (default `proxmox-token`), the
+`secret` inside an azure site's `auth: {mode: service-principal, ...}` arm (default
+`azure-client-secret`), and the `access_key_secret` inside an aws site's
+`auth: {mode: access-key, ...}` arm (default `aws-secret-access-key`). Writing an explicit `null`
+there used to be a hard error whose message told you to OMIT the key instead. The rule is now that
+absent and `null` mean the same thing, so that same input quietly resolves to the default-named
+secret and the site declares a dependency on it.
+
+Two of those three paths moved in
+["Authentication and placement are one tagged field now"](#authentication-and-placement-are-one-tagged-field-now)
+above: the FIELDS keep their spellings, but they now sit in an `auth` arm rather than in a
+`service_principal` or `credentials` block. So do that rewrite first, then read this against the
+file you end up with. Proxmox is where it was.
 
 The rule itself is general: every field that names a secret and has a default reads absent and
 `null` alike. These three are called out because they are the ones whose behavior CHANGED. A git
@@ -601,11 +822,14 @@ grep -rniE '(token_secret|access_key_secret|secret):[[:space:]]*(null|~)?[[:spac
   ~/.config/agentworks/resources
 ```
 
-Three details in that pattern are load-bearing, because YAML has more ways to write a null than the
-obvious one. `-i` catches `Null` and `NULL`, which the loader reads as null exactly like `null`.
-Ending on `[,}]` as well as end-of-line catches a field written inside a flow mapping
-(`service_principal: { client_id: cid, secret: null }`), where the line does not end after the
-value. And the optional `(null|~)?` catches a bare key with nothing after it, which is a null too.
+The pattern is unchanged by the `auth` rewrite above, because the three keys it looks for kept their
+spellings; only the block around two of them moved, and the pattern never mentioned that block.
+Three details in it are load-bearing, because YAML has more ways to write a null than the obvious
+one. `-i` catches `Null` and `NULL`, which the loader reads as null exactly like `null`. Ending on
+`[,}]` as well as end-of-line catches a field written inside a flow mapping
+(`auth: { mode: service-principal, client_id: cid, secret: null }`), where the line does not end
+after the value. And the optional `(null|~)?` catches a bare key with nothing after it, which is a
+null too.
 
 Treat a clean result as good evidence rather than as proof. It is a line-oriented scan of a format
 that does not have to be line-oriented, so it will still miss a quoted key (`"secret": null`) or a
@@ -614,8 +838,19 @@ opening the site's manifest and looking at the field directly.
 
 Then decide, per hit:
 
-- If you meant "no secret here", **delete the line instead**. That is the same answer as the other
-  null fields above, and it is now the only spelling that means it.
+- **If you meant "no secret here", deleting the FIELD is not how you say so.** Where the field is
+  legal at all, absent, `null`, and the default written out are three ways of writing one thing
+  (checked: a proxmox site whose `token_secret` line is deleted validates with `token_secret` set to
+  `proxmox-token` and declares the dependency, and an azure site whose `secret` line is deleted or
+  set to `null` does the same with `azure-client-secret`). Opting out is a MODE now, not an
+  omission, and it differs by platform: an azure or aws site that names no secret at all is one
+  written `auth: {mode: ambient}`, which declares no secret and no secret edge. That is a change of
+  identity rather than of naming, though, so it is only the right answer if the ambient chain really
+  is the credential you want that site to use; the `tenant_id` / `client_id` (or `access_key_id`)
+  keys go away with it. Proxmox has no such mode: its token configuration is required, so a proxmox
+  site always names a secret.
+- **If you meant a different secret, name it.** Which secret the field points at is the only thing
+  it can express, and it is what you came here to set.
 - If you meant the default all along, leave it. Nothing changes for you except that the default is
   now declared as a dependency, which `agw resource describe secret/proxmox-token` will show and
   `agw doctor` will check.

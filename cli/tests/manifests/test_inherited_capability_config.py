@@ -86,9 +86,9 @@ def test_an_inherited_required_field_loads_and_does_not_validate() -> None:
     """
     from agentworks.resources.graph import FinalizeContext
 
-    # No validation context: a row may not carry an owner-templated field
-    # at all (``DeclaredResource.__pydantic_init_subclass__`` refuses one on
-    # an inheriting kind), so there is no owner for these to need.
+    # No fill: a row may not carry an owner-templated field at all
+    # (``DeclaredResource.__pydantic_init_subclass__`` refuses one on an
+    # inheriting kind), so there is nothing here for a boundary to render.
     parent = SessionTemplate.model_validate(
         {"name": "base", "harness_integration": {"name": "demanding", "workspace": "proj"}}
     )

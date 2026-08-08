@@ -27,6 +27,8 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
 
+    from agentworks.manifests.field_tree import Alternative, FieldEntry
+
 
 class LocalDisk(AgwModel):
     """A disk carved out of the host's own storage."""
@@ -75,15 +77,21 @@ def _text(target: str) -> str:
 def _field_entry(text: str, field: str) -> str:
     """One field's rendered block, unwrapped onto a single line.
 
-    Bounded by the next field heading, so an assertion cannot pass on
-    prose that belongs to the field below. Unwrapped because the renderer
-    fills to a width, which puts the line break wherever it lands.
+    Bounded by the next SIBLING heading, meaning the next one indented no
+    further than this one, so an assertion cannot pass on prose that
+    belongs to the field below and the block still carries what is nested
+    inside it: a union's arms, and the fields under each arm, are part of
+    the field they belong to. Unwrapped because the renderer fills to a
+    width, which puts the line break wherever it lands.
     """
     headings = list(re.finditer(r"^( *)(\S+) {2}\(", text, re.MULTILINE))
     for index, heading in enumerate(headings):
         if heading.group(2) != field:
             continue
-        end = headings[index + 1].start() if index + 1 < len(headings) else len(text)
+        depth = len(heading.group(1))
+        after = (found for found in headings[index + 1 :] if len(found.group(1)) <= depth)
+        sibling = next(after, None)
+        end = sibling.start() if sibling is not None else len(text)
         return " ".join(text[heading.start() : end].split())
     raise AssertionError(f"{field} is not a field in:\n{text}")
 
@@ -174,21 +182,94 @@ def test_an_implementation_shows_the_config_it_declares() -> None:
 
     assert text.startswith("Lima (vm-platform/lima, vm-platform implementation)")
     assert "config:" in text
-    assert "vm_host  (string or null, optional, min length 1, e.g. me@gpu-box)" in text
+    # The union's declared default is a fact of the field, so the
+    # parenthetical carries it: what an omitting document resolves to
+    # should not take opening the model to learn.
+    assert "placement  (table, optional, default {mode: local})" in text
 
 
-def test_a_host_kind_lists_the_arms_and_marks_the_one_shown() -> None:
+def test_a_nested_tagged_union_renders_every_arm_with_its_own_fields() -> None:
+    """The rendering half of the same first-non-capability-union case
+    ``tests/manifests/test_reference.py`` pins structurally.
+
+    Each arm's fields sit under that arm, which is the only reading that
+    is true of both: ``mode: local`` takes nothing else and ``mode: ssh``
+    requires a ``host``, and a flat list under the field would attribute
+    each to the other.
+    """
+    text = _text("vm-platform/lima")
+
+    assert "    - local: Run limactl on this machine." in text
+    assert "    - ssh: Run limactl on another host over SSH." in text
+    assert "      mode  (one of: local, required)" in text
+    assert "      mode  (one of: ssh, required)" in text
+    assert "      host  (string, required, min length 1, e.g. me@gpu-box)" in text
+
+
+def test_a_nested_union_arm_summary_reaches_the_terminal_as_plain_text() -> None:
+    """An arm summary is the arm MODEL's docstring, authored in RST, so it
+    has to go through the same markdown normalization every other
+    description in this renderer does.
+
+    The alternatives line was the one place that skipped it, which nothing
+    noticed while every discriminated union's arms were capabilities
+    carrying plain one-line ``description`` strings. Azure's ambient arm is
+    the first summary that legitimately wants code spans, so it is the one
+    that pins the transform: double backticks in, single backticks out."""
+    text = _text("vm-platform/azure-vm")
+
+    assert "- ambient: Authenticate with the ambient chain: `az login`," in text
+    assert "``" not in text
+
+
+def test_a_host_kind_lists_every_arm_it_could_hold() -> None:
     text = _text("vm-site")
 
-    assert "- lima (shown below): Lima VMs (local, or on a remote host via SSH)" in text
+    assert "- lima: Lima VMs (local, or on a remote host via SSH)" in text
     assert "- proxmox: Proxmox VE cluster VMs (clone + cloud-init)" in text
 
 
-def test_a_host_kind_gives_an_address_for_the_arms_it_did_not_expand() -> None:
-    """Listing five platforms and expanding one leaves the operator with no
-    way to read the other four, which is exactly the question the list
-    provokes."""
-    assert "`agw resource describe-kind vm-platform/" in _text("vm-site")
+def test_every_arm_this_surface_names_is_one_it_also_answers_for(seated: None) -> None:
+    """The invariant, over every target the surface documents.
+
+    Naming an arm raises one question, which is what to write if you pick
+    it, and there are exactly three honest answers: an address that
+    documents it, its fields shown here, or a line saying it is the block
+    already open above. Anything else is a word an operator cannot act on,
+    and both halves of this have shipped: ``vm-platform/wsl2`` was named
+    and unaddressed before the pointer landed, and ``auth: {mode:
+    service-principal}`` was named with its three required keys documented
+    nowhere any CLI form reached.
+
+    Asserted over the record rather than over the text, and over every
+    describable target rather than over a fixture, because the way this
+    regresses is a NEW union nobody thought to add a case for.
+    """
+    for target in describable_targets():
+        reference = reference_for(target)
+        roots = (*reference.metadata, *reference.spec)
+        if reference.root_value is not None:
+            roots = (*roots, reference.root_value)
+        for path, alternative in _alternatives_in(roots, (target,)):
+            answers = (alternative.target, alternative.fields, alternative.recurring)
+            assert any(answers), f"{'.'.join(path)}: arm {alternative.name!r} is named and not answered for"
+
+
+def _alternatives_in(
+    entries: tuple[FieldEntry, ...],
+    path: tuple[str, ...],
+) -> Iterator[tuple[tuple[str, ...], Alternative]]:
+    """Every alternative anywhere in ``entries``, with where it was found.
+
+    Arms are walked through too: a union inside a union's arm is exactly
+    where a gap hides, and ``vm-site``'s ``platform.placement`` is one.
+    """
+    for entry in entries:
+        here = (*path, entry.name)
+        for alternative in entry.alternatives:
+            yield here, alternative
+            yield from _alternatives_in(alternative.fields, (*here, alternative.name))
+        yield from _alternatives_in(entry.children, here)
 
 
 def test_a_capability_kind_summary_does_not_enumerate_its_implementations() -> None:
@@ -234,17 +315,24 @@ def test_a_collection_of_tagged_blocks_names_its_arms_and_expands_one(seated: No
     assert "disks (list of table, optional)" in block
     assert "The disks every VM gets, each saying which kind of disk it is." in block
     assert "- (each element) (table, required)" in block
-    assert "- local (shown below): A disk carved out of the host's own storage." in block
+    assert "- local: A disk carved out of the host's own storage." in block
     assert "- network: A disk attached over the network." in block
 
 
-def test_an_expanded_element_arm_shows_that_arms_own_fields(seated: None) -> None:
-    """One arm's fields, at the element's indent: what an operator writes
-    under the ``-``, rather than a table of everything every arm takes."""
-    text = _text("vm-platform/never-enabled")
+def test_each_element_arm_shows_that_arms_own_fields(seated: None) -> None:
+    """Each arm's fields under that arm, rather than a table of everything
+    every arm takes.
 
-    assert "size_gb  (integer, optional, default 40)" in text
-    assert "volume" not in text, "the arm that was not expanded contributes no fields"
+    Both arms, because neither is addressable: a disk is not a capability
+    and ``agw resource describe-kind vm-platform/network`` is a command
+    that fails. ``volume`` was documented nowhere at all while only the
+    first arm was expanded, which made a required field of a shape the
+    loader accepts invisible to every surface an operator has.
+    """
+    text = _field_entry(_text("vm-platform/never-enabled"), "disks")
+
+    assert "size_gb (integer, optional, default 40)" in text
+    assert "volume (string, required)" in text
 
 
 def test_a_seated_capability_is_addressable_and_an_unseated_one_is_not(seated: None) -> None:

@@ -3,6 +3,12 @@
 Totality lives in its own file (``test_extract_totality.py``) because it
 is a property over generated inputs rather than a statement about one
 shape.
+
+Every case runs through :func:`_extracted`, which is extraction as
+production runs it: over the blob the boundary fill has already rendered
+templated defaults into. The fill is the identity for a blob with
+nothing to fill, so a case without a template reads as bare extraction,
+and a case WITH one pins the pipeline the graph is actually built by.
 """
 
 from __future__ import annotations
@@ -10,9 +16,9 @@ from __future__ import annotations
 from typing import Annotated, Literal
 
 import pytest
-from pydantic import Discriminator
+from pydantic import BaseModel, Discriminator, Field
 
-from agentworks.schema import AgwModel, AgwRootModel, RefOwner, SecretRef, extract_references
+from agentworks.schema import AgwModel, AgwRootModel, RefOwner, SecretRef, extract_references, filled_defaults
 from agentworks.schema.reference import ConfigReference, RefRelationship
 
 from ._fixture_models import (
@@ -20,6 +26,7 @@ from ._fixture_models import (
     AwsLike,
     AzureLike,
     CatalogLike,
+    DefaultedCollectionSite,
     DiamondLike,
     EveryArmMarkedCollectionSite,
     EveryArmMarkedSite,
@@ -50,16 +57,22 @@ def names(refs: tuple[ConfigReference, ...]) -> list[str]:
     return [ref.name for ref in refs]
 
 
+def _extracted(model_cls: type[BaseModel], blob: object, owner: RefOwner = OWNER) -> tuple[ConfigReference, ...]:
+    """The production pipeline: fill, then extract the filled blob. See
+    the module docstring."""
+    return extract_references(model_cls, filled_defaults(model_cls, blob, owner))
+
+
 # --- marked scalars ---------------------------------------------------
 
 
 def test_an_operator_written_name_wins() -> None:
-    refs = extract_references(GithubLike, {"token": "custom-token"}, OWNER)
+    refs = _extracted(GithubLike, {"token": "custom-token"})
     assert refs == (ConfigReference(kind="secret", name="custom-token", usage="the auth token"),)
 
 
 def test_an_omitted_field_falls_back_to_the_owner_template() -> None:
-    assert names(extract_references(GithubLike, {}, OWNER)) == ["git-token-prod"]
+    assert names(_extracted(GithubLike, {})) == ["git-token-prod"]
 
 
 # An explicit ``null`` is treated as an omission, which is a DIVERGENCE
@@ -76,19 +89,85 @@ def test_an_omitted_field_falls_back_to_the_owner_template() -> None:
 def test_a_malformed_name_omits_the_edge(value: object) -> None:
     # The edge's identity is destroyed, so it is omitted rather than
     # guessed at; validation is where the shape error surfaces.
-    assert extract_references(GithubLike, {"token": value}, OWNER) == ()
+    assert _extracted(GithubLike, {"token": value}) == ()
 
 
 def test_a_marker_with_no_template_contributes_nothing_when_omitted() -> None:
     class NoDefault(AgwModel):
         secret: Annotated[str, SecretRef(usage="a secret")] | None = None
 
-    assert extract_references(NoDefault, {}, OWNER) == ()
+    assert _extracted(NoDefault, {}) == ()
+
+
+# --- declared defaults ------------------------------------------------
+#
+# An absent field with a declared default is read as if the operator had
+# written the default's value, because that is what validation does with
+# it. The block and collection shapes are pinned by the completeness
+# suite against the validated object; what belongs here is the scalar
+# precedence, which that oracle's subset assertion cannot see, and the
+# two default spellings that are NOT static.
+
+
+def test_an_absent_marked_scalar_reads_as_its_declared_default() -> None:
+    class Defaulted(AgwModel):
+        secret: Annotated[str, SecretRef(usage="a secret")] = "declared-default"
+
+    assert names(_extracted(Defaulted, {})) == ["declared-default"]
+    assert names(_extracted(Defaulted, {"secret": "written"})) == ["written"]
+
+
+def test_the_owner_template_outranks_a_declared_default() -> None:
+    # The boundary fill answers an absent templated field before pydantic
+    # could reach for the declared default, so the validated config
+    # carries the rendered template and the edge must name the same secret.
+    class Both(AgwModel):
+        secret: Annotated[str, SecretRef(usage="a secret", default_template="tpl-{owner_name}")] = "declared-default"
+
+    assert names(_extracted(Both, {})) == ["tpl-prod"]
+
+
+def test_a_written_null_does_not_fall_back_to_the_declared_default() -> None:
+    # Pydantic reserves a default for the ABSENT key: an explicit null
+    # validates as null (or not at all), never as the default, so an edge
+    # for the default here would name a secret the config does not carry.
+    class Defaulted(AgwModel):
+        secret: Annotated[str, SecretRef(usage="a secret")] | None = "declared-default"
+
+    assert _extracted(Defaulted, {"secret": None}) == ()
+
+
+def test_a_validated_data_factory_is_not_a_static_default() -> None:
+    # A factory taking validated data computes the default FROM the
+    # neighboring fields, so its value is not a property of the class and
+    # its edges deliberately cannot be pre-computed; the honest answer is
+    # no edge, stated in ``_absent_defaults``'s docstring rather than
+    # papered over.
+    class Dynamic(AgwModel):
+        base: str = "b"
+        secret: Annotated[str, SecretRef(usage="a secret")] = Field(
+            default_factory=lambda data: f"{data['base']}-secret"
+        )
+
+    assert _extracted(Dynamic, {"base": "x"}) == ()
+
+
+def test_a_raising_factory_contributes_nothing_rather_than_raising() -> None:
+    # The one guarded region: author code, not the walk. Extraction is
+    # total by contract, and a config leaning on this factory cannot
+    # validate either.
+    def boom() -> str:
+        raise RuntimeError("author bug")
+
+    class Broken(AgwModel):
+        secret: Annotated[str, SecretRef(usage="a secret")] = Field(default_factory=boom)
+
+    assert _extracted(Broken, {}) == ()
 
 
 def test_an_unmarked_model_implies_nothing_at_any_depth() -> None:
     blob = {"name": "a", "port": 22, "nested": {"name": "lima", "vm_host": "h"}}
-    assert extract_references(UnmarkedLike, blob, OWNER) == ()
+    assert _extracted(UnmarkedLike, blob) == ()
 
 
 # --- nested models ----------------------------------------------------
@@ -96,11 +175,11 @@ def test_an_unmarked_model_implies_nothing_at_any_depth() -> None:
 
 def test_a_nested_block_is_walked() -> None:
     blob = {"region": "eastus", "service_principal": {"client_id": "c", "secret": "sp-secret"}}
-    assert names(extract_references(AzureLike, blob, OWNER)) == ["sp-secret"]
+    assert names(_extracted(AzureLike, blob)) == ["sp-secret"]
 
 
 def test_a_nested_block_that_is_not_a_table_contributes_nothing() -> None:
-    assert extract_references(AzureLike, {"service_principal": "nope"}, OWNER) == ()
+    assert _extracted(AzureLike, {"service_principal": "nope"}) == ()
 
 
 def test_two_sibling_fields_of_one_nested_model_both_extract() -> None:
@@ -109,7 +188,7 @@ def test_two_sibling_fields_of_one_nested_model_both_extract() -> None:
     # accumulating visited set walks ``primary`` and skips ``fallback``,
     # building a graph that is missing an edge nothing reports.
     blob = {"primary": {"secret": "primary-secret"}, "fallback": {"secret": "fallback-secret"}}
-    assert names(extract_references(DiamondLike, blob, OWNER)) == ["primary-secret", "fallback-secret"]
+    assert names(_extracted(DiamondLike, blob)) == ["primary-secret", "fallback-secret"]
 
 
 def test_a_recursive_model_walks_finite_data_all_the_way_down() -> None:
@@ -121,7 +200,7 @@ def test_a_recursive_model_walks_finite_data_all_the_way_down() -> None:
     resource would be missing at runtime, in a run that finalized clean.
     """
     blob = {"secret": "top", "child": {"secret": "nested", "child": {"secret": "deeper"}}}
-    assert names(extract_references(SelfReferential, blob, OWNER)) == ["top", "nested", "deeper"]
+    assert names(_extracted(SelfReferential, blob)) == ["top", "nested", "deeper"]
 
 
 def test_data_reachable_from_itself_terminates() -> None:
@@ -131,7 +210,7 @@ def test_data_reachable_from_itself_terminates() -> None:
     blob: dict[str, object] = {"secret": "top"}
     blob["child"] = blob
 
-    assert names(extract_references(SelfReferential, blob, OWNER)) == ["top"]
+    assert names(_extracted(SelfReferential, blob)) == ["top"]
 
 
 def test_a_data_cycle_through_two_values_terminates() -> None:
@@ -141,7 +220,7 @@ def test_a_data_cycle_through_two_values_terminates() -> None:
     inner: dict[str, object] = {"secret": "inner", "child": outer}
     outer["child"] = inner
 
-    assert names(extract_references(SelfReferential, outer, OWNER)) == ["outer", "inner"]
+    assert names(_extracted(SelfReferential, outer)) == ["outer", "inner"]
 
 
 def test_deeply_nested_finite_data_neither_truncates_nor_overflows() -> None:
@@ -154,32 +233,43 @@ def test_deeply_nested_finite_data_neither_truncates_nor_overflows() -> None:
     for _ in range(depth):
         blob = {"child": blob}
 
-    assert names(extract_references(SelfReferential, blob, OWNER)) == ["bottom"]
+    assert names(_extracted(SelfReferential, blob)) == ["bottom"]
 
 
 # --- marked lists -----------------------------------------------------
 
 
 def test_a_marked_list_emits_one_edge_per_element() -> None:
-    refs = extract_references(TemplateLike, {"inherits": ["base", "shared"]}, OWNER)
+    refs = _extracted(TemplateLike, {"inherits": ["base", "shared"]})
     assert names(refs) == ["base", "shared"]
     assert {ref.kind for ref in refs} == {"vm-template"}
 
 
 def test_a_marked_list_carries_the_declared_relationship() -> None:
-    refs = extract_references(TemplateLike, {"inherits": ["base"], "image": "ubuntu"}, OWNER)
+    refs = _extracted(TemplateLike, {"inherits": ["base"], "image": "ubuntu"})
     assert [ref.relationship for ref in refs] == [RefRelationship.INHERITS, RefRelationship.USES]
 
 
 def test_a_marked_list_skips_the_elements_that_name_nothing() -> None:
-    assert names(extract_references(TemplateLike, {"inherits": ["base", 8, "", None, "other"]}, OWNER)) == [
+    assert names(_extracted(TemplateLike, {"inherits": ["base", 8, "", None, "other"]})) == [
         "base",
         "other",
     ]
 
 
 def test_an_omitted_list_has_no_default_identity() -> None:
-    assert extract_references(TemplateLike, {}, OWNER) == ()
+    # No owner template applies at an element, and this model's declared
+    # default is EMPTY, so absence contributes nothing. An omitted list
+    # whose declared default holds names is the next test.
+    assert _extracted(TemplateLike, {}) == ()
+
+
+def test_an_omitted_list_contributes_what_its_declared_default_holds() -> None:
+    # Validation answers the absent field with the default's elements, so
+    # the names they carry are names the validated config really holds.
+    # Outside the completeness oracle like every element marker, so the
+    # expectation is spelled here.
+    assert names(_extracted(DefaultedCollectionSite, {})) == ["default-collection-token"]
 
 
 # --- collections of models --------------------------------------------
@@ -187,21 +277,21 @@ def test_an_omitted_list_has_no_default_identity() -> None:
 
 def test_every_element_of_a_list_of_models_is_walked() -> None:
     blob = {"accounts": [{"secret": "first"}, {"secret": "second"}]}
-    assert names(extract_references(CatalogLike, blob, OWNER)) == ["first", "second"]
+    assert names(_extracted(CatalogLike, blob)) == ["first", "second"]
 
 
 def test_every_value_of_a_table_of_models_is_walked() -> None:
     blob = {"accounts_by_name": {"prod": {"secret": "prod-secret"}, "dev": {"secret": "dev-secret"}}}
-    assert names(extract_references(CatalogLike, blob, OWNER)) == ["prod-secret", "dev-secret"]
+    assert names(_extracted(CatalogLike, blob)) == ["prod-secret", "dev-secret"]
 
 
 def test_every_value_of_a_table_of_names_becomes_an_edge() -> None:
     blob = {"extra_secrets": {"one": "first", "two": "second", "bad": 8}}
-    assert names(extract_references(CatalogLike, blob, OWNER)) == ["first", "second"]
+    assert names(_extracted(CatalogLike, blob)) == ["first", "second"]
 
 
 def test_a_tuple_of_names_is_a_sequence_like_a_list() -> None:
-    assert names(extract_references(CatalogLike, {"templates": ["base", "other"]}, OWNER)) == ["base", "other"]
+    assert names(_extracted(CatalogLike, {"templates": ["base", "other"]})) == ["base", "other"]
 
 
 @pytest.mark.parametrize(
@@ -222,17 +312,17 @@ def test_a_tuple_of_names_is_a_sequence_like_a_list() -> None:
 def test_a_collection_that_is_not_one_contributes_nothing(field: str, value: object) -> None:
     # Fields whose ELEMENTS are marked, so a refusal that leaked would
     # emit edges rather than quietly walking blocks that name nothing.
-    assert extract_references(CatalogLike, {field: value}, OWNER) == ()
+    assert _extracted(CatalogLike, {field: value}) == ()
 
 
 def test_malformed_elements_are_skipped_and_the_rest_still_extract() -> None:
     blob = {"accounts": [{"secret": "kept"}, "not a table", None, 8, {"secret": ""}, {"secret": "also-kept"}]}
-    assert names(extract_references(CatalogLike, blob, OWNER)) == ["kept", "also-kept"]
+    assert names(_extracted(CatalogLike, blob)) == ["kept", "also-kept"]
 
 
 def test_a_recursive_model_walks_a_finite_collection_all_the_way_down() -> None:
     blob = {"secret": "top", "children": [{"secret": "nested", "children": [{"secret": "deeper"}]}]}
-    assert names(extract_references(SelfReferential, blob, OWNER)) == ["top", "nested", "deeper"]
+    assert names(_extracted(SelfReferential, blob)) == ["top", "nested", "deeper"]
 
 
 def test_a_data_cycle_through_a_collection_terminates() -> None:
@@ -241,7 +331,7 @@ def test_a_data_cycle_through_a_collection_terminates() -> None:
     blob: dict[str, object] = {"secret": "top"}
     blob["children"] = [blob]
 
-    assert names(extract_references(SelfReferential, blob, OWNER)) == ["top"]
+    assert names(_extracted(SelfReferential, blob)) == ["top"]
 
 
 def test_a_collection_spelled_as_an_abc_is_still_a_collection() -> None:
@@ -261,7 +351,7 @@ def test_a_collection_spelled_as_an_abc_is_still_a_collection() -> None:
         "set_tokens": ["in-a-set"],
         "blocks": [{"token": "in-a-block"}],
     }
-    assert names(extract_references(AbstractCollectionLike, blob, OWNER)) == [
+    assert names(_extracted(AbstractCollectionLike, blob)) == [
         "in-a-sequence",
         "in-a-mutable-sequence",
         "in-a-mapping",
@@ -276,7 +366,7 @@ def test_an_abstract_mapping_addresses_its_values_not_its_keys() -> None:
     second. Classifying it as a sequence would read the KEY type, so a
     marked value would go unread while an unmarked key looked marked."""
     blob = {"mapping_tokens": {"a-key-that-is-not-a-secret": "the-value-that-is"}}
-    assert names(extract_references(AbstractCollectionLike, blob, OWNER)) == ["the-value-that-is"]
+    assert names(_extracted(AbstractCollectionLike, blob)) == ["the-value-that-is"]
 
 
 # --- discriminated unions ---------------------------------------------
@@ -284,22 +374,22 @@ def test_an_abstract_mapping_addresses_its_values_not_its_keys() -> None:
 
 def test_the_arm_the_raw_tag_names_is_walked() -> None:
     blob = {"platform": {"name": "proxmox", "token_secret": "lab-token"}}
-    assert names(extract_references(SiteLike, blob, OWNER)) == ["lab-token"]
+    assert names(_extracted(SiteLike, blob)) == ["lab-token"]
 
 
 def test_an_arm_that_names_nothing_contributes_nothing() -> None:
-    assert extract_references(SiteLike, {"platform": {"name": "lima", "vm_host": "h"}}, OWNER) == ()
+    assert _extracted(SiteLike, {"platform": {"name": "lima", "vm_host": "h"}}) == ()
 
 
 def test_an_arms_own_templated_default_applies() -> None:
-    assert names(extract_references(SiteLike, {"platform": {"name": "proxmox"}}, OWNER)) == ["proxmox-token"]
+    assert names(_extracted(SiteLike, {"platform": {"name": "proxmox"}})) == ["proxmox-token"]
 
 
 @pytest.mark.parametrize("tag", [8, "unregistered"])
 def test_a_tag_naming_no_arm_contributes_nothing(tag: object) -> None:
     # ``_arm_block``'s two rejections: a tag that is not a name at all,
     # and a name no arm answers to.
-    assert extract_references(SiteLike, {"platform": {"name": tag}}, OWNER) == ()
+    assert _extracted(SiteLike, {"platform": {"name": tag}}) == ()
 
 
 @pytest.mark.parametrize("model_cls", [SiteLike, FieldDiscriminatedSite, OptionalUnionSite])
@@ -307,31 +397,31 @@ def test_every_legal_union_spelling_walks_the_same_way(model_cls: type[AgwModel]
     # Pydantic validates all three identically, so a lookup that missed
     # one would build a silently wrong graph rather than fail.
     blob = {"platform": {"name": "proxmox", "token_secret": "lab-token"}}
-    assert names(extract_references(model_cls, blob, OWNER)) == ["lab-token"]
+    assert names(_extracted(model_cls, blob)) == ["lab-token"]
 
 
 def test_an_arm_answering_to_two_tags_is_reachable_by_both() -> None:
     for tag in ("aws-ec2", "ec2"):
         blob = {"platform": {"name": tag, "access_key_secret": "key"}}
-        assert names(extract_references(RenamedArmSite, blob, OWNER)) == ["key"], tag
+        assert names(_extracted(RenamedArmSite, blob)) == ["key"], tag
 
 
 def test_a_union_tagged_by_a_non_name_has_no_addressable_arm() -> None:
     # A documented boundary: every discriminator in this framework is a
     # capability or kind name.
     blob = {"thing": {"version": 1, "token_secret": "x"}}
-    assert extract_references(NumericallyTaggedSite, blob, OWNER) == ()
+    assert _extracted(NumericallyTaggedSite, blob) == ()
 
 
 def test_a_marker_inside_a_multi_arm_union_is_still_found() -> None:
-    assert names(extract_references(MultiArmMarked, {"secret": "named"}, OWNER)) == ["named"]
-    assert names(extract_references(MultiArmMarked, {}, OWNER)) == ["multi-arm-secret"]
-    assert extract_references(MultiArmMarked, {"secret": 8}, OWNER) == ()
+    assert names(_extracted(MultiArmMarked, {"secret": "named"})) == ["named"]
+    assert names(_extracted(MultiArmMarked, {})) == ["multi-arm-secret"]
+    assert _extracted(MultiArmMarked, {"secret": 8}) == ()
 
 
 def test_a_union_with_no_discriminator_has_no_addressable_arm() -> None:
     blob = {"platform": {"name": "proxmox", "token_secret": "lab-token"}}
-    assert extract_references(UndiscriminatedSite, blob, OWNER) == ()
+    assert _extracted(UndiscriminatedSite, blob) == ()
 
 
 # --- a block that names no arm selects none of them --------------------
@@ -365,7 +455,7 @@ _NAMES_NO_ARM: tuple[object, ...] = (
 
 @pytest.mark.parametrize("block", _NAMES_NO_ARM, ids=range(len(_NAMES_NO_ARM)))
 def test_a_block_naming_no_arm_contributes_nothing(block: object) -> None:
-    assert extract_references(EveryArmMarkedSite, {"platform": block}, OWNER) == ()
+    assert _extracted(EveryArmMarkedSite, {"platform": block}) == ()
 
 
 @pytest.mark.parametrize("block", _NAMES_NO_ARM, ids=range(len(_NAMES_NO_ARM)))
@@ -373,7 +463,7 @@ def test_a_collection_element_naming_no_arm_contributes_nothing(block: object) -
     # The same question of the other walker: both select arms through one
     # call, and a fallback added to it would be reachable from either.
     blob = {"platforms": [block], "platforms_by_name": {"x": block}}
-    assert extract_references(EveryArmMarkedCollectionSite, blob, OWNER) == ()
+    assert _extracted(EveryArmMarkedCollectionSite, blob) == ()
 
 
 @pytest.mark.parametrize(
@@ -390,10 +480,10 @@ def test_selecting_any_arm_would_show(tag: str, expected: str) -> None:
     established if each arm the walker could have fallen back to is one
     whose selection shows.
     """
-    assert names(extract_references(EveryArmMarkedSite, {"platform": {"name": tag}}, OWNER)) == [expected]
+    assert names(_extracted(EveryArmMarkedSite, {"platform": {"name": tag}})) == [expected]
 
     blob = {"platforms": [{"name": tag}], "platforms_by_name": {"x": {"name": tag}}}
-    assert names(extract_references(EveryArmMarkedCollectionSite, blob, OWNER)) == [expected, expected]
+    assert names(_extracted(EveryArmMarkedCollectionSite, blob)) == [expected, expected]
 
 
 def test_an_arm_tagged_with_the_empty_string_is_still_addressable() -> None:
@@ -416,8 +506,8 @@ def test_an_arm_tagged_with_the_empty_string_is_still_addressable() -> None:
     class EmptyTagSite(AgwModel):
         platform: Annotated[Nameless | Named, Discriminator("name")]
 
-    assert names(extract_references(EmptyTagSite, {"platform": {"name": "", "token_secret": "t"}}, OWNER)) == ["t"]
-    assert extract_references(EmptyTagSite, {"platform": {"name": "other"}}, OWNER) == ()
+    assert names(_extracted(EmptyTagSite, {"platform": {"name": "", "token_secret": "t"}})) == ["t"]
+    assert _extracted(EmptyTagSite, {"platform": {"name": "other"}}) == ()
 
 
 # --- untagged scalar-or-block unions ----------------------------------
@@ -431,13 +521,13 @@ def test_an_arm_tagged_with_the_empty_string_is_still_addressable() -> None:
 
 def test_a_union_written_as_a_table_walks_its_block() -> None:
     blob = {"mapping": {"secret": "named-in-the-arm"}}
-    assert names(extract_references(ScalarOrBlockLike, blob, OWNER)) == ["named-in-the-arm"]
+    assert names(_extracted(ScalarOrBlockLike, blob)) == ["named-in-the-arm"]
 
 
 def test_a_union_written_as_a_scalar_contributes_nothing() -> None:
     # The other arm entirely, and the operator wrote a name that belongs
     # to the backend rather than to agentworks.
-    assert extract_references(ScalarOrBlockLike, {"mapping": "op://vault/item"}, OWNER) == ()
+    assert _extracted(ScalarOrBlockLike, {"mapping": "op://vault/item"}) == ()
 
 
 def test_an_untagged_union_held_by_a_collection_is_read_per_element() -> None:
@@ -445,14 +535,14 @@ def test_an_untagged_union_held_by_a_collection_is_read_per_element() -> None:
         "mappings": {"a": {"secret": "in-a-table"}, "b": "a scalar element"},
         "mapping_list": ["another scalar", {"secret": "in-a-list"}],
     }
-    assert names(extract_references(ScalarOrBlockLike, blob, OWNER)) == ["in-a-table", "in-a-list"]
+    assert names(_extracted(ScalarOrBlockLike, blob)) == ["in-a-table", "in-a-list"]
 
 
 def test_a_union_block_reachable_from_itself_terminates() -> None:
     blob: dict[str, object] = {"name": "anchored"}
     blob["child"] = blob
 
-    assert extract_references(SelfReferentialUnion, blob, OWNER) == ()
+    assert _extracted(SelfReferentialUnion, blob) == ()
 
 
 def test_a_union_that_also_offers_a_bare_table_addresses_no_arm() -> None:
@@ -468,7 +558,7 @@ def test_a_union_that_also_offers_a_bare_table_addresses_no_arm() -> None:
     class Ambiguous(AgwModel):
         thing: dict[str, str] | GithubLike | None = None
 
-    assert extract_references(Ambiguous, {"thing": {"api_url": "https://example"}}, OWNER) == ()
+    assert _extracted(Ambiguous, {"thing": {"api_url": "https://example"}}) == ()
 
 
 def test_a_scalar_is_not_read_as_a_root_model_arm() -> None:
@@ -483,7 +573,7 @@ def test_a_scalar_is_not_read_as_a_root_model_arm() -> None:
     class HoldsRooted(AgwModel):
         thing: str | Rooted | None = None
 
-    assert extract_references(HoldsRooted, {"thing": "a plain string"}, OWNER) == ()
+    assert _extracted(HoldsRooted, {"thing": "a plain string"}) == ()
 
 
 # --- surfaces that are not mapping-shaped -----------------------------
@@ -494,22 +584,22 @@ def test_a_blob_that_is_not_a_table_contributes_nothing(blob: object) -> None:
     # Refused by SHAPE rather than by truthiness, which is what the
     # non-empty list is here to say: a walk guarded by ``if not blob``
     # would go on to read keys off it.
-    assert extract_references(GithubLike, blob, OWNER) == ()
+    assert _extracted(GithubLike, blob) == ()
 
 
 def test_a_bare_scalar_root_names_nothing() -> None:
     # Every shipped backend mapping: an env var name, an ``op://``
     # reference. Neither is an agentworks Resource.
-    assert extract_references(StringRoot, "op://vault/item", OWNER) == ()
+    assert _extracted(StringRoot, "op://vault/item") == ()
 
 
 def test_a_model_rooted_root_model_carries_its_roots_references() -> None:
     # The alternative would render the marked field in a generated
     # sample and never emit its edge, which is the silent-missing-edge
     # outcome, reached by a different route.
-    assert names(extract_references(MappingRoot, {"token": "t"}, OWNER)) == ["t"]
-    assert names(extract_references(MappingRoot, {}, OWNER)) == ["git-token-prod"]
-    assert extract_references(MappingRoot, "not a table", OWNER) == ()
+    assert names(_extracted(MappingRoot, {"token": "t"})) == ["t"]
+    assert names(_extracted(MappingRoot, {})) == ["git-token-prod"]
+    assert _extracted(MappingRoot, "not a table") == ()
 
 
 @pytest.mark.parametrize("model_cls", [NeverResolved, ResolvesToUnbuildable])
@@ -518,7 +608,7 @@ def test_a_model_that_cannot_be_built_contributes_nothing_rather_than_raising(mo
     # escape: pydantic's own ``raise_errors=False`` covers an annotation
     # that never resolves, not one that resolves to a type it cannot
     # build a schema for.
-    assert extract_references(model_cls, {"secret": "named"}, OWNER) == ()
+    assert _extracted(model_cls, {"secret": "named"}) == ()
 
 
 # --- parity with the shipped hand-rolled derivations -------------------
@@ -534,29 +624,25 @@ def test_a_model_that_cannot_be_built_contributes_nothing_rather_than_raising(mo
 def test_parity_with_the_azure_service_principal_derivation() -> None:
     # plugins/azure/platform.py::AzureVMPlatform.dependencies
     site = RefOwner(kind="vm-site", name="lab")
-    assert extract_references(AzureLike, {"region": "eastus"}, site) == ()
-    assert names(extract_references(AzureLike, {"service_principal": {"client_id": "c"}}, site)) == [
-        "azure-client-secret"
-    ]
-    assert extract_references(AzureLike, {"service_principal": {"secret": ""}}, site) == ()
+    assert _extracted(AzureLike, {"region": "eastus"}, site) == ()
+    assert names(_extracted(AzureLike, {"service_principal": {"client_id": "c"}}, site)) == ["azure-client-secret"]
+    assert _extracted(AzureLike, {"service_principal": {"secret": ""}}, site) == ()
 
 
 def test_parity_with_the_aws_credentials_derivation() -> None:
     # plugins/aws/platform.py::AwsEc2Platform.dependencies
     site = RefOwner(kind="vm-site", name="lab")
-    assert extract_references(AwsLike, {"region": "us-east-1"}, site) == ()
-    assert names(extract_references(AwsLike, {"credentials": {"access_key_id": "k"}}, site)) == [
-        "aws-secret-access-key"
-    ]
-    assert extract_references(AwsLike, {"credentials": {"access_key_secret": 8}}, site) == ()
+    assert _extracted(AwsLike, {"region": "us-east-1"}, site) == ()
+    assert names(_extracted(AwsLike, {"credentials": {"access_key_id": "k"}}, site)) == ["aws-secret-access-key"]
+    assert _extracted(AwsLike, {"credentials": {"access_key_secret": 8}}, site) == ()
 
 
 def test_parity_with_the_proxmox_token_derivation() -> None:
     # plugins/proxmox/platform.py::ProxmoxPlatform.dependencies
     site = RefOwner(kind="vm-site", name="lab")
-    assert names(extract_references(ProxmoxLike, {"api_url": "https://pve"}, site)) == ["proxmox-token"]
-    assert names(extract_references(ProxmoxLike, {"token_secret": "lab-token"}, site)) == ["lab-token"]
-    assert extract_references(ProxmoxLike, {"token_secret": ""}, site) == ()
+    assert names(_extracted(ProxmoxLike, {"api_url": "https://pve"}, site)) == ["proxmox-token"]
+    assert names(_extracted(ProxmoxLike, {"token_secret": "lab-token"}, site)) == ["lab-token"]
+    assert _extracted(ProxmoxLike, {"token_secret": ""}, site) == ()
 
 
 # --- the one deliberate divergence from shipped behavior --------------
@@ -593,13 +679,13 @@ def test_an_explicit_null_diverges_from_three_shipped_validators(
     break note; it is a test rather than only a doc line so the decision
     is one someone can find and overturn.
     """
-    assert names(extract_references(model_cls, blob, OWNER)) == [expected]
+    assert names(_extracted(model_cls, blob)) == [expected]
 
 
 def test_the_usage_prose_is_carried_verbatim() -> None:
     # It ends up on the target's ReferenceEntry and in describe's
     # "Referenced by:" section, so it is operator-visible output.
-    assert extract_references(ProxmoxLike, {}, OWNER)[0].usage == "the Proxmox API token"
+    assert _extracted(ProxmoxLike, {})[0].usage == "the Proxmox API token"
 
 
 # --- FR18: extraction is structural (issue #311) -----------------------
@@ -611,10 +697,10 @@ def test_renaming_a_marked_field_moves_the_extracted_reference() -> None:
     class Renamed(AgwModel):
         pat: Annotated[str, SecretRef(usage="the auth token", default_template="git-token-{owner_name}")]
 
-    assert names(extract_references(Renamed, {"pat": "x"}, OWNER)) == ["x"]
-    assert names(extract_references(Renamed, {}, OWNER)) == ["git-token-prod"]
+    assert names(_extracted(Renamed, {"pat": "x"})) == ["x"]
+    assert names(_extracted(Renamed, {})) == ["git-token-prod"]
     # And the old field name means nothing to the model now.
-    assert names(extract_references(Renamed, {"token": "x"}, OWNER)) == ["git-token-prod"]
+    assert names(_extracted(Renamed, {"token": "x"})) == ["git-token-prod"]
 
 
 def test_adding_a_second_marked_field_adds_a_second_reference() -> None:
@@ -622,11 +708,11 @@ def test_adding_a_second_marked_field_adds_a_second_reference() -> None:
         token: Annotated[str, SecretRef(usage="the auth token", default_template="git-token-{owner_name}")]
         webhook_secret: Annotated[str, SecretRef(usage="the webhook signing secret")] | None = None
 
-    assert names(extract_references(TwoSecrets, {"webhook_secret": "hook"}, OWNER)) == ["git-token-prod", "hook"]
+    assert names(_extracted(TwoSecrets, {"webhook_secret": "hook"})) == ["git-token-prod", "hook"]
 
 
 def test_the_owner_kind_is_available_to_a_template() -> None:
     class KindTemplated(AgwModel):
         secret: Annotated[str, SecretRef(usage="u", default_template="{owner_kind}-{owner_name}")] | None = None
 
-    assert names(extract_references(KindTemplated, {}, OWNER)) == ["git-credential-prod"]
+    assert names(_extracted(KindTemplated, {})) == ["git-credential-prod"]

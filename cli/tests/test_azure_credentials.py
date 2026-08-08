@@ -38,7 +38,12 @@ if TYPE_CHECKING:
 
 _RESOURCE_ID = "/subscriptions/sub-A/resourceGroups/rg1/providers/Microsoft.Compute/virtualMachines/vm1"
 _CONFIG = {"subscription_id": "sub-A", "resource_group": "rg1", "region": "eastus"}
-_SP = {"tenant_id": "tenant-A", "client_id": "client-A", "secret": "az-sp"}
+#: The ambient arm, which every site that is not testing the service
+#: principal declares. Spelled out rather than omitted: the whole point of
+#: the required ``auth`` union is that no site selects an identity by
+#: writing nothing.
+_AMBIENT_AUTH = {"mode": "ambient"}
+_SP = {"mode": "service-principal", "tenant_id": "tenant-A", "client_id": "client-A", "secret": "az-sp"}
 
 
 def _fake_vm(resource_id: str = _RESOURCE_ID) -> Any:
@@ -186,15 +191,17 @@ def _clear_sp_args() -> None:
 
 
 def _platform() -> AzureVMPlatform:
-    return AzureVMPlatform("az-site", dict(_CONFIG))
+    """A platform bound to a site that selects the ambient credential
+    chain, explicitly."""
+    return AzureVMPlatform("az-site", {**_CONFIG, "auth": dict(_AMBIENT_AUTH)})
 
 
 def _sp_platform(secret_key: str | None = "secret") -> AzureVMPlatform:
-    """A platform bound to a site that declares a service principal.
+    """A platform bound to a site that selects the service-principal arm.
     ``secret_key=None`` omits the ``secret`` field so the default name
     applies."""
     sp = dict(_SP) if secret_key else {k: v for k, v in _SP.items() if k != "secret"}
-    return AzureVMPlatform("az-site", {**_CONFIG, "service_principal": sp})
+    return AzureVMPlatform("az-site", {**_CONFIG, "auth": sp})
 
 
 class _Secrets:

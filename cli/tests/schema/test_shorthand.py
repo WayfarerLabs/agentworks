@@ -22,9 +22,9 @@ from agentworks.schema import (
     RefOwner,
     ScalarShorthand,
     SecretRef,
+    filled_defaults,
     iter_field_docs,
     render_type,
-    validation_context,
 )
 
 from ._fixture_models import ShorthandHolder, ShorthandLike, ShorthandTemplatedLike
@@ -66,13 +66,14 @@ def test_the_shorthand_is_folded_before_owner_templated_defaults_are_filled() ->
     """The order the two rewrites happen in, asserted through what it
     decides rather than through which function runs first.
 
-    The fill acts on a mapping, so a value folded AFTER it would skip the
-    fill entirely: an owner-templated field would resolve for the operator
-    who wrote the table form and silently not for the one who wrote the
-    scalar, which is the same value spelled two ways.
+    The boundary fill acts on a mapping, so it folds a bare-scalar value
+    itself before filling: folded after, an owner-templated field would
+    resolve for the operator who wrote the table form and silently not
+    for the one who wrote the scalar, which is the same value spelled two
+    ways.
     """
-    short = ShorthandTemplatedLike.model_validate("a value", context=validation_context(OWNER))
-    long = ShorthandTemplatedLike.model_validate({"value": "a value"}, context=validation_context(OWNER))
+    short = ShorthandTemplatedLike.model_validate(filled_defaults(ShorthandTemplatedLike, "a value", OWNER))
+    long = ShorthandTemplatedLike.model_validate(filled_defaults(ShorthandTemplatedLike, {"value": "a value"}, OWNER))
 
     assert short.token == "shorthand-dev"
     assert short == long
@@ -141,7 +142,7 @@ def test_a_marked_field_inside_a_shorthand_model_still_reaches_the_graph() -> No
     class Holder(AgwModel):
         entries: dict[str, ShorthandLike] = Field(default_factory=dict)
 
-    found = extract_references(Holder, {"entries": {"A": {"secret": "npm-token"}, "B": "plaintext"}}, OWNER)
+    found = extract_references(Holder, {"entries": {"A": {"secret": "npm-token"}, "B": "plaintext"}})
 
     assert [(ref.kind, ref.name) for ref in found] == [("secret", "npm-token")]
 

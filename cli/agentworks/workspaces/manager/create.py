@@ -144,7 +144,7 @@ def create_workspace(
         pending_workspace.mark_realized()
 
         if open_vscode:
-            subprocess.run(["code", vscode_path], check=False)
+            subprocess.run(["code", str(vscode_path)], check=False)
 
 
 def describe_workspace(

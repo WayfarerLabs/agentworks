@@ -14,6 +14,7 @@ from agentworks.errors import (
     UserAbort,
     ValidationError,
 )
+from agentworks.path_rendering import format_host_path
 from agentworks.vms.manager import gated_vm_boundary
 from agentworks.workspaces.manager._common import _guard_vm_status, _workspace_scope
 from agentworks.workspaces.manager.repair import _rehome_partial_state_hint
@@ -207,7 +208,7 @@ def _rehome_vm(
                         "copy verification failed, target directory not found",
                         entity_kind="workspace",
                         entity_name=ws_name,
-                        hint=f"SSH log: {ssh_logger.path}",
+                        hint=f"SSH log: {ssh_logger.display_path}",
                     )
 
                 # Fix ownership, permissions, and ACLs on the new path
@@ -266,7 +267,7 @@ def _rehome_vm(
 
                 # Regenerate VS Code workspace file
                 vscode_path = generate_vscode_workspace(vm, config, ws_name, new_path)
-                output.detail(f"VS Code workspace updated: {vscode_path}")
+                output.detail(f"VS Code workspace updated: {format_host_path(vscode_path)}")
 
                 # Handle old directory
                 if remove_old:
@@ -281,7 +282,7 @@ def _rehome_vm(
                 output.warn(
                     f"Cancelling workspace rehome '{ws_name}'. "
                     f"{_rehome_partial_state_hint(db, ws_name, old_path, new_path)} "
-                    f"SSH log: {ssh_logger.path}"
+                    f"SSH log: {ssh_logger.display_path}"
                 )
                 raise
             except AgentworksError:
@@ -291,7 +292,10 @@ def _rehome_vm(
                     f"during rehome: {e}",
                     entity_kind="workspace",
                     entity_name=ws_name,
-                    hint=(f"SSH log: {ssh_logger.path}. {_rehome_partial_state_hint(db, ws_name, old_path, new_path)}"),
+                    hint=(
+                        f"SSH log: {ssh_logger.display_path}. "
+                        f"{_rehome_partial_state_hint(db, ws_name, old_path, new_path)}"
+                    ),
                 ) from e
         finally:
             ssh_logger.close()

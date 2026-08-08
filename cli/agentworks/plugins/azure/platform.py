@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, NamedTuple,
 from pydantic import Field
 
 from agentworks import output
+from agentworks.capabilities.retired_shapes import RetiredPresenceShape
 from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
 from agentworks.capabilities.vm_platform.bootstrap_script import generate_bootstrap_script
 from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES, generate_cloud_init
@@ -120,8 +121,8 @@ _ARM_SCOPE = "https://management.azure.com/.default"
 
 
 def _build_ambient_credential() -> object:
-    """Build the AMBIENT Azure credential (the path taken when the site
-    declares no ``service_principal``), deciding the interactive-browser
+    """Build the AMBIENT Azure credential (the path a site selects by
+    declaring ``auth: {mode: ambient}``), deciding the interactive-browser
     fallback with a single live probe.
 
     Tries DefaultAzureCredential first (picks up az login, env vars,
@@ -153,14 +154,14 @@ def _build_ambient_credential() -> object:
         return InteractiveBrowserCredential()
 
 
-def _build_service_principal_credential(sp: AzureServicePrincipal, client_secret: str, site_name: str) -> object:
-    """Build the EXPLICIT service-principal credential from the site's
-    configured tenant / client and the resolved client secret, probed
-    once against ARM.
+def _build_service_principal_credential(sp: AzureServicePrincipalAuth, client_secret: str, site_name: str) -> object:
+    """Build the service-principal credential from the site's configured
+    tenant / client and the resolved client secret, probed once against
+    ARM.
 
     The probe mirrors the ambient path's, but for a different reason:
-    there is no fallback to decide here (an operator who configured a
-    service principal means that credential and no other, so falling
+    there is no fallback to decide here (an operator who selected
+    ``mode: service-principal`` means that credential and no other, so falling
     through to ambient or to a browser prompt would silently authenticate
     as the wrong identity). It exists purely to turn a bad credential
     into a clear, site-and-secret-named error at the point of
@@ -210,7 +211,7 @@ def _build_service_principal_credential(sp: AzureServicePrincipal, client_secret
             entity_kind="vm-site",
             entity_name=site_name,
             hint=(
-                f"Check service_principal.tenant_id / client_id and the "
+                f"Check auth.tenant_id / auth.client_id and the "
                 f"value of the '{sp.secret}' secret (an expired client "
                 f"secret is the usual cause; `az ad app credential list` "
                 f"shows expiry). If Entra ID is simply unreachable this "
@@ -221,13 +222,38 @@ def _build_service_principal_credential(sp: AzureServicePrincipal, client_secret
     return cred
 
 
-class AzureServicePrincipal(AgwModel):
-    """A site's explicit Azure service-principal credential.
+# Why an arm with no fields but its tag exists at all: it gives
+# borrowing the host's identity a DECLARED form, which the old optional
+# ``service_principal`` block never had. A site can now write the choice
+# down and a reviewer can read it, and the union's default is this arm,
+# carried in ``describe-kind`` and the emitted schema rather than
+# implied by a missing key.
+class AzureAmbientAuth(AgwModel):
+    """Authenticate with the ambient chain: ``az login``, ``AZURE_*``, or a managed identity.
 
-    Nested rather than flattened into the platform config on purpose: a
-    future certificate-based variant slots in beside ``secret`` without
-    touching the top-level namespace or breaking a declared site.
+    The interactive-browser fallback runs when none of those can get a
+    token.
     """
+
+    mode: Literal["ambient"]
+    """Selects this arm."""
+
+
+# A tagged arm rather than an optional block on the config: a future
+# certificate-based service principal, or a managed-identity mode with
+# fields of its own, is a new arm beside these two rather than another
+# nullable table whose presence has to be cross-checked against the
+# others.
+class AzureServicePrincipalAuth(AgwModel):
+    """Authenticate as an explicit Entra ID service principal.
+
+    It replaces the ambient chain entirely for this site: a rejected
+    client secret fails the command rather than falling back to some other
+    identity.
+    """
+
+    mode: Literal["service-principal"]
+    """Selects this arm."""
 
     tenant_id: NonEmptyStr
     """The Entra ID tenant the principal lives in."""
@@ -243,6 +269,41 @@ class AzureServicePrincipal(AgwModel):
     the field NAMES a secret in the framework's secret system, which is
     why it is ``secret`` and not ``client_secret``. The default env-var
     convention reads ``AW_SECRET_AZURE_CLIENT_SECRET``."""
+
+
+#: How an azure-vm site authenticates, as a tagged union DEFAULTING to
+#: the ambient arm.
+#:
+#: An earlier revision made this required with no default, and that
+#: reasoning is in the history, so here is why it reversed (operator
+#: ruling): the defect the union fixed was never "absence selects a
+#: mechanism", it was that there was no way to DECLARE the choice at all.
+#: The union fixes the second, and once an explicit form exists, a
+#: default is an ordinary default, carried in the emitted schema and in
+#: ``describe-kind`` like any other. Ambient is the right one because it
+#: is what the wrapped SDK already does: ``DefaultAzureCredential`` is
+#: ambient-first, so requiring explicit auth would make this site
+#: stricter than the tool it wraps, which is surprising in the other
+#: direction. The general pattern: ambient where the underlying tool has
+#: an ambient notion, required where it does not, which is why proxmox
+#: has no union at all rather than being an exception to one.
+#:
+#: The tag is a string ``Literal`` rather than a boolean for the same
+#: reason it is a union rather than an ``auth_mode`` field beside nullable
+#: blocks: each mode carries its OWN fields, and azure has further modes
+#: worth naming later (a user-assigned managed identity, a certificate
+#: credential) that a boolean could not grow into. Pydantic emits this
+#: directly as ``oneOf`` with a ``discriminator`` mapping, so the loader
+#: and the emitted schema agree by construction, which a cross-field
+#: validator over nullable blocks could not achieve. Not because JSON
+#: Schema cannot state the constraint (it can, as ``oneOf`` over closed
+#: arms or as ``if``/``then`` on the tag), but because pydantic does not
+#: derive a validator's body into the schema it emits, so the emitted
+#: schema would go silent about it and accept mixed-arm configs the
+#: loader rejects. That is sanctioned under-approximation under
+#: ``manifests/emit.py``, not a breach of it; what it forfeits is the
+#: editor DIAGNOSTIC.
+AzureAuth = Annotated[AzureAmbientAuth | AzureServicePrincipalAuth, Field(discriminator="mode")]
 
 
 class AzureVMSize(AgwModel):
@@ -279,10 +340,11 @@ class AzureVMConfig(AgwModel):
     satisfies the request. Non-empty when present, because an empty
     catalog is a site on which no VM can be created."""
 
-    service_principal: AzureServicePrincipal | None = None
-    """An explicit credential. Omit to authenticate with the ambient
-    Azure credential chain, which is what every site did before issue
-    #199 and what every site that omits this still does."""
+    auth: AzureAuth = AzureAmbientAuth(mode="ambient")
+    """How this site authenticates to Azure: ``{mode: ambient}`` for the
+    ambient credential chain, or ``{mode: service-principal, ...}`` for an
+    explicit principal. Defaults to ambient, matching what
+    ``DefaultAzureCredential`` does when told nothing."""
 
 
 class _VMSize(NamedTuple):
@@ -369,6 +431,16 @@ class AzureVMPlatform(VMPlatform):
     name: ClassVar[str] = "azure-vm"
     description: ClassVar[str] = "Azure Virtual Machines (subscription + resource group)"
     config_model: ClassVar[type[AzureVMConfig]] = AzureVMConfig
+    # An azure-vm site that WROTE ``service_principal`` (or wrote it
+    # null) crosses this break and gets its exact rewrite; a site that
+    # omitted it lands on the ambient default and was never broken.
+    # Release-scoped.
+    retired_shape: ClassVar[RetiredPresenceShape | None] = RetiredPresenceShape(
+        retired_field="service_principal",
+        union_field="auth",
+        present_mode="service-principal",
+        absent_mode="ambient",
+    )
     prose: ClassVar[TopicProse | None] = TopicProse(
         title="Azure VMs",
         overview="""
@@ -381,10 +453,11 @@ class AzureVMPlatform(VMPlatform):
         `vm create` picks the smallest entry that satisfies the vm-template's request
         (an off-ratio request rounds up and warns).
 
-        Authentication is the ambient Azure credential chain by default (`az login`,
-        `AZURE_*` variables, managed identity). Declaring a service principal replaces
-        that chain entirely for this site: a rejected client secret then fails the
-        command rather than falling back.
+        `auth` says how the site authenticates and defaults to `{mode: ambient}`, the
+        ambient Azure credential chain (`az login`, `AZURE_*` variables, managed
+        identity), which is what `DefaultAzureCredential` does when told nothing.
+        `auth: {mode: service-principal, ...}` replaces that chain entirely for this
+        site: a rejected client secret then fails the command rather than falling back.
 
         Ships as the opt-in `azure` system plugin, so a site stays not-ready until
         `[plugins] system` lists it.
@@ -415,8 +488,8 @@ class AzureVMPlatform(VMPlatform):
         # Azure credential and SDK clients, built on FIRST need by the
         # accessors below and reused for the instance's remaining ops.
         # The credential is subscription-independent AND its identity is
-        # fixed by the bound config (the site's service_principal, or
-        # the ambient chain when it declares none), so it caches once
+        # fixed by the bound config (whichever arm the site's auth.mode
+        # names), so it caches once
         # per instance (one live get_token probe per command, given the
         # vms/nodes.py site memo shares one instance per site). The
         # clients are keyed by subscription_id: the site's config names
@@ -430,8 +503,8 @@ class AzureVMPlatform(VMPlatform):
         self._network_cached: dict[str, NetworkManagementClient] = {}
         self._resource_cached: dict[str, ResourceManagementClient] = {}
 
-    # No preflight override, on either credential path. A site with a
-    # ``service_principal`` DOES declare a config secret, and an
+    # No preflight override, on either credential path. A
+    # ``service-principal`` site DOES declare a config secret, and an
     # unresolvable client secret does fail before any prompt or
     # mutation, but that check is the OPERATION's preflight sweep
     # predicting over the site's declared references, not this class's
@@ -464,31 +537,32 @@ class AzureVMPlatform(VMPlatform):
         """The Azure credential, built on first need (one live probe) and
         reused for the instance's remaining ops.
 
-        Which credential is a config decision, not a runtime one: a site
-        that declares a ``service_principal`` gets exactly that
-        credential, built from the client secret ``ctx.secret`` delivers
-        (the declare/receive contract: the instance never holds a
-        resolver or a raw reader, only the credential derived from the
-        delivered value), and NEVER falls back to the ambient chain or a
-        browser prompt if it fails; a site that declares none gets the
-        ambient chain with its browser fallback, byte-for-byte as before.
-        Falling back would authenticate as a different identity than the
-        operator configured, which is worse than failing.
+        Which credential is a config decision, not a runtime one, and the
+        site states it outright: ``auth.mode`` selects the arm. A
+        ``service-principal`` site gets exactly that credential, built
+        from the client secret ``ctx.secret`` delivers (the
+        declare/receive contract: the instance never holds a resolver or
+        a raw reader, only the credential derived from the delivered
+        value), and NEVER falls back to the ambient chain or a browser
+        prompt if it fails; an ``ambient`` site gets the ambient chain
+        with its browser fallback. Falling back would authenticate as a
+        different identity than the operator configured, which is worse
+        than failing.
 
         Caching stays correct under the fork because the fork's inputs
-        are fixed per instance: the site's tenant, client, and secret
-        NAME come from the bound config, so a given instance
+        are fixed per instance: the site's mode, tenant, client, and
+        secret NAME come from the bound config, so a given instance
         resolves the same credential every time. See
         :func:`_build_ambient_credential` and
         :func:`_build_service_principal_credential`.
         """
         cred = self._credential_cached
         if cred is None:
-            sp = self.config.service_principal
-            if sp is None:
+            auth = self.config.auth
+            if isinstance(auth, AzureAmbientAuth):
                 cred = _build_ambient_credential()
             else:
-                cred = _build_service_principal_credential(sp, ctx.secret(sp.secret), self.site_name)
+                cred = _build_service_principal_credential(auth, ctx.secret(auth.secret), self.site_name)
             self._credential_cached = cred
         return cred
 
@@ -552,8 +626,8 @@ class AzureVMPlatform(VMPlatform):
 
         Post-resolve and authenticated: the credential is whatever
         :meth:`_get_credential` resolves off the site's config, and this
-        is where BOTH paths first pay for it. On a site with a declared
-        ``service_principal`` that means the client secret is read from
+        is where BOTH paths first pay for it. On a ``service-principal``
+        site that means the client secret is read from
         the context here and the credential is probed here, so a bad or
         expired one aborts ``vm create`` with a typed, secret-naming
         error before the DB row or any Azure resource exists, which is

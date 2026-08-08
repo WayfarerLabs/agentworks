@@ -35,22 +35,25 @@ from weakref import WeakKeyDictionary
 from pydantic import BaseModel, ConfigDict, Field, RootModel, model_validator
 
 from agentworks.errors import StateError
-from agentworks.schema._shape import marker_of, markers_in, model_fields_of, shape_of
-from agentworks.schema.markers import REF_SCHEMA_KEY, RefOwner
+from agentworks.schema._shape import (
+    marker_of,
+    markers_in,
+    model_fields_of,
+    models_in,
+    shape_of,
+    table_addresses_block,
+)
+from agentworks.schema.markers import REF_SCHEMA_KEY
 from agentworks.schema.shorthand import ScalarShorthand, shorthand_field_error
 
 if TYPE_CHECKING:
-    from pydantic import GetJsonSchemaHandler, ValidationInfo
+    from pydantic import GetJsonSchemaHandler
     from pydantic.fields import FieldInfo
     from pydantic.json_schema import JsonSchemaValue
     from pydantic_core import CoreSchema
 
     from agentworks.schema._shape import FieldShape
     from agentworks.schema.markers import RefMarker
-
-#: The key an owner rides under in pydantic's validation context. Build
-#: the context with :func:`validation_context` rather than spelling it.
-OWNER_CONTEXT_KEY: Final = "owner"
 
 #: Per-class cache for :func:`_marked_fields`.
 _MARKED_FIELD_CACHE: Final[WeakKeyDictionary[type[BaseModel], tuple[tuple[str, RefMarker], ...]]] = WeakKeyDictionary()
@@ -104,76 +107,19 @@ class AgwModel(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def _normalized_input(cls, data: Any, info: ValidationInfo) -> Any:
-        """The two rewrites this base makes before any field is validated,
-        in the order they have to happen.
-
-        One validator calling both rather than two validators, because the
-        order is load-bearing and pydantic runs ``mode="before"``
-        validators in REVERSE definition order. Written as two, the fold
-        would have to be declared SECOND to run first, and the day someone
-        tidied that an owner-templated default would silently stop being
-        filled for a value written in its shorthand form. Here the order
-        is the line below.
-        """
-        return cls._fill_owner_templated_defaults(cls._fold_scalar_shorthand(data), info)
-
-    @classmethod
     def _fold_scalar_shorthand(cls, data: Any) -> Any:
         """``data`` as the mapping a bare-scalar shorthand stands for, so
         everything after this point sees one shape.
 
-        First, because the fill below acts only on a mapping: a shorthand
-        value folded after it would skip the fill entirely, and a
-        shorthand model with an owner-templated field would resolve
-        nothing for exactly the operators who wrote the short spelling.
+        The ONLY rewrite this base makes. In particular, an owner-templated
+        default is deliberately not resolved here: rendering it needs the
+        owner, which is a fact about where the blob was declared and not
+        about its content, so the boundary that knows the owner renders it
+        into the blob before validation ever runs
+        (:func:`~agentworks.schema.filled_defaults`). Keeping the model
+        layer owner-free is what makes every model constructible standalone.
         """
         return data if cls.scalar_shorthand is None else cls.scalar_shorthand.folded(data)
-
-    @classmethod
-    def _fill_owner_templated_defaults(cls, data: Any, info: ValidationInfo) -> Any:
-        """Resolve an omitted reference field from its marker's owner
-        template, so the validated instance carries the same name the
-        reference extractor derived for the graph.
-
-        The model cannot know its owner by itself, so the owner rides the
-        validation context (:func:`validation_context`). Models with no
-        templated field ignore the context entirely, which keeps a
-        context-free ``model_validate`` legal for them.
-
-        An omitted value and an explicit ``null`` are treated alike, and
-        deliberately so: reference extraction makes the same call, and
-        the resolved name has to be the same on both paths or the graph
-        edge and the validated instance would name different secrets.
-        """
-        templated = _owner_templated_fields(cls)
-        # ``dict``, not ``Mapping``: strict mode accepts a dict or a model
-        # instance and nothing else, so widening here would let some other
-        # mapping type through for exactly the models that happen to have
-        # an unset templated field, which is an invisible local exception
-        # to the global posture.
-        if not templated or not isinstance(data, dict):
-            return data
-        unset = [(name, marker) for name, marker in templated if data.get(name) is None]
-        if not unset:
-            return data
-
-        owner = info.context.get(OWNER_CONTEXT_KEY) if isinstance(info.context, dict) else None
-        if not isinstance(owner, RefOwner):
-            # A framework bug (a call site forgot the context), never an
-            # operator mistake, so this is not a ConfigError.
-            names = ", ".join(name for name, _marker in unset)
-            raise StateError(
-                f"{cls.__name__} has owner-templated field(s) ({names}) but was validated "
-                "with no owner in context; pass validation_context(owner) to model_validate"
-            )
-
-        filled = dict(data)
-        for name, marker in unset:
-            rendered = marker.render_default(owner)
-            if rendered:
-                filled[name] = rendered
-        return filled
 
     @classmethod
     def __pydantic_init_subclass__(cls, **kwargs: Any) -> None:
@@ -227,13 +173,14 @@ def _with_marker_corrections(
     """``json_schema`` with the two reference-marker corrections applied.
 
     **An owner-templated field is neither required nor non-nullable.**
-    :func:`_filled_owner_templated_defaults` resolves such a field from
-    its marker, and it treats an omitted value and an explicit ``null``
-    alike, on purpose: reference extraction makes the same call, so the
-    two paths cannot come to name different secrets. Emitted schema has to
-    state BOTH halves of that, and pydantic can state neither, because it
-    computes ``required`` and nullability from the declared field and
-    knows nothing about the validator:
+    The boundary fill (:func:`~agentworks.schema.filled_defaults`)
+    resolves such a field from its marker before validation reads the
+    blob, and it treats an omitted value and an explicit ``null`` alike,
+    on purpose: the two spellings are one instruction, and both resolve
+    to the same name extraction reads off the same filled blob. Emitted
+    schema has to state BOTH halves of that, and pydantic can state
+    neither, because it computes ``required`` and nullability from the
+    declared field and knows nothing about the fill:
 
     - not required, or an editor red-underlines the very omission the
       mechanism exists to resolve (``provider: {name: github}`` with no
@@ -247,10 +194,10 @@ def _with_marker_corrections(
     every marked field, templated or not, because the widening above is
     only one of the two ways a marker ends up buried.
 
-    Stated here, on the class that does the filling, rather than in the
-    emitter: both rules are properties of this model's validation
-    behavior, and a consumer correcting for them downstream would be a
-    second place to keep in sync.
+    Stated here, on the base every filled model extends, rather than in
+    the emitter: both rules are properties of how the framework loads
+    these models, and a consumer correcting for them downstream would be
+    a second place to keep in sync.
     """
     marked = _marked_fields(model_cls)
     if not marked:
@@ -372,22 +319,12 @@ def _accepts_null(prop: JsonSchemaValue) -> bool:
     return any(branch.get("type") == "null" for branch in branches)
 
 
-def validation_context(owner: RefOwner) -> dict[str, object]:
-    """The validation context every framework ``model_validate`` call
-    passes: it is what lets an owner-templated field resolve its default.
-
-    A model with no templated field ignores it, so passing it always is
-    cheaper than remembering which models need it.
-    """
-    return {OWNER_CONTEXT_KEY: owner}
-
-
 def _marked_fields(model_cls: type[BaseModel]) -> tuple[tuple[str, RefMarker], ...]:
     """The model's own fields carrying a reference marker on the field
     ITSELF, in declaration order.
 
     Cached per class, since it is a pure function of the class and the
-    filling above runs on every validation of every model. The cache is
+    schema hook above runs it for every model that emits. The cache is
     weak so a model class defined inside a function (a test, mostly) is
     still collectable.
     """
@@ -404,22 +341,6 @@ def _marked_fields(model_cls: type[BaseModel]) -> tuple[tuple[str, RefMarker], .
     return computed
 
 
-def _owner_templated_fields(model_cls: type[BaseModel]) -> tuple[tuple[str, RefMarker], ...]:
-    """The marked fields whose marker declares a default template.
-
-    Scalar fields only, and now provably so:
-    :func:`reference_marker_error` refuses a marker on a collection or on
-    a nested block at registration, so the filling above can write a
-    rendered name straight into the field. It was a comment here before
-    that, which is a promise no shape had to keep.
-
-    Filtered off :func:`_marked_fields` rather than cached separately: a
-    model has at most a handful of marked fields and most have none, so
-    the walk this saves is the expensive half.
-    """
-    return tuple((name, marker) for name, marker in _marked_fields(model_cls) if marker.default_template is not None)
-
-
 def reference_marker_error(model_cls: type[BaseModel]) -> str | None:
     """Why one of ``model_cls``'s reference markers cannot mean what it
     says, or ``None`` when every one of them can.
@@ -429,14 +350,14 @@ def reference_marker_error(model_cls: type[BaseModel]) -> str | None:
     nothing in this layer can honor it, and each of the three consumers
     fails differently and silently:
 
-    - validation writes the marker's rendered default where a list or a
-      table belongs, then rejects the field on a key the operator never
-      wrote;
+    - the boundary fill writes the marker's rendered default where a list
+      or a table belongs, and validation then rejects the field on a key
+      the operator never wrote;
     - emitted schema widens the COLLECTION with a null arm rather than
       its elements, and hangs the marker off the whole field;
-    - reference extraction reads the field as a scalar, so it emits a
-      bogus edge for the rendered default and none of the edges the
-      elements actually imply.
+    - reference extraction reads the field as a scalar, so it emits an
+      edge for the filled-in default and none of the edges the elements
+      actually imply.
 
     Refused here rather than handled at those three sites, because the
     mistake is an author's and has exactly one fix: move the marker onto
@@ -463,13 +384,32 @@ def reference_marker_error(model_cls: type[BaseModel]) -> str | None:
     doubling as a set of silent failures: whatever it does not classify is
     loud here instead.
 
-    Recursive over the same shapes validation reaches, since a nested
-    block, a collection's element model, and a union arm each fill and
-    extract on their own. Every model a walker can descend into is
-    descended into here, which is both kinds of union arm and the single
-    block an untagged scalar-or-block union offers, at the field and at
-    one element alike. A model that cannot be built reports nothing: it
-    has no fields to judge, and its own check
+    A marker fact no consumer reads is refused the same way, which today
+    means one: a default template on a COLLECTION's element marker. The
+    boundary fill (:func:`~agentworks.schema.filled_defaults`) renders a
+    template into the field it defaults, and an omitted collection has no
+    element to write into, so the authored template would be prose
+    nothing executes.
+
+    The rule behind all of the refusals is one invariant, and it is what
+    this function enforces: **every model pydantic can select is a model
+    some walker reaches, or no reference marker hides inside it.** The
+    check is recursive over the models the walkers descend into (both
+    kinds of union arm and the single addressable block of an untagged
+    scalar-or-block union, at the field and at one element alike), and it
+    is CLOSED over the models validation can construct that no walker
+    reaches: an arm of a two-model union nothing tags, a block a table
+    member shadows out of pre-validation addressability, an arm behind a
+    non-string tag, a model under a shape the classifier does not
+    recognize. Each of those validates happily while extraction, by sound
+    refusal, never walks it, so a marker anywhere inside one is the same
+    silent gating bypass one shape over, and the whole model is refused
+    unless it is marker-free at every depth. Stated as a subtraction
+    (models validation offers minus models the walkers reach,
+    marker-free remainder required) rather than as a list of known bad
+    shapes, so the next walker gap an author can spell is refused here
+    without anyone having to predict it. A model that cannot be built
+    reports nothing: it has no fields to judge, and its own check
     (:func:`~agentworks.schema.model_is_complete`) already refuses it.
     """
     return _marker_error(model_cls, ())
@@ -513,8 +453,26 @@ def _marker_error(model_cls: type[BaseModel], visiting: tuple[type[BaseModel], .
                 f"the field's own value or on one element of a list, a set, or a table, so spell "
                 f"the field as one of those (a nested collection needs a model for the inner one)"
             )
-        for reachable in _reachable_models(shape):
-            reason = _marker_error(reachable, visiting)
+        if shape.item_marker is not None and shape.item_marker.default_template is not None:
+            return (
+                f"{model_cls.__name__}.{name} declares a default template on a collection's "
+                f"element marker, which nothing renders: an omitted collection has no element to "
+                f"default and a present element is named by the operator, so drop the template or "
+                f"move the marker onto a scalar field that holds one name"
+            )
+        reachable = _reachable_models(shape)
+        for stranded in models_in(field.annotation):
+            if stranded not in reachable and _hides_marker(stranded, ()):
+                return (
+                    f"{model_cls.__name__}.{name} lets validation select {stranded.__name__}, "
+                    f"which no walker reaches, and a reference marker hides inside "
+                    f"{stranded.__name__}, so a Resource a document names there would never "
+                    f"become a graph edge; make the model addressable from a raw value (a tagged "
+                    f"union arm with string tags, the one table-shaped member of its union, or a "
+                    f"directly nested block), or remove the marker"
+                )
+        for model in reachable:
+            reason = _marker_error(model, visiting)
             if reason is not None:
                 return reason
     return None
@@ -539,19 +497,72 @@ def _has_unplaceable_marker(field: FieldInfo, shape: FieldShape) -> bool:
 
 
 def _reachable_models(shape: FieldShape) -> tuple[type[BaseModel], ...]:
-    """Every model a walker can descend into from one field.
+    """Every model a WALKER can descend into from one field.
 
     Both kinds of union arm and both untagged scalar-or-block blocks are
     here beside the plain nested block and a collection's element model,
     because reference extraction reaches all six, and a marker this check
     does not visit is one an author ships.
+
+    An untagged union's block counts only when extraction can actually
+    address it (:func:`~agentworks.schema._shape.table_addresses_block`,
+    the same predicate extraction asks): a block shadowed by a table
+    member validates fine and is walked by nothing, which is exactly what
+    the stranded-model subtraction in :func:`_marker_error` exists to
+    refuse when a marker hides inside one.
     """
     models = (
         shape.nested_model,
         shape.item_model,
-        shape.union_model,
-        shape.item_union_model,
+        _addressable_block(shape.union_model, shape.union_members),
+        _addressable_block(shape.item_union_model, shape.item_union_members),
         *(arm.model for arm in shape.arms),
         *(arm.model for arm in shape.item_arms),
     )
     return tuple(model for model in models if model is not None)
+
+
+def _addressable_block(model: type[BaseModel] | None, members: tuple[object, ...]) -> type[BaseModel] | None:
+    """``model`` when a raw table can be attributed to it, else ``None``."""
+    if model is None or not table_addresses_block(model, members):
+        return None
+    return model
+
+
+def _hides_marker(model_cls: type[BaseModel], visiting: tuple[type[BaseModel], ...]) -> bool:
+    """Whether a reference marker is written anywhere inside ``model_cls``
+    or a model reachable from it, in any position, placed or not.
+
+    The question asked of a model VALIDATION can construct and no walker
+    reads. Such a model is fine to accept and worthless to mark, since no
+    marker inside it can ever feed the graph, so any marker at any depth
+    makes the whole model refusable where none at all leaves it alone.
+    Both marker carriers are read, because pydantic keeps both: the
+    field's own metadata (where an outermost ``Annotated`` marker is
+    lifted) and the annotation tree (everywhere else).
+
+    ``visiting`` is this walk's OWN path, and the sole caller deliberately
+    starts it at ``()`` rather than handing down the path
+    :func:`_marker_error` is carrying. That difference is load-bearing:
+    the question here is about one stranded model's contents, not about
+    where the outer walk happened to reach it from. Threading the outer
+    path in would make this return ``False`` for any stranded model
+    already on it, silently skipping the very check the subtraction
+    exists to perform. Do not "tidy" the call to match the recursion.
+
+    A model that cannot be built hides nothing this can see; its own
+    check (:func:`~agentworks.schema.model_is_complete`) already refuses
+    it.
+    """
+    if model_cls in visiting:
+        return False
+    fields = model_fields_of(model_cls)
+    if fields is None:
+        return False
+    visiting = (*visiting, model_cls)
+    for field in fields.values():
+        if marker_of(field) is not None or markers_in(field.annotation):
+            return True
+        if any(_hides_marker(child, visiting) for child in models_in(field.annotation)):
+            return True
+    return False

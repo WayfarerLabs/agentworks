@@ -514,7 +514,8 @@ spec:
     subscription_id: "0000"
     resource_group: agw-dev
     region: eastus
-    service_principal:
+    auth:
+      mode: service-principal
       tenant_id: tenant-1
       client_id: client-1
       secret: az-sp

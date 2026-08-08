@@ -6,6 +6,7 @@ import typer
 
 from agentworks.cli._app import app
 from agentworks.cli._helpers import get_db
+from agentworks.path_rendering import format_host_path
 
 config_app = typer.Typer(
     name="config",
@@ -24,14 +25,14 @@ def config_init() -> None:
     from agentworks.config import CONFIG_DIR, CONFIG_PATH
 
     if CONFIG_PATH.exists():
-        typer.echo(f"Config already exists: {CONFIG_PATH}")
+        typer.echo(f"Config already exists: {format_host_path(CONFIG_PATH)}")
         typer.echo("Edit it directly, or remove it and run 'agw config init' again.")
         return
 
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     sample = files("agentworks").joinpath("sample-config.toml")
     shutil.copy2(str(sample), CONFIG_PATH)
-    typer.echo(f"Sample config written to {CONFIG_PATH}")
+    typer.echo(f"Sample config written to {format_host_path(CONFIG_PATH)}")
     # The SSH key pair is called out by name because it is the only thing
     # in the sample that must be true of the HOST before any command
     # works: the sample ships a plausible default path, and on a machine
@@ -58,7 +59,7 @@ def config_edit() -> None:
         raise typer.Exit(1)
 
     if not CONFIG_PATH.exists():
-        typer.echo(f"Error: config file not found at {CONFIG_PATH}", err=True)
+        typer.echo(f"Error: config file not found at {format_host_path(CONFIG_PATH)}", err=True)
         typer.echo("Run 'agw config init' to create one.", err=True)
         raise typer.Exit(1)
 
@@ -95,10 +96,10 @@ def config_sync_vscode_workspaces() -> None:
             typer.echo(f"  Skipping '{ws.name}': VM '{ws.vm_name}' not found", err=True)
             continue
         path = generate_vscode_workspace(vm, config, ws.name, ws.workspace_path)
-        typer.echo(f"  {ws.name} -> {path}")
+        typer.echo(f"  {ws.name} -> {format_host_path(path)}")
         count += 1
 
-    typer.echo(f"Regenerated {count} VS Code workspace file(s) in {config.paths.vscode_workspaces}")
+    typer.echo(f"Regenerated {count} VS Code workspace file(s) in {format_host_path(config.paths.vscode_workspaces)}")
 
 
 @config_app.command("sync-ssh-config")

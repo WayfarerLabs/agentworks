@@ -15,6 +15,15 @@ come out unlocated; the finalize pass appends the origin, gluing it to
 the LAST line). Framing the batch here is the only shape in which no
 error line is unlocated.
 
+:func:`located` is the framing itself, exposed separately for the
+callers that raise a ``ConfigError`` about a document without a pydantic
+exception behind it: a pre-validation refusal is still one of the
+manifest errors an operator reads in a batch, and it has to carry the
+same ``<file>:<line>:`` prefix as its neighbors or it reads as being
+about something else. One renderer for the frame, so the sentinels
+(``line == 0``, the synthesized path) are honored the same way
+everywhere and no call site invents a second spelling of a path.
+
 A diagnostic surface wanting the same text WITHOUT an exception in hand
 (a doctor row, ``describe``) reads :func:`_problems`, the shared core the
 framing is built over, and frames the problems its own way. That is why
@@ -40,6 +49,7 @@ here as ``PydanticValidationError`` and this module produces
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import cache
 from typing import TYPE_CHECKING, Final
@@ -47,11 +57,12 @@ from typing import TYPE_CHECKING, Final
 from pydantic import RootModel
 
 from agentworks.errors import ConfigError
+from agentworks.path_rendering import format_host_path
 from agentworks.schema._shape import Collection, is_hidden, is_model, model_fields_of, shape_of
-from agentworks.source_location import SYNTHESIZED_PATH, format_file_path
+from agentworks.source_location import SYNTHESIZED_PATH
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Sequence
 
     from pydantic import BaseModel
     from pydantic import ValidationError as PydanticValidationError
@@ -134,9 +145,9 @@ def config_error_from(
     .. code-block:: text
 
         sites.yaml:12: vm-site/lab: 3 problems
-          platform.vm_host: must be a string
+          platform.placement: must be a table
           platform.cpus: is required
-          platform.regions: unknown field; expected one of: cpus, vm_host
+          platform.regions: unknown field; expected one of: cpus, placement
 
     Because this owns the framing, a caller must NOT also wrap the
     result with a location of its own: that would frame it twice. There is
@@ -225,7 +236,7 @@ def _problem(
     address = _resolve_path(model_cls, detail["loc"])
     return _Problem(
         path=address.path,
-        message=_message(detail, address.container),
+        message=_message(detail, address),
         inherited_from=_inherited_from(address.path, owner, provenance),
         alternatives=_alternatives(detail) if address.at_union else (),
         union_path=address.union_path,
@@ -350,61 +361,91 @@ def _framed_batch(
     location: SourceLocation | None,
 ) -> str:
     if len(problems) == 1:
-        return _located(location, _owner_framed(owner, problems[0]))
-    lines = [_located(location, f"{owner.display}: {len(problems)} problems")]
+        return located(location, _owner_framed(owner, problems[0]))
+    lines = [located(location, f"{owner.display}: {len(problems)} problems")]
     lines.extend(f"  {problem.render()}" for problem in problems[:MAX_ERROR_LINES])
     if len(problems) > MAX_ERROR_LINES:
         lines.append(f"  ... and {len(problems) - MAX_ERROR_LINES} more")
     return "\n".join(lines)
 
 
-def _located(location: SourceLocation | None, text: str) -> str:
-    """``text`` prefixed with where the operator can go and fix it.
+def location_text(location: SourceLocation | None) -> str | None:
+    """The bare ``~/path:42`` an operator can navigate to, or ``None``
+    when there is no such place.
+
+    The single authority for the sentinel rule, so that the two ways a
+    location reaches an operator (as :func:`located`'s prefix, or named
+    inline inside a message) cannot answer differently.
 
     ``SourceLocation`` carries its own sentinels and they are honored
     rather than rendered: ``line == 0`` means the resource was not
-    introduced by a specific declaration site, and the synthesized path
-    means there is no file either (a framework-constructed row). A
-    location an operator cannot navigate to is worse than no location, so
-    those frame nothing.
+    introduced by a specific declaration site, so the file is named
+    without a position (no editor has a line 0), and the synthesized path
+    means there is no file either (a framework-constructed row), which is
+    nowhere to send anyone.
 
     The path renders home-relative, matching every other operator-facing
     rendering of a config path.
     """
     if location is None or location.file == SYNTHESIZED_PATH:
-        return text
-    where = format_file_path(location.file)
-    if location.line:
-        where = f"{where}:{location.line}"
-    return f"{where}: {text}"
+        return None
+    where = format_host_path(location.file)
+    return f"{where}:{location.line}" if location.line else where
+
+
+def located(location: SourceLocation | None, text: str) -> str:
+    """``text`` prefixed with where the operator can go and fix it.
+
+    Public because a config error does not have to come from pydantic to
+    deserve the same frame. A pre-validation refusal
+    (:mod:`agentworks.capabilities.retired_shapes`, the envelope and
+    duplicate checks in :mod:`agentworks.manifests`) raises its own
+    ``ConfigError`` about the same document, at the same moment, with the
+    same location in hand, and an operator reading a batch of manifest
+    errors should not find one of them framed differently because of
+    where in the pipeline it was raised.
+
+    A location an operator cannot navigate to is worse than no location,
+    so :func:`location_text`'s ``None`` frames nothing at all.
+    """
+    where = location_text(location)
+    return text if where is None else f"{where}: {text}"
 
 
 # -- Message normalization ----------------------------------------------------
 
 
-def _message(detail: ErrorDetails, container: type[BaseModel] | None) -> str:
+def _message(detail: ErrorDetails, address: _Address) -> str:
     """The operator-facing phrasing for one error.
 
     The contextual cases come first because they read values out of
     pydantic's ``ctx``; everything else is the flat table, and anything
     in neither keeps pydantic's own message.
     """
-    contextual = _contextual_message(detail, container)
+    contextual = _contextual_message(detail, address)
     if contextual is not None:
         return contextual
     return _TYPE_MESSAGES.get(detail["type"], detail["msg"])
 
 
-def _contextual_message(detail: ErrorDetails, container: type[BaseModel] | None) -> str | None:
+def _contextual_message(detail: ErrorDetails, address: _Address) -> str | None:
     """The phrasing for the error types whose text depends on the model
     or on the error's context, or ``None`` to leave it to the table.
+
+    Takes the whole :class:`_Address` because the walk is what knows the
+    MODEL behind an error: the unknown-key message needs the container to
+    list its fields, and the missing-tag message needs the union's arms to
+    list its modes. Pydantic supplies neither.
 
     Each of these returns ``None`` when the fact it needs is not where it
     should be, which puts the message back on pydantic's own text rather
     than on a guess.
     """
+    container = address.container
     ctx: Mapping[str, object] = detail.get("ctx") or {}
     match detail["type"]:
+        case "missing":
+            return _missing_union_block(address)
         case "extra_forbidden":
             return _unknown_field(container)
         case "string_too_short":
@@ -437,10 +478,9 @@ def _contextual_message(detail: ErrorDetails, container: type[BaseModel] | None)
         case "bool_type":
             return _quoted_boolean(detail.get("input"))
         case "union_tag_not_found":
-            tag_field = _unquoted(ctx.get("discriminator"))
-            return f"{tag_field} is required" if tag_field else None
+            return _missing_tag(ctx, address.arms)
         case "union_tag_invalid":
-            return _unknown_tag(ctx)
+            return _unknown_tag(detail, ctx)
         case "value_error" | "assertion_error":
             # A model validator's own exception. Pydantic renders it as
             # "Value error, <message>"; the prefix is its presentation and
@@ -455,8 +495,9 @@ def _contextual_message(detail: ErrorDetails, container: type[BaseModel] | None)
 
 
 @cache
-def _loader_boolean_spellings() -> frozenset[str]:
-    """Every plain scalar the manifest loader reads as a boolean.
+def _loader_booleans() -> Mapping[str, bool]:
+    """Every plain scalar the manifest loader reads as a boolean, mapped
+    to the boolean it becomes.
 
     Derived from pyyaml's own table through a real load rather than
     listed, the way ``manifests.emit.YAML_11_ONLY_BOOLEANS`` is derived in
@@ -464,15 +505,34 @@ def _loader_boolean_spellings() -> frozenset[str]:
     done with the same text unquoted, so the loader's parser is the only
     honest source for it.
 
+    Two messages read it, from opposite directions. :func:`_quoted_boolean`
+    asks whether a STRING would have been a boolean unquoted; the missing
+    half of :func:`_unknown_tag` asks which spellings produce the BOOLEAN
+    it is holding, which is why the value is carried and not just the key.
+
     Imported inside the function: this package is the model layer and
     nothing else in it depends on the serialization format. The dependency
-    is real but narrow, and it belongs to this one message.
+    is real but narrow, and it belongs to these messages.
     """
     import yaml
 
     words = yaml.constructor.SafeConstructor.bool_values
     casings = {casing for word in words for casing in (word.lower(), word.upper(), word.capitalize())}
-    return frozenset(text for text in casings if isinstance(yaml.safe_load(f"a: {text}")["a"], bool))
+    loaded = {text: yaml.safe_load(f"a: {text}")["a"] for text in casings}
+    return {text: value for text, value in loaded.items() if isinstance(value, bool)}
+
+
+def _plain_spellings_of(value: bool) -> str:
+    """The lowercase plain scalars the loader reads as ``value``, listed
+    for an operator (``'on', 'true' or 'yes'``).
+
+    Lowercase only: the casings are the same three words shouted, and a
+    list of nine says no more than a list of three about what to do.
+    Quoted and joined the way pydantic pre-formats ``expected_tags``, so
+    the two lists in one message are punctuated alike.
+    """
+    words = sorted(repr(text) for text, loaded in _loader_booleans().items() if loaded is value and text.islower())
+    return " or ".join([", ".join(words[:-1]), words[-1]] if len(words) > 1 else words)
 
 
 def _quoted_boolean(value: object) -> str | None:
@@ -496,7 +556,7 @@ def _quoted_boolean(value: object) -> str | None:
     else (``verify_ssl: 5``) goes back to the flat table, because the
     quotes are not the story there.
     """
-    if isinstance(value, str) and value in _loader_boolean_spellings():
+    if isinstance(value, str) and value in _loader_booleans():
         return f"must be a boolean, and '{value}' is quoted, which makes it a string; write it unquoted"
     return None
 
@@ -524,14 +584,88 @@ def _unknown_field(container: type[BaseModel] | None) -> str:
     return "unknown field; expected one of: " + ", ".join(offered)
 
 
-def _unknown_tag(ctx: Mapping[str, object]) -> str | None:
+def _missing_union_block(address: _Address) -> str | None:
+    """ "is required", naming the choices when the missing field is a
+    tagged BLOCK rather than a value.
+
+    ``None`` for every ordinary field, which puts the message back on the
+    table's bare ``is required``: that is the whole message for a missing
+    ``region``, and there is nothing else true to say about it.
+
+    A missing union is different in kind. ``auth: is required`` tells an
+    operator to write a field without telling them it is a choice, and
+    the choice is the only hard part; the modes are two lookups away in
+    ``describe-kind``. This and :func:`_missing_tag` are one mistake a
+    keystroke apart (the block absent, and the block present without its
+    tag), so they answer with the same list.
+
+    The three ``retired_shapes`` unions no longer reach this at all:
+    each carries a declared default now, so their absent case loads
+    instead of erroring. What lands here is any REQUIRED tagged union,
+    which the mode unions were for one revision and another field may
+    be again.
+    """
+    if not address.arms or not address.discriminator:
+        return None
+    # "is one of:" rather than the tag errors' "registered:", because this
+    # names the field's own shape rather than answering a tag the operator
+    # wrote; it is the phrasing ``literal_error`` and ``extra_forbidden``
+    # already use for "here are the values that go here".
+    choices = ", ".join(repr(arm.tag) for arm in address.arms)
+    return f"is required; its '{address.discriminator}' is one of: {choices}"
+
+
+def _missing_tag(ctx: Mapping[str, object], arms: tuple[UnionArmType, ...]) -> str | None:
+    """The no-arm-selected message: the operator wrote the block and not
+    the key that says which KIND of block it is.
+
+    Names the choices, which is the whole job. Pydantic supplies
+    ``expected_tags`` for a WRONG tag and nothing at all for a missing
+    one, so an operator who typed a typo was shown the menu and an
+    operator who typed nothing was shown ``mode is required`` and left to
+    find it. The arms come from the loc walk instead, which stands on the
+    union at exactly this moment.
+
+    Quoted and comma-joined to match pydantic's own ``expected_tags``
+    rendering, so the two messages about one union read alike.
+    """
+    tag_field = _unquoted(ctx.get("discriminator"))
+    if not tag_field:
+        return None
+    if not arms:
+        return f"{tag_field} is required"
+    return f"{tag_field} is required; registered: " + ", ".join(repr(arm.tag) for arm in arms)
+
+
+def _unknown_tag(detail: ErrorDetails, ctx: Mapping[str, object]) -> str | None:
     """The bad-capability-name message: the operator named an arm that
-    the union does not have."""
+    the union does not have.
+
+    A BOOLEAN tag is called out rather than quoted, because quoting it
+    prints something nobody typed: pydantic stringifies the value, so
+    ``mode: true`` arrives as the tag ``'True'``, Python's spelling of a
+    word the document spells ``true``. The loader is what turned the word
+    into a boolean, so the fix is the loader's, and it is the mirror of
+    :func:`_quoted_boolean`: there an operator quoted a boolean and got a
+    string, here they left a name unquoted and got a boolean.
+
+    Which of the three spellings they wrote is unknowable from the parsed
+    value, so all of them are named. That also covers the case this is
+    really protecting, an arm legitimately tagged ``no`` or ``on``, where
+    the value is right and only the quoting is wrong.
+    """
     tag_field = _unquoted(ctx.get("discriminator"))
     tag = ctx.get("tag")
     expected = ctx.get("expected_tags")
     if not tag_field or not isinstance(tag, str) or not isinstance(expected, str):
         return None
+    written = detail.get("input")
+    value = written.get(tag_field) if isinstance(written, Mapping) else None
+    if isinstance(value, bool):
+        return (
+            f"unknown {tag_field}: an unquoted {_plain_spellings_of(value)} is a boolean rather than a "
+            f"name, so quote it to name one; registered: {expected}"
+        )
     return f"unknown {tag_field} {tag!r}; registered: {expected}"
 
 
@@ -559,13 +693,23 @@ class _AtTag:
     """The next ``loc`` segment is a discriminated union's arm tag.
 
     Pydantic inserts the selected arm's tag as a path segment, but the
-    operator wrote no such key: for ``platform: {name: lima, vm_host: 8}``
-    the loc is ``('platform', 'lima', 'vm_host')`` and the address the
-    operator can act on is ``platform.vm_host``. Knowing the arms is what
-    lets the tag be dropped only when it really is one.
+    operator wrote no such key: for ``platform: {name: lima, placement: 8}``
+    the loc is ``('platform', 'lima', 'placement')`` and the address the
+    operator can act on is ``platform.placement``. Knowing the arms is
+    what lets the tag be dropped only when it really is one.
+
+    NESTED unions get the same treatment by the same rule, which is what
+    keeps a bad key inside lima's ``placement`` reading as
+    ``platform.placement.host`` rather than growing a ``ssh`` segment in
+    the middle.
     """
 
     arms: tuple[UnionArmType, ...]
+
+    discriminator: str | None = None
+    """The field name carrying the tag. Pydantic supplies this in ``ctx``
+    for its own two tag errors but not for ``missing``, which is reported
+    on the field that HOLDS the union rather than on the tag inside it."""
 
 
 @dataclass(frozen=True)
@@ -601,6 +745,10 @@ class _AtElement:
     walk can step into :class:`_AtTag` and drop the tag pydantic inserts,
     exactly as it does for a tagged union written directly on a field."""
 
+    item_discriminator: str | None = None
+    """:attr:`_AtTag.discriminator` one level down: the tag field an
+    ELEMENT is dispatched on."""
+
     mapping: bool = False
     """Whether the elements are addressed by an operator-written KEY.
     Only a mapping can produce pydantic's ``[key]`` marker, so this is
@@ -635,6 +783,25 @@ class _Address:
     """The address of the OUTERMOST undiscriminated union the walk passed
     through, whether it ended there or carried on into a member. ``None``
     when it passed through none. See :attr:`_Problem.union_path`."""
+
+    arms: tuple[UnionArmType, ...] = ()
+    """The arms of the DISCRIMINATED union the walk ended standing on,
+    with :attr:`discriminator` naming the field that selects among them.
+    Empty everywhere else.
+
+    The counterpart of :attr:`container`: that names the model whose
+    fields an unknown key could have been, this names the arms the tag
+    could have selected. Both are facts pydantic's ``ctx`` leaves out and
+    the walk has in hand.
+
+    Populated for two errors that look unrelated and are the same
+    operator mistake one keystroke apart: a block written without its tag
+    (``union_tag_not_found``) and the block not written at all
+    (``missing``). The walk lands on the union either way, because the
+    last segment of both locs is the field that HOLDS it."""
+
+    discriminator: str | None = None
+    """The tag field of that union (``mode``), or ``None``."""
 
 
 def _resolve_path(model_cls: type[BaseModel], loc: tuple[int | str, ...]) -> _Address:
@@ -676,7 +843,18 @@ def _resolve_path(model_cls: type[BaseModel], loc: tuple[int | str, ...]) -> _Ad
             _append_index(parts, segment)
         else:
             parts.append(segment)
-    return _Address(path=".".join(parts), container=container, at_union=at_union, union_path=union_path)
+    return _Address(
+        path=".".join(parts),
+        container=container,
+        at_union=at_union,
+        union_path=union_path,
+        # Where the walk STOPPED, rather than the cursor each segment was
+        # read against: both union messages are reported on the field that
+        # HOLDS the union, so the last segment consumed is what lands the
+        # walk on the arms they name.
+        arms=cursor.arms if isinstance(cursor, _AtTag) else (),
+        discriminator=cursor.discriminator if isinstance(cursor, _AtTag) else None,
+    )
 
 
 def _initial_cursor(model_cls: type[BaseModel]) -> _Cursor:
@@ -717,7 +895,7 @@ def _advance(cursor: _Cursor, segment: int | str) -> tuple[bool, _Cursor]:
         if cursor.item_model is not None:
             return True, _AtModel(cursor.item_model)
         if cursor.item_arms:
-            return True, _AtTag(cursor.item_arms)
+            return True, _AtTag(cursor.item_arms, cursor.item_discriminator)
         return True, _AtUnion(cursor.item_union_members) if cursor.item_union_members else None
     if isinstance(cursor, _AtModel) and isinstance(segment, str):
         fields = model_fields_of(cursor.model)
@@ -735,10 +913,11 @@ def _cursor_for(shape: FieldShape) -> _Cursor:
             shape.item_model,
             item_union_members=shape.item_union_members,
             item_arms=shape.item_arms,
+            item_discriminator=shape.item_discriminator,
             mapping=shape.collection is Collection.MAPPING,
         )
     if shape.arms:
-        return _AtTag(shape.arms)
+        return _AtTag(shape.arms, shape.discriminator)
     if shape.union_members:
         return _AtUnion(shape.union_members)
     return None

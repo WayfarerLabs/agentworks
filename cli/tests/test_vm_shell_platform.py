@@ -389,7 +389,7 @@ def test_native_transport_opens_route_and_registers_close_for_azure(
         def __init__(self) -> None:  # noqa: D401
             super().__init__(
                 "az-test",
-                {"subscription_id": "sub", "resource_group": "rg", "region": "eastus"},
+                {"subscription_id": "sub", "resource_group": "rg", "region": "eastus", "auth": {"mode": "ambient"}},
             )
 
         def _ensure_public_ip(self, vm: object, ctx: object) -> None:
@@ -470,7 +470,7 @@ def test_native_transport_closes_allow_on_exception_for_azure(
         def __init__(self) -> None:  # noqa: D401
             super().__init__(
                 "az-test",
-                {"subscription_id": "sub", "resource_group": "rg", "region": "eastus"},
+                {"subscription_id": "sub", "resource_group": "rg", "region": "eastus", "auth": {"mode": "ambient"}},
             )
 
         def _ensure_public_ip(self, vm: object, ctx: object) -> None:

@@ -279,8 +279,8 @@ and the documentation to disagree.
 The model is an `AgwModel` (`agentworks.schema`): strict, frozen, closed-world. A field that names
 another resource carries a `SecretRef` / `ResourceRef` marker, optionally with an owner-templated
 default (`git-token-{owner_name}`), and that marker is the single authored place the reference
-semantics live: extraction reads it, validation fills the default from it, and emitted JSON Schema
-carries it as `x-agw-ref`.
+semantics live: the boundary fill (`filled_defaults`) renders the default into the blob before
+validation and extraction read it, and emitted JSON Schema carries it as `x-agw-ref`.
 
 The two halves the core derives keep the contracts the split classmethods used to carry:
 
@@ -304,13 +304,14 @@ The two halves the core derives keep the contracts the split classmethods used t
   hosting shapes under Related).
 
 **How the config reaches the model, on a manifest surface.** A host kind's spec selects a capability
-with ONE tagged table on its naming field (`platform: {name: lima, vm_host: ...}`), which the row
-carries as a `CapabilityBlock`. That table has two owners, and the split is the contract: **`name`
-belongs to the HOST kind** (it is the selector, and the host's own model validates it), and **every
-other key belongs to the capability** the tag names. Decode deliberately does NOT check the extras,
-even though it could see them: they are checked closed-world at finalize against the capability's
-own declared model. Validating them twice, against two models, is how a host kind would end up
-encoding what its capabilities accept, which is the coupling this whole layer exists to avoid.
+with ONE tagged table on its naming field (`platform: {name: lima, placement: {mode: local}}`),
+which the row carries as a `CapabilityBlock`. That table has two owners, and the split is the
+contract: **`name` belongs to the HOST kind** (it is the selector, and the host's own model
+validates it), and **every other key belongs to the capability** the tag names. Decode deliberately
+does NOT check the extras, even though it could see them: they are checked closed-world at finalize
+against the capability's own declared model. Validating them twice, against two models, is how a
+host kind would end up encoding what its capabilities accept, which is the coupling this whole layer
+exists to avoid.
 
 `config_for()` is how the core asks which config a capability offers, and every read of a
 capability's config goes through it rather than off `config_model` directly. Every capability today
@@ -610,6 +611,82 @@ fine and failed later, far from the mistake. `register_plugin` runs it in its va
 any registry is mutated, so a non-conforming implementation is a typed error naming the plugin and
 seating stays all-or-nothing. Built-in implementations are held to the same contract by the
 descriptor table's own self-test.
+
+### Modeling a Config That Has Variants
+
+When a capability can be driven more than one way, the choice must be DECLARABLE. That is the whole
+rule, and it is narrower than it first appears: the failure is not that absence selects a mechanism,
+it is that there is no way to WRITE the choice down. Azure and AWS sites once worked that way.
+Omitting the credential block selected the platform's ambient chain, and no spelling existed that
+said so, so a manifest could not distinguish a deliberate choice from a forgotten one and neither
+could a reviewer, `doctor`, or the graph. Lima was worse, because presence of `vm_host` selected
+between two transports, which is why a typo in that one key silently turned a remote site into a
+not-ready local one and suppressed the error naming the typo.
+
+Once an explicit form exists, a default is an ordinary default, like `storage: local-lvm`. All three
+of those fields carry one today. **The rule for which arm: whatever the field already does when
+omitted.** That makes every default a strict no-op for existing manifests, which is what makes
+adding one non-breaking, and it forbids the dangerous move directly: **never default to a NEW arm.**
+When a capability grows a mode it did not have, defaulting to it would silently change behavior for
+configurations already in the field. Ambient is not privileged here; it is simply what omission
+already did on the clouds, which is also what the wrapped SDKs do.
+
+The shape for this is a nested discriminated union with a string `Literal` tag per arm, required or
+defaulted as above:
+
+```python
+auth: Annotated[AmbientAuth | ServicePrincipalAuth, Field(discriminator="mode")]
+```
+
+Not a boolean, and not a mode field sitting beside optional credential fields. Pydantic emits this
+as `oneOf` over closed object shapes with `discriminator.propertyName` and a `const` per arm, so one
+authoritative declaration serves runtime validation, editor validation, samples, the field
+reference, and the guide. The alternative needs cross-field constraints ("`mode: ssh` requires
+`host`, `mode: local` forbids it"), and it loses on DERIVATION, not on expressiveness. JSON Schema
+states that constraint perfectly well: as `oneOf` over closed arms, which is exactly what we ship,
+or as `if`/`then` on the discriminator. What does not survive the trip is imperative code. The enum
+design has to put the rule in a `model_validator`, and pydantic does not derive a validator's body
+into the schema it emits, so the emitted schema would say nothing at all about the one rule that
+design added. The union states the same rule declaratively, so emission reads it off the same
+declaration the loader validates against.
+
+That silence is not unsound, since a schema more permissive than the loader is sanctioned
+under-approximation, but it forfeits the DIAGNOSTIC: a mixed-arm config gets silence from the editor
+and fails at load instead. Emitting schema exists to move that feedback earlier, so the enum spends
+the point of it.
+
+**The discriminator selects a SHAPE, not a concept, and the operational test is whether the required
+field sets differ.** Two ways of driving a capability that need different required fields are two
+arms even when they feel like one mechanism, and two that need the same fields are one arm even when
+they feel like two. Worked example: Azure service principals authenticating by certificate rather
+than by secret are conceptually the same mechanism, but they need a certificate in place of a secret
+name, so they would be their own arm. Merging them would need "exactly one of `secret` or
+`certificate_path`", which is the same validator-only cross-field constraint one level down, inside
+the arm that exists to eliminate it.
+
+**Adding an arm is the extension path, and it is additive.** Existing manifests keep validating, the
+emitted schema grows a branch and a mapping entry, and nothing restructures. So do not pre-group
+fields against a variant that does not exist yet: that is mechanism without a consumer, and this
+codebase deletes those. Name each arm for the MECHANISM it selects rather than for a position
+(`ssh`, not `remote`; `ambient`, `service-principal`, `access-key`), because a positional name
+leaves the mechanism implicit and reintroduces one layer up exactly what the union removes. A name
+that is fully specified today is fine even if a future sibling would make it ambiguous; implicitness
+is judged against what exists, not against what might.
+
+**Pick the DISCRIMINATOR key by the field's grammar, and expect `mode`.** Every union shipped today
+spells it `mode`, and a new one probably should: `auth` and `placement` both name an ACTION, and an
+action is done in a mode. That is why `placement.mode` reads and `placement.type` does not. A field
+named for a STATE rather than an action takes `type` instead, because a state has a kind and not a
+manner, and forcing `mode` onto one would be the same category error in reverse. So
+`<mechanism>.mode` is the dominant pattern rather than a rule: follow it unless your field is a noun
+of the other sort, and if you diverge, say at the site which it is so the next reader sees a
+decision rather than an inconsistency.
+
+**Name the FIELD for what it selects, and let sibling capabilities diverge.** `auth` on `azure-vm`
+and `aws-ec2` and `placement` on `lima` are the same shape doing different jobs: one selects an
+identity, the other selects where `limactl` runs. Naming both of them the same thing for symmetry's
+sake would make one of the two names a lie, so the divergence is deliberate and is not a consistency
+defect to be tidied away.
 
 ### Secrets Are Just Declared References
 
