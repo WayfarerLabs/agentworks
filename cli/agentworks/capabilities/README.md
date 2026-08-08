@@ -668,6 +668,7 @@ source: Annotated[PlaintextSource | SecretSource, StructuralUnion()]
 
 `StructuralUnion` is narrower than an ordinary untagged union. It requires at least two closed model
 arms whose required and allowed keys cannot overlap, and it emits them as plain `oneOf`. Structural
+unions cannot also declare a discriminator; use a tagged union when a selector exists. Structural
 arms use their field names as operator-written keys, so validation aliases are refused. Put a
 resource marker on the field inside its arm, never on the union holder or a collection element that
 holds the union. A scalar shorthand is allowed only on a marker-free structural arm because raw
