@@ -120,8 +120,11 @@ class FieldShape:
     may be, empty unless the elements are a discriminated union of models.
 
     A collection of tagged blocks is not a shape the framework ships
-    today (all four discriminated unions are top-level capability
-    configs), and it is one any capability or plugin author can write.
+    today, and it is one any capability or plugin author can write. (It
+    was once true that every discriminated union here was a top-level
+    capability config. The auth and placement unions on azure, aws, and
+    lima are nested unions whose arms are plain models, so what is left
+    unshipped is the COLLECTION of them, not the nesting.)
     Left unclassified, its elements read as an undiscriminated union,
     which no walker expands: a secret named inside such an element would
     be absent from the dependency graph with nothing reported."""
@@ -706,8 +709,12 @@ def _tags_of(arm: type[BaseModel], discriminator: str) -> tuple[str, ...]:
     the old name silently unaddressable.
 
     Non-string tags are out of scope, and that is a boundary rather than
-    an oversight: every discriminator in this framework is a capability
-    or kind NAME. A model tagged otherwise contributes no arms here.
+    an oversight. The justification used to be that every discriminator
+    here is a capability or kind NAME; that stopped being true when the
+    platform auth and placement unions arrived tagged by ``mode``. The
+    boundary stands on its own terms instead: a tag is an identifier the
+    OPERATOR writes in a document, so it is a string, and a model tagged
+    otherwise contributes no arms here.
     """
     fields = model_fields_of(arm)
     if fields is None or discriminator not in fields:

@@ -304,13 +304,14 @@ The two halves the core derives keep the contracts the split classmethods used t
   hosting shapes under Related).
 
 **How the config reaches the model, on a manifest surface.** A host kind's spec selects a capability
-with ONE tagged table on its naming field (`platform: {name: lima, vm_host: ...}`), which the row
-carries as a `CapabilityBlock`. That table has two owners, and the split is the contract: **`name`
-belongs to the HOST kind** (it is the selector, and the host's own model validates it), and **every
-other key belongs to the capability** the tag names. Decode deliberately does NOT check the extras,
-even though it could see them: they are checked closed-world at finalize against the capability's
-own declared model. Validating them twice, against two models, is how a host kind would end up
-encoding what its capabilities accept, which is the coupling this whole layer exists to avoid.
+with ONE tagged table on its naming field (`platform: {name: lima, placement: {mode: local}}`),
+which the row carries as a `CapabilityBlock`. That table has two owners, and the split is the
+contract: **`name` belongs to the HOST kind** (it is the selector, and the host's own model
+validates it), and **every other key belongs to the capability** the tag names. Decode deliberately
+does NOT check the extras, even though it could see them: they are checked closed-world at finalize
+against the capability's own declared model. Validating them twice, against two models, is how a
+host kind would end up encoding what its capabilities accept, which is the coupling this whole layer
+exists to avoid.
 
 `config_for()` is how the core asks which config a capability offers, and every read of a
 capability's config goes through it rather than off `config_model` directly. Every capability today
