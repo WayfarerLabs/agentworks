@@ -113,8 +113,9 @@ framing. Its folded readiness:
    operation-time `prepare` call.
 
 This chooses the consuming-resource readiness hook from the FRD fork, matching `vm-site`. The
-descriptor records `secret-source` as the backend's tagged host, which makes the choice derivable
-rather than a secret-only readiness switch.
+descriptor's tagged-host record names `secret-source`; the consuming resource's readiness hook is
+derived from that record, so no second readiness-shape field or secret-only readiness switch is
+added.
 
 ### Synthesized sources and provenance
 
@@ -300,11 +301,17 @@ unbounded remote cleanup.
 Resolution receives an explicit immutable policy rather than reading TTY state inside a backend:
 
 - `interaction=allow` permits sources declared as possibly interactive;
-- `interaction=refuse` excludes them before client construction and records `interaction-refused`
+- `interaction=refuse` excludes them before client construction and records `refused-interaction`
   when they were the remaining candidate;
 - global `--non-interactive` always selects `refuse`;
 - `agw secret verify` defaults to `refuse` and requires an explicit `--allow-interaction` to permit
   prompt, biometric, or reauthentication paths.
+
+Ordinary operations preserve today's interaction default: the operation boundary derives `allow`
+only when stdin is a TTY and global `--non-interactive` is absent; otherwise it selects `refuse`.
+Before opening a prompt client, resolution preserves the existing fail-before-prompt doom check: if
+any still-missing secret has no remaining ready source that would attempt it, the operation fails
+without prompting for a different secret that cannot make the whole operation succeed.
 
 The caller-owned `InteractionBroker` is the only interface permitted to render a prompt. A backend
 cannot infer interactivity from TTY state or gain ambient access to prompt metadata.
@@ -320,7 +327,7 @@ The resolution core returns one frozen, value-free `ResolutionOutcome` per reque
 
 - `resolved`: carries source and safe identifier only;
 - `unavailable`: every eligible source soft-missed or was not ready;
-- `interaction-refused`: resolution required a source excluded by policy;
+- `refused-interaction`: resolution required a source excluded by policy;
 - `timeout`: an attempted source exceeded its backend-enforced external deadline;
 - `resolution-failure`: hard mapping, authentication, transport, malformed-value, or unexpected
   source failure, with a typed detail code and safe remediation.
@@ -355,8 +362,16 @@ The implementation updates in the same phases that make each claim true:
   `capabilities/secret_backend/README.md`;
 - `docs/guides/resources.md` and the 0.14 upgrade guide, including the exact onepassword rewrite;
 - ADR 0016's graduated-instance wording and ADR 0023's descriptor field inventory;
-- CLI completion snapshots if the command tree changes for `secret verify`;
+- the secrets CLI README, command reference, and Bash, Zsh, and PowerShell completion snapshots for
+  the new `agw secret verify` command;
 - guide topic prose through the universal topic contract once that contract is present at HEAD.
+
+The guide-topic contribution is the only conditional item. If the universal contract has not landed
+by this effort's closeout, Secret Sources does not invent a temporary adapter: it records the
+deferral against
+`docs/sdd/2026-08-05-onboarding-and-discovery/plan.md#phase-4-wave-2-adoption-and-registry-inventory`
+and still completes every README, command reference, sample, schema, and shell-completion update it
+owns.
 
 No permanent artifact points readers back to this SDD.
 
