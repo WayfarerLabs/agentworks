@@ -614,16 +614,25 @@ descriptor table's own self-test.
 
 ### Modeling a Config That Has Variants
 
-When a capability can be driven more than one way, the choice is DECLARED, never inferred from what
-the operator left out. Absence supplies a default VALUE; it must not select a MECHANISM. A config
-where omitting a block silently picks a different code path cannot tell a deliberate choice from a
-forgotten one, and neither can a reviewer, `doctor`, or the graph. Azure and AWS sites once worked
-that way: omitting the credential block selected the platform's ambient chain, so a manifest could
-not say which the operator meant. Lima was worse, because presence of `vm_host` selected between two
-transports, which is why a typo in that one key silently turned a remote site into a not-ready local
-one and suppressed the error naming the typo.
+When a capability can be driven more than one way, the choice must be DECLARABLE. That is the whole
+rule, and it is narrower than it first appears: the failure is not that absence selects a mechanism,
+it is that there is no way to WRITE the choice down. Azure and AWS sites once worked that way.
+Omitting the credential block selected the platform's ambient chain, and no spelling existed that
+said so, so a manifest could not distinguish a deliberate choice from a forgotten one and neither
+could a reviewer, `doctor`, or the graph. Lima was worse, because presence of `vm_host` selected
+between two transports, which is why a typo in that one key silently turned a remote site into a
+not-ready local one and suppressed the error naming the typo.
 
-The shape for this is a REQUIRED nested discriminated union, with a string `Literal` tag per arm:
+Once an explicit form exists, a default is an ordinary default, like `storage: local-lvm`. All three
+of those fields carry one today. **The rule for which arm: whatever the field already does when
+omitted.** That makes every default a strict no-op for existing manifests, which is what makes
+adding one non-breaking, and it forbids the dangerous move directly: **never default to a NEW arm.**
+When a capability grows a mode it did not have, defaulting to it would silently change behavior for
+configurations already in the field. Ambient is not privileged here; it is simply what omission
+already did on the clouds, which is also what the wrapped SDKs do.
+
+The shape for this is a nested discriminated union with a string `Literal` tag per arm, required or
+defaulted as above:
 
 ```python
 auth: Annotated[AmbientAuth | ServicePrincipalAuth, Field(discriminator="mode")]
