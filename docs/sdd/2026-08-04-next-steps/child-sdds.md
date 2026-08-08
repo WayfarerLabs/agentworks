@@ -75,6 +75,18 @@ is locked.
       effort's per-phase PR plan
 - [ ] Locked
 
+### Installer plugins (pre-0.14 core slimming): 2026-08-07-installer-plugins
+
+- [x] Ruled into roadmap scope (operator, 2026-08-07): misc core installers move behind system
+      plugins before the 0.14.0 cut, with a first-class disabled-error experience
+- [x] Seeded (FRD, PR #440, 2026-08-07; launchable whenever, with the moves consuming wave 2's
+      descriptor registration and the guide topics consuming onboarding's first slice)
+- [ ] FRD merged to `main`
+- [ ] Picked up by an effort lead (inventory-first, phased artifact review)
+- [ ] Implementation complete (moves, disabled errors, guide topics, upgrade-guide step)
+- [ ] Ships in 0.14.0 (gates the cut per `phasing.md` release mapping)
+- [ ] Locked
+
 ### Not yet spawned
 
 Planned children, seeded when their prerequisites land (see `phasing.md`):
@@ -135,3 +147,5 @@ open-ended research placeholder.
 9. Roadmap lead reviews wave 2 and onboarding PRs as they arrive.
 10. Design track: scope participation contract in review (PR #407); then the instance-state store
     schema and the event vocabulary's first slice.
+11. Installer-plugins child seeded (PR #440, 2026-08-07). Launch its effort lead whenever; the R1
+    inventory can start immediately.
