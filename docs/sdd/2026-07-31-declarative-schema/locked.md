@@ -370,3 +370,45 @@ arms are not capability configs. The one thing that did break was downstream of 
 `manifests/describe.py` built its alternatives line as a raw f-string, the only description in that
 renderer skipping `plain_text`, which nothing had noticed because capability arms carry plain
 one-line summaries while a plain union falls back to a docstring.
+
+## 2026-08-08: model construction no longer takes external context
+
+Recorded here because it removes a mechanism this effort built, and because several of this
+directory's LLDs describe that mechanism and now disagree with the code. Those LLDs are left alone:
+they record what the effort built, and a mechanism being removed later is not a defect in them. The
+stale references, for a reader who follows one: `schema-foundation-lld.md` around lines 566, 671,
+706-724, and 1140; `kind-spec-models-lld.md:173` and `:186`; `capability-contract-lld.md:409`;
+`emission-lld.md:63` and `:90`.
+
+**What changed.** `validation_context(owner)`, `OWNER_CONTEXT_KEY`, the
+`_fill_owner_templated_defaults` before-validator, and the `StateError` raised when a templated
+model was validated without an owner are all gone. Resolving an owner-templated default was the ONLY
+thing the context carried. The marker still DECLARES the template; a new `schema/fill.py` applies it
+at the boundary where the model, the blob, and the owner first come together, and validation then
+runs on a filled blob. So the resolved name is still validated rather than the template, which was
+the property the before-validator existed to protect.
+
+**Why, in the operator's terms.** Building an object should have no regard for content, and needing
+the owner's name is a builder problem rather than a validation one. Threading it through validation
+made a model non-constructible standalone, which is why an arm carrying a templated field could not
+be a default INSTANCE. It now can, and the failure for one relying on the template for its content
+is an ordinary "field required" rather than a special error about context.
+
+**The part worth keeping, which is larger than the removal.** `extract_references` lost its `owner`
+parameter entirely and is now a pure function of the model and the blob. Extraction and validation
+used to render the same template INDEPENDENTLY: two derivations of one fact, the defect class this
+effort spent itself on. Extraction is now structurally incapable of rendering, so they cannot
+disagree, and the precedence rules (a written name outranks a template, a template outranks a
+declared default, a written null equals absence) exist in exactly one place.
+
+**Not a single decode-time enrichment, deliberately.** A capability config rides its host row as a
+raw block and is validated later against a model that requires a registry lookup of seated
+implementations, so enriching it at host-row decode would put registry reads inside the model layer:
+the same layering defect the context was, relocated. The fill is instead applied at each point the
+triple is complete, which is two production modules, and it is idempotent so overlapping paths are
+safe.
+
+**A pre-existing gap closed as a side effect.** A block written in its scalar shorthand form with a
+templated field validated to the rendered name while extraction, which never folded shorthand,
+emitted no edge. The fill folds before filling, so both readers see the same mapping. Fixture-only
+today, and now pinned.
