@@ -153,6 +153,19 @@ fidelity, collector survivability, adversarial assurance) frames what any slice 
 The distiller consumes the record store and proposes reviewed PRs, never direct commits; harness
 memory is a cache, the repository is the system of record, and distillation is the flush.
 
+### Plugin namespace and name stability (operator ruling, 2026-08-07)
+
+**One name, one source.** In-repo contributions (built-ins and system plugins) share one curated
+namespace in which a collision is a defect, caught at registration seat time with attribution, never
+a runtime policy question. Third-party plugins (wave 8) MUST NOT collide with in-repo names, and use
+their unique plugin name as a namespace so cross-plugin uniqueness is structural rather than
+policed; the guide's plugin-topic namespacing with its ownership gate (settled in the onboarding
+child's design, landing with its phase 1) is the shape wave 8 inherits. Operator declarations
+interact with provided names through the collision semantics settled in the installer-plugins child
+(name-is-the-contract; silent collision is a hard error naming both remediations;
+disable-and-redeclare is the sanctioned replacement with provenance surfaced; defaults-with-override
+is reserved for surfaces that declare it, wave 3's synthesized sources being canonical).
+
 ### Compatibility posture (all destinations)
 
 Breaking changes are acceptable across this roadmap provided each ships with a deprecation runway:
