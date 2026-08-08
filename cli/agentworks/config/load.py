@@ -22,7 +22,8 @@ from agentworks.config.loaders_secrets import _load_plugins, _load_secret_config
 from agentworks.config.loaders_sessions import _load_session_config
 from agentworks.config.models import Config, _SectionLineMap
 from agentworks.errors import ConfigError
-from agentworks.source_location import format_file_path, scan_section_lines
+from agentworks.path_rendering import format_file_path
+from agentworks.source_location import scan_section_lines
 
 if TYPE_CHECKING:
     from pathlib import Path

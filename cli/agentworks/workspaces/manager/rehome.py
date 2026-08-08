@@ -14,7 +14,7 @@ from agentworks.errors import (
     UserAbort,
     ValidationError,
 )
-from agentworks.source_location import format_file_path
+from agentworks.path_rendering import format_file_path
 from agentworks.vms.manager import gated_vm_boundary
 from agentworks.workspaces.manager._common import _guard_vm_status, _workspace_scope
 from agentworks.workspaces.manager.repair import _rehome_partial_state_hint

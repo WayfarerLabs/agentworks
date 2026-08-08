@@ -190,7 +190,7 @@ def _resolve_system_slug(db: Database) -> str | None:
 
 def _init_log_hint(vm_name: str) -> str:
     """Return a log hint suffix like ' See log: <path>' or empty string."""
-    from agentworks.source_location import format_file_path
+    from agentworks.path_rendering import format_file_path
     from agentworks.ssh import LOG_DIR
 
     if not LOG_DIR.exists():

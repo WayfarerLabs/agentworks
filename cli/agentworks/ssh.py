@@ -126,7 +126,7 @@ class SSHLogger:
         them stayed absolute would recreate the mixed rendering one level
         down.
         """
-        from agentworks.source_location import format_file_path
+        from agentworks.path_rendering import format_file_path
 
         return format_file_path(self.path)
 

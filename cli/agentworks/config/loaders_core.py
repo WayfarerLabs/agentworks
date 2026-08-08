@@ -27,7 +27,7 @@ from agentworks.config.models import DefaultsConfig, OperatorConfig, PathsConfig
 from agentworks.config.validation import validate_vm_workspaces
 from agentworks.errors import ConfigError
 from agentworks.naming import SSH_HOST_PREFIX_RE
-from agentworks.source_location import format_file_path
+from agentworks.path_rendering import format_file_path
 
 
 def _expand(path_str: str) -> Path:

@@ -6,7 +6,7 @@ import typer
 
 from agentworks.cli._app import app
 from agentworks.cli._helpers import get_db
-from agentworks.source_location import format_file_path
+from agentworks.path_rendering import format_file_path
 
 config_app = typer.Typer(
     name="config",

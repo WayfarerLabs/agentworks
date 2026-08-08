@@ -8,7 +8,7 @@ import typer
 from agentworks.cli._app import _seed_debug_from_pre_callback, debug_enabled
 from agentworks.cli._errors import echo_hint, record_unhandled_error
 from agentworks.cli._typer_output import TyperHandler
-from agentworks.source_location import format_file_path
+from agentworks.path_rendering import format_file_path
 
 
 def main() -> None:

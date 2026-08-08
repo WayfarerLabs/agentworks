@@ -25,8 +25,9 @@ hand-validated lives here:
   reads.
 
 **This package is a LEAF, and that is load-bearing rather than tidy.** It
-imports ``agentworks.errors`` and ``agentworks.source_location``, both
-top-level leaves themselves, and nothing else of ours. In particular it
+imports ``agentworks.errors``, ``agentworks.source_location`` and
+``agentworks.path_rendering``, all top-level leaves themselves, and
+nothing else of ours. In particular it
 imports nothing under ``agentworks.resources``, because importing any
 module of that package runs its ``__init__``, which loads every kind
 module, which loads every capability package. Capability modules declare

@@ -27,8 +27,8 @@ from agentworks.errors import ValidationError
 from agentworks.manifests.reference import kind_reference
 from agentworks.manifests.skeleton import skeleton_text
 from agentworks.manifests.spec_model import declarable_kinds
+from agentworks.path_rendering import format_file_path
 from agentworks.resources import KIND_REGISTRY
-from agentworks.source_location import format_file_path
 
 _SUFFIXES = {".yaml", ".yml"}
 
