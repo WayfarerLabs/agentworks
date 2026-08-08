@@ -432,6 +432,20 @@ def _reject_framework_heading_delimiter(
     return value
 
 
+def _reject_expression_delimiter(
+    value: str,
+    *,
+    source: str,
+    topic: str | None,
+    path: str,
+    error_type: type[GuideContributionError] = GuideContributionError,
+) -> str:
+    """Reject executable-looking markers outside exact inert code spans."""
+    if _has_unsafe_expression_marker(value):
+        raise _error(error_type, source, topic, path, "contains an expression delimiter")
+    return value
+
+
 def _sequence(
     value: object,
     *,
@@ -469,6 +483,7 @@ def _parse_action_input(value: object, source: str, topic: str | None, path: str
         path=f"{path}.description",
         max_bytes=_MAX_ACTION_INPUT_DESCRIPTION_BYTES,
     )
+    _reject_expression_delimiter(description, source=source, topic=topic, path=f"{path}.description")
     required = data["required"]
     sensitive = data.get("sensitive", False)
     if type(required) is not bool or type(sensitive) is not bool:
@@ -539,6 +554,7 @@ def _parse_action(value: object, source: str, topic: str | None, path: str) -> G
             path=f"{path}.{name}",
             max_bytes=_MAX_ACTION_PROSE_BYTES,
         )
+        _reject_expression_delimiter(prose[name], source=source, topic=topic, path=f"{path}.{name}")
     raw_inputs = _sequence(data["required_inputs"], source=source, topic=topic, path=f"{path}.required_inputs")
     if len(raw_inputs) > _MAX_ACTION_INPUTS:
         raise _error(
@@ -598,6 +614,8 @@ def _parse_action(value: object, source: str, topic: str | None, path: str) -> G
             max_bytes=_MAX_ACTION_PROSE_BYTES,
         )
     )
+    if manual_steps is not None:
+        _reject_expression_delimiter(manual_steps, source=source, topic=topic, path=f"{path}.manual_steps")
     raw_verification = data.get("verification")
     verification = (
         None
@@ -702,8 +720,13 @@ def _parse_block(value: object, source: str, topic: str, index: int) -> GuideBlo
             blank=True,
             error_type=InvalidBlockError,
         )
-        if _has_unsafe_expression_marker(markdown):
-            raise _error(InvalidBlockError, source, topic, f"{path}.markdown", "contains an expression delimiter")
+        _reject_expression_delimiter(
+            markdown,
+            source=source,
+            topic=topic,
+            path=f"{path}.markdown",
+            error_type=InvalidBlockError,
+        )
         _reject_framework_heading_delimiter(
             markdown,
             source=source,
@@ -989,6 +1012,8 @@ def parse_topic_contribution(value: object, source: str) -> TopicContribution:
         raise _error(GuideContributionError, source, topic, "related_topics", "contains a repeated link")
     title = _bounded_string(data["title"], source=source, topic=topic, path="title", max_bytes=_MAX_TITLE_BYTES)
     summary = _bounded_string(data["summary"], source=source, topic=topic, path="summary", max_bytes=_MAX_SUMMARY_BYTES)
+    _reject_expression_delimiter(title, source=source, topic=topic, path="title")
+    _reject_expression_delimiter(summary, source=source, topic=topic, path="summary")
     _reject_framework_heading_delimiter(title, source=source, topic=topic, path="title")
     _reject_framework_heading_delimiter(summary, source=source, topic=topic, path="summary")
     return TopicContribution(

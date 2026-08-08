@@ -756,7 +756,11 @@ stable stream backs Bash, Zsh, and PowerShell topic completion.
 workflow. It keeps the sequence, checkpoints, and consent boundaries in colocated package data and
 points to the installed kind and implementation topics for fields and samples. Its action records
 are inert instructions. Rendering them never reads a path, runs doctor, edits configuration, or
-authorizes an agent to do so.
+authorizes an agent to do so. The sequence inventories canonical manifest-producing names first,
+backs up configuration and resources separately to fresh operator-selected destinations outside the
+active trees, verifies matching copies or an explicit absent resources baseline before editing, and
+compares the final operator inventory with the caller-owned union of retired-TOML and baseline
+manifest identities. Identity matching keeps manifest paths and ignores mutable source lines.
 
 | Command                                                               | Description                                      |
 | --------------------------------------------------------------------- | ------------------------------------------------ |

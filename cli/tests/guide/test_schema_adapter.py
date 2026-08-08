@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from enum import Enum
+from pathlib import Path
 
 import pytest
 
@@ -20,8 +22,9 @@ from agentworks.guide import (
 )
 from agentworks.guide.catalog import _build_guide_catalog
 from agentworks.guide.render import render_topic
-from agentworks.guide.service import _dynamic_names, _dynamic_topic, render_guide
+from agentworks.guide.service import _dynamic_names, _dynamic_topic, _EmptyInventory, render_guide
 from agentworks.manifests.reference import reference_for
+from agentworks.manifests.yaml_value import render_value
 
 
 def _broken_config() -> object:
@@ -55,6 +58,65 @@ def test_schema_reference_prose_maps_once_and_preserves_authored_markdown() -> N
     assert reference.overview not in fields
 
 
+class _LiteralChoice(Enum):
+    BACKTICKS = "a``b"
+
+
+def test_schema_scalar_facts_render_authoritative_yaml_without_prose_normalization(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import agentworks.guide.render as guide_render
+
+    original = reference_for("secret")
+    entry = original.spec[0]
+    literal_doc = replace(
+        entry.doc,
+        default=True,
+        default_template=None,
+        description=None,
+        choices=(_LiteralChoice.BACKTICKS, "", " "),
+        constraints={"allowed": [True, "a``b"], "pattern": "a``b"},
+        examples=({"enabled": True}, ["a``b", False], "", " "),
+    )
+    literal_entry = replace(entry, doc=literal_doc, children=(), alternatives=())
+    reference = replace(original, metadata=(), spec=(literal_entry,), alternatives=(), root_value=None)
+    monkeypatch.setattr(guide_render, "reference_for", lambda target: reference)
+    monkeypatch.setattr(guide_render, "plain_text", lambda value: pytest.fail(f"plain_text called for {value!r}"))
+    topic = TopicContribution(
+        TopicSlug("secret"),
+        "Secret",
+        "Secret schema.",
+        KindAnchor("secret"),
+        (FieldReference(BlockId("fields")),),
+    )
+
+    rendered = render_topic(topic, None, GuideMode.AGENT)
+
+    assert "default `true`" in rendered.markdown
+    assert f"choices ```{render_value(_LiteralChoice.BACKTICKS)}```" in rendered.markdown
+    assert f"`{render_value('')}`" in rendered.markdown
+    assert f"`{render_value(' ')}`" in rendered.markdown
+    assert f"allowed ```{render_value([True, 'a``b'])}```" in rendered.markdown
+    assert f"pattern ```{render_value('a``b')}```" in rendered.markdown
+    assert f"`{render_value({'enabled': True})}`" in rendered.markdown
+    assert f"```{render_value(['a``b', False])}```" in rendered.markdown
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("a``b", "```a``b```"),
+        ("`leading", "`` `leading ``"),
+        ("trailing`", "`` trailing` ``"),
+        (" edge ", "`  edge  `"),
+    ],
+)
+def test_schema_code_spans_use_longer_delimiters_and_needed_edge_padding(value: str, expected: str) -> None:
+    from agentworks.guide.render import _code
+
+    assert _code(value) == expected
+
+
 def test_schema_blocks_render_with_broken_config_beside_static_migration_teaching() -> None:
     response = render_guide(
         ("concept-migration", "vm-template", "vm-platform/wsl2"),
@@ -63,11 +125,38 @@ def test_schema_blocks_render_with_broken_config_beside_static_migration_teachin
     )
 
     assert response.exit_code == 1
-    assert "Preserve the migration evidence" in response.markdown
+    assert "Inventory and preserve the migration evidence" in response.markdown
     assert "Reference target: `vm-template`" in response.markdown
     assert "```yaml" in response.markdown
     assert "Reference target: `vm-platform/wsl2`" in response.markdown
     assert response.markdown.count("Configuration error: retired resource sections remain") == 1
+
+
+def test_disabled_proxmox_renders_disabled_state_and_config_free_schema(tmp_path: Path) -> None:
+    from agentworks.bootstrap import load_guide_registry
+    from agentworks.config import load_config
+
+    private_key = tmp_path / "id"
+    public_key = tmp_path / "id.pub"
+    private_key.write_text("private")
+    public_key.write_text("public")
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(f'[operator]\nssh_public_key = "{public_key}"\nssh_private_key = "{private_key}"\n')
+    config = load_config(config_path, warn_issues=False, warn_deprecations=False)
+    assert config.enabled_system_plugins == ()
+
+    response = render_guide(
+        ("vm-platform/proxmox",),
+        GuideMode.AGENT,
+        load_config_fn=lambda: config,
+        load_registry_fn=load_guide_registry,
+        db=_EmptyInventory(),  # type: ignore[arg-type]
+    )
+
+    assert response.exit_code == 0
+    assert "`vm-platform/proxmox` (disabled)" in response.markdown
+    assert "Reference target: `vm-platform/proxmox`" in response.markdown
+    assert "`config.api_url`" in response.markdown
 
 
 def test_capability_topics_never_contribute_samples() -> None:
