@@ -67,14 +67,17 @@ service fact records ------> human renderers
 
 The initial block vocabulary is closed:
 
-- `Overview`: inert markdown prose. The proposed wave 2 alignment maps its planned blurb to this
-  same block rather than a separate blurb registry.
+- `Overview`: inert markdown prose. The declarative-schema topic prose maps to this same block
+  rather than a separate blurb registry.
 - `Teaching`: inert markdown prose rendered by guide, not by describe.
 - `AgentContract`: inert markdown prose whose heading and placement are foregrounded in agent mode.
 - `InstanceList`: core-rendered live resources anchored at a kind or implementation.
 - `State`: core-rendered enablement and readiness for `me`.
 - `Relationships`: core-rendered inbound and outbound resource relationships for `me`.
-- `FieldReference`: a core-rendered declarative-schema field-documentation fragment.
+- `FieldReference`: a core-rendered declarative-schema field-documentation fragment. It reads the
+  landed `SchemaReference` tree, including each union alternative's fields and recurring or
+  separately addressable arms. An exact section selector may cross an alternative only when one
+  field path matches.
 - `Sample`: a core-rendered declarative-schema live sample.
 - `ActionList`: inert, strictly validated `GuideAction` records with an exact consent boundary,
   command or platform-neutral manual step, expected state, verification, and refusal alternative.
@@ -220,6 +223,10 @@ rewrite sequencing and points into kind and implementation topics whose `FieldRe
 `Sample` blocks consume the declarative-schema services now on `main`. An operator or agent
 therefore works against the installed model rather than a frozen migration oracle.
 `concept-onboarding` and `concept-management` link to it without duplicating its teaching.
+
+Schema-derived guide topics consume the context-free reference and sample records. Owner-dependent
+default filling remains at the manifest decode boundary; the guide does not recreate that step, pass
+Pydantic validation context, or construct capability implementations.
 
 `concept-onboarding` does not persist a second onboarding ledger. Done and not-yet-done status is a
 pure assessment over sanitized facts already available through `GuideView`: resource identity and

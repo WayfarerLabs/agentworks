@@ -154,8 +154,9 @@ current registry/resource-derived content without any wave 2 surface.
 ### Release-gate adoption after wave 2
 
 The 2026-08-07 remediation-posture ruling supersedes Phase 1's originally dependency-free merge
-boundary. PR #428 addressed all wave-2-independent review findings first, then rebased once after
-the declarative-schema service contracts merged to `main`. It has no provisional branch dependency.
+boundary. PR #428 addressed all wave-2-independent review findings first, then rebased after the
+declarative-schema service contracts and their explicit authentication and placement variants merged
+to `main`. It has no provisional branch dependency.
 
 - [x] After wave 2 merges, add `concept-migration` as the exceptional resource-model remediation
       topic, distinct from ordinary upgrading, using authoritative live sample and field-reference
@@ -165,16 +166,19 @@ the declarative-schema service contracts merged to `main`. It has no provisional
       exact contribution validation, completions, field references, and declarable samples.
 - [x] Link migration from onboarding and management without duplicating its teaching; cover TOML to
       manifest rewrites, tagged capability configuration, strict validation changes, and the precise
-      null-secret discovery and implemented decision path: omitted and explicit-null fields both use
-      the default secret; Azure and AWS require removing the enclosing auth block for ambient auth;
-      Proxmox has no no-secret mode.
+      credential decision path: omission or explicit null inside a credential arm selects its
+      default secret reference; Azure and AWS select ambient authentication through the defaulted
+      `auth` union, Lima selects local placement through the defaulted `placement` union, and
+      Proxmox has no no-secret mode. Written legacy authentication and placement fields receive
+      their exact hard-error rewrites before cutover.
 - [x] Prove the topic remains available when operator config does not load, names exact live
       remediation surfaces, and verifies results through normal loading and doctor rather than a
       frozen migration oracle.
 - [x] Every migration read, probe, and mutation crossing a consent boundary is a validated inert
       action record with exact scope, expected result, verification, and refusal behavior; backups
       and the complete pre-migration identity-and-origin inventory precede edits.
-- [x] Review the cross-SDD adapter and migration teaching after the wave 2 rebase, then rerun the
+- [ ] Reconcile schema rendering and migration teaching with the final PR #444 union surfaces,
+      confirm PR #446's context-free validation boundary adds no guide-side filling, then rerun the
       full Phase 1 and CI gates before requesting roadmap-lead re-review.
 
 The release-gate adapter is specified in `wave2-guide-adapter-lld.md`. It binds existing schema
