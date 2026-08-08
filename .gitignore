@@ -63,6 +63,17 @@ GEMINI.md
 !.codex/memories/
 !.codex/skills/
 
+# agw-test-env-local: this MACHINE's concrete integration-test inventory
+# (real AWS/Azure IDs, hostnames, regions). It fills in the generic
+# agw-test-env skill's operator parameters for this host only and must never
+# be committed. Its rulesync source, and every harness's generated output for
+# it, stay ignored even though the parent skills/ dirs above are re-included.
+# See rulesync.local.jsonc (also gitignored) for how it's generated.
+.rulesync/skills/agw-test-env-local/
+.claude/skills/agw-test-env-local/
+.codex/skills/agw-test-env-local/
+.github/skills/agw-test-env-local/
+
 # Tmux
 .tmuxinator.yml
 

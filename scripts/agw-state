@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# Snapshot and restore the agentworks operator state on a test host.
+# State is ~/.config/agentworks: config.toml, resources/, agentworks.db.
+# Used around PR test runs so forward-only DB migrations can be undone
+# by restoring the pre-run snapshot. See the agw-test-env skill
+# (.rulesync/skills/agw-test-env/SKILL.md) for the surrounding safety
+# protocol. Install this onto your PATH (e.g. ~/.local/bin/agw-state).
+set -euo pipefail
+
+STATE_DIR="$HOME/.config/agentworks"
+SNAP_DIR="$HOME/aw-state-snapshots"
+usage() {
+    echo "usage: agw-state save <tag> | restore <archive> | list" >&2
+    exit 1
+}
+
+[ $# -ge 1 ] || usage
+cmd="$1"
+shift || true
+
+case "$cmd" in
+save)
+    [ $# -eq 1 ] || usage
+    tag="$1"
+    mkdir -p "$SNAP_DIR"
+    ts="$(date -u +%Y%m%dT%H%M%SZ)"
+    archive="$SNAP_DIR/${tag}-${ts}.tar.gz"
+    # logs and backups are excluded: logs are noise, backups are config.toml
+    # copies already superseded by these snapshots.
+    tar czf "$archive" -C "$HOME/.config" \
+        --exclude agentworks/logs --exclude agentworks/backups agentworks
+    echo "saved $archive"
+    ;;
+restore)
+    [ $# -eq 1 ] || usage
+    archive="$1"
+    [ -f "$archive" ] || archive="$SNAP_DIR/$1"
+    [ -f "$archive" ] || { echo "no such snapshot: $1" >&2; exit 1; }
+    ts="$(date -u +%Y%m%dT%H%M%SZ)"
+    if [ -d "$STATE_DIR" ]; then
+        mv "$STATE_DIR" "$STATE_DIR.pre-restore-$ts"
+        echo "current state moved to $STATE_DIR.pre-restore-$ts"
+    fi
+    tar xzf "$archive" -C "$HOME/.config"
+    echo "restored $archive"
+    ;;
+list)
+    ls -1t "$SNAP_DIR" 2>/dev/null || echo "(no snapshots)"
+    ;;
+*)
+    usage
+    ;;
+esac
