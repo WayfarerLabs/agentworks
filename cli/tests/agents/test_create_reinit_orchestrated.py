@@ -88,6 +88,40 @@ def _stop_the_vm(monkeypatch: pytest.MonkeyPatch, events: list[str]) -> None:
     monkeypatch.setattr(vm_manager, "_ensure_tailscale", lambda *a, **k: events.append("tailscale"))
 
 
+def test_create_and_reinit_loggers_receive_all_git_tokens(
+    db: Database,
+    make_config,
+    mutation: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Both agent mutation roots bind the complete resolved credential set
+    when constructing their incremental logger."""
+    captured: list[tuple[str, str, tuple[str, ...]]] = []
+
+    class _LoggerSpy:
+        path = "/dev/null"
+
+        def __init__(self, vm_name: str, command_stem: str, *, redactions: tuple[str, ...] = ()) -> None:
+            captured.append((vm_name, command_stem, redactions))
+
+        def close(self) -> None:
+            pass
+
+    assert mutation == {}
+    config = make_config()
+    _seed_vm(db)
+    _reachable(monkeypatch, True)
+    monkeypatch.setattr("agentworks.ssh.SSHLogger", _LoggerSpy)
+
+    agent_manager.create_agent(db, config, name="dev", vm_name="box")
+    agent_manager.reinit_agent(db, config, name="dev")
+
+    assert captured == [
+        ("box", "agent-create", ("ghtok",)),
+        ("box", "agent-reinit", ("ghtok",)),
+    ]
+
+
 # -- the derived graph --------------------------------------------------------
 
 

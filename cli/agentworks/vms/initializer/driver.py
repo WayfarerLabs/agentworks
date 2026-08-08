@@ -123,11 +123,11 @@ def bootstrap_vm(
     from agentworks.ssh import SSHLogger
 
     home = f"/home/{admin_username}"
-    logger = SSHLogger(vm_name, "vm-create")
-    logger.add_redaction(tailscale_auth_key)
-    if git_tokens:
-        for token in git_tokens.values():
-            logger.add_redaction(token)
+    logger = SSHLogger(
+        vm_name,
+        "vm-create",
+        redactions=(tailscale_auth_key, *(git_tokens or {}).values()),
+    )
 
     # Attach logger to the provisioning transport. ``Transport`` declares
     # ``logger`` on the ABC; the assignment is polymorphic.

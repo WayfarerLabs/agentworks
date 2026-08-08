@@ -127,6 +127,57 @@ class TestDynamicCompletionsMapping:
                 f"Completer '{completer_id}' from ({command_path}, {param_name}) has no bash snippet mapping"
             )
 
+    def test_guide_topics_use_names_only_in_every_shell(self) -> None:
+        from agentworks.completions.bash import DYNAMIC_SNIPPETS as BASH_SNIPPETS
+        from agentworks.completions.powershell import DYNAMIC_SNIPPETS as POWERSHELL_SNIPPETS
+        from agentworks.completions.zsh import DYNAMIC_FUNCTIONS
+
+        assert DYNAMIC_COMPLETIONS[("guide", "topics")] == "guide_topics"
+        assert "agw guide --names-only" in BASH_SNIPPETS["guide_topics"]
+        assert "agw guide --names-only" in POWERSHELL_SNIPPETS["guide_topics"]
+        assert "agw guide --names-only" in DYNAMIC_FUNCTIONS["guide_topics"]
+
+    def test_guide_topic_completion_stream_keeps_schema_targets_when_config_is_broken(self) -> None:
+        from agentworks.errors import ConfigError
+        from agentworks.guide import GuideMode
+        from agentworks.guide.service import render_guide
+
+        def broken_config() -> object:
+            raise ConfigError("broken config")
+
+        response = render_guide((), GuideMode.AGENT, names_only=True, load_config_fn=broken_config)
+
+        assert response.exit_code == 0
+        assert "vm-template" in response.names
+        assert "vm-platform/wsl2" in response.names
+
+    def test_guide_topic_completion_stream_omits_rejected_schema_target(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from dataclasses import replace
+
+        from agentworks.guide import GuideMode
+        from agentworks.guide.service import render_guide
+        from agentworks.manifests.reference import reference_for
+
+        def invalid_reference(target: str):
+            reference = reference_for(target)
+            if target == "vm-template":
+                return replace(reference, summary="Untrusted ${SCHEMA_PAYLOAD}")
+            return reference
+
+        monkeypatch.setattr("agentworks.guide.service.reference_for", invalid_reference)
+        response = render_guide(
+            (),
+            GuideMode.AGENT,
+            names_only=True,
+            load_config_fn=lambda: object(),  # type: ignore[arg-type,return-value]
+            load_registry_fn=lambda _config: None,  # type: ignore[arg-type,return-value]
+        )
+
+        assert response.exit_code == 0
+        assert "agent-template" in response.names
+        assert "vm-template" not in response.names
+        assert "SCHEMA_PAYLOAD" not in response.markdown
+
 
 class TestOptionFlagsInSpec:
     """Pin option flags that must (or must not) reach the completion tree.

@@ -179,6 +179,7 @@ fields. The former `agw vm-host` registry is gone: a remote Lima host is now jus
 | `agw vm create <name>`                              | Create a new VM (provision + initialize)                      |
 | `agw vm list`                                       | List VMs with status and resources                            |
 | `agw vm describe <name>`                            | Show VM details, workspaces, and event log                    |
+| `agw vm verify-connection <name>`                   | Test the canonical admin connection without starting the VM   |
 | `agw vm shell <name> [--workspace <ws>]`            | Admin shell on a VM (optionally rooted in a workspace)        |
 | `agw vm exec <name> [--workspace <ws>] -- <cmd...>` | Run a one-shot command as admin (optionally from a workspace) |
 | `agw vm start <name>`                               | Start a stopped VM and clear its manual-stop intent           |
@@ -695,6 +696,101 @@ config load. Declare session templates as YAML manifests (`agw resource sample s
 and rewrite any that still live in `config.toml`; the
 [0.14 upgrade guide](../docs/guides/upgrading-to-0.14.md) walks through it.
 
+### Guide
+
+`agw guide [TOPIC]...` renders Markdown teaching together with safe facts from the current finalized
+resource registry. With no topic it prints a security disclosure, onboarding entry point, and topic
+index. Bare declarable-kind topics such as `vm-template` render current resources, a live field
+reference, and a generated sample from the same schema services the manifest loader uses.
+Capability-kind and implementation topics render their live alternatives or configuration fields,
+including implementations that are installed but disabled. Exact declared-resource topics describe
+current state and relationships and link back to their kind's shared schema. Core concepts use names
+such as `concept-onboarding`, `concept-migration`, `concept-secrets`, and `concept-reporting-bugs`.
+Schema literal values remain on one reference row: YAML-rendered backslashes, carriage returns, line
+feeds, and tabs appear as distinct visible escape sequences inside safe variable-backtick code
+spans.
+
+Multiple topics render in the requested order and are validated atomically: one unknown topic
+prevents all output. Repeated topics render once at their first position. `--agent` and `--human`
+override automatic presentation selection; explicit selection wins over the Claude Code execution
+signature and stdout TTY fallback. Both modes carry the same semantic content. Guide output is
+instructional and never grants consent to resolve secrets, inspect the workstation, connect to a VM,
+or mutate state.
+
+Guide registry construction never probes host tools or backend availability. Readiness that would
+require workstation inspection is rendered as unavailable; use an explicitly consented diagnostic
+surface when that fact is needed. Normal commands retain their ordinary readiness probes.
+
+Every renderer-owned level-2 heading in raw CLI Markdown carries the exact literal `⟦AGW framework⟧`
+marker. The contribution contract rejects either delimiter, whether literal or HTML-entity encoded,
+in authored topic titles, summaries, and Markdown. An authored contribution therefore cannot emit
+that exact literal marker in raw CLI Markdown. Other authored Markdown and HTML remain authored
+content and are not relabeled.
+
+The marker is a source-provenance convention, not an anti-spoof guarantee for arbitrary downstream
+Markdown, HTML, or CSS renderers, images, or styling. It grants no authority or trust to the content
+that follows.
+
+`concept-onboarding` also renders a pure assessment of the projected registry, relationship, and
+stored-instance facts. It reports each fact as done, disabled, not ready, or unverifiable and emits
+only the still-applicable ordered action records. Verification evidence is caller-owned and scoped
+to one named target; a verified rerun is a no-op, while refusal keeps the documented manual
+alternative without executing or repeating the command.
+
+The guide service composes a frozen onboarding snapshot from registered exact-resource guide views.
+The assessment receives only their bounded fact records; it cannot traverse the registry, database,
+configuration, or operational capabilities.
+
+Replay a caller-owned verification log with a repeatable, target-scoped flag such as
+`--evidence verify-named-secret:secret/tailscale-auth-key=verified` or
+`--evidence verify-vm-connection:vm/worker=refused`. The accepted outcomes are `verified`, `failed`,
+and `refused`; malformed, duplicate, mismatched, or inapplicable records fail the whole request
+before output. Agentworks does not persist an evidence ledger. Direct guided, non-interactive, and
+future bootstrap service consumers may provide the typed tuple they own at the service boundary.
+
+Guide remains useful when configuration or registry finalization fails. Authored prose still
+renders, schema-derived field references and samples remain available without configuration, other
+live blocks are marked unavailable, the framed failure appears once, and the command exits 1.
+`--names-only` emits one retained topic per line, degrades to authored topics plus every retained
+schema-describable kind and capability implementation under broken configuration, and exits 0. An
+invalid schema-derived topic is isolated as a scoped content issue in normal rendering and omitted
+from name discovery, while unaffected topics remain available. This stable stream backs Bash, Zsh,
+and PowerShell topic completion.
+
+`concept-migration` is the exceptional 0.14 resource-model rewrite guide, not a general upgrade
+workflow. It keeps the sequence, checkpoints, and consent boundaries in colocated package data and
+points to the installed kind and implementation topics for fields and samples. Its action records
+are inert instructions. Rendering them never reads a path, runs doctor, edits configuration, or
+authorizes an agent to do so. Under the first read boundary, the sequence inventories existing
+manifests and retired-TOML resources, records every intended TOML manifest file, and freezes their
+complete identity union. It then backs up configuration and resources separately to fresh
+operator-selected destinations outside the active trees, verifies matching copies or an explicit
+absent resources baseline without extending the union, and edits only at pre-recorded paths. Final
+identity matching keeps operator origin and manifest paths while ignoring mutable source lines. The
+final operator inventory can probe host readiness, so its action requires consent to examine the
+workstation.
+
+| Command                                                               | Description                                      |
+| --------------------------------------------------------------------- | ------------------------------------------------ |
+| `agw guide`                                                           | Render the guide index and onboarding disclosure |
+| `agw guide TOPIC...`                                                  | Render one or more exact topics atomically       |
+| `agw guide TOPIC... --agent/--human`                                  | Override automatic presentation mode             |
+| `agw guide concept-onboarding --evidence ACTION_ID:KIND/NAME=OUTCOME` | Replay caller-owned proof                        |
+| `agw guide --names-only`                                              | Emit topic names for shell completion            |
+
+### Guide management coverage
+
+The authored guide remains useful after initial setup. These operator goals have permanent entry
+points:
+
+| Goal                            | Guide coverage                                                       | Ordinary CLI surface                                                                        |
+| ------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| Create or change a resource     | `concept-management`, then the bare kind and exact `kind/name` topic | The resource's owning command or canonical manifest                                         |
+| Adopt a capability              | `concept-management`, then the capability implementation topic       | `agw resource list --include-disabled` and the owning configuration surface                 |
+| Resolve upgrade deprecations    | `concept-management`                                                 | Follow the emitted migration instruction before unrelated changes                           |
+| Migrate the 0.14 resource model | `concept-migration`, then each live kind or implementation topic     | Validate each manifest with doctor, cut over TOML once, then compare operator inventory     |
+| Troubleshoot                    | `concept-troubleshooting`                                            | Run `agw doctor` only with consent to examine the workstation; authorize repairs separately |
+
 ### Config
 
 | Command                             | Description                                  |
@@ -930,6 +1026,26 @@ agw secret describe tailscale-auth-key
 ```
 
 `describe` reports state -- it does not prompt and does not resolve the secret's value.
+
+To prove that a declared secret resolves through the configured backend chain, use `verify`:
+
+```bash
+agw secret verify tailscale-auth-key
+# Secret 'tailscale-auth-key' verified.
+```
+
+Verification performs one real ordered resolution pass, but prints only the one-line success result
+and never returns or displays the secret value. By default it skips interactive backends, so the
+command cannot unexpectedly prompt or initiate provider authentication. Opt in explicitly when an
+interactive backend is required:
+
+```bash
+agw secret verify tailscale-auth-key --allow-interactive
+```
+
+`--allow-interactive` is rejected when the global `--non-interactive` flag is set. Missing secrets,
+unavailable mappings, backend connectivity failures, and configuration failures use the normal
+framed CLI error categories with backend-authored details sanitized at this verification boundary.
 
 `agw doctor`'s Secrets group emits exactly one row per registry secret -- operator-declared and
 auto-declared alike (auto-declared rows, e.g. `tailscale-auth-key` and the `git-token-*` family,

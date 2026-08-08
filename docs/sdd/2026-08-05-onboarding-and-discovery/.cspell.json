@@ -3,13 +3,17 @@
   "import": ["../../../.cspell.json"],
   "words": [
     "dogfooding",
+    "fixpoint",
     "HashiCorp",
     "kubectl",
+    "metacharacters",
+    "redactions",
     "replayable",
     "rerunnability",
     "rerunnable",
     "rustc",
     "scriptable",
+    "setext",
     "unwired"
   ]
 }

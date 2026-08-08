@@ -41,64 +41,144 @@ identifies all wave 2 gates, and has no unresolved review finding.
 
 ## Phase 1: guide core and safe projection
 
-- [ ] `guide-contract-lld.md` pins Python records, validation errors, catalog build timing, package
+- [x] `guide-contract-lld.md` pins Python records, validation errors, catalog build timing, package
       data layout, semantic block identity, the deny-by-construction `GuideView` API, and the inert
       onboarding action record (identifier, sanitized precondition, required inputs, consent,
       command, expected state, verification, and refusal alternative). Catalog construction is
       guide-scoped and fail-soft, so invalid contributed content cannot break unrelated commands or
       valid core topics.
-- [ ] The guide LLD inventories documented, unambiguous Claude Code and Codex environment
+- [x] The guide LLD inventories documented, unambiguous Claude Code and Codex environment
       signatures; pins explicit flag, signature, then TTY detection precedence; rejects general
       configuration and secret variables as signatures; and tests `--human` for piped output.
-- [ ] Immutable `TopicContribution`, typed anchors, and closed block records implemented with strict
+- [x] Immutable `TopicContribution`, typed anchors, and closed block records implemented with strict
       registration validation; unknown fields, duplicate slugs, broken links, placeholder syntax,
       and executable contributions rejected.
-- [ ] `GuideView` implemented over finalized registry and graph facts with no capability object,
+- [x] `GuideView` implemented over finalized registry and graph facts with no capability object,
       secret resolver, raw config, run target, mutation, or arbitrary traversal surface.
-- [ ] Tests prove rendering performs no probe, secret resolution, capability invocation, finalize,
+- [x] Tests prove rendering performs no probe, secret resolution, capability invocation, finalize,
       or mutation and rejects an expression-evaluation attempt from plugin content.
-- [ ] Broken-config fixtures prove authored content and the framed config error still render, every
+- [x] Broken-config fixtures prove authored content and the framed config error still render, every
       affected dynamic block reports unavailable, full guide requests attempt the normal registry
       build, and `GuideView` construction cannot prompt for a secret.
-- [ ] Core concept topics and initial kind topics colocated with their owning packages, including
+- [x] Following live acceptance, guide-scoped registry construction preserves normal declaration,
+      publication, materialization, validation, finalization, and freezing while disabling host
+      probes; probe-dependent readiness remains unavailable and unverifiable. This corrective item
+      supersedes the preceding completed item's historical "normal registry build" wording. Ordinary
+      command registry builds retain their existing readiness checks.
+- [x] Core concept topics and initial kind topics colocated with their owning packages, including
       security disclosure, consent-first behavior, progressive onboarding, management, secrets, and
       troubleshooting. `concept-reporting-bugs` covers redacted reproduction, existing-issue search,
       the repository bug template, and explicit operator authorization before external submission;
       it does not solicit general feedback.
-- [ ] `concept-onboarding` assessment derives done, not-ready, disabled, and unverifiable status
+- [x] `concept-onboarding` assessment derives done, not-ready, disabled, and unverifiable status
       only from registry rows, finalized graph verdicts and relationships, and stored instance rows,
       with no raw-config reach-around, doctor execution, or persistent onboarding ledger.
-- [ ] Guided and replayable modes consume the same ordered action records; fixture scenarios prove
+- [x] Guided and replayable modes consume the same ordered action records; fixture scenarios prove
       equal registry, graph, stored-row, and explicit verification outcomes for equal inputs,
       including equal `unverifiable` outcomes after refusal.
-- [ ] Verification-surface inventory is rechecked against HEAD in the guide LLD: secret describe and
+- [x] Final review correction exposes strict repeatable target-scoped evidence on the guide CLI so
+      caller-owned replay logs can produce verified no-op and refusal-equivalent reruns without an
+      Agentworks onboarding ledger.
+- [x] Verification-surface inventory is rechecked against HEAD in the guide LLD: secret describe and
       doctor prediction, doctor and readiness tool checks, and lifecycle-only SSH checks are marked
       existing; actual secret proof and a non-mutating named-VM connection check are marked gaps.
-- [ ] A named-secret verification operation resolves through the normal boundary and reports only
+- [x] A named-secret verification operation resolves through the normal boundary and reports only
       success or framed failure, never returns or emits the value, and never invokes an interactive
       backend without explicit consent.
-- [ ] A non-mutating named-VM connection verification operation uses the standard transport and
+- [x] A non-mutating named-VM connection verification operation uses the standard transport and
       reports success or framed failure without repair, rekey, or implicit power-state change.
-- [ ] `agw guide [topic ...]`, `--agent/--human`, and `--names-only` implemented with atomic
+- [x] `agw guide [topic ...]`, `--agent/--human`, and `--names-only` implemented with atomic
       multi-topic validation, exact lookup, deterministic ordering, and markdown-only output.
-- [ ] Dynamic topic completion implemented and tested for Bash, Zsh, and PowerShell, including
+- [x] Dynamic topic completion implemented and tested for Bash, Zsh, and PowerShell, including
       `concept-` discovery and resource/capability `kind/name` topics.
-- [ ] Golden-path acceptance is step-bounded in automation and timed manually on a clean machine;
+- [x] Golden-path acceptance is step-bounded in automation and timed manually on a clean machine;
       the evidence records time to first working session and every operator interaction.
-- [ ] A management coverage matrix proves topics cover creating and changing resources, adopting a
+- [x] Phase 1 acceptance records time to the first actionable guide plan and every interaction in
+      that guide-only path. This corrective item supersedes the preceding completed item's premature
+      "first working session" wording; the actual fresh-operator working-session acceptance requires
+      the published bootstrap packages and remains in Phase 3.
+- [x] A management coverage matrix proves topics cover creating and changing resources, adopting a
       capability, resolving upgrade deprecations, and consented doctor-driven troubleshooting.
-- [ ] Permanent CLI and contributor documentation shipped with the command. Sample config reviewed;
+- [x] Permanent CLI and contributor documentation shipped with the command. Sample config reviewed;
       either updated for a real new setting or recorded as unaffected in the commit handoff.
-- [ ] Canonical Rulesync sources gain an always-on guide-contribution rule plus matching
+- [x] Canonical Rulesync sources gain an always-on guide-contribution rule plus matching
       `agentworks-dev` completeness and `agentworks-reviewer` drift checks; other roles are audited,
       shared Claude Code, Codex, and Copilot outputs regenerated, and
       `./scripts/rulesync-upgen.sh --check` passes.
-- [ ] Unit, integration, CLI, completion, packaging, typing, and lint gates pass.
-- [ ] Step reviewed by `agentworks-reviewer` and a fresh-eyes reviewer; valid findings resolved.
-- [ ] Always-green ready-to-merge implementation PR opened and roadmap-lead review requested.
+- [x] Unit, integration, CLI, completion, packaging, typing, and lint gates pass.
+- [x] Step reviewed by `agentworks-reviewer` and a fresh-eyes reviewer; valid findings resolved.
+- [x] Always-green ready-to-merge implementation PR opened and roadmap-lead review requested.
+- [x] Roadmap re-review corrective: restore sanitized SSH warning diagnostics; make verification
+      exception sanitization fail closed for malformed plugin exceptions; audit every secret-bearing
+      logger construction now that redactions are immutable; and document the CodeQL-recognized sink
+      constraint without weakening runtime error propagation or descriptor cleanup.
+- [x] Roadmap re-review corrective: prove the guide database is opened read-only with an actual
+      rejected write and service-construction assertion; frame any escaped read-only database error.
+- [x] Roadmap re-review corrective: extend probe, secret, capability, filesystem-write, and mutation
+      denials across end-to-end `render_guide` on a live registry, recording this corrective item
+      without altering the earlier checked no-power claim.
+- [x] Roadmap re-review corrective: exercise taxonomy ownership, untrusted collision, and
+      broken-link fixpoint behavior with fixtures that reach those gates; make trusted-core taxonomy
+      mistakes fail CI while runtime catalog construction remains fail-soft, align the HLA and LLD
+      with that split, and isolate invalid contributions from valid topics at runtime.
+- [x] Roadmap re-review corrective: make authored-content wheel inclusion a normal CI assertion, not
+      an integration-only test.
+- [x] Roadmap re-review corrective: sanitize C0/C1 terminal controls at one render boundary for all
+      authored and projected text; accept action tokens only through a closed literal allowlist that
+      excludes shell syntax, expansion, globbing, comments, whitespace, and line breaks; reject or
+      safely frame controls in evidence errors.
+- [x] Roadmap re-review corrective: keep secret-sanitizer scope narrow and diagnostics useful while
+      distrusting every backend-authored field; make verification result fields authoritative rather
+      than hard-coded or unread; add malformed-exception adversarial coverage.
+- [x] Roadmap re-review corrective: make view construction and exit status fail soft for missing
+      plugin roots, missing resources, unsupported concept instance lists, and unrelated invalid
+      topics; derive probe suppression from one shared policy until the descriptor owns it.
+- [x] Roadmap re-review corrective: pin registry validation, materialization, deferred targets,
+      finalized-state gating, empty inventory, no-topic live rendering, first-run config framing, VM
+      verification CLI behavior, every block renderer, and unsupported-block refusal with meaningful
+      non-vacuous tests.
+- [x] Roadmap re-review corrective: record sample config as unaffected in a repository-visible
+      handoff; add contributed-content size bounds; remove or clarify dead and implicit
+      discriminators identified by review where doing so improves the forward contract; defer only
+      organizational test consolidation that changes no behavior or proof.
+- [x] Roadmap re-review follow-up: give renderer-owned framework headings a visible reserved label,
+      reject that label in authored markdown without restricting ordinary authored headings, and
+      prove a plugin cannot emit the exact literal marker in raw CLI Markdown; document that the
+      marker is provenance syntax, not downstream presentation security or authorization.
+- [x] Roadmap re-review follow-up: make the guide power-import boundary inspect Python files
+      recursively so a future guide subpackage cannot escape the denial proof.
 
 Definition of done: R2, R3, R4, R5, R9, R10, R12, R13, R14, and R15 work for static topics and
 current registry/resource-derived content without any wave 2 surface.
+
+### Release-gate adoption after wave 2
+
+The 2026-08-07 remediation-posture ruling supersedes Phase 1's originally dependency-free merge
+boundary. PR #428 addressed all wave-2-independent review findings first, then rebased once after
+the declarative-schema service contracts merged to `main`. It has no provisional branch dependency.
+
+- [x] After wave 2 merges, add `concept-migration` as the exceptional resource-model remediation
+      topic, distinct from ordinary upgrading, using authoritative live sample and field-reference
+      service APIs rather than copied shapes or rendered CLI output.
+- [x] Config-free `describable_targets`, `SchemaReference`, and `sample_text` adapters populate kind
+      and capability-implementation topics from one source, including disabled implementations,
+      exact contribution validation, completions, field references, and declarable samples.
+- [x] Link migration from onboarding and management without duplicating its teaching; cover TOML to
+      manifest rewrites, tagged capability configuration, strict validation changes, and the precise
+      null-secret discovery and implemented decision path: omitted and explicit-null fields both use
+      the default secret; Azure and AWS require removing the enclosing auth block for ambient auth;
+      Proxmox has no no-secret mode.
+- [x] Prove the topic remains available when operator config does not load, names exact live
+      remediation surfaces, and verifies results through normal loading and doctor rather than a
+      frozen migration oracle.
+- [x] Every migration read, probe, and mutation crossing a consent boundary is a validated inert
+      action record with exact scope, expected result, verification, and refusal behavior; backups
+      and the complete pre-migration identity-and-origin inventory precede edits.
+- [x] Review the cross-SDD adapter and migration teaching after the wave 2 rebase, then rerun the
+      full Phase 1 and CI gates before requesting roadmap-lead re-review.
+
+The release-gate adapter is specified in `wave2-guide-adapter-lld.md`. It binds existing schema
+blocks and the migration workflow only; the broader registry-inventory scope remains in Phase 4.
 
 ## Phase 2: machine-readable operational output
 
@@ -152,39 +232,23 @@ one fact source.
 Definition of done: R1, R11, R12, R16, AC1, AC3, AC7, AC8, and AC10 hold for both harnesses and the
 zero-plugin README path.
 
-## Phase 4: wave 2 adoption and registry inventory
+## Phase 4: registry inventory and specific-resource projection
 
-Each adapter starts when its required wave 2 contract merges to `main`; unrelated adapters do not
-wait for the whole phase. Registry inventory remains deliberately last to minimize conflict with
-wave 2. Rebase once after its descriptor work merges if needed.
+The Phase 1 release gate now owns schema-derived kind and implementation pages because the 0.14
+migration topic requires them. This phase retains only runtime registry inventory and
+specific-resource depth that does not block the first release.
 
-- [ ] Main checked for delivered coordination messages and wave 2's merged HLA, plan, LLD, and
-      implementation reviewed against this HLA. Any incompatible contract is flagged to the
-      operator; this effort does not patch wave 2 artifacts.
-- [ ] Plan and HLA updated before implementation if authoritative wave 2 contracts differ from the
-      provisional `FieldDoc`, sample, describe, or blurb direction recorded on 2026-08-06.
-- [ ] `wave2-guide-adapter-lld.md` pins each independently merged service API and maps shared
-      overview, field docs, schemas, samples, disabled implementations, and capability descriptors
-      into guide blocks with a separate merge gate per source.
-- [ ] After the field-doc service merges, `FieldReference` consumes it directly with no rendered CLI
-      scraping, copied field list, or alternate schema walker.
-- [ ] After the live-sample service merges, `Sample` consumes it directly with no rendered CLI
-      scraping or bundled sample copy.
 - [ ] After the descriptor inventory merges, registry inventory renders capability kinds and
       implementations, including enablement/readiness, without a hand-maintained adapter table.
-- [ ] Kind and implementation guide pages combine shared overview, field reference, sample, current
-      state, and progressive links. Disabled implementations remain discoverable and truthful.
 - [ ] Specific-resource topics delegate to the same service fact source as instance describe.
 - [ ] Adding a registered implementation or resource changes the guide inventory with no topic
       switchboard edit, pinned by fixture-plugin tests.
-- [ ] Wave 2 CLI names and this effort's guide links documented together; completions updated for
-      authoritative names.
-- [ ] Full cross-SDD integration gates pass; step reviewed by `agentworks-reviewer` and a fresh-eyes
+- [ ] Full registry integration gates pass; step reviewed by `agentworks-reviewer` and a fresh-eyes
       reviewer; valid findings resolved.
 - [ ] Always-green ready-to-merge PR opened and roadmap-lead review requested.
 
-Definition of done: R6, R8, D4, AC5, and the schema-derived depth of R13 and R14 use only
-authoritative wave 2 sources.
+Definition of done: R8 and AC5 project runtime registry and specific-resource facts without a
+hand-maintained switchboard.
 
 ## Phase 5: acceptance, promotion, and closeout
 

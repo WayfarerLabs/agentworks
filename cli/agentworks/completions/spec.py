@@ -104,6 +104,7 @@ class CommandSpec:
 #   "resource_refs"   -> agw resource list --names-only
 #                        (kind/name per line, verbatim -- the candidate
 #                        IS the token for `resource describe KIND/NAME`)
+#   "guide_topics"    -> agw guide --names-only
 #
 # The template + git_credentials completers source from the Resource
 # Registry (via `agw resource list --kind X --names-only`) rather than
@@ -133,12 +134,14 @@ class CommandSpec:
 # spirit is preserved (one line per resource, no header or formatting).
 
 DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
+    ("guide", "topics"): "guide_topics",
     ("vm.start", "name"): "vms",
     ("vm.stop", "name"): "vms",
     ("vm.delete", "name"): "vms",
     ("vm.rekey", "name"): "vms",
     ("vm.backup", "name"): "vms",
     ("vm.describe", "name"): "vms",
+    ("vm.verify-connection", "name"): "vms",
     ("vm.reinit", "name"): "vms",
     ("vm.exec", "name"): "vms",
     ("vm.exec", "workspace"): "workspaces",
@@ -223,6 +226,7 @@ DYNAMIC_COMPLETIONS: dict[tuple[str, str], str] = {
     ("console.restore-session", "session"): "sessions",
     # Secret inspection
     ("secret.describe", "name"): "secrets",
+    ("secret.verify", "name"): "secrets",
     # Resource inspection (describe took the single KIND/NAME
     # grammar in the display-syntax unification)
     ("resource.list", "kind"): "resource_kinds",
