@@ -1,7 +1,7 @@
 # Target State
 
 - Status: North star, accumulating settled rulings
-- Last updated: 2026-08-08
+- Last updated: 2026-08-07
 
 This document describes where Agentworks is going across this roadmap effort, synthesized from the
 perspectives in `inputs/`. It is the target of these waves, not a forever vision: when
@@ -91,24 +91,17 @@ post-finalize immutability staying a registry/fold property rather than a model-
 and one instance-state store designed once for instance specs, integration applied-state, and
 artifact ownership records (three perspectives converge on that store).
 
-**The variant-modeling contract** (operator rulings, 2026-08-07 and 2026-08-08) is applied in three
-tiers. First, a genuine mechanism choice with arm-specific required fields is a closed discriminated
-union with a string `Literal` tag; a selector-free choice between distinct required-key shapes may
-instead be an explicit untagged structural union emitted as plain `oneOf`. Second, anything that
-decides whether a secret reference or resource edge exists must be model-visible to the walkers, so
-extraction reaches exactly what validation can select. Third, cross-field validity among plain
-config fields may remain in a loud, precise load-time validator even when emitted schema
-under-constrains the combination. The schema must never reject a loader-accepted document;
-sanctioned under-reporting is not itself unsound.
-
-Three tests precede restructuring: first dissolve a constraint when its formerly forbidden
-combination has useful semantics; then protect the common spelling with defaults, scalar shorthands,
-or untagged structural unions; finally weigh the editor-validation gain against the operator cost.
-The current dissolutions make GitHub `repos` plus `owner` the union of both scopes, and make
-multiple install tests an all-pass condition with an explicit at-least-one guard. A union may
-default only to the arm omission historically selected, never a new arm. Permanent home for the
-complete rule is `cli/agentworks/capabilities/README.md`; the retirement pattern for old shapes
-remains the exact-rewrite hard error plus the upgrade guide.
+**The variant-modeling contract** (operator rulings, 2026-08-07 and 2026-08-08): config that has
+variants is a discriminated union on a string `Literal` discriminator (spelled `mode` on today's
+action-named fields; the README's grammar rule governs the key), one arm per required-field shape
+(the discriminator tracks shape, not concept), the union field named for what it selects (sibling
+capabilities may diverge, as `auth` versus `placement` do), and new variants added as arms, never by
+pre-grouped mechanism awaiting a consumer. A union may default only to the mode its omission
+historically selected, never to a new arm, and extraction reads declared defaults as if written so a
+defaulted choice is graph-visible exactly like a written one. Permanent homes: the shape rule in
+`cli/agentworks/capabilities/README.md`, the extraction invariant in `schema/extract.py`'s
+docstring, the default posture's reasoning at the union sites themselves; the retirement pattern for
+old shapes is the exact-rewrite hard error plus the upgrade guide.
 
 Two companion rulings (operator, 2026-08-08): **secret sources are simple KV stores with shared
 config**; creation specifications (a minted credential's scopes, repos, permissions) belong to the
