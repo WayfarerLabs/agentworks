@@ -326,6 +326,25 @@ the reason that survives, which is that a tag is an identifier the operator writ
 said all four discriminated unions were top-level capability configs; three now are not, so what
 remains unshipped is the COLLECTION of tagged blocks rather than the nesting.
 
+### The same landing strengthened this effort's registration guard
+
+`reference_marker_error` shipped here as a set of checks against shapes someone had thought of, and
+it was extended three times by three separate findings, each after a walker gap let a marker
+through. It now states one invariant instead: **every model pydantic can select is a model some
+walker reaches, or no reference marker hides inside it.** Implemented as a subtraction, the models
+an annotation offers validation minus the models the walkers reach, so a position nobody enumerated
+is refused automatically rather than becoming a fourth finding. It caught two on arrival that this
+effort had silently accepted: a model under a nested collection, and a fixed-length tuple member.
+
+The conformance walk now shares `table_addresses_block` verbatim with extraction's own refusal, so
+it cannot claim reach the extractor does not have. That coupling is the point: the guard derivation
+has to ask the walkers what they can read rather than keep its own opinion.
+
+An audit of this layer found the enumeration of derivations was the thing missing, not any one
+check, so it now lives permanently at `cli/agentworks/schema/README.md` with the comparator map:
+what derives from the model, which pairs are compared and by what, and the rule that adding a
+derivation adds N pairs that have to agree.
+
 **One thing this effort's union machinery got right, worth recording as evidence.** The three new
 unions needed NO change to `_shape.py`'s classification, `extract.py`'s arm walk, `base.py`'s marker
 refusal, or `field_tree.py`'s expansion, despite being the first discriminated unions here whose
