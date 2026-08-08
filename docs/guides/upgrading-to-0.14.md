@@ -581,6 +581,30 @@ document and one line is added to it: placement: {mode: local}
   declared, not inferred" in docs/guides/upgrading-to-0.14.md.
 ```
 
+A site that wrote the old key as an explicit `null` gets a third message, and it is the one worth
+reading closest. On 0.13 a null meant exactly what omitting the key meant, so `vm_host: null` was a
+LOCAL site and `service_principal: null` was ambient auth. That is the same absent-and-null
+conflation this change exists to end, so the fix differs from the absent case in one important way:
+there is a line to delete as well as one to write.
+
+```console
+$ agw resource list
+Configuration error: ~/.config/agentworks/resources/lima.yaml:1: vm-site/lima-here: 'placement' is
+required and this resource does not declare it. 'vm_host: null' selected 'local', exactly as
+omitting the key did, and that is the conflation the required 'placement' ends; delete the null line
+and write the choice instead: placement: {mode: local}
+  Hint: Apply the rewrite above; `agw resource describe-kind <kind>` documents the field, and `agw
+  resource sample <kind>` prints it as a document to edit. See "Authentication and placement are
+  declared, not inferred" in docs/guides/upgrading-to-0.14.md.
+```
+
+Note which arm it names. A null selected the AMBIENT and LOCAL modes, never the credentialed ones,
+so `service_principal: null` becomes `auth: {mode: ambient}` and `vm_host: null` becomes
+`placement: {mode: local}`. If you are working from the null scan in
+["An explicit `null` secret name now means the DEFAULT secret"](#one-meaning-changed-rather-than-one-shape)
+below, these three keys are the ones whose nulls were doing something different from the secret
+fields that section covers.
+
 Both errors name the file, the line, and the site, like every other manifest error here. One site
 per pass, as everywhere else here, so three stale sites take three passes. `agw doctor` reports each
 as one fail row and carries on, which makes it the loop to work in.
