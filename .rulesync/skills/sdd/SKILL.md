@@ -121,8 +121,10 @@ messaged, and the difference matters: a message goes to a live effort and must s
 churn, so it delivers via `main`; a brief CREATES the work vehicle, and the assignee owns it from
 pickup, so it never needs to touch `main` at all. The current mechanism: the requester seeds a
 branch (`task/<slug>`) whose first commit adds a single brief file
-(`message-<YYYY>-<MM>-<DD>-<topic>.md`, at the repo root) carrying the charter (what, why, the
-definition of done, where the authoritative spec lives, who reviews) and the brief's own
+(`brief-<YYYY>-<MM>-<DD>-<topic>.md`; the distinct prefix keeps it from reading as the message
+channel above, whose semantics it does not share). It sits at the repo root for pickup
+discoverability, which stays clean because briefs never reach `main`. The brief carries the charter
+(what, why, the definition of done, where the authoritative spec lives, who reviews) and its own
 disposition, usually "delete this file before the PR goes ready" (keep-and-promote is the exception,
 and the brief says where the content goes). The assignee takes over the branch, does the work there,
 and disposes of the brief per its own instructions. The contract is mechanism-independent on
