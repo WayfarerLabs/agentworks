@@ -103,6 +103,14 @@ defaulted choice is graph-visible exactly like a written one. Permanent homes: t
 docstring, the default posture's reasoning at the union sites themselves; the retirement pattern for
 old shapes is the exact-rewrite hard error plus the upgrade guide.
 
+Two companion rulings (operator, 2026-08-08): **secret sources are simple KV stores with shared
+config**; creation specifications (a minted credential's scopes, repos, permissions) belong to the
+consuming capability's domain, never the source or per-secret mapping, so credential minting models
+as a git-credential variant. Consequently **git-credential joins the variant contract before the
+0.14.0 cut**: a one-arm union restructure (defaulting to the stored arm per the omission-history
+rule, with the scalar shorthand as the stored arm's spelling) so minting later lands as a purely
+additive arm.
+
 ### Capability descriptor (destination 3)
 
 A core-owned, typed capability-kind descriptor registered once per kind, from which graph stamping,
@@ -164,6 +172,19 @@ distinguishable, because VM auto-suspend keys on the latter. The layered threat 
 fidelity, collector survivability, adversarial assurance) frames what any slice may honestly claim.
 The distiller consumes the record store and proposes reviewed PRs, never direct commits; harness
 memory is a cache, the repository is the system of record, and distillation is the flush.
+
+### Plugin namespace and name stability (operator ruling, 2026-08-07)
+
+**One name, one source.** In-repo contributions (built-ins and system plugins) share one curated
+namespace in which a collision is a defect, caught at registration seat time with attribution, never
+a runtime policy question. Third-party plugins (wave 8) MUST NOT collide with in-repo names, and use
+their unique plugin name as a namespace so cross-plugin uniqueness is structural rather than
+policed; the guide's plugin-topic namespacing with its ownership gate (settled in the onboarding
+child's design, landing with its phase 1) is the shape wave 8 inherits. Operator declarations
+interact with provided names through the collision semantics settled in the installer-plugins child
+(name-is-the-contract; silent collision is a hard error naming both remediations;
+disable-and-redeclare is the sanctioned replacement with provenance surfaced; defaults-with-override
+is reserved for surfaces that declare it, wave 3's synthesized sources being canonical).
 
 ### Compatibility posture (all destinations)
 
