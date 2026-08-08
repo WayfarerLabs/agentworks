@@ -331,11 +331,12 @@ there is no longer an inference to mis-fire. Both fixes are load-bearing and nei
 other.
 
 **What was promoted, per the SDD-is-not-permanent rule.** The modeling rule that came out of the
-design is in `cli/agentworks/capabilities/README.md` ("Modeling a Config That Has Variants"):
-absence supplies a default value and must not select a mechanism; the discriminator selects a SHAPE
-rather than a concept, and the operational test is whether the required field sets differ; adding an
-arm is the additive extension path, so pre-grouping against a variant that does not exist is
-mechanism without a consumer; and arm names select a mechanism rather than a position.
+design is in `cli/agentworks/capabilities/README.md` ("Modeling a Config That Has Variants"): the
+choice must be DECLARABLE, which is narrower than forbidding a default (see the 2026-08-08 entry
+below, which reversed the required posture this line originally summarized); the discriminator
+selects a SHAPE rather than a concept, and the operational test is whether the required field sets
+differ; adding an arm is the additive extension path, so pre-grouping against a variant that does
+not exist is mechanism without a consumer; and arm names select a mechanism rather than a position.
 
 **Two claims in this effort's code were made false by it and corrected there.** `_shape.py`'s
 `_tags_of` justified its non-string-tag boundary on "every discriminator in this framework is a
