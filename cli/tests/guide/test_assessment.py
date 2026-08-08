@@ -298,7 +298,10 @@ def test_cli_rejects_malformed_evidence_atomically(monkeypatch: pytest.MonkeyPat
 
 
 @pytest.mark.parametrize("control", ["\x00", "\x07", "\x1b", "\x7f", "\x80", "\x9f"])
-def test_cli_rejects_control_bytes_in_evidence_without_echoing_them(control: str) -> None:
+def test_cli_rejects_control_bytes_in_evidence_without_echoing_them(
+    control: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("NO_COLOR", "1")
     value = f"verify-named-secret:secret/to{control}ken=verified"
     result = CliRunner().invoke(app, ["guide", "concept-onboarding", "--evidence", value])
     assert result.exit_code == 2
