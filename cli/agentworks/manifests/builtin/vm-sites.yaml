@@ -20,7 +20,7 @@ metadata:
   name: lima-local
   description: Local Lima VMs on this workstation
 spec:
-  platform: { name: lima }
+  platform: { name: lima, placement: { mode: local } }
 ---
 apiVersion: agentworks/v1
 kind: vm-site

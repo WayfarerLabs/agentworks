@@ -221,7 +221,7 @@ class LiveVMNode:
         # That degrade covers the BACKEND read only. A failure in the
         # credential layer beneath it does not reach here as UNKNOWN: a
         # platform with explicitly configured credentials (an azure site
-        # with a service_principal) raises a typed error instead, and
+        # on the service-principal arm) raises a typed error instead, and
         # deliberately so, since its identity layer cannot distinguish a
         # rejected credential from an unreachable one and reporting
         # UNKNOWN would hide a misconfiguration behind a plausible

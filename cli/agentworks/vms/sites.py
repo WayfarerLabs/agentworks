@@ -64,7 +64,7 @@ class VMSiteDecl(DeclaredResource):
     platform: CapabilityBlock
     """The vm-platform backing this site: one table whose ``name`` selects
     the platform and whose remaining keys are that platform's own config
-    (``{name: lima, vm_host: me@box}``)."""
+    (``{name: lima, placement: {mode: ssh, host: me@box}}``)."""
 
     @model_validator(mode="after")
     def _no_shadowed_platform(self) -> VMSiteDecl:
@@ -208,10 +208,13 @@ def site_manifest_hint(name: str, *, vm_host: str | None = None) -> str:
     Used by the stranded-VM ``ConfigError`` (a migrated remote-Lima row
     whose site manifest the operator has not added yet), the DB
     migration's printed snippets, and doctor.
+
+    ``vm_host`` keeps its parameter name because it is what the CALLERS
+    have: a legacy ``vm_hosts.ssh_host`` column and a retired
+    ``defaults.vm_host`` setting. What it RENDERS is the current shape,
+    the remote placement arm.
     """
-    config_lines = ""
-    if vm_host is not None:
-        config_lines = f"\n    vm_host: {vm_host}"
+    placement = "{ mode: local }" if vm_host is None else f"{{ mode: ssh, host: {vm_host} }}"
     return (
         "declare it under ~/.config/agentworks/resources/ (any filename), "
         "e.g.:\n\n"
@@ -221,8 +224,8 @@ def site_manifest_hint(name: str, *, vm_host: str | None = None) -> str:
         f"  name: {name}\n"
         "spec:\n"
         "  platform:\n"
-        "    name: lima"
-        f"{config_lines}\n\n"
+        "    name: lima\n"
+        f"    placement: {placement}\n\n"
         "(adjust the platform table's name and config keys to match where "
         "this site's VMs actually live; see `agw resource sample vm-site`)"
     )

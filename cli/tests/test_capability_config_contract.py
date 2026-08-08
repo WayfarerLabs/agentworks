@@ -184,10 +184,10 @@ def _azure_site(tmp_path: Path, *, enabled: bool, blob: dict[str, Any]) -> Any:
 
 
 #: Rejected by the azure-vm model on any host: ``regions`` is not a field.
-_BROKEN_BLOB = {"subscription_id": "s", "resource_group": "g", "regions": "eastus"}
+_BROKEN_BLOB = {"subscription_id": "s", "resource_group": "g", "regions": "eastus", "auth": {"mode": "ambient"}}
 
 #: Accepted by the same model, so only the plugin's state can mark this row.
-_VALID_BLOB = {"subscription_id": "s", "resource_group": "g", "region": "eastus"}
+_VALID_BLOB = {"subscription_id": "s", "resource_group": "g", "region": "eastus", "auth": {"mode": "ambient"}}
 
 
 @pytest.mark.parametrize("enabled", [False, True])

@@ -132,7 +132,7 @@ class VMPlatform(Capability):
         configured site ready" (that is preflight) and not "is a tool merely
         missing but installable" (that is the config-dependent
         :meth:`Capability.not_ready`: lima the platform is supported
-        everywhere because remote sites run ``limactl`` on the vm_host over
+        everywhere because ssh-placed sites run ``limactl`` on the placement host over
         SSH, but a local-Lima site without a local ``limactl`` is not-ready).
         Default: supported everywhere.
         """

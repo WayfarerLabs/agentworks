@@ -547,7 +547,27 @@ def test_an_implementation_documents_the_model_it_declares() -> None:
     reference = reference_for("vm-platform/lima")
 
     assert reference.implementation == "lima"
-    assert {entry.name for entry in reference.spec} == {"name", "vm_host"}
+    assert {entry.name for entry in reference.spec} == {"name", "placement"}
+
+
+def test_a_nested_tagged_union_lists_its_arms_and_expands_one() -> None:
+    """lima's ``placement`` is the framework's first discriminated union
+    that is NOT a capability-config union, so this pins that the shared
+    field-tree machinery expands it with no special casing: both arms are
+    offered, the first is expanded, and its own fields are the children.
+
+    ``target`` is None on both, unlike a capability arm's: there is no
+    ``describe-kind`` address for one arm of an ordinary union, and
+    inventing one would print a command that fails."""
+    (placement,) = [e for e in reference_for("vm-platform/lima").spec if e.name == "placement"]
+
+    assert [alt.name for alt in placement.alternatives] == ["local", "ssh"]
+    assert all(alt.target is None for alt in placement.alternatives)
+    assert placement.rendered == "local"
+    assert [child.name for child in placement.children] == ["mode"]
+    # The arm summaries come from the arm MODELS' docstrings (a capability
+    # union reads its impls' one-liners instead), so they are real prose.
+    assert placement.alternatives[1].summary == "Run limactl on another host over SSH."
 
 
 def test_a_root_model_config_is_described_as_a_value() -> None:

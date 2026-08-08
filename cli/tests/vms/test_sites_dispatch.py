@@ -48,7 +48,7 @@ def test_resolve_site_binds_the_platform_config() -> None:
     registry = _registry(
         VMSiteDecl(
             name="gpu-box",
-            platform=CapabilityBlock.of("lima", **{"vm_host": "me@box"}),
+            platform=CapabilityBlock.of("lima", placement={"mode": "ssh", "host": "me@box"}),
         )
     )
     platform = resolve_site("gpu-box", registry)
@@ -135,10 +135,14 @@ def test_ops_read_the_token_through_the_context() -> None:
 # SimpleNamespace stub config they used here.
 
 
-def test_site_manifest_hint_carries_the_vm_host() -> None:
+def test_site_manifest_hint_carries_the_host_in_the_ssh_arm() -> None:
+    """The hint is a ready-to-paste manifest, so it has to carry the
+    CURRENT shape: a host renders as the ssh placement arm, and no host
+    renders as the local one."""
     hint = site_manifest_hint("gpu-box", vm_host="me@box")
     assert "name: gpu-box" in hint
-    assert "vm_host: me@box" in hint
+    assert "placement: { mode: ssh, host: me@box }" in hint
+    assert "placement: { mode: local }" in site_manifest_hint("here")
 
 
 # -- select_site: the house selection model ---------------------------------
@@ -166,7 +170,7 @@ def test_select_site_infers_the_single_declared_site(
     registry.add(
         "vm-site",
         "only-one",
-        VMSiteDecl(name="only-one", platform=CapabilityBlock(name="lima")),
+        VMSiteDecl(name="only-one", platform=CapabilityBlock.of("lima", placement={"mode": "local"})),
         Origin.built_in(source="test"),
     )
     registry.finalize()

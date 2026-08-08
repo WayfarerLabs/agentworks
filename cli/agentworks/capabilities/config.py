@@ -46,6 +46,7 @@ from pydantic import Field
 from pydantic import ValidationError as PydanticValidationError
 
 from agentworks.capabilities.descriptor import descriptor_for, descriptor_for_impl
+from agentworks.capabilities.retired_shapes import retired_shape_error
 from agentworks.errors import StateError
 from agentworks.schema import (
     AgwRootModel,
@@ -142,6 +143,10 @@ def validate_capability_config(
     impl = _seated_impl(descriptor, selected)
     if impl is None:
         return None
+    # Before validation, so a pre-migration document gets its exact
+    # rewrite rather than the unconnected pair of problems the model layer
+    # would answer it with. Release-scoped; see the module it lives in.
+    retired_shape_error(getattr(impl, "retired_shape", None), config, owner)
     hint = reference_hint(kind, selected)
     if descriptor.config_schema.discriminator is None:
         model = offered_model(impl)
@@ -175,6 +180,7 @@ def validate_own_config(
     can only be a framework mistake (a call site handing over a table
     where a config belongs), so it is a ``StateError``.
     """
+    retired_shape_error(getattr(impl, "retired_shape", None), config, owner)
     descriptor = descriptor_for_impl(impl)
     discriminator = descriptor.config_schema.discriminator if descriptor is not None else None
     payload: Mapping[str, object] = config
@@ -224,9 +230,9 @@ def capability_config_union(kind: str) -> type[BaseModel]:
 
     A root model wrapping the union type rather than a bare
     ``TypeAdapter``, because the error bridge frames against a model: as a
-    root model, a failure's leading tag segment (``('lima', 'vm_host')``)
+    root model, a failure's leading tag segment (``('lima', 'placement')``)
     is recognized as the tag it is and dropped, so an operator reads
-    ``vm-site/lab.vm_host`` rather than a path with our dispatch mechanism
+    ``vm-site/lab.placement`` rather than a path with our dispatch mechanism
     in it. The model is generated rather than authored, which is legal
     precisely because it declares no fields of its own: every field, and
     every field description, comes from the authored arms.

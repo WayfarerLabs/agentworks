@@ -16,7 +16,7 @@ warning walks the ``SecretRef`` edges the model declares
 happens to name a secret.
 
 A capability is named by ONE tagged table on its host's naming field
-(``spec.platform: {name: lima, vm_host: ...}``), which the host row carries
+(``spec.platform: {name: lima, placement: {...}}``), which the host row carries
 as a ``CapabilityBlock``. The CONTENT of a capability-owned blob is NOT
 validated here: its shape check is the finalize ``validate_config`` pass
 (R3), against the capability's own declared model.

@@ -14,7 +14,11 @@ from __future__ import annotations
 
 import pytest
 
-from agentworks.capabilities.config import capability_config_references, validate_capability_config
+from agentworks.capabilities.config import (
+    capability_config_model,
+    capability_config_references,
+    validate_capability_config,
+)
 from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
 from agentworks.capabilities.vm_platform.lima import LimaPlatform
 from agentworks.capabilities.vm_platform.wsl2 import WSL2Platform
@@ -23,6 +27,7 @@ from agentworks.plugins.aws.platform import EC2Platform
 from agentworks.plugins.azure.platform import AzureVMPlatform
 from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.schema import RefOwner
+from agentworks.schema._shape import shape_of
 from agentworks.schema.reference import ConfigReference
 
 #: The well-known secret names the three credential-bearing platforms
@@ -33,12 +38,20 @@ AWS_DEFAULT_SECRET = "aws-secret-access-key"
 AZURE_DEFAULT_SECRET = "azure-client-secret"
 PROXMOX_DEFAULT_SECRET = "proxmox-token"
 
+#: The arm every site that is not testing credentials selects. Written
+#: out at every call site's base config rather than defaulted, because
+#: that is the contract: no site selects an identity, or a placement, by
+#: omission.
+AMBIENT_AUTH = {"mode": "ambient"}
+
 AZURE_CONFIG = {
     "subscription_id": "0000",
     "resource_group": "agw",
     "region": "eastus",
+    "auth": AMBIENT_AUTH,
 }
 AZURE_SP = {
+    "mode": "service-principal",
     "tenant_id": "tenant-0000",
     "client_id": "client-0000",
     "secret": "az-sp",
@@ -49,8 +62,10 @@ PROXMOX_CONFIG = {
     "token_id": "agw@pam!agw",
     "template_vmid": 9000,
 }
-EC2_CONFIG = {"region": "us-east-1"}
-EC2_CREDS = {"access_key_id": "AKIAEXAMPLE", "access_key_secret": "aws-secret"}
+EC2_CONFIG = {"region": "us-east-1", "auth": AMBIENT_AUTH}
+EC2_CREDS = {"mode": "access-key", "access_key_id": "AKIAEXAMPLE", "access_key_secret": "aws-secret"}
+LIMA_LOCAL = {"placement": {"mode": "local"}}
+LIMA_SSH = {"placement": {"mode": "ssh", "host": "me@box"}}
 
 OWNER = RefOwner(kind="vm-site", name="t")
 
@@ -81,16 +96,16 @@ def test_registry_names_match_classes() -> None:
 # -- Validation (the throwing shape check) -----------------------------------
 
 
-def test_lima_accepts_empty_and_vm_host() -> None:
-    _validate("lima", {})
-    _validate("lima", {"vm_host": "me@box"})
+def test_lima_accepts_either_placement() -> None:
+    _validate("lima", LIMA_LOCAL)
+    _validate("lima", LIMA_SSH)
 
 
-def test_lima_rejects_bad_vm_host_and_unknown_keys() -> None:
-    with pytest.raises(ConfigError, match="vm_host"):
-        _validate("lima", {"vm_host": ""})
-    with pytest.raises(ConfigError, match="host: unknown field; expected one of: name, vm_host"):
-        _validate("lima", {"host": "x"})
+def test_lima_rejects_bad_host_and_unknown_keys() -> None:
+    with pytest.raises(ConfigError, match="placement.host: must not be empty"):
+        _validate("lima", {"placement": {"mode": "ssh", "host": ""}})
+    with pytest.raises(ConfigError, match="host: unknown field; expected one of: name, placement"):
+        _validate("lima", {**LIMA_LOCAL, "host": "x"})
 
 
 def test_wsl2_accepts_no_configuration() -> None:
@@ -99,36 +114,40 @@ def test_wsl2_accepts_no_configuration() -> None:
         _validate("wsl2", {"anything": 1})
 
 
-def test_azure_requires_the_three_keys() -> None:
+def test_azure_requires_all_four_keys_including_auth() -> None:
+    """``auth`` is required exactly like the three location keys, and it
+    is the one that used to be optional: omitting it selected the ambient
+    chain silently.
+
+    ``auth``'s own message is the retired-shape rewrite rather than the
+    model layer's "is required" (see the tagged-union block below and
+    ``tests/capabilities/test_retired_shapes.py``), so it is matched on
+    the half both spellings share."""
     _validate("azure-vm", AZURE_CONFIG)
     for missing in AZURE_CONFIG:
         broken = {k: v for k, v in AZURE_CONFIG.items() if k != missing}
-        with pytest.raises(ConfigError, match=f"{missing}: is required"):
+        with pytest.raises(ConfigError, match=f"'?{missing}'?[: ].*required"):
             _validate("azure-vm", broken)
     with pytest.raises(ConfigError, match="extra: unknown field"):
         _validate("azure-vm", {**AZURE_CONFIG, "extra": "x"})
 
 
-def test_azure_service_principal_is_optional_and_shape_checked() -> None:
-    """The optional ``service_principal`` table: absent is the ambient
-    path (and stays valid), present must carry both identifiers, may
-    name its secret, and rejects anything else."""
-    _validate("azure-vm", {**AZURE_CONFIG, "service_principal": AZURE_SP})
+def test_azure_service_principal_arm_is_shape_checked() -> None:
+    """The ``service-principal`` arm must carry both identifiers, may name
+    its secret, and rejects anything else."""
+    _validate("azure-vm", {**AZURE_CONFIG, "auth": AZURE_SP})
     # ``secret`` is optional (the default name applies).
-    _validate(
-        "azure-vm",
-        {**AZURE_CONFIG, "service_principal": {k: v for k, v in AZURE_SP.items() if k != "secret"}},
-    )
+    _validate("azure-vm", {**AZURE_CONFIG, "auth": {k: v for k, v in AZURE_SP.items() if k != "secret"}})
     for missing in ("tenant_id", "client_id"):
         broken = {k: v for k, v in AZURE_SP.items() if k != missing}
-        with pytest.raises(ConfigError, match=f"service_principal.{missing}: is required"):
-            _validate("azure-vm", {**AZURE_CONFIG, "service_principal": broken})
+        with pytest.raises(ConfigError, match=f"auth.{missing}: is required"):
+            _validate("azure-vm", {**AZURE_CONFIG, "auth": broken})
 
 
 @pytest.mark.parametrize(
-    ("sp", "match"),
+    ("auth", "match"),
     [
-        pytest.param("not-a-table", "must be a table", id="not-a-table"),
+        pytest.param("not-a-table", "auth: must be a table", id="not-a-table"),
         pytest.param({**AZURE_SP, "tenant_id": ""}, "tenant_id: must not be empty", id="empty-tenant"),
         pytest.param({**AZURE_SP, "client_id": 7}, "client_id: must be a string", id="non-string-client"),
         pytest.param({**AZURE_SP, "secret": ""}, "secret: must not be empty", id="empty-secret-name"),
@@ -139,15 +158,15 @@ def test_azure_service_principal_is_optional_and_shape_checked() -> None:
         pytest.param({**AZURE_SP, "certificate": "x"}, "unknown field", id="future-variant-not-yet"),
     ],
 )
-def test_azure_rejects_malformed_service_principal(sp: object, match: str) -> None:
+def test_azure_rejects_malformed_service_principal(auth: object, match: str) -> None:
     with pytest.raises(ConfigError, match=match):
-        _validate("azure-vm", {**AZURE_CONFIG, "service_principal": sp})
+        _validate("azure-vm", {**AZURE_CONFIG, "auth": auth})
 
 
 def test_aws_ec2_requires_region() -> None:
     _validate("aws-ec2", EC2_CONFIG)
     with pytest.raises(ConfigError, match="region: is required"):
-        _validate("aws-ec2", {})
+        _validate("aws-ec2", {"auth": AMBIENT_AUTH})
     with pytest.raises(ConfigError, match="extra: unknown field"):
         _validate("aws-ec2", {**EC2_CONFIG, "extra": "x"})
 
@@ -165,20 +184,19 @@ def test_aws_ec2_rejects_the_removed_ami_override() -> None:
         _validate("aws-ec2", {**EC2_CONFIG, "ami": "ami-123"})
 
 
-def test_aws_ec2_credentials_is_optional_and_shape_checked() -> None:
-    """The optional ``credentials`` table: absent is the ambient path, present
-    must carry access_key_id, may name its secret and a role, and rejects
-    anything else."""
-    _validate("aws-ec2", {**EC2_CONFIG, "credentials": EC2_CREDS})
-    _validate("aws-ec2", {**EC2_CONFIG, "credentials": {"access_key_id": "AKIA"}})
-    _validate("aws-ec2", {**EC2_CONFIG, "credentials": {**EC2_CREDS, "assume_role_arn": "arn:x"}})
+def test_aws_ec2_access_key_arm_is_shape_checked() -> None:
+    """The ``access-key`` arm must carry access_key_id, may name its
+    secret and a role, and rejects anything else."""
+    _validate("aws-ec2", {**EC2_CONFIG, "auth": EC2_CREDS})
+    _validate("aws-ec2", {**EC2_CONFIG, "auth": {"mode": "access-key", "access_key_id": "AKIA"}})
+    _validate("aws-ec2", {**EC2_CONFIG, "auth": {**EC2_CREDS, "assume_role_arn": "arn:x"}})
 
 
 @pytest.mark.parametrize(
-    ("creds", "match"),
+    ("auth", "match"),
     [
-        pytest.param("not-a-table", "must be a table", id="not-a-table"),
-        pytest.param({}, "access_key_id: is required", id="missing-access-key"),
+        pytest.param("not-a-table", "auth: must be a table", id="not-a-table"),
+        pytest.param({"mode": "access-key"}, "access_key_id: is required", id="missing-access-key"),
         pytest.param({**EC2_CREDS, "access_key_id": ""}, "access_key_id: must not be empty", id="empty-access-key"),
         pytest.param({**EC2_CREDS, "access_key_secret": ""}, "must not be empty", id="empty-secret-name"),
         pytest.param({**EC2_CREDS, "access_key_secret": 7}, "must be a string", id="non-string-secret-name"),
@@ -189,9 +207,9 @@ def test_aws_ec2_credentials_is_optional_and_shape_checked() -> None:
         pytest.param({**EC2_CREDS, "secret": "aws-secret"}, "unknown field", id="old-secret-spelling"),
     ],
 )
-def test_aws_ec2_rejects_malformed_credentials(creds: object, match: str) -> None:
+def test_aws_ec2_rejects_malformed_credentials(auth: object, match: str) -> None:
     with pytest.raises(ConfigError, match=match):
-        _validate("aws-ec2", {**EC2_CONFIG, "credentials": creds})
+        _validate("aws-ec2", {**EC2_CONFIG, "auth": auth})
 
 
 def test_aws_ec2_rejects_bad_instance_type_arch() -> None:
@@ -268,13 +286,13 @@ def test_proxmox_no_longer_reads_a_string_verify_ssl_as_true() -> None:
         pytest.param("proxmox", {**PROXMOX_CONFIG, "token_secret": None}, PROXMOX_DEFAULT_SECRET, id="proxmox"),
         pytest.param(
             "azure-vm",
-            {**AZURE_CONFIG, "service_principal": {**AZURE_SP, "secret": None}},
+            {**AZURE_CONFIG, "auth": {**AZURE_SP, "secret": None}},
             AZURE_DEFAULT_SECRET,
             id="azure",
         ),
         pytest.param(
             "aws-ec2",
-            {**EC2_CONFIG, "credentials": {**EC2_CREDS, "access_key_secret": None}},
+            {**EC2_CONFIG, "auth": {**EC2_CREDS, "access_key_secret": None}},
             AWS_DEFAULT_SECRET,
             id="aws",
         ),
@@ -296,75 +314,197 @@ def test_an_explicit_null_secret_name_now_means_the_default(
     assert ref.name == expected
 
 
+# -- The required tagged unions: the four ways to get them wrong -------------
+#
+# azure's ``auth``, aws's ``auth``, and lima's ``placement`` are the same
+# shape, so they are pinned together: whatever an operator does wrong, all
+# three have to say so in the same words, at an address the operator wrote.
+# The MESSAGE is asserted, not merely the raise (FR12): a required union
+# whose failures are unreadable would trade one bad diagnostic for another.
+
+#: ``(platform, base config, the union's field name)`` for the three
+#: platforms carrying a required tagged union.
+TAGGED = [
+    pytest.param("azure-vm", AZURE_CONFIG, "auth", id="azure-vm"),
+    pytest.param("aws-ec2", EC2_CONFIG, "auth", id="aws-ec2"),
+    pytest.param("lima", LIMA_LOCAL, "placement", id="lima"),
+]
+
+
+@pytest.mark.parametrize(("platform", "config", "field"), TAGGED)
+def test_the_union_is_required_with_no_omission_alias(platform: str, config: dict[str, object], field: str) -> None:
+    """THE headline break. Omitting the field used to be how a site chose
+    ambient credentials or local placement; it is an error now, because a
+    choice expressed by absence cannot be told from a choice never made.
+
+    Asserted on the MODEL, not through ``_validate``, and that is
+    load-bearing rather than fussy. The message an operator sees for this
+    case comes from the release-scoped retired-shape rewrite (pinned in
+    ``tests/capabilities/test_retired_shapes.py``), which fires BEFORE
+    validation and would keep raising even if the field regained a
+    default. So a test that only asserted the raise would go on passing
+    through the requiredness being lost, and would stop pinning anything
+    at all the day that module is deleted. The requiredness itself is a
+    property of the model, so it is pinned there.
+    """
+    model = capability_config_model("vm-platform", platform)
+    assert model is not None
+    assert model.model_fields[field].is_required()
+    # And it really is a discriminated union rather than a lone block, so
+    # "required" means "one of these arms, chosen by tag".
+    assert shape_of(model.model_fields[field]).discriminator == "mode"
+
+    without = {k: v for k, v in config.items() if k != field}
+    with pytest.raises(ConfigError) as exc:
+        _validate(platform, without)
+    assert f"'{field}' is required" in str(exc.value)
+
+
+@pytest.mark.parametrize(("platform", "config", "field"), TAGGED)
+def test_an_unknown_mode_names_the_modes_there_are(platform: str, config: dict[str, object], field: str) -> None:
+    """A tag no arm answers to is refused, and the message lists the tags
+    that exist rather than leaving the operator to find them."""
+    with pytest.raises(ConfigError) as exc:
+        _validate(platform, {**config, field: {"mode": "no-such-mode"}})
+    message = str(exc.value)
+    assert message.startswith(f"vm-site/t.{field}: unknown mode 'no-such-mode'; ")
+    for tag in _MODES[platform]:
+        assert repr(tag) in message
+
+
+@pytest.mark.parametrize(
+    ("platform", "config", "field", "stray"),
+    [
+        pytest.param("azure-vm", AZURE_CONFIG, "auth", "tenant_id", id="azure-vm"),
+        pytest.param("aws-ec2", EC2_CONFIG, "auth", "access_key_id", id="aws-ec2"),
+        pytest.param("lima", LIMA_LOCAL, "placement", "host", id="lima"),
+    ],
+)
+def test_a_field_from_the_other_arm_is_refused(
+    platform: str, config: dict[str, object], field: str, stray: str
+) -> None:
+    """The arms are CLOSED, which is the property a nullable block beside
+    an enum could not have: a credential field under the no-credential arm
+    is an unknown field, caught by the emitted schema in the operator's
+    editor as well as by the loader. The address is the field the operator
+    wrote, with no arm-tag segment spliced into it."""
+    tagless = {k: v for k, v in config.items() if k != field}
+    mode = _MODES[platform][0]
+    with pytest.raises(ConfigError) as exc:
+        _validate(platform, {**tagless, field: {"mode": mode, stray: "x"}})
+    assert str(exc.value).startswith(f"vm-site/t.{field}.{stray}: unknown field; expected one of: mode")
+
+
+@pytest.mark.parametrize(("platform", "config", "field"), TAGGED)
+def test_an_extra_field_inside_an_arm_is_refused(platform: str, config: dict[str, object], field: str) -> None:
+    """An arm forbids extras like every other model here, so a typo inside
+    one is named rather than ignored. This is the case that used to bite
+    lima hardest: a misspelled host key read as ABSENT, which read as a
+    local site, which reported a missing ``limactl`` the operator did not
+    need."""
+    mode = _MODES[platform][0]
+    tagless = {k: v for k, v in config.items() if k != field}
+    with pytest.raises(ConfigError) as exc:
+        _validate(platform, {**tagless, field: {"mode": mode, "hst": "typo"}})
+    assert str(exc.value).startswith(f"vm-site/t.{field}.hst: unknown field; expected one of: ")
+
+
+#: Every mode each union answers to, first one first. The first is the
+#: no-extra-fields arm on all three, which is what lets the mixed-arm and
+#: extra-field cases above share one parametrization.
+_MODES = {
+    "azure-vm": ("ambient", "service-principal"),
+    "aws-ec2": ("ambient", "access-key"),
+    "lima": ("local", "ssh"),
+}
+
+
 # -- Extraction (total, never raising) ---------------------------------------
 
 
 def test_config_free_platforms_imply_no_edges() -> None:
-    assert _refs("lima", {"vm_host": "me@box"}) == ()
+    assert _refs("lima", LIMA_SSH) == ()
+    assert _refs("lima", LIMA_LOCAL) == ()
     assert _refs("wsl2", {}) == ()
-    # No service_principal: azure authenticates ambiently and implies no
-    # reference, exactly as every azure-vm site did before issue #199.
+
+
+def test_the_ambient_arm_emits_no_secret_reference() -> None:
+    """The whole point of the ambient arm: a site that DELIBERATELY
+    borrows the host's identity declares so, and still names no secret.
+    The edge set is what tells "chose ambient" apart from "named a
+    credential", and choosing ambient must not invent one."""
     assert _refs("azure-vm", AZURE_CONFIG) == ()
-    # No credentials table: ec2 authenticates ambiently and implies no edge.
     assert _refs("aws-ec2", EC2_CONFIG) == ()
+    # And it stays empty when the arm is the only thing in the blob, so
+    # the emptiness is the ARM's property rather than the rest of the
+    # config's.
+    assert _refs("azure-vm", {"auth": AMBIENT_AUTH}) == ()
+    assert _refs("aws-ec2", {"auth": AMBIENT_AUTH}) == ()
 
 
 def test_aws_ec2_returns_the_secret_access_key_reference() -> None:
-    (ref,) = _refs("aws-ec2", {**EC2_CONFIG, "credentials": EC2_CREDS})
+    (ref,) = _refs("aws-ec2", {**EC2_CONFIG, "auth": EC2_CREDS})
     assert (ref.kind, ref.name) == ("secret", "aws-secret")
     assert ref.usage == "the AWS secret access key"
 
     # Omitting ``access_key_secret`` falls back to the well-known default name.
-    (ref,) = _refs("aws-ec2", {**EC2_CONFIG, "credentials": {"access_key_id": "AKIA"}})
+    (ref,) = _refs("aws-ec2", {**EC2_CONFIG, "auth": {"mode": "access-key", "access_key_id": "AKIA"}})
     assert ref.name == AWS_DEFAULT_SECRET
 
 
 def test_aws_ec2_extraction_is_total_on_malformed_config() -> None:
     """Extraction never raises. The edge's identity is the secret NAME,
-    so it emits even when the table's other fields are missing or malformed, and
-    is omitted only when the table itself, or the field naming the edge, is
+    so it emits even when the arm's other fields are missing or malformed, and
+    is omitted only when the arm itself, or the field naming the edge, is
     unusable."""
-    (ref,) = _refs("aws-ec2", {"credentials": {"access_key_secret": "aws-secret"}})
+    (ref,) = _refs("aws-ec2", {"auth": {"mode": "access-key", "access_key_secret": "aws-secret"}})
     assert ref.name == "aws-secret"
-    (ref,) = _refs("aws-ec2", {**EC2_CONFIG, "credentials": {}})
+    (ref,) = _refs("aws-ec2", {**EC2_CONFIG, "auth": {"mode": "access-key"}})
     assert ref.name == AWS_DEFAULT_SECRET
-    assert _refs("aws-ec2", {**EC2_CONFIG, "credentials": {**EC2_CREDS, "access_key_secret": ""}}) == ()
-    assert _refs("aws-ec2", {**EC2_CONFIG, "credentials": "nope"}) == ()
+    assert _refs("aws-ec2", {**EC2_CONFIG, "auth": {**EC2_CREDS, "access_key_secret": ""}}) == ()
+    assert _refs("aws-ec2", {**EC2_CONFIG, "auth": "nope"}) == ()
+    # No tag names no arm, so nothing is walked: an omitted or unknown
+    # ``mode`` contributes no edge rather than guessing which arm was meant.
+    assert _refs("aws-ec2", {**EC2_CONFIG, "auth": {"access_key_secret": "aws-secret"}}) == ()
+    assert _refs("aws-ec2", {**EC2_CONFIG, "auth": {"mode": "profile", "access_key_secret": "aws-secret"}}) == ()
 
 
 def test_azure_returns_the_client_secret_reference() -> None:
-    (ref,) = _refs("azure-vm", {**AZURE_CONFIG, "service_principal": AZURE_SP})
+    (ref,) = _refs("azure-vm", {**AZURE_CONFIG, "auth": AZURE_SP})
     assert (ref.kind, ref.name) == ("secret", "az-sp")
     assert "service-principal" in ref.usage
 
     # Omitting ``secret`` falls back to the well-known default name.
     no_name = {k: v for k, v in AZURE_SP.items() if k != "secret"}
-    (ref,) = _refs("azure-vm", {**AZURE_CONFIG, "service_principal": no_name})
+    (ref,) = _refs("azure-vm", {**AZURE_CONFIG, "auth": no_name})
     assert ref.name == AZURE_DEFAULT_SECRET
 
 
 def test_azure_extraction_is_total_on_malformed_config() -> None:
     """Extraction never raises. The edge's identity is the secret NAME,
-    so it emits even when the table's other fields are missing or
-    malformed, and is omitted only when the table itself, or the field
+    so it emits even when the arm's other fields are missing or
+    malformed, and is omitted only when the arm itself, or the field
     naming the edge, is unusable."""
-    # Nothing but the secret name: the edge still emits.
-    (ref,) = _refs("azure-vm", {"service_principal": {"secret": "az-sp"}})
+    # Nothing but the tag and the secret name: the edge still emits.
+    (ref,) = _refs("azure-vm", {"auth": {"mode": "service-principal", "secret": "az-sp"}})
     assert ref.name == "az-sp"
-    # An empty table is still a declared service principal, so the
+    # The bare tag is still a declared service principal, so the
     # default-named edge emits (validation is what rejects the shape).
-    (ref,) = _refs("azure-vm", {**AZURE_CONFIG, "service_principal": {}})
+    (ref,) = _refs("azure-vm", {**AZURE_CONFIG, "auth": {"mode": "service-principal"}})
     assert ref.name == AZURE_DEFAULT_SECRET
-    # A table whose OTHER fields are malformed still emits (their shape
+    # An arm whose OTHER fields are malformed still emits (their shape
     # does not change what the edge points at).
-    assert _refs("azure-vm", {**AZURE_CONFIG, "service_principal": {**AZURE_SP, "tenant_id": 3}}) == (
+    assert _refs("azure-vm", {**AZURE_CONFIG, "auth": {**AZURE_SP, "tenant_id": 3}}) == (
         ConfigReference(kind="secret", name="az-sp", usage="the Azure service-principal client secret"),
     )
     # A malformed name, or a non-table, makes the edge underivable, so it
     # is omitted (never raised).
-    assert _refs("azure-vm", {**AZURE_CONFIG, "service_principal": {**AZURE_SP, "secret": ""}}) == ()
-    assert _refs("azure-vm", {**AZURE_CONFIG, "service_principal": {**AZURE_SP, "secret": 3}}) == ()
-    assert _refs("azure-vm", {**AZURE_CONFIG, "service_principal": "nope"}) == ()
+    assert _refs("azure-vm", {**AZURE_CONFIG, "auth": {**AZURE_SP, "secret": ""}}) == ()
+    assert _refs("azure-vm", {**AZURE_CONFIG, "auth": {**AZURE_SP, "secret": 3}}) == ()
+    assert _refs("azure-vm", {**AZURE_CONFIG, "auth": "nope"}) == ()
+    # No tag names no arm (see the aws twin).
+    assert _refs("azure-vm", {**AZURE_CONFIG, "auth": {"secret": "az-sp"}}) == ()
+    assert _refs("azure-vm", {**AZURE_CONFIG, "auth": {"mode": "managed-identity", "secret": "az-sp"}}) == ()
 
 
 def test_proxmox_returns_the_token_secret_reference() -> None:

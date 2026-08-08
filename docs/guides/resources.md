@@ -220,6 +220,7 @@ spec:
     subscription_id: "..."
     resource_group: agentworks-vms
     region: eastus2
+    auth: { mode: ambient }
 ```
 
 - `spec.platform` is one table: its `name` key names a `vm-platform` capability row and the
@@ -227,13 +228,13 @@ spec:
   `agw resource describe-kind vm-platform` lists the platforms this build has, including any that
   arrive with an opt-in [system plugin](#system-plugins);
   `agw resource describe-kind vm-platform/<name>` documents one platform's own fields. A platform
-  needing no config is just `platform: {name: wsl2}`. Remote Lima is just a lima site with a
-  `vm_host: user@host` key.
-- The `lima-local` and `wsl2` sites ship built in with empty config. Like every site they register
-  on every host and report not-ready where this host lacks what they need (wsl2 is Windows-only; a
-  local Lima site needs `limactl`); a not-ready site still lists and describes with its reason, and
-  using it is an error. Their names are reserved. A site named after a platform must declare that
-  platform.
+  needing no config is just `platform: {name: wsl2}`. A lima site says where `limactl` runs:
+  `placement: {mode: local}` on this machine, or `placement: {mode: ssh, host: user@host}` over SSH.
+- The `lima-local` and `wsl2` sites ship built in, `lima-local` on `placement: {mode: local}` and
+  `wsl2` on no config at all. Like every site they register on every host and report not-ready where
+  this host lacks what they need (wsl2 is Windows-only; a local Lima site needs `limactl`); a
+  not-ready site still lists and describes with its reason, and using it is an error. Their names
+  are reserved. A site named after a platform must declare that platform.
 - Consumers name sites: `agw vm create --site`, `defaults.site` in config.toml, and each VM row's
   `site`. Templates deliberately carry no site: placement is per-host, never template state.
 - Site config secrets ride the standard secret machinery: a platform that needs a credential names
@@ -241,11 +242,17 @@ spec:
   out (a Proxmox site's API token is the `proxmox-token` secret unless `token_secret` says
   otherwise). Those secrets are auto-declared and resolved through the backend chain like any other,
   and `agw resource describe-kind vm-platform/<name>` shows each platform's secret fields with their
-  default names. Azure is the one with a choice to make: it authenticates with ambient credentials
-  (`az login`, `AZURE_*` env vars, managed identity, browser fallback) unless a `service_principal`
-  table inside the platform table declares an explicit one. A site with a service principal uses
-  that identity and only that one, so a rejected or expired client secret fails the command rather
-  than falling back to ambient credentials.
+  default names.
+- **Azure and AWS sites say how they authenticate, in a required `auth` table.** There is no
+  default, and omitting it is an error rather than a silent choice: `auth: {mode: ambient}` uses the
+  host's own credential chain (for Azure, `az login` / `AZURE_*` / managed identity / browser
+  fallback; for AWS, environment, shared config, instance profile, SSO), while
+  `auth: {mode: service-principal, ...}` and `auth: {mode: access-key, ...}` name an explicit
+  identity. An explicit identity is used and only it, so a rejected or expired credential fails the
+  command rather than falling back to the ambient chain. The same shape reads back out: an `ambient`
+  site declares no secret and shows no secret edge, and a credential arm declares exactly the one
+  secret it names. Proxmox is unaffected: it has one authentication shape, so it keeps its required
+  token fields with no mode selector.
 - The cloud and datacenter platforms ship as opt-in system plugins, so a site that names one is
   not-ready with an "enable plugin `<name>`" hint, and refused at use, until you list that plugin in
   `[plugins] system`. The `azure-dev` example above is not-ready until you set

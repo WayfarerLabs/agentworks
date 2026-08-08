@@ -1,5 +1,5 @@
-"""The Lima VM platform: local limactl, or limactl over SSH when the
-site's ``platform_config`` declares a ``vm_host``."""
+"""The Lima VM platform: local limactl, or limactl over SSH, whichever
+the site's ``platform_config.placement`` selects."""
 
 from __future__ import annotations
 
@@ -8,12 +8,17 @@ import json
 import shlex
 import tempfile
 import textwrap
+
+# Imported at RUNTIME, not just for typing: not_ready reads an unvalidated
+# placement table and has to isinstance-check it.
+from collections.abc import Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Literal
+from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal
 
 from pydantic import Field
 
 from agentworks import output
+from agentworks.capabilities.retired_shapes import RetiredPresenceShape
 from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
 from agentworks.capabilities.vm_platform.bootstrap_script import (
     REBOOT_SENTINEL_PATH,
@@ -30,8 +35,6 @@ from agentworks.topics import TopicProse
 from agentworks.transports import LimaTransport, RemoteLimaTransport, SSHTransport
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
-
     from agentworks.capabilities.base import RunContext
     from agentworks.config import Config
     from agentworks.db import VMRow
@@ -93,16 +96,87 @@ provision:
 """
 
 
+# Why an arm with no fields but its tag exists at all: local and ssh are
+# different execution mechanisms (a local subprocess versus a two-hop SSH
+# transport) with different readiness rules, and a site that never said
+# which it wanted used to read as local. A misspelled host key then made
+# an ssh site look local and report ``limactl not installed``, naming a
+# problem the operator did not have. Saying ``mode: local`` is one line,
+# and it is the line that makes the choice reviewable.
+class LimaLocalPlacement(AgwModel):
+    """Run limactl on this machine.
+
+    Needs ``limactl`` installed here, and the site reports not-ready
+    without it.
+    """
+
+    mode: Literal["local"]
+    """Selects this arm."""
+
+
+# Tagged ``ssh`` rather than ``remote`` deliberately. "Remote" names a
+# POSITION and leaves the mechanism implicit, which would reproduce one
+# layer up the exact defect this union removes: absence implying a
+# mechanism would simply become a word implying one. ``ssh`` names what
+# actually happens, reads coherently with the arm's own field
+# (``mode: ssh, host: me@gpu-box``), and matches the other platforms,
+# whose modes already name mechanisms rather than positions (``ambient``,
+# ``service-principal``, ``access-key``). It also leaves room: a second
+# non-local drive path would sit beside ``ssh``, where ``remote`` would
+# already be taken and ambiguous.
+#
+# ``host`` rather than ``vm_host``: the arm it sits in already says which
+# host this is, so the ``vm_`` prefix that disambiguated at the flat level
+# is noise once nested.
+class LimaSshPlacement(AgwModel):
+    """Run limactl on another host over SSH.
+
+    The VMs live on a shared box and nothing but SSH is needed here.
+    """
+
+    mode: Literal["ssh"]
+    """Selects this arm."""
+
+    host: NonEmptyStr = Field(examples=["me@gpu-box"])
+    """The SSH host running ``limactl`` (e.g. ``user@host``). Required in
+    this arm: an SSH-driven site with no host is not a site, which is
+    exactly what the flat ``vm_host`` could not say."""
+
+
+#: Where a ``lima`` site's ``limactl`` runs, as a REQUIRED tagged union.
+#:
+#: Required, and with no omission alias, because presence of a host used
+#: to select between two entirely different execution mechanisms. A
+#: manifest could not distinguish "deliberately local" from "forgot the
+#: host", and neither could a reviewer or the readiness fold.
+#:
+#: The pair reads asymmetric (``local`` is a position, ``ssh`` is a
+#: transport) and that was decided knowingly: the symmetric spelling would
+#: be ``direct``/``ssh``, but ``local`` is immediately understood where
+#: ``direct`` is not, and obvious beats symmetric. Do not "fix" it.
+#:
+#: Not an enum beside an optional ``host``, and the reason is the
+#: DIAGNOSTIC rather than soundness: an enum cannot state that ``ssh``
+#: requires a host and ``local`` forbids one, so a mixed-arm config would
+#: draw no editor complaint and fail only at load. (A schema more
+#: permissive than the loader is sanctioned under-approximation, so that
+#: alternative would not have broken ``manifests/emit.py``'s contract; it
+#: would simply have spent the point of emitting schema at all.) The union
+#: puts the constraint where the editor checks it, and pydantic emits it
+#: directly as ``oneOf`` with a ``discriminator`` mapping.
+LimaPlacement = Annotated[LimaLocalPlacement | LimaSshPlacement, Field(discriminator="mode")]
+
+
 class LimaConfig(AgwModel):
     """Where a Lima site's ``limactl`` runs."""
 
     name: Literal["lima"]
     """The platform this config is for."""
 
-    vm_host: NonEmptyStr | None = Field(default=None, examples=["me@gpu-box"])
-    """The SSH host running ``limactl`` for a REMOTE-Lima site (e.g.
-    ``user@host``). Omit for a local site, which needs ``limactl``
-    installed here."""
+    placement: LimaPlacement
+    """Where ``limactl`` runs: ``{mode: local}`` on this machine, or
+    ``{mode: ssh, host: ...}`` over SSH. Required, with no default, so a
+    site never selects its execution mechanism by leaving a key out."""
 
 
 class LimaPlatform(VMPlatform):
@@ -112,50 +186,62 @@ class LimaPlatform(VMPlatform):
     name: ClassVar[str] = "lima"
     description: ClassVar[str] = "Lima VMs (local, or on a remote host via SSH)"
     config_model: ClassVar[type[LimaConfig]] = LimaConfig
+    # Every hand-declared lima site crosses this break, and the ABSENT
+    # case is the common one: the zero-config local site wrote nothing at
+    # all, so its error has to say that a line is being added rather than
+    # that something went missing. Release-scoped.
+    retired_shape: ClassVar[RetiredPresenceShape | None] = RetiredPresenceShape(
+        retired_field="vm_host",
+        union_field="placement",
+        present_mode="ssh",
+        absent_mode="local",
+        scalar_field="host",
+    )
     prose: ClassVar[TopicProse | None] = TopicProse(
         title="Lima",
         overview="""
-        Lima runs Linux VMs through `limactl`. A site with no `vm_host` runs them on
-        this machine, which is the zero-config starting point and what the built-in
-        `lima-local` site is; a site WITH one runs `limactl` on that host over SSH, so
-        the VMs live on a shared box and nothing but SSH is needed here.
+        Lima runs Linux VMs through `limactl`. Every site says where: `placement:
+        {mode: local}` runs them on this machine, which is what the built-in
+        `lima-local` site is; `placement: {mode: ssh, host: me@gpu-box}` runs
+        `limactl` on that host over SSH, so the VMs live on a shared box and nothing
+        but SSH is needed here.
 
         Local sites need `limactl` installed here and report not-ready without it.
         Remote sites need nothing locally.
         """,
     )
     # No unsupported_reason override: the platform is supported on
-    # every host, because remote-Lima sites run limactl on the vm_host
-    # over SSH and need nothing locally.
+    # every host, because remote-Lima sites run limactl on the placement
+    # host over SSH and need nothing locally.
 
     @classmethod
     def not_ready(cls, config: Mapping[str, object]) -> Readiness:
-        """A LOCAL Lima site (no ``vm_host``) is pointless without a
-        local ``limactl``. This covers the bundled ``lima-local``
-        site and any operator-declared local site alike; a host that
-        later installs Lima enables them on the next look. Remote
-        sites need nothing here.
+        """A site placed ``local`` is pointless without a local
+        ``limactl``. This covers the bundled ``lima-local`` site and any
+        operator-declared local site alike; a host that later installs
+        Lima enables them on the next look. Remote sites need nothing
+        here.
 
         Non-constructing (LLD c): reads ``config`` fields directly, never
         builds an instance, so the readiness fold stays total over
         unvalidated ``platform_config``.
 
-        Reading unvalidated config means this verdict is only trustworthy
-        because something else refuses the configs it would misread. A
-        missing ``vm_host`` and a MISSPELLED one are indistinguishable
-        here: both make a remote site look local, and this would then
-        report ``limactl not installed``, naming a problem the operator
-        does not have while their host setting silently does not apply.
-        What rules that out is that the finalize validate pass runs on
-        every present resource, whatever its readiness, so ``vm_hst``
-        never survives to be folded into a verdict an operator reads. That
-        pass used to be readiness-gated and this method was the exact
-        place the resulting circle closed. Keep the two facts together: if
-        validation is ever made conditional again, every presence-keyed
-        read below becomes a silent wrong answer."""
+        Keyed on the tag saying ``local``, never on the ABSENCE of
+        something. That is what makes the verdict self-standing rather
+        than trustworthy-by-luck. It used to key on a missing ``vm_host``,
+        which made a missing host and a MISSPELLED one indistinguishable:
+        both read as local, and this reported ``limactl not installed``,
+        naming a problem the operator did not have while their host
+        setting silently did not apply. Now a config that does not say
+        ``local`` is not treated as local, so an unreadable, absent, or
+        malformed ``placement`` yields ``ready`` here and the validate
+        pass reports the real error against ``placement`` itself. This
+        method no longer has an opinion it could be wrong about."""
         from agentworks.resources.graph import Readiness
 
-        if config.get("vm_host"):
+        placement = config.get("placement")
+        local = isinstance(placement, Mapping) and placement.get("mode") == "local"
+        if not local:
             return Readiness.ready()
         import shutil
 
@@ -175,12 +261,19 @@ class LimaPlatform(VMPlatform):
         return {"instance_name": str(row["name"])}
 
     @property
-    def _vm_host_ssh(self) -> str | None:
-        return self.config.vm_host
+    def _remote_host(self) -> str | None:
+        """The SSH host ``limactl`` runs on, or ``None`` for a local site.
+
+        Read off the placement ARM rather than off a nullable field, so
+        "there is no host" and "this site is local" are the same fact
+        rather than two that could disagree.
+        """
+        placement = self.config.placement
+        return placement.host if isinstance(placement, LimaSshPlacement) else None
 
     @property
     def is_remote(self) -> bool:
-        return self._vm_host_ssh is not None
+        return self._remote_host is not None
 
     def _instance_name(self, vm: VMRow) -> str:
         name = vm.platform_metadata.get("instance_name")
@@ -193,10 +286,10 @@ class LimaPlatform(VMPlatform):
         return str(name)
 
     def _run_lima(self, command: str, *, check: bool = True) -> str:
-        """Run a limactl command, locally or on the site's vm_host."""
+        """Run a limactl command, locally or on the site's placement host."""
         if self.is_remote:
-            assert self._vm_host_ssh is not None
-            target = SSHTarget(host=self._vm_host_ssh, user=None, login_shell=True)
+            assert self._remote_host is not None
+            target = SSHTarget(host=self._remote_host, user=None, login_shell=True)
             result = ssh_run(target, command, check=check)
             return result.stdout
         else:
@@ -215,7 +308,7 @@ class LimaPlatform(VMPlatform):
 
     def preflight(self, ctx: RunContext) -> None:
         """Local sites: ``limactl`` must be on PATH. Remote sites defer
-        to the ops (probing the vm_host over SSH is a real round trip;
+        to the ops (probing the placement host over SSH is a real round trip;
         the first op's error is already clear). No config secrets, so
         the operation sweep's central prediction has nothing to check.
 
@@ -241,7 +334,8 @@ class LimaPlatform(VMPlatform):
                 "'limactl' not found. Lima is not installed on this machine.",
                 hint=(
                     "For remote Lima VMs, declare a vm-site whose "
-                    "`platform: {name: lima, vm_host: ...}` names the host, and pass it via --site."
+                    "`platform: {name: lima, placement: {mode: ssh, host: ...}}` "
+                    "names the host, and pass it via --site."
                 ),
             )
 
@@ -265,14 +359,14 @@ class LimaPlatform(VMPlatform):
         if self._instance_exists(instance_name):
             raise StateError(
                 f"a Lima instance named '{instance_name}' already exists"
-                + (f" on '{self._vm_host_ssh}'" if self.is_remote else ""),
+                + (f" on '{self._remote_host}'" if self.is_remote else ""),
                 entity_kind="vm",
                 entity_name=request.vm_name,
                 hint=("delete it first (limactl delete) or pick a different VM name"),
             )
 
         if self.is_remote:
-            output.info(f"Connecting to VM host '{self._vm_host_ssh}'...")
+            output.info(f"Connecting to VM host '{self._remote_host}'...")
         output.info(f"Creating Lima VM '{instance_name}' ({'remote' if self.is_remote else 'local'})...")
         output.detail(f"Resources: {cpus} CPUs, {memory} GiB memory, {disk} GiB disk")
         if swap > 0:
@@ -418,8 +512,8 @@ class LimaPlatform(VMPlatform):
 
     def _transport_for(self, instance_name: str) -> Transport:
         if self.is_remote:
-            assert self._vm_host_ssh is not None
-            return RemoteLimaTransport(vm_name=instance_name, vm_host_ssh=self._vm_host_ssh)
+            assert self._remote_host is not None
+            return RemoteLimaTransport(vm_name=instance_name, vm_host_ssh=self._remote_host)
         return LimaTransport(vm_name=instance_name)
 
     def _create_local(self, instance_name: str, lima_yaml: str) -> None:
@@ -438,12 +532,12 @@ class LimaPlatform(VMPlatform):
             Path(template_path).unlink(missing_ok=True)
 
     def _host_transport(self, logger: SSHLogger | None = None) -> SSHTransport:
-        """An exec transport to the site's vm_host (remote sites only):
+        """An exec transport to the site's placement host (remote sites only):
         the create path's run_detached target, and the interrupt
         rollback's kill target."""
-        assert self._vm_host_ssh is not None
+        assert self._remote_host is not None
         return SSHTransport(
-            host=self._vm_host_ssh,
+            host=self._remote_host,
             user=None,
             login_shell=True,
             logger=logger,
@@ -457,9 +551,9 @@ class LimaPlatform(VMPlatform):
         return f"/tmp/agentworks-lima-{instance_name}"
 
     def _create_remote(self, instance_name: str, lima_yaml: str) -> None:
-        """Create and start a Lima VM on the site's vm_host."""
-        assert self._vm_host_ssh is not None
-        target = SSHTarget(host=self._vm_host_ssh, user=None)
+        """Create and start a Lima VM on the site's placement host."""
+        assert self._remote_host is not None
+        target = SSHTarget(host=self._remote_host, user=None)
 
         # Write Lima YAML locally and copy to VM Host
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -564,7 +658,7 @@ class LimaPlatform(VMPlatform):
         try:
             if self.is_remote:
                 # This locally raised interrupt stopped nothing on the
-                # vm_host: run_detached nohups the remote limactl
+                # placement host: run_detached nohups the remote limactl
                 # precisely so it survives this process. Kill the
                 # detached wrapper before deleting, or the delete races
                 # a create/start still mutating the same instance. The
@@ -586,7 +680,7 @@ class LimaPlatform(VMPlatform):
             )
 
     def _manual_removal_hint(self, instance_name: str) -> str:
-        where = f" on '{self._vm_host_ssh}'" if self.is_remote else ""
+        where = f" on '{self._remote_host}'" if self.is_remote else ""
         return f"remove it manually with 'limactl delete --force {instance_name}'{where}."
 
     def _log_provision_errors(self, instance_name: str) -> None:
@@ -641,7 +735,7 @@ class LimaPlatform(VMPlatform):
     def display_backend_name(self, vm: VMRow) -> str:
         instance = str(vm.platform_metadata.get("instance_name", vm.name))
         if self.is_remote:
-            return f"{instance}@{self._vm_host_ssh}"
+            return f"{instance}@{self._remote_host}"
         return instance
 
     def native_transport(
@@ -651,7 +745,7 @@ class LimaPlatform(VMPlatform):
         *,
         config: Config | None = None,
     ) -> Transport | None:
-        # ctx is unused: limactl (local or over the vm_host SSH hop)
+        # ctx is unused: limactl (local or over the placement host SSH hop)
         # needs no backend credential.
         return self._transport_for(self._instance_name(vm))
 

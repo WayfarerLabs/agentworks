@@ -102,7 +102,7 @@ class HostSurface:
     """How a capability kind is selected inside a declarable kind's spec.
 
     The manifest shape is one tagged table on the naming field
-    (``platform: {name: lima, vm_host: ...}``), and it is the only shape:
+    (``platform: {name: lima, placement: {...}}``), and it is the only shape:
     the legacy sibling pair (``platform: lima`` plus
     ``platform_config: {...}``) is a hard error on every surface. Decode
     reads the two field names off this record, so there is one refusal
