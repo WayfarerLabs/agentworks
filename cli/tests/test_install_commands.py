@@ -9,10 +9,17 @@ there too.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
+
 import pytest
 
 from agentworks.errors import ConfigError
-from agentworks.install_commands import _load_system_commands, _load_user_commands
+from agentworks.install_commands import (
+    SystemInstallCommandEntry,
+    UserInstallCommandEntry,
+    _load_system_commands,
+    _load_user_commands,
+)
 
 
 def test_user_command_preserves_test_exec() -> None:
@@ -48,18 +55,31 @@ def test_legacy_test_field_rejected() -> None:
         )
 
 
-def test_multiple_test_fields_rejected() -> None:
-    with pytest.raises(ConfigError, match="at most one"):
-        _load_user_commands(
-            {
-                "bad": {
-                    "command": "echo install",
-                    "description": "Bad",
-                    "test_exec": "bad",
-                    "test_file": "~/.bad",
-                }
+@pytest.mark.parametrize("loader", [_load_system_commands, _load_user_commands])
+def test_multiple_test_fields_are_loaded(
+    loader: Callable[
+        [dict[str, object]],
+        Mapping[str, SystemInstallCommandEntry | UserInstallCommandEntry],
+    ],
+) -> None:
+    entries = loader(
+        {
+            "my-tool": {
+                "command": "echo install",
+                "description": "My tool",
+                "test_exec": "my-tool",
+                "test_file": "~/.my-tool",
+                "test_dir": "~/.my-tool.d",
             }
-        )
+        }
+    )
+
+    entry = entries["my-tool"]
+    assert (entry.test_exec, entry.test_file, entry.test_dir) == (
+        "my-tool",
+        "~/.my-tool",
+        "~/.my-tool.d",
+    )
 
 
 def test_system_command_requires_command() -> None:

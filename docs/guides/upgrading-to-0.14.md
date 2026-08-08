@@ -937,10 +937,9 @@ whose `inherits` names more than one parent, and any parent that declares little
 
 ### Two smaller ones
 
-- **An install command's `test_exec: ""` beside a `test_file`** used to be legal: the empty string
-  normalized away before the at-most-one-test check counted. It now counts, so the pair is rejected.
-  Delete the empty one; the error names which key that is, and says to delete it rather than blank
-  it.
+- **Install commands may now combine `test_exec`, `test_file`, and `test_dir`.** Documents that set
+  more than one were previously rejected and now load. Installation is skipped only when every
+  non-empty declared test passes; with no non-empty tests, the command always runs.
 - **`{value: x}` is a new accepted env spelling**, alongside a bare string and `{secret: name}`.
   Additive: nothing you have written stops working, but a config can now say something it could not.
 
