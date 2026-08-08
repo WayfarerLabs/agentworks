@@ -59,6 +59,7 @@ from agentworks.schema.errors import (
     MAX_ERROR_LINES,
     config_error_from,
     located,
+    location_text,
 )
 from agentworks.schema.extract import extract_references
 from agentworks.schema.fields import (
@@ -105,6 +106,7 @@ __all__ = [
     "extract_references",
     "iter_field_docs",
     "located",
+    "location_text",
     "marker_of",
     "model_doc",
     "model_is_complete",

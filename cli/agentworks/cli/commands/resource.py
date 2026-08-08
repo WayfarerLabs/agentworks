@@ -281,6 +281,8 @@ def resource_edit(
         raise typer.Exit(1)
 
     from agentworks.errors import ConfigError
+    from agentworks.schema import location_text
+    from agentworks.source_location import SourceLocation, format_file_path
 
     try:
         config = load_config()
@@ -302,7 +304,7 @@ def resource_edit(
         found = locate_document(resources_dir, kind, name)
         if found.location is None:
             if found.unreadable:
-                files = ", ".join(str(p) for p in found.unreadable)
+                files = ", ".join(format_file_path(p) for p in found.unreadable)
                 exc.hint = (
                     f"{exc.hint + ' ' if exc.hint else ''}Also: {files} "
                     f"failed to parse and could not be searched; edit "
@@ -313,8 +315,9 @@ def resource_edit(
         path, line = found.location.file, found.location.line
     # Per-kind layout files hold many documents; the line tells the
     # operator where to look. (No editor +line heuristics -- keep it
-    # simple, per the maintainer's scope ruling.)
-    output.info(f"Editing {kind}/{name} ({path}:{line})")
+    # simple, per the maintainer's scope ruling.) Framed by the shared
+    # helper so this reads the same as the errors that sent them here.
+    output.info(f"Editing {kind}/{name} ({location_text(SourceLocation(file=path, line=line))})")
     raise typer.Exit(subprocess.call([editor, str(path)]))
 
 
