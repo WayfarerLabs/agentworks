@@ -114,3 +114,25 @@ field-row multiplicities across all 30 live schema targets. Final combined valid
 - Rulesync generated-output check: clean;
 - locked-SDD check: clean;
 - mandatory file lint: Prettier, markdownlint, and cspell clean.
+
+## Round-3 projection-growth follow-up
+
+The final performance review found accidental superlinear work in onboarding projection. The fix
+remains inside the existing architecture: `GuideView` now materializes global kind and
+implementation inventories only for concept roots permitted to read them, while resource,
+implementation, and kind views construct no inaccessible global inventory. Onboarding snapshot
+deduplication uses insertion-ordered identity maps, preserving the first-seen instance and
+relationship order without linear list-membership scans. No cache, builder, bulk hook API, database
+projection change, or wall-clock acceptance threshold was added.
+
+Structural tests prove that global capability projection does not repeat per registry row, permitted
+concept inventories remain complete, duplicate fact comparisons stay bounded, and first-seen order
+is stable. The required project reviewer and independent fresh-eyes reviewer approved with no code
+findings. Final rebased validation passed:
+
+- guide suite: 428 tests;
+- full non-integration suite: 6,477 passed and 3 deselected;
+- Ruff check and format check: 611 files clean;
+- mypy: 611 source files clean;
+- Rulesync generated-output check and locked-SDD validation: clean;
+- mandatory file lint: Prettier, markdownlint, and cspell clean.

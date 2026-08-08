@@ -14,6 +14,7 @@
     "rustc",
     "scriptable",
     "setext",
+    "superlinear",
     "unwired"
   ]
 }

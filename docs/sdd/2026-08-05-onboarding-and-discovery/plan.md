@@ -180,7 +180,7 @@ to `main`. It has no provisional branch dependency.
 - [x] Reconcile schema rendering and migration teaching with the final PR #444 union surfaces,
       confirm PR #446's context-free validation boundary adds no guide-side filling, then rerun the
       full Phase 1 and CI gates before requesting roadmap-lead re-review.
-- [ ] Round-3 performance follow-up: materialize global kind and implementation inventories only for
+- [x] Round-3 performance follow-up: materialize global kind and implementation inventories only for
       concept views permitted to read them, replace snapshot list-membership deduplication with
       insertion-ordered identity maps, and pin bounded work and stable ordering structurally without
       redesigning `GuideView`, adding bulk hook APIs, or imposing wall-clock thresholds.
