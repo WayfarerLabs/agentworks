@@ -338,10 +338,12 @@ convention in block resolvers.
 `build_guide_view(anchor, registry, db)` is the sole composition boundary. It requires an already
 finalized registry, reads `KIND_REGISTRY` metadata, registry rows, `graph.enablement_of`,
 `graph.readiness_of`, `graph.edges_of`, and `graph.dependents_of`, and copies only the records
-above. For instance inventory it calls the same optional kind-owned
-`instances(db, registry, resource)` hook used by resource inspection, exhausts it during
-construction, sorts facts by `(kind, name)`, and retains no hook or database reference. It never
-calls `Registry.finalize()` or `graph.impl_of()`.
+above. It materializes a global kind or implementation inventory only when a concept anchor permits
+that root; resource, implementation, and kind anchors construct no inaccessible global inventory.
+For instance inventory it calls the same optional kind-owned `instances(db, registry, resource)`
+hook used by resource inspection, exhausts it during construction, sorts facts by `(kind, name)`,
+and retains no hook or database reference. It never calls `Registry.finalize()` or
+`graph.impl_of()`.
 
 The builder accepts no resolver or run context. A structural API test enumerates public attributes
 and recursively inspects returned dataclass fields, proving the forbidden objects cannot be reached.

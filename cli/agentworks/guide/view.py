@@ -190,14 +190,6 @@ def build_guide_view(contribution: TopicContribution, registry: Registry, db: Da
     if not registry.is_finalized:
         raise GuideTraversalError("guide facts require an already-finalized registry")
 
-    kinds = tuple(_kind_fact(kind, handler) for kind, handler in sorted(KIND_REGISTRY.items()))
-    implementations = tuple(
-        _resource_fact(registry, kind, name, resource)
-        for kind, handler in sorted(KIND_REGISTRY.items())
-        if handler.category == "capability"
-        for name, resource in sorted(registry.iter_kind_items(kind))
-    )
-    inventory = {GuideRoot.KINDS: kinds, GuideRoot.IMPLEMENTATIONS: implementations}
     me: GuideResourceFact | None = None
     kind_fact: GuideResourceFact | None = None
     instances: tuple[GuideInstanceFact, ...] = ()
@@ -211,6 +203,17 @@ def build_guide_view(contribution: TopicContribution, registry: Registry, db: Da
             raise GuideTraversalError(
                 f"concept topic {anchor.name!r} does not match a registered inventory resolver plan"
             )
+
+    inventory: dict[GuideRoot, tuple[GuideResourceFact, ...]] = {}
+    if GuideRoot.KINDS in permitted:
+        inventory[GuideRoot.KINDS] = tuple(_kind_fact(kind, handler) for kind, handler in sorted(KIND_REGISTRY.items()))
+    if GuideRoot.IMPLEMENTATIONS in permitted:
+        inventory[GuideRoot.IMPLEMENTATIONS] = tuple(
+            _resource_fact(registry, kind, name, resource)
+            for kind, handler in sorted(KIND_REGISTRY.items())
+            if handler.category == "capability"
+            for name, resource in sorted(registry.iter_kind_items(kind))
+        )
 
     if isinstance(anchor, KindAnchor):
         handler = KIND_REGISTRY.get(anchor.kind)

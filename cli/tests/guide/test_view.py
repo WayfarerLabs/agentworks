@@ -12,7 +12,9 @@ from agentworks.guide import (
     GuideInstanceFact,
     GuideRoot,
     GuideTraversalError,
+    ImplementationAnchor,
     InstanceList,
+    KindAnchor,
     Overview,
     ResourceAnchor,
     TopicContribution,
@@ -66,6 +68,21 @@ class _NoInstanceHandler:
     description = "Test kind."
 
 
+class _CapabilityHandler:
+    kind = "guide-capability"
+    category = "capability"
+    description = "Test capability kind."
+
+
+class _CountingRegistry(_Registry):
+    def __init__(self) -> None:
+        self.iterated_kinds: list[str] = []
+
+    def iter_kind_items(self, kind: str):
+        self.iterated_kinds.append(kind)
+        return super().iter_kind_items(kind)
+
+
 def _walk(value: object) -> list[object]:
     result = [value]
     if is_dataclass(value) and not isinstance(value, type):
@@ -94,8 +111,15 @@ def _deny_production_powers(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(LimaPlatform, "not_ready", denied)
 
 
-def _topic_for(anchor: ConceptAnchor | ResourceAnchor, *, inventory: bool = False) -> TopicContribution:
-    slug = anchor.name if isinstance(anchor, ConceptAnchor) else f"{anchor.kind}/{anchor.name}"
+def _topic_for(
+    anchor: ConceptAnchor | ImplementationAnchor | KindAnchor | ResourceAnchor, *, inventory: bool = False
+) -> TopicContribution:
+    if isinstance(anchor, ConceptAnchor):
+        slug = anchor.name
+    elif isinstance(anchor, KindAnchor):
+        slug = anchor.kind
+    else:
+        slug = f"{anchor.kind}/{anchor.name}"
     blocks: tuple[GuideBlock, ...] = (Overview(BlockId("overview"), "Text."),)
     if inventory:
         blocks += (InstanceList(BlockId("inventory")),)
@@ -132,6 +156,28 @@ def test_anchor_enforces_traversal_and_never_finalizes(monkeypatch: pytest.Monke
         view.inventory(GuideRoot.KINDS)
 
 
+@pytest.mark.parametrize(
+    ("anchor", "expected_iteration"),
+    [
+        (ResourceAnchor("guide-test", "demo"), ()),
+        (ImplementationAnchor("guide-capability", "demo"), ()),
+        (KindAnchor("guide-test"), ("guide-test",)),
+    ],
+)
+def test_non_concept_views_do_not_materialize_inaccessible_global_inventories(
+    monkeypatch: pytest.MonkeyPatch,
+    anchor: ImplementationAnchor | KindAnchor | ResourceAnchor,
+    expected_iteration: tuple[str, ...],
+) -> None:
+    monkeypatch.setitem(KIND_REGISTRY, "guide-test", _NoInstanceHandler())
+    monkeypatch.setitem(KIND_REGISTRY, "guide-capability", _CapabilityHandler())
+    registry = _CountingRegistry()
+
+    build_guide_view(_topic_for(anchor), registry, SimpleNamespace())  # type: ignore[arg-type]
+
+    assert tuple(registry.iterated_kinds) == expected_iteration
+
+
 def test_each_concept_receives_only_planned_roots(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setitem(KIND_REGISTRY, "guide-test", _NoInstanceHandler())
     view = build_guide_view(
@@ -140,6 +186,34 @@ def test_each_concept_receives_only_planned_roots(monkeypatch: pytest.MonkeyPatc
     assert view.inventory(GuideRoot.IMPLEMENTATIONS)
     with pytest.raises(GuideTraversalError):
         view.inventory(GuideRoot.KINDS)
+
+
+@pytest.mark.parametrize(
+    ("concept", "expected_roots"),
+    [
+        ("concept-onboarding", frozenset({GuideRoot.KINDS, GuideRoot.IMPLEMENTATIONS})),
+        ("concept-secrets", frozenset({GuideRoot.IMPLEMENTATIONS})),
+    ],
+)
+def test_concept_views_materialize_only_their_permitted_global_inventories(
+    monkeypatch: pytest.MonkeyPatch,
+    concept: str,
+    expected_roots: frozenset[GuideRoot],
+) -> None:
+    monkeypatch.setitem(KIND_REGISTRY, "guide-test", _NoInstanceHandler())
+    monkeypatch.setitem(KIND_REGISTRY, "guide-capability", _CapabilityHandler())
+    registry = _CountingRegistry()
+
+    view = build_guide_view(_topic_for(ConceptAnchor(concept), inventory=True), registry, SimpleNamespace())  # type: ignore[arg-type]
+
+    for root in expected_roots:
+        assert view.inventory(root)
+    for root in frozenset(GuideRoot).difference(expected_roots):
+        with pytest.raises(GuideTraversalError):
+            view.inventory(root)
+    assert tuple(registry.iterated_kinds) == tuple(
+        kind for kind, handler in sorted(KIND_REGISTRY.items()) if handler.category == "capability"
+    )
 
 
 def test_concept_roots_must_match_validated_block_plan() -> None:

@@ -29,7 +29,7 @@ from agentworks.guide.contract import (
 )
 from agentworks.guide.contributions import guide_contributions
 from agentworks.guide.render import framework_heading, render_index, render_topic, sanitize_terminal_output
-from agentworks.guide.view import build_guide_view
+from agentworks.guide.view import GuideInstanceFact, GuideRelationship, build_guide_view
 from agentworks.manifests.reference import describable_targets, reference_for
 from agentworks.resources import KIND_REGISTRY
 
@@ -233,18 +233,16 @@ def _dynamic_names(registry: Registry | None, schema: GuideCatalog | None = None
 def build_onboarding_snapshot(registry: Registry, db: Database) -> OnboardingSnapshot:
     """Compose bounded onboarding facts through real anchor-scoped guide views."""
     resources = []
-    instances = []
-    relationships = []
+    instances: dict[GuideInstanceFact, None] = {}
+    relationships: dict[GuideRelationship, None] = {}
     for kind in sorted(KIND_REGISTRY):
         for name, _resource in sorted(registry.iter_kind_items(kind)):
             view = build_guide_view(_dynamic_topic(registry, f"{kind}/{name}"), registry, db)
             resources.append(view.me())
             for instance in view.instances():
-                if instance not in instances:
-                    instances.append(instance)
+                instances.setdefault(instance, None)
             for relationship in (*view.outbound(), *view.inbound()):
-                if relationship not in relationships:
-                    relationships.append(relationship)
+                relationships.setdefault(relationship, None)
     return OnboardingSnapshot(tuple(resources), tuple(instances), tuple(relationships))
 
 

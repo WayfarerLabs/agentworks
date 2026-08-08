@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from types import SimpleNamespace
-from typing import cast
+from typing import ClassVar, cast
 
 import pytest
 from typer.testing import CliRunner
@@ -34,6 +34,7 @@ from agentworks.guide import (
 )
 from agentworks.guide.service import build_onboarding_snapshot
 from agentworks.resources import KIND_REGISTRY, Origin, Registry, ResourceReference
+from agentworks.resources.graph import Enablement, Readiness
 from agentworks.resources.kind import InstanceRef
 from agentworks.secrets.base import SecretDecl
 
@@ -67,6 +68,24 @@ def _snapshot(
 
 def _evidence(action: str, kind: str, name: str, outcome: VerificationOutcome) -> VerificationEvidence:
     return VerificationEvidence(ActionId(action), GuideIdentity(kind, name), outcome)
+
+
+class _CountedSnapshotFact:
+    comparisons: ClassVar[int] = 0
+
+    def __init__(self, value: int) -> None:
+        self.value = value
+
+    def __hash__(self) -> int:
+        return hash(self.value)
+
+    def __eq__(self, other: object) -> bool:
+        type(self).comparisons += 1
+        return isinstance(other, type(self)) and self.value == other.value
+
+
+class _CountedSnapshotRelationship(_CountedSnapshotFact):
+    comparisons: ClassVar[int] = 0
 
 
 def test_mixed_projected_facts_relationships_and_instances_keep_individual_statuses() -> None:
@@ -524,3 +543,102 @@ def test_real_views_compose_snapshot_and_render_target_scoped_evidence(
     for markdown in outputs:
         assert "Retain the stored VM fact and mark connectivity unverifiable" in markdown
         assert "### `verify-vm-connection`" not in markdown
+
+
+def test_snapshot_does_not_rebuild_global_implementation_inventory_for_each_resource(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import agentworks.guide.service as guide_service
+    import agentworks.guide.view as guide_view
+
+    class Handler:
+        def __init__(self, category: str) -> None:
+            self.category = category
+            self.description = "Snapshot test resources."
+
+    class Graph:
+        def readiness_of(self, kind: str, name: str) -> Readiness:
+            return Readiness.ready()
+
+        def enablement_of(self, kind: str, name: str) -> Enablement:
+            return Enablement.enabled
+
+        def edges_of(self, kind: str, name: str) -> tuple[object, ...]:
+            return ()
+
+        def dependents_of(self, kind: str, name: str) -> tuple[object, ...]:
+            return ()
+
+    class SnapshotRegistry:
+        is_finalized = True
+        graph = Graph()
+
+        def __init__(self) -> None:
+            self.iterated_kinds: list[str] = []
+
+        def iter_kind_items(self, kind: str):
+            self.iterated_kinds.append(kind)
+            return iter((name, SimpleNamespace()) for name in ("first", "second", "third"))
+
+        def lookup(self, kind: str, name: str) -> object:
+            return SimpleNamespace()
+
+    handlers = {"snapshot-capability": Handler("capability"), "snapshot-resource": Handler("declarable")}
+    monkeypatch.setattr(guide_service, "KIND_REGISTRY", handlers)
+    monkeypatch.setattr(guide_view, "KIND_REGISTRY", handlers)
+    registry = SnapshotRegistry()
+
+    snapshot = build_onboarding_snapshot(registry, SimpleNamespace())  # type: ignore[arg-type]
+
+    assert [fact.identity for fact in snapshot.resources] == [
+        GuideIdentity("snapshot-capability", name) for name in ("first", "second", "third")
+    ] + [GuideIdentity("snapshot-resource", name) for name in ("first", "second", "third")]
+    assert registry.iterated_kinds == ["snapshot-capability", "snapshot-resource"]
+
+
+def test_snapshot_deduplication_keeps_first_seen_order_without_linear_membership_work(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import agentworks.guide.service as guide_service
+
+    class Handler:
+        category = "declarable"
+
+    class SnapshotRegistry:
+        def iter_kind_items(self, kind: str):
+            assert kind == "snapshot-test"
+            return iter((("first", SimpleNamespace()), ("second", SimpleNamespace())))
+
+        def lookup(self, kind: str, name: str) -> object:
+            assert kind == "snapshot-test"
+            return SimpleNamespace()
+
+    instance_facts = tuple(_CountedSnapshotFact(value) for value in range(64))
+    relationship_facts = tuple(_CountedSnapshotRelationship(value) for value in range(64))
+    _CountedSnapshotFact.comparisons = 0
+    _CountedSnapshotRelationship.comparisons = 0
+    calls = 0
+
+    def fake_view(*args: object, **kwargs: object) -> SimpleNamespace:
+        nonlocal calls
+        calls += 1
+        facts = instance_facts if calls == 1 else tuple(reversed(instance_facts))
+        relationships = relationship_facts if calls == 1 else tuple(reversed(relationship_facts))
+        return SimpleNamespace(
+            me=lambda: _fact("snapshot-test", str(calls)),
+            instances=lambda: facts,
+            outbound=lambda: relationships if calls == 1 else (),
+            inbound=lambda: () if calls == 1 else relationships,
+        )
+
+    monkeypatch.setattr(guide_service, "KIND_REGISTRY", {"snapshot-test": Handler()})
+    monkeypatch.setattr(guide_service, "build_guide_view", fake_view)
+
+    snapshot = build_onboarding_snapshot(SnapshotRegistry(), SimpleNamespace())  # type: ignore[arg-type]
+
+    captured_instances = cast(tuple[_CountedSnapshotFact, ...], snapshot.instances)
+    captured_relationships = cast(tuple[_CountedSnapshotRelationship, ...], snapshot.relationships)
+    assert tuple(fact.value for fact in captured_instances) == tuple(range(64))
+    assert tuple(relationship.value for relationship in captured_relationships) == tuple(range(64))
+    assert _CountedSnapshotFact.comparisons <= len(instance_facts)
+    assert _CountedSnapshotRelationship.comparisons <= len(relationship_facts)
