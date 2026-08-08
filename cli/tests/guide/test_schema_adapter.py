@@ -76,7 +76,16 @@ def test_schema_scalar_facts_render_authoritative_yaml_without_prose_normalizati
         description=None,
         choices=(_LiteralChoice.BACKTICKS, "", " "),
         constraints={"allowed": [True, "a``b"], "pattern": "a``b"},
-        examples=({"enabled": True}, ["a``b", False], "", " "),
+        examples=(
+            {"enabled": True},
+            ["a``b", False],
+            "",
+            " ",
+            "top\n\nbottom",
+            "carriage\rreturn",
+            "tab\tvalue",
+            r"slash\ntext",
+        ),
     )
     literal_entry = replace(entry, doc=literal_doc, children=(), alternatives=())
     reference = replace(original, metadata=(), spec=(literal_entry,), alternatives=(), root_value=None)
@@ -100,6 +109,13 @@ def test_schema_scalar_facts_render_authoritative_yaml_without_prose_normalizati
     assert f"pattern ```{render_value('a``b')}```" in rendered.markdown
     assert f"`{render_value({'enabled': True})}`" in rendered.markdown
     assert f"```{render_value(['a``b', False])}```" in rendered.markdown
+    fields = rendered.blocks[0].source_payload
+    assert fields is not None
+    assert fields.count("\n") == 2
+    assert r"\n\n" in fields
+    assert r"\\r" in fields
+    assert r"\\t" in fields
+    assert r"\\n" in fields
 
 
 @pytest.mark.parametrize(
@@ -115,6 +131,50 @@ def test_schema_code_spans_use_longer_delimiters_and_needed_edge_padding(value: 
     from agentworks.guide.render import _code
 
     assert _code(value) == expected
+
+
+def test_schema_value_turns_blank_line_yaml_into_one_lossless_display_line() -> None:
+    from agentworks.guide.render import _schema_value
+
+    yaml_value = render_value("top\n\nbottom")
+    rendered = _schema_value("top\n\nbottom")
+
+    assert "\n\n" in yaml_value
+    assert not any(control in rendered for control in ("\r", "\n", "\t"))
+    assert r"\n\n\n  bottom" in rendered
+
+
+def test_schema_value_distinguishes_controls_from_literal_backslash_sequences() -> None:
+    from agentworks.guide.render import _schema_value
+
+    displays = {
+        "lf": _schema_value("line\nbreak"),
+        "slash-n": _schema_value(r"line\nbreak"),
+        "cr": _schema_value("carriage\rreturn"),
+        "slash-r": _schema_value(r"carriage\rreturn"),
+        "tab": _schema_value("tab\tvalue"),
+        "slash-t": _schema_value(r"tab\tvalue"),
+    }
+
+    assert len(set(displays.values())) == len(displays)
+    assert all(not any(control in display for control in ("\r", "\n", "\t")) for display in displays.values())
+    assert r"\n" in displays["lf"]
+    assert r"\\n" in displays["slash-n"]
+    assert r"\\r" in displays["cr"]
+    assert r"\\t" in displays["tab"]
+
+
+def test_schema_value_is_single_line_and_commonmark_safe_with_backticks() -> None:
+    from agentworks.guide.render import _schema_value
+
+    rendered = _schema_value("a``b\n\npath\\name\tvalue")
+
+    assert rendered.startswith("```") and rendered.endswith("```")
+    assert not any(control in rendered for control in ("\r", "\n", "\t"))
+    assert "a``b" in rendered
+    assert r"\\n\\n" in rendered
+    assert r"\\" in rendered
+    assert r"\\t" in rendered
 
 
 def test_schema_blocks_render_with_broken_config_beside_static_migration_teaching() -> None:

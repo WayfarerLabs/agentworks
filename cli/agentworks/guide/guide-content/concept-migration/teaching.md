@@ -1,10 +1,13 @@
 ## Inventory and preserve the migration evidence
 
-Before any backup or edit, read only the selected `config.toml` and record one canonical `kind/name`
-for each manifest-producing retired section. Collapse nested tables into their parent resource.
-Exclude `[secret_backends.*]`, which produces no manifest. The caller owns this TOML identity set.
-An inventory captured before upgrading can be useful additional evidence, but the procedure does not
-assume one exists.
+Before any backup or edit, read only the selected `config.toml` and the resources directory when it
+exists. Record every pre-existing manifest as canonical `kind/name`, `operator-declared` origin
+variant, and manifest file path. For each manifest-producing retired section, record its canonical
+`kind/name`, the same origin variant, and an operator-chosen intended manifest file. Collapse nested
+tables into their parent resource. Exclude `[secret_backends.*]`, which produces no manifest. Omit
+source lines because edits to a multi-document file can shift them without changing origin. The
+caller owns this complete union as immutable expected identities. An inventory captured before
+upgrading can be useful additional evidence, but the procedure does not assume one exists.
 
 Next, preserve the selected `config.toml` and resources directory as separate untouched backups at
 fresh operator-selected destinations. Each destination must be distinct from its source and outside
@@ -14,12 +17,9 @@ creating a directory in that case.
 
 Before editing, use a separate read boundary to verify that the config backup matches its source
 byte for byte and that the resources backup contains exactly the same paths and file bytes as its
-source, or that both sides match the explicit absent baseline. Extend the caller-owned expected
-identities with every pre-existing baseline manifest. Keep the canonical TOML identities in that
-same working set. A baseline identity carries its canonical `kind/name`, the `operator-declared`
-origin variant, and its manifest file path. As each TOML identity receives a manifest, add the
-intended file path and operator-declared variant. Ignore the source line because edits to a
-multi-document file can shift it without changing origin.
+source, or that both sides match the explicit absent baseline. Validate the complete expected
+identities against those untouched sources and the pre-recorded intended TOML paths. Verification
+does not add, remove, or change an entry.
 
 ## Rewrite one resource at a time
 
@@ -53,12 +53,14 @@ live implementation reference: `[azure]` selects `spec.platform.name: azure-vm`,
 `spec.platform.name: proxmox`, and a legacy git credential provider moves under the tagged
 `spec.provider` table.
 
-Write one manifest at a time while leaving every retired TOML section in place. Use the manifest
-kind's sample and field reference. When the manifest contains tagged capability configuration, use
-that implementation's separate `kind/name` field reference. Run `agw doctor` after each edit. Its
-degraded configuration path validates the growing manifest set while continuing to report the
-retired-section failure. Fix closed-world fields, strict types, non-nullable nulls, and retired
-sibling capability shapes from that precise error and the live field reference.
+Write one manifest at a time at its pre-recorded intended path while leaving every retired TOML
+section in place. The edit must consume its existing expected identity without changing the
+baseline. Use the manifest kind's sample and field reference. When the manifest contains tagged
+capability configuration, use that implementation's separate `kind/name` field reference. Run
+`agw doctor` after each edit. Its degraded configuration path validates the growing manifest set
+while continuing to report the retired-section failure. Fix closed-world fields, strict types,
+non-nullable nulls, and retired sibling capability shapes from that precise error and the live field
+reference.
 
 ## Review changed secret references
 

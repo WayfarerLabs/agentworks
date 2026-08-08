@@ -104,7 +104,8 @@ anchors. Samples are valid only for declarable bare kinds. Keep a resource topic
 kind instead of attaching schema blocks to the resource instance. Field descriptions and alternative
 summaries use the shared prose normalization. Literal defaults, examples, choices, and constraints
 retain their exact rendered values inside Markdown code spans sized and padded for their backticks
-and edge spaces.
+and edge spaces. After YAML rendering, backslashes, carriage returns, line feeds, and tabs become
+distinct visible escape sequences so one scalar cannot break the reference row across lines.
 
 ## Shipping a plugin
 

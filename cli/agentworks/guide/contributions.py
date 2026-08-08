@@ -64,22 +64,37 @@ def _migration_actions() -> tuple[GuideAction, ...]:
         GuideAction(
             ActionId("inventory-retired-resources"),
             "No migration backup or edit has begun.",
-            (ActionInput("CONFIG_PATH", "The config.toml file selected for read-only inventory.", True),),
+            (
+                ActionInput("CONFIG_PATH", "The config.toml file selected for read-only inventory.", True),
+                ActionInput(
+                    "RESOURCES_PATH",
+                    "The active resource manifest directory to inventory when it exists; omit when absent.",
+                    False,
+                ),
+                ActionInput(
+                    "INTENDED_MANIFEST_PATHS",
+                    "The operator-chosen manifest file for every manifest-producing retired TOML identity.",
+                    True,
+                ),
+            ),
             ConsentBoundary.READ_CONFIGURED_STATE,
             None,
-            "The caller owns the expected identity set initialized with one canonical kind/name for every "
-            "manifest-producing "
-            "retired section, with nested subtables collapsed into their parent and secret_backends "
-            "declarations excluded.",
+            "The caller owns one complete immutable EXPECTED_IDENTITIES union. It includes every pre-existing "
+            "manifest's kind/name, operator-declared origin variant, and manifest file path, plus every "
+            "manifest-producing retired TOML identity with the same origin variant and its operator-chosen "
+            "intended manifest file. Source lines are excluded.",
             None,
-            "Stop before backup or editing and leave CONFIG_PATH unread.",
-            "Read only CONFIG_PATH. Record one canonical kind/name for each manifest-producing retired "
-            "section, collapse nested subtables into the parent resource, and exclude every "
-            "[secret_backends.*] declaration.",
+            "Stop before backup or editing and leave CONFIG_PATH and RESOURCES_PATH unread.",
+            "Read only CONFIG_PATH and, when it exists, RESOURCES_PATH. Record each pre-existing manifest by "
+            "kind/name, operator-declared origin variant, and manifest file path. Record each "
+            "manifest-producing retired TOML section by canonical kind/name, the operator-declared variant, "
+            "and its path from INTENDED_MANIFEST_PATHS. Collapse nested subtables into their parent, exclude "
+            "every [secret_backends.*] declaration, omit source lines, and freeze the complete union as "
+            "EXPECTED_IDENTITIES before backup or editing.",
         ),
         GuideAction(
             ActionId("backup-config"),
-            "The caller-owned expected identities include every retired TOML resource and no migration edit has begun.",
+            "The caller-owned EXPECTED_IDENTITIES union is complete and immutable, and no migration edit has begun.",
             (
                 ActionInput("CONFIG_PATH", "The config.toml file selected for migration.", True),
                 ActionInput(
@@ -100,7 +115,7 @@ def _migration_actions() -> tuple[GuideAction, ...]:
         ),
         GuideAction(
             ActionId("backup-resources"),
-            "The config backup exists and no migration edit has begun.",
+            "EXPECTED_IDENTITIES is immutable, the config backup exists, and no migration edit has begun.",
             (
                 ActionInput(
                     "RESOURCES_PATH",
@@ -127,7 +142,7 @@ def _migration_actions() -> tuple[GuideAction, ...]:
         ),
         GuideAction(
             ActionId("verify-migration-inputs"),
-            "Both backup actions completed and the caller owns the expected identities initialized from TOML.",
+            "Both backup actions completed after EXPECTED_IDENTITIES was frozen.",
             (
                 ActionInput("CONFIG_PATH", "The source config.toml file.", True),
                 ActionInput("CONFIG_BACKUP_PATH", "The config backup to verify.", True),
@@ -139,7 +154,7 @@ def _migration_actions() -> tuple[GuideAction, ...]:
                 ),
                 ActionInput(
                     "EXPECTED_IDENTITIES",
-                    "The caller-owned identity set initialized from retired TOML sections.",
+                    "The complete immutable union established before backup.",
                     True,
                 ),
             ),
@@ -147,22 +162,29 @@ def _migration_actions() -> tuple[GuideAction, ...]:
             None,
             "CONFIG_BACKUP_PATH matches CONFIG_PATH byte for byte, RESOURCES_BACKUP_PATH has exactly the "
             "same paths and file bytes as an existing RESOURCES_PATH or both match the explicit absent baseline. "
-            "The caller-owned EXPECTED_IDENTITIES set is extended with every pre-existing manifest's "
-            "kind/name, operator-declared origin variant, and manifest file path. Source line is "
-            "ignored because multi-document edits can shift it.",
+            "EXPECTED_IDENTITIES still contains exactly the complete pre-backup union, including each "
+            "pre-existing manifest and each TOML identity's pre-recorded intended file, without source lines.",
             None,
             "Stop before any edit when a backup differs or EXPECTED_IDENTITIES is incomplete.",
             "Read CONFIG_PATH and CONFIG_BACKUP_PATH and compare them byte for byte. For resources, compare "
-            "the exact paths and file bytes or confirm the explicit absent baseline. Derive pre-existing manifest "
-            "identities from that baseline and union them into EXPECTED_IDENTITIES. Preserve kind/name, the "
-            "operator-declared origin variant, and manifest file path while ignoring source line.",
+            "the exact paths and file bytes or confirm the explicit absent baseline. Validate every entry in "
+            "EXPECTED_IDENTITIES against those sources and the pre-recorded intended TOML paths without adding, "
+            "removing, or changing any entry.",
         ),
         GuideAction(
             ActionId("edit-one-manifest"),
             "Both backups and the caller-owned expected identities passed the read-only verification checkpoint.",
             (
-                ActionInput("MANIFEST_PATH", "The single manifest file to create or edit.", True),
-                ActionInput("MANIFEST_KIND", "The declarable kind for the live sample and field reference.", True),
+                ActionInput(
+                    "MANIFEST_PATH",
+                    "The pre-recorded intended manifest file for the selected expected identity.",
+                    True,
+                ),
+                ActionInput(
+                    "MANIFEST_KIND",
+                    "The pre-recorded declarable kind for the live sample and field reference.",
+                    True,
+                ),
                 ActionInput(
                     "CAPABILITY_TARGET",
                     "The optional kind/name field-reference target when the manifest has tagged capability config.",
@@ -170,22 +192,22 @@ def _migration_actions() -> tuple[GuideAction, ...]:
                 ),
                 ActionInput(
                     "EXPECTED_IDENTITIES",
-                    "The caller-owned expected identity set updated as this manifest receives a path.",
+                    "The immutable baseline containing this manifest's pre-recorded identity and path.",
                     True,
                 ),
             ),
             ConsentBoundary.MUTATE_AGENTWORKS,
             None,
             "MANIFEST_PATH contains one resource rewritten against the live sample and field reference for "
-            "MANIFEST_KIND and, when present, the separate field reference for CAPABILITY_TARGET. Its expected "
-            "identity records kind/name, the operator-declared origin variant, and MANIFEST_PATH while ignoring "
-            "source line.",
+            "MANIFEST_KIND and, when present, the separate field reference for CAPABILITY_TARGET. "
+            "EXPECTED_IDENTITIES remains byte-for-byte unchanged.",
             None,
             "Keep the last validated manifest set and do not remove any retired TOML section.",
             "Edit only MANIFEST_PATH. Use the live sample and field-reference topic for MANIFEST_KIND. When "
             "tagged capability config is present, also use the separate field-reference topic for "
-            "CAPABILITY_TARGET. Update the selected EXPECTED_IDENTITIES entry with the operator-declared origin "
-            "variant and MANIFEST_PATH, ignoring source line. Do not copy a schema from this migration topic.",
+            "CAPABILITY_TARGET. Require MANIFEST_PATH to equal the selected EXPECTED_IDENTITIES entry's "
+            "pre-recorded intended file. Never add, remove, or change a baseline entry. Do not copy a schema "
+            "from this migration topic.",
         ),
         GuideAction(
             ActionId("validate-manifest-set"),
@@ -230,7 +252,7 @@ def _migration_actions() -> tuple[GuideAction, ...]:
             (
                 ActionInput(
                     "EXPECTED_IDENTITIES",
-                    "The caller-owned union of baseline-manifest and retired-TOML identities.",
+                    "The complete immutable union frozen before backup and editing.",
                     True,
                 ),
             ),
