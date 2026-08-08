@@ -391,7 +391,7 @@ def test_a_kind_owned_key_inside_the_table_is_the_platforms_to_refuse(tmp_path: 
         spec:
           platform:
             name: lima
-            vm_host: me@gpu-box
+            placement: { mode: ssh, host: me@gpu-box }
             platform: wsl2
         """)
     )

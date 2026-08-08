@@ -28,6 +28,7 @@ spec:
     subscription_id: "0000"
     resource_group: agw-dev
     region: eastus
+    auth: { mode: ambient }
 """
 
 _NO_PLATFORM_DOC = """\
@@ -59,6 +60,7 @@ def test_decode_nests_platform_config(tmp_path: Path) -> None:
         "subscription_id": "0000",
         "resource_group": "agw-dev",
         "region": "eastus",
+        "auth": {"mode": "ambient"},
     }
     assert site.description == "Dev subscription"
 
@@ -264,14 +266,18 @@ def test_azure_service_principal_secret_reaches_the_site_node(tmp_path: Path) ->
     resources = tmp_path / "resources"
     resources.mkdir()
     (resources / "site.yaml").write_text(
-        SITE_DOC + "    service_principal:\n      tenant_id: tenant-1\n      client_id: client-1\n      secret: az-sp\n"
+        SITE_DOC.replace(
+            "    auth: { mode: ambient }\n",
+            "    auth:\n      mode: service-principal\n"
+            "      tenant_id: tenant-1\n      client_id: client-1\n      secret: az-sp\n",
+        )
     )
 
     registry = build_registry(load_config(cfg, warn_issues=False))
 
     assert vm_site_node(registry, "azure-dev").secret_refs() == ("az-sp",)
-    # And a site WITHOUT the block declares nothing, so the ambient-path
-    # sites every existing operator runs stay edge-free.
+    # And a site on the AMBIENT arm declares nothing: choosing the host's
+    # own identity is still choosing no secret.
     (resources / "site.yaml").write_text(SITE_DOC.replace("name: azure-dev", "name: azure-ambient"))
     ambient = build_registry(load_config(cfg, warn_issues=False))
     assert vm_site_node(ambient, "azure-ambient").secret_refs() == ()
@@ -279,7 +285,7 @@ def test_azure_service_principal_secret_reaches_the_site_node(tmp_path: Path) ->
 
 def test_aws_ec2_credentials_secret_reaches_the_site_node(tmp_path: Path) -> None:
     """The same end-to-end hop the azure test pins, for the aws-ec2 platform: an
-    aws site with a ``credentials`` block reaches
+    aws site on the ``access-key`` arm reaches
     ``vm_site_node(...).secret_refs()`` carrying its secret access key.
     """
     from agentworks.bootstrap import build_registry
@@ -300,18 +306,18 @@ def test_aws_ec2_credentials_secret_reaches_the_site_node(tmp_path: Path) -> Non
     aws_ec2_site = (
         "apiVersion: agentworks/v1\nkind: vm-site\nmetadata:\n  name: aws-dev\nspec:\n"
         "  platform:\n    name: aws-ec2\n    region: us-east-1\n"
-        "    credentials:\n      access_key_id: AKIAEXAMPLE\n      access_key_secret: aws-secret\n"
+        "    auth:\n      mode: access-key\n"
+        "      access_key_id: AKIAEXAMPLE\n      access_key_secret: aws-secret\n"
     )
     (resources / "site.yaml").write_text(aws_ec2_site)
 
     registry = build_registry(load_config(cfg, warn_issues=False))
     assert vm_site_node(registry, "aws-dev").secret_refs() == ("aws-secret",)
 
-    # A site WITHOUT the block declares nothing, so ambient-path sites stay
-    # edge-free.
+    # A site on the AMBIENT arm declares nothing.
     (resources / "site.yaml").write_text(
         "apiVersion: agentworks/v1\nkind: vm-site\nmetadata:\n  name: aws-ambient\nspec:\n"
-        "  platform:\n    name: aws-ec2\n    region: us-east-1\n"
+        "  platform:\n    name: aws-ec2\n    region: us-east-1\n    auth: { mode: ambient }\n"
     )
     ambient = build_registry(load_config(cfg, warn_issues=False))
     assert vm_site_node(ambient, "aws-ambient").secret_refs() == ()

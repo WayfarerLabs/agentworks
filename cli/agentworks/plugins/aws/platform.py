@@ -2,7 +2,8 @@
 
 This is the second cloud platform, and it copies the azure-vm reference shape
 deliberately (see ``cli/agentworks/capabilities/vm_platform/README.md``): an
-optional ``credentials`` table that names a secret, an instance-type catalog
+required ``auth`` tagged union whose credential arm names a secret, an
+instance-type catalog
 with smallest-that-fits selection, and the baseline-deny / ephemeral-scoped-allow
 exposure model azure's redesign established (a security
 group that denies all inbound by default; SSH via ephemeral rules scoped to the
@@ -25,6 +26,7 @@ import yaml
 from pydantic import Field
 
 from agentworks import output
+from agentworks.capabilities.retired_shapes import RetiredPresenceShape
 from agentworks.capabilities.vm_platform.base import ProvisionRequest, ProvisionResult, VMPlatform
 from agentworks.capabilities.vm_platform.bootstrap_script import generate_bootstrap_script
 from agentworks.capabilities.vm_platform.cloud_init import PROVISIONING_PACKAGES
@@ -76,8 +78,33 @@ _DEBIAN_ARCH_SEGMENT = {"x86_64": "amd64", "arm64": "arm64"}
 _MAX_USER_DATA_BYTES = 16384
 
 
-class AwsCredentials(AgwModel):
-    """A site's explicit AWS credential."""
+# Why an arm with no fields but its tag exists at all: see azure's
+# ``AzureAmbientAuth``. It makes borrowing the host's identity a declared
+# choice rather than a state a site lands in by writing nothing.
+class AwsAmbientAuth(AgwModel):
+    """Authenticate with boto3's ambient default credential chain.
+
+    That is environment variables, the shared config and credentials
+    files, an instance profile, and SSO.
+    """
+
+    mode: Literal["ambient"]
+    """Selects this arm."""
+
+
+# A tagged arm rather than an optional block on the config: a future
+# profile or web-identity mode, each with fields of its own, is a new arm
+# beside these two rather than another nullable table whose presence has
+# to be cross-checked against the others.
+class AwsAccessKeyAuth(AgwModel):
+    """Authenticate with an explicit IAM access key.
+
+    It replaces the ambient chain entirely for this site: a rejected key
+    fails the command rather than falling back to some other identity.
+    """
+
+    mode: Literal["access-key"]
+    """Selects this arm."""
 
     access_key_id: NonEmptyStr
     """The access key id, plain config."""
@@ -92,7 +119,31 @@ class AwsCredentials(AgwModel):
     convention reads ``AW_SECRET_AWS_SECRET_ACCESS_KEY``."""
 
     assume_role_arn: NonEmptyStr | None = None
-    """A role to assume with the key, via STS."""
+    """A role to assume with the key, via STS. Optional: omitted, the key
+    is the identity; named, an auto-refreshing AssumeRole is layered over
+    it (see :func:`_assume_role_session`)."""
+
+
+#: How an aws-ec2 site authenticates, as a REQUIRED tagged union.
+#:
+#: Required, and with no omission alias, because the choice of identity is
+#: too consequential to be expressed by absence. An optional credential
+#: block cannot distinguish "borrow the host's identity deliberately" from
+#: "nobody configured this yet", and neither can a reviewer or the
+#: dependency graph reading the same document.
+#:
+#: The tag is a string ``Literal`` rather than a boolean for the same
+#: reason it is a union rather than an ``auth_mode`` field beside nullable
+#: blocks: each mode carries its OWN fields, and AWS has further modes
+#: worth naming later (a named shared-config profile, a web identity) that
+#: a boolean could not grow into. Pydantic emits this directly as
+#: ``oneOf`` with a ``discriminator`` mapping, so the loader and the
+#: emitted schema agree by construction, which a cross-field validator
+#: over nullable blocks could not achieve (JSON Schema cannot state one,
+#: so the emitted schema would accept mixed-arm configs the loader
+#: rejects, breaking the under-approximation contract in
+#: ``manifests/emit.py``).
+AwsAuth = Annotated[AwsAmbientAuth | AwsAccessKeyAuth, Field(discriminator="mode")]
 
 
 class AwsInstanceType(AgwModel):
@@ -131,9 +182,11 @@ class AwsEC2Config(AgwModel):
     satisfies the request. Non-empty when present, because an empty
     catalog is a site on which no instance can be created."""
 
-    credentials: AwsCredentials | None = None
-    """An explicit credential. Omit to authenticate with boto3's ambient
-    default chain (env vars, shared config, instance profile, SSO)."""
+    auth: AwsAuth
+    """How this site authenticates to AWS: ``{mode: ambient}`` for boto3's
+    default chain, or ``{mode: access-key, ...}`` for an explicit key.
+    Required, with no default, so a site never selects an identity by
+    leaving a key out."""
 
 
 class _InstanceType(NamedTuple):
@@ -245,6 +298,15 @@ class EC2Platform(VMPlatform):
     name: ClassVar[str] = "aws-ec2"
     description: ClassVar[str] = "Amazon EC2 instances (region + optional VPC subnet)"
     config_model: ClassVar[type[AwsEC2Config]] = AwsEC2Config
+    # Every aws-ec2 site written before the required ``auth`` union
+    # crosses this break, whether or not it declared credentials, so both
+    # directions get their exact rewrite. Release-scoped.
+    retired_shape: ClassVar[RetiredPresenceShape | None] = RetiredPresenceShape(
+        retired_field="credentials",
+        union_field="auth",
+        present_mode="access-key",
+        absent_mode="ambient",
+    )
     prose: ClassVar[TopicProse | None] = TopicProse(
         title="Amazon EC2",
         overview="""
@@ -263,9 +325,10 @@ class EC2Platform(VMPlatform):
         egress IP (plus `operator.ssh_allow_cidrs`) during bootstrap and each native
         route.
 
-        Authentication is the ambient AWS credential chain by default (environment,
-        shared config, instance profile, SSO). Declaring an access key replaces that
-        chain for this site; add `assume_role_arn` to layer an STS AssumeRole on top.
+        Every site states how it authenticates; there is no default. `auth: {mode:
+        ambient}` uses the ambient AWS credential chain (environment, shared config,
+        instance profile, SSO). `auth: {mode: access-key, ...}` replaces that chain for
+        this site; add `assume_role_arn` to layer an STS AssumeRole on top.
 
         Ships as the opt-in `aws` system plugin, so a site stays not-ready until
         `[plugins] system` lists it.
@@ -288,8 +351,8 @@ class EC2Platform(VMPlatform):
         # The boto3 session (credentials) and per-(service, region) clients,
         # built on FIRST need by the accessors below and reused for the
         # instance's remaining ops. The session's identity is fixed by the
-        # bound config (the site's credentials table, or the ambient chain when
-        # it declares none), so it caches once per instance. Clients key by
+        # bound config (whichever arm the site's auth.mode names), so it caches
+        # once per instance. Clients key by
         # (service, region): the config names one region, but power ops read
         # each VM's stored region, and rows created under an older region must
         # keep operating regardless of what the config says today.
@@ -315,28 +378,28 @@ class EC2Platform(VMPlatform):
         """The boto3 session, built on first need and reused for the instance's
         remaining ops.
 
-        Which credential is a config decision, not a runtime one: a site that
-        declares a ``credentials`` table gets exactly that credential, built
-        from the secret access key ``ctx.secret`` delivers (then STS AssumeRole
-        when ``assume_role_arn`` is set), and NEVER falls back to the ambient
-        chain if it fails; a site that declares none gets boto3's ambient
-        default chain (env vars, shared config, instance profile, SSO). Falling
-        back would authenticate as a different identity than the operator
-        configured, which is worse than failing.
+        Which credential is a config decision, not a runtime one, and the site
+        states it outright: ``auth.mode`` selects the arm. An ``access-key``
+        site gets exactly that credential, built from the secret access key
+        ``ctx.secret`` delivers (then STS AssumeRole when ``assume_role_arn``
+        is set), and NEVER falls back to the ambient chain if it fails; an
+        ``ambient`` site gets boto3's default chain (env vars, shared config,
+        instance profile, SSO). Falling back would authenticate as a different
+        identity than the operator configured, which is worse than failing.
 
         Caching stays correct under the fork because the fork's inputs are
-        fixed per instance: the access key id and the secret NAME come from the
-        bound config, so a given instance resolves the same session
-        every time. See :func:`_build_explicit_session`.
+        fixed per instance: the mode, the access key id, and the secret NAME
+        come from the bound config, so a given instance resolves the same
+        session every time. See :func:`_build_access_key_session`.
         """
         session = self._session_cached
         if session is None:
-            creds = self.config.credentials
+            auth = self.config.auth
             region = self.config.region
-            if creds is None:
+            if isinstance(auth, AwsAmbientAuth):
                 session = _build_ambient_session(region)
             else:
-                session = _build_explicit_session(creds, ctx.secret(creds.access_key_secret), self.site_name, region)
+                session = _build_access_key_session(auth, ctx.secret(auth.access_key_secret), self.site_name, region)
             self._session_cached = session
         return session
 
@@ -385,17 +448,13 @@ class EC2Platform(VMPlatform):
 
         region = self.config.region
         subnet_id = self.config.subnet_id
-        creds = self.config.credentials
-        if creds is None:
+        auth = self.config.auth
+        if isinstance(auth, AwsAmbientAuth):
             cred_label = "the ambient AWS credentials (env, shared config, instance profile, SSO)"
             cred_hint = "check the credentials in the active AWS credential chain"
         else:
-            cred_label = (
-                f"the AWS credentials for access key {creds.access_key_id} (secret '{creds.access_key_secret}')"
-            )
-            cred_hint = (
-                f"check credentials.access_key_id and the value / permissions of the '{creds.access_key_secret}' secret"
-            )
+            cred_label = f"the AWS credentials for access key {auth.access_key_id} (secret '{auth.access_key_secret}')"
+            cred_hint = f"check auth.access_key_id and the value / permissions of the '{auth.access_key_secret}' secret"
 
         output.info(f"Performing runup test for vm-site/{self.site_name}...")
         # Client build sits OUTSIDE the try: it is where the credential is
@@ -794,7 +853,7 @@ class EC2Platform(VMPlatform):
 
         ``ctx`` is the create op's own scoped context, whose secrets were
         resolved before Phase A began, so even the interrupt path never resolves
-        a secret here for the first time; on a credentials-configured site the
+        a secret here for the first time; on an ``access-key`` site the
         network call authenticates as the configured access key, with no ambient
         fallback.
         """
@@ -1083,9 +1142,9 @@ class EC2Platform(VMPlatform):
 
 
 def _build_ambient_session(region: str) -> Any:
-    """The AMBIENT boto3 session (the path taken when the site declares no
-    ``credentials`` table): boto3's default credential chain (env vars, shared
-    config, instance profile, SSO), zero-config. No probe and no fallback
+    """The AMBIENT boto3 session (the path a site selects by declaring
+    ``auth: {mode: ambient}``): boto3's default credential chain (env vars,
+    shared config, instance profile, SSO). No probe and no fallback
     decision, unlike azure's ambient path: AWS has no interactive-browser
     equivalent, so the chain is used as-is and any failure surfaces at runup or
     at the op."""
@@ -1094,16 +1153,17 @@ def _build_ambient_session(region: str) -> Any:
     return boto3.session.Session(region_name=region)
 
 
-def _build_explicit_session(creds: AwsCredentials, secret_value: str, site_name: str, region: str) -> Any:
-    """The EXPLICIT boto3 session, built from the site's configured access key
-    id and the resolved secret access key, with STS AssumeRole layered on when
-    ``assume_role_arn`` is set.
+def _build_access_key_session(auth: AwsAccessKeyAuth, secret_value: str, site_name: str, region: str) -> Any:
+    """The ACCESS-KEY boto3 session, built from the site's configured access
+    key id and the resolved secret access key, with STS AssumeRole layered on
+    when ``assume_role_arn`` is set.
 
     Raises :class:`EC2Error` (site- and secret-named) on the one credential
     failure reachable at BUILD time, an empty resolved secret, for the same
-    reason azure's explicit path raises a typed error: an operator who
-    configured credentials means those and no other, so a failure here is fatal
-    and must not fall through to the ambient chain. The empty resolved secret is
+    reason azure's service-principal path raises a typed error: an operator who
+    selected ``mode: access-key`` means that credential and no other, so a
+    failure here is fatal and must not fall through to the ambient chain (which
+    the site did not select). The empty resolved secret is
     reachable in a way ``validate`` cannot catch (the config names a secret; a
     backend hands back the value), so it is checked explicitly here. The secret
     VALUE is never interpolated into any message.
@@ -1128,23 +1188,23 @@ def _build_explicit_session(creds: AwsCredentials, secret_value: str, site_name:
     if not secret_value:
         raise EC2Error(
             f"could not authenticate the AWS credentials for vm-site '{site_name}' "
-            f"(access key {creds.access_key_id}, secret '{creds.access_key_secret}'): the resolved secret is empty",
+            f"(access key {auth.access_key_id}, secret '{auth.access_key_secret}'): the resolved secret is empty",
             detail="the framework resolved the configured secret to an empty string",
             entity_kind="vm-site",
             entity_name=site_name,
             hint=(
-                f"check the value of the '{creds.access_key_secret}' secret (its default env-var backend key is "
+                f"check the value of the '{auth.access_key_secret}' secret (its default env-var backend key is "
                 f"AW_SECRET_AWS_SECRET_ACCESS_KEY)"
             ),
         )
     base = boto3.session.Session(
-        aws_access_key_id=creds.access_key_id,
+        aws_access_key_id=auth.access_key_id,
         aws_secret_access_key=secret_value,
         region_name=region,
     )
-    if creds.assume_role_arn is None:
+    if auth.assume_role_arn is None:
         return base
-    return _assume_role_session(base, creds.assume_role_arn, region)
+    return _assume_role_session(base, auth.assume_role_arn, region)
 
 
 def _assume_role_session(base: Any, role_arn: str, region: str) -> Any:

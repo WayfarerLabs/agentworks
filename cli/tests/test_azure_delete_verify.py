@@ -34,7 +34,7 @@ from tests._azure_platform_support import _RESOURCE_ID, _authorization_denied, _
 if TYPE_CHECKING:
     from tests.conftest import CapturedOutput
 
-_CONFIG = {"subscription_id": "sub-A", "resource_group": "rg1", "region": "eastus"}
+_CONFIG = {"subscription_id": "sub-A", "resource_group": "rg1", "region": "eastus", "auth": {"mode": "ambient"}}
 
 
 def _platform() -> AzureVMPlatform:

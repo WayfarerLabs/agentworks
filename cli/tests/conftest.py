@@ -567,6 +567,17 @@ def stub_session_resolvers(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("agentworks.secrets.resolve_for_command", lambda *a, **k: {})
 
 
+#: The minimum config each platform needs to VALIDATE, for the built-in
+#: same-named sites ``_StubRegistry`` serves below.
+#:
+#: Only platforms with a required field appear: lima's ``placement`` says
+#: where limactl runs, and it is required precisely so that no site can
+#: leave its execution mechanism unsaid, stub sites included. wsl2 takes
+#: no configuration, and the cloud platforms' sites are never served here
+#: (a stubbed VM's site is a local one).
+_STUB_PLATFORM_CONFIG: dict[str, dict[str, object]] = {"lima": {"placement": {"mode": "local"}}}
+
+
 class _StubRegistry:
     """Registry test double serving the consumer read surface from a
     (possibly ``SimpleNamespace``) config.
@@ -631,7 +642,7 @@ class _StubRegistry:
 
             if name not in VM_PLATFORM_REGISTRY:
                 raise KeyError(name)
-            return VMSiteDecl(name=name, platform=CapabilityBlock(name=name))
+            return VMSiteDecl(name=name, platform=CapabilityBlock.of(name, **_STUB_PLATFORM_CONFIG.get(name, {})))
         if kind not in self._KIND_ATTRS:
             raise KeyError(kind)
         return self._kind_dict(kind)[name]

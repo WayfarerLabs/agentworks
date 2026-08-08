@@ -174,7 +174,37 @@ def test_an_implementation_shows_the_config_it_declares() -> None:
 
     assert text.startswith("Lima (vm-platform/lima, vm-platform implementation)")
     assert "config:" in text
-    assert "vm_host  (string or null, optional, min length 1, e.g. me@gpu-box)" in text
+    assert "placement  (table, required)" in text
+
+
+def test_a_nested_tagged_union_renders_its_arms_and_expands_one() -> None:
+    """The rendering half of the same first-non-capability-union case
+    ``tests/manifests/test_reference.py`` pins structurally.
+
+    """
+    text = _text("vm-platform/lima")
+
+    assert "    - local (shown below): Run limactl on this machine." in text
+    assert "    - ssh: Run limactl on another host over SSH." in text
+    # The expanded arm's own fields render as the union field's children,
+    # one level under it, exactly where a document nests them.
+    assert "    mode  (one of: local, required)" in text
+
+
+def test_a_nested_union_arm_summary_reaches_the_terminal_as_plain_text() -> None:
+    """An arm summary is the arm MODEL's docstring, authored in RST, so it
+    has to go through the same markdown normalization every other
+    description in this renderer does.
+
+    The alternatives line was the one place that skipped it, which nothing
+    noticed while every discriminated union's arms were capabilities
+    carrying plain one-line ``description`` strings. Azure's ambient arm is
+    the first summary that legitimately wants code spans, so it is the one
+    that pins the transform: double backticks in, single backticks out."""
+    text = _text("vm-platform/azure-vm")
+
+    assert "- ambient (shown below): Authenticate with the ambient chain: `az login`," in text
+    assert "``" not in text
 
 
 def test_a_host_kind_lists_the_arms_and_marks_the_one_shown() -> None:

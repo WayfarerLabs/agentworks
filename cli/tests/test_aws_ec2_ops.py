@@ -34,7 +34,9 @@ def _stub_egress_detection(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _platform(**extra: object) -> EC2Platform:
-    return EC2Platform("aws-site", {"region": "us-east-1", **extra})
+    """A platform on a site that selects the ambient credential chain
+    explicitly; ``auth`` is required, so no site can leave it unsaid."""
+    return EC2Platform("aws-site", {"region": "us-east-1", "auth": {"mode": "ambient"}, **extra})
 
 
 def _request(

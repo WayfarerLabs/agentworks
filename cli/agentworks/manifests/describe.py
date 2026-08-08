@@ -120,7 +120,12 @@ def _field(entry: FieldEntry, *, depth: int) -> Iterator[str]:
         yield from _wrapped(entry.doc.description, depth=depth + 1)
     for alternative in entry.alternatives:
         shown = " (shown below)" if alternative.name == entry.rendered else ""
-        summary = f": {alternative.summary}" if alternative.summary else ""
+        # plain_text here for the same reason _wrapped applies it: an arm's
+        # summary is a capability's one-line ``description`` only when the
+        # union's arms ARE capabilities. Any other tagged union falls back
+        # to the arm model's own docstring, which is authored in RST, and
+        # its double backticks would reach the terminal raw.
+        summary = f": {plain_text(alternative.summary)}" if alternative.summary else ""
         yield f"{_INDENT * (depth + 1)}- {alternative.name}{shown}{summary}"
     yield from _other_arms_pointer(entry, depth=depth + 1)
     yield from _fields(entry.children, depth=depth + 1)

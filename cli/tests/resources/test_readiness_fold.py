@@ -148,8 +148,9 @@ def test_disabled_platform_node_folds_end_to_end_to_enable_its_unit() -> None:
     platform node injected DISABLED via a stub enablement source; the fold then
     hands the (remote-ready) site a disabled platform ``DependencyState``, and
     the site's stored ``readiness_of`` verdict, the graph's source of truth, is
-    the disabled hint. vm_host is set so the site would be ready if the platform
-    were enabled, isolating the enablement propagation from the tool check. The
+    the disabled hint. The ssh placement is set so the site would be ready if the
+    platform were enabled, isolating the enablement propagation from the tool
+    check. The
     stub's default reason reproduces the original "enable its unit" verdict; the
     plugin source's specific reason is pinned in the producer tests."""
     from agentworks.capabilities.descriptor import descriptor_for
@@ -160,7 +161,7 @@ def test_disabled_platform_node_folds_end_to_end_to_enable_its_unit() -> None:
     registry.add(
         "vm-site",
         "s",
-        VMSiteDecl(name="s", platform=CapabilityBlock.of("lima", **{"vm_host": "me@box"})),
+        VMSiteDecl(name="s", platform=CapabilityBlock.of("lima", placement={"mode": "ssh", "host": "me@box"})),
         Origin.operator_declared(file=Path("sites.yaml"), line=1),
     )
     registry.finalize(enablement_sources=[_source_disabling(("vm-platform", "lima"))])
@@ -315,10 +316,10 @@ def test_fold_does_not_throw_on_malformed_platform_config() -> None:
     ``not_ready`` blocks no model would accept; end-to-end deferral can no
     longer pin it, because validation is unconditional now and every malformed
     block raises somewhere."""
-    # vm_host as an int: lima.not_ready sees it truthy -> ready (no throw, no
-    # construction); validate then rejects the non-string.
-    site = VMSiteDecl(name="bad", platform=CapabilityBlock.of("lima", **{"vm_host": 123}))
-    with pytest.raises(ConfigError, match="vm_host: must be a string") as exc:
+    # host as an int: lima.not_ready sees a non-local tag -> ready (no throw,
+    # no construction); validate then rejects the non-string.
+    site = VMSiteDecl(name="bad", platform=CapabilityBlock.of("lima", placement={"mode": "ssh", "host": 123}))
+    with pytest.raises(ConfigError, match="placement.host: must be a string") as exc:
         _finalized(site)
     # The validate pass re-attaches the resource origin; construction would not.
     assert "sites.yaml" in str(exc.value)
@@ -326,8 +327,8 @@ def test_fold_does_not_throw_on_malformed_platform_config() -> None:
 
 def test_r5_ready_site_with_unknown_field_fails_validation() -> None:
     """R5: readiness is not validity. A ready site (lima is supported
-    everywhere; no vm_host but we make it ready) with an unknown config field
-    still fails the validate pass.
+    everywhere; an ssh placement needs no local limactl) with an unknown
+    config field still fails the validate pass.
 
     The NOT-ready host is not a second test: the typo case below runs its
     whole assertion under both host states, which is where the direction
@@ -335,30 +336,54 @@ def test_r5_ready_site_with_unknown_field_fails_validation() -> None:
     resource was ready meant a not-ready host silently accepted config a
     ready host refused, so what "valid" meant depended on the machine
     reading the document)."""
-    site = VMSiteDecl(name="bad", platform=CapabilityBlock.of("lima", **{"vm_host": "me@box", "bogus": "x"}))
+    site = VMSiteDecl(
+        name="bad",
+        platform=CapabilityBlock.of("lima", placement={"mode": "ssh", "host": "me@box"}, bogus="x"),
+    )
     with pytest.raises(ConfigError, match="bogus: unknown field"):
         _finalized(site)
 
 
-def test_typo_in_vm_host_is_refused_rather_than_changing_readiness(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The defect this ungating fixes, end to end: a REMOTE lima site whose
-    ``vm_host`` key is misspelled.
+def test_typo_in_the_placement_host_is_refused_rather_than_changing_readiness(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The defect this ungating fixed, end to end, now closed a second time
+    at the SHAPE: an ssh-placed lima site whose host key is misspelled.
 
-    ``lima.not_ready`` reads ``config.get("vm_host")`` off UNVALIDATED config,
-    so ``vm_hst`` is invisible to it and the site folds as local, hence
-    not-ready for want of ``limactl``. While the validate pass was
-    readiness-gated, that verdict suppressed the very error naming the typo:
-    the operator was told ``limactl not installed``, a problem they do not
-    have, and their host setting silently did not apply. Worse, the identical
-    document WAS refused on a host that happened to have ``limactl``, so the
-    closed world was only closed on some machines.
+    The original failure had two halves. Ungating the validate pass fixed
+    the first: while it was readiness-gated, the not-ready verdict
+    suppressed the very error naming the typo, so the operator was told
+    ``limactl not installed``, a problem they did not have, and the
+    identical document WAS refused on a host that happened to have
+    ``limactl``. The required ``placement`` union fixes the second: a typo
+    can no longer LOOK like a choice. ``not_ready`` keys on the tag saying
+    ``local``, which an ssh-placed site never says, so the misspelling
+    cannot fold the site to local at all, whatever the host.
 
-    Both hosts must now refuse it, and name the key."""
+    Both hosts must refuse it, and name the key at the address the
+    operator wrote it."""
+    from agentworks.capabilities.vm_platform.lima import LimaPlatform
+
+    typo: dict[str, object] = {"placement": {"mode": "ssh", "hst": "me@box"}}
     for limactl in (None, "/usr/bin/limactl"):
         monkeypatch.setattr("shutil.which", lambda name, found=limactl: found)
-        site = VMSiteDecl(name="gpu", platform=CapabilityBlock.of("lima", **{"vm_hst": "me@gpu-box"}))
-        with pytest.raises(ConfigError, match="vm_hst: unknown field"):
+        # The SHAPE half, asserted on the hook the fold calls: the tag says
+        # ssh, so the site is not local, so no limactl verdict is reachable
+        # for it however this host is equipped. This is the half the
+        # required union added; keying on the tag rather than on a key's
+        # presence is what makes a misspelling unable to change the answer.
+        assert LimaPlatform.not_ready(typo).is_ready
+
+        site = VMSiteDecl(name="gpu", platform=CapabilityBlock.of("lima", **typo))
+        with pytest.raises(ConfigError) as exc:
             _finalized(site)
+        message = str(exc.value)
+        # The VALIDATION half: the typo is named, at its real path, and the
+        # REQUIRED host it displaced is named too. Two precise complaints,
+        # neither of which is the misleading limactl verdict.
+        assert "placement.hst: unknown field" in message
+        assert "placement.host: is required" in message
+        assert "limactl" not in message
 
 
 def test_not_ready_is_total_over_malformed_config() -> None:
@@ -372,7 +397,13 @@ def test_not_ready_is_total_over_malformed_config() -> None:
     pass, which is why ungating that pass leaves this contract untouched."""
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
 
-    for config in ({"bogus": "x"}, {"vm_host": 123}, {"vm_host": {"nested": "junk"}}, {}):
+    for config in (
+        {"bogus": "x"},
+        {"placement": 123},
+        {"placement": {"mode": {"nested": "junk"}}},
+        {"placement": {"mode": "local", "host": []}},
+        {},
+    ):
         assert LimaPlatform.not_ready(config).reason in (None, "limactl not installed")
 
 
@@ -380,7 +411,7 @@ def test_r5_not_ready_site_with_valid_block_stays_not_ready(monkeypatch: pytest.
     """R5, the other direction: a not-ready site with a perfectly valid block
     is still not-ready (a dependency/host verdict, blind to validity)."""
     monkeypatch.setattr("shutil.which", lambda name: None)
-    site = VMSiteDecl(name="local", platform=CapabilityBlock.of("lima", **{}))  # valid (empty) block
+    site = VMSiteDecl(name="local", platform=CapabilityBlock.of("lima", placement={"mode": "local"}))
     registry = _finalized(site)
     assert not registry.graph.is_ready("vm-site", "local")
 

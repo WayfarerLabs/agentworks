@@ -40,6 +40,17 @@ def make_config(tmp_path: Path):
     return _make
 
 
+def _placement_mode(config: object) -> str | None:
+    """The placement tag off an UNVALIDATED lima config, mirroring what
+    the real ``LimaPlatform.not_ready`` reads."""
+    from collections.abc import Mapping
+
+    if not isinstance(config, Mapping):
+        return None
+    placement = config.get("placement")
+    return placement.get("mode") if isinstance(placement, Mapping) else None
+
+
 def _site_doc(name: str, platform: str, **config: str) -> str:
     """One vm-site manifest in the canonical tagged shape."""
     keys = "".join(f"    {key}: {value}\n" for key, value in config.items())
@@ -54,7 +65,7 @@ def _site_doc(name: str, platform: str, **config: str) -> str:
     )
 
 
-_GPU_BOX = _site_doc("gpu-box", "lima", vm_host="me@box")
+_GPU_BOX = _site_doc("gpu-box", "lima", placement="{ mode: ssh, host: me@box }")
 
 
 def _support(
@@ -66,8 +77,9 @@ def _support(
     """Pin the two host-dependent checks to explicit outcomes.
 
     ``wsl2`` pins the platform-level host-support gate; ``lima_local``
-    pins the config-dependent requirement for LOCAL lima sites only (remote
-    sites with a ``vm_host`` stay ready, mirroring the real check).
+    pins the config-dependent requirement for LOCAL lima sites only (ssh
+    sites stay ready, mirroring the real check, which keys on the
+    placement TAG rather than on a host being present).
     """
     from agentworks.resources.graph import Readiness
 
@@ -78,7 +90,9 @@ def _support(
         "not_ready",
         classmethod(
             lambda cls, config: (
-                Readiness.ready() if (config.get("vm_host") or lima_local is None) else Readiness.blocked(lima_local)
+                Readiness.ready()
+                if (_placement_mode(config) != "local" or lima_local is None)
+                else Readiness.blocked(lima_local)
             )
         ),
     )
@@ -156,8 +170,8 @@ def test_supported_host_has_everything_enabled(make_config, monkeypatch: pytest.
 
 
 def test_remote_lima_site_enabled_without_local_limactl(make_config, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The load-bearing split: a remote-Lima site runs limactl on the
-    vm_host over SSH, so only the LOCAL site disables."""
+    """The load-bearing split: an ssh-placed Lima site runs limactl on
+    the placement host over SSH, so only the LOCAL site disables."""
     _support(monkeypatch, wsl2="Windows only", lima_local="limactl not installed")
     registry = build_registry(make_config(resources=_GPU_BOX))
     graph = registry.graph
@@ -342,17 +356,25 @@ def test_lima_not_ready_is_local_only(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """lima the platform is supported everywhere; the limactl
-    requirement binds to LOCAL sites only (remote sites run limactl on
-    the vm_host over SSH). ``not_ready`` reads the config directly,
-    non-constructing."""
+    requirement binds to LOCAL sites only (ssh-placed sites run limactl
+    on the placement host over SSH). ``not_ready`` reads the config
+    directly, non-constructing.
+
+    Keyed on the TAG saying local, never on absence: a config with no
+    readable placement is not treated as local, so a shape error is
+    reported against ``placement`` by the validate pass rather than
+    surfacing here as a missing ``limactl`` the operator does not need."""
     assert LimaPlatform.unsupported_reason() is None
 
     monkeypatch.setattr("shutil.which", lambda name: None)
-    local = LimaPlatform.not_ready({})
+    local = LimaPlatform.not_ready({"placement": {"mode": "local"}})
     assert not local.is_ready
     assert local.reason is not None
     assert "limactl" in local.reason
-    assert LimaPlatform.not_ready({"vm_host": "me@box"}).is_ready
+    assert LimaPlatform.not_ready({"placement": {"mode": "ssh", "host": "me@box"}}).is_ready
+    # Absent or unreadable: NOT local, so no limactl verdict is invented.
+    assert LimaPlatform.not_ready({}).is_ready
+    assert LimaPlatform.not_ready({"placement": "junk"}).is_ready
 
     monkeypatch.setattr("shutil.which", lambda name: "/x/limactl")
-    assert LimaPlatform.not_ready({}).is_ready
+    assert LimaPlatform.not_ready({"placement": {"mode": "local"}}).is_ready

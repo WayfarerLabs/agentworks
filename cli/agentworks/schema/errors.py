@@ -134,9 +134,9 @@ def config_error_from(
     .. code-block:: text
 
         sites.yaml:12: vm-site/lab: 3 problems
-          platform.vm_host: must be a string
+          platform.placement: must be a table
           platform.cpus: is required
-          platform.regions: unknown field; expected one of: cpus, vm_host
+          platform.regions: unknown field; expected one of: cpus, placement
 
     Because this owns the framing, a caller must NOT also wrap the
     result with a location of its own: that would frame it twice. There is
@@ -559,10 +559,15 @@ class _AtTag:
     """The next ``loc`` segment is a discriminated union's arm tag.
 
     Pydantic inserts the selected arm's tag as a path segment, but the
-    operator wrote no such key: for ``platform: {name: lima, vm_host: 8}``
-    the loc is ``('platform', 'lima', 'vm_host')`` and the address the
-    operator can act on is ``platform.vm_host``. Knowing the arms is what
-    lets the tag be dropped only when it really is one.
+    operator wrote no such key: for ``platform: {name: lima, placement: 8}``
+    the loc is ``('platform', 'lima', 'placement')`` and the address the
+    operator can act on is ``platform.placement``. Knowing the arms is
+    what lets the tag be dropped only when it really is one.
+
+    NESTED unions get the same treatment by the same rule, which is what
+    keeps a bad key inside lima's ``placement`` reading as
+    ``platform.placement.host`` rather than growing a ``ssh`` segment in
+    the middle.
     """
 
     arms: tuple[UnionArmType, ...]

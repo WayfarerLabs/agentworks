@@ -308,7 +308,9 @@ def test_doctor_vm_sites_not_ready_and_preflight_rows(
     from agentworks.resources.graph import Readiness
 
     def _lima_readiness(cls: type, config: dict[str, object]) -> Readiness:
-        return Readiness.ready() if config.get("vm_host") else Readiness.blocked("limactl not installed")
+        placement = config.get("placement")
+        mode = placement.get("mode") if isinstance(placement, dict) else None
+        return Readiness.blocked("limactl not installed") if mode == "local" else Readiness.ready()
 
     monkeypatch.setattr(LimaPlatform, "not_ready", classmethod(_lima_readiness))
     monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
@@ -319,7 +321,7 @@ def test_doctor_vm_sites_not_ready_and_preflight_rows(
     registry.add(
         "vm-site",
         "mybox",
-        VMSiteDecl(name="mybox", platform=CapabilityBlock.of("lima", **{"vm_host": "me@box"})),
+        VMSiteDecl(name="mybox", platform=CapabilityBlock.of("lima", placement={"mode": "ssh", "host": "me@box"})),
         Origin.operator_declared(file=_Path("sites.yaml"), line=1),
     )
     registry.finalize()
