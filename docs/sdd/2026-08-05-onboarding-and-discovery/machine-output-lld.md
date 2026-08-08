@@ -110,12 +110,15 @@ malformed live read and therefore creates no issue.
 Secret resolution is an output-neutral boundary operation. The ordered resolver accepts the existing
 ResolutionReporter protocol from its caller rather than constructing an output reporter internally.
 Resolver.resolve, the VM no-gate boundary, the session batch boundary, and its late repair-key
-resolution thread that reporter through. Human rendering passes the existing output reporter and
-therefore preserves its resolution and skipped-backend transcript. JSON passes a quiet reporter to
-the same ordered resolver, active backend chain, interactive policy, preflight, and value cache. It
-does not use the verification-only quiet resolver, which has deliberately different backend wrapping
-and interactivity rules. Thus JSON suppression changes presentation only, never secret resolution
-semantics or whether a successful VM describe or status-enabled session list can prompt.
+resolution thread that reporter through. The singular session path also threads it unchanged:
+\_prepare_vm receives the reporter, passes it to gated_vm_boundary, and that boundary passes it to
+gate_secret_resolver and its Resolver.resolve call. Human rendering passes the existing output
+reporter and therefore preserves its resolution and skipped-backend transcript. JSON passes a quiet
+reporter to the same ordered resolver, active backend chain, interactive policy, preflight, and
+value cache. It does not use the verification-only quiet resolver, which has deliberately different
+backend wrapping and interactivity rules. Thus JSON suppression changes presentation only, never
+secret resolution semantics or whether a successful VM describe, session describe, or status-enabled
+session list can prompt.
 
 ## Data schemas
 
@@ -283,9 +286,12 @@ Implementation must add:
    output.
 7. Secret-boundary parity fixtures. A successful VM describe whose site requires a resolvable secret
    proves JSON stdout is exactly one parseable envelope with no resolver transcript. The equivalent
-   human fixture preserves the current resolved and skipped-backend transcript. The status-enabled
-   session-list fixture exercises the same quiet reporter through the batch boundary and proves it
-   retains the existing status and PID-repair outcome.
+   human fixture preserves the current resolved and skipped-backend transcript. A resolvable-secret
+   session-describe fixture proves that JSON passes the quiet reporter through \_prepare_vm,
+   gated_vm_boundary, and gate_secret_resolver: stdout is exactly one parseable envelope, while the
+   equivalent human invocation preserves its current transcript. The status-enabled session-list
+   fixture exercises the same quiet reporter through the batch boundary and its late repair-key
+   resolution, and proves it retains the existing status and PID-repair outcome.
 8. Reference fixtures with repeated entries and inheritance declarers. They assert the exact graph
    sequence, nullable declared_by fields, and no JSON-side deduplication. Session detail fixtures
    assert a positive live PID and a stopped PID_STOPPED row rendered as null. Harness-integration
@@ -307,9 +313,9 @@ has no new setting and is recorded as unaffected in the Phase 2 handoff.
 2. Wire resource, kinds, secret, and doctor first, reusing existing fact records to establish the
    renderer, null, enum, error, and human-fixture patterns.
 3. Extract read facts for VM, workspace, agent, console, and session. Make the resolver reporter
-   caller-owned before wiring JSON VM describe and status-enabled session list. Preserve existing
-   queries, secret-resolution behavior, and session PID-repair behavior, but make fact construction
-   independently testable.
+   caller-owned before wiring JSON VM describe, session describe, and status-enabled session list.
+   Preserve existing queries, secret-resolution behavior, and session PID-repair behavior, but make
+   fact construction independently testable.
 4. Wire command options, permanent docs, completion expectations, and guide-action consumption, then
    run focused and full gates. This LLD changes no plan checkbox.
 
