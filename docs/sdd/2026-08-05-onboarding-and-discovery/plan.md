@@ -157,24 +157,24 @@ The 2026-08-07 remediation-posture ruling supersedes Phase 1's originally depend
 boundary. PR #428 addressed all wave-2-independent review findings first, then rebased once after
 the declarative-schema service contracts merged to `main`. It has no provisional branch dependency.
 
-- [ ] After wave 2 merges, add `concept-migration` as the exceptional resource-model remediation
+- [x] After wave 2 merges, add `concept-migration` as the exceptional resource-model remediation
       topic, distinct from ordinary upgrading, using authoritative live sample and field-reference
       service APIs rather than copied shapes or rendered CLI output.
-- [ ] Config-free `describable_targets`, `SchemaReference`, and `sample_text` adapters populate kind
+- [x] Config-free `describable_targets`, `SchemaReference`, and `sample_text` adapters populate kind
       and capability-implementation topics from one source, including disabled implementations,
       exact contribution validation, completions, field references, and declarable samples.
-- [ ] Link migration from onboarding and management without duplicating its teaching; cover TOML to
+- [x] Link migration from onboarding and management without duplicating its teaching; cover TOML to
       manifest rewrites, tagged capability configuration, strict validation changes, and the precise
       null-secret discovery and implemented decision path: omitted and explicit-null fields both use
       the default secret; Azure and AWS require removing the enclosing auth block for ambient auth;
       Proxmox has no no-secret mode.
-- [ ] Prove the topic remains available when operator config does not load, names exact live
+- [x] Prove the topic remains available when operator config does not load, names exact live
       remediation surfaces, and verifies results through normal loading and doctor rather than a
       frozen migration oracle.
-- [ ] Every migration read, probe, and mutation crossing a consent boundary is a validated inert
+- [x] Every migration read, probe, and mutation crossing a consent boundary is a validated inert
       action record with exact scope, expected result, verification, and refusal behavior; backups
-      and the old name inventory precede edits.
-- [ ] Review the cross-SDD adapter and migration teaching after the wave 2 rebase, then rerun the
+      and the complete pre-migration identity-and-origin inventory precede edits.
+- [x] Review the cross-SDD adapter and migration teaching after the wave 2 rebase, then rerun the
       full Phase 1 and CI gates before requesting roadmap-lead re-review.
 
 The release-gate adapter is specified in `wave2-guide-adapter-lld.md`. It binds existing schema
