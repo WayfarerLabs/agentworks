@@ -282,3 +282,54 @@ frozen oracle, two runtime dependencies whose justifying comment named a file th
 existed, four completion providers, a settings overlay, and five newly-dead helpers. What made that
 a deletion rather than an excavation was a guard written a day earlier for exactly this, which is
 the case for building deletability into anything shipped as runway.
+
+## 2026-08-08: authentication and placement became explicit on three platforms
+
+Recorded here because it supersedes shapes this effort shipped. The plan, FRD, and HLA are NOT
+edited: they describe what this effort built, accurately, and a completed checkbox is not corrected
+by a later change. In particular the 2.3 inventory still names azure's nested `service_principal`
+model and aws's nested `credentials` model, which is what existed when that step ran.
+
+**What changed.** Azure's `service_principal` block, AWS's `credentials` block, and lima's `vm_host`
+field are replaced by required nested discriminated unions: `auth: {mode: ambient}` or
+`{mode: service-principal, ...}` on azure, `auth: {mode: ambient}` or `{mode: access-key, ...}` on
+aws, and `placement: {mode: local}` or `{mode: ssh, host: ...}` on lima. No default and no omission
+alias, so every existing manifest for those three platforms crosses the break. Proxmox is unchanged
+because it has one valid shape, and wsl2 has no choice to model.
+
+**Why it belongs on THIS lockfile.** All three were the same defect this effort spent itself
+removing, in a shape it did not name: absence selecting a MECHANISM rather than supplying a default
+value. Omitting azure's credential block chose the ambient chain; omitting aws's did the same; and
+lima inferred local versus remote from whether `vm_host` was present. A manifest could not
+distinguish a deliberate choice from a forgotten one, and neither could a reviewer, `doctor`, or the
+graph.
+
+**It closes the readiness self-masking case structurally, not just at the validation layer.** The
+"Validation is unconditional" decision above tells that story at length: a misspelled `vm_host` read
+as an absent one, which made a remote lima site look local, which made it not-ready for want of
+`limactl`, which suppressed the very error that named the typo. This effort fixed the layer that
+SUPPRESSED the error. The placement union removes the shape that made a typo look like a choice, so
+there is no longer an inference to mis-fire. Both fixes are load-bearing and neither replaces the
+other.
+
+**What was promoted, per the SDD-is-not-permanent rule.** The modeling rule that came out of the
+design is in `cli/agentworks/capabilities/README.md` ("Modeling a Config That Has Variants"):
+absence supplies a default value and must not select a mechanism; the discriminator selects a SHAPE
+rather than a concept, and the operational test is whether the required field sets differ; adding an
+arm is the additive extension path, so pre-grouping against a variant that does not exist is
+mechanism without a consumer; and arm names select a mechanism rather than a position.
+
+**Two claims in this effort's code were made false by it and corrected there.** `_shape.py`'s
+`_tags_of` justified its non-string-tag boundary on "every discriminator in this framework is a
+capability or kind NAME", which stopped being true when `mode` arrived; the boundary now stands on
+the reason that survives, which is that a tag is an identifier the operator writes. And `item_arms`
+said all four discriminated unions were top-level capability configs; three now are not, so what
+remains unshipped is the COLLECTION of tagged blocks rather than the nesting.
+
+**One thing this effort's union machinery got right, worth recording as evidence.** The three new
+unions needed NO change to `_shape.py`'s classification, `extract.py`'s arm walk, `base.py`'s marker
+refusal, or `field_tree.py`'s expansion, despite being the first discriminated unions here whose
+arms are not capability configs. The one thing that did break was downstream of them:
+`manifests/describe.py` built its alternatives line as a raw f-string, the only description in that
+renderer skipping `plain_text`, which nothing had noticed because capability arms carry plain
+one-line summaries while a plain union falls back to a docstring.
