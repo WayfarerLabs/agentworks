@@ -111,7 +111,7 @@ def test_graph_node_producers_expose_dependencies_not_referenced_resources() -> 
     """
     from agentworks.vms.sites import VMSiteDecl
 
-    site = VMSiteDecl(name="s", platform=CapabilityBlock(name="lima"))
+    site = VMSiteDecl(name="s", platform=CapabilityBlock.of("lima", placement={"mode": "local"}))
     assert hasattr(site, "dependencies")
     assert not hasattr(site, "referenced_resources")
     assert not hasattr(site, "required_resources")

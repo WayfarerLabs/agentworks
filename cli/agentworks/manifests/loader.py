@@ -17,6 +17,7 @@ import yaml
 from agentworks.errors import ConfigError
 from agentworks.manifests.decode import decode_document
 from agentworks.manifests.envelope import validate_envelope
+from agentworks.schema import located, location_text
 from agentworks.source_location import SourceLocation
 
 if TYPE_CHECKING:
@@ -174,12 +175,16 @@ def _iter_documents(path: Path) -> Iterator[tuple[object, SourceLocation]]:
     mark; values are constructed from the composed node with the safe
     constructor so per-document line numbers survive.
     """
+    # A file that cannot be read or parsed has no document, so there is
+    # no declaration line to point at: ``line=0`` is exactly that case,
+    # and the shared framing renders the file alone.
+    whole_file = SourceLocation(file=path, line=0)
     try:
         text = path.read_text(encoding="utf-8")
     except UnicodeDecodeError as exc:
-        raise ConfigError(f"{path}: not valid UTF-8: {exc}") from exc
+        raise ConfigError(located(whole_file, f"not valid UTF-8: {exc}")) from exc
     except OSError as exc:
-        raise ConfigError(f"{path}: cannot read manifest: {exc}") from exc
+        raise ConfigError(located(whole_file, f"cannot read manifest: {exc}")) from exc
     try:
         for node in yaml.compose_all(text, Loader=_StrictLoader):
             if node is None:
@@ -196,8 +201,8 @@ def _iter_documents(path: Path) -> Iterator[tuple[object, SourceLocation]]:
             yield value, location
     except yaml.YAMLError as exc:
         mark = getattr(exc, "problem_mark", None)
-        line = f":{mark.line + 1}" if mark is not None else ""
-        raise ConfigError(f"{path}{line}: invalid YAML: {exc}") from exc
+        at = whole_file if mark is None else SourceLocation(file=path, line=mark.line + 1)
+        raise ConfigError(located(at, f"invalid YAML: {exc}")) from exc
 
 
 @dataclass(frozen=True)
@@ -252,10 +257,15 @@ def load_manifests(resources_dir: Path) -> ManifestSet:
             doc = validate_envelope(value, location)
             key = (doc.kind, doc.name)
             if key in seen:
-                first = seen[key]
+                # Two locations, one message: the frame points at the
+                # SECOND declaration (the one to delete), and the first
+                # is named inline. Both render through the same helper,
+                # so a first declaration with nowhere to point drops the
+                # clause instead of offering an unopenable path.
+                first = location_text(seen[key])
+                also = f" (also declared at {first})" if first is not None else ""
                 raise ConfigError(
-                    f"{location.file}:{location.line}: duplicate {doc.kind} "
-                    f'"{doc.name}" (also declared at {first.file}:{first.line})',
+                    located(location, f'duplicate {doc.kind} "{doc.name}"{also}'),
                 )
             seen[key] = location
             resource = decode_document(doc, issues)

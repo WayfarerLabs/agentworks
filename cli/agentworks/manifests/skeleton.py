@@ -59,9 +59,9 @@ def _document_lines(reference: SchemaReference) -> Iterator[str]:
     yield f"#apiVersion: {API_VERSION}"
     yield f"#kind: {reference.kind}"
     yield "#metadata:"
-    yield from _block(reference.metadata, depth=1, commented=False)
+    yield from _block(reference.metadata, target=reference.target, depth=1, commented=False)
     yield "#spec:"
-    yield from _block(reference.spec, depth=1, commented=False)
+    yield from _block(reference.spec, target=reference.target, depth=1, commented=False)
 
 
 def _prose_lines(reference: SchemaReference) -> Iterator[str]:
@@ -84,18 +84,22 @@ def _prose_lines(reference: SchemaReference) -> Iterator[str]:
     yield "##"
 
 
-def _block(entries: tuple[FieldEntry, ...], *, depth: int, commented: bool) -> Iterator[str]:
+def _block(entries: tuple[FieldEntry, ...], *, target: str, depth: int, commented: bool) -> Iterator[str]:
     for entry in entries:
-        yield from _field_lines(entry, depth=depth, commented=commented)
+        yield from _field_lines(entry, target=target, depth=depth, commented=commented)
 
 
-def _field_lines(entry: FieldEntry, *, depth: int, commented: bool) -> Iterator[str]:
+def _field_lines(entry: FieldEntry, *, target: str, depth: int, commented: bool) -> Iterator[str]:
     """One field: its description, its alternatives if it has any, and the
     line (or block) that writes it.
 
     ``commented`` is inherited: everything under an optional field is a
     suggestion too, because a key written inside a block the document does
     not open is not a key at all.
+
+    ``target`` is the address of the reference being rendered, threaded
+    down so a union can point at the surface that shows the arms a
+    document cannot: see :func:`_alternatives_of`.
     """
     commented = commented or not entry.writable
     if entry.name in (SEQUENCE_ELEMENT, MAPPING_KEY):
@@ -110,9 +114,9 @@ def _field_lines(entry: FieldEntry, *, depth: int, commented: bool) -> Iterator[
     # Outside the branch: an ELEMENT may be a tagged union too (a list of
     # blocks each naming which kind of block it is), and an operator
     # writing one needs the same list of what else may go there.
-    yield from _comment(_alternatives_of(entry), depth=depth)
+    yield from _comment(_alternatives_of(entry, target), depth=depth)
     yield from _value_lines(entry, depth=depth, commented=commented)
-    yield from _block(entry.children, depth=depth + 1, commented=commented)
+    yield from _block(entry.contents, target=target, depth=depth + 1, commented=commented)
 
 
 def _value_lines(entry: FieldEntry, *, depth: int, commented: bool) -> Iterator[str]:
@@ -120,7 +124,7 @@ def _value_lines(entry: FieldEntry, *, depth: int, commented: bool) -> Iterator[
     the value itself when it fits on one line."""
     opener = _opener(entry)
     value = entry.sample_value
-    if value is UNSET or entry.children:
+    if value is UNSET or entry.contents:
         yield _line(opener, depth=depth, commented=commented)
         return
     yield _line(f"{opener} {render_value(value)}", depth=depth, commented=commented)
@@ -149,7 +153,7 @@ def _annotation_of(entry: FieldEntry) -> list[str]:
     facts = [entry.type_label, "required" if entry.writable else "optional"]
     if entry.doc.default_template is not None:
         facts.append(f"defaults to the resource named `{_template(entry.doc.default_template)}`")
-    elif not entry.writable and not entry.children and worth_showing(entry.doc.default):
+    elif not entry.writable and not entry.contents and worth_showing(entry.doc.default):
         facts.append(f"default: {render_value(entry.doc.default)}")
     if entry.doc.ref is not None:
         facts.append(f"names a {entry.doc.ref.kind}")
@@ -158,9 +162,18 @@ def _annotation_of(entry: FieldEntry) -> list[str]:
     return lines
 
 
-def _alternatives_of(entry: FieldEntry) -> list[str]:
+def _alternatives_of(entry: FieldEntry, target: str) -> list[str]:
     """The line naming the arms this field could hold, and where to read
-    about the one that is not rendered."""
+    about the ones this document cannot show.
+
+    A sample writes ONE arm, so every other arm is a name the operator
+    still has to look up, and the pointer is what keeps the list from
+    being a list of words. Which pointer depends on the arms: a
+    capability's arm has an address of its own, and an arm of any other
+    union has none and never will, so the address that answers it is this
+    reference's own, where ``describe-kind`` expands every such arm in
+    place.
+    """
     if not entry.alternatives:
         return []
     names = ", ".join(alt.name for alt in entry.alternatives)
@@ -170,9 +183,12 @@ def _alternatives_of(entry: FieldEntry) -> list[str]:
     # at what may go here, which is the half that is still true.
     shown = "" if entry.rendered is None else f" Shown here: {entry.rendered}."
     lines = [f"One of: {names}.{shown}"]
-    other = next((alt for alt in entry.alternatives if alt.name != entry.rendered and alt.target), None)
-    if other is not None:
-        lines.append(f"`agw resource describe-kind {other.target}` prints another one's fields.")
+    unshown = [alt for alt in entry.alternatives if alt.name != entry.rendered and not alt.recurring]
+    addressed = next((alt for alt in unshown if alt.target), None)
+    if addressed is not None:
+        lines.append(f"`agw resource describe-kind {addressed.target}` prints another one's fields.")
+    elif unshown:
+        lines.append(f"`agw resource describe-kind {target}` prints every arm's fields.")
     return lines
 
 

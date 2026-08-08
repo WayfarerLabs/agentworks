@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from agentworks.declared_resource import METADATA_FIELDS
 from agentworks.errors import ConfigError
 from agentworks.resources import KIND_REGISTRY
+from agentworks.schema import located
 
 if TYPE_CHECKING:
     from agentworks.source_location import SourceLocation
@@ -42,7 +43,15 @@ _NO_SELECTOR_KINDS = {"named-console-template"}
 
 @dataclass(frozen=True)
 class Document:
-    """One validated envelope, ready for spec decode."""
+    """One validated envelope, ready for spec decode.
+
+    ``location`` is carried raw, not pre-rendered: every message about
+    this document frames through ``schema.located``, which owns the
+    home-relative path and the ``SourceLocation`` sentinels. A
+    convenience property returning ``"file:line"`` would hand callers a
+    string they append ``": "`` to, which is exactly the frame that
+    cannot express "this location is not navigable".
+    """
 
     kind: str
     name: str
@@ -57,10 +66,6 @@ class Document:
     spec: dict[str, object]
     location: SourceLocation
 
-    @property
-    def where(self) -> str:
-        return f"{self.location.file}:{self.location.line}"
-
 
 def only_default_name(kind: str) -> bool:
     """Whether ``kind`` accepts only ``metadata.name: default``.
@@ -74,7 +79,7 @@ def only_default_name(kind: str) -> bool:
 
 
 def _err(location: SourceLocation, message: str, *, hint: str | None = None) -> ConfigError:
-    return ConfigError(f"{location.file}:{location.line}: {message}", hint=hint)
+    return ConfigError(located(location, message), hint=hint)
 
 
 def validate_envelope(raw: object, location: SourceLocation) -> Document:

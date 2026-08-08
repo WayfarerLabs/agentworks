@@ -426,7 +426,12 @@ def test_a_marked_list_carries_the_element_marker_and_no_default_identity() -> N
 
 
 def test_the_annotation_has_its_markers_stripped() -> None:
-    assert docs(GithubLike)[("token",)].annotation is str
+    """The marker itself never reaches the annotation. Its EFFECT on what
+    an operator may write does: an owner-templated field reads an explicit
+    ``null`` as the omission it resolves, so the annotation says ``null``
+    is accepted, exactly as the emitted schema does. A marked LIST cannot
+    carry a template, so nothing is added there."""
+    assert docs(GithubLike)[("token",)].annotation == (str | None)
     assert docs(TemplateLike)[("inherits",)].annotation == list[str]
     assert docs(TemplateLike)[("image",)].annotation == (str | None)
 

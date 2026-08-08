@@ -27,6 +27,7 @@ from agentworks.errors import ValidationError
 from agentworks.manifests.reference import kind_reference
 from agentworks.manifests.skeleton import skeleton_text
 from agentworks.manifests.spec_model import declarable_kinds
+from agentworks.path_rendering import format_host_path
 from agentworks.resources import KIND_REGISTRY
 
 _SUFFIXES = {".yaml", ".yml"}
@@ -267,7 +268,7 @@ def _validated_target(resources_dir: Path, filename: str) -> Path:
     if rel.is_absolute() or ".." in rel.parts:
         raise ValidationError(
             f"--write takes a path relative to the resources directory; got {filename!r}",
-            hint=f"Files land under {resources_dir}.",
+            hint=f"Files land under {format_host_path(resources_dir)}.",
         )
     if rel.suffix not in _SUFFIXES:
         raise ValidationError(

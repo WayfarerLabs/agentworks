@@ -274,7 +274,12 @@ def test_doctor_vm_sites_group(db: Database, monkeypatch: pytest.MonkeyPatch, tm
 
     by_name = {c.name: c for c in group.checks}
     assert by_name["lima-local"].status is doctor.Status.OK
+    # The row names the platform AND the resolved mode, because the mode
+    # can be implicit now (the unions carry declared defaults): this row
+    # is where a reviewer sees the choice without opening the manifest.
+    assert by_name["lima-local"].message == "platform lima (placement: local)"
     assert by_name["wsl2"].status is doctor.Status.OK
+    assert by_name["wsl2"].message == "platform wsl2"
     stranded = by_name["VM 'lost'"]
     assert stranded.status is doctor.Status.FAIL
     assert "gone-box" in (stranded.message or "")
@@ -308,7 +313,9 @@ def test_doctor_vm_sites_not_ready_and_preflight_rows(
     from agentworks.resources.graph import Readiness
 
     def _lima_readiness(cls: type, config: dict[str, object]) -> Readiness:
-        return Readiness.ready() if config.get("vm_host") else Readiness.blocked("limactl not installed")
+        placement = config.get("placement")
+        mode = placement.get("mode") if isinstance(placement, dict) else None
+        return Readiness.blocked("limactl not installed") if mode == "local" else Readiness.ready()
 
     monkeypatch.setattr(LimaPlatform, "not_ready", classmethod(_lima_readiness))
     monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
@@ -319,7 +326,7 @@ def test_doctor_vm_sites_not_ready_and_preflight_rows(
     registry.add(
         "vm-site",
         "mybox",
-        VMSiteDecl(name="mybox", platform=CapabilityBlock.of("lima", **{"vm_host": "me@box"})),
+        VMSiteDecl(name="mybox", platform=CapabilityBlock.of("lima", placement={"mode": "ssh", "host": "me@box"})),
         Origin.operator_declared(file=_Path("sites.yaml"), line=1),
     )
     registry.finalize()

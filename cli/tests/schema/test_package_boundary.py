@@ -26,6 +26,7 @@ _PACKAGE = Path(__file__).resolve().parents[2] / "agentworks" / "schema"
 #: imports nothing of ours, so none can start a cycle back here.
 _PERMITTED = (
     "agentworks.errors",
+    "agentworks.path_rendering",
     "agentworks.source_location",
     "agentworks.schema",
     "agentworks.traversal",

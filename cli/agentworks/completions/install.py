@@ -10,6 +10,8 @@ from pathlib import Path
 
 import typer
 
+from agentworks.path_rendering import format_host_path
+
 # The exact shape the installer appends to $PROFILE: a leading dot-source
 # operator, a double-quoted absolute path, ending in ``agentworks.ps1``.
 # Matched at uninstall time to strip only what we wrote -- a substring
@@ -53,7 +55,7 @@ def _install_bash(script: str) -> None:
     target_dir.mkdir(parents=True, exist_ok=True)
     target = target_dir / "agentworks"
     target.write_text(script)
-    typer.echo(f"Installed to {target}")
+    typer.echo(f"Installed to {format_host_path(target)}")
 
     # bash-completion lazy-loads completion files keyed by command name, so
     # the `complete -F _agentworks agw` line inside the agentworks file isn't
@@ -61,7 +63,7 @@ def _install_bash(script: str) -> None:
     # `agw`). Drop a symlink so either command triggers the same script.
     alias_link = target_dir / "agw"
     _link_alias(alias_link, "agentworks")
-    typer.echo(f"Linked    {alias_link} -> agentworks")
+    typer.echo(f"Linked    {format_host_path(alias_link)} -> agentworks")
 
     # Check if bash-completion is likely available
     bashrc = Path.home() / ".bashrc"
@@ -88,7 +90,7 @@ def _install_zsh(script: str) -> None:
     target_dir.mkdir(parents=True, exist_ok=True)
     target = target_dir / "_agentworks"
     target.write_text(script)
-    typer.echo(f"Installed to {target}")
+    typer.echo(f"Installed to {format_host_path(target)}")
 
     # zsh's compinit autoloads completion files keyed by command name: typing
     # `agw<TAB>` causes zsh to look for `_agw` in fpath, not `_agentworks`.
@@ -98,7 +100,7 @@ def _install_zsh(script: str) -> None:
     # the same script.
     alias_link = target_dir / "_agw"
     _link_alias(alias_link, "_agentworks")
-    typer.echo(f"Linked    {alias_link} -> _agentworks")
+    typer.echo(f"Linked    {format_host_path(alias_link)} -> _agentworks")
 
     # Check if ~/.zfunc needs fpath setup (not needed for Oh My Zsh)
     if target_dir.name == ".zfunc":
@@ -122,7 +124,7 @@ def _install_powershell(script: str) -> None:
     target_dir.mkdir(parents=True, exist_ok=True)
     target = target_dir / "agentworks.ps1"
     target.write_text(script)
-    typer.echo(f"Installed to {target}")
+    typer.echo(f"Installed to {format_host_path(target)}")
 
     # Ensure $PROFILE sources the completion script
     if profile_path.exists():
@@ -133,13 +135,17 @@ def _install_powershell(script: str) -> None:
     else:
         content = ""
 
+    # Absolute, deliberately, and NOT via `format_host_path`: this line is
+    # appended to the operator's $PROFILE for PowerShell to execute, and
+    # PowerShell does not expand `~` inside the double quotes. Every other
+    # path in this module is prose an operator reads and is home-relative.
     source_line = f'. "{target}"'
     profile_path.parent.mkdir(parents=True, exist_ok=True)
     with profile_path.open("a") as f:
         if content and not content.endswith("\n"):
             f.write("\n")
         f.write(f"{source_line}\n")
-    typer.echo(f"Added to $PROFILE: {profile_path}")
+    typer.echo(f"Added to $PROFILE: {format_host_path(profile_path)}")
 
 
 def uninstall_completions(shell: str) -> None:
@@ -162,9 +168,9 @@ def _remove_file(path: Path) -> bool:
     except FileNotFoundError:
         return False
     except OSError as e:
-        typer.echo(f"Warning: could not remove {path}: {e}", err=True)
+        typer.echo(f"Warning: could not remove {format_host_path(path)}: {e}", err=True)
         return False
-    typer.echo(f"Removed {path}")
+    typer.echo(f"Removed {format_host_path(path)}")
     return True
 
 
@@ -222,7 +228,7 @@ def _uninstall_powershell() -> None:
         kept = [ln for ln in lines if not _PS_PROFILE_SOURCE_LINE.match(ln.rstrip("\r\n"))]
         if len(kept) != len(lines):
             profile_path.write_text("".join(kept))
-            typer.echo(f"Removed source line from $PROFILE: {profile_path}")
+            typer.echo(f"Removed source line from $PROFILE: {format_host_path(profile_path)}")
             removed = True
 
     if not removed:

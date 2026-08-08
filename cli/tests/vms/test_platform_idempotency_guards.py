@@ -23,7 +23,7 @@ def _vm() -> object:
 def test_lima_start_skips_when_already_running(monkeypatch: pytest.MonkeyPatch, captured_output: object) -> None:
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
 
-    platform = LimaPlatform("lima", {})
+    platform = LimaPlatform("lima", {"placement": {"mode": "local"}})
     monkeypatch.setattr(LimaPlatform, "status", lambda self, vm, ctx: VMStatus.RUNNING)
     monkeypatch.setattr(
         LimaPlatform,
@@ -36,7 +36,7 @@ def test_lima_start_skips_when_already_running(monkeypatch: pytest.MonkeyPatch, 
 def test_lima_stop_skips_when_already_stopped(monkeypatch: pytest.MonkeyPatch, captured_output: object) -> None:
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
 
-    platform = LimaPlatform("lima", {})
+    platform = LimaPlatform("lima", {"placement": {"mode": "local"}})
     monkeypatch.setattr(LimaPlatform, "status", lambda self, vm, ctx: VMStatus.STOPPED)
     monkeypatch.setattr(
         LimaPlatform,
@@ -49,7 +49,7 @@ def test_lima_stop_skips_when_already_stopped(monkeypatch: pytest.MonkeyPatch, c
 def test_lima_start_proceeds_when_stopped(monkeypatch: pytest.MonkeyPatch, captured_output: object) -> None:
     from agentworks.capabilities.vm_platform.lima import LimaPlatform
 
-    platform = LimaPlatform("lima", {})
+    platform = LimaPlatform("lima", {"placement": {"mode": "local"}})
     monkeypatch.setattr(LimaPlatform, "status", lambda self, vm, ctx: VMStatus.STOPPED)
     ran: list[str] = []
     monkeypatch.setattr(LimaPlatform, "_run_lima", lambda self, cmd, **k: ran.append(cmd) or "")

@@ -308,6 +308,7 @@ def test_azure_rbac_delete_failure_keeps_the_row_end_to_end(
                         "subscription_id": "sub-A",
                         "resource_group": "rg1",
                         "region": "eastus",
+                        "auth": {"mode": "ambient"},
                     }
                 },
             )

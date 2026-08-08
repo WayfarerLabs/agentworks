@@ -105,7 +105,7 @@ def test_failure_mid_create_cleans_up_and_reraises(
     )
 
     with pytest.raises(SSHError, match="provision exploded"):
-        LimaPlatform("lima", {}).create(_request(), RunContext())
+        LimaPlatform("lima", {"placement": {"mode": "local"}}).create(_request(), RunContext())
 
     assert _deletes(ran) == ["limactl delete --force myvm"]
     assert not any("Interrupted" in w for w in captured_output.warnings)
@@ -127,7 +127,7 @@ def test_interrupt_during_start_cleans_up_and_reraises_the_original(
     )
 
     with pytest.raises(KeyboardInterrupt) as exc:
-        LimaPlatform("lima", {}).create(_request(), RunContext())
+        LimaPlatform("lima", {"placement": {"mode": "local"}}).create(_request(), RunContext())
 
     assert exc.value is interrupt
     assert _deletes(ran) == ["limactl delete --force myvm"]
@@ -143,7 +143,7 @@ def test_interrupt_during_post_start_steps_cleans_up_too(
     ran = _wire(monkeypatch, errors={"tailscale ip": interrupt})
 
     with pytest.raises(KeyboardInterrupt) as exc:
-        LimaPlatform("lima", {}).create(_request(), RunContext())
+        LimaPlatform("lima", {"placement": {"mode": "local"}}).create(_request(), RunContext())
 
     assert exc.value is interrupt
     assert _deletes(ran) == ["limactl delete --force myvm"]
@@ -164,7 +164,7 @@ def test_second_interrupt_abandons_cleanup_loudly(
     )
 
     with pytest.raises(KeyboardInterrupt) as exc:
-        LimaPlatform("lima", {}).create(_request(), RunContext())
+        LimaPlatform("lima", {"placement": {"mode": "local"}}).create(_request(), RunContext())
 
     assert exc.value is interrupt
     assert len(_deletes(ran)) == 1
@@ -215,7 +215,7 @@ def test_remote_abandon_warning_names_the_vm_host(
     )
 
     with pytest.raises(KeyboardInterrupt) as exc:
-        LimaPlatform("lima", {"vm_host": "user@host"}).create(_request(), RunContext())
+        LimaPlatform("lima", {"placement": {"mode": "ssh", "host": "user@host"}}).create(_request(), RunContext())
 
     assert exc.value is interrupt
     (abandoned,) = [w for w in captured_output.warnings if "Cleanup abandoned" in w]
@@ -281,7 +281,7 @@ def test_remote_interrupt_kills_the_detached_limactl_before_deleting(
     monkeypatch.setattr(LimaPlatform, "_run_lima", _fake_run_lima)
 
     with pytest.raises(KeyboardInterrupt) as exc:
-        LimaPlatform("lima", {"vm_host": "user@host"}).create(_request(), RunContext())
+        LimaPlatform("lima", {"placement": {"mode": "ssh", "host": "user@host"}}).create(_request(), RunContext())
 
     assert exc.value is interrupt
     # The kill goes through run_detached's PID-file mechanism, and it
@@ -311,7 +311,7 @@ def test_cleanup_failure_warns_and_does_not_mask_the_original(
     )
 
     with pytest.raises(SSHError, match="original failure"):
-        LimaPlatform("lima", {}).create(_request(), RunContext())
+        LimaPlatform("lima", {"placement": {"mode": "local"}}).create(_request(), RunContext())
 
     assert len(_deletes(ran)) == 1
     warned = "\n".join(captured_output.warnings)
@@ -329,7 +329,7 @@ def test_pre_mutation_failure_makes_no_cleanup_calls(
     monkeypatch.setattr(LimaPlatform, "_instance_exists", lambda self, name: True)
 
     with pytest.raises(StateError, match="already exists"):
-        LimaPlatform("lima", {}).create(_request(), RunContext())
+        LimaPlatform("lima", {"placement": {"mode": "local"}}).create(_request(), RunContext())
 
     assert _deletes(ran) == []
     # The cleanup announcement goes to the detail stream; its absence
@@ -345,6 +345,6 @@ def test_delete_op_issues_the_shared_teardown_command(
     ran = _wire(monkeypatch)
     vm = SimpleNamespace(name="myvm", platform_metadata={"instance_name": "myvm"})
 
-    LimaPlatform("lima", {}).delete(vm, RunContext())  # type: ignore[arg-type]
+    LimaPlatform("lima", {"placement": {"mode": "local"}}).delete(vm, RunContext())  # type: ignore[arg-type]
 
     assert ran == ["limactl delete --force myvm"]

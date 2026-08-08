@@ -187,6 +187,7 @@ class TestCreateProvisioningOutput:
             "subscription_id": "sub",
             "resource_group": "rg",
             "region": "eastus",
+            "auth": {"mode": "ambient"},
         }
         if vm_sizes is not None:
             config["vm_sizes"] = vm_sizes
@@ -297,6 +298,7 @@ class TestCreateOSDiskClamp:
             "subscription_id": "sub",
             "resource_group": "rg",
             "region": "eastus",
+            "auth": {"mode": "ambient"},
         }
         AzureVMPlatform("azure", config).create(request, RunContext())
         return vms
@@ -343,9 +345,10 @@ class TestImageOSDiskFloorConstant:
         assert IMAGE_OS_DISK_FLOOR_GIB == 30
 
 
-#: The three keys every azure-vm site needs, so the tests below can talk
-#: about the catalog alone.
-_BASE = {"subscription_id": "sub", "resource_group": "rg", "region": "eastus"}
+#: The keys every azure-vm site needs, so the tests below can talk about
+#: the catalog alone. ``auth`` is among them: it is required, and the
+#: ambient arm is the one that needs no credentials.
+_BASE = {"subscription_id": "sub", "resource_group": "rg", "region": "eastus", "auth": {"mode": "ambient"}}
 
 
 def _config(blob: dict[str, object]) -> AzureVMConfig:

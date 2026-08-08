@@ -16,7 +16,7 @@ warning walks the ``SecretRef`` edges the model declares
 happens to name a secret.
 
 A capability is named by ONE tagged table on its host's naming field
-(``spec.platform: {name: lima, vm_host: ...}``), which the host row carries
+(``spec.platform: {name: lima, placement: {...}}``), which the host row carries
 as a ``CapabilityBlock``. The CONTENT of a capability-owned blob is NOT
 validated here: its shape check is the finalize ``validate_config`` pass
 (R3), against the capability's own declared model.
@@ -37,7 +37,7 @@ from pydantic import ValidationError as PydanticValidationError
 from agentworks.declared_resource import METADATA_FIELDS, DeclaredResource
 from agentworks.errors import ConfigError, StateError
 from agentworks.resources import KIND_REGISTRY
-from agentworks.schema import RefOwner, config_error_from, extract_references, validation_context
+from agentworks.schema import RefOwner, config_error_from, extract_references, located, validation_context
 from agentworks.schema._shape import Collection, shape_of
 
 if TYPE_CHECKING:
@@ -47,6 +47,7 @@ if TYPE_CHECKING:
     from agentworks.env import EnvEntry
     from agentworks.manifests.envelope import Document
     from agentworks.schema.reference import ConfigReference
+    from agentworks.source_location import SourceLocation
 
 #: The fields a row carries as METADATA rather than as spec surface. They
 #: are real fields of the model, so a document writing one inside ``spec``
@@ -174,7 +175,7 @@ def _tagged_rewrite(field: str, name: str, keys: Iterable[str]) -> str:
     return f"{field}: {{{inner}}}"
 
 
-def _reject_legacy_shape(surface: HostSurface, spec: Mapping[str, object], where: str) -> None:
+def _reject_legacy_shape(surface: HostSurface, spec: Mapping[str, object], location: SourceLocation) -> None:
     """The 0.14 sibling pair, refused BY NAME with its rewrite.
 
     Under the kind spec models this document is two problems the model
@@ -223,12 +224,15 @@ def _reject_legacy_shape(surface: HostSurface, spec: Mapping[str, object], where
     if not isinstance(value, str):
         if config_field in spec:
             raise ConfigError(
-                f"{where}: spec.{config_field} is not a supported YAML field; "
-                f"fold its keys into the spec.{field} tagged table"
+                located(
+                    location,
+                    f"spec.{config_field} is not a supported YAML field; "
+                    f"fold its keys into the spec.{field} tagged table",
+                )
             )
         return
     name = value or "<capability>"
-    head = f"{where}: spec.{field} names the capability as a string, which is no longer supported"
+    head = located(location, f"spec.{field} names the capability as a string, which is no longer supported")
     if config_field not in spec:
         raise ConfigError(
             f"{head}; write one tagged table instead: {_tagged_rewrite(field, name, ())}", hint=SIBLING_SHAPE_HINT
@@ -267,7 +271,7 @@ def decode_document(doc: Document, issues: list[str]) -> Any:
     _reject_spec_metadata(doc, spec)
     descriptor = _hosting_descriptors().get(doc.kind)
     if descriptor is not None and descriptor.manifest_section is not None:
-        _reject_legacy_shape(descriptor.manifest_section, spec, doc.where)
+        _reject_legacy_shape(descriptor.manifest_section, spec, doc.location)
     model = _model_for(doc.kind)
 
     owner = RefOwner(kind=doc.kind, name=doc.name)
@@ -284,7 +288,7 @@ def decode_document(doc: Document, issues: list[str]) -> Any:
             location=doc.location,
             hint=_sample_hint(doc.kind),
         ) from exc
-    issues.extend(f"{doc.where}: {issue}" for issue in advisory_issues(resource, doc))
+    issues.extend(located(doc.location, issue) for issue in advisory_issues(resource, doc))
     return resource
 
 
@@ -336,11 +340,11 @@ def _reject_spec_metadata(doc: Document, spec: Mapping[str, object]) -> None:
     framework = sorted((_ROW_METADATA_FIELDS - METADATA_FIELDS) & set(spec))
     if misplaced:
         raise ConfigError(
-            f"{doc.where}: {', '.join(misplaced)} belong(s) in metadata, not in spec",
+            located(doc.location, f"{', '.join(misplaced)} belong(s) in metadata, not in spec"),
         )
     if framework:
         raise ConfigError(
-            f"{doc.where}: {', '.join(framework)} is set by the framework and cannot be declared",
+            located(doc.location, f"{', '.join(framework)} is set by the framework and cannot be declared"),
         )
 
 
@@ -376,7 +380,7 @@ def _check_declared_name(doc: Document, owner: RefOwner, model: type[DeclaredRes
     try:
         validate_name(doc.name, max_length=model.NAME_MAX_LENGTH)
     except ValidationError as exc:
-        raise ConfigError(f"{doc.where}: {owner.display}: {exc}") from None
+        raise ConfigError(located(doc.location, f"{owner.display}: {exc}")) from None
 
 
 def _check_declared_description(doc: Document, owner: RefOwner, model: type[DeclaredResource]) -> None:
@@ -397,7 +401,7 @@ def _check_declared_description(doc: Document, owner: RefOwner, model: type[Decl
     field = model.model_fields.get("description")
     if field is None or not field.is_required() or doc.description != "":
         return
-    raise ConfigError(f"{doc.where}: {owner.display}.description: must not be empty")
+    raise ConfigError(located(doc.location, f"{owner.display}.description: must not be empty"))
 
 
 def advisory_issues(resource: DeclaredResource, doc: Document) -> list[str]:

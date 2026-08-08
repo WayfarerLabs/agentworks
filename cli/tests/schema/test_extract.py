@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Annotated, Literal
 
 import pytest
-from pydantic import Discriminator
+from pydantic import Discriminator, Field
 
 from agentworks.schema import AgwModel, AgwRootModel, RefOwner, SecretRef, extract_references
 from agentworks.schema.reference import ConfigReference, RefRelationship
@@ -20,6 +20,7 @@ from ._fixture_models import (
     AwsLike,
     AzureLike,
     CatalogLike,
+    DefaultedCollectionSite,
     DiamondLike,
     EveryArmMarkedCollectionSite,
     EveryArmMarkedSite,
@@ -84,6 +85,72 @@ def test_a_marker_with_no_template_contributes_nothing_when_omitted() -> None:
         secret: Annotated[str, SecretRef(usage="a secret")] | None = None
 
     assert extract_references(NoDefault, {}, OWNER) == ()
+
+
+# --- declared defaults ------------------------------------------------
+#
+# An absent field with a declared default is read as if the operator had
+# written the default's value, because that is what validation does with
+# it. The block and collection shapes are pinned by the completeness
+# suite against the validated object; what belongs here is the scalar
+# precedence, which that oracle's subset assertion cannot see, and the
+# two default spellings that are NOT static.
+
+
+def test_an_absent_marked_scalar_reads_as_its_declared_default() -> None:
+    class Defaulted(AgwModel):
+        secret: Annotated[str, SecretRef(usage="a secret")] = "declared-default"
+
+    assert names(extract_references(Defaulted, {}, OWNER)) == ["declared-default"]
+    assert names(extract_references(Defaulted, {"secret": "written"}, OWNER)) == ["written"]
+
+
+def test_the_owner_template_outranks_a_declared_default() -> None:
+    # The filler answers an absent templated field BEFORE pydantic could
+    # reach for the declared default, so the validated config carries the
+    # rendered template and the edge must name the same secret.
+    class Both(AgwModel):
+        secret: Annotated[str, SecretRef(usage="a secret", default_template="tpl-{owner_name}")] = "declared-default"
+
+    assert names(extract_references(Both, {}, OWNER)) == ["tpl-prod"]
+
+
+def test_a_written_null_does_not_fall_back_to_the_declared_default() -> None:
+    # Pydantic reserves a default for the ABSENT key: an explicit null
+    # validates as null (or not at all), never as the default, so an edge
+    # for the default here would name a secret the config does not carry.
+    class Defaulted(AgwModel):
+        secret: Annotated[str, SecretRef(usage="a secret")] | None = "declared-default"
+
+    assert extract_references(Defaulted, {"secret": None}, OWNER) == ()
+
+
+def test_a_validated_data_factory_is_not_a_static_default() -> None:
+    # A factory taking validated data computes the default FROM the
+    # neighboring fields, so its value is not a property of the class and
+    # its edges deliberately cannot be pre-computed; the honest answer is
+    # no edge, stated in ``_absent_defaults``'s docstring rather than
+    # papered over.
+    class Dynamic(AgwModel):
+        base: str = "b"
+        secret: Annotated[str, SecretRef(usage="a secret")] = Field(
+            default_factory=lambda data: f"{data['base']}-secret"
+        )
+
+    assert extract_references(Dynamic, {"base": "x"}, OWNER) == ()
+
+
+def test_a_raising_factory_contributes_nothing_rather_than_raising() -> None:
+    # The one guarded region: author code, not the walk. Extraction is
+    # total by contract, and a config leaning on this factory cannot
+    # validate either.
+    def boom() -> str:
+        raise RuntimeError("author bug")
+
+    class Broken(AgwModel):
+        secret: Annotated[str, SecretRef(usage="a secret")] = Field(default_factory=boom)
+
+    assert extract_references(Broken, {}, OWNER) == ()
 
 
 def test_an_unmarked_model_implies_nothing_at_any_depth() -> None:
@@ -179,7 +246,18 @@ def test_a_marked_list_skips_the_elements_that_name_nothing() -> None:
 
 
 def test_an_omitted_list_has_no_default_identity() -> None:
+    # No owner template applies at an element, and this model's declared
+    # default is EMPTY, so absence contributes nothing. An omitted list
+    # whose declared default holds names is the next test.
     assert extract_references(TemplateLike, {}, OWNER) == ()
+
+
+def test_an_omitted_list_contributes_what_its_declared_default_holds() -> None:
+    # Validation answers the absent field with the default's elements, so
+    # the names they carry are names the validated config really holds.
+    # Outside the completeness oracle like every element marker, so the
+    # expectation is spelled here.
+    assert names(extract_references(DefaultedCollectionSite, {}, OWNER)) == ["default-collection-token"]
 
 
 # --- collections of models --------------------------------------------

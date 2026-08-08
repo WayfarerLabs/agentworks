@@ -46,6 +46,7 @@ from pydantic import Field
 from pydantic import ValidationError as PydanticValidationError
 
 from agentworks.capabilities.descriptor import descriptor_for, descriptor_for_impl
+from agentworks.capabilities.retired_shapes import retired_shape_error
 from agentworks.errors import StateError
 from agentworks.schema import (
     AgwRootModel,
@@ -142,6 +143,12 @@ def validate_capability_config(
     impl = _seated_impl(descriptor, selected)
     if impl is None:
         return None
+    # Before validation, so a pre-migration document gets its exact
+    # rewrite rather than the unconnected pair of problems the model layer
+    # would answer it with. Framed with the same ``location`` the
+    # validation below is given, because it is an error about the same
+    # document. Release-scoped; see the module it lives in.
+    retired_shape_error(getattr(impl, "retired_shape", None), config, owner, location)
     hint = reference_hint(kind, selected)
     if descriptor.config_schema.discriminator is None:
         model = offered_model(impl)
@@ -175,6 +182,7 @@ def validate_own_config(
     can only be a framework mistake (a call site handing over a table
     where a config belongs), so it is a ``StateError``.
     """
+    retired_shape_error(getattr(impl, "retired_shape", None), config, owner)
     descriptor = descriptor_for_impl(impl)
     discriminator = descriptor.config_schema.discriminator if descriptor is not None else None
     payload: Mapping[str, object] = config
@@ -218,15 +226,62 @@ def capability_config_references(
     return extract_references(model, config, owner)
 
 
+def resolved_capability_modes(
+    *,
+    kind: str,
+    config: object,
+    name: str | None = None,
+) -> tuple[tuple[str, str], ...]:
+    """The tag each discriminated-union field of ``config``'s
+    implementation resolves to, as ``(field, tag)`` pairs in declaration
+    order: a written tag off the blob, an omitted field's off its
+    declared default.
+
+    This is what makes an IMPLICIT mode choice visible without opening
+    the manifest: the mode unions carry declared defaults (azure and
+    aws's ``auth``, lima's ``placement``), so a document that writes
+    nothing has still resolved to an arm, and a reviewer reading a
+    health or inspection surface should see which. Read structurally off
+    the declared model, like extraction: no validation runs and no
+    capability code is invoked.
+
+    Total and never raising: an unknown implementation, a blob that is
+    not a table, or a written value whose tag is missing or malformed
+    contributes no pair (validation is where that becomes an error), so
+    a rendering caller degrades to what it already showed.
+    """
+    from agentworks.schema._shape import model_fields_of, shape_of
+
+    selected = selected_name(kind, config, name)
+    model = None if selected is None else capability_config_model(kind, selected)
+    fields = None if model is None else model_fields_of(model)
+    if fields is None:
+        return ()
+    modes: list[tuple[str, str]] = []
+    for field_name, field in fields.items():
+        shape = shape_of(field)
+        if not shape.arms or shape.discriminator is None:
+            continue
+        written = isinstance(config, Mapping) and field_name in config
+        value: object = config[field_name] if written and isinstance(config, Mapping) else field.default
+        if isinstance(value, Mapping):
+            tag = value.get(shape.discriminator)
+        else:
+            tag = getattr(value, shape.discriminator, None)
+        if isinstance(tag, str) and tag:
+            modes.append((field_name, tag))
+    return tuple(modes)
+
+
 def capability_config_union(kind: str) -> type[BaseModel]:
     """The discriminated union over every registered ``kind``
     implementation's config.
 
     A root model wrapping the union type rather than a bare
     ``TypeAdapter``, because the error bridge frames against a model: as a
-    root model, a failure's leading tag segment (``('lima', 'vm_host')``)
+    root model, a failure's leading tag segment (``('lima', 'placement')``)
     is recognized as the tag it is and dropped, so an operator reads
-    ``vm-site/lab.vm_host`` rather than a path with our dispatch mechanism
+    ``vm-site/lab.placement`` rather than a path with our dispatch mechanism
     in it. The model is generated rather than authored, which is legal
     precisely because it declares no fields of its own: every field, and
     every field description, comes from the authored arms.

@@ -205,6 +205,7 @@ _EDGELESS_BY_DESIGN = {
     "UndiscriminatedSite": "no discriminator, so no arm is addressable",
     "OneArmSite": "its one arm is the arm that names nothing",
     "NumericallyTaggedSite": "tagged by something other than a name",
+    "OtherNumericallyTaggedArm": "nothing in the version-2 arm names a Resource",
     "NeverResolved": "the model cannot be built",
     "ResolvesToUnbuildable": "the model cannot be built",
     "TableWithConstrainedKeys": "a constrained key names nothing, and neither does its value",
@@ -231,3 +232,22 @@ def test_the_kind_oracle_is_not_vacuous() -> None:
     from ._fixture_models import TemplateLike
 
     assert _kinds_declared_by(TemplateLike) == {"vm-template"}
+
+
+def test_all_fixtures_lists_every_model_the_fixture_module_defines() -> None:
+    """The tuple is authored by hand, so a fixture defined and never
+    listed would quietly sit outside every suite quantified over it; three
+    arm models drifted out exactly that way. The module's own definitions
+    are the oracle, so adding a fixture without listing it fails here by
+    name rather than passing by omission."""
+    from tests.schema import _fixture_models
+
+    defined = {
+        obj
+        for obj in vars(_fixture_models).values()
+        if isinstance(obj, type) and issubclass(obj, BaseModel) and obj.__module__ == _fixture_models.__name__
+    }
+    missing = defined - set(ALL_FIXTURES)
+    assert not missing, f"defined but not in ALL_FIXTURES: {sorted(cls.__name__ for cls in missing)}"
+    stray = set(ALL_FIXTURES) - defined
+    assert not stray, f"in ALL_FIXTURES but not defined by the module: {sorted(cls.__name__ for cls in stray)}"

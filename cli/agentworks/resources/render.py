@@ -5,18 +5,19 @@ the cross-kind ``agw resource describe`` and the per-kind commands
 same ``Origin`` shape; defining the renderer next to ``Origin`` keeps the
 layer correct.
 
-``format_file_path`` is re-exported from ``agentworks.source_location``,
-which is where it moved so the schema error bridge can render a path the
-same way without importing this package: importing anything under
-``agentworks.resources`` runs that package's ``__init__``, which loads
-every kind module.
+The host paths these renderers embed are spelled by
+``agentworks.path_rendering.format_host_path``, the repo-wide rule, which
+lives in its own top-level leaf so the schema error bridge can render a
+path the same way without importing this package: importing anything
+under ``agentworks.resources`` runs that package's ``__init__``, which
+loads every kind module. Import it from there rather than from here.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from agentworks.source_location import format_file_path
+from agentworks.path_rendering import format_host_path
 
 if TYPE_CHECKING:
     from agentworks.origin import Origin
@@ -56,7 +57,7 @@ def format_origin_line(origin: Origin | None) -> str:
         return "unknown"
     if origin.variant == "operator-declared":
         if origin.file is not None and origin.line:
-            return f"operator-declared ({format_file_path(origin.file)}:{origin.line})"
+            return f"operator-declared ({format_host_path(origin.file)}:{origin.line})"
         return "operator-declared"
     if origin.variant == "auto-declared":
         source = origin.source
@@ -72,20 +73,4 @@ def format_origin_line(origin: Origin | None) -> str:
     raise AssertionError(f"unhandled Origin variant: {origin.variant!r}")
 
 
-def format_origin_location(origin: Origin | None) -> str:
-    """Render an ``Origin`` as a bare source location for inline error
-    framing, dropping the variant prefix ``format_origin_line`` carries
-    for the describe / doctor views. An operator-declared row renders as
-    ``~/path:42`` (an operator reading a config error already knows it is
-    their config, so the ``operator-declared`` prefix is redundant noise
-    inside the message). Other variants fall back to the full
-    ``format_origin_line`` rendering: a built-in ``source`` or an
-    auto-declared ``kind/name`` carries no bare file location, so the
-    labelled form stays the informative one.
-    """
-    if origin is not None and origin.variant == "operator-declared" and origin.file is not None and origin.line:
-        return f"{format_file_path(origin.file)}:{origin.line}"
-    return format_origin_line(origin)
-
-
-__all__ = ["format_file_path", "format_origin_line", "format_origin_location"]
+__all__ = ["format_origin_line"]

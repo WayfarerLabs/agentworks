@@ -55,7 +55,7 @@ if TYPE_CHECKING:
     from agentworks.db import VMRow
     from tests.conftest import CapturedOutput
 
-_CONFIG = {"subscription_id": "sub-A", "resource_group": "rg1", "region": "eastus"}
+_CONFIG = {"subscription_id": "sub-A", "resource_group": "rg1", "region": "eastus", "auth": {"mode": "ambient"}}
 _DETECTED = "198.18.0.7"
 _DETECTED_PREFIX = f"{_DETECTED}/32"
 

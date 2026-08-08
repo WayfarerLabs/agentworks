@@ -127,10 +127,10 @@ can roll back (e.g. `vm create` during the provisioning phase, `workspace create
 On every platform the `vm create` provisioning-phase rollback also deletes the partially created
 backend state: Azure the cloud resource set (VM, NIC, public IP, NSG, vnet, disk), which can take a
 minute or two; Proxmox the partially cloned VM (cancelling a still-running clone task first); Lima
-the instance (local, or on the site's `vm_host` for a remote site); WSL2 the distro plus its install
-directory. A second Ctrl-C abandons that cleanup, printing what to remove manually: the resource
-group and name prefix, the node and VMID, or the exact removal command
-(`limactl delete --force <name>`, run on the `vm_host` for a remote site, or
+the instance (local, or on the site's placement host for an ssh-placed site); WSL2 the distro plus
+its install directory. A second Ctrl-C abandons that cleanup, printing what to remove manually: the
+resource group and name prefix, the node and VMID, or the exact removal command
+(`limactl delete --force <name>`, run on the placement host for an ssh-placed site, or
 `wsl --unregister <name>` plus deleting the install directory it names). Where rollback isn't
 possible (`vm reinit`, `agent reinit`, the init phase of `vm create`) it prints a recovery hint: the
 next command to run (`vm reinit`, `vm delete --force`, ...). Every cancellation exits with the

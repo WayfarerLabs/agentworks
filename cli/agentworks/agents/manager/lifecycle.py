@@ -602,7 +602,7 @@ def reinit_agent(
                 except KeyboardInterrupt:
                     output.warn(
                         f"Cancelling agent reinit '{name}'. The agent may be in a partial state. "
-                        f"Re-run 'agent reinit {name}' to retry. SSH log: {ssh_logger.path}"
+                        f"Re-run 'agent reinit {name}' to retry. SSH log: {ssh_logger.display_path}"
                     )
                     raise
                 except Exception as e:
@@ -610,7 +610,7 @@ def reinit_agent(
                         f"reinitializing agent: {e}",
                         entity_kind="agent",
                         entity_name=name,
-                        hint=f"SSH log: {ssh_logger.path}",
+                        hint=f"SSH log: {ssh_logger.display_path}",
                     ) from e
             finally:
                 ssh_logger.close()
