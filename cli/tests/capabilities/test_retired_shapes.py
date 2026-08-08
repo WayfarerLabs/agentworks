@@ -17,12 +17,16 @@ from pathlib import Path
 
 import pytest
 
-from agentworks.capabilities.config import validate_capability_config
-from agentworks.capabilities.retired_shapes import RETIRED_SHAPE_HINT
+from agentworks.capabilities.config import (
+    capability_config_model,
+    registered_implementations,
+    validate_capability_config,
+)
+from agentworks.capabilities.retired_shapes import RETIRED_SHAPE_HINT, RetiredPresenceShape
 from agentworks.errors import ConfigError
 from agentworks.plugins.aws.platform import EC2Platform
 from agentworks.plugins.azure.platform import AzureVMPlatform
-from agentworks.schema import RefOwner
+from agentworks.schema import RefOwner, iter_field_docs
 from agentworks.source_location import SourceLocation
 
 # Importing the two plugin platforms SEATS them, which is what makes
@@ -182,6 +186,63 @@ def test_a_retired_shape_refusal_is_framed_like_the_errors_beside_it(platform: s
     assert "sites.yaml:12" in frame
 
     assert str(_refuse(platform, blob, _WHERE)).startswith(frame)
+
+
+# -- The declarations against the live unions they rewrite to ----------------
+#
+# ``RetiredPresenceShape`` hand-authors knowledge of BOTH sides of the
+# break: the old field's name and the live union's field, modes, and (for
+# lima) the field a scalar's value moves into. The rewrites above pin the
+# rendered strings, but a renamed mode would leave the declaration and
+# those pinned strings stale TOGETHER: the error would confidently print a
+# rewrite the model rejects. So the declarations are also compared to the
+# live models structurally, with no literal spelled on both sides.
+
+
+def _declared_shapes() -> dict[str, RetiredPresenceShape]:
+    """Every seated vm-platform's declaration, keyed by platform name."""
+    return {
+        name: shape
+        for name, impl in registered_implementations("vm-platform").items()
+        if isinstance(shape := getattr(impl, "retired_shape", None), RetiredPresenceShape)
+    }
+
+
+def test_the_three_platforms_that_crossed_the_break_are_the_ones_declaring_it() -> None:
+    """Membership before structure: a structural check over 'whatever the
+    registry returned' is satisfied by an empty registry, and unseated
+    plugins is exactly how two of the three subjects go missing. The
+    ``_SEATED`` import above is what makes azure and aws answerable here
+    at all."""
+    assert set(_declared_shapes()) == {"lima", "azure-vm", "aws-ec2"}
+
+
+def test_each_declaration_matches_the_live_union_it_rewrites_to() -> None:
+    """Every name a declaration authors is checked against the model it
+    describes: the union field exists and is required, both modes are
+    tags a document can actually select, a scalar's destination field is
+    a real field of the arm the rewrite names, and the retired field is
+    not still live (a declaration for a field the model kept would refuse
+    valid documents)."""
+    for name, shape in _declared_shapes().items():
+        model = capability_config_model("vm-platform", name)
+        assert model is not None, f"{name}: declares a retired shape and no config model"
+        docs = {doc.path: doc for doc in iter_field_docs(model)}
+        union_doc = docs.get((shape.union_field,))
+        assert union_doc is not None, f"{name}: '{shape.union_field}' is not a field of {model.__name__}"
+        assert union_doc.required, f"{name}: '{shape.union_field}' is optional, so the absent rewrite is not needed"
+        arms = {arm.tag: arm.doc.model for arm in union_doc.union_arms}
+        for mode in (shape.present_mode, shape.absent_mode):
+            assert mode in arms, f"{name}: mode '{mode}' selects no arm of '{shape.union_field}' (live: {sorted(arms)})"
+        if shape.scalar_field is not None:
+            arm_model = arms[shape.present_mode]
+            assert shape.scalar_field in arm_model.model_fields, (
+                f"{name}: '{shape.scalar_field}' is not a field of {arm_model.__name__}, "
+                f"so the rendered rewrite names a key the arm rejects"
+            )
+        assert shape.retired_field not in model.model_fields, (
+            f"{name}: '{shape.retired_field}' is still a live field of {model.__name__}"
+        )
 
 
 def test_a_platform_with_no_retired_shape_is_untouched() -> None:
