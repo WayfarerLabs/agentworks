@@ -296,6 +296,72 @@ class EveryArmMarkedCollectionSite(AgwModel):
     )
 
 
+class DefaultedProxyArm(AgwModel):
+    """The INNER union's marked arm, constructible with no document: its
+    tag and its marked field both carry plain defaults."""
+
+    name: Literal["authenticated"] = "authenticated"
+    creds_secret: Annotated[str, SecretRef(usage="the proxy credentials")] = "default-proxy-creds"
+
+
+class DefaultedAuthArm(AgwModel):
+    """The arm a defaulted union selects when a document writes nothing.
+
+    It names a secret through its own field's plain default, and it holds
+    a SECOND defaulted union, so the as-if-written substitution is proven
+    to recurse: the ordinary walk must reach both this arm's secret and
+    the inner arm's.
+    """
+
+    name: Literal["defaulted"] = "defaulted"
+    token_secret: Annotated[str, SecretRef(usage="the defaulted arm's token")] = "default-arm-token"
+    proxy: Annotated[LimaArm | DefaultedProxyArm, Discriminator("name")] = DefaultedProxyArm()
+
+
+class DefaultedUnionSite(AgwModel):
+    """A tagged union whose DEFAULT selects a marker-carrying arm.
+
+    The shape whose edges used to vanish: validation answers an absent
+    ``auth`` with the default instance, so the names it carries are names
+    the validated config really holds, and extraction has to emit them.
+    """
+
+    auth: Annotated[LimaArm | DefaultedAuthArm, Discriminator("name")] = DefaultedAuthArm()
+
+
+class DefaultedBlockSite(AgwModel):
+    """A plain nested block (no union anywhere) whose default names a
+    secret: the same absence, one shape simpler."""
+
+    creds: CredsLike = CredsLike(secret="default-block-secret")
+
+
+class DefaultedCollectionSite(AgwModel):
+    """A defaulted collection whose default HOLDS a name, unlike every
+    empty-collection default in this file: an absent field contributes
+    what its default holds."""
+
+    tokens: list[Annotated[str, SecretRef(usage="a default token")]] = Field(
+        default_factory=lambda: ["default-collection-token"]
+    )
+
+
+class RawDefaultedProvider(AgwModel):
+    """A union whose default is RAW DATA rather than a constructed
+    instance.
+
+    The spelling that can express an OWNER-TEMPLATED default: an instance
+    cannot carry one (building it at class definition has no owner), but
+    a raw mapping is resolved at use on both paths, validation filling
+    the rendered template under ``validate_default`` and extraction
+    rendering the same template for what the mapping leaves absent.
+    """
+
+    sourcing: Annotated[LimaArm | ProxmoxArm, Discriminator("name")] = Field(
+        default={"name": "proxmox"}  # type: ignore[assignment]
+    )
+
+
 class AbstractCollectionLike(AgwModel):
     """Collections spelled as ABCs rather than as concrete classes.
 
@@ -591,6 +657,12 @@ ALL_FIXTURES = (
     EveryArmMarkedSecond,
     EveryArmMarkedSite,
     EveryArmMarkedCollectionSite,
+    DefaultedProxyArm,
+    DefaultedAuthArm,
+    DefaultedUnionSite,
+    DefaultedBlockSite,
+    DefaultedCollectionSite,
+    RawDefaultedProvider,
     AbstractCollectionLike,
     NumericallyTaggedSite,
     UndiscriminatedSite,

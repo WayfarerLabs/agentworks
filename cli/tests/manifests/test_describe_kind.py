@@ -182,7 +182,10 @@ def test_an_implementation_shows_the_config_it_declares() -> None:
 
     assert text.startswith("Lima (vm-platform/lima, vm-platform implementation)")
     assert "config:" in text
-    assert "placement  (table, required)" in text
+    # The union's declared default is a fact of the field, so the
+    # parenthetical carries it: what an omitting document resolves to
+    # should not take opening the model to learn.
+    assert "placement  (table, optional, default {mode: local})" in text
 
 
 def test_a_nested_tagged_union_renders_every_arm_with_its_own_fields() -> None:

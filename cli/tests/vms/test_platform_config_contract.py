@@ -17,6 +17,7 @@ import pytest
 from agentworks.capabilities.config import (
     capability_config_model,
     capability_config_references,
+    resolved_capability_modes,
     validate_capability_config,
 )
 from agentworks.capabilities.vm_platform import VM_PLATFORM_REGISTRY
@@ -39,9 +40,9 @@ AZURE_DEFAULT_SECRET = "azure-client-secret"
 PROXMOX_DEFAULT_SECRET = "proxmox-token"
 
 #: The arm every site that is not testing credentials selects. Written
-#: out at every call site's base config rather than defaulted, because
-#: that is the contract: no site selects an identity, or a placement, by
-#: omission.
+#: out at every call site's base config even though the unions default to
+#: it now, so each case reads whole; the defaulting itself is pinned once,
+#: in ``test_the_union_defaults_to_the_mode_omission_used_to_select``.
 AMBIENT_AUTH = {"mode": "ambient"}
 
 AZURE_CONFIG = {
@@ -114,20 +115,16 @@ def test_wsl2_accepts_no_configuration() -> None:
         _validate("wsl2", {"anything": 1})
 
 
-def test_azure_requires_all_four_keys_including_auth() -> None:
-    """``auth`` is required exactly like the three location keys, and it
-    is the one that used to be optional: omitting it selected the ambient
-    chain silently.
-
-    ``auth``'s own message is the retired-shape rewrite rather than the
-    model layer's "is required" (see the tagged-union block below and
-    ``tests/capabilities/test_retired_shapes.py``), so it is matched on
-    the half both spellings share."""
+def test_azure_requires_the_three_location_keys_and_defaults_auth() -> None:
+    """The three location keys are required; ``auth`` is not, because it
+    carries the declared ambient default (pinned with its siblings in
+    ``test_the_union_defaults_to_the_mode_omission_used_to_select``)."""
     _validate("azure-vm", AZURE_CONFIG)
-    for missing in AZURE_CONFIG:
+    for missing in ("subscription_id", "resource_group", "region"):
         broken = {k: v for k, v in AZURE_CONFIG.items() if k != missing}
         with pytest.raises(ConfigError, match=f"'?{missing}'?[: ].*required"):
             _validate("azure-vm", broken)
+    _validate("azure-vm", {k: v for k, v in AZURE_CONFIG.items() if k != "auth"})
     with pytest.raises(ConfigError, match="extra: unknown field"):
         _validate("azure-vm", {**AZURE_CONFIG, "extra": "x"})
 
@@ -314,16 +311,16 @@ def test_an_explicit_null_secret_name_now_means_the_default(
     assert ref.name == expected
 
 
-# -- The required tagged unions: the four ways to get them wrong -------------
+# -- The tagged mode unions: the ways to get them wrong ----------------------
 #
 # azure's ``auth``, aws's ``auth``, and lima's ``placement`` are the same
 # shape, so they are pinned together: whatever an operator does wrong, all
 # three have to say so in the same words, at an address the operator wrote.
-# The MESSAGE is asserted, not merely the raise (FR12): a required union
-# whose failures are unreadable would trade one bad diagnostic for another.
+# The MESSAGE is asserted, not merely the raise (FR12): a union whose
+# failures are unreadable would trade one bad diagnostic for another.
 
 #: ``(platform, base config, the union's field name)`` for the three
-#: platforms carrying a required tagged union.
+#: platforms carrying a tagged mode union.
 TAGGED = [
     pytest.param("azure-vm", AZURE_CONFIG, "auth", id="azure-vm"),
     pytest.param("aws-ec2", EC2_CONFIG, "auth", id="aws-ec2"),
@@ -332,32 +329,30 @@ TAGGED = [
 
 
 @pytest.mark.parametrize(("platform", "config", "field"), TAGGED)
-def test_the_union_is_required_with_no_omission_alias(platform: str, config: dict[str, object], field: str) -> None:
-    """THE headline break. Omitting the field used to be how a site chose
-    ambient credentials or local placement; it is an error now, because a
-    choice expressed by absence cannot be told from a choice never made.
-
-    Asserted on the MODEL, not through ``_validate``, and that is
-    load-bearing rather than fussy. The message an operator sees for this
-    case comes from the release-scoped retired-shape rewrite (pinned in
-    ``tests/capabilities/test_retired_shapes.py``), which fires BEFORE
-    validation and would keep raising even if the field regained a
-    default. So a test that only asserted the raise would go on passing
-    through the requiredness being lost, and would stop pinning anything
-    at all the day that module is deleted. The requiredness itself is a
-    property of the model, so it is pinned there.
+def test_the_union_defaults_to_the_mode_omission_used_to_select(
+    platform: str, config: dict[str, object], field: str
+) -> None:
+    """Omitting the field selects the declared default, which is the
+    same mechanism omission selected before the union existed (ambient
+    on the clouds, local on lima). An earlier revision made omission an
+    error; the operator ruling that reversed it is recorded at the union
+    sites, and this pins both halves: the default is a fact of the MODEL
+    (visible to describe-kind and the emitted schema, not conjured by a
+    validator), and validation really resolves an omitting document to
+    that arm.
     """
     model = capability_config_model("vm-platform", platform)
     assert model is not None
-    assert model.model_fields[field].is_required()
-    # And it really is a discriminated union rather than a lone block, so
-    # "required" means "one of these arms, chosen by tag".
+    default = model.model_fields[field].default
+    assert getattr(default, "mode", None) == _MODES[platform][0]
+    # And it really is a discriminated union rather than a lone block:
+    # the default names one of several arms a document may write.
     assert shape_of(model.model_fields[field]).discriminator == "mode"
 
     without = {k: v for k, v in config.items() if k != field}
-    with pytest.raises(ConfigError) as exc:
-        _validate(platform, without)
-    assert f"'{field}' is required" in str(exc.value)
+    validated = validate_capability_config(kind="vm-platform", config={"name": platform, **without}, owner=OWNER)
+    assert validated is not None
+    assert getattr(validated, field).mode == _MODES[platform][0]
 
 
 @pytest.mark.parametrize(("platform", "config", "field"), TAGGED)
@@ -419,6 +414,39 @@ _MODES = {
 }
 
 
+# -- The resolved-mode read (what doctor's site rows render) -----------------
+
+
+def _modes(platform: str, blob: dict[str, object]) -> tuple[tuple[str, str], ...]:
+    return resolved_capability_modes(kind="vm-platform", config={"name": platform, **blob})
+
+
+def test_resolved_modes_report_the_written_tag() -> None:
+    assert _modes("lima", LIMA_SSH) == (("placement", "ssh"),)
+    assert _modes("azure-vm", {**AZURE_CONFIG, "auth": AZURE_SP}) == (("auth", "service-principal"),)
+    assert _modes("aws-ec2", {**EC2_CONFIG, "auth": EC2_CREDS}) == (("auth", "access-key"),)
+
+
+def test_resolved_modes_report_the_declared_default_for_an_omitting_document() -> None:
+    """The read that makes an IMPLICIT choice reviewable: a site that
+    wrote no union has still resolved to an arm, and the answer is the
+    same one validation gives it."""
+    assert _modes("lima", {}) == (("placement", "local"),)
+    assert _modes("azure-vm", {k: v for k, v in AZURE_CONFIG.items() if k != "auth"}) == (("auth", "ambient"),)
+    assert _modes("aws-ec2", {"region": "us-east-1"}) == (("auth", "ambient"),)
+
+
+def test_resolved_modes_are_total_over_what_validation_would_refuse() -> None:
+    """A rendering caller degrades to the bare platform name, so an
+    unknown implementation or a malformed union contributes no pair
+    rather than an exception; validation is where those become errors."""
+    assert resolved_capability_modes(kind="vm-platform", config={"name": "no-such-platform"}) == ()
+    assert resolved_capability_modes(kind="vm-platform", config="nope") == ()
+    assert _modes("lima", {"placement": "junk"}) == ()
+    assert _modes("lima", {"placement": {"mode": 7}}) == ()
+    assert _modes("wsl2", {}) == ()
+
+
 # -- Extraction (total, never raising) ---------------------------------------
 
 
@@ -440,6 +468,12 @@ def test_the_ambient_arm_emits_no_secret_reference() -> None:
     # config's.
     assert _refs("azure-vm", {"auth": AMBIENT_AUTH}) == ()
     assert _refs("aws-ec2", {"auth": AMBIENT_AUTH}) == ()
+    # An ABSENT union resolves to the same ambient default and emits the
+    # same zero edges: extraction reads defaults as if written, and this
+    # default names nothing.
+    assert _refs("azure-vm", {k: v for k, v in AZURE_CONFIG.items() if k != "auth"}) == ()
+    assert _refs("aws-ec2", {k: v for k, v in EC2_CONFIG.items() if k != "auth"}) == ()
+    assert _refs("lima", {}) == ()
 
 
 def test_aws_ec2_returns_the_secret_access_key_reference() -> None:

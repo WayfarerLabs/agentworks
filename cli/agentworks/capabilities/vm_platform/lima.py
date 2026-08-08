@@ -98,11 +98,12 @@ provision:
 
 # Why an arm with no fields but its tag exists at all: local and ssh are
 # different execution mechanisms (a local subprocess versus a two-hop SSH
-# transport) with different readiness rules, and a site that never said
-# which it wanted used to read as local. A misspelled host key then made
-# an ssh site look local and report ``limactl not installed``, naming a
-# problem the operator did not have. Saying ``mode: local`` is one line,
-# and it is the line that makes the choice reviewable.
+# transport) with different readiness rules, and before the union there
+# was no way to write the choice down: presence of ``vm_host`` selected
+# ssh, and a misspelled host key made an ssh site look local and report
+# ``limactl not installed``, naming a problem the operator did not have.
+# The union ends that: an ssh site's mistakes error inside the ssh arm,
+# and ``mode: local`` is the writable form of the default.
 class LimaLocalPlacement(AgwModel):
     """Run limactl on this machine.
 
@@ -143,12 +144,23 @@ class LimaSshPlacement(AgwModel):
     exactly what the flat ``vm_host`` could not say."""
 
 
-#: Where a ``lima`` site's ``limactl`` runs, as a REQUIRED tagged union.
+#: Where a ``lima`` site's ``limactl`` runs, as a tagged union DEFAULTING
+#: to the local arm.
 #:
-#: Required, and with no omission alias, because presence of a host used
-#: to select between two entirely different execution mechanisms. A
-#: manifest could not distinguish "deliberately local" from "forgot the
-#: host", and neither could a reviewer or the readiness fold.
+#: An earlier revision made this required with no default, and that
+#: reasoning is in the history, so here is why it reversed (operator
+#: ruling): the defect the union fixed was never "absence selects a
+#: mechanism", it was that there was no way to DECLARE the choice at all,
+#: so a misspelled host key silently turned an ssh site local. The union
+#: fixes the second, and once an explicit form exists, a default is an
+#: ordinary default, carried in the emitted schema and in
+#: ``describe-kind`` like any other. Local is the right one because it is
+#: what the wrapped tool already does: ``limactl`` runs where it is
+#: invoked, so requiring an explicit placement would make this site
+#: stricter than the tool it wraps. The general pattern: ambient where
+#: the underlying tool has an ambient notion, required where it does not,
+#: which is why proxmox has no union at all rather than being an
+#: exception to one.
 #:
 #: The pair reads asymmetric (``local`` is a position, ``ssh`` is a
 #: transport) and that was decided knowingly: the symmetric spelling would
@@ -175,10 +187,10 @@ class LimaConfig(AgwModel):
     name: Literal["lima"]
     """The platform this config is for."""
 
-    placement: LimaPlacement
+    placement: LimaPlacement = LimaLocalPlacement(mode="local")
     """Where ``limactl`` runs: ``{mode: local}`` on this machine, or
-    ``{mode: ssh, host: ...}`` over SSH. Required, with no default, so a
-    site never selects its execution mechanism by leaving a key out."""
+    ``{mode: ssh, host: ...}`` over SSH. Defaults to local, matching
+    where ``limactl`` runs when told nothing."""
 
 
 class LimaPlatform(VMPlatform):
@@ -188,10 +200,10 @@ class LimaPlatform(VMPlatform):
     name: ClassVar[str] = "lima"
     description: ClassVar[str] = "Lima VMs (local, or on a remote host via SSH)"
     config_model: ClassVar[type[LimaConfig]] = LimaConfig
-    # Every hand-declared lima site crosses this break, and the ABSENT
-    # case is the common one: the zero-config local site wrote nothing at
-    # all, so its error has to say that a line is being added rather than
-    # that something went missing. Release-scoped.
+    # A lima site that WROTE ``vm_host`` (or wrote it null) crosses this
+    # break and gets its exact rewrite; the zero-config local site that
+    # wrote nothing lands on the local default and was never broken.
+    # Release-scoped.
     retired_shape: ClassVar[RetiredPresenceShape | None] = RetiredPresenceShape(
         retired_field="vm_host",
         union_field="placement",
@@ -202,11 +214,11 @@ class LimaPlatform(VMPlatform):
     prose: ClassVar[TopicProse | None] = TopicProse(
         title="Lima",
         overview="""
-        Lima runs Linux VMs through `limactl`. Every site says where: `placement:
-        {mode: local}` runs them on this machine, which is what the built-in
-        `lima-local` site is; `placement: {mode: ssh, host: me@gpu-box}` runs
-        `limactl` on that host over SSH, so the VMs live on a shared box and nothing
-        but SSH is needed here.
+        Lima runs Linux VMs through `limactl`. `placement` says where, and defaults
+        to `{mode: local}`: `limactl` runs on this machine, which is what the
+        built-in `lima-local` site is. `placement: {mode: ssh, host: me@gpu-box}`
+        runs `limactl` on that host over SSH, so the VMs live on a shared box and
+        nothing but SSH is needed here.
 
         Local sites need `limactl` installed here and report not-ready without it.
         Remote sites need nothing locally.
@@ -228,21 +240,26 @@ class LimaPlatform(VMPlatform):
         builds an instance, so the readiness fold stays total over
         unvalidated ``platform_config``.
 
-        Keyed on the tag saying ``local``, never on the ABSENCE of
-        something. That is what makes the verdict self-standing rather
-        than trustworthy-by-luck. It used to key on a missing ``vm_host``,
-        which made a missing host and a MISSPELLED one indistinguishable:
-        both read as local, and this reported ``limactl not installed``,
-        naming a problem the operator did not have while their host
-        setting silently did not apply. Now a config that does not say
-        ``local`` is not treated as local, so an unreadable, absent, or
-        malformed ``placement`` yields ``ready`` here and the validate
-        pass reports the real error against ``placement`` itself. This
-        method no longer has an opinion it could be wrong about."""
+        Keyed on the tag saying ``local``, never on a GUESS about what
+        absence means. That is what makes the verdict self-standing
+        rather than trustworthy-by-luck. It used to key on a missing
+        ``vm_host``, which made a missing host and a MISSPELLED one
+        indistinguishable: both read as local, and this reported
+        ``limactl not installed``, naming a problem the operator did not
+        have while their host setting silently did not apply. A WRITTEN
+        ``placement`` that does not say ``local`` is not treated as
+        local, so an unreadable or malformed one yields ``ready`` here
+        and the validate pass reports the real error against
+        ``placement`` itself. An ABSENT ``placement`` is not a guess:
+        it resolves to the field's declared default, read off the model
+        so this cannot disagree with what validation resolves."""
         from agentworks.resources.graph import Readiness
 
-        placement = config.get("placement")
-        local = isinstance(placement, Mapping) and placement.get("mode") == "local"
+        if "placement" in config:
+            placement = config.get("placement")
+            local = isinstance(placement, Mapping) and placement.get("mode") == "local"
+        else:
+            local = isinstance(LimaConfig.model_fields["placement"].default, LimaLocalPlacement)
         if not local:
             return Readiness.ready()
         import shutil

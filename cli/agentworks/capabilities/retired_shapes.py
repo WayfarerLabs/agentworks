@@ -11,20 +11,21 @@ declarations, and the framework is unchanged.
 
 **The defect it is the receipt for.** Three platforms used to express a
 mode CHOICE through the presence or absence of an optional block: azure's
-``service_principal``, aws's ``credentials``, lima's ``vm_host``. Writing
-the block picked one mechanism, omitting it picked another, and no
-document could tell "I chose the omitted one" from "I never configured
-this". Each is now a required tagged union, so both choices are written
-down.
+``service_principal``, aws's ``credentials``, lima's ``vm_host``. The
+defect was never that absence selected a mechanism; it was that there
+was no way to DECLARE the choice at all, so a document could not tell "I
+chose the omitted one" from "I never configured this", and a misspelled
+key silently selected the wrong mechanism. Each is a tagged union now,
+with the mode the old absence selected as its ordinary declared default
+(operator ruling, reversing an earlier required-with-no-default
+revision; the union sites carry the reasoning).
 
-That makes this a total break: EVERY existing manifest for those three
-platforms fails, including the ones that are wrong in no way except that
-they predate the union. The ABSENT case is the one that needs the most
-help, because the operator's document does not contain the offending
-text: they wrote nothing, and an error about a field they never typed
-reads as "you deleted something" unless it says otherwise. So the absent
-case is a first-class message here, not an afterthought on the present
-one.
+The default is what keeps this break narrow: a manifest that omitted the
+old block still loads, landing on the same mechanism it always used.
+Only a document that WROTE the retired field crosses the break, in
+either of its two spellings (a real value, or an explicit ``null``), and
+a retired field is still a retired field: both get their exact rewrite
+here rather than a bare "unknown field".
 """
 
 from __future__ import annotations
@@ -43,7 +44,7 @@ if TYPE_CHECKING:
 RETIRED_SHAPE_HINT = (
     "Apply the rewrite above; `agw resource describe-kind <kind>` documents the field, "
     "and `agw resource sample <kind>` prints it as a document to edit. "
-    'See "Authentication and placement are declared, not inferred" in docs/guides/upgrading-to-0.14.md.'
+    'See "Authentication and placement are one tagged field now" in docs/guides/upgrading-to-0.14.md.'
 )
 """Where an operator goes to make a retired presence-shape load again.
 
@@ -57,7 +58,8 @@ the half that stands on its own.
 @dataclass(frozen=True, kw_only=True)
 class RetiredPresenceShape:
     """A field whose PRESENCE used to select one mode and whose ABSENCE
-    used to select another, replaced by a required tagged union.
+    used to select another, replaced by a tagged union that defaults to
+    the absent mode.
 
     One declaration per platform, stating what the operator's old document
     says and what it has to say now. The rewrite is rendered from the
@@ -69,13 +71,14 @@ class RetiredPresenceShape:
     """The key that used to carry the choice (``service_principal``)."""
 
     union_field: str
-    """The required union that replaced it (``auth``)."""
+    """The union that replaced it (``auth``)."""
 
     present_mode: str
     """The mode an operator who WROTE ``retired_field`` meant."""
 
     absent_mode: str
-    """The mode an operator who OMITTED it meant."""
+    """The mode an operator who OMITTED it meant, and the union's
+    declared default now, so an omitting document loads unchanged."""
 
     scalar_field: str | None = None
     """Where a retired SCALAR's value goes inside the new arm.
@@ -116,11 +119,10 @@ class RetiredPresenceShape:
 
     @property
     def absent_rewrite(self) -> str:
-        """The exact replacement for a document that wrote NOTHING.
-
-        The arms with no fields of their own are on purpose: what the
-        operator has to add is one line saying which mechanism they were
-        relying on all along.
+        """The line a document that wrote ``retired_field: null`` writes
+        in the null line's place: the mechanism it was relying on, made
+        explicit. One line with no arm fields on purpose, because the
+        absent-mode arms have none.
         """
         return f"{self.union_field}: {{mode: {self.absent_mode}}}"
 
@@ -131,24 +133,28 @@ def retired_shape_error(
     owner: RefOwner,
     location: SourceLocation | None = None,
 ) -> None:
-    """Refuse a config written in ``shape``'s retired spelling, naming the
+    """Refuse a config that WROTE ``shape``'s retired field, naming the
     exact rewrite; return silently for anything else.
+
+    A config that wrote nothing is not refused at all: the union's
+    declared default resolves it to the same mechanism omission always
+    selected, so an omitting document was never broken and there is no
+    absent case here.
 
     Runs BEFORE model validation, for the reason
     ``decode._reject_legacy_shape`` runs before it: the model layer
-    answers the retired document with two problems it has no reason to
-    connect (an unknown ``service_principal`` key and a missing ``auth``),
-    and connecting them is the whole job here.
+    answers the retired document with a bare unknown-key error that says
+    nothing about where the choice the key carried has gone, and saying
+    so is the whole job here.
 
     ``location`` frames the message the way every other manifest error is
     framed, through :func:`~agentworks.schema.located`, and it is the same
     location the validation path two lines down is given. Running earlier
     in the pipeline is not a reason for an error to arrive without a file
-    and a line: these two carry an operator across a break that reaches
-    every azure, aws, and lima manifest, so they are the LAST errors that
-    should make someone grep for which document they are about. Defaulted
-    for the construct-time caller, which is validating a config that came
-    from code and has no declaration site.
+    and a line: these errors carry an operator across a break, so they
+    are the LAST errors that should make someone grep for which document
+    they are about. Defaulted for the construct-time caller, which is
+    validating a config that came from code and has no declaration site.
 
     A config that already carries the union field is left entirely alone,
     even when the retired field sits beside it. That document is a
@@ -157,28 +163,22 @@ def retired_shape_error(
     precise answer; printing a rewrite would tell the operator to write
     something they have already written.
 
-    **An explicit ``null`` selects the ABSENT mode, so the branch is
-    taken on the VALUE and not on key membership.** All three retired
-    fields were optional, so a written ``null`` did exactly what omitting
-    the key did: ``service_principal: null`` and ``credentials: null``
+    **An explicit ``null`` names the ABSENT mode, so the branch is taken
+    on the VALUE and not on key membership.** All three retired fields
+    were optional, so a written ``null`` did exactly what omitting the
+    key did: ``service_principal: null`` and ``credentials: null``
     selected the ambient chain, and ``vm_host: null`` ran ``limactl``
-    locally. Branching on membership answers the operator whose site was
-    LOCAL with ``placement: {mode: ssh, host: ...}``, which is not a
+    locally. Branching on membership would answer the operator whose site
+    was LOCAL with ``placement: {mode: ssh, host: ...}``, which is not a
     rewrite of their site but the opposite of it.
 
-    That is worth calling out rather than folding into the membership
-    test, because it is the very conflation this break exists to end: a
-    written ``null`` and a missing key meant one thing, one surface
-    disagreed, and every union below is the fix. Advice that reproduces
-    the conflation while announcing the cure is worse than no advice.
-
-    It gets its own message rather than sharing the absent one, because
-    the two documents need different edits. The absent message says
-    nothing was deleted and one line is added, and for a document that
-    WROTE ``vm_host: null`` both halves are false: that line has to go,
-    and leaving it while adding the union yields
-    ``vm_host: unknown field`` on the next load. Three spellings of the
-    old choice, three edits, three messages.
+    The null document still errors, because a retired field is still a
+    retired field, and it gets its own message because it needs its own
+    edit: the null line has to GO, and the message says what the null was
+    doing while it names the line to write. It resolves to the same arm
+    the default now supplies, so strictly the write is belt beside
+    braces, but advice that leaves the choice implicit while retiring
+    the old implicit spelling would be a poor cure.
     """
     if shape is None or not isinstance(config, Mapping) or shape.union_field in config:
         return
@@ -199,24 +199,12 @@ def retired_shape_error(
         raise ConfigError(
             located(
                 location,
-                f"{owner.display}: '{shape.union_field}' is required and this resource does not declare it. "
-                f"'{shape.retired_field}: null' selected '{shape.absent_mode}', exactly as omitting the key "
-                f"did, and that is the conflation the required '{shape.union_field}' ends; delete the null "
-                f"line and write the choice instead: {shape.absent_rewrite}",
+                f"{owner.display}: '{shape.retired_field}: null' is a retired spelling. It selected "
+                f"'{shape.absent_mode}', exactly as omitting the key did, and ending that conflation is why "
+                f"the field is gone; delete the null line and write the choice instead: "
+                f"{shape.absent_rewrite}",
             ),
             entity_kind=owner.kind,
             entity_name=owner.name,
             hint=RETIRED_SHAPE_HINT,
         )
-    raise ConfigError(
-        located(
-            location,
-            f"{owner.display}: '{shape.union_field}' is required and this resource does not declare it. "
-            f"Omitting '{shape.retired_field}' used to mean '{shape.absent_mode}'; that choice is written "
-            f"down now rather than inferred from what is missing, so nothing was deleted from your document "
-            f"and one line is added to it: {shape.absent_rewrite}",
-        ),
-        entity_kind=owner.kind,
-        entity_name=owner.name,
-        hint=RETIRED_SHAPE_HINT,
-    )
