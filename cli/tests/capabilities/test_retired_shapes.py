@@ -16,6 +16,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import yaml
 
 from agentworks.capabilities.config import (
     capability_config_model,
@@ -53,6 +54,15 @@ def _refuse(platform: str, blob: dict[str, object], location: SourceLocation | N
             location=location,
         )
     return exc.value
+
+
+def _declared_shapes() -> dict[str, RetiredPresenceShape]:
+    """Every seated vm-platform's declaration, keyed by platform name."""
+    return {
+        name: shape
+        for name, impl in registered_implementations("vm-platform").items()
+        if isinstance(shape := getattr(impl, "retired_shape", None), RetiredPresenceShape)
+    }
 
 
 @pytest.mark.parametrize(
@@ -99,6 +109,22 @@ def test_the_rewrite_carries_only_the_keys_the_operator_wrote() -> None:
     assert "secret" not in str(error)
 
 
+@pytest.mark.parametrize("value", [pytest.param("oops", id="scalar"), pytest.param({}, id="empty-table")])
+def test_a_retired_value_with_no_keys_elides_the_arm_s_fields_rather_than_promising_none(value: object) -> None:
+    """A rewrite that names a mode and no fields is a document the model
+    rejects for the three keys that arm requires.
+
+    Both spellings reach it: a value that is not a table at all
+    (``service_principal: "oops"``) and a table with nothing in it. In
+    neither case is there a key to transcribe, so the bare ``...`` says
+    the arm's own fields go here, which is true, instead of saying
+    nothing, which reads as "there are none".
+    """
+    message = str(_refuse("azure-vm", {**_AZURE, "service_principal": value}))
+
+    assert "auth: {mode: service-principal, ...}" in message, message
+
+
 @pytest.mark.parametrize(
     ("platform", "blob", "retired", "rewrite"),
     [
@@ -126,6 +152,79 @@ def test_an_absent_retired_field_explains_that_a_line_is_being_added(
     assert "nothing was deleted from your document" in message
     assert rewrite in message
     assert error.hint == RETIRED_SHAPE_HINT
+
+
+#: The three declarations' subjects, as ``(platform, base config, retired
+#: field, the mode omitting it used to select)``. The set is pinned by
+#: ``test_the_three_platforms_that_crossed_the_break_are_the_ones_declaring_it``.
+_ABSENT_CASES = [
+    pytest.param("lima", {}, "vm_host", "local", id="lima-local"),
+    pytest.param("azure-vm", _AZURE, "service_principal", "ambient", id="azure-ambient"),
+    pytest.param("aws-ec2", _AWS, "credentials", "ambient", id="aws-ambient"),
+]
+
+
+@pytest.mark.parametrize(("platform", "base", "retired", "absent_mode"), _ABSENT_CASES)
+def test_an_explicit_null_selects_the_mode_omission_selected(
+    platform: str, base: dict[str, object], retired: str, absent_mode: str
+) -> None:
+    """``vm_host: null`` was a LOCAL site, not an SSH one.
+
+    All three retired fields were optional, so a written ``null`` did
+    byte-for-byte what omitting the key did: the ambient credential chain
+    for azure and aws, ``limactl`` on this machine for lima. Reading the
+    choice off key MEMBERSHIP sent each of these operators to the other
+    arm, and for lima that is not an imprecise rewrite but the opposite
+    placement: an operator whose VMs ran here was told to write
+    ``mode: ssh``.
+
+    That mattered more than its size, which is why it is asserted from
+    both ends: the arm they were relying on is named, and the arm they
+    were NOT is absent from the message rather than merely outranked by
+    it.
+    """
+    shape = _declared_shapes()[platform]
+    message = str(_refuse(platform, {**base, retired: None}))
+
+    assert f"{shape.union_field}: {{mode: {absent_mode}}}" in message, message
+    assert shape.present_mode not in message, message
+    assert "no longer a supported field" not in message, message
+
+
+@pytest.mark.parametrize(("platform", "base", "retired", "absent_mode"), _ABSENT_CASES)
+def test_a_null_document_is_told_to_delete_the_line_because_adding_one_is_not_enough(
+    platform: str, base: dict[str, object], retired: str, absent_mode: str
+) -> None:
+    """The null case gets its own message because it needs a different
+    edit, and the assertion is that the edit WORKS rather than that the
+    words are there.
+
+    The absent message says nothing was deleted and one line is added.
+    For a document that wrote ``vm_host: null`` both halves are false:
+    following it leaves the null line in place, and the very next load
+    answers with ``vm_host: unknown field``. So the advice, applied
+    verbatim, has to be run here, and the version that only adds has to
+    be shown failing, or "delete the null line" is prose nothing holds to
+    account.
+    """
+    shape = _declared_shapes()[platform]
+    message = str(_refuse(platform, {**base, retired: None}))
+    assert "delete the null line" in message, message
+
+    applied: dict[str, object] = yaml.safe_load(shape.absent_rewrite)
+    assert applied == {shape.union_field: {"mode": absent_mode}}, applied
+
+    # The advice, applied: the null line deleted and the union written.
+    validate_capability_config(kind="vm-platform", config={"name": platform, **base, **applied}, owner=OWNER)
+
+    # And the edit the ABSENT message would have prescribed, which is why
+    # this document does not get that message.
+    with pytest.raises(ConfigError, match=f"{retired}: unknown field"):
+        validate_capability_config(
+            kind="vm-platform",
+            config={"name": platform, **base, retired: None, **applied},
+            owner=OWNER,
+        )
 
 
 @pytest.mark.parametrize(
@@ -197,15 +296,9 @@ def test_a_retired_shape_refusal_is_framed_like_the_errors_beside_it(platform: s
 # those pinned strings stale TOGETHER: the error would confidently print a
 # rewrite the model rejects. So the declarations are also compared to the
 # live models structurally, with no literal spelled on both sides.
-
-
-def _declared_shapes() -> dict[str, RetiredPresenceShape]:
-    """Every seated vm-platform's declaration, keyed by platform name."""
-    return {
-        name: shape
-        for name, impl in registered_implementations("vm-platform").items()
-        if isinstance(shape := getattr(impl, "retired_shape", None), RetiredPresenceShape)
-    }
+#
+# ``_declared_shapes`` is the read they share, and it sits with the other
+# helpers at the top because the message tests above read declarations too.
 
 
 def test_the_three_platforms_that_crossed_the_break_are_the_ones_declaring_it() -> None:
@@ -242,6 +335,33 @@ def test_each_declaration_matches_the_live_union_it_rewrites_to() -> None:
             )
         assert shape.retired_field not in model.model_fields, (
             f"{name}: '{shape.retired_field}' is still a live field of {model.__name__}"
+        )
+
+
+def test_the_present_arm_of_every_declaration_has_fields_for_the_marker_to_stand_for() -> None:
+    """The invariant ``rewrite_for``'s elided ``...`` rests on.
+
+    The marker claims there is more to write. That is true only while
+    every declared ``present_mode`` names an arm with fields beyond the
+    tag, which is no accident (a retired field carried a mode choice BY
+    carrying fields) but is enforced nowhere else. An arm that lost its
+    fields would leave the marker pointing at nothing, and the rewrite
+    for a keyless value would go back to being unappliable.
+
+    The tag field is found by what it IS (the field closed to exactly
+    this mode) rather than by spelling ``mode``, so the discriminator can
+    be renamed without this quietly passing on a subtraction that no
+    longer subtracts anything.
+    """
+    for name, shape in _declared_shapes().items():
+        model = capability_config_model("vm-platform", name)
+        assert model is not None
+        union_doc = next(doc for doc in iter_field_docs(model) if doc.path == (shape.union_field,))
+        arm = {arm.tag: arm.doc.model for arm in union_doc.union_arms}[shape.present_mode]
+        beyond_the_tag = [doc.path for doc in iter_field_docs(arm) if doc.choices != (shape.present_mode,)]
+        assert beyond_the_tag, (
+            f"{name}: the '{shape.present_mode}' arm has no fields beyond its tag, so the elided "
+            f"'...' in its rewrite stands for nothing"
         )
 
 

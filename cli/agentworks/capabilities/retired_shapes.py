@@ -94,11 +94,24 @@ class RetiredPresenceShape:
         The keys come from what the operator actually wrote, so a
         service principal with no ``secret`` does not get told to add
         one.
+
+        A value with NO keys to transcribe (a bare ``service_principal:
+        "oops"``, or an empty table) gets a bare ``...`` standing for the
+        arm's own fields. Without it the rewrite reads
+        ``auth: {mode: service-principal}``, a document the model rejects
+        for the three keys that arm requires: advice that fails when
+        applied verbatim, which is the defect class this whole break is
+        being carried across. The marker is honest for every declaration
+        below, because a retired field only ever carried a mode choice by
+        carrying fields, and
+        ``tests/capabilities/test_retired_shapes.py`` holds the present
+        arm to having some.
         """
         if self.scalar_field is not None:
             return f"{self.union_field}: {{mode: {self.present_mode}, {self.scalar_field}: ...}}"
         keys = list(value) if isinstance(value, Mapping) else []
-        inner = ", ".join([f"mode: {self.present_mode}", *(f"{key}: ..." for key in keys)])
+        elided = [f"{key}: ..." for key in keys] or ["..."]
+        inner = ", ".join([f"mode: {self.present_mode}", *elided])
         return f"{self.union_field}: {{{inner}}}"
 
     @property
@@ -143,16 +156,53 @@ def retired_shape_error(
     layer's unknown-key error against the stray field is already the
     precise answer; printing a rewrite would tell the operator to write
     something they have already written.
+
+    **An explicit ``null`` selects the ABSENT mode, so the branch is
+    taken on the VALUE and not on key membership.** All three retired
+    fields were optional, so a written ``null`` did exactly what omitting
+    the key did: ``service_principal: null`` and ``credentials: null``
+    selected the ambient chain, and ``vm_host: null`` ran ``limactl``
+    locally. Branching on membership answers the operator whose site was
+    LOCAL with ``placement: {mode: ssh, host: ...}``, which is not a
+    rewrite of their site but the opposite of it.
+
+    That is worth calling out rather than folding into the membership
+    test, because it is the very conflation this break exists to end: a
+    written ``null`` and a missing key meant one thing, one surface
+    disagreed, and every union below is the fix. Advice that reproduces
+    the conflation while announcing the cure is worse than no advice.
+
+    It gets its own message rather than sharing the absent one, because
+    the two documents need different edits. The absent message says
+    nothing was deleted and one line is added, and for a document that
+    WROTE ``vm_host: null`` both halves are false: that line has to go,
+    and leaving it while adding the union yields
+    ``vm_host: unknown field`` on the next load. Three spellings of the
+    old choice, three edits, three messages.
     """
     if shape is None or not isinstance(config, Mapping) or shape.union_field in config:
         return
-    if shape.retired_field in config:
+    written = config.get(shape.retired_field)
+    if written is not None:
         raise ConfigError(
             located(
                 location,
                 f"{owner.display}: '{shape.retired_field}' is no longer a supported field; the choice it "
                 f"used to carry by being present is written explicitly now: "
-                f"{shape.rewrite_for(config[shape.retired_field])}",
+                f"{shape.rewrite_for(written)}",
+            ),
+            entity_kind=owner.kind,
+            entity_name=owner.name,
+            hint=RETIRED_SHAPE_HINT,
+        )
+    if shape.retired_field in config:
+        raise ConfigError(
+            located(
+                location,
+                f"{owner.display}: '{shape.union_field}' is required and this resource does not declare it. "
+                f"'{shape.retired_field}: null' selected '{shape.absent_mode}', exactly as omitting the key "
+                f"did, and that is the conflation the required '{shape.union_field}' ends; delete the null "
+                f"line and write the choice instead: {shape.absent_rewrite}",
             ),
             entity_kind=owner.kind,
             entity_name=owner.name,
