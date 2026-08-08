@@ -256,7 +256,7 @@ def _migration_actions() -> tuple[GuideAction, ...]:
                     True,
                 ),
             ),
-            ConsentBoundary.READ_CONFIGURED_STATE,
+            ConsentBoundary.EXAMINE_WORKSTATION,
             ("agw", "resource", "list", "--origin", "operator"),
             "The operator inventory matches EXPECTED_IDENTITIES exactly by kind/name, operator-declared origin "
             "variant, and intended manifest file path, with source line ignored and no missing or extra resource.",

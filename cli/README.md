@@ -751,9 +751,11 @@ future bootstrap service consumers may provide the typed tuple they own at the s
 Guide remains useful when configuration or registry finalization fails. Authored prose still
 renders, schema-derived field references and samples remain available without configuration, other
 live blocks are marked unavailable, the framed failure appears once, and the command exits 1.
-`--names-only` emits one retained topic per line, degrades to authored topics plus every
-schema-describable kind and capability implementation under broken configuration, and exits 0. This
-stable stream backs Bash, Zsh, and PowerShell topic completion.
+`--names-only` emits one retained topic per line, degrades to authored topics plus every retained
+schema-describable kind and capability implementation under broken configuration, and exits 0. An
+invalid schema-derived topic is isolated as a scoped content issue in normal rendering and omitted
+from name discovery, while unaffected topics remain available. This stable stream backs Bash, Zsh,
+and PowerShell topic completion.
 
 `concept-migration` is the exceptional 0.14 resource-model rewrite guide, not a general upgrade
 workflow. It keeps the sequence, checkpoints, and consent boundaries in colocated package data and
@@ -764,7 +766,9 @@ manifests and retired-TOML resources, records every intended TOML manifest file,
 complete identity union. It then backs up configuration and resources separately to fresh
 operator-selected destinations outside the active trees, verifies matching copies or an explicit
 absent resources baseline without extending the union, and edits only at pre-recorded paths. Final
-identity matching keeps operator origin and manifest paths while ignoring mutable source lines.
+identity matching keeps operator origin and manifest paths while ignoring mutable source lines. The
+final operator inventory can probe host readiness, so its action requires consent to examine the
+workstation.
 
 | Command                                                               | Description                                      |
 | --------------------------------------------------------------------- | ------------------------------------------------ |
