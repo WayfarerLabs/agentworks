@@ -664,6 +664,15 @@ leaves the mechanism implicit and reintroduces one layer up exactly what the uni
 that is fully specified today is fine even if a future sibling would make it ambiguous; implicitness
 is judged against what exists, not against what might.
 
+**Pick the DISCRIMINATOR key by the field's grammar, and expect `mode`.** Every union shipped today
+spells it `mode`, and a new one probably should: `auth` and `placement` both name an ACTION, and an
+action is done in a mode. That is why `placement.mode` reads and `placement.type` does not. A field
+named for a STATE rather than an action takes `type` instead, because a state has a kind and not a
+manner, and forcing `mode` onto one would be the same category error in reverse. So
+`<mechanism>.mode` is the dominant pattern rather than a rule: follow it unless your field is a noun
+of the other sort, and if you diverge, say at the site which it is so the next reader sees a
+decision rather than an inconsistency.
+
 **Name the FIELD for what it selects, and let sibling capabilities diverge.** `auth` on `azure-vm`
 and `aws-ec2` and `placement` on `lima` are the same shape doing different jobs: one selects an
 identity, the other selects where `limactl` runs. Naming both of them the same thing for symmetry's
