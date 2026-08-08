@@ -445,7 +445,7 @@ def test_remote_stdin_write_failure_removes_partial_template_and_preserves_error
     monkeypatch.setattr(lima_mod, "ssh_run", _ssh_run)
 
     with pytest.raises(SSHError) as caught:
-        LimaPlatform("lima", {"vm_host": "user@host"})._create_remote(
+        LimaPlatform("lima", {"placement": {"mode": "ssh", "host": "user@host"}})._create_remote(
             "myvm",
             f"embedded: {secret}",
             redactions=(secret,),
@@ -476,7 +476,7 @@ def test_remote_template_staging_is_mode_0600_stdin_and_verified_cleanup(
 
     monkeypatch.setattr(lima_mod, "ssh_run", _ssh_run)
 
-    LimaPlatform("lima", {"vm_host": "user@host"})._create_remote(
+    LimaPlatform("lima", {"placement": {"mode": "ssh", "host": "user@host"}})._create_remote(
         "myvm",
         f"embedded: {secret}",
         redactions=(secret,),
@@ -543,7 +543,7 @@ def test_remote_template_uses_private_random_directory_not_predictable_fifo(
 
     monkeypatch.setattr(lima_mod, "ssh_run", _ssh_run)
 
-    LimaPlatform("lima", {"vm_host": "user@host"})._create_remote(
+    LimaPlatform("lima", {"placement": {"mode": "ssh", "host": "user@host"}})._create_remote(
         "myvm",
         f"embedded: {secret}",
         redactions=(secret,),
@@ -572,7 +572,7 @@ def test_remote_template_rejects_untrusted_allocation_path(
     monkeypatch.setattr(lima_mod, "ssh_run", _ssh_run)
 
     with pytest.raises(ProvisioningError) as caught:
-        LimaPlatform("lima", {"vm_host": "user@host"})._create_remote(
+        LimaPlatform("lima", {"placement": {"mode": "ssh", "host": "user@host"}})._create_remote(
             "myvm",
             "embedded: secret",
             redactions=("secret",),
@@ -604,7 +604,7 @@ def test_remote_template_cleanup_retries_then_succeeds_without_surface(
 
     monkeypatch.setattr(lima_mod, "ssh_run", _ssh_run)
 
-    LimaPlatform("lima", {"vm_host": "user@host"})._remove_remote_template_dir(
+    LimaPlatform("lima", {"placement": {"mode": "ssh", "host": "user@host"}})._remove_remote_template_dir(
         SimpleNamespace(),  # type: ignore[arg-type]
         _REMOTE_TEMPLATE_DIR,
     )
@@ -633,7 +633,7 @@ def test_repeated_remote_template_cleanup_failure_reports_typed_residue(
     monkeypatch.setattr(lima_mod, "ssh_run", _ssh_run)
 
     with pytest.raises(SensitiveDataCleanupError) as caught:
-        LimaPlatform("lima", {"vm_host": "user@host"})._remove_remote_template_dir(
+        LimaPlatform("lima", {"placement": {"mode": "ssh", "host": "user@host"}})._remove_remote_template_dir(
             SimpleNamespace(),  # type: ignore[arg-type]
             _REMOTE_TEMPLATE_DIR,
         )
@@ -661,7 +661,7 @@ def test_remote_template_cleanup_propagates_programming_errors(
     monkeypatch.setattr(lima_mod, "ssh_run", _ssh_run)
 
     with pytest.raises(RuntimeError) as caught:
-        LimaPlatform("lima", {"vm_host": "user@host"})._remove_remote_template_dir(
+        LimaPlatform("lima", {"placement": {"mode": "ssh", "host": "user@host"}})._remove_remote_template_dir(
             SimpleNamespace(),  # type: ignore[arg-type]
             _REMOTE_TEMPLATE_DIR,
         )
@@ -689,7 +689,7 @@ def test_successful_remote_operation_with_cleanup_residue_fails_closed(
     monkeypatch.setattr(lima_mod, "ssh_run", _ssh_run)
 
     with pytest.raises(SensitiveDataCleanupError) as caught:
-        LimaPlatform("lima", {"vm_host": "user@host"})._create_remote(
+        LimaPlatform("lima", {"placement": {"mode": "ssh", "host": "user@host"}})._create_remote(
             "myvm",
             f"embedded: {secret}",
             redactions=(secret,),
@@ -721,7 +721,7 @@ def test_staging_and_repeated_cleanup_failure_reports_safe_combined_error(
     monkeypatch.setattr(lima_mod, "ssh_run", _ssh_run)
 
     with pytest.raises(SensitiveDataCleanupError) as caught:
-        LimaPlatform("lima", {"vm_host": "user@host"})._create_remote(
+        LimaPlatform("lima", {"placement": {"mode": "ssh", "host": "user@host"}})._create_remote(
             "myvm",
             f"embedded: {secret}",
             redactions=(secret,),
@@ -761,7 +761,7 @@ def test_staging_interrupt_and_cleanup_interrupt_preserve_original_after_retry(
     monkeypatch.setattr(lima_mod, "ssh_run", _ssh_run)
 
     with pytest.raises(KeyboardInterrupt) as caught:
-        LimaPlatform("lima", {"vm_host": "user@host"})._create_remote(
+        LimaPlatform("lima", {"placement": {"mode": "ssh", "host": "user@host"}})._create_remote(
             "myvm",
             f"embedded: {secret}",
             redactions=(secret,),
@@ -802,7 +802,7 @@ def test_logger_close_interrupt_preserves_active_interrupt_and_cleans_template(
     monkeypatch.setattr(SSHLogger, "close", _interrupt_close)
 
     with pytest.raises(KeyboardInterrupt) as caught:
-        LimaPlatform("lima", {"vm_host": "user@host"})._create_remote(
+        LimaPlatform("lima", {"placement": {"mode": "ssh", "host": "user@host"}})._create_remote(
             "myvm",
             "embedded: secret",
             redactions=("secret",),
@@ -840,7 +840,7 @@ def test_remote_interrupt_preserves_original_when_artifact_cleanup_fails(
     )
 
     with pytest.raises(KeyboardInterrupt) as caught:
-        LimaPlatform("lima", {"vm_host": "user@host"}).create(_request(), RunContext())
+        LimaPlatform("lima", {"placement": {"mode": "ssh", "host": "user@host"}}).create(_request(), RunContext())
 
     assert caught.value is interrupt
     assert any(kind == "host" and cmd.startswith("rm -f") and ".sh" in cmd for kind, cmd in events)
@@ -881,7 +881,7 @@ def test_remote_exception_kills_cleans_artifacts_then_deletes_without_masking(
     )
 
     with pytest.raises(SSHError) as caught:
-        LimaPlatform("lima", {"vm_host": "user@host"}).create(_request(), RunContext())
+        LimaPlatform("lima", {"placement": {"mode": "ssh", "host": "user@host"}}).create(_request(), RunContext())
 
     assert caught.value is original
     kill_cmd = "kill $(cat /tmp/agentworks-lima-myvm.pid)"
@@ -920,7 +920,7 @@ def test_remote_provision_failure_redacts_log_and_raised_error(
     )
 
     with pytest.raises(SSHError) as caught:
-        LimaPlatform("lima", {"vm_host": "user@host"})._create_remote(
+        LimaPlatform("lima", {"placement": {"mode": "ssh", "host": "user@host"}})._create_remote(
             "myvm",
             f"embedded: {secret}",
             redactions=(secret,),
