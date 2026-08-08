@@ -26,6 +26,15 @@ as hard errors. The config deprecation channel is kept deliberately as the warn-
 `capabilities/facets.py` was removed pending its wave 4 consumer; the `config_for(facet)` contract
 stays settled in the docs and this roadmap's contracts.
 
+The vm-platform mode contract landed post-lock (PR #444, 2026-08-08, recorded on that SDD's
+lockfile): azure and aws carry a required-shape `auth` union (`ambient` or their credential arm),
+lima carries `placement` (`local` or `ssh`), each union defaulting to the mode omission historically
+selected, with extraction reading declared defaults as if written so an omitted union produces the
+same graph edges as the written spelling. Written old shapes hard-error with the exact rewrite; an
+untouched 0.13 estate loads unchanged. The variant-modeling rule (one arm per required-field shape;
+the discriminator tracks shape, not concept) lives permanently in
+`cli/agentworks/capabilities/README.md`.
+
 ## Deprecation removal targets
 
 Cleared by wave 1 (PR #406, 2026-08-05): every in-scope expired surface is removed, including the

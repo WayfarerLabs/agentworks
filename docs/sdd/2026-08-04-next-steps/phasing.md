@@ -105,8 +105,11 @@ picked off whenever bandwidth allows, on its own merits and its own schedule.
   so the release that rejects old inputs also ships the CLI that teaches the new ones; newcomers
   ride the forgiving 0.13.0 until then. The 0.13.0 warnings stay true because the version number
   attaches to the breaking content, not the date. If wave 2's generic-discriminator hard error lands
-  in the same window, it folds in: one well-cushioned breaking release instead of two. While `main`
-  holds unreleased breaking changes, urgent operator fixes ship from a `0.13.x` backport branch.
+  in the same window, it folds in: one well-cushioned breaking release instead of two. The
+  vm-platform mode contract (PR #444, merged 2026-08-08) folds in the same way: its
+  written-old-shape hard errors ride the cushioned release, and its omission-equals-historical-
+  default posture means untouched 0.13 manifests cross without edits. While `main` holds unreleased
+  breaking changes, urgent operator fixes ship from a `0.13.x` backport branch.
 - **Later:** remaining waves map to releases as they prove out; no need to pin numbers now.
 
 ## Open ordering decisions
