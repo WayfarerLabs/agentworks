@@ -671,11 +671,11 @@ def reinit_vm(
             except KeyboardInterrupt:
                 output.warn(
                     f"Cancelling vm reinit '{name}'. The VM may be in a partial state. "
-                    f"Re-run 'vm reinit {name}' to retry. Log: {logger.path}"
+                    f"Re-run 'vm reinit {name}' to retry. Log: {logger.display_path}"
                 )
                 raise
             except Exception:
-                output.warn(f"Log: {logger.path}")
+                output.warn(f"Log: {logger.display_path}")
                 raise
         finally:
             logger.close()
@@ -685,6 +685,6 @@ def reinit_vm(
     # Terminal outcome line at column 0 via result().
     if refreshed_vm.init_status == InitStatus.PARTIAL.value:
         output.result(f"VM '{name}' reinitialized (with warnings, see above)")
-        output.info(f"Log: {logger.path}")
+        output.info(f"Log: {logger.display_path}")
     else:
         output.result(f"VM '{name}' reinitialized successfully!")

@@ -190,12 +190,13 @@ def _resolve_system_slug(db: Database) -> str | None:
 
 def _init_log_hint(vm_name: str) -> str:
     """Return a log hint suffix like ' See log: <path>' or empty string."""
+    from agentworks.source_location import format_file_path
     from agentworks.ssh import LOG_DIR
 
     if not LOG_DIR.exists():
         return ""
     logs = sorted(LOG_DIR.glob(f"{vm_name}-*.log"), reverse=True)
-    return f" See log: {logs[0]}" if logs else ""
+    return f" See log: {format_file_path(logs[0])}" if logs else ""
 
 
 def _guard_failed_vm(vm: VMRow, *, allow_failed_init: bool = False) -> None:

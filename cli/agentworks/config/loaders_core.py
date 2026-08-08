@@ -27,6 +27,7 @@ from agentworks.config.models import DefaultsConfig, OperatorConfig, PathsConfig
 from agentworks.config.validation import validate_vm_workspaces
 from agentworks.errors import ConfigError
 from agentworks.naming import SSH_HOST_PREFIX_RE
+from agentworks.source_location import format_file_path
 
 
 def _expand(path_str: str) -> Path:
@@ -117,10 +118,13 @@ def _load_operator(data: dict[str, object], issues: list[str]) -> OperatorConfig
     pub = _expand(str(_require(raw, "ssh_public_key", "operator")))
     priv = _expand(str(_require(raw, "ssh_private_key", "operator")))
 
+    # `_expand` has already turned the operator's `~/.ssh/id_ed25519` into
+    # an absolute path, so rendering it back home-relative also happens to
+    # quote the setting closer to the way they wrote it in config.toml.
     if not pub.exists():
-        raise ConfigError(f"operator.ssh_public_key does not exist: {pub}", hint=_SSH_KEY_HINT)
+        raise ConfigError(f"operator.ssh_public_key does not exist: {format_file_path(pub)}", hint=_SSH_KEY_HINT)
     if not priv.exists():
-        raise ConfigError(f"operator.ssh_private_key does not exist: {priv}", hint=_SSH_KEY_HINT)
+        raise ConfigError(f"operator.ssh_private_key does not exist: {format_file_path(priv)}", hint=_SSH_KEY_HINT)
 
     ssh_config = Path.home() / ".ssh" / "config"
     if "ssh_config" in raw:
@@ -130,7 +134,7 @@ def _load_operator(data: dict[str, object], issues: list[str]) -> OperatorConfig
     for entry in raw.get("extra_ssh_public_keys", []):
         p = _expand(str(entry))
         if not p.exists():
-            raise ConfigError(f"operator.extra_ssh_public_keys: file does not exist: {p}")
+            raise ConfigError(f"operator.extra_ssh_public_keys: file does not exist: {format_file_path(p)}")
         extra_keys.append(p)
 
     # Extra sources allowed through the transient cloud SSH firewall

@@ -601,7 +601,7 @@ class LimaPlatform(VMPlatform):
                 ssh_logger.log_error(result.output)
                 raise SSHError(
                     f"limactl create/start failed (exit {result.exit_code})\n"
-                    f"SSH log: {ssh_logger.path}\n"
+                    f"SSH log: {ssh_logger.display_path}\n"
                     f"Last output:\n{result.output[-1000:]}"
                 )
         finally:

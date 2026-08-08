@@ -11,7 +11,10 @@ from __future__ import annotations
 import json
 import sqlite3
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+from agentworks.source_location import format_file_path
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -55,8 +58,9 @@ def _migrate_vm_sites(conn: sqlite3.Connection, context: MigrationContext) -> No
     """
     # Name the DB file in validation errors so the operator knows which
     # file to inspect/fix (PRAGMA reports the actual attached file, so
-    # this stays honest for non-default paths, e.g. in tests).
-    db_file = conn.execute("PRAGMA database_list").fetchone()[2]
+    # this stays honest for non-default paths, e.g. in tests). Spelled
+    # home-relative like every other host path an operator reads.
+    db_file = format_file_path(Path(conn.execute("PRAGMA database_list").fetchone()[2]))
 
     # Validate BEFORE the first DDL statement. Pre-v27 schemas only
     # ever stored the four legacy platform names, and the vm-sites

@@ -63,7 +63,7 @@ than it is:
 ```console
 $ agw doctor    # config.toml still declares every section
 Configuration:
-  [ok]   Config file: /home/you/.config/agentworks/config.toml
+  [ok]   Config file: ~/.config/agentworks/config.toml
   [FAIL] Config: config.toml declares resources, which config.toml no longer supports (it is
          settings only now): [secrets.*], [vm_templates.*], [agent_templates.*], ...
   [FAIL] Manifest: ~/.config/agentworks/resources/vm-templates.yaml:1: vm-template/default.memory_gib:
@@ -386,7 +386,7 @@ file, a resource, and a field.
 
 ```console
 Configuration:
-  [ok]   Config file: /home/you/.config/agentworks/config.toml
+  [ok]   Config file: ~/.config/agentworks/config.toml
   [ok]   Config is valid
 
 Secrets:

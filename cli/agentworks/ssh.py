@@ -109,6 +109,27 @@ class SSHLogger:
         ts = datetime.now(tz=UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
         self._write(f"# Log: {vm_name} ({command_stem})\n# Started: {ts}\n\n")
 
+    @property
+    def display_path(self) -> str:
+        """``path`` spelled the way an operator reads it (``~/...``).
+
+        Separate from ``path`` because the two have different jobs: ``path``
+        is opened and written to, ``display_path`` is interpolated into
+        messages. Every caller that says "SSH log: ..." wants this one; a
+        dozen of them used to say ``{logger.path}`` and print an absolute
+        path next to a home-relative one from the same screen.
+
+        This is about naming the log, not about what goes INSIDE it. The
+        log body stays absolute throughout: it is a verbatim transcript,
+        its command lines are the literal argv that ran, and abbreviating
+        the prose lines while the ``$ ssh -i /home/you/...`` lines beside
+        them stayed absolute would recreate the mixed rendering one level
+        down.
+        """
+        from agentworks.source_location import format_file_path
+
+        return format_file_path(self.path)
+
     def add_redaction(self, secret: str) -> None:
         """Register a secret to be redacted from all output."""
         if secret:

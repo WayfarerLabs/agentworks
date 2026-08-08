@@ -14,6 +14,8 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from agentworks.source_location import format_file_path
+
 if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.resources.registry import Registry
@@ -458,11 +460,21 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
     g = HealthGroup("Configuration")
     config = None
 
+    # Home-relative like every other path doctor prints. Doctor is the
+    # command whose output gets pasted into an issue, which is the one
+    # argument for spelling paths absolutely here, and it does not hold
+    # up: an operator's home is not the ambiguous part of a bug report,
+    # and `~/` avoids pasting their username into a public tracker. The
+    # decisive point is that this row and the Manifest row render a few
+    # lines apart in the same group, naming files in the same directory
+    # tree. Whatever they do they must do together, and the Manifest row
+    # is framed by `located()`, which is shared with every non-doctor
+    # surface that reports the same error, so it is not doctor's to change.
     if not CONFIG_PATH.exists():
-        g.fail("Config file", f"not found: {CONFIG_PATH}. Run 'agw config init' to create one.")
+        g.fail("Config file", f"not found: {format_file_path(CONFIG_PATH)}. Run 'agw config init' to create one.")
         return g, None, None
 
-    g.ok("Config file", str(CONFIG_PATH))
+    g.ok("Config file", format_file_path(CONFIG_PATH))
 
     config_load_failed = False
     try:
@@ -586,13 +598,13 @@ def _check_ssh_key(g: HealthGroup, path: object, label: str) -> None:
         g.fail(f"SSH {label} key", "invalid path")
         return
     if not path.exists():
-        g.fail(f"SSH {label} key", f"not found: {path}")
+        g.fail(f"SSH {label} key", f"not found: {format_file_path(path)}")
         return
     if not os.access(path, os.R_OK):
-        g.fail(f"SSH {label} key", f"not readable: {path}")
+        g.fail(f"SSH {label} key", f"not readable: {format_file_path(path)}")
         return
 
-    g.ok(f"SSH {label} key", str(path))
+    g.ok(f"SSH {label} key", format_file_path(path))
 
     # Check permissions on private key. Skipped on Windows: st_mode there is
     # synthesized from the read-only attribute (typically reports 0o666) and
@@ -762,7 +774,7 @@ def _report_db_contents(g: HealthGroup, db: object) -> None:
         if not LOG_DIR.exists():
             return ""
         logs = sorted(LOG_DIR.glob(f"{vm_name}-*.log"), reverse=True)
-        return f" Log: {logs[0]}" if logs else ""
+        return f" Log: {format_file_path(logs[0])}" if logs else ""
 
     for vm in vms:
         if vm.init_status == InitStatus.FAILED.value:
