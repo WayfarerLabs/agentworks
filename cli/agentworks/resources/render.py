@@ -5,18 +5,19 @@ the cross-kind ``agw resource describe`` and the per-kind commands
 same ``Origin`` shape; defining the renderer next to ``Origin`` keeps the
 layer correct.
 
-``format_file_path`` is re-exported from ``agentworks.source_location``,
-which is where it moved so the schema error bridge can render a path the
-same way without importing this package: importing anything under
-``agentworks.resources`` runs that package's ``__init__``, which loads
-every kind module.
+The host paths these renderers embed are spelled by
+``agentworks.path_rendering.format_file_path``, the repo-wide rule, which
+lives in its own top-level leaf so the schema error bridge can render a
+path the same way without importing this package: importing anything
+under ``agentworks.resources`` runs that package's ``__init__``, which
+loads every kind module. Import it from there rather than from here.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from agentworks.source_location import format_file_path
+from agentworks.path_rendering import format_file_path
 
 if TYPE_CHECKING:
     from agentworks.origin import Origin
@@ -88,4 +89,4 @@ def format_origin_location(origin: Origin | None) -> str:
     return format_origin_line(origin)
 
 
-__all__ = ["format_file_path", "format_origin_line", "format_origin_location"]
+__all__ = ["format_origin_line", "format_origin_location"]

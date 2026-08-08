@@ -14,7 +14,7 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from agentworks.source_location import format_file_path
+from agentworks.path_rendering import format_file_path
 
 if TYPE_CHECKING:
     from agentworks.config import Config

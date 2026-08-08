@@ -10,7 +10,7 @@ from pathlib import Path
 
 import typer
 
-from agentworks.source_location import format_file_path
+from agentworks.path_rendering import format_file_path
 
 # The exact shape the installer appends to $PROFILE: a leading dot-source
 # operator, a double-quoted absolute path, ending in ``agentworks.ps1``.

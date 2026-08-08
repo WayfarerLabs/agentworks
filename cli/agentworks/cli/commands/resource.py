@@ -15,6 +15,11 @@ import typer
 from agentworks.cli._app import app
 from agentworks.cli._helpers import get_db
 
+# Module-level because three commands in this file render a host path and
+# `path_rendering` is a leaf module (pathlib only), so hoisting it costs
+# no startup time.
+from agentworks.path_rendering import format_file_path
+
 # Module-level so the sample-kind Choice below can be built at decoration
 # time. This is intentional and adds no startup cost over the pre-fix
 # code: that imported SAMPLE_KINDS from `agentworks.manifests.samples`,
@@ -22,11 +27,6 @@ from agentworks.cli._helpers import get_db
 # transitively, so `agw`, `agw --help`, and completion loaded the same
 # modules before this fix.
 from agentworks.resources import KIND_REGISTRY
-
-# Module-level because three commands in this file render a host path and
-# `source_location` is a leaf module (re, dataclasses, pathlib), so
-# hoisting it costs no startup time.
-from agentworks.source_location import format_file_path
 
 if TYPE_CHECKING:
     from agentworks.resources.inspect import OriginFilter

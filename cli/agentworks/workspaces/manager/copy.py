@@ -10,7 +10,7 @@ from agentworks import output
 from agentworks.agents.grants import MAX_WORKSPACE_NAME_LENGTH
 from agentworks.errors import AlreadyExistsError, ExternalError, NotFoundError, StateError
 from agentworks.naming import validate_name
-from agentworks.source_location import format_file_path
+from agentworks.path_rendering import format_file_path
 from agentworks.vms.manager import gated_vm_boundary
 from agentworks.workspaces.backends.vm import default_workspace_path
 from agentworks.workspaces.manager._common import _guard_vm_status, _resolve_vm, _workspace_scope

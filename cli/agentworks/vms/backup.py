@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.errors import BackupError, NotFoundError, StateError
-from agentworks.source_location import format_file_path
+from agentworks.path_rendering import format_file_path
 from agentworks.vms.manager import gated_vm_boundary
 
 if TYPE_CHECKING:
