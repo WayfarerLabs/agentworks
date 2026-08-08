@@ -6,6 +6,15 @@ reads is the model's reference markers, so renaming a marked field, or
 adding a second one, changes the extracted edges with no other edit
 anywhere.
 
+**This walker renders nothing.** An owner-templated default is resolved
+into the blob by the boundary fill
+(:func:`~agentworks.schema.filled_defaults`) before either validation or
+extraction reads it, so the blob handed here already carries every name
+the validated config will carry, and there is no second renderer to
+disagree with. Hand it the blob the fill ran over, which is the blob
+validation is (or would be) given; an unfilled blob extracts no edge for
+a templated field, exactly as it fails validation.
+
 **An absent field with a declared default is read as if the operator had
 written the default's value.** Validation answers absence with the
 default, so a default that names a Resource (a marked field's own plain
@@ -27,9 +36,8 @@ blob it cannot make sense of contributes no edges. The registry builds
 edges in pass 1 and validates in pass 7, so a config with both a
 malformed blob and a cycle must still report the cycle. Totality is a
 property of the code, not of a guard: the walk performs only membership
-tests, ``isinstance`` checks, ``Mapping.get``, and a substitution over a
-placeholder vocabulary that was validated when the marker was
-constructed. There is deliberately NO blanket ``except Exception``,
+tests, ``isinstance`` checks, and ``Mapping.get``.
+There is deliberately NO blanket ``except Exception``,
 because that would turn a bug in this walker into silently missing graph
 edges, and a graph that builds while quietly omitting a secret is worse
 than a traceback. The one narrow guard sits in
@@ -62,7 +70,7 @@ if TYPE_CHECKING:
     from pydantic.fields import FieldInfo
 
     from agentworks.schema._shape import FieldShape, UnionArmType
-    from agentworks.schema.markers import RefMarker, RefOwner
+    from agentworks.schema.markers import RefMarker
 
 
 @dataclass(frozen=True)
@@ -94,7 +102,6 @@ _Node = _Block | _Edge
 def extract_references(
     model_cls: type[BaseModel],
     blob: object,
-    owner: RefOwner,
 ) -> tuple[ConfigReference, ...]:
     """Every Resource reference ``blob`` implies under ``model_cls``, read
     structurally from the model's reference-marked fields.
@@ -108,9 +115,12 @@ def extract_references(
 
     Never raises; see the module docstring for why that is load-bearing.
 
-    The parameters are the model, the blob, and the owner, and that is
-    the whole input. This function is deliberately not given the
-    registry, the config, the graph, a source location, or a
+    The parameters are the model and the blob, and that is the whole
+    input: extraction is a pure function of the two. There is no owner
+    here, and that absence is the design: the owner's one job was
+    rendering templated defaults, which the boundary fill now writes into
+    the blob before this reads it. Neither is this given the registry,
+    the config, the graph, a source location, or a
     declared-versus-effective flag: a blob validated against the same
     model extracts identically no matter where it came from, because
     this walker cannot tell the difference. An inheriting host reads its
@@ -119,7 +129,7 @@ def extract_references(
     that is therefore two CALLS by the caller, never a parameter here.
     """
     root: _Node = _Block(model=model_cls, blob=blob)
-    walk = iter_descendants(root, lambda node: _below(node, owner), key=_identity_of)
+    walk = iter_descendants(root, _below, key=_identity_of)
     return tuple(node.reference for node in walk if isinstance(node, _Edge))
 
 
@@ -147,7 +157,7 @@ def _identity_of(node: _Node) -> Hashable:
     return (node.model, id(node.blob)) if isinstance(node, _Block) else id(node)
 
 
-def _below(node: _Node, owner: RefOwner) -> Iterator[_Node]:
+def _below(node: _Node) -> Iterator[_Node]:
     """What ``node`` contains, in declaration order: the edge each marked
     field names, and the block each nested field opens, whether it opens
     it outright, through a tag, or by being written as a table where a
@@ -159,9 +169,9 @@ def _below(node: _Node, owner: RefOwner) -> Iterator[_Node]:
     """
     if isinstance(node, _Edge):
         return
-    for shape, present, value in _field_values(node):
+    for shape, value in _field_values(node):
         if shape.marker is not None:
-            yield from _scalar_edge(shape.marker, present=present, value=value, owner=owner)
+            yield from _scalar_edge(shape.marker, value)
         elif shape.collection is not None:
             yield from _collection_nodes(shape, value)
         elif shape.nested_model is not None:
@@ -172,14 +182,13 @@ def _below(node: _Node, owner: RefOwner) -> Iterator[_Node]:
             yield from _union_block(shape.union_model, shape.union_members, value)
 
 
-def _field_values(block: _Block) -> Iterator[tuple[FieldShape, bool, object]]:
+def _field_values(block: _Block) -> Iterator[tuple[FieldShape, object]]:
     """Each declared field of ``block``'s model, with the raw value the
-    blob holds for it and whether the operator wrote the key at all.
+    blob holds for it.
 
     An absent field arrives carrying its declared default's blob (or
-    ``None`` when it has none), still flagged absent: the flag is what
-    lets :func:`_scalar_edge` rank the marker's owner template above a
-    declared default, exactly as validation's filler does.
+    ``None`` when it has none): validation answers absence with the
+    default, so the default is what the field is worth.
     """
     fields = model_fields_of(block.model)
     if fields is None:
@@ -191,49 +200,27 @@ def _field_values(block: _Block) -> Iterator[tuple[FieldShape, bool, object]]:
         # model-rooted one carries whatever its root model carries.
         root = fields.get("root")
         if root is not None:
-            yield shape_of(root), True, block.blob
+            yield shape_of(root), block.blob
         return
     if not isinstance(block.blob, Mapping):
         return
     defaults = _absent_defaults(block.model)
     for name, field in fields.items():
-        present = name in block.blob
-        yield shape_of(field), present, block.blob.get(name) if present else defaults.get(name)
+        yield shape_of(field), block.blob[name] if name in block.blob else defaults.get(name)
 
 
-def _scalar_edge(
-    marker: RefMarker,
-    *,
-    present: bool,
-    value: object,
-    owner: RefOwner,
-) -> Iterator[_Edge]:
-    """A marked scalar field: the operator's name, else the marker's
-    owner-templated default, else the field's own declared default (which
-    is what ``value`` holds when the field is absent), else nothing.
+def _scalar_edge(marker: RefMarker, value: object) -> Iterator[_Edge]:
+    """A marked scalar field: the name it holds, or nothing.
 
-    A value that is present but is not a non-empty string destroys the
-    edge's identity, so the edge is omitted rather than guessed at. That
-    reproduces what every hand-rolled ``dependencies`` does today.
-
-    The precedence mirrors validation exactly, and has to: the base
-    model's filler answers an absent (or null) templated field with the
-    rendered template BEFORE pydantic could reach for a declared default,
-    so the template outranks the default here too, and a written null
-    resolves to the template or to nothing, never to a default pydantic
-    reserves for the absent key.
+    ``value`` is the operator's own string, the rendered name the
+    boundary fill wrote for an omitted templated field, or the field's
+    declared default (which is what an absent field arrives carrying);
+    the walker cannot tell which, and does not need to. Anything that is
+    not a non-empty string destroys the edge's identity, so the edge is
+    omitted rather than guessed at, which is also what a written ``null``
+    on an untemplated marked field resolves to.
     """
-    if present:
-        if isinstance(value, str) and value:
-            yield _Edge(_reference(marker, value))
-            return
-        if value is not None:
-            return
-    templated = marker.render_default(owner)
-    if templated:
-        yield _Edge(_reference(marker, templated))
-        return
-    if not present and isinstance(value, str) and value:
+    if isinstance(value, str) and value:
         yield _Edge(_reference(marker, value))
 
 
@@ -367,18 +354,20 @@ def _absent_defaults(model_cls: type[BaseModel]) -> dict[str, object]:
 
     - A CONSTRUCTED default (a model instance, or a collection holding
       one) is dumped to the mapping it is equivalent to. Such an instance
-      can never carry an owner-templated marked field, and that is a
-      limitation of instance defaults rather than a principle: building
-      the instance at class definition needs the owner, and no owner
-      exists until a document is validated.
+      never carries an UNSET owner-templated field: building it required
+      every field, so its dump is complete.
     - A RAW value (a scalar, or a plain mapping or list the author wrote
       as data) passes through untouched, and this is the spelling that
-      CAN express an owner-templated default: the walk descends into the
-      raw mapping and renders the marker's template for whatever the
-      mapping leaves absent, exactly as validation (which validates the
-      raw default with the live context under ``validate_default``)
-      fills it. The two resolve the same name because both resolve it at
-      use, each with the owner in hand.
+      CAN leave an owner-templated field unset: the boundary fill
+      materializes such a default into the blob, filled, before either
+      validation or this walk reads it, so what descends here already
+      carries the rendered name.
+
+    Shared with the boundary fill
+    (:mod:`agentworks.schema.fill`), which substitutes an absent field's
+    default the same way before deciding whether anything inside it needs
+    filling; one function is what keeps "what an omitted field is worth"
+    a single answer.
 
     A ``default_factory`` is called once here, like the field-doc
     stream's ``_default_of``, unless it takes validated data: that

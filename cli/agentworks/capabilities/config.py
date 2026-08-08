@@ -52,7 +52,7 @@ from agentworks.schema import (
     AgwRootModel,
     config_error_from,
     extract_references,
-    validation_context,
+    filled_defaults,
 )
 
 if TYPE_CHECKING:
@@ -212,18 +212,18 @@ def capability_config_references(
     before anything is validated, so a config nobody can make sense of has
     to contribute no edges rather than sink the walk.
 
-    What is read is exactly what would be VALIDATED, tag and all. That is
-    not a change of substance from the raw-blob rule this used to state:
-    the rule existed because the tagged form was a synthesis the caller
-    did not have, and now it is the table the operator wrote. An arm
-    model's tag field carries no reference marker, so it contributes
-    nothing either way.
+    What is read is exactly what would be VALIDATED, tag and all, and
+    filled the same way: the boundary fill runs here as it does before
+    validation, so the edges come off the blob validation would see and
+    the two cannot disagree on a rendered default. An arm model's tag
+    field carries no reference marker, so it contributes nothing either
+    way.
     """
     selected = selected_name(kind, config, name)
     model = None if selected is None else capability_config_model(kind, selected)
     if model is None:
         return ()
-    return extract_references(model, config, owner)
+    return extract_references(model, filled_defaults(model, config, owner))
 
 
 def resolved_capability_modes(
@@ -462,7 +462,10 @@ def _validated(
     provenance: Mapping[str, RefOwner] | None = None,
 ) -> BaseModel:
     try:
-        return model.model_validate(payload, context=validation_context(owner))
+        # The boundary fill: an omitted owner-templated field is rendered
+        # into the blob here, so what pydantic validates is complete and
+        # the model itself needs no owner.
+        return model.model_validate(filled_defaults(model, payload, owner))
     except PydanticValidationError as exc:
         raise config_error_from(
             exc,

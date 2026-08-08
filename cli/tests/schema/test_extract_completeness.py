@@ -37,9 +37,9 @@ from agentworks.schema import (
     RefOwner,
     SecretRef,
     extract_references,
+    filled_defaults,
     marker_of,
     reference_marker_error,
-    validation_context,
 )
 
 from ._fixture_models import (
@@ -173,9 +173,12 @@ def test_no_reference_a_validated_value_carries_is_missing_from_the_edges(
     model_cls: type[BaseModel],
     blob: object,
 ) -> None:
-    validated = model_cls.model_validate(blob, context=validation_context(OWNER))
+    # One fill feeds both readers, exactly as production's boundaries run
+    # it: validation and extraction read the same filled blob.
+    filled = filled_defaults(model_cls, blob, OWNER)
+    validated = model_cls.model_validate(filled)
     expected = _referenced_names(validated)
-    extracted = {ref.name for ref in extract_references(model_cls, blob, OWNER)}
+    extracted = {ref.name for ref in extract_references(model_cls, filled)}
 
     # Non-vacuity per case: an oracle that found nothing would make the
     # subset assertion below true for a walker that extracted nothing.
@@ -230,8 +233,8 @@ def test_every_sequence_spelling_extracts_what_the_concrete_one_does(spelling: o
     model_cls = _sequence_model(spelling)
     blob = {"tokens": ["named"]}
 
-    model_cls.model_validate(blob, context=validation_context(OWNER))
-    assert {ref.name for ref in extract_references(model_cls, blob, OWNER)} == {"named"}
+    model_cls.model_validate(blob)
+    assert {ref.name for ref in extract_references(model_cls, blob)} == {"named"}
 
 
 @pytest.mark.parametrize("spelling", _MAPPING_SPELLINGS, ids=lambda s: getattr(s, "__name__", str(s)))
@@ -239,8 +242,8 @@ def test_every_mapping_spelling_extracts_what_the_concrete_one_does(spelling: ob
     model_cls = _mapping_model(spelling)
     blob = {"tokens": {"k": "named"}}
 
-    model_cls.model_validate(blob, context=validation_context(OWNER))
-    assert {ref.name for ref in extract_references(model_cls, blob, OWNER)} == {"named"}
+    model_cls.model_validate(blob)
+    assert {ref.name for ref in extract_references(model_cls, blob)} == {"named"}
 
 
 def test_a_shape_no_spelling_covers_is_refused_rather_than_walked_silently() -> None:
@@ -259,9 +262,9 @@ def test_a_shape_no_spelling_covers_is_refused_rather_than_walked_silently() -> 
         tokens: dict[str, list[Annotated[str, SecretRef(usage="a token")]]] = {}
 
     blob = {"tokens": {"k": ["named"]}}
-    Nested.model_validate(blob, context=validation_context(OWNER))
+    Nested.model_validate(blob)
 
-    assert extract_references(Nested, blob, OWNER) == ()
+    assert extract_references(Nested, blob) == ()
     assert reference_marker_error(Nested) is not None, "an unwalkable marker must not also be accepted"
 
 
@@ -273,6 +276,6 @@ def test_the_oracle_sees_what_the_walker_would_miss() -> None:
     stopped at the first repeated model type would report one name here,
     and the whole point is that it reports four.
     """
-    validated = SelfReferential.model_validate(_nested(3), context=validation_context(OWNER))
+    validated = SelfReferential.model_validate(_nested(3))
 
     assert _referenced_names(validated) == {"level-0", "level-1", "level-2", "level-3"}

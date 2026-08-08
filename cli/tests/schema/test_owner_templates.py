@@ -1,9 +1,11 @@
-"""The owner template resolves at validation as well as at extraction.
+"""The owner template resolves through one fill, at the boundary.
 
-One declaration (the marker's ``default_template``) feeds both, and the
-last test here is the one that matters: the validated instance and the
-graph edge must name the SAME secret, or a resource would be validated
-against one name and resolved against another.
+One declaration (the marker's ``default_template``) is rendered into the
+blob by ``filled_defaults`` before validation or extraction reads it, and
+the last test here is the one that matters: the validated instance and
+the graph edge must name the SAME secret, or a resource would be
+validated against one name and resolved against another. They cannot
+disagree, because both read the one filled blob.
 """
 
 from __future__ import annotations
@@ -11,89 +13,113 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from agentworks.errors import StateError
-from agentworks.schema import RefOwner, extract_references, validation_context
+from agentworks.schema import AgwModel, RefOwner, extract_references, filled_defaults
 from tests._emitted_schema import accepts_null, ref_extension
 
-from ._fixture_models import AzureLike, CredsLike, GithubLike, SiteLike, UnmarkedLike
+from ._fixture_models import AzureLike, CredsLike, GithubLike, ProxmoxArm, SiteLike, UnmarkedLike
 
 OWNER = RefOwner(kind="git-credential", name="prod")
-CONTEXT = validation_context(OWNER)
 
 
 def test_an_omitted_templated_field_resolves_from_the_owner() -> None:
-    assert GithubLike.model_validate({}, context=CONTEXT).token == "git-token-prod"
+    filled = filled_defaults(GithubLike, {}, OWNER)
+    assert filled == {"token": "git-token-prod"}
+    assert GithubLike.model_validate(filled).token == "git-token-prod"
 
 
 def test_an_operator_written_value_wins() -> None:
-    assert GithubLike.model_validate({"token": "custom"}, context=CONTEXT).token == "custom"
+    blob = {"token": "custom"}
+    assert filled_defaults(GithubLike, blob, OWNER) is blob
+    assert GithubLike.model_validate(blob).token == "custom"
 
 
 def test_an_explicit_null_resolves_like_an_omission() -> None:
-    # Same call extraction makes, so the two cannot disagree on the name.
-    # This is the validation half of the deliberate divergence pinned in
-    # test_extract.py: azure's shipped validator RAISES on
-    # ``secret: null``, telling the operator to omit the key, where the
-    # model resolves it to the default instead.
-    assert GithubLike.model_validate({"token": None}, context=CONTEXT).token == "git-token-prod"
-    site = AzureLike.model_validate(
-        {"region": "eastus", "service_principal": {"client_id": "c", "tenant_id": "t", "secret": None}},
-        context=validation_context(RefOwner(kind="vm-site", name="lab")),
-    )
+    # Same treatment extraction gets, since both read the filled blob, so
+    # the two cannot disagree on the name. This is the fill half of the
+    # deliberate divergence pinned in test_extract.py: azure's shipped
+    # validator RAISES on ``secret: null``, telling the operator to omit
+    # the key, where the fill resolves it to the default instead.
+    assert filled_defaults(GithubLike, {"token": None}, OWNER) == {"token": "git-token-prod"}
+    blob = {"region": "eastus", "service_principal": {"client_id": "c", "tenant_id": "t", "secret": None}}
+    site = AzureLike.model_validate(filled_defaults(AzureLike, blob, RefOwner(kind="vm-site", name="lab")))
     assert site.service_principal is not None
     assert site.service_principal.secret == "azure-client-secret"
 
 
 def test_a_nested_models_templated_field_resolves_too() -> None:
     blob = {"region": "eastus", "service_principal": {"client_id": "c", "tenant_id": "t"}}
-    site = AzureLike.model_validate(blob, context=validation_context(RefOwner(kind="vm-site", name="lab")))
+    site = AzureLike.model_validate(filled_defaults(AzureLike, blob, RefOwner(kind="vm-site", name="lab")))
     assert site.service_principal is not None
     assert site.service_principal.secret == "azure-client-secret"
 
 
 def test_a_union_arms_templated_field_resolves_too() -> None:
-    site = SiteLike.model_validate({"platform": {"name": "proxmox"}}, context=CONTEXT)
+    site = SiteLike.model_validate(filled_defaults(SiteLike, {"platform": {"name": "proxmox"}}, OWNER))
     assert getattr(site.platform, "token_secret", None) == "proxmox-token"
 
 
-def test_a_model_with_no_templated_field_ignores_the_context() -> None:
-    # Context-free validation stays legal for the models that do not need
-    # an owner, which is most of them.
-    assert UnmarkedLike.model_validate({"name": "a"}).name == "a"
+def test_a_model_with_no_templated_field_is_left_untouched() -> None:
+    # Copy-on-write: the common case (nothing to fill) hands back the
+    # very object, so filling always is cheaper than remembering which
+    # models need it.
+    blob = {"name": "a"}
+    assert filled_defaults(UnmarkedLike, blob, OWNER) is blob
+    assert UnmarkedLike.model_validate(blob).name == "a"
 
 
 def test_a_provided_value_needs_no_owner() -> None:
     assert GithubLike.model_validate({"token": "custom"}).token == "custom"
 
 
-def test_a_missing_owner_is_a_framework_bug_not_an_operator_mistake() -> None:
-    # A StateError, never a ConfigError: a call site forgot the context,
-    # and blaming the operator for our omission would be a lie.
-    with pytest.raises(StateError) as exc:
+def test_an_unfilled_blob_fails_as_an_ordinary_missing_field() -> None:
+    """A boundary that forgets the fill gets pydantic's plain
+    required-field error, which is a statement about the blob's content.
+
+    This is the standalone-construction property: the model itself needs
+    no external context of any kind, so there is no framework plumbing to
+    forget mid-validation and no state error naming it. The field really
+    is required; the fill is what satisfies it for a document that omits
+    it.
+    """
+    with pytest.raises(ValidationError) as exc:
         GithubLike.model_validate({})
-    assert "token" in str(exc.value)
-    assert "validation_context" in str(exc.value)
+    assert {error["loc"] for error in exc.value.errors()} == {("token",)}
+
+
+def test_a_templated_arm_is_constructible_as_an_instance() -> None:
+    """Building a model is a fact about its content alone, so an arm
+    carrying a templated marker constructs like any other model, at class
+    definition included. Under the context mechanism this raised a
+    ``StateError`` at import of the declaring module, which is what made
+    such an arm unusable as a default instance."""
+    arm = ProxmoxArm(name="proxmox", token_secret="explicit")
+    assert arm.token_secret == "explicit"
+
+    class Defaulted(AgwModel):
+        platform: ProxmoxArm = ProxmoxArm(name="proxmox", token_secret="explicit")
+
+    assert Defaulted.model_validate({}).platform.token_secret == "explicit"
 
 
 def test_untemplated_fields_are_still_required() -> None:
     # Filling is per marker, not per model: the templated field resolves
     # while its untemplated siblings get pydantic's ordinary
     # required-field errors.
+    blob = filled_defaults(AzureLike, {"service_principal": {}}, OWNER)
     with pytest.raises(ValidationError) as exc:
-        AzureLike.model_validate({"service_principal": {}}, context=CONTEXT)
+        AzureLike.model_validate(blob)
     missing = {error["loc"] for error in exc.value.errors()}
     assert missing == {("region",), ("service_principal", "client_id"), ("service_principal", "tenant_id")}
 
 
 def test_a_templated_field_is_not_required_in_emitted_schema() -> None:
-    """A field the model FILLS is not a field an operator must write, and
-    emitted schema has to say so or an editor red-underlines the very
-    omission this mechanism exists to resolve. Pydantic computes
+    """A field the fill resolves is not a field an operator must write,
+    and emitted schema has to say so or an editor red-underlines the very
+    omission the mechanism exists to resolve. Pydantic computes
     ``required`` from the declared field, which knows nothing about the
-    before-validator, so ``AgwModel`` corrects it where the filling
-    happens.
+    boundary fill, so ``AgwModel`` corrects it.
 
-    Nested models and union arms too, since the filling reaches them.
+    Nested models and union arms too, since the fill reaches them.
     """
     assert "token" not in GithubLike.model_json_schema().get("required", ())
 
@@ -108,11 +134,11 @@ def test_a_templated_field_is_not_required_in_emitted_schema() -> None:
 def test_a_templated_field_is_nullable_in_emitted_schema() -> None:
     """The other half of the same rule, and the half that was missing.
 
-    ``_fill_owner_templated_defaults`` treats an omission and an explicit
-    ``null`` alike, deliberately, so a schema that drops the field from
-    ``required`` and leaves it non-nullable still red-underlines
-    ``token: null``: the same instruction spelled out, and one the loader
-    accepts. Nested models and union arms too.
+    The fill treats an omission and an explicit ``null`` alike,
+    deliberately, so a schema that drops the field from ``required`` and
+    leaves it non-nullable still red-underlines ``token: null``: the same
+    instruction spelled out, and one the loader accepts. Nested models
+    and union arms too.
     """
     assert accepts_null(GithubLike.model_json_schema()["properties"]["token"])
 
@@ -147,16 +173,18 @@ def test_a_widened_field_keeps_its_hover_text_and_its_marker() -> None:
 
 
 def test_an_untemplated_reference_field_stays_required_in_emitted_schema() -> None:
-    """The correction is per MARKER, exactly like the filling: a
-    reference field with nothing to default to is still the operator's to
-    write, and still not nullable."""
+    """The correction is per MARKER, exactly like the fill: a reference
+    field with nothing to default to is still the operator's to write,
+    and still not nullable."""
     schema = CredsLike.model_json_schema()
     assert schema["required"] == ["secret"]
     assert not accepts_null(schema["properties"]["secret"])
 
 
 def test_validation_and_extraction_derive_the_same_name() -> None:
-    blob: dict[str, object] = {}
-    validated = GithubLike.model_validate(blob, context=CONTEXT)
-    (extracted,) = extract_references(GithubLike, blob, OWNER)
+    # The agreement is structural: one fill runs, and both read its
+    # output, so there is no second renderer to drift.
+    filled = filled_defaults(GithubLike, {}, OWNER)
+    validated = GithubLike.model_validate(filled)
+    (extracted,) = extract_references(GithubLike, filled)
     assert validated.token == extracted.name
