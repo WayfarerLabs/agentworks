@@ -120,16 +120,18 @@ Task briefs outside any SDD: some ruled work is too small for an SDD and belongs
 messaged, and the difference matters: a message goes to a live effort and must survive its branch
 churn, so it delivers via `main`; a brief CREATES the work vehicle, and the assignee owns it from
 pickup, so it never needs to touch `main` at all. The current mechanism: the requester seeds a
-branch (`task/<slug>`) whose first commit adds a single brief file
-(`brief-<YYYY>-<MM>-<DD>-<topic>.md`; the distinct prefix keeps it from reading as the message
-channel above, whose semantics it does not share). It sits at the repo root for pickup
-discoverability, which stays clean because briefs never reach `main`. The brief carries the charter
-(what, why, the definition of done, where the authoritative spec lives, who reviews) and its own
-disposition, usually "delete this file before the PR goes ready" (keep-and-promote is the exception,
-and the brief says where the content goes). The assignee takes over the branch, does the work there,
-and disposes of the brief per its own instructions. The contract is mechanism-independent on
-purpose: a brief names its work, its reviewer, and its own disposition, and delivery may later move
-to other channels (including Agentworks-native messaging) without changing what a brief is.
+branch, naming it with the repo's conventional branch prefix for the eventual change (`feat/<slug>`,
+`fix/<slug>`, `chore/<slug>`, ...) since the seeded branch is the working branch the PR ships from,
+whose first commit adds a single brief file (`brief-<YYYY>-<MM>-<DD>-<topic>.md`; the distinct
+prefix keeps it from reading as the message channel above, whose semantics it does not share). It
+sits at the repo root for pickup discoverability, which stays clean because briefs never reach
+`main`. The brief carries the charter (what, why, the definition of done, where the authoritative
+spec lives, who reviews) and its own disposition, usually "delete this file before the PR goes
+ready" (keep-and-promote is the exception, and the brief says where the content goes). The assignee
+takes over the branch, does the work there, and disposes of the brief per its own instructions. The
+contract is mechanism-independent on purpose: a brief names its work, its reviewer, and its own
+disposition, and delivery may later move to other channels (including Agentworks-native messaging)
+without changing what a brief is.
 
 A running effort only sees messages that existed at its branch point, so a message that lands after
 the recipient's branch was cut needs two independent mechanisms. Neither side may assume the other
