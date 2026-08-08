@@ -443,9 +443,12 @@ your own document:
 
 ```console
 $ agw resource list
-Configuration error: resources/git-credentials.yaml:1: spec.provider names the capability as a
-string, which is no longer supported; write one tagged table instead: provider: {name: github,
-token: ..., owner: ...}
+Configuration error: ~/.config/agentworks/resources/git-credentials.yaml:1: spec.provider names
+the capability as a string, which is no longer supported; write one tagged table instead:
+provider: {name: github, token: ..., owner: ...}
+  Hint: Apply the rewrite above; `agw resource describe-kind <kind>` documents the field, and `agw
+  resource sample <kind>` prints it as a document to edit. See "The retired sibling capability
+  shape" in docs/guides/upgrading-to-0.14.md.
 ```
 
 The keys it lists are the ones your document actually had, in order, with the values elided as

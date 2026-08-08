@@ -367,33 +367,47 @@ def _framed_batch(
     return "\n".join(lines)
 
 
-def located(location: SourceLocation | None, text: str) -> str:
-    """``text`` prefixed with where the operator can go and fix it.
+def location_text(location: SourceLocation | None) -> str | None:
+    """The bare ``~/path:42`` an operator can navigate to, or ``None``
+    when there is no such place.
 
-    Public because a config error does not have to come from pydantic to
-    deserve the same frame. A pre-validation refusal
-    (:mod:`agentworks.capabilities.retired_shapes`) raises its own
-    ``ConfigError`` about the same document, at the same moment, with the
-    same location in hand, and an operator reading a batch of manifest
-    errors should not find one of them unlocated because of where in the
-    pipeline it was raised.
+    The single authority for the sentinel rule, so that the two ways a
+    location reaches an operator (as :func:`located`'s prefix, or named
+    inline inside a message) cannot answer differently.
 
     ``SourceLocation`` carries its own sentinels and they are honored
     rather than rendered: ``line == 0`` means the resource was not
-    introduced by a specific declaration site, and the synthesized path
-    means there is no file either (a framework-constructed row). A
-    location an operator cannot navigate to is worse than no location, so
-    those frame nothing.
+    introduced by a specific declaration site, so the file is named
+    without a position (no editor has a line 0), and the synthesized path
+    means there is no file either (a framework-constructed row), which is
+    nowhere to send anyone.
 
     The path renders home-relative, matching every other operator-facing
     rendering of a config path.
     """
     if location is None or location.file == SYNTHESIZED_PATH:
-        return text
+        return None
     where = format_file_path(location.file)
-    if location.line:
-        where = f"{where}:{location.line}"
-    return f"{where}: {text}"
+    return f"{where}:{location.line}" if location.line else where
+
+
+def located(location: SourceLocation | None, text: str) -> str:
+    """``text`` prefixed with where the operator can go and fix it.
+
+    Public because a config error does not have to come from pydantic to
+    deserve the same frame. A pre-validation refusal
+    (:mod:`agentworks.capabilities.retired_shapes`, the envelope and
+    duplicate checks in :mod:`agentworks.manifests`) raises its own
+    ``ConfigError`` about the same document, at the same moment, with the
+    same location in hand, and an operator reading a batch of manifest
+    errors should not find one of them framed differently because of
+    where in the pipeline it was raised.
+
+    A location an operator cannot navigate to is worse than no location,
+    so :func:`location_text`'s ``None`` frames nothing at all.
+    """
+    where = location_text(location)
+    return text if where is None else f"{where}: {text}"
 
 
 # -- Message normalization ----------------------------------------------------

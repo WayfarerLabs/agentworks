@@ -9,6 +9,7 @@ adds only the KIND/NAME parse and the $EDITOR launch.
 
 from __future__ import annotations
 
+from pathlib import Path
 from textwrap import dedent
 from typing import TYPE_CHECKING
 
@@ -22,7 +23,6 @@ from tests.conftest import ManifestDoc, write_manifests
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
-    from pathlib import Path
 
 
 def _write_base(cfg_path: Path) -> None:
@@ -140,6 +140,48 @@ def test_cli_edit_launches_editor_on_manifest(tmp_path: Path, monkeypatch) -> No
     assert calls == [["test-editor", str(resources / "secrets.yaml")]]
     assert "Editing secret/npm-token" in result.output
     assert "secrets.yaml:1" in result.output
+
+
+def test_cli_edit_names_the_manifest_home_relative(tmp_path: Path, monkeypatch) -> None:
+    """The "Editing" line frames its path like every manifest error does.
+
+    The assertion above it is a SUFFIX match, which is why this needs its
+    own test: ``tmp_path`` is never under ``$HOME``, so ``~/`` and the
+    absolute path are byte-identical there and a hand-rolled
+    ``f"{path}:{line}"`` passes it. Patching home is what makes the two
+    distinguishable, and an operator always has the distinguishing case.
+    """
+    from typer.testing import CliRunner
+
+    from agentworks.cli import app
+
+    home = tmp_path / "home"
+    (home / ".config" / "agentworks").mkdir(parents=True)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+
+    cfg = home / ".config" / "agentworks" / "config.toml"
+    _write_base(cfg)
+    resources = cfg.parent / "resources"
+    resources.mkdir()
+    (resources / "secrets.yaml").write_text(
+        dedent("""\
+        apiVersion: agentworks/v1
+        kind: secret
+        metadata:
+          name: npm-token
+          description: npm token
+        spec: {}
+        """)
+    )
+    monkeypatch.setattr("agentworks.config.CONFIG_PATH", cfg)
+    monkeypatch.setenv("EDITOR", "test-editor")
+    monkeypatch.setattr("subprocess.call", lambda argv: 0)
+
+    result = CliRunner().invoke(app, ["resource", "edit", "secret/npm-token"])
+
+    assert result.exit_code == 0, result.output
+    assert "Editing secret/npm-token (~/.config/agentworks/resources/secrets.yaml:1)" in result.output
+    assert str(home) not in result.output
 
 
 def test_cli_edit_requires_editor_env(tmp_path: Path, monkeypatch) -> None:
