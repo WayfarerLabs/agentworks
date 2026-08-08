@@ -153,7 +153,7 @@ model. Direct backend references hard-error in 0.14 with the exact rewrite (oper
 prompt and env-var spellings cross unchanged through their synthesized sources and the affected
 surface is effectively the operator's own onepassword config. The resolution API evolves in the same
 effort: typed per-secret outcomes, explicit failure categories, policy-aware interaction
-requirements, timeouts and cleanup, and bounded- lifetime source clients. The simple case must not
+requirements, timeouts and cleanup, and bounded-lifetime source clients. The simple case must not
 get more verbose.
 
 ### Harness scopes (destination 4)
