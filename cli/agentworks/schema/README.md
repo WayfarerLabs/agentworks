@@ -90,17 +90,14 @@ A pair that should agree and has no comparator is a hole whether or not it curre
 - **D10 against live output** cannot be compared by any automated check. Console blocks in guides
   are re-pasted from real runs, never hand-edited.
 
-Two pairs are open holes. They are named here so the next person does not have to rediscover them:
+One pair is an open hole. It is named here so the next person does not have to rediscover it. (D8
+was the other, and it was closed by the same change that named it, per this file's own rule about
+adding the comparator alongside the derivation.)
 
 - **D6 against the models.** Every path `_resolve_path` renders is pinned as a hand-authored literal
   in `tests/schema/test_errors.py`, so nothing asserts that an error's address is one D3 would ever
   show an operator. D6 does share `_shape.py`'s classifier, which narrows the gap without closing
   it.
-- **D8 against D1.** A readiness probe's raw-config read is compared to nothing. The blobs
-  `tests/vms/test_platform_support.py` hands `not_ready` are hand-spelled and never validated, and
-  the same literals are spelled a second time in `tests/vms/test_platform_config_contract.py` with
-  nothing tying the two together. A renamed union tag would leave `not_ready` reading a key the
-  model no longer has, report every site ready, and break no test.
 
 ## Three oracles, and why no single guard covers the class
 
