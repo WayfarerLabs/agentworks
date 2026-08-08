@@ -199,6 +199,20 @@ def _build_schema_catalog(*, strict: bool = False) -> GuideCatalog:
             if strict:
                 raise
             issues.append(GuideCatalogIssue(error))
+        except AgentworksError:
+            if strict:
+                raise
+            source = f"schema:{target}"
+            issues.append(
+                GuideCatalogIssue(
+                    GuideContributionError(
+                        f"invalid guide contribution from {source}: reference is unavailable",
+                        source=source,
+                        topic=target,
+                        field_path="reference",
+                    )
+                )
+            )
     return GuideCatalog(tuple(topics), tuple(issues))
 
 
