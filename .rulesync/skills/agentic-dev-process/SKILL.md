@@ -107,6 +107,11 @@ names change; match the current equivalent of each tier:
 - **A reviewer must be at least as capable as the dev whose work it reviews.** Never review
   standard-tier work with a lighter-tier reviewer; match or exceed it.
 
+**Pick reasoning effort with the model, where the harness exposes it.** Effort is a second selection
+axis, chosen per launch just as deliberately: low effort for mechanical, well-charted tasks; higher
+effort reserved for genuinely hard reasoning. The reviewer-at-least-as-capable rule spans both axes:
+do not review high-effort work with a low-effort reviewer.
+
 **Pass the tier explicitly on every launch.** The subagent definitions ship `model: inherit`, so a
 launch that names no model runs the subagent at whatever tier the lead happens to be on. That is how
 the reviewer >= dev rule breaks in practice: not by anyone choosing a weaker reviewer, but by nobody
