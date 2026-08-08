@@ -408,15 +408,18 @@ def test_lima_not_ready_is_local_only(
     on the placement host over SSH). ``not_ready`` reads the config
     directly, non-constructing.
 
-    Keyed on the TAG saying local, never on absence: a config with no
-    readable placement is not treated as local, so a shape error is
+    Keyed on the TAG saying local, never on a guess: a WRITTEN placement
+    that does not say local is not treated as local, so a shape error is
     reported against ``placement`` by the validate pass rather than
     surfacing here as a missing ``limactl`` the operator does not need.
+    An ABSENT placement resolves to the field's declared local default,
+    the same answer validation gives it, so the limactl verdict applies
+    to it exactly as to a written ``mode: local``.
 
     The well-formed blobs go through :func:`_readiness`, which is what
     stops the tags spelled here from drifting away from the model
-    alongside the read they are pinning. The malformed ones cannot, and
-    the comment on them says why."""
+    alongside the read they are pinning. The malformed one cannot, and
+    the comment on it says why."""
     assert LimaPlatform.unsupported_reason() is None
 
     monkeypatch.setattr("shutil.which", lambda name: None)
@@ -425,12 +428,17 @@ def test_lima_not_ready_is_local_only(
     assert local.reason is not None
     assert "limactl" in local.reason
     assert _readiness(LimaPlatform, {"placement": {"mode": "ssh", "host": "me@box"}}).is_ready
-    # Absent or unreadable: NOT local, so no limactl verdict is invented.
-    # Raw rather than through _readiness, deliberately: the model refuses
-    # both of these, and answering them anyway is the totality that
-    # ``not_ready`` exists for.
-    assert LimaPlatform.not_ready({}).is_ready
+    # Absent: the declared default is local, so the verdict matches the
+    # written local's rather than inventing a different site.
+    absent = _readiness(LimaPlatform, {})
+    assert not absent.is_ready
+    assert absent.reason == local.reason
+    # Unreadable: NOT local, so no limactl verdict is invented. Raw
+    # rather than through _readiness, deliberately: the model refuses
+    # this, and answering it anyway is the totality that ``not_ready``
+    # exists for.
     assert LimaPlatform.not_ready({"placement": "junk"}).is_ready
 
     monkeypatch.setattr("shutil.which", lambda name: "/x/limactl")
     assert _readiness(LimaPlatform, {"placement": {"mode": "local"}}).is_ready
+    assert _readiness(LimaPlatform, {}).is_ready

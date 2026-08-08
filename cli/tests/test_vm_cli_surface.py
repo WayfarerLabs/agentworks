@@ -274,7 +274,12 @@ def test_doctor_vm_sites_group(db: Database, monkeypatch: pytest.MonkeyPatch, tm
 
     by_name = {c.name: c for c in group.checks}
     assert by_name["lima-local"].status is doctor.Status.OK
+    # The row names the platform AND the resolved mode, because the mode
+    # can be implicit now (the unions carry declared defaults): this row
+    # is where a reviewer sees the choice without opening the manifest.
+    assert by_name["lima-local"].message == "platform lima (placement: local)"
     assert by_name["wsl2"].status is doctor.Status.OK
+    assert by_name["wsl2"].message == "platform wsl2"
     stranded = by_name["VM 'lost'"]
     assert stranded.status is doctor.Status.FAIL
     assert "gone-box" in (stranded.message or "")

@@ -177,7 +177,11 @@ def _facts_of(entry: FieldEntry) -> str:
     facts = [entry.type_label, "required" if entry.writable else "optional"]
     if entry.doc.default_template is not None:
         facts.append(f"defaults to `{entry.doc.default_template.replace('{owner_name}', '<name>')}`")
-    elif worth_showing(entry.doc.default) and not entry.contents:
+    elif worth_showing(entry.doc.default):
+        # A BLOCK field's default renders too (``default {mode: local}``):
+        # the defaulted mode unions are the shipped case, and what a field
+        # resolves to when omitted is exactly what this parenthetical is
+        # for.
         facts.append(f"default {render_value(entry.doc.default)}")
     if entry.doc.ref is not None:
         facts.append(f"names a {entry.doc.ref.kind}")

@@ -249,16 +249,20 @@ spec:
   otherwise). Those secrets are auto-declared and resolved through the backend chain like any other,
   and `agw resource describe-kind vm-platform/<name>` shows each platform's secret fields with their
   default names.
-- **Azure and AWS sites say how they authenticate, in a required `auth` table.** There is no
-  default, and omitting it is an error rather than a silent choice: `auth: {mode: ambient}` uses the
+- **Azure and AWS sites say how they authenticate, in a tagged `auth` table that defaults to
+  ambient.** `auth: {mode: ambient}` is the declared default, so omitting the table means it: the
   host's own credential chain (for Azure, `az login` / `AZURE_*` / managed identity / browser
-  fallback; for AWS, environment, shared config, instance profile, SSO), while
-  `auth: {mode: service-principal, ...}` and `auth: {mode: access-key, ...}` name an explicit
-  identity. An explicit identity is used and only it, so a rejected or expired credential fails the
-  command rather than falling back to the ambient chain. The same shape reads back out: an `ambient`
-  site declares no secret and shows no secret edge, and a credential arm declares exactly the one
-  secret it names. Proxmox is unaffected: it has one authentication shape, so it keeps its required
-  token fields with no mode selector.
+  fallback; for AWS, environment, shared config, instance profile, SSO), which is what each wrapped
+  SDK does when told nothing. `auth: {mode: service-principal, ...}` and
+  `auth: {mode: access-key, ...}` name an explicit identity. An explicit identity is used and only
+  it, so a rejected or expired credential fails the command rather than falling back to the ambient
+  chain. The same shape reads back out: an `ambient` site declares no secret and shows no secret
+  edge, a credential arm declares exactly the one secret it names, and `agw doctor`'s site row shows
+  the resolved mode (`platform azure-vm (auth: ambient)`) whether it was written or defaulted.
+  Lima's `placement` works the same way, defaulting to `{mode: local}`. Proxmox has no mode selector
+  at all: it has one authentication shape, so it keeps its required token fields, which is the
+  pattern (a default where the underlying tool has an ambient notion, required fields where it does
+  not).
 - The cloud and datacenter platforms ship as opt-in system plugins, so a site that names one is
   not-ready with an "enable plugin `<name>`" hint, and refused at use, until you list that plugin in
   `[plugins] system`. The `azure-dev` example above is not-ready until you set

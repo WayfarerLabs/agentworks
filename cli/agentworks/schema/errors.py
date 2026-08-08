@@ -599,10 +599,11 @@ def _missing_union_block(address: _Address) -> str | None:
     keystroke apart (the block absent, and the block present without its
     tag), so they answer with the same list.
 
-    This is the case ``retired_shapes`` currently intercepts for its
-    three unions with a far richer message. That module is
-    RELEASE-SCOPED, and its own docstring says the absent case is the one
-    needing the most help; when it goes, these operators land here.
+    The three ``retired_shapes`` unions no longer reach this at all:
+    each carries a declared default now, so their absent case loads
+    instead of erroring. What lands here is any REQUIRED tagged union,
+    which the mode unions were for one revision and another field may
+    be again.
     """
     if not address.arms or not address.discriminator:
         return None
@@ -624,12 +625,6 @@ def _missing_tag(ctx: Mapping[str, object], arms: tuple[UnionArmType, ...]) -> s
     operator who typed nothing was shown ``mode is required`` and left to
     find it. The arms come from the loc walk instead, which stands on the
     union at exactly this moment.
-
-    ``retired_shapes`` currently answers the three unions it names far
-    more richly than this, but that module is RELEASE-SCOPED and its own
-    docstring says the absent case is the one needing the most help.
-    Deleting it must demote those operators to a good message, not to a
-    bare "is required".
 
     Quoted and comma-joined to match pydantic's own ``expected_tags``
     rendering, so the two messages about one union read alike.

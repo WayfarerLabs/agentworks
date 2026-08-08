@@ -226,6 +226,53 @@ def capability_config_references(
     return extract_references(model, config, owner)
 
 
+def resolved_capability_modes(
+    *,
+    kind: str,
+    config: object,
+    name: str | None = None,
+) -> tuple[tuple[str, str], ...]:
+    """The tag each discriminated-union field of ``config``'s
+    implementation resolves to, as ``(field, tag)`` pairs in declaration
+    order: a written tag off the blob, an omitted field's off its
+    declared default.
+
+    This is what makes an IMPLICIT mode choice visible without opening
+    the manifest: the mode unions carry declared defaults (azure and
+    aws's ``auth``, lima's ``placement``), so a document that writes
+    nothing has still resolved to an arm, and a reviewer reading a
+    health or inspection surface should see which. Read structurally off
+    the declared model, like extraction: no validation runs and no
+    capability code is invoked.
+
+    Total and never raising: an unknown implementation, a blob that is
+    not a table, or a written value whose tag is missing or malformed
+    contributes no pair (validation is where that becomes an error), so
+    a rendering caller degrades to what it already showed.
+    """
+    from agentworks.schema._shape import model_fields_of, shape_of
+
+    selected = selected_name(kind, config, name)
+    model = None if selected is None else capability_config_model(kind, selected)
+    fields = None if model is None else model_fields_of(model)
+    if fields is None:
+        return ()
+    modes: list[tuple[str, str]] = []
+    for field_name, field in fields.items():
+        shape = shape_of(field)
+        if not shape.arms or shape.discriminator is None:
+            continue
+        written = isinstance(config, Mapping) and field_name in config
+        value: object = config[field_name] if written and isinstance(config, Mapping) else field.default
+        if isinstance(value, Mapping):
+            tag = value.get(shape.discriminator)
+        else:
+            tag = getattr(value, shape.discriminator, None)
+        if isinstance(tag, str) and tag:
+            modes.append((field_name, tag))
+    return tuple(modes)
+
+
 def capability_config_union(kind: str) -> type[BaseModel]:
     """The discriminated union over every registered ``kind``
     implementation's config.

@@ -27,6 +27,7 @@ from enum import Enum
 from typing import Final
 
 import yaml
+from pydantic import BaseModel
 
 #: Wide enough that pyyaml never folds a scalar. A folded line would not
 #: carry the leading `#` that makes a rendered sample inert, and an apt
@@ -63,7 +64,13 @@ def _wire(value: object) -> object:
     be stable across runs or the tests that pin it are worthless, and by
     the rendering rather than by the value so that a mixed-type set
     orders at all.
+
+    A model instance becomes the mapping a document writes for it, which
+    is what a defaulted union arm is on this surface: ``{mode: local}``,
+    not a Python ``repr``.
     """
+    if isinstance(value, BaseModel):
+        return _wire(value.model_dump(mode="python"))
     if isinstance(value, Enum):
         return _wire(value.value)
     if isinstance(value, Mapping):

@@ -222,12 +222,12 @@ def _build_service_principal_credential(sp: AzureServicePrincipalAuth, client_se
     return cred
 
 
-# Why an arm with no fields but its tag exists at all: it makes borrowing
-# the host's identity a declared choice rather than a state a site lands
-# in by writing nothing. A reviewer, ``doctor``, and the dependency graph
-# can then all tell "this site deliberately borrows the host's identity"
-# from "this site was never given one", which an omitted credential block
-# could not say.
+# Why an arm with no fields but its tag exists at all: it gives
+# borrowing the host's identity a DECLARED form, which the old optional
+# ``service_principal`` block never had. A site can now write the choice
+# down and a reviewer can read it, and the union's default is this arm,
+# carried in ``describe-kind`` and the emitted schema rather than
+# implied by a missing key.
 class AzureAmbientAuth(AgwModel):
     """Authenticate with the ambient chain: ``az login``, ``AZURE_*``, or a managed identity.
 
@@ -271,13 +271,22 @@ class AzureServicePrincipalAuth(AgwModel):
     convention reads ``AW_SECRET_AZURE_CLIENT_SECRET``."""
 
 
-#: How an azure-vm site authenticates, as a REQUIRED tagged union.
+#: How an azure-vm site authenticates, as a tagged union DEFAULTING to
+#: the ambient arm.
 #:
-#: Required, and with no omission alias, because the choice of identity is
-#: too consequential to be expressed by absence. An optional credential
-#: block cannot distinguish "borrow the host's identity deliberately" from
-#: "nobody configured this yet", and neither can a reviewer or the
-#: dependency graph reading the same document.
+#: An earlier revision made this required with no default, and that
+#: reasoning is in the history, so here is why it reversed (operator
+#: ruling): the defect the union fixed was never "absence selects a
+#: mechanism", it was that there was no way to DECLARE the choice at all.
+#: The union fixes the second, and once an explicit form exists, a
+#: default is an ordinary default, carried in the emitted schema and in
+#: ``describe-kind`` like any other. Ambient is the right one because it
+#: is what the wrapped SDK already does: ``DefaultAzureCredential`` is
+#: ambient-first, so requiring explicit auth would make this site
+#: stricter than the tool it wraps, which is surprising in the other
+#: direction. The general pattern: ambient where the underlying tool has
+#: an ambient notion, required where it does not, which is why proxmox
+#: has no union at all rather than being an exception to one.
 #:
 #: The tag is a string ``Literal`` rather than a boolean for the same
 #: reason it is a union rather than an ``auth_mode`` field beside nullable
@@ -331,11 +340,11 @@ class AzureVMConfig(AgwModel):
     satisfies the request. Non-empty when present, because an empty
     catalog is a site on which no VM can be created."""
 
-    auth: AzureAuth
+    auth: AzureAuth = AzureAmbientAuth(mode="ambient")
     """How this site authenticates to Azure: ``{mode: ambient}`` for the
     ambient credential chain, or ``{mode: service-principal, ...}`` for an
-    explicit principal. Required, with no default, so a site never selects
-    an identity by leaving a key out."""
+    explicit principal. Defaults to ambient, matching what
+    ``DefaultAzureCredential`` does when told nothing."""
 
 
 class _VMSize(NamedTuple):
@@ -422,9 +431,10 @@ class AzureVMPlatform(VMPlatform):
     name: ClassVar[str] = "azure-vm"
     description: ClassVar[str] = "Azure Virtual Machines (subscription + resource group)"
     config_model: ClassVar[type[AzureVMConfig]] = AzureVMConfig
-    # Every azure-vm site written before the required ``auth`` union
-    # crosses this break, whether or not it declared a service principal,
-    # so both directions get their exact rewrite. Release-scoped.
+    # An azure-vm site that WROTE ``service_principal`` (or wrote it
+    # null) crosses this break and gets its exact rewrite; a site that
+    # omitted it lands on the ambient default and was never broken.
+    # Release-scoped.
     retired_shape: ClassVar[RetiredPresenceShape | None] = RetiredPresenceShape(
         retired_field="service_principal",
         union_field="auth",
@@ -443,11 +453,11 @@ class AzureVMPlatform(VMPlatform):
         `vm create` picks the smallest entry that satisfies the vm-template's request
         (an off-ratio request rounds up and warns).
 
-        Every site states how it authenticates; there is no default. `auth: {mode:
-        ambient}` uses the ambient Azure credential chain (`az login`, `AZURE_*`
-        variables, managed identity). `auth: {mode: service-principal, ...}` replaces
-        that chain entirely for this site: a rejected client secret then fails the
-        command rather than falling back.
+        `auth` says how the site authenticates and defaults to `{mode: ambient}`, the
+        ambient Azure credential chain (`az login`, `AZURE_*` variables, managed
+        identity), which is what `DefaultAzureCredential` does when told nothing.
+        `auth: {mode: service-principal, ...}` replaces that chain entirely for this
+        site: a rejected client secret then fails the command rather than falling back.
 
         Ships as the opt-in `azure` system plugin, so a site stays not-ready until
         `[plugins] system` lists it.

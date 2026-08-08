@@ -79,8 +79,8 @@ _MAX_USER_DATA_BYTES = 16384
 
 
 # Why an arm with no fields but its tag exists at all: see azure's
-# ``AzureAmbientAuth``. It makes borrowing the host's identity a declared
-# choice rather than a state a site lands in by writing nothing.
+# ``AzureAmbientAuth``. It gives borrowing the host's identity a declared
+# form, and it is the union's default.
 class AwsAmbientAuth(AgwModel):
     """Authenticate with boto3's ambient default credential chain.
 
@@ -124,13 +124,22 @@ class AwsAccessKeyAuth(AgwModel):
     it (see :func:`_assume_role_session`)."""
 
 
-#: How an aws-ec2 site authenticates, as a REQUIRED tagged union.
+#: How an aws-ec2 site authenticates, as a tagged union DEFAULTING to the
+#: ambient arm.
 #:
-#: Required, and with no omission alias, because the choice of identity is
-#: too consequential to be expressed by absence. An optional credential
-#: block cannot distinguish "borrow the host's identity deliberately" from
-#: "nobody configured this yet", and neither can a reviewer or the
-#: dependency graph reading the same document.
+#: An earlier revision made this required with no default, and that
+#: reasoning is in the history, so here is why it reversed (operator
+#: ruling): the defect the union fixed was never "absence selects a
+#: mechanism", it was that there was no way to DECLARE the choice at all.
+#: The union fixes the second, and once an explicit form exists, a
+#: default is an ordinary default, carried in the emitted schema and in
+#: ``describe-kind`` like any other. Ambient is the right one because it
+#: is what the wrapped SDK already does: boto3's credential chain is
+#: ambient-first, so requiring explicit auth would make this site
+#: stricter than the tool it wraps, which is surprising in the other
+#: direction. The general pattern: ambient where the underlying tool has
+#: an ambient notion, required where it does not, which is why proxmox
+#: has no union at all rather than being an exception to one.
 #:
 #: The tag is a string ``Literal`` rather than a boolean for the same
 #: reason it is a union rather than an ``auth_mode`` field beside nullable
@@ -185,11 +194,10 @@ class AwsEC2Config(AgwModel):
     satisfies the request. Non-empty when present, because an empty
     catalog is a site on which no instance can be created."""
 
-    auth: AwsAuth
+    auth: AwsAuth = AwsAmbientAuth(mode="ambient")
     """How this site authenticates to AWS: ``{mode: ambient}`` for boto3's
     default chain, or ``{mode: access-key, ...}`` for an explicit key.
-    Required, with no default, so a site never selects an identity by
-    leaving a key out."""
+    Defaults to ambient, matching what boto3 does when told nothing."""
 
 
 class _InstanceType(NamedTuple):
@@ -301,9 +309,9 @@ class EC2Platform(VMPlatform):
     name: ClassVar[str] = "aws-ec2"
     description: ClassVar[str] = "Amazon EC2 instances (region + optional VPC subnet)"
     config_model: ClassVar[type[AwsEC2Config]] = AwsEC2Config
-    # Every aws-ec2 site written before the required ``auth`` union
-    # crosses this break, whether or not it declared credentials, so both
-    # directions get their exact rewrite. Release-scoped.
+    # An aws-ec2 site that WROTE ``credentials`` (or wrote it null)
+    # crosses this break and gets its exact rewrite; a site that omitted
+    # it lands on the ambient default and was never broken. Release-scoped.
     retired_shape: ClassVar[RetiredPresenceShape | None] = RetiredPresenceShape(
         retired_field="credentials",
         union_field="auth",
@@ -328,10 +336,11 @@ class EC2Platform(VMPlatform):
         egress IP (plus `operator.ssh_allow_cidrs`) during bootstrap and each native
         route.
 
-        Every site states how it authenticates; there is no default. `auth: {mode:
-        ambient}` uses the ambient AWS credential chain (environment, shared config,
-        instance profile, SSO). `auth: {mode: access-key, ...}` replaces that chain for
-        this site; add `assume_role_arn` to layer an STS AssumeRole on top.
+        `auth` says how the site authenticates and defaults to `{mode: ambient}`, the
+        ambient AWS credential chain (environment, shared config, instance profile,
+        SSO), which is what boto3 does when told nothing. `auth: {mode: access-key,
+        ...}` replaces that chain for this site; add `assume_role_arn` to layer an STS
+        AssumeRole on top.
 
         Ships as the opt-in `aws` system plugin, so a site stays not-ready until
         `[plugins] system` lists it.

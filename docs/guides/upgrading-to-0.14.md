@@ -216,14 +216,13 @@ resources guide before editing an appended file.
   rather than from the section header: `[proxmox]` does select the `proxmox` platform, but `[azure]`
   selects `azure-vm`, so only one of the two matches its old section name.
 
-  An `azure-vm` site also carries one key no `[azure]` section had: it states how it authenticates,
-  in a required `auth` table with no default. A site on the ambient Azure credentials (`az login`,
-  `AZURE_*`, a managed identity) writes `auth: {mode: ambient}`; a site on an explicit principal
-  writes `auth: {mode: service-principal, tenant_id: ..., client_id: ..., secret: ...}`, where
-  `secret` NAMES the secret holding the client secret and defaults to `azure-client-secret`. Move
-  the section's keys first and add that table, or the manifest you just wrote will be refused for
-  the missing field.
-  ["Authentication and placement are declared, not inferred"](#authentication-and-placement-are-declared-not-inferred)
+  An `azure-vm` site also carries one key no `[azure]` section had: it says how it authenticates, in
+  a tagged `auth` table. A site on the ambient Azure credentials (`az login`, `AZURE_*`, a managed
+  identity) writes `auth: {mode: ambient}`, or writes nothing: ambient is the declared default. A
+  site on an explicit principal writes
+  `auth: {mode: service-principal, tenant_id: ..., client_id: ..., secret: ...}`, where `secret`
+  NAMES the secret holding the client secret and defaults to `azure-client-secret`.
+  ["Authentication and placement are one tagged field now"](#authentication-and-placement-are-one-tagged-field-now)
   below has both rewrites in full. `[proxmox]` needs nothing extra: proxmox has one authentication
   shape.
 
@@ -537,18 +536,20 @@ carries its own `name` key, two keys claim to select the capability and which on
 decide. If it holds something that is not a table, there are no keys to fold and printing the tag
 alone would discard what you wrote. Both errors say so and name the field.
 
-### Authentication and placement are declared, not inferred
+### Authentication and placement are one tagged field now
 
 Three platforms used to let the PRESENCE of an optional block choose a mechanism: an `azure-vm`
-site's `service_principal`, an `aws-ec2` site's `credentials`, and a `lima` site's `vm_host`.
-Writing the block picked one mechanism and leaving it out picked another, so no document could say
-which of the two you meant, and neither could a reviewer, `agw doctor`, or the dependency graph.
-Each is now a required tagged union whose `mode` names the mechanism outright: `auth` on the two
-clouds, `placement` on lima.
+site's `service_principal`, an `aws-ec2` site's `credentials`, and a `lima` site's `vm_host`. There
+was no way to write the choice itself down, so no document could say "I chose the omitted one", and
+a misspelled key silently selected the wrong mechanism. Each is now a tagged union whose `mode`
+names the mechanism outright: `auth` on the two clouds, `placement` on lima. Each defaults to the
+mode omission always selected (`{mode: ambient}` on the clouds, `{mode: local}` on lima), which is
+also what the wrapped tool does when told nothing, so a site that wrote no block still loads and
+still means what it always meant. `agw doctor`'s site row shows the resolved mode either way
+(`platform azure-vm (auth: ambient)`), so the choice is reviewable without opening the manifest.
 
-**Every azure-vm, aws-ec2, and lima site crosses this, including the ones that declared nothing**,
-because absence is no longer a state a site can be in. There is no default and no omission alias:
-one of the two modes gets written down. Proxmox and wsl2 are unaffected, having no choice to express
+**Only a site that WROTE the old field crosses this**, with a value or as an explicit `null`; a site
+that omitted it was never broken. Proxmox and wsl2 are unaffected, having no choice to express
 (proxmox has one authentication shape, wsl2 takes no config at all). Like every other declaration,
 this is checked wherever the manifest loads, whether or not the platform's plugin is enabled, per
 ["Every host checks every declaration now"](#every-host-checks-every-declaration-now) above.
@@ -563,44 +564,30 @@ Configuration error: ~/.config/agentworks/resources/sites.yaml:1: vm-site/azure-
 written explicitly now: auth: {mode: service-principal, tenant_id: ..., client_id: ..., secret: ...}
   Hint: Apply the rewrite above; `agw resource describe-kind <kind>` documents the field, and `agw
   resource sample <kind>` prints it as a document to edit. See "Authentication and placement are
-  declared, not inferred" in docs/guides/upgrading-to-0.14.md.
+  one tagged field now" in docs/guides/upgrading-to-0.14.md.
 ```
 
-A site that wrote nothing is refused too, and that error is the one to read rather than skim: it
-names a field you never typed, so it says outright that nothing was deleted and that a line is being
-added. This is the common case on lima, where the zero-config local site said nothing at all:
-
-```console
-$ agw resource list
-Configuration error: ~/.config/agentworks/resources/lima.yaml:1: vm-site/lima-here: 'placement' is
-required and this resource does not declare it. Omitting 'vm_host' used to mean 'local'; that choice
-is written down now rather than inferred from what is missing, so nothing was deleted from your
-document and one line is added to it: placement: {mode: local}
-  Hint: Apply the rewrite above; `agw resource describe-kind <kind>` documents the field, and `agw
-  resource sample <kind>` prints it as a document to edit. See "Authentication and placement are
-  declared, not inferred" in docs/guides/upgrading-to-0.14.md.
-```
-
-A site that wrote the old key as an explicit `null` gets a third message, and it is the one worth
+A site that wrote the old key as an explicit `null` gets its own message, and it is the one worth
 reading closest. On 0.13 a null meant exactly what omitting the key meant, so `vm_host: null` was a
-LOCAL site and `service_principal: null` was ambient auth. That is the same absent-and-null
-conflation this change exists to end, so the fix differs from the absent case in one important way:
-there is a line to delete as well as one to write.
+LOCAL site and `service_principal: null` was ambient auth. A retired field is still a retired field,
+so the line has to go; the message says what the null was doing and names the line to write in its
+place:
 
 ```console
 $ agw resource list
-Configuration error: ~/.config/agentworks/resources/lima.yaml:1: vm-site/lima-here: 'placement' is
-required and this resource does not declare it. 'vm_host: null' selected 'local', exactly as
-omitting the key did, and that is the conflation the required 'placement' ends; delete the null line
-and write the choice instead: placement: {mode: local}
+Configuration error: ~/.config/agentworks/resources/sites.yaml:1: vm-site/lima-here: 'vm_host:
+null' is a retired spelling. It selected 'local', exactly as omitting the key did, and ending that
+conflation is why the field is gone; delete the null line and write the choice instead: placement:
+{mode: local}
   Hint: Apply the rewrite above; `agw resource describe-kind <kind>` documents the field, and `agw
   resource sample <kind>` prints it as a document to edit. See "Authentication and placement are
-  declared, not inferred" in docs/guides/upgrading-to-0.14.md.
+  one tagged field now" in docs/guides/upgrading-to-0.14.md.
 ```
 
 Note which arm it names. A null selected the AMBIENT and LOCAL modes, never the credentialed ones,
 so `service_principal: null` becomes `auth: {mode: ambient}` and `vm_host: null` becomes
-`placement: {mode: local}`. If you are working from the null scan in
+`placement: {mode: local}` (each is the union's default, so deleting the null line alone also loads;
+writing the line keeps the choice visible in the document). If you are working from the null scan in
 ["An explicit `null` secret name now means the DEFAULT secret"](#one-meaning-changed-rather-than-one-shape)
 below, these three keys are the ones whose nulls were doing something different from the secret
 fields that section covers.
@@ -624,14 +611,6 @@ spec:
       tenant_id: 11111111-1111-1111-1111-111111111111
       client_id: 22222222-2222-2222-2222-222222222222
       secret: azure-client-secret
----
-# before, the other site: no service_principal key anywhere in it
-spec:
-  platform:
-    name: azure-vm
-    subscription_id: "00000000-0000-0000-0000-000000000000"
-    resource_group: agw-dev
-    region: eastus
 ```
 
 ```yaml
@@ -647,22 +626,14 @@ spec:
       tenant_id: 11111111-1111-1111-1111-111111111111
       client_id: 22222222-2222-2222-2222-222222222222
       secret: azure-client-secret
----
-# after, the site that was borrowing the host's Azure identity all along
-spec:
-  platform:
-    name: azure-vm
-    subscription_id: "00000000-0000-0000-0000-000000000000"
-    resource_group: agw-dev
-    region: eastus
-    auth: { mode: ambient }
 ```
 
 `mode`, `tenant_id`, and `client_id` are required in the `service-principal` arm. `secret` is not:
 it names the secret holding the client secret and falls back to `azure-client-secret` when you leave
-it out, exactly as it did inside the old block. `ambient` is the `az login` / `AZURE_*` /
-managed-identity chain, with the interactive-browser fallback, which is what a site with no
-`service_principal` block was using.
+it out, exactly as it did inside the old block. A site with no `service_principal` key anywhere in
+it needs no edit: it lands on the `auth: {mode: ambient}` default, the `az login` / `AZURE_*` /
+managed-identity chain with the interactive-browser fallback, which is what it was using all along.
+Write the line anyway if you want the choice visible in the document.
 
 **AWS.** `auth` replaces `credentials`. The three keys keep their spellings:
 
@@ -676,12 +647,6 @@ spec:
       access_key_id: AKIAEXAMPLE
       access_key_secret: aws-secret-access-key
       assume_role_arn: arn:aws:iam::123456789012:role/agentworks
----
-# before, the other site: no credentials key anywhere in it
-spec:
-  platform:
-    name: aws-ec2
-    region: us-east-1
 ```
 
 ```yaml
@@ -695,19 +660,13 @@ spec:
       access_key_id: AKIAEXAMPLE
       access_key_secret: aws-secret-access-key
       assume_role_arn: arn:aws:iam::123456789012:role/agentworks
----
-# after, the site that was using the ambient AWS chain all along
-spec:
-  platform:
-    name: aws-ec2
-    region: us-east-1
-    auth: { mode: ambient }
 ```
 
 `mode` and `access_key_id` are required in the `access-key` arm. `access_key_secret` names the
 secret holding the secret access key and falls back to `aws-secret-access-key`; `assume_role_arn` is
-optional and layers an STS AssumeRole over the key. `ambient` is boto3's default chain (environment,
-shared config, instance profile, SSO).
+optional and layers an STS AssumeRole over the key. A site with no `credentials` key anywhere in it
+needs no edit: it lands on the `auth: {mode: ambient}` default, boto3's own chain (environment,
+shared config, instance profile, SSO), which is what it was using all along.
 
 **Lima.** `placement` replaces `vm_host`, and this is the one where a field is also renamed: inside
 the `ssh` arm it is `host`, because the arm already says which host this is.
@@ -718,11 +677,6 @@ spec:
   platform:
     name: lima
     vm_host: me@gpu-box
----
-# before, the other site: no vm_host key anywhere in it
-spec:
-  platform:
-    name: lima
 ```
 
 ```yaml
@@ -731,30 +685,26 @@ spec:
   platform:
     name: lima
     placement: { mode: ssh, host: me@gpu-box }
----
-# after, the site that runs limactl on this machine
-spec:
-  platform:
-    name: lima
-    placement: { mode: local }
 ```
 
 `host` is required in the `ssh` arm, which is the whole point of the change: a misspelled host key
 used to turn an ssh site into a not-ready local one, reporting `limactl not installed` about a
-problem you did not have. A `local` site needs `limactl` here and reports not-ready without it; the
-built-in `lima-local` site is exactly `placement: {mode: local}` and needs no declaration.
+problem you did not have. A site with no `vm_host` key anywhere in it needs no edit: it lands on the
+`placement: {mode: local}` default and keeps running `limactl` on this machine. A `local` site needs
+`limactl` here and reports not-ready without it; the built-in `lima-local` site is exactly
+`placement: {mode: local}` and needs no declaration.
 
 **Where the fields come from.** `agw resource describe-kind vm-platform/azure-vm` (and `/aws-ec2`,
-`/lima`) documents the union as a required table and shows each mode's own fields under that mode,
-so the rewrites above are not the only place they are written down:
+`/lima`) documents the union with its default in the parenthetical and shows each mode's own fields
+under that mode, so the rewrites above are not the only place they are written down:
 
 ```console
 $ agw resource describe-kind vm-platform/azure-vm
 [...]
-  auth  (table, required)
+  auth  (table, optional, default {mode: ambient})
     How this site authenticates to Azure: `{mode: ambient}` for the ambient credential
-    chain, or `{mode: service-principal, ...}` for an explicit principal. Required, with
-    no default, so a site never selects an identity by leaving a key out.
+    chain, or `{mode: service-principal, ...}` for an explicit principal. Defaults to
+    ambient, matching what `DefaultAzureCredential` does when told nothing.
     - ambient: Authenticate with the ambient chain: `az login`, `AZURE_*`, or a managed identity.
       mode  (one of: ambient, required)
         Selects this arm.
@@ -851,7 +801,7 @@ absent and `null` mean the same thing, so that same input quietly resolves to th
 secret and the site declares a dependency on it.
 
 Two of those three paths moved in
-["Authentication and placement are declared, not inferred"](#authentication-and-placement-are-declared-not-inferred)
+["Authentication and placement are one tagged field now"](#authentication-and-placement-are-one-tagged-field-now)
 above: the FIELDS keep their spellings, but they now sit in an `auth` arm rather than in a
 `service_principal` or `credentials` block. So do that rewrite first, then read this against the
 file you end up with. Proxmox is where it was.
