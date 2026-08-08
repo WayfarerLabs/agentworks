@@ -32,6 +32,13 @@ def _to_ssh_path(path: Path) -> str:
 
     Uses ~ for the home directory prefix and forward slashes on all platforms
     since OpenSSH expects POSIX-style paths even on Windows.
+
+    Deliberately NOT ``source_location.format_file_path``, despite the
+    overlapping ``~`` behaviour. That one renders prose for a human; this
+    one generates a token for ``ssh`` to parse, which is why it resolves
+    symlinks first and forces POSIX separators on Windows. Two callers
+    with genuinely different output contracts, so folding them together
+    would mean one of them silently getting the other's rules.
     """
     resolved = path.resolve()
     posix = resolved.as_posix()

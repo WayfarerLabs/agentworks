@@ -60,6 +60,38 @@ consumer that would navigate an operator to one renders nothing."""
 def format_file_path(file: Path) -> str:
     """Render a file path operator-friendly: ``~/path`` when under
     ``$HOME``, else the bare absolute path. Relative paths render as-is.
+
+    **This is the one way a host path is spelled to an operator.** Every
+    string a human reads that names a file on the machine they are sitting
+    at goes through here: doctor rows, command confirmations, error
+    messages, and hints alike. The rule is uniform on purpose. A screen
+    that shows ``~/.config/...`` on one line and ``/home/you/.config/...``
+    on the next teaches a reader that the difference carries meaning, and
+    it does not; that mixed screen is the defect this helper exists to
+    prevent, and it has recurred twice.
+
+    Three kinds of path are deliberately NOT rendered here, and each
+    exclusion is load-bearing rather than an oversight:
+
+    - **Paths on a VM or other remote.** ``$HOME`` here is the *host's*
+      home, so abbreviating a remote path against it is not merely
+      useless but actively wrong: an operator whose own username matches
+      the VM's would see ``/home/dev/workspaces/w`` collapse to
+      ``~/workspaces/w`` and go looking on the wrong machine. Remote
+      paths stay absolute. See ``workspaces/manager/rehome.py`` for the
+      density of them.
+    - **Text written into a file another program parses**, where ``~`` is
+      not expanded in that position: the PowerShell ``$PROFILE``
+      source line (``completions/install.py``), and the OpenSSH config
+      writer, which has its own ``_to_ssh_path`` because it is generating
+      config for ``ssh`` to read rather than prose for a human.
+    - **Verbatim echoes of what the operator typed**, such as
+      ``admin.dotfiles_source`` (which may be a git URL, not a path at
+      all) and ``apt.source_file``. Quoting input back unchanged is the
+      point of those messages.
+
+    A path outside ``$HOME`` needs no exclusion: it already falls through
+    to the absolute form.
     """
     if file.is_absolute():
         try:

@@ -23,6 +23,11 @@ from agentworks.cli._helpers import get_db
 # modules before this fix.
 from agentworks.resources import KIND_REGISTRY
 
+# Module-level because three commands in this file render a host path and
+# `source_location` is a leaf module (re, dataclasses, pathlib), so
+# hoisting it costs no startup time.
+from agentworks.source_location import format_file_path
+
 if TYPE_CHECKING:
     from agentworks.resources.inspect import OriginFilter
 
@@ -282,7 +287,7 @@ def resource_edit(
 
     from agentworks.errors import ConfigError
     from agentworks.schema import location_text
-    from agentworks.source_location import SourceLocation, format_file_path
+    from agentworks.source_location import SourceLocation
 
     try:
         config = load_config()
@@ -372,7 +377,7 @@ def resource_sample(
     resources_dir = config.source_path.parent / RESOURCES_DIRNAME
     path, outcome = write_sample(resources_dir, write, kind, all_kinds=all_kinds)
     verb = "Appended sample to" if outcome == "appended" else "Wrote sample to"
-    output.info(f"{verb} {path}")
+    output.info(f"{verb} {format_file_path(path)}")
     output.info("Uncomment the document lines (delete one leading '#') to activate.")
     # Each arm names something that IS in the file. A blank file that was
     # already there ("filled") gets neither a separator nor a modeline, so
@@ -460,4 +465,4 @@ def resource_schema(
     config = load_config(resources=False)
     schema_dir = config.source_path.parent / RESOURCES_DIRNAME / SCHEMA_DIRNAME
     written = write_schema_set(schema_dir)
-    output.info(f"Wrote {len(written)} schemas to {schema_dir}")
+    output.info(f"Wrote {len(written)} schemas to {format_file_path(schema_dir)}")

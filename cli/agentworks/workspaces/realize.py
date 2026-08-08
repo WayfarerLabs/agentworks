@@ -28,8 +28,11 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.errors import AgentworksError, ExternalError
+from agentworks.source_location import format_file_path
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
     from agentworks.resources.registry import Registry
@@ -44,7 +47,7 @@ def realize_workspace(
     name: str,
     vm: VMRow,
     template: ResolvedTemplate,
-) -> str:
+) -> Path:
     """Make workspace ``name`` real on ``vm``: create the on-VM
     directory from its RESOLVED template, generate the VS Code
     workspace stub, insert the DB row, and reconcile grant-all agents
@@ -70,7 +73,7 @@ def realize_workspace(
     )
 
     workspace_path: str | None = None
-    vscode_path: str | None = None
+    vscode_path: Path | None = None
 
     ssh_logger = SSHLogger(vm.name, "workspace-create")
 
@@ -88,9 +91,7 @@ def realize_workspace(
         if workspace_path:
             delete_vm_workspace(vm, config, name, workspace_path, workspace_group(name), logger=ssh_logger)
         if vscode_path:
-            from pathlib import Path
-
-            Path(vscode_path).unlink(missing_ok=True)
+            vscode_path.unlink(missing_ok=True)
 
     def _safe_cleanup() -> None:
         # Rollback failures must not mask the original KI/exception. Surface
@@ -102,7 +103,7 @@ def realize_workspace(
             output.warn(
                 f"rollback during workspace create '{name}' failed: {cleanup_err}. "
                 f"VM may have residual files or VS Code workspace file. "
-                f"SSH log: {ssh_logger.path}"
+                f"SSH log: {ssh_logger.display_path}"
             )
 
     # Outer try/finally ensures the SSH logger is closed exactly once, AFTER
@@ -114,7 +115,7 @@ def realize_workspace(
             workspace_path = create_vm_workspace(vm, config, name, template, logger=ssh_logger)
 
             vscode_path = generate_vscode_workspace(vm, config, name, workspace_path)
-            output.detail(f"VS Code workspace: {vscode_path}")
+            output.detail(f"VS Code workspace: {format_file_path(vscode_path)}")
 
             db.insert_workspace(
                 name,
@@ -136,7 +137,7 @@ def realize_workspace(
                 f"creating workspace: {e}",
                 entity_kind="workspace",
                 entity_name=name,
-                hint=f"SSH log: {ssh_logger.path}",
+                hint=f"SSH log: {ssh_logger.display_path}",
             ) from e
 
         # Materialize grant_all agents onto the new workspace: one explicit

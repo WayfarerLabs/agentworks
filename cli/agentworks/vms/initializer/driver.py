@@ -184,7 +184,7 @@ def bootstrap_vm(
         except Exception as secure_error:
             output.warn(f"could not secure the failed VM: {secure_error}")
         logger.close()
-        output.warn(f"Log: {logger.path}")
+        output.warn(f"Log: {logger.display_path}")
         raise
     except BaseException:
         # An operator interrupt (KeyboardInterrupt) or another
