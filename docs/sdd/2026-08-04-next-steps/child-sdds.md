@@ -77,6 +77,16 @@ is locked.
       effort's per-phase PR plan
 - [ ] Locked
 
+### Wave 3: 2026-08-07-secret-sources
+
+- [x] Seeded (FRD, PR #443, 2026-08-07; unblocked by wave 2's landing, carries the map-keyed
+      descriptor amendment as R8)
+- [ ] FRD merged to `main`
+- [ ] Picked up by an effort lead (HLA, plan)
+- [ ] Implementation complete (two-level model, synthesized sources, resolution API, singleton
+      exception removed, map-keyed hosting, relocation)
+- [ ] Locked
+
 ### Installer plugins (pre-0.14 core slimming): 2026-08-07-installer-plugins
 
 - [x] Ruled into roadmap scope (operator, 2026-08-07): misc core installers move behind system
@@ -93,7 +103,6 @@ is locked.
 
 Planned children, seeded when their prerequisites land (see `phasing.md`):
 
-- Wave 3: secret-source instances
 - Wave 4: harness scope framework
 - Wave 5: session observability phase 1
 - Wave 6: agentic artifacts and distillation
