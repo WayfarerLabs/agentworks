@@ -104,6 +104,13 @@ def _code(value: object) -> str:
     return f"{delimiter}{padding}{text}{padding}{delimiter}"
 
 
+def _schema_value(value: object) -> str:
+    """Render one YAML value as a lossless single-line Markdown literal."""
+    rendered = render_value(value)
+    visible = rendered.replace("\\", "\\\\").replace("\r", "\\r").replace("\n", "\\n").replace("\t", "\\t")
+    return _code(visible)
+
+
 def _field_name(entry: FieldEntry) -> str:
     if entry.name == MAPPING_KEY:
         return "<key>"
@@ -124,21 +131,20 @@ def _field_rows(
         facts = ["required" if entry.writable else "optional", _code(entry.type_label)]
         if entry.doc.default_template is not None:
             owner_default = entry.doc.default_template.replace("{owner_name}", "<name>")
-            facts.append(f"owner default {_code(render_value(owner_default))}")
+            facts.append(f"owner default {_schema_value(owner_default)}")
         elif worth_showing(entry.doc.default) and not entry.children:
-            facts.append(f"default {_code(render_value(entry.doc.default))}")
+            facts.append(f"default {_schema_value(entry.doc.default)}")
         if entry.doc.choices:
-            facts.append("choices " + ", ".join(_code(render_value(choice)) for choice in entry.doc.choices))
+            facts.append("choices " + ", ".join(_schema_value(choice) for choice in entry.doc.choices))
         if entry.doc.constraints:
             facts.append(
                 "constraints "
                 + ", ".join(
-                    f"{key.replace('_', ' ')} {_code(render_value(value))}"
-                    for key, value in entry.doc.constraints.items()
+                    f"{key.replace('_', ' ')} {_schema_value(value)}" for key, value in entry.doc.constraints.items()
                 )
             )
         if entry.doc.examples:
-            facts.append("examples " + ", ".join(_code(render_value(example)) for example in entry.doc.examples))
+            facts.append("examples " + ", ".join(_schema_value(example) for example in entry.doc.examples))
         if entry.doc.ref is not None:
             facts.append(f"references {_code(entry.doc.ref.kind)}")
         rows.append(f"- {_code('.'.join(path))}: " + "; ".join(facts))

@@ -706,6 +706,9 @@ Capability-kind and implementation topics render their live alternatives or conf
 including implementations that are installed but disabled. Exact declared-resource topics describe
 current state and relationships and link back to their kind's shared schema. Core concepts use names
 such as `concept-onboarding`, `concept-migration`, `concept-secrets`, and `concept-reporting-bugs`.
+Schema literal values remain on one reference row: YAML-rendered backslashes, carriage returns, line
+feeds, and tabs appear as distinct visible escape sequences inside safe variable-backtick code
+spans.
 
 Multiple topics render in the requested order and are validated atomically: one unknown topic
 prevents all output. Repeated topics render once at their first position. `--agent` and `--human`
@@ -756,11 +759,12 @@ stable stream backs Bash, Zsh, and PowerShell topic completion.
 workflow. It keeps the sequence, checkpoints, and consent boundaries in colocated package data and
 points to the installed kind and implementation topics for fields and samples. Its action records
 are inert instructions. Rendering them never reads a path, runs doctor, edits configuration, or
-authorizes an agent to do so. The sequence inventories canonical manifest-producing names first,
-backs up configuration and resources separately to fresh operator-selected destinations outside the
-active trees, verifies matching copies or an explicit absent resources baseline before editing, and
-compares the final operator inventory with the caller-owned union of retired-TOML and baseline
-manifest identities. Identity matching keeps manifest paths and ignores mutable source lines.
+authorizes an agent to do so. Under the first read boundary, the sequence inventories existing
+manifests and retired-TOML resources, records every intended TOML manifest file, and freezes their
+complete identity union. It then backs up configuration and resources separately to fresh
+operator-selected destinations outside the active trees, verifies matching copies or an explicit
+absent resources baseline without extending the union, and edits only at pre-recorded paths. Final
+identity matching keeps operator origin and manifest paths while ignoring mutable source lines.
 
 | Command                                                               | Description                                      |
 | --------------------------------------------------------------------- | ------------------------------------------------ |

@@ -56,11 +56,19 @@ def test_migration_actions_make_inventory_backups_and_verification_distinct() ->
     by_id = {str(action.id): action for action in actions}
 
     inventory = by_id["inventory-retired-resources"]
-    assert [item.name for item in inventory.required_inputs] == ["CONFIG_PATH"]
+    assert [(item.name, item.required) for item in inventory.required_inputs] == [
+        ("CONFIG_PATH", True),
+        ("RESOURCES_PATH", False),
+        ("INTENDED_MANIFEST_PATHS", True),
+    ]
     assert inventory.manual_steps is not None
-    assert "canonical kind/name" in inventory.manual_steps
-    assert "collapse nested subtables" in inventory.manual_steps
+    assert "pre-existing manifest by kind/name" in inventory.manual_steps
+    assert "path from INTENDED_MANIFEST_PATHS" in inventory.manual_steps
+    assert "Collapse nested subtables" in inventory.manual_steps
     assert "exclude every [secret_backends.*]" in inventory.manual_steps
+    assert "freeze the complete union as EXPECTED_IDENTITIES before backup or editing" in inventory.manual_steps
+    assert "complete immutable EXPECTED_IDENTITIES union" in inventory.expected_state
+    assert "operator-chosen intended manifest file" in inventory.expected_state
 
     config_backup = by_id["backup-config"]
     assert [item.name for item in config_backup.required_inputs] == ["CONFIG_PATH", "CONFIG_BACKUP_PATH"]
@@ -84,10 +92,8 @@ def test_migration_actions_make_inventory_backups_and_verification_distinct() ->
     assert "compare them byte for byte" in verification.manual_steps
     assert "exact paths and file bytes" in verification.manual_steps
     assert "explicit absent baseline" in verification.manual_steps
-    assert "union them into EXPECTED_IDENTITIES" in verification.manual_steps
-    assert "operator-declared origin variant" in verification.manual_steps
-    assert "manifest file path" in verification.manual_steps
-    assert "ignoring source line" in verification.manual_steps
+    assert "Validate every entry in EXPECTED_IDENTITIES" in verification.manual_steps
+    assert "without adding, removing, or changing any entry" in verification.manual_steps
 
     edit = by_id["edit-one-manifest"]
     assert [(item.name, item.required) for item in edit.required_inputs] == [
@@ -97,12 +103,37 @@ def test_migration_actions_make_inventory_backups_and_verification_distinct() ->
         ("EXPECTED_IDENTITIES", True),
     ]
     assert edit.manual_steps is not None
+    assert edit.required_inputs[0].description.startswith("The pre-recorded intended manifest file")
     assert "separate field-reference topic" in edit.manual_steps
-    assert "operator-declared origin variant and MANIFEST_PATH" in edit.manual_steps
+    assert "MANIFEST_PATH to equal" in edit.manual_steps
+    assert "pre-recorded intended file" in edit.manual_steps
+    assert "Never add, remove, or change a baseline entry" in edit.manual_steps
+    assert "EXPECTED_IDENTITIES remains byte-for-byte unchanged" in edit.expected_state
 
     comparison = by_id["compare-operator-inventory"]
     assert [item.name for item in comparison.required_inputs] == ["EXPECTED_IDENTITIES"]
     assert comparison.command == ("agw", "resource", "list", "--origin", "operator")
+
+
+def test_only_inventory_can_author_an_expected_manifest_path() -> None:
+    actions = next(block for block in _topic("concept-migration").blocks if isinstance(block, ActionList)).actions
+    inventory, *later = actions
+
+    assert "operator-chosen intended manifest file" in inventory.expected_state
+    for action in later:
+        authored = " ".join(
+            (
+                action.precondition,
+                action.expected_state,
+                action.refusal_alternative,
+                action.manual_steps or "",
+                *(item.description for item in action.required_inputs),
+            )
+        )
+        assert "operator-chosen intended manifest file" not in authored
+        assert "path from INTENDED_MANIFEST_PATHS" not in authored
+        assert "update the selected EXPECTED_IDENTITIES" not in authored
+        assert "union them into EXPECTED_IDENTITIES" not in authored
 
 
 def test_migration_mutations_name_exact_scope_and_never_claim_implicit_authority() -> None:
@@ -146,12 +177,15 @@ def test_migration_teaching_covers_cutover_validation_backends_and_null_secret_c
     flowed = " ".join(markdown.split())
 
     for required in (
-        "one canonical `kind/name`",
+        "read only the selected `config.toml` and the resources directory when it exists",
+        "operator-chosen intended manifest file",
+        "complete union as immutable expected identities",
         "fresh operator-selected destinations",
         "explicit absent resources baseline",
-        "Extend the caller-owned expected identities with every pre-existing baseline manifest",
         "operator-declared origin variant",
-        "Ignore the source line",
+        "Verification does not add, remove, or change an entry",
+        "pre-recorded intended path",
+        "without changing the baseline",
         "one manifest at a time",
         "after each edit",
         "`[secret_backends.*]`",
