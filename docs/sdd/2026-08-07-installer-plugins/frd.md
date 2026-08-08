@@ -30,7 +30,7 @@ and the mise tooling step; the authoritative inventory of what moves versus what
   Grouping follows the shape test, never a curated theme: mechanisms are distinct when their
   external dependency, config family, and failure modes differ, and the inventory may fold
   mechanisms whose shapes genuinely coincide, recording the shape test's answer per grouping
-  (operator direction, 2026-08-07).
+  (operator ruling, 2026-08-07).
 - R3. **The disabled experience is a first-class requirement.** An existing config that references a
   moved surface while the owning plugin is not enabled MUST fail with a crisp error that names the
   moved surface, the plugin that now owns it, and the exact remediation (the config line to add).
@@ -45,14 +45,17 @@ and the mise tooling step; the authoritative inventory of what moves versus what
 - R6. Ships in 0.14.0: this is part of the breaking-cleanup release and rides the same runway
   posture (the release that rejects old inputs also ships the teaching that explains them).
 - R7. **An explicit disable list**, universal across plugin-provided and built-in resources
-  (operator direction, 2026-08-07). A disabled resource leaves the normal views (lists, completions,
-  guide topics; retrievable behind a flag); `describe` and `doctor` always surface enablement
-  provenance; and a disabled resource that is still referenced is a finalize-time hard error naming
-  both ends and the remediation (re-enable it, or declare your own under the name). Wave 2's
-  reference extraction is what makes this safe: dangling references to disabled resources are
-  detectable at finalize by construction. This may be the firing trigger for the descriptor
-  contract's deferred `consumer_gating` field; the effort records that determination in the
-  descriptor contract if gating derivation consolidates here.
+  (operator ruling, 2026-08-07). A disabled resource leaves the normal views (lists, completions,
+  guide topics), retrievable in listings behind a flag; `describe` and `doctor` always surface
+  enablement provenance; and a disabled resource that is still referenced by another resource is a
+  finalize-time hard error naming both ends and the remediation (re-enable it, or declare your own
+  under the name). Wave 2's reference extraction is what makes this safe: references to disabled
+  resources are detectable at finalize by construction. Scope: R7 governs resource-to-resource
+  references; settings references keep the presence-not-availability contract wave 2 landed
+  (`config/references.py`), with `doctor` surfacing the disabled state. R3's plugin-enablement error
+  is a distinct, plugin-level mechanism whose surfacing point stays open below. This may be the
+  firing trigger for the descriptor contract's deferred `consumer_gating` field; the effort records
+  that determination in the descriptor contract if gating derivation consolidates here.
 
 ## Settled constraints (inherited; do not reopen)
 
@@ -63,15 +66,15 @@ and the mise tooling step; the authoritative inventory of what moves versus what
   grouping, no speculative generality, no mechanism without a consumer.
 - C3. This exercises the internal plugin framework only; it makes no external plugin promises (wave
   8 still gates those on the distribution-trust model).
-- C4. **The name is the contract** (operator agreement, 2026-08-07). A resource name's provider
-  changes only by explicit operator act: a silent same-name collision between a plugin-provided
-  resource and an operator declaration is a hard error whose remediation names both paths (rename
-  the operator's resource, or disable the plugin's and keep the name). Disable-and-redeclare is the
-  sanctioned replacement flow, and the substitution is surfaced in provenance, so dependents of the
-  name never silently receive something other than what they were built for. Defaults-with-override
-  semantics (a synthesized row that an operator declaration replaces, with provenance shown) are
-  reserved for surfaces that declare them deliberately; wave 3's synthesized secret sources are the
-  canonical case (`docs/sdd/2026-08-07-secret-sources/`).
+- C4. **The name is the contract** (operator ruling, 2026-08-07). A resource name's provider changes
+  only by explicit operator act: a silent same-name collision between a plugin-provided resource and
+  an operator declaration is a hard error whose remediation names both paths (rename the operator's
+  resource, or disable the plugin's and keep the name). Disable-and-redeclare is the sanctioned
+  replacement flow, and the substitution is surfaced in provenance, so dependents of the name never
+  silently receive something other than what they were built for. Defaults-with-override semantics
+  (a synthesized row that an operator declaration replaces, with provenance shown) are reserved for
+  surfaces that declare them deliberately; wave 3's synthesized secret sources are the canonical
+  case (`docs/sdd/2026-08-07-secret-sources/`).
 
 ## Growth path (recorded, explicitly out of scope now)
 
@@ -102,6 +105,7 @@ and the mise tooling step; the authoritative inventory of what moves versus what
 
 - The R1 inventory and classification (the seed deliberately does not pre-judge it beyond the named
   candidates).
-- One plugin or several, and their names.
-- Whether the disabled error surfaces at config load, finalize, or first use, and how it interacts
-  with `agw doctor`.
+- Which mechanisms, if any, the R1 inventory folds under R2's shape test, and the plugin names that
+  result.
+- Whether the R3 disabled-plugin error surfaces at config load, finalize, or first use, and how it
+  interacts with `agw doctor` (R7's disable-list check is ruled finalize-time).
