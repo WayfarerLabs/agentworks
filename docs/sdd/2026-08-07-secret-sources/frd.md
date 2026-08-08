@@ -28,7 +28,11 @@ declarable instance kind, the secret-backend analog of vm-site").
   2026-08-05): zero-config backends get synthesized sources under their current names (`env-var`,
   `prompt`), so existing per-secret references and `[secret_config].backends` chains keep working
   unchanged, and the model has exactly one concept (sources). Synthesized sources appear on
-  discovery surfaces (describe, samples, guide) like declared ones.
+  discovery surfaces (describe, samples, guide) like declared ones. They are the canonical
+  defaults-with-override case under the collision semantics settled with the installer-plugins child
+  (`docs/sdd/2026-08-07-installer-plugins/frd.md`, C4): an operator declaring a source under a
+  synthesized name replaces the synthesized row, with the substitution surfaced in provenance by
+  `describe` and `doctor`, never silently.
 - R3. Every per-secret reference names a source. Direct backend references become a deprecated
   compatibility path (warn in one release, reject in the next), never a permanent second branch. The
   runway has two carriers: the settings-side chain (`[secret_config].backends`) rides the kept
