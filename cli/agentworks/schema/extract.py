@@ -405,10 +405,16 @@ def _absent_defaults(model_cls: type[BaseModel]) -> dict[str, object]:
     for name, field in fields.items():
         try:
             value = _declared_default(field)
+            if value is not None:
+                # Inside the guard on purpose: _as_blob dumps the value, and a
+                # dump runs the author's serializers. A raising field_serializer
+                # on a defaulted instance would otherwise escape as an
+                # exception from a walk that promises never to raise.
+                blob = _as_blob(value)
         except Exception:  # noqa: BLE001  (see the docstring: author code, not the walk)
             continue
         if value is not None:
-            defaults[name] = _as_blob(value)
+            defaults[name] = blob
     _ABSENT_DEFAULT_CACHE[model_cls] = defaults
     return defaults
 

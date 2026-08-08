@@ -291,7 +291,7 @@ by a later change. In particular the 2.3 inventory still names azure's nested `s
 model and aws's nested `credentials` model, which is what existed when that step ran.
 
 **What changed.** Azure's `service_principal` block, AWS's `credentials` block, and lima's `vm_host`
-field are replaced by required nested discriminated unions: `auth: {mode: ambient}` or
+field are replaced by nested discriminated unions: `auth: {mode: ambient}` or
 `{mode: service-principal, ...}` on azure, `auth: {mode: ambient}` or `{mode: access-key, ...}` on
 aws, and `placement: {mode: local}` or `{mode: ssh, host: ...}` on lima. Each defaults to its
 ambient or local arm (operator ruling, reversed from the no-default posture this entry originally
