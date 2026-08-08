@@ -611,6 +611,51 @@ any registry is mutated, so a non-conforming implementation is a typed error nam
 seating stays all-or-nothing. Built-in implementations are held to the same contract by the
 descriptor table's own self-test.
 
+### Modeling a Config That Has Variants
+
+When a capability can be driven more than one way, the choice is DECLARED, never inferred from what
+the operator left out. Absence supplies a default VALUE; it must not select a MECHANISM. A config
+where omitting a block silently picks a different code path cannot tell a deliberate choice from a
+forgotten one, and neither can a reviewer, `doctor`, or the graph. Azure and AWS sites once worked
+that way: omitting the credential block selected the platform's ambient chain, so a manifest could
+not say which the operator meant. Lima was worse, because presence of `vm_host` selected between two
+transports, which is why a typo in that one key silently turned a remote site into a not-ready local
+one and suppressed the error naming the typo.
+
+The shape for this is a REQUIRED nested discriminated union, with a string `Literal` tag per arm:
+
+```python
+auth: Annotated[AmbientAuth | ServicePrincipalAuth, Field(discriminator="mode")]
+```
+
+Not a boolean, and not a mode field sitting beside optional credential fields. Pydantic emits this
+as `oneOf` over closed object shapes with `discriminator.propertyName` and a `const` per arm, so one
+authoritative declaration serves runtime validation, editor validation, samples, the field
+reference, and the guide. The alternative needs cross-field constraints ("`mode: ssh` requires
+`host`, `mode: local` forbids it") that JSON Schema cannot state. That does not violate the
+soundness contract, since a schema more permissive than the loader is sanctioned
+under-approximation, but it forfeits the DIAGNOSTIC: a mixed-arm config gets silence from the editor
+and fails at load instead. Emitting schema exists to move that feedback earlier, so the enum spends
+the point of it.
+
+**The discriminator selects a SHAPE, not a concept, and the operational test is whether the required
+field sets differ.** Two ways of driving a capability that need different required fields are two
+arms even when they feel like one mechanism, and two that need the same fields are one arm even when
+they feel like two. Worked example: Azure service principals authenticating by certificate rather
+than by secret are conceptually the same mechanism, but they need a certificate in place of a secret
+name, so they would be their own arm. Merging them would need "exactly one of `secret` or
+`certificate_path`", which is the same inexpressible cross-field constraint one level down, inside
+the arm that exists to eliminate it.
+
+**Adding an arm is the extension path, and it is additive.** Existing manifests keep validating, the
+emitted schema grows a branch and a mapping entry, and nothing restructures. So do not pre-group
+fields against a variant that does not exist yet: that is mechanism without a consumer, and this
+codebase deletes those. Name each arm for the MECHANISM it selects rather than for a position
+(`ssh`, not `remote`; `ambient`, `service-principal`, `access-key`), because a positional name
+leaves the mechanism implicit and reintroduces one layer up exactly what the union removes. A name
+that is fully specified today is fine even if a future sibling would make it ambiguous; implicitness
+is judged against what exists, not against what might.
+
 ### Secrets Are Just Declared References
 
 A capability's config may name secrets (a Proxmox API token, a git PAT, an AWS client secret).
