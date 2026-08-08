@@ -408,17 +408,19 @@ class Capability(ABC):
         actually offers rather than to its ``config_model`` declaration.
         """
         from agentworks.capabilities.config import validate_own_config
-        from agentworks.schema import extract_references
+        from agentworks.schema import extract_references, filled_defaults
 
         self.owner_name = owner_name
         owner = RefOwner(kind=self.owner_kind, name=owner_name)
         model = type(self).config_for()
         self._config = validate_own_config(type(self), config, owner=owner)
-        # Extracted from the RAW blob, exactly as the finalize pass does,
-        # so an instance's declared secrets are the same set the graph
-        # carries for it.
+        # Extracted from the FILLED blob, exactly as the finalize pass
+        # extracts: the boundary fill is the one renderer of templated
+        # defaults (validation above applies the same fill), so an
+        # instance's declared secrets are the same set the graph carries
+        # for it.
         self._secret_refs: tuple[ConfigReference, ...] = tuple(
-            ref for ref in extract_references(model, config, owner) if ref.kind == "secret"
+            ref for ref in extract_references(model, filled_defaults(model, config, owner)) if ref.kind == "secret"
         )
 
     @property

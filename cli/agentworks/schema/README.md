@@ -19,11 +19,11 @@ Each of these walks the model graph itself, so each can be wrong on its own.
 
 |     | Derivation                                              | Where                                                                                                                                          | What it walks with                                                                          |
 | --- | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| D1  | Loader validation                                       | `manifests/decode.py`, `manifests/envelope.py`, `capabilities/config.py`                                                                       | pydantic, plus the two before-validators in `base.py` (shorthand fold, owner-template fill) |
+| D1  | Loader validation                                       | `manifests/decode.py`, `manifests/envelope.py`, `capabilities/config.py`                                                                       | pydantic, plus the shorthand-fold before-validator in `base.py`, over the D5-filled blob    |
 | D2  | Emitted JSON Schema                                     | `manifests/emit.py`, `AgwModel.__get_pydantic_json_schema__`, `RefMarker.__get_pydantic_json_schema__`, `_ManifestJsonSchema`                  | `model_json_schema` plus three correction layers                                            |
 | D3  | Field-documentation stream                              | `fields.py::iter_field_docs`                                                                                                                   | the classifier (`_shape.py::shape_of`, `accepted_annotation`)                               |
 | D4  | Reference extraction, which builds the dependency graph | `extract.py::extract_references`                                                                                                               | the same classifier, over RAW blobs, before validation                                      |
-| D5  | Owner-template default fill                             | `base.py::_fill_owner_templated_defaults`                                                                                                      | must agree with D4 on absent-versus-null; both call `marker.render_default`                 |
+| D5  | Owner-template default fill                             | `fill.py::filled_defaults`, run at the boundaries (decode, the capability config core)                                                         | the same classifier, rewriting the raw blob BEFORE D1 and D4 read it                        |
 | D6  | The error bridge                                        | `errors.py::_resolve_path`                                                                                                                     | re-walks the model beside pydantic's `loc`                                                  |
 | D7  | Registration conformance                                | `base.py::reference_marker_error`, `_shape.py::model_is_complete`, `shorthand.py::shorthand_field_error`, run by `capabilities/conformance.py` | the guard derivation: its job is making the other walkers' blind spots loud                 |
 | D8  | Readiness probes over raw config                        | `capabilities/vm_platform/lima.py::not_ready` and kin                                                                                          | a hand-rolled read, deliberately non-constructing                                           |
@@ -65,7 +65,10 @@ A pair that should agree and has no comparator is a hole whether or not it curre
   OTHER derivation mechanism, so the oracle cannot inherit D4's own blind spots.
 - **D3 and the sample against D1** is guarded by uncommenting the real sample and loading it, for
   the FIRST arm of every union only, because a document holds one arm.
-- **D5 against D4** is single-source by construction.
+- **D5 against D1 and D4** is structural: D5 is the only renderer of an owner-templated default, and
+  D1 and D4 both read the blob D5 already rewrote, so there is no second rendering to drift. The
+  pipeline (fill, then validate or extract) is what `tests/schema/test_owner_templates.py` and the
+  completeness suite exercise.
 - **D8 against D1** is guarded per-blob by `_readiness` in `tests/vms/test_platform_support.py`:
   every config handed to a real `not_ready` is validated through the platform's own model first. The
   exposure it closes is a RENAME, not an unguarded read. Change a tag and the production manifests

@@ -2,7 +2,10 @@
 
 This is the property the whole dependency graph rests on. The registry
 builds edges before it validates anything, so a config with both a
-malformed blob and a cycle must still report the cycle.
+malformed blob and a cycle must still report the cycle. Every call here
+runs the boundary fill first, as production's graph-building paths do,
+so the quantification covers ``filled_defaults`` under the same
+contract: the pipeline as a whole never raises.
 
 The property is quantified over BOTH inputs, not just the blob. The blob
 axis is an explicit adversarial corpus plus a seeded generator; the model
@@ -28,7 +31,7 @@ import pytest
 from pydantic import BaseModel
 from pydantic.errors import PydanticSchemaGenerationError, PydanticUndefinedAnnotation, PydanticUserError
 
-from agentworks.schema import REF_SCHEMA_KEY, RefOwner, extract_references
+from agentworks.schema import REF_SCHEMA_KEY, RefOwner, extract_references, filled_defaults
 
 from ._fixture_models import ALL_FIXTURES
 
@@ -169,7 +172,7 @@ def _generated_blobs(model_cls: type[BaseModel], count: int = 800) -> list[objec
 
 
 def _assert_sane(model_cls: type[BaseModel], blob: object, declared: set[str]) -> None:
-    for ref in extract_references(model_cls, blob, OWNER):
+    for ref in extract_references(model_cls, filled_defaults(model_cls, blob, OWNER)):
         assert isinstance(ref.name, str) and ref.name, f"{model_cls.__name__} produced an unnamed edge from {blob!r}"
         assert ref.kind in declared, f"{model_cls.__name__} produced an undeclared {ref.kind} edge from {blob!r}"
 
@@ -220,7 +223,7 @@ def test_the_inputs_reach_an_edge_on_every_model_that_has_one(model_cls: type[Ba
     # vacuous for any model whose inputs never reach an edge, and a
     # whole-suite check would be satisfied by one fixture out of twenty.
     blobs = [*_ADVERSARIAL, *_generated_blobs(model_cls)]
-    produced = [ref for blob in blobs for ref in extract_references(model_cls, blob, OWNER)]
+    produced = [ref for blob in blobs for ref in extract_references(model_cls, filled_defaults(model_cls, blob, OWNER))]
     reason = _EDGELESS_BY_DESIGN.get(model_cls.__name__)
     if reason is None:
         assert produced, f"no input ever reached an edge on {model_cls.__name__}; its assertions are vacuous"

@@ -37,7 +37,7 @@ from pydantic import ValidationError as PydanticValidationError
 from agentworks.declared_resource import METADATA_FIELDS, DeclaredResource
 from agentworks.errors import ConfigError, StateError
 from agentworks.resources import KIND_REGISTRY
-from agentworks.schema import RefOwner, config_error_from, extract_references, located, validation_context
+from agentworks.schema import RefOwner, config_error_from, extract_references, filled_defaults, located
 from agentworks.schema._shape import Collection, shape_of
 
 if TYPE_CHECKING:
@@ -277,9 +277,12 @@ def decode_document(doc: Document, issues: list[str]) -> Any:
     owner = RefOwner(kind=doc.kind, name=doc.name)
     _check_declared_name(doc, owner, model)
     _check_declared_description(doc, owner, model)
-    payload = {**spec, **_metadata_payload(doc)}
+    # The boundary fill: this is the point that knows the owner, so an
+    # omitted owner-templated field is rendered into the payload here and
+    # the model validates a complete blob with no context of any kind.
+    payload = filled_defaults(model, {**spec, **_metadata_payload(doc)}, owner)
     try:
-        resource = model.model_validate(payload, context=validation_context(owner))
+        resource = model.model_validate(payload)
     except PydanticValidationError as exc:
         raise config_error_from(
             exc,
@@ -414,7 +417,8 @@ def advisory_issues(resource: DeclaredResource, doc: Document) -> list[str]:
     "hand-enumerating the loaders that reference a secret".
     """
     owner = RefOwner(kind=doc.kind, name=doc.name)
-    refs = [*extract_references(type(resource), doc.spec, owner), *_hosted_capability_references(resource, doc, owner)]
+    spec = filled_defaults(type(resource), doc.spec, owner)
+    refs = [*extract_references(type(resource), spec), *_hosted_capability_references(resource, doc, owner)]
     return [
         _nonconforming_secret(owner, ref) for ref in refs if ref.kind == "secret" and not _conforming_secret(ref.name)
     ] + _env_hygiene_issues(owner, resource)

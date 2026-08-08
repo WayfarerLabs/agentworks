@@ -29,7 +29,7 @@ from agentworks.schema import (
     AgwRootModel,
     RefOwner,
     config_error_from,
-    validation_context,
+    filled_defaults,
 )
 from agentworks.schema.errors import _problems
 from agentworks.source_location import SourceLocation, synthesized
@@ -81,12 +81,12 @@ class Bounded(AgwModel):
 def _fails(model_cls: type[BaseModel], blob: object) -> PydanticValidationError:
     """The ``ValidationError`` ``blob`` raises against ``model_cls``.
 
-    The owner rides the validation context, as it does at every real call
-    site: a model with an owner-templated field refuses to validate
-    without it.
+    The boundary fill runs first, as it does at every real call site, so
+    an owner-templated field never reports itself missing here and every
+    failure is one the operator's own document earns.
     """
     with pytest.raises(PydanticValidationError) as caught:
-        model_cls.model_validate(blob, context=validation_context(OWNER))
+        model_cls.model_validate(filled_defaults(model_cls, blob, OWNER))
     return caught.value
 
 

@@ -11,16 +11,18 @@ things a field can mean about another Resource are said with
     template: Annotated[str, ResourceRef(kind="vm-template", usage="the base image")]
 
 One authored marker feeds every consumer: reference extraction reads it
-off ``model_fields``, validation fills an omitted templated field from
-it, the field-reference stream carries it verbatim, and
+off ``model_fields``, the boundary fill
+(:func:`~agentworks.schema.filled_defaults`) resolves an omitted
+templated field from it before validation reads the blob, the
+field-reference stream carries it verbatim, and
 ``__get_pydantic_json_schema__`` puts it into emitted JSON Schema under
 a single ``x-agw-ref`` key. There is no second place to keep in sync.
 
 The owner-template vocabulary (``{owner_name}``, ``{owner_kind}``) is
 closed and is checked when the MARKER is constructed, so an author's
 mistake fails at import of the module declaring the model. That check is
-what lets ``extract_references`` promise it never raises: rendering a
-validated template cannot fail.
+what lets the fill promise it never raises: rendering a validated
+template cannot fail.
 """
 
 from __future__ import annotations

@@ -184,9 +184,10 @@ class DeclaredResource(EnvelopeMetadata):
     def __pydantic_init_subclass__(cls, **kwargs: Any) -> None:
         """Refuse an owner-templated default on an INHERITING kind's row.
 
-        ``AgwModel`` fills any field whose marker declares a
-        ``default_template`` and whose value is absent or ``None``. On a
-        capability config model that is exactly right, because the
+        The boundary fill (:func:`~agentworks.schema.filled_defaults`)
+        fills any field whose marker declares a ``default_template`` and
+        whose value is absent or ``None``. On a capability config model
+        that is exactly right, because the
         validated blob IS the effective blob. On a row that composes along
         an ``inherits`` chain it is wrong, and silently so: ``None`` there
         means "inherit", so filling it would give every template the
