@@ -6,8 +6,10 @@
 
 ## Scope
 
-This LLD adds JSON v1 to selected read-only operational commands. It makes the facts their human
-renderers already present available without parsing terminal tables, display sentinels, or prose.
+This LLD adds JSON v1 to selected operational list and describe commands. It makes the facts their
+human renderers already present available without parsing terminal tables, display sentinels, or
+prose. JSON adds no new mutation. It preserves a status-enabled session list's existing PID and
+boot-ID repair behavior, which can update stored session state before rendering.
 
 | CLI command                                     | Contract command                   |
 | ----------------------------------------------- | ---------------------------------- |
@@ -80,21 +82,40 @@ Missing facts are JSON null, never a display sentinel. Counts are integers and f
 All fields below are always present and in listed order.
 
     origin = { variant, file, line, source, source_resource, plugin }
-    reference = { source_kind, source_name, usage }
+    reference = { source_kind, source_name, usage, declared_by_kind, declared_by_name }
     instance_reference = { kind, name }
-    status_issue = { scope, reason }
+    vm_issue = { source, code }
 
 origin is nullable. When present, variant is exactly operator-declared, auto-declared, built-in, or
 system-plugin. file, line, source, source_resource, and plugin are null when inapplicable.
 source_resource is null or {kind, name} and represents an auto-declared tuple source. source is a
 code-source string. This keeps its type stable across origin variants.
 
-References are deduplicated by all three fields in first existing graph order. Instance references
-are the current InstanceRef values. JSON never groups them for display.
+declared_by_kind and declared_by_name are nullable strings. They are the ReferenceEntry declarer
+when the graph entry records one, not a display-derived source. References preserve every original
+graph entry and its graph order. They are never deduplicated, regrouped, or sorted. Instance
+references are the current InstanceRef values. JSON never groups them for display.
 
-status_issue appears only when a successful current inspection already degrades after a bounded
-attempted read. scope is a stable lowercase service identifier; reason is the existing sanitized
-diagnostic. The human renderer keeps its existing stderr warning, while JSON writes facts on stdout.
+vm_issue appears only in vm.describe. Its source is exactly site_lookup, preflight,
+secret_resolution, or platform_status. Its code is exactly unavailable. The fact builder records an
+issue at the named stage only: site lookup failures map to site_lookup; a failure raised by the
+preflight sweep maps to preflight; the resolver's ordered boundary pass maps to secret_resolution;
+display-backend-name or platform-status failures map to platform_status. It must split the current
+broad VM describe catch at those boundaries. It never serializes str(exception), an exception class,
+a hint, or backend-authored text. The same fact record carries a renderer-private typed diagnostic
+for the human renderer, preserving today's stderr warning and hint transcript. JSON writes only the
+safe issue on stdout. The existing live-resource helper already returns null for every failed or
+malformed live read and therefore creates no issue.
+
+Secret resolution is an output-neutral boundary operation. The ordered resolver accepts the existing
+ResolutionReporter protocol from its caller rather than constructing an output reporter internally.
+Resolver.resolve, the VM no-gate boundary, the session batch boundary, and its late repair-key
+resolution thread that reporter through. Human rendering passes the existing output reporter and
+therefore preserves its resolution and skipped-backend transcript. JSON passes a quiet reporter to
+the same ordered resolver, active backend chain, interactive policy, preflight, and value cache. It
+does not use the verification-only quiet resolver, which has deliberately different backend wrapping
+and interactivity rules. Thus JSON suppression changes presentation only, never secret resolution
+semantics or whether a successful VM describe or status-enabled session list can prompt.
 
 ## Data schemas
 
@@ -165,7 +186,7 @@ swap_total, swap_used, swap_percent, disk_total, disk_used, disk_percent}. These
 bounded live-read text and units. agents[] is {name, linux_user, grant_all, grant_count}.
 workspaces[] is {name, path, sessions}, and sessions[] is {name, template, mode, agent_name}.
 events[] is {created_at, event, detail} with nullable detail. mode is admin or agent; agent_name is
-nullable. These arrays retain current DB ordering. issues[] uses status_issue in encounter order.
+nullable. These arrays retain current DB ordering. issues[] uses vm_issue in encounter order.
 
 ### Workspaces and agents
 
@@ -188,15 +209,19 @@ sessions[] is {name, template, workspace_name}. Both retain current service orde
 ### Sessions and consoles
 
 session.list.data is {sessions}. Each session is {name, workspace_name, vm_name, template,
-harness_integration, mode, agent_name, status}. mode is admin or agent; agent_name is nullable.
+harness_integration, mode, agent_name, status}. harness_integration is a nullable string. mode is
+admin or agent; agent_name is nullable. A broken config or unresolvable template produces null for
+harness_integration, matching the current human display fallback without exposing an error string.
 status is exactly running, stopped, broken, unknown, or unavailable. unavailable represents current
 --no-status behavior or a current status probe without a result, rather than a human display
 sentinel. Ordering remains workspace name then session name. Existing human warnings for broken and
 unknown state stay on stderr only.
 
 session.describe.data is {session}. session is {name, workspace_name, vm_name, template,
-harness_integration, mode, agent_name, status, pid, created_at, updated_at}. agent_name and pid are
-nullable. Opaque harness state, boot identifier, and socket path are excluded.
+harness_integration, mode, agent_name, status, pid, created_at, updated_at}. harness_integration,
+agent_name, and pid are nullable. pid is a positive integer or null only. The stored PID_STOPPED
+sentinel is rendered as null, never as a negative number. Opaque harness state, boot identifier, and
+socket path are excluded.
 
 console.list.data is {consoles}, where entries are {name, vm_name, session_count} in current name
 order after filter validation. console.describe.data is {console}. console is {name, vm_name,
@@ -223,8 +248,8 @@ optional hint to stderr and exits nonzero. This includes bad resource references
 filters, configuration errors, and failed dependencies. Invalid --output follows normal usage
 handling before work begins.
 
-Doctor is the only report-with-failure exception. A successful inspection that currently degrades
-after a bounded attempted read uses null for unavailable facts and a status_issue; it is not a
+Doctor is the only report-with-failure exception. A successful VM inspection that currently degrades
+after a bounded attempted read uses null for unavailable facts and a closed vm_issue; it is not a
 business-error envelope. JSON contains no ANSI on either output stream. The serializer writes stdout
 directly, rather than output.info, so the ambient handler cannot add presentation. --output human
 executes the exact current human renderer path.
@@ -248,13 +273,23 @@ Implementation must add:
 2. Repeat-run raw-byte tests that prove deterministic array and key order.
 3. A human byte-compatibility fixture for every covered command: no option and explicit --output
    human both match pre-Phase-2 stdout and stderr in a non-interactive no-color fixture. VM and
-   session fixtures cover existing bounded status and degraded paths.
+   session fixtures cover existing bounded status and degraded paths, including the existing session
+   PID and boot-ID repair write.
 4. Mutual exclusion, no-ANSI, stderr-routing, error-empty-stdout, and doctor-report-before-exit
    tests.
 5. Safety tests proving JSON excludes secret values, raw config, opaque platform metadata, harness
    state, sockets, and boot identifiers.
 6. An end-to-end guide-action fixture that parses each applicable v1 document rather than human
    output.
+7. Secret-boundary parity fixtures. A successful VM describe whose site requires a resolvable secret
+   proves JSON stdout is exactly one parseable envelope with no resolver transcript. The equivalent
+   human fixture preserves the current resolved and skipped-backend transcript. The status-enabled
+   session-list fixture exercises the same quiet reporter through the batch boundary and proves it
+   retains the existing status and PID-repair outcome.
+8. Reference fixtures with repeated entries and inheritance declarers. They assert the exact graph
+   sequence, nullable declared_by fields, and no JSON-side deduplication. Session detail fixtures
+   assert a positive live PID and a stopped PID_STOPPED row rendered as null. Harness-integration
+   degradation fixtures assert null in list and describe JSON.
 
 cli/README.md gains the permanent JSON v1 contract: envelope, supported commands, resource and
 doctor examples, null and ordering rules, errors, doctor exit behavior, --names-only exclusion, and
@@ -271,8 +306,10 @@ has no new setting and is recorded as unaffected in the Phase 2 handoff.
    tests. Do not modify output.py or the global Typer handler.
 2. Wire resource, kinds, secret, and doctor first, reusing existing fact records to establish the
    renderer, null, enum, error, and human-fixture patterns.
-3. Extract read facts for VM, workspace, agent, console, and session. Preserve existing queries and
-   live status behavior, but make fact construction independently testable.
+3. Extract read facts for VM, workspace, agent, console, and session. Make the resolver reporter
+   caller-owned before wiring JSON VM describe and status-enabled session list. Preserve existing
+   queries, secret-resolution behavior, and session PID-repair behavior, but make fact construction
+   independently testable.
 4. Wire command options, permanent docs, completion expectations, and guide-action consumption, then
    run focused and full gates. This LLD changes no plan checkbox.
 
