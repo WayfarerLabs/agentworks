@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from agentworks.errors import ConfigError
+from agentworks.errors import ConfigError, ValidationError
 from agentworks.guide import (
     BlockId,
     FieldReference,
@@ -70,6 +70,37 @@ def test_strict_schema_catalog_rejects_one_invalid_target_with_scoped_diagnostic
     assert raised.value.topic == "vm-template"
     assert raised.value.field_path == "title"
     assert "SCHEMA_PAYLOAD" not in str(raised.value)
+
+
+def test_schema_service_error_is_strict_for_ci_and_isolated_at_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service_error = ValidationError("SCHEMA_SERVICE_PAYLOAD must not be rendered")
+
+    def unavailable_reference(target: str):
+        if target == "vm-template":
+            raise service_error
+        return reference_for(target)
+
+    monkeypatch.setattr("agentworks.guide.service.reference_for", unavailable_reference)
+
+    with pytest.raises(ValidationError) as raised:
+        _build_schema_catalog(strict=True)
+    assert raised.value is service_error
+
+    response = render_guide(
+        ("vm-template", "agent-template"),
+        GuideMode.AGENT,
+        load_config_fn=lambda: object(),  # type: ignore[arg-type,return-value]
+        load_registry_fn=lambda _config: None,  # type: ignore[arg-type,return-value]
+    )
+
+    assert response.exit_code == 1
+    assert "# vm-template\n\nThis guide topic is unavailable." in response.markdown
+    assert "Reference target: `agent-template`" in response.markdown
+    assert "invalid guide contribution from schema:vm-template: reference is unavailable" in response.markdown
+    assert "vm-template" not in response.names
+    assert "SCHEMA_SERVICE_PAYLOAD" not in response.markdown
 
 
 def test_runtime_isolates_invalid_schema_target_in_explicit_multi_topic_render(
