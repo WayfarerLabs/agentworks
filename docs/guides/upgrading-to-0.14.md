@@ -614,8 +614,16 @@ opening the site's manifest and looking at the field directly.
 
 Then decide, per hit:
 
-- If you meant "no secret here", **delete the line instead**. That is the same answer as the other
-  null fields above, and it is now the only spelling that means it.
+- **If you meant "no secret here", there is no spelling for that, and there never was.** These three
+  fields are required and always name a secret, so absent, `null`, and the default written out are
+  three ways of writing one thing. Deleting the line does NOT opt out; it is the same as writing
+  `null`, which is what this section is about. (Checked, not assumed: a proxmox site whose
+  `token_secret` line is deleted validates with `token_secret` set to `proxmox-token` and declares
+  the dependency.) If a site genuinely should not use one of these credentials, the field is not
+  where you say so, because the platform cannot run without it: that site should not be declared, or
+  it belongs on a platform that does not need one.
+- **If you meant a different secret, name it.** Which secret the field points at is the only thing
+  it can express, and it is what you came here to set.
 - If you meant the default all along, leave it. Nothing changes for you except that the default is
   now declared as a dependency, which `agw resource describe secret/proxmox-token` will show and
   `agw doctor` will check.
