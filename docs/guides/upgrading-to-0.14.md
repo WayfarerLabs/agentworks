@@ -419,11 +419,11 @@ procedure above as its brief. What matters is that it gets the constraints, not 
   recalled. Where a `spec` selects a capability implementation, the fields come from
   `agw resource describe-kind <capability-kind>/<name>` (`vm-platform/proxmox`,
   `git-credential-provider/azdo`), because the kind's own output only details one implementation.
-- One field list `describe-kind` does NOT fully print: where a platform's config carries a mode
-  union (`auth` on `azure-vm` and `aws-ec2`, `placement` on `lima`), it lists both modes and expands
-  only one. The arm that is merely named has no address of its own, so its fields come from
-  ["Authentication and placement are declared, not inferred"](#authentication-and-placement-are-declared-not-inferred)
-  below, or from the emitted schema, which carries both.
+- `describe-kind` is the AUTHORITATIVE field list, and for mode unions it is complete. Where a
+  platform's config carries one (`auth` on `azure-vm` and `aws-ec2`, `placement` on `lima`), the
+  per-implementation output expands EVERY arm with that arm's own fields, so nothing about the modes
+  has to be reconstructed from prose or from a second surface. `agw resource sample` is the surface
+  that shows one arm only; it says so in a comment naming the `describe-kind` that prints them all.
 - `describe-kind`, `sample`, and `schema --write` work while `config.toml` is refused. `list` and
   `secret list` do not. `agw doctor` DOES: it reports the refusal as one fail row and goes on to
   validate the manifests written so far, so it is the iteration loop, not just the final check.

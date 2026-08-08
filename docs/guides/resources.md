@@ -147,10 +147,10 @@ does not declare, and the editor should underline it immediately. If nothing hap
 first line of the file is the modeline and that the path it names exists.
 
 What the editor checks is a deliberate subset of what loading checks. Everything it flags is a real
-error, but agentworks also applies rules JSON Schema cannot state (cross-field constraints, name
-character rules, whether a capability is registered here at all), so a manifest with no editor
-diagnostics can still fail to load. The direction is on purpose: a schema that under-reports costs
-you a squiggle, while one that over-reports would underline valid configuration.
+error, but agentworks also applies rules the emitted schema does not carry (cross-field validators,
+name character rules, whether a capability is registered on this host at all), so a manifest with no
+editor diagnostics can still fail to load. The direction is on purpose: a schema that under-reports
+costs you a squiggle, while one that over-reports would underline valid configuration.
 
 **The schemas target YAML 1.2**, because that is the version every schema-aware editor parses. The
 loader is PyYAML, which is YAML 1.1, and the two versions disagree about three things a manifest can

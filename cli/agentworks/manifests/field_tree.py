@@ -207,7 +207,13 @@ class FieldEntry:
 
 
 def field_tree(model: type[BaseModel], capability_kind: str | None = None) -> tuple[FieldEntry, ...]:
-    """``model``'s fields as a tree, one union arm expanded.
+    """``model``'s fields as a tree, with union arms expanded in place.
+
+    Every arm with no address of its own is expanded, because nothing else
+    documents it. An arm that HAS an address (a capability implementation)
+    is expanded only when it is the first, since its own ``describe-kind``
+    form covers it in full. :func:`_shows_fields` holds that rule and the
+    reasons for both halves of it.
 
     ``capability_kind`` names the capability whose implementations a
     discriminated union's arms ARE, when they are: it is what lets an

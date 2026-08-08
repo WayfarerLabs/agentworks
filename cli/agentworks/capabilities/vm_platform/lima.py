@@ -156,9 +156,11 @@ class LimaSshPlacement(AgwModel):
 #: ``direct`` is not, and obvious beats symmetric. Do not "fix" it.
 #:
 #: Not an enum beside an optional ``host``, and the reason is the
-#: DIAGNOSTIC rather than soundness: an enum cannot state that ``ssh``
-#: requires a host and ``local`` forbids one, so a mixed-arm config would
-#: draw no editor complaint and fail only at load. (A schema more
+#: DIAGNOSTIC rather than soundness: that shape can only state "``ssh``
+#: requires a host, ``local`` forbids one" in a ``model_validator``, and
+#: pydantic does not derive a validator's body into the schema it emits,
+#: so a mixed-arm config would draw no editor complaint and fail only at
+#: load. (A schema more
 #: permissive than the loader is sanctioned under-approximation, so that
 #: alternative would not have broken ``manifests/emit.py``'s contract; it
 #: would simply have spent the point of emitting schema at all.) The union

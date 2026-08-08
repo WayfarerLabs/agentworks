@@ -376,10 +376,12 @@ a plaintext file; the value resolves through the framework secret system like pr
 A union rather than an `auth_mode` enum beside nullable blocks, and the reason is mechanical:
 pydantic emits a discriminated union directly as `oneOf` with a `discriminator` mapping and a
 `const` per arm, so the loader and the emitted schema agree by construction. The enum alternative
-needs a cross-field validator, which JSON Schema cannot state, so the emitted schema would accept
-mixed-arm configs the loader rejects. Under `manifests/emit.py`'s contract a schema may be more
-permissive than the loader, so that is not unsound; what it forfeits is the DIAGNOSTIC, since a
-`tenant_id` written under `mode: ambient` would draw no editor complaint and fail only at load.
+needs a cross-field validator, and pydantic does not derive a validator's body into the schema it
+emits, so the emitted schema would accept mixed-arm configs the loader rejects. The limit is that
+derivation and not JSON Schema, which states such a constraint fine; it just has to be declared
+rather than written as code. Under `manifests/emit.py`'s contract a schema may be more permissive
+than the loader, so that is not unsound; what it forfeits is the DIAGNOSTIC, since a `tenant_id`
+written under `mode: ambient` would draw no editor complaint and fail only at load.
 
 Proxmox is deliberately NOT in this shape: it has one authentication mechanism, so it keeps its
 required token fields with no mode selector. Add a union when there are two mechanisms to choose

@@ -633,8 +633,15 @@ Not a boolean, and not a mode field sitting beside optional credential fields. P
 as `oneOf` over closed object shapes with `discriminator.propertyName` and a `const` per arm, so one
 authoritative declaration serves runtime validation, editor validation, samples, the field
 reference, and the guide. The alternative needs cross-field constraints ("`mode: ssh` requires
-`host`, `mode: local` forbids it") that JSON Schema cannot state. That does not violate the
-soundness contract, since a schema more permissive than the loader is sanctioned
+`host`, `mode: local` forbids it"), and it loses on DERIVATION, not on expressiveness. JSON Schema
+states that constraint perfectly well: as `oneOf` over closed arms, which is exactly what we ship,
+or as `if`/`then` on the discriminator. What does not survive the trip is imperative code. The enum
+design has to put the rule in a `model_validator`, and pydantic does not derive a validator's body
+into the schema it emits, so the emitted schema would say nothing at all about the one rule that
+design added. The union states the same rule declaratively, so emission reads it off the same
+declaration the loader validates against.
+
+That silence is not unsound, since a schema more permissive than the loader is sanctioned
 under-approximation, but it forfeits the DIAGNOSTIC: a mixed-arm config gets silence from the editor
 and fails at load instead. Emitting schema exists to move that feedback earlier, so the enum spends
 the point of it.
@@ -645,7 +652,7 @@ arms even when they feel like one mechanism, and two that need the same fields a
 they feel like two. Worked example: Azure service principals authenticating by certificate rather
 than by secret are conceptually the same mechanism, but they need a certificate in place of a secret
 name, so they would be their own arm. Merging them would need "exactly one of `secret` or
-`certificate_path`", which is the same inexpressible cross-field constraint one level down, inside
+`certificate_path`", which is the same validator-only cross-field constraint one level down, inside
 the arm that exists to eliminate it.
 
 **Adding an arm is the extension path, and it is additive.** Existing manifests keep validating, the
@@ -656,6 +663,12 @@ codebase deletes those. Name each arm for the MECHANISM it selects rather than f
 leaves the mechanism implicit and reintroduces one layer up exactly what the union removes. A name
 that is fully specified today is fine even if a future sibling would make it ambiguous; implicitness
 is judged against what exists, not against what might.
+
+**Name the FIELD for what it selects, and let sibling capabilities diverge.** `auth` on `azure-vm`
+and `aws-ec2` and `placement` on `lima` are the same shape doing different jobs: one selects an
+identity, the other selects where `limactl` runs. Naming both of them the same thing for symmetry's
+sake would make one of the two names a lie, so the divergence is deliberate and is not a consistency
+defect to be tidied away.
 
 ### Secrets Are Just Declared References
 
