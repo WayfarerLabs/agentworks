@@ -62,6 +62,14 @@ while continuing to report the retired-section failure. Fix closed-world fields,
 non-nullable nulls, and retired sibling capability shapes from that precise error and the live field
 reference.
 
+The `edit-one-manifest` mutation applies to both pre-existing manifests and manifests derived from
+retired TOML. If validation reports a written legacy `service_principal`, `credentials`, or
+`vm_host` field, apply that hard error's exact replacement in the selected manifest. A retired outer
+field written as explicit null selected the same mode as omission: delete the retired null line and
+write `auth: {mode: ambient}`, `auth: {mode: ambient}`, or `placement: {mode: local}`, respectively.
+A manifest that omitted the old outer field needs no shape edit because the new tagged field has the
+same default. Validate the changed manifest again before reviewing it.
+
 ## Review authentication, placement, and changed secret references
 
 Inspect every pre-existing and TOML-derived site manifest, not only the files created during this
@@ -82,15 +90,14 @@ tagged choices now:
   `placement: {mode: local}` records that choice explicitly. The `ssh` arm also requires
   `placement.host`.
 
-The old presence-shaped fields are retired. A manifest that wrote `service_principal`,
-`credentials`, or `vm_host` fails with an exact replacement derived from its own keys. Apply that
-hard-error guidance and confirm the result against the live field reference. A retired outer field
-written as explicit null selected the same mode as omission: `service_principal: null` maps to
-`auth: {mode: ambient}`, `credentials: null` maps to `auth: {mode: ambient}`, and `vm_host: null`
-maps to `placement: {mode: local}`. Delete the retired null line when writing the replacement. A
-manifest that omitted the old outer field needs no shape edit because the new tagged field has the
-same default. Do not confuse these outer-null rewrites with a null inner secret reference, which
-still selects the well-known secret name.
+The old presence-shaped fields are retired. During this read-only review, a remaining
+`service_principal`, `credentials`, or `vm_host` shape means the earlier edit loop is incomplete.
+Record the hard error's exact required rewrite and return that manifest to `edit-one-manifest`; do
+not modify it during review. For classification, `service_principal: null` means
+`auth: {mode: ambient}`, `credentials: null` means `auth: {mode: ambient}`, and `vm_host: null`
+means `placement: {mode: local}`. Do not confuse these outer-null mappings with a null inner secret
+reference, which still selects the well-known secret name. Review is complete only after every site
+has a current shape and its mode and secret-reference intent are confirmed.
 
 ## Cut over once
 

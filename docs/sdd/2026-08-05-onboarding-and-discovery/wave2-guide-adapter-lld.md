@@ -64,8 +64,10 @@ scoped content issue. `FieldReference.section` is a tuple of field-path segments
 renders the complete reference. A non-empty tuple selects one exact metadata or spec subtree and
 fails closed when the path is absent or ambiguous. Selection descends through plain
 `FieldEntry.children` plus every `Alternative.fields` set. A field unique to one arm, such as
-`auth.secret`, is selectable. A field repeated across arms, such as `auth.mode`, remains unavailable
-because exact selection requires one match.
+`auth.secret`, is selectable. The selector carries every candidate through the complete path, so two
+arms may share an intermediate block when only one supplies the requested leaf. A field whose
+complete path is repeated across arms, such as `auth.mode`, remains unavailable because exact
+selection requires one terminal match.
 
 Dynamic guide topics use the following block sets:
 
@@ -150,9 +152,9 @@ platform-native copy, inspection, and editing tools.
 | `backup-config`               | `MUTATE_AGENTWORKS`     | Manual: copy `CONFIG_PATH` to a fresh operator-selected `CONFIG_BACKUP_PATH` outside and distinct from the active config and resources trees.                                                                                                                                                                                                                                          | Refusal leaves config untouched and stops migration.                                                                                                                                                                                     |
 | `backup-resources`            | `MUTATE_AGENTWORKS`     | Manual: when `RESOURCES_PATH` exists, copy it to a fresh `RESOURCES_BACKUP_PATH` outside and distinct from both active trees. Otherwise record an absent resources baseline and create no active path.                                                                                                                                                                                 | Refusal leaves resources untouched and stops migration.                                                                                                                                                                                  |
 | `verify-migration-inputs`     | `READ_CONFIGURED_STATE` | Manual: compare config backup with source, verify a matching resources copy or recorded absent baseline, and review the already-complete expected identity-and-origin set before any edit.                                                                                                                                                                                             | Every present backup must match; destinations must be outside active trees; verification must not add or rewrite expected entries. Otherwise stop.                                                                                       |
-| `edit-one-manifest`           | `MUTATE_AGENTWORKS`     | Manual: edit only the pre-recorded `MANIFEST_PATH` for `MANIFEST_KIND`, using its sample and, when tagged config is present, the separate field reference for optional `CAPABILITY_TARGET`.                                                                                                                                                                                            | Consume but never change the expected entry; leave the last validated manifests unchanged on refusal and do not remove TOML.                                                                                                             |
+| `edit-one-manifest`           | `MUTATE_AGENTWORKS`     | Manual: edit only the pre-recorded `MANIFEST_PATH` for a pre-existing or TOML-derived manifest, using its live sample and optional implementation reference. Apply any retired presence shape's exact hard-error rewrite here, including deletion of an outer null line and its ambient, ambient, or local tagged mode.                                                                | Consume but never change the expected entry; leave the last validated manifests unchanged on refusal and do not remove TOML.                                                                                                             |
 | `validate-manifest-set`       | `EXAMINE_WORKSTATION`   | `agw doctor`                                                                                                                                                                                                                                                                                                                                                                           | The new manifest receives precise feedback while the retired-section config failure remains; refusal leaves the edit unverified and blocks cutover.                                                                                      |
-| `review-null-secret-fields`   | `READ_CONFIGURED_STATE` | Manual: inspect every pre-existing and TOML-derived site manifest. Classify current `token_secret`, `auth.mode`, service-principal `auth.secret`, access-key `auth.access_key_secret`, and `placement.mode`. Rewrite a written legacy `service_principal`, `credentials`, or `vm_host` field from its exact hard error.                                                                | Record default, custom, ambient, or local intent. An outer legacy null maps to ambient, ambient, or local; an inner secret-reference null selects its well-known default. Refusal leaves the site unchanged and blocks cutover.          |
+| `review-null-secret-fields`   | `READ_CONFIGURED_STATE` | Manual: inspect every pre-existing and TOML-derived site manifest. Classify current `token_secret`, `auth.mode`, service-principal `auth.secret`, access-key `auth.access_key_secret`, and `placement.mode`. If a retired shape remains, record the exact required rewrite and return it to the earlier edit action without changing the manifest.                                     | Confirm default, custom, ambient, or local intent. An outer legacy null maps to ambient, ambient, or local; an inner secret-reference null selects its well-known default. Refusal leaves the site unchanged and blocks cutover.         |
 | `remove-retired-sections`     | `MUTATE_AGENTWORKS`     | Manual: remove every retired resource section from `CONFIG_PATH` in one edit and update `[secret_config].backends` when needed.                                                                                                                                                                                                                                                        | Refusal restores or retains the untouched config and its hard error.                                                                                                                                                                     |
 | `compare-operator-inventory`  | `EXAMINE_WORKSTATION`   | `agw resource list --origin operator`                                                                                                                                                                                                                                                                                                                                                  | The normal inventory may probe host readiness. Compare identity, `operator-declared`, and manifest file with the expected set while ignoring source line; any missing or extra row stops completion and uses the backups to investigate. |
 | `finish-doctor`               | `EXAMINE_WORKSTATION`   | `agw doctor`                                                                                                                                                                                                                                                                                                                                                                           | Zero failures completes the migration; refusal leaves host readiness unverified.                                                                                                                                                         |
@@ -170,19 +172,20 @@ The teaching covers:
    absence plus the expected identity set before editing;
 3. use `agw resource sample KIND` or `agw guide KIND` for the live manifest shape and use
    `agw resource describe-kind KIND/NAME` or `agw guide KIND/NAME` for tagged capability config;
-4. write one manifest at a time while leaving all retired TOML sections in place, then run
-   `agw doctor` after each edit so its degraded config path validates the growing manifest set;
+4. write one pre-existing or TOML-derived manifest at a time while leaving all retired TOML sections
+   in place; apply retired presence-shape hard-error rewrites only inside this mutation, then run
+   `agw doctor` after each edit so its degraded config path validates the growing set;
 5. treat `[secret_backends.*]` as the one section family with no manifest: delete those empty
    declarations during the final TOML cutover and activate desired backends through
    `[secret_config].backends`;
 6. fix closed-world fields, strict types, non-nullable nulls, and the retired sibling capability
    shape from the emitted error and live field reference;
-7. inspect every pre-existing and TOML-derived site for current authentication and placement modes;
-   classify Proxmox `token_secret`, Azure service-principal `auth.secret`, and AWS access-key
+7. inspect every pre-existing and TOML-derived site without changing it; classify Proxmox
+   `token_secret`, Azure service-principal `auth.secret`, and AWS access-key
    `auth.access_key_secret` as the well-known default or a custom secret name; treat omitted `auth`
-   as ambient, omitted `placement` as local, and preserve Proxmox's required secret-backed mode;
-   rewrite written legacy presence-shaped fields from their exact hard errors, with outer nulls
-   mapping to ambient, ambient, and local rather than to the inner secret-reference null behavior;
+   as ambient, omitted `placement` as local, and preserve Proxmox's required secret-backed mode; if
+   a retired shape remains, record its exact required rewrite and route it back through the earlier
+   edit and validation loop, keeping outer null mode mappings distinct from inner secret nulls;
 8. remove every retired TOML resource section in one pass, compare the normal
    `agw resource list --origin operator` inventory with the pre-migration identities, including
    origin variant and manifest file while ignoring source line, and finish only when `agw doctor`
@@ -221,13 +224,15 @@ The adapter is complete when tests prove:
 - capability references never reach the sample renderer;
 - resource and concept anchors reject schema blocks, while an explicit resource request still
   degrades to unavailable when config cannot build the registry;
-- section selection descends through every union arm, resolves a field unique to one arm, and fails
-  as scoped guide content when a selector is absent or repeated across arms;
+- section selection carries every union-arm candidate through the complete selector, resolves one
+  terminal field despite shared intermediate names, and fails as scoped guide content when the
+  terminal path is absent or repeated across arms;
 - onboarding and management link to migration without duplicating its teaching;
 - migration output renders validated consent-bearing action records, preserves fresh out-of-tree
   backups or an absent baseline, carries the union of existing and migrated operator identities,
-  names the normal load, inventory, and per-manifest doctor loop, handles backend sections, and
-  distinguishes legacy outer-null mode rewrites from current inner secret-reference null defaults;
+  names the normal load, inventory, and per-manifest doctor loop, handles backend sections, keeps
+  retired-shape editing inside the mutation action, and distinguishes legacy outer-null mode
+  rewrites from current inner secret-reference null defaults during read-only review;
 - Azure, AWS, and Lima field references render every anonymous union arm's fields under the arm,
   preserve block defaults, mark recurring arms, and point unexpanded addressable arms to their full
   guide or describe reference;

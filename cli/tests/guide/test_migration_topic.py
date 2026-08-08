@@ -105,10 +105,13 @@ def test_migration_actions_make_inventory_backups_and_verification_distinct() ->
         ("EXPECTED_IDENTITIES", True),
     ]
     assert edit.manual_steps is not None
-    assert edit.required_inputs[0].description.startswith("The pre-recorded intended manifest file")
+    assert "pre-existing or TOML-derived expected identity" in edit.required_inputs[0].description
     assert "separate field-reference topic" in edit.manual_steps
+    assert "whether it is pre-existing or TOML-derived" in edit.manual_steps
+    assert "apply that hard error's exact rewrite" in edit.manual_steps
+    assert "delete the retired line and write auth ambient, auth ambient, or placement local" in edit.manual_steps
     assert "MANIFEST_PATH to equal" in edit.manual_steps
-    assert "pre-recorded intended file" in edit.manual_steps
+    assert "pre-recorded file" in edit.manual_steps
     assert "Never add, remove, or change a baseline entry" in edit.manual_steps
     assert "EXPECTED_IDENTITIES remains byte-for-byte unchanged" in edit.expected_state
 
@@ -222,8 +225,12 @@ def test_migration_review_action_covers_all_sites_and_distinguishes_outer_from_i
     assert "access-key auth.access_key_secret" in manual
     assert "Omitted auth selects ambient" in manual
     assert "omitted placement selects local" in manual
-    assert "outer explicit null maps to auth ambient, auth ambient, or placement local" in manual
+    assert "outer explicit null means auth ambient, auth ambient, or placement local" in manual
     assert "Inside a credential arm, an omitted or null secret reference" in manual
+    assert "record the hard error's exact required rewrite and return it to edit-one-manifest" in manual
+    assert "Do not modify a manifest during this review" in manual
+    assert "apply that hard error's exact rewrite" not in manual
+    assert "delete the retired line" not in manual
     for stale in ("service_principal.secret", "credentials.access_key_secret"):
         assert stale not in manual
 
@@ -253,10 +260,11 @@ def test_migration_teaching_covers_cutover_validation_backends_and_auth_choices(
         "`auth.access_key_secret` names the secret access key",
         "Omitted `placement` defaults to local placement",
         "`placement.host`",
-        "`service_principal: null` maps to `auth: {mode: ambient}`",
-        "`credentials: null` maps to `auth: {mode: ambient}`",
-        "`vm_host: null` maps to `placement: {mode: local}`",
-        "Do not confuse these outer-null rewrites with a null inner secret reference",
+        "`service_principal: null` means `auth: {mode: ambient}`",
+        "`credentials: null` means `auth: {mode: ambient}`",
+        "`vm_host: null` means `placement: {mode: local}`",
+        "Do not confuse these outer-null mappings with a null inner secret reference",
+        "return that manifest to `edit-one-manifest`; do not modify it during review",
         "Proxmox has no no-secret mode",
         "closed-world fields",
         "strict types",

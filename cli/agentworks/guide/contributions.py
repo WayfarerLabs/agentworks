@@ -173,11 +173,12 @@ def _migration_actions() -> tuple[GuideAction, ...]:
         ),
         GuideAction(
             ActionId("edit-one-manifest"),
-            "Both backups and the caller-owned expected identities passed the read-only verification checkpoint.",
+            "Both backups and the caller-owned expected identities passed the read-only verification checkpoint, "
+            "and one pre-existing or TOML-derived manifest is selected for editing.",
             (
                 ActionInput(
                     "MANIFEST_PATH",
-                    "The pre-recorded intended manifest file for the selected expected identity.",
+                    "The pre-recorded file for the selected pre-existing or TOML-derived expected identity.",
                     True,
                 ),
                 ActionInput(
@@ -200,14 +201,18 @@ def _migration_actions() -> tuple[GuideAction, ...]:
             None,
             "MANIFEST_PATH contains one resource rewritten against the live sample and field reference for "
             "MANIFEST_KIND and, when present, the separate field reference for CAPABILITY_TARGET. "
+            "Any retired presence shape uses the exact hard-error rewrite, including the outer-null mode mapping. "
             "EXPECTED_IDENTITIES remains byte-for-byte unchanged.",
             None,
             "Keep the last validated manifest set and do not remove any retired TOML section.",
-            "Edit only MANIFEST_PATH. Use the live sample and field-reference topic for MANIFEST_KIND. When "
-            "tagged capability config is present, also use the separate field-reference topic for "
-            "CAPABILITY_TARGET. Require MANIFEST_PATH to equal the selected EXPECTED_IDENTITIES entry's "
-            "pre-recorded intended file. Never add, remove, or change a baseline entry. Do not copy a schema "
-            "from this migration topic.",
+            "Edit only MANIFEST_PATH, whether it is pre-existing or TOML-derived. Use the live sample and "
+            "field-reference topic for MANIFEST_KIND. When tagged capability config is present, also use the "
+            "separate field-reference topic for CAPABILITY_TARGET. If validation reports a retired "
+            "service_principal, credentials, or vm_host shape, apply that hard error's exact rewrite in "
+            "MANIFEST_PATH. For an outer explicit null, delete the retired line and write auth ambient, auth "
+            "ambient, or placement local, respectively. Require MANIFEST_PATH to equal the selected "
+            "EXPECTED_IDENTITIES entry's pre-recorded file. Never add, remove, or change a baseline entry. Do "
+            "not copy a schema from this migration topic.",
         ),
         GuideAction(
             ActionId("validate-manifest-set"),
@@ -235,16 +240,17 @@ def _migration_actions() -> tuple[GuideAction, ...]:
             None,
             "Each current auth and placement mode plus each token_secret, service-principal auth.secret, and "
             "access-key auth.access_key_secret occurrence has a recorded default, custom-name, ambient, or "
-            "local intent. Every written retired shape has its exact live rewrite recorded.",
+            "local intent. Every remaining retired shape has its required exact rewrite recorded for the earlier "
+            "edit-one-manifest action, and no file changed during review.",
             None,
             "Leave the site manifests unchanged and block cutover until the intent can be established.",
-            "Inspect only SITE_MANIFESTS. Use the live implementation field references to classify Proxmox "
-            "token_secret, Azure auth.mode and service-principal auth.secret, AWS auth.mode and access-key "
-            "auth.access_key_secret, and Lima placement.mode. Omitted auth selects ambient; omitted placement "
-            "selects local. For a written legacy service_principal, credentials, or vm_host field, use its hard "
-            "error's exact rewrite. An outer explicit null maps to auth ambient, auth ambient, or placement "
-            "local, respectively. Inside a credential arm, an omitted or null secret reference selects its "
-            "well-known default name. Record the intended choice for every site.",
+            "Inspect only SITE_MANIFESTS. Classify Proxmox token_secret, Azure auth.mode and service-principal "
+            "auth.secret, AWS auth.mode and access-key auth.access_key_secret, and Lima placement.mode against "
+            "the live implementation field references. Omitted auth selects ambient; omitted placement selects "
+            "local. An outer explicit null means auth ambient, auth ambient, or placement local, respectively. "
+            "Inside a credential arm, an omitted or null secret reference selects its well-known default name. "
+            "If a retired service_principal, credentials, or vm_host shape remains, record the hard error's exact "
+            "required rewrite and return it to edit-one-manifest. Do not modify a manifest during this review.",
         ),
         GuideAction(
             ActionId("remove-retired-sections"),

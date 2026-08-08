@@ -85,11 +85,20 @@ PR #444 resolved the previous upgrade-guide inconsistency and landed the exhaust
 under the arm that owns them, preserves the defaulted tagged block, marks recursion explicitly, and
 gives addressable arms a full guide or describe pointer. Exact section traversal sees every arm:
 unique selectors such as `auth.secret`, `auth.access_key_id`, and `placement.host` resolve, while
-repeated `auth.mode` remains unavailable under the existing ambiguity guard. Runtime schema-catalog
-failure isolation still retains unrelated union-derived fields.
+repeated `auth.mode` remains unavailable under the existing ambiguity guard. A reviewer follow-up
+also pins the deeper case: candidates with the same intermediate block name continue through the
+complete selector, then one unique terminal field resolves while a duplicated full leaf fails
+closed. Runtime schema-catalog failure isolation still retains unrelated union-derived fields.
 
 PR #446 moved owner-templated filling out of Pydantic validation context and into the decode
 boundary. The guide needs no corresponding fill step: it renders `FieldDoc.default_template` with
 the neutral `<name>` placeholder and never creates or validates a payload. The focused post-rebase
 suite covered guide behavior, field reference and schema emission, manifest decode filling, retired
 presence-shape errors, and platform config contracts: 627 tests passed.
+
+The same follow-up tightened the migration consent boundary. `edit-one-manifest` is the only action
+that applies a retired presence-shape rewrite or deletes its old outer-null line, for either a
+pre-existing or TOML-derived manifest. `review-null-secret-fields` only inspects, classifies, and
+confirms. If it finds a retired shape, it records the exact required rewrite and routes the manifest
+back to the mutation and validation loop without changing the file. The expanded focused suite
+passed 632 tests.

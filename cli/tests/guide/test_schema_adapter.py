@@ -30,8 +30,8 @@ from agentworks.guide.service import (
     _EmptyInventory,
     render_guide,
 )
-from agentworks.manifests.field_tree import Alternative
-from agentworks.manifests.reference import describable_targets, reference_for
+from agentworks.manifests.field_tree import Alternative, FieldEntry
+from agentworks.manifests.reference import SchemaReference, describable_targets, reference_for
 from agentworks.manifests.yaml_value import render_value
 
 
@@ -178,6 +178,25 @@ def test_schema_fields_render_every_nested_union_arm_from_the_live_reference(
 
 
 @pytest.mark.parametrize(
+    ("target", "mode_path"),
+    [
+        ("vm-platform/azure-vm", "config.auth.mode"),
+        ("vm-platform/aws-ec2", "config.auth.mode"),
+        ("vm-platform/lima", "config.placement.mode"),
+    ],
+)
+def test_each_live_auth_or_placement_arm_keeps_its_own_mode_row(
+    target: str,
+    mode_path: str,
+) -> None:
+    rendered = render_topic(_implementation_field_topic(target), None, GuideMode.AGENT)
+    payload = rendered.blocks[0].source_payload
+
+    assert payload is not None
+    assert payload.count(f"`{mode_path}`") == 2
+
+
+@pytest.mark.parametrize(
     ("target", "section", "rendered_path"),
     [
         ("vm-platform/azure-vm", ("auth", "secret"), "config.auth.secret"),
@@ -208,6 +227,92 @@ def test_field_section_refuses_a_name_repeated_across_union_arms() -> None:
     assert rendered.issues == (
         "schema content for vm-platform/azure-vm/fields is unavailable: "
         "field-reference section 'auth.mode' is unavailable",
+    )
+    assert "Schema content unavailable" in rendered.markdown
+
+
+def _shared_intermediate_reference(*, duplicate_leaf: bool) -> SchemaReference:
+    original = reference_for("secret")
+    template = original.spec[0]
+
+    def entry(path: tuple[str, ...], *, children: tuple[FieldEntry, ...] = ()) -> FieldEntry:
+        return replace(
+            template,
+            doc=replace(template.doc, path=path),
+            children=children,
+            alternatives=(),
+        )
+
+    first_credentials = entry(
+        ("auth", "credentials"),
+        children=(entry(("auth", "credentials", "secret")),),
+    )
+    second_leaf = "secret" if duplicate_leaf else "profile"
+    second_credentials = entry(
+        ("auth", "credentials"),
+        children=(entry(("auth", "credentials", second_leaf)),),
+    )
+    auth = replace(
+        template,
+        doc=replace(template.doc, path=("auth",)),
+        children=(),
+        alternatives=(
+            Alternative(name="first", summary=None, target=None, fields=(first_credentials,)),
+            Alternative(name="second", summary=None, target=None, fields=(second_credentials,)),
+        ),
+    )
+    return replace(original, metadata=(), spec=(auth,))
+
+
+def test_field_section_carries_shared_intermediate_candidates_to_a_unique_leaf(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import agentworks.guide.render as guide_render
+
+    monkeypatch.setattr(
+        guide_render,
+        "reference_for",
+        lambda _target: _shared_intermediate_reference(duplicate_leaf=False),
+    )
+    topic = TopicContribution(
+        TopicSlug("secret"),
+        "Secret",
+        "Secret schema.",
+        KindAnchor("secret"),
+        (FieldReference(BlockId("fields"), ("auth", "credentials", "secret")),),
+    )
+
+    rendered = render_topic(topic, None, GuideMode.AGENT)
+    payload = rendered.blocks[0].source_payload
+
+    assert rendered.issues == ()
+    assert payload is not None
+    assert "`spec.auth.credentials.secret`" in payload
+
+
+def test_field_section_refuses_a_shared_intermediate_with_duplicate_full_leaf(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import agentworks.guide.render as guide_render
+
+    monkeypatch.setattr(
+        guide_render,
+        "reference_for",
+        lambda _target: _shared_intermediate_reference(duplicate_leaf=True),
+    )
+    topic = TopicContribution(
+        TopicSlug("secret"),
+        "Secret",
+        "Secret schema.",
+        KindAnchor("secret"),
+        (FieldReference(BlockId("fields"), ("auth", "credentials", "secret")),),
+    )
+
+    rendered = render_topic(topic, None, GuideMode.AGENT)
+
+    assert rendered.issues == (
+        "schema content for secret/fields is unavailable: "
+        "field-reference section 'auth.credentials.secret' is unavailable",
     )
     assert "Schema content unavailable" in rendered.markdown
 

@@ -188,18 +188,15 @@ def _selected_reference(
     )
     matches: list[tuple[FieldEntry, tuple[str, ...]]] = []
     for root_entries, root_prefix in roots:
-        entries = root_entries
-        prefix = list(root_prefix)
-        for index, segment in enumerate(section):
-            selected = tuple(entry for entry in entries if _field_name(entry) == segment)
-            if len(selected) != 1:
-                break
-            entry = selected[0]
-            if index == len(section) - 1:
-                matches.append((entry, tuple(prefix)))
-                break
-            entries = _selectable_fields(entry)
-            prefix.append(segment)
+        candidates = [(entry, root_prefix) for entry in root_entries if _field_name(entry) == section[0]]
+        for segment in section[1:]:
+            candidates = [
+                (child, (*prefix, _field_name(entry)))
+                for entry, prefix in candidates
+                for child in _selectable_fields(entry)
+                if _field_name(child) == segment
+            ]
+        matches.extend(candidates)
     if len(matches) != 1:
         raise GuideTraversalError(f"field-reference section {'.'.join(section)!r} is unavailable")
     entry, selected_prefix = matches[0]
