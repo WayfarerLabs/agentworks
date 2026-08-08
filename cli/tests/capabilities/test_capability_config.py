@@ -34,7 +34,6 @@ from agentworks.schema import (
     RefOwner,
     SecretRef,
     config_error_from,
-    validation_context,
 )
 from agentworks.source_location import SourceLocation
 from tests.plugins._fixtures import ConformingVMPlatform
@@ -453,7 +452,7 @@ def test_a_collapsed_union_still_dispatches_on_the_tag(sole_seated: None) -> Non
     assert isinstance(validated, SoleConfig), "the collapsed union still unwraps to the arm it selected"
 
     with pytest.raises(PydanticValidationError) as caught:
-        union.model_validate({"name": "nope"}, context=validation_context(OWNER))
+        union.model_validate({"name": "nope"})
 
     assert str(config_error_from(caught.value, model_cls=union, owner=OWNER)) == (
         "vm-site/lab: unknown name 'nope'; registered: 'sole-platform'"
@@ -474,7 +473,7 @@ def test_an_unregistered_name_is_rejected_by_the_union_naming_what_is_registered
     proof that the assembled union really does dispatch on the tag."""
     union = capability_config_union("vm-platform")
     with pytest.raises(PydanticValidationError) as caught:
-        union.model_validate({"name": "nope"}, context=validation_context(OWNER))
+        union.model_validate({"name": "nope"})
 
     message = str(config_error_from(caught.value, model_cls=union, owner=OWNER))
     assert message.startswith("vm-site/lab: unknown name 'nope'; registered: ")

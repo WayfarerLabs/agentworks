@@ -279,8 +279,8 @@ and the documentation to disagree.
 The model is an `AgwModel` (`agentworks.schema`): strict, frozen, closed-world. A field that names
 another resource carries a `SecretRef` / `ResourceRef` marker, optionally with an owner-templated
 default (`git-token-{owner_name}`), and that marker is the single authored place the reference
-semantics live: extraction reads it, validation fills the default from it, and emitted JSON Schema
-carries it as `x-agw-ref`.
+semantics live: the boundary fill (`filled_defaults`) renders the default into the blob before
+validation and extraction read it, and emitted JSON Schema carries it as `x-agw-ref`.
 
 The two halves the core derives keep the contracts the split classmethods used to carry:
 

@@ -456,11 +456,11 @@ def test_the_shapes_the_envelope_tolerates_are_not_schema_errors() -> None:
         assert _errors(schema, _a_document("admin-template", {}, expires=spelling)) == [], spelling
 
 
-def test_a_field_the_model_fills_is_neither_required_nor_non_nullable() -> None:
+def test_a_field_the_fill_resolves_is_neither_required_nor_non_nullable() -> None:
     """An unscoped github credential writes nothing but the tag, because
-    the marker's owner template supplies the token, and writing
-    ``token: null`` says the same thing out loud. Both load, so both have
-    to validate.
+    the boundary fill renders the marker's owner template into the
+    token, and writing ``token: null`` says the same thing out loud.
+    Both load, so both have to validate.
 
     ``AgwModel`` owns the correction; this is the end-to-end proof that it
     survives the splice into a hosting kind's document.

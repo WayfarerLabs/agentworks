@@ -15,6 +15,9 @@ hand-validated lives here:
   at registration so a marker nothing could honor is never declared.
 - :class:`CapabilityBlock`, the tagged table a hosting kind's spec field
   holds: the capability's name plus that capability's own config.
+- :func:`filled_defaults`, the boundary fill that renders a marker's
+  owner-templated default into a raw blob, so validation and extraction
+  both read the one filled blob and neither needs an owner of its own.
 - :func:`extract_references`, the total, never-raising reference
   extractor that reads a raw blob through a model's markers.
 - :func:`iter_field_docs`, the ordered field-reference stream every human
@@ -53,7 +56,6 @@ from agentworks.schema.base import (
     NonEmptyStr,
     PositiveInt,
     reference_marker_error,
-    validation_context,
 )
 from agentworks.schema.block import CapabilityBlock
 from agentworks.schema.errors import (
@@ -74,6 +76,7 @@ from agentworks.schema.fields import (
     model_doc,
     render_type,
 )
+from agentworks.schema.fill import filled_defaults
 from agentworks.schema.markers import (
     REF_SCHEMA_KEY,
     RefMarker,
@@ -105,6 +108,7 @@ __all__ = [
     "config_error_from",
     "element_annotation",
     "extract_references",
+    "filled_defaults",
     "iter_field_docs",
     "located",
     "location_text",
@@ -113,5 +117,4 @@ __all__ = [
     "model_is_complete",
     "reference_marker_error",
     "render_type",
-    "validation_context",
 ]

@@ -43,21 +43,17 @@ from agentworks.schema._shape import (
     shape_of,
     table_addresses_block,
 )
-from agentworks.schema.markers import REF_SCHEMA_KEY, RefOwner
+from agentworks.schema.markers import REF_SCHEMA_KEY
 from agentworks.schema.shorthand import ScalarShorthand, shorthand_field_error
 
 if TYPE_CHECKING:
-    from pydantic import GetJsonSchemaHandler, ValidationInfo
+    from pydantic import GetJsonSchemaHandler
     from pydantic.fields import FieldInfo
     from pydantic.json_schema import JsonSchemaValue
     from pydantic_core import CoreSchema
 
     from agentworks.schema._shape import FieldShape
     from agentworks.schema.markers import RefMarker
-
-#: The key an owner rides under in pydantic's validation context. Build
-#: the context with :func:`validation_context` rather than spelling it.
-OWNER_CONTEXT_KEY: Final = "owner"
 
 #: Per-class cache for :func:`_marked_fields`.
 _MARKED_FIELD_CACHE: Final[WeakKeyDictionary[type[BaseModel], tuple[tuple[str, RefMarker], ...]]] = WeakKeyDictionary()
@@ -111,76 +107,19 @@ class AgwModel(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def _normalized_input(cls, data: Any, info: ValidationInfo) -> Any:
-        """The two rewrites this base makes before any field is validated,
-        in the order they have to happen.
-
-        One validator calling both rather than two validators, because the
-        order is load-bearing and pydantic runs ``mode="before"``
-        validators in REVERSE definition order. Written as two, the fold
-        would have to be declared SECOND to run first, and the day someone
-        tidied that an owner-templated default would silently stop being
-        filled for a value written in its shorthand form. Here the order
-        is the line below.
-        """
-        return cls._fill_owner_templated_defaults(cls._fold_scalar_shorthand(data), info)
-
-    @classmethod
     def _fold_scalar_shorthand(cls, data: Any) -> Any:
         """``data`` as the mapping a bare-scalar shorthand stands for, so
         everything after this point sees one shape.
 
-        First, because the fill below acts only on a mapping: a shorthand
-        value folded after it would skip the fill entirely, and a
-        shorthand model with an owner-templated field would resolve
-        nothing for exactly the operators who wrote the short spelling.
+        The ONLY rewrite this base makes. In particular, an owner-templated
+        default is deliberately not resolved here: rendering it needs the
+        owner, which is a fact about where the blob was declared and not
+        about its content, so the boundary that knows the owner renders it
+        into the blob before validation ever runs
+        (:func:`~agentworks.schema.filled_defaults`). Keeping the model
+        layer owner-free is what makes every model constructible standalone.
         """
         return data if cls.scalar_shorthand is None else cls.scalar_shorthand.folded(data)
-
-    @classmethod
-    def _fill_owner_templated_defaults(cls, data: Any, info: ValidationInfo) -> Any:
-        """Resolve an omitted reference field from its marker's owner
-        template, so the validated instance carries the same name the
-        reference extractor derived for the graph.
-
-        The model cannot know its owner by itself, so the owner rides the
-        validation context (:func:`validation_context`). Models with no
-        templated field ignore the context entirely, which keeps a
-        context-free ``model_validate`` legal for them.
-
-        An omitted value and an explicit ``null`` are treated alike, and
-        deliberately so: reference extraction makes the same call, and
-        the resolved name has to be the same on both paths or the graph
-        edge and the validated instance would name different secrets.
-        """
-        templated = _owner_templated_fields(cls)
-        # ``dict``, not ``Mapping``: strict mode accepts a dict or a model
-        # instance and nothing else, so widening here would let some other
-        # mapping type through for exactly the models that happen to have
-        # an unset templated field, which is an invisible local exception
-        # to the global posture.
-        if not templated or not isinstance(data, dict):
-            return data
-        unset = [(name, marker) for name, marker in templated if data.get(name) is None]
-        if not unset:
-            return data
-
-        owner = info.context.get(OWNER_CONTEXT_KEY) if isinstance(info.context, dict) else None
-        if not isinstance(owner, RefOwner):
-            # A framework bug (a call site forgot the context), never an
-            # operator mistake, so this is not a ConfigError.
-            names = ", ".join(name for name, _marker in unset)
-            raise StateError(
-                f"{cls.__name__} has owner-templated field(s) ({names}) but was validated "
-                "with no owner in context; pass validation_context(owner) to model_validate"
-            )
-
-        filled = dict(data)
-        for name, marker in unset:
-            rendered = marker.render_default(owner)
-            if rendered:
-                filled[name] = rendered
-        return filled
 
     @classmethod
     def __pydantic_init_subclass__(cls, **kwargs: Any) -> None:
@@ -234,13 +173,14 @@ def _with_marker_corrections(
     """``json_schema`` with the two reference-marker corrections applied.
 
     **An owner-templated field is neither required nor non-nullable.**
-    :func:`_filled_owner_templated_defaults` resolves such a field from
-    its marker, and it treats an omitted value and an explicit ``null``
-    alike, on purpose: reference extraction makes the same call, so the
-    two paths cannot come to name different secrets. Emitted schema has to
-    state BOTH halves of that, and pydantic can state neither, because it
-    computes ``required`` and nullability from the declared field and
-    knows nothing about the validator:
+    The boundary fill (:func:`~agentworks.schema.filled_defaults`)
+    resolves such a field from its marker before validation reads the
+    blob, and it treats an omitted value and an explicit ``null`` alike,
+    on purpose: the two spellings are one instruction, and both resolve
+    to the same name extraction reads off the same filled blob. Emitted
+    schema has to state BOTH halves of that, and pydantic can state
+    neither, because it computes ``required`` and nullability from the
+    declared field and knows nothing about the fill:
 
     - not required, or an editor red-underlines the very omission the
       mechanism exists to resolve (``provider: {name: github}`` with no
@@ -254,10 +194,10 @@ def _with_marker_corrections(
     every marked field, templated or not, because the widening above is
     only one of the two ways a marker ends up buried.
 
-    Stated here, on the class that does the filling, rather than in the
-    emitter: both rules are properties of this model's validation
-    behavior, and a consumer correcting for them downstream would be a
-    second place to keep in sync.
+    Stated here, on the base every filled model extends, rather than in
+    the emitter: both rules are properties of how the framework loads
+    these models, and a consumer correcting for them downstream would be
+    a second place to keep in sync.
     """
     marked = _marked_fields(model_cls)
     if not marked:
@@ -379,22 +319,12 @@ def _accepts_null(prop: JsonSchemaValue) -> bool:
     return any(branch.get("type") == "null" for branch in branches)
 
 
-def validation_context(owner: RefOwner) -> dict[str, object]:
-    """The validation context every framework ``model_validate`` call
-    passes: it is what lets an owner-templated field resolve its default.
-
-    A model with no templated field ignores it, so passing it always is
-    cheaper than remembering which models need it.
-    """
-    return {OWNER_CONTEXT_KEY: owner}
-
-
 def _marked_fields(model_cls: type[BaseModel]) -> tuple[tuple[str, RefMarker], ...]:
     """The model's own fields carrying a reference marker on the field
     ITSELF, in declaration order.
 
     Cached per class, since it is a pure function of the class and the
-    filling above runs on every validation of every model. The cache is
+    schema hook above runs it for every model that emits. The cache is
     weak so a model class defined inside a function (a test, mostly) is
     still collectable.
     """
@@ -411,22 +341,6 @@ def _marked_fields(model_cls: type[BaseModel]) -> tuple[tuple[str, RefMarker], .
     return computed
 
 
-def _owner_templated_fields(model_cls: type[BaseModel]) -> tuple[tuple[str, RefMarker], ...]:
-    """The marked fields whose marker declares a default template.
-
-    Scalar fields only, and now provably so:
-    :func:`reference_marker_error` refuses a marker on a collection or on
-    a nested block at registration, so the filling above can write a
-    rendered name straight into the field. It was a comment here before
-    that, which is a promise no shape had to keep.
-
-    Filtered off :func:`_marked_fields` rather than cached separately: a
-    model has at most a handful of marked fields and most have none, so
-    the walk this saves is the expensive half.
-    """
-    return tuple((name, marker) for name, marker in _marked_fields(model_cls) if marker.default_template is not None)
-
-
 def reference_marker_error(model_cls: type[BaseModel]) -> str | None:
     """Why one of ``model_cls``'s reference markers cannot mean what it
     says, or ``None`` when every one of them can.
@@ -436,14 +350,14 @@ def reference_marker_error(model_cls: type[BaseModel]) -> str | None:
     nothing in this layer can honor it, and each of the three consumers
     fails differently and silently:
 
-    - validation writes the marker's rendered default where a list or a
-      table belongs, then rejects the field on a key the operator never
-      wrote;
+    - the boundary fill writes the marker's rendered default where a list
+      or a table belongs, and validation then rejects the field on a key
+      the operator never wrote;
     - emitted schema widens the COLLECTION with a null arm rather than
       its elements, and hangs the marker off the whole field;
-    - reference extraction reads the field as a scalar, so it emits a
-      bogus edge for the rendered default and none of the edges the
-      elements actually imply.
+    - reference extraction reads the field as a scalar, so it emits an
+      edge for the filled-in default and none of the edges the elements
+      actually imply.
 
     Refused here rather than handled at those three sites, because the
     mistake is an author's and has exactly one fix: move the marker onto
@@ -472,10 +386,10 @@ def reference_marker_error(model_cls: type[BaseModel]) -> str | None:
 
     A marker fact no consumer reads is refused the same way, which today
     means one: a default template on a COLLECTION's element marker. The
-    fill above renders a template into the field it defaults, an omitted
-    collection has no element to write into, and extraction renders no
-    default per element for the same reason, so the authored template
-    would be prose nothing executes.
+    boundary fill (:func:`~agentworks.schema.filled_defaults`) renders a
+    template into the field it defaults, and an omitted collection has no
+    element to write into, so the authored template would be prose
+    nothing executes.
 
     The rule behind all of the refusals is one invariant, and it is what
     this function enforces: **every model pydantic can select is a model

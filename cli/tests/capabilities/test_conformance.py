@@ -34,9 +34,9 @@ from agentworks.schema import (
     RefOwner,
     SecretRef,
     extract_references,
+    filled_defaults,
     model_is_complete,
     reference_marker_error,
-    validation_context,
 )
 from tests.plugins._fixtures import ConformingSecretBackend, ConformingVMPlatform
 
@@ -204,11 +204,12 @@ def test_the_refused_shape_is_the_one_that_answers_three_different_things() -> N
     """
     from pydantic import ValidationError
 
+    filled = filled_defaults(MarkedList, {"name": "fixture-platform"}, OWNER)
     with pytest.raises(ValidationError) as exc:
-        MarkedList.model_validate({"name": "fixture-platform"}, context=validation_context(OWNER))
+        MarkedList.model_validate(filled)
     assert exc.value.errors()[0]["loc"] == ("tokens",), "the fill wrote a name where a list belongs"
 
-    (edge,) = extract_references(MarkedList, {"name": "fixture-platform"}, OWNER)
+    (edge,) = extract_references(MarkedList, filled)
     assert edge.name == "tok-lab", "and extraction emitted an edge for a list element that does not exist"
 
 
@@ -286,7 +287,7 @@ def test_a_marker_no_walker_could_ever_read_is_refused() -> None:
     assert conformance_error(VM_PLATFORM, _impl(NestedCollection)) is not None
 
     # The half that makes the refusal necessary rather than merely tidy.
-    assert extract_references(NestedCollection, {"tokens": {"k": ["named"]}}, OWNER) == ()
+    assert extract_references(NestedCollection, {"tokens": {"k": ["named"]}}) == ()
 
 
 # -- Validation must not accept what no walker reads -------------------------
@@ -408,10 +409,11 @@ def test_a_marker_validation_accepts_and_no_walker_reads_is_refused(
     remainder required), so the next stranded position an author can
     spell is refused without being listed here first.
     """
-    validated = config_model.model_validate(blob, context=validation_context(OWNER))
+    filled = filled_defaults(config_model, blob, OWNER)
+    validated = config_model.model_validate(filled)
     assert _carries(validated.model_dump(), HIDDEN), "premise: the secret name must survive validation"
 
-    extracted = {ref.name for ref in extract_references(config_model, blob, OWNER)}
+    extracted = {ref.name for ref in extract_references(config_model, filled)}
     assert HIDDEN not in extracted, "premise gone: extraction reaches this shape now, so move it to the walked set"
 
     assert reference_marker_error(config_model) is not None
@@ -449,11 +451,10 @@ def test_a_stranded_model_with_nothing_marked_inside_is_left_alone() -> None:
 def test_a_default_template_on_an_element_marker_is_refused() -> None:
     """``fields.py`` and ``_shape.py`` have stated this refusal as fact in
     prose; this is the enforcement. Nothing renders such a template: the
-    fill writes a rendered name into the field the template defaults, an
-    omitted collection has no element to write into, and extraction
-    renders no per-element default for the same reason, so the authored
-    promise would be read by nobody. The premises are asserted so the
-    refusal cannot outlive its reason.
+    boundary fill writes a rendered name into the field the template
+    defaults, and an omitted collection has no element to write into, so
+    the authored promise would be read by nobody. The premises are
+    asserted so the refusal cannot outlive its reason.
     """
 
     class TemplatedElements(AgwModel):
@@ -462,11 +463,12 @@ def test_a_default_template_on_an_element_marker_is_refused() -> None:
             default_factory=list
         )
 
-    validated = TemplatedElements.model_validate({"name": "fixture-platform"}, context=validation_context(OWNER))
-    assert validated.tokens == [], "premise: the fill writes nothing for an omitted collection"
-    assert extract_references(TemplatedElements, {"name": "fixture-platform"}, OWNER) == (), (
-        "premise: extraction renders no per-element default"
+    blob = {"name": "fixture-platform"}
+    assert filled_defaults(TemplatedElements, blob, OWNER) is blob, (
+        "premise: the fill writes nothing for an omitted collection"
     )
+    assert TemplatedElements.model_validate(blob).tokens == []
+    assert extract_references(TemplatedElements, blob) == (), "premise: no per-element default is ever rendered"
 
     reason = reference_marker_error(TemplatedElements)
     assert reason is not None
@@ -501,7 +503,7 @@ def test_an_abstract_collection_spelling_is_recognized_rather_than_refused() -> 
 
     assert reference_marker_error(AbstractlySpelled) is None
     assert conformance_error(VM_PLATFORM, _impl(AbstractlySpelled)) is None
-    assert extract_references(AbstractlySpelled, {"tokens": ["named"]}, OWNER)[0].name == "named"
+    assert extract_references(AbstractlySpelled, {"tokens": ["named"]})[0].name == "named"
 
 
 def test_a_well_placed_marker_is_left_alone() -> None:

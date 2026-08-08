@@ -172,10 +172,10 @@ class FieldEntry:
 
         Not simply ``required``: a field with an owner-templated default is
         required to pydantic and optional to the operator, because the
-        model fills it from its owner when it is omitted (emitted schema
-        makes the same subtraction, for the same reason). A skeleton that
-        listed it as a line to fill in would be telling them to name a
-        secret the framework already names.
+        boundary fill renders it from the owner when it is omitted
+        (emitted schema makes the same subtraction, for the same reason).
+        A skeleton that listed it as a line to fill in would be telling
+        them to name a secret the framework already names.
         """
         return self.doc.required and self.doc.default_template is None
 
