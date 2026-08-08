@@ -84,6 +84,10 @@ Two things this graph deliberately does not serialize:
 
 ## Tracks
 
+- **Installer-plugins child (pre-0.14 core slimming): seeded 2026-08-07, launchable whenever.** The
+  R1 inventory has no dependencies; the plugin moves consume wave 2's descriptor registration and
+  the guide topics consume onboarding's first slice, both of which precede the 0.14.0 cut this child
+  gates (see release mapping).
 - **Onboarding-and-discovery child (destination 1): seeds at wave 1 completion, runs parallel to
   wave 2.** Slotted as early as sensible without rework: it teaches the post-cleanup 0.14 surface,
   so nothing wave 1 removes gets taught, and its first slice (onboarding harness plugin and skills,
@@ -103,14 +107,17 @@ picked off whenever bandwidth allows, on its own merits and its own schedule.
 - **0.14.0 (held; operator ruling, 2026-08-06):** the breaking cleanup does not ship alone. The cut
   waits for the guide first slice (guide command core, `concept-onboarding`, the README bootstrap),
   so the release that rejects old inputs also ships the CLI that teaches the new ones; newcomers
-  ride the forgiving 0.13.0 until then. The 0.13.0 warnings stay true because the version number
-  attaches to the breaking content, not the date. If wave 2's generic-discriminator hard error lands
-  in the same window, it folds in: one well-cushioned breaking release instead of two. The
-  vm-platform mode contract (PR #444, merged 2026-08-08) folds in the same way: its
-  written-old-shape hard errors ride the cushioned release, and its omission-equals-historical-
-  default posture means manifests that never wrote the retired blocks cross without edits. While
-  `main` holds unreleased breaking changes, urgent operator fixes ship from a `0.13.x` backport
-  branch.
+  ride the forgiving 0.13.0 until then. The installer-plugins child (operator ruling, 2026-08-07;
+  launchable whenever, see Tracks) also gates the cut: its moves are breaking and belong in the same
+  well-cushioned release. The 0.13.0 warnings stay true because the version number attaches to the
+  breaking content, not the date. If wave 2's generic-discriminator hard error lands in the same
+  window, it folds in: one well-cushioned breaking release instead of two. The vm-platform mode
+  contract (PR #444, merged 2026-08-08) folds in the same way: its written-old-shape hard errors
+  ride the cushioned release, and its omission-equals-historical-default posture means manifests
+  that never wrote the retired blocks cross without edits. The git-credential one-arm union
+  restructure (operator ruling, 2026-08-08, ahead of credential minting) also lands before the cut,
+  following the same pattern. While `main` holds unreleased breaking changes, urgent operator fixes
+  ship from a `0.13.x` backport branch.
 - **Later:** remaining waves map to releases as they prove out; no need to pin numbers now.
 
 ## Open ordering decisions

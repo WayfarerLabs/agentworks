@@ -23,7 +23,6 @@ venv/
 *~
 
 # Rulesync
-rulesync.local.jsonc
 rulesync.lock
 
 # Rulesync - generated output (regenerate with: ./scripts/rulesync-upgen.sh).
@@ -62,6 +61,16 @@ GEMINI.md
 !.codex/agents/
 !.codex/memories/
 !.codex/skills/
+
+# Reserved convention: any file with `.local.` in its name is machine-specific
+# and NEVER committed. Covers a skill's local aux content (e.g.
+# inventory.local.md) at both its .rulesync source and every generated harness
+# copy, plus rulesync.local.jsonc. A new standard target needs no new line.
+# The exception: a matching `*.local.*.example` file is the SHAREABLE
+# TEMPLATE and IS committed. Copy it, drop the `.example` suffix, and fill in
+# your real values; the copy then falls under the ignore rule above.
+*.local.*
+!*.local.*.example
 
 # Tmux
 .tmuxinator.yml
