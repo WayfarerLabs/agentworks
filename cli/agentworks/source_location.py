@@ -57,18 +57,6 @@ SYNTHESIZED_PATH = Path("<synthesized>")
 consumer that would navigate an operator to one renders nothing."""
 
 
-def format_file_path(file: Path) -> str:
-    """Render a file path operator-friendly: ``~/path`` when under
-    ``$HOME``, else the bare absolute path. Relative paths render as-is.
-    """
-    if file.is_absolute():
-        try:
-            return f"~/{file.relative_to(Path.home())}"
-        except ValueError:
-            return str(file)
-    return str(file)
-
-
 def synthesized() -> SourceLocation:
     """Sentinel ``SourceLocation`` for Resources constructed outside the
     config loader: direct construction in tests, framework ``synthesize``

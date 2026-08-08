@@ -10,6 +10,7 @@ mutation (the workspace VM backend) are the fakes.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -49,7 +50,7 @@ def mutation(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     monkeypatch.setattr("agentworks.workspaces.backends.vm.create_vm_workspace", _fake_create)
     monkeypatch.setattr(
         "agentworks.workspaces.backends.vm.generate_vscode_workspace",
-        lambda vm, config, ws_name, path: f"/tmp/{ws_name}.code-workspace",
+        lambda vm, config, ws_name, path: Path(f"/tmp/{ws_name}.code-workspace"),
     )
     return captured
 

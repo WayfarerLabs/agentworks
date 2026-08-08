@@ -114,6 +114,7 @@ _AZURE_CONFIG = {
     "subscription_id": "sub-123",
     "resource_group": "rg-dev",
     "region": "eastus",
+    "auth": {"mode": "ambient"},
 }
 
 
@@ -212,7 +213,12 @@ def test_azure_runup_sdk_failure_wraps_not_masquerades_as_missing(
 
 _AZURE_SP_CONFIG = {
     **_AZURE_CONFIG,
-    "service_principal": {"tenant_id": "tenant-1", "client_id": "client-1", "secret": "az-sp"},
+    "auth": {
+        "mode": "service-principal",
+        "tenant_id": "tenant-1",
+        "client_id": "client-1",
+        "secret": "az-sp",
+    },
 }
 
 
@@ -278,10 +284,10 @@ def test_azure_runup_without_the_client_secret_is_typed(monkeypatch: pytest.Monk
 # warns and continues unverified. A configured-but-missing subnet is fatal the
 # way azure's missing resource group is.
 
-_EC2_CONFIG = {"region": "us-east-1"}
+_EC2_CONFIG = {"region": "us-east-1", "auth": {"mode": "ambient"}}
 _EC2_CREDS_CONFIG = {
     "region": "us-east-1",
-    "credentials": {"access_key_id": "AKIA", "access_key_secret": "aws-secret"},
+    "auth": {"mode": "access-key", "access_key_id": "AKIA", "access_key_secret": "aws-secret"},
 }
 
 

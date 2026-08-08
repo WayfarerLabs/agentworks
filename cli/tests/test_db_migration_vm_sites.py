@@ -179,9 +179,9 @@ def test_prints_site_manifest_snippets(tmp_path: Path, captured_output: Captured
         # One snippet per distinct host-named site (two gpu-box VMs,
         # one snippet), carrying the host's ssh target.
         assert joined.count("name: gpu-box") == 1
-        assert "vm_host: me@gpu-box" in joined
+        assert "placement: { mode: ssh, host: me@gpu-box }" in joined
         assert "name: wsl2-host" in joined
-        assert "vm_host: me@wsl2-host" in joined
+        assert "placement: { mode: ssh, host: me@wsl2-host }" in joined
         # The shadow-name suffix is called out.
         assert "'wsl2' shadows a platform name" in joined
     finally:

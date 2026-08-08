@@ -131,7 +131,15 @@ class FieldDoc:
     indents by ``len(path)`` or joins with dots."""
 
     annotation: object
-    """The resolved annotation, reference markers stripped."""
+    """What an operator may WRITE here, as an annotation: the resolved
+    declaration with our reference markers stripped, widened by the
+    spellings a before-validator accepts and a declaration cannot say (a
+    model's scalar shorthand, an owner-templated reference's ``null``).
+
+    The widening is not cosmetic: emitted JSON Schema states the same two
+    spellings from the same declarations, and
+    ``tests/manifests/test_accepted_type_parity.py`` fails when this
+    record offers fewer types than that schema does."""
 
     required: bool
     default: object

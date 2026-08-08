@@ -25,8 +25,9 @@ hand-validated lives here:
   reads.
 
 **This package is a LEAF, and that is load-bearing rather than tidy.** It
-imports ``agentworks.errors`` and ``agentworks.source_location``, both
-top-level leaves themselves, and nothing else of ours. In particular it
+imports ``agentworks.errors``, ``agentworks.source_location`` and
+``agentworks.path_rendering``, all top-level leaves themselves, and
+nothing else of ours. In particular it
 imports nothing under ``agentworks.resources``, because importing any
 module of that package runs its ``__init__``, which loads every kind
 module, which loads every capability package. Capability modules declare
@@ -58,6 +59,8 @@ from agentworks.schema.block import CapabilityBlock
 from agentworks.schema.errors import (
     MAX_ERROR_LINES,
     config_error_from,
+    located,
+    location_text,
 )
 from agentworks.schema.extract import extract_references
 from agentworks.schema.fields import (
@@ -103,6 +106,8 @@ __all__ = [
     "element_annotation",
     "extract_references",
     "iter_field_docs",
+    "located",
+    "location_text",
     "marker_of",
     "model_doc",
     "model_is_complete",

@@ -45,10 +45,13 @@ from agentworks.schema import (
 from ._fixture_models import (
     AzureLike,
     CatalogLike,
+    DefaultedBlockSite,
+    DefaultedUnionSite,
     DiamondLike,
     FieldTaggedCollectionSite,
     GithubLike,
     MappingRoot,
+    RawDefaultedProvider,
     RenamedArmSite,
     ScalarOrBlockLike,
     SelfReferential,
@@ -149,6 +152,19 @@ _VALID = [
         id="collection-of-tagged-blocks-other-spelling",
     ),
     *(pytest.param(SelfReferential, _nested(depth), id=f"recursive-model-depth-{depth}") for depth in range(6)),
+    # Absence with a declared default is a spelling of the default's
+    # value: validation answers it with names the config then really
+    # carries, so the oracle already knows the right edges and these
+    # cases need no expectation logic of their own. The union case is
+    # the one whose edges used to vanish (a defaulted arm's own secret,
+    # and a second union nested inside it), and the raw-mapping case is
+    # the one where the default's secret is owner-templated. A defaulted
+    # COLLECTION is outside this oracle like every element marker (see
+    # the module docstring) and is pinned in the walk suite instead.
+    pytest.param(DefaultedUnionSite, {}, id="absent-defaulted-union"),
+    pytest.param(DefaultedBlockSite, {}, id="absent-defaulted-block"),
+    pytest.param(RawDefaultedProvider, {}, id="absent-raw-default-with-owner-template"),
+    pytest.param(DefaultedUnionSite, {"auth": {"name": "defaulted"}}, id="defaulted-fields-inside-a-written-arm"),
 ]
 
 

@@ -95,6 +95,12 @@ agw resource describe-kind vm-platform/aws-ec2   # one platform's own config
 It reads no config and builds no registry, so it answers on a host whose `config.toml` does not
 load, and it documents a capability whose plugin is not enabled yet.
 
+It also answers for every arm of a tagged table, which a sample cannot: where the arms are
+capabilities it names each one and gives its address
+(`agw resource describe-kind vm-platform/wsl2`), and where they are not (a lima site's
+`placement: {mode: local}` against `{mode: ssh, host: ...}`) it shows each arm's own fields under
+that arm, because no other command reaches them.
+
 `agw resource edit KIND/NAME` opens the manifest declaring a resource in `$EDITOR`.
 
 ## Editing manifests with schema support
@@ -141,10 +147,10 @@ does not declare, and the editor should underline it immediately. If nothing hap
 first line of the file is the modeline and that the path it names exists.
 
 What the editor checks is a deliberate subset of what loading checks. Everything it flags is a real
-error, but agentworks also applies rules JSON Schema cannot state (cross-field constraints, name
-character rules, whether a capability is registered here at all), so a manifest with no editor
-diagnostics can still fail to load. The direction is on purpose: a schema that under-reports costs
-you a squiggle, while one that over-reports would underline valid configuration.
+error, but agentworks also applies rules the emitted schema does not carry (cross-field validators,
+name character rules, whether a capability is registered on this host at all), so a manifest with no
+editor diagnostics can still fail to load. The direction is on purpose: a schema that under-reports
+costs you a squiggle, while one that over-reports would underline valid configuration.
 
 **The schemas target YAML 1.2**, because that is the version every schema-aware editor parses. The
 loader is PyYAML, which is YAML 1.1, and the two versions disagree about three things a manifest can
@@ -220,6 +226,7 @@ spec:
     subscription_id: "..."
     resource_group: agentworks-vms
     region: eastus2
+    auth: { mode: ambient }
 ```
 
 - `spec.platform` is one table: its `name` key names a `vm-platform` capability row and the
@@ -227,13 +234,13 @@ spec:
   `agw resource describe-kind vm-platform` lists the platforms this build has, including any that
   arrive with an opt-in [system plugin](#system-plugins);
   `agw resource describe-kind vm-platform/<name>` documents one platform's own fields. A platform
-  needing no config is just `platform: {name: wsl2}`. Remote Lima is just a lima site with a
-  `vm_host: user@host` key.
-- The `lima-local` and `wsl2` sites ship built in with empty config. Like every site they register
-  on every host and report not-ready where this host lacks what they need (wsl2 is Windows-only; a
-  local Lima site needs `limactl`); a not-ready site still lists and describes with its reason, and
-  using it is an error. Their names are reserved. A site named after a platform must declare that
-  platform.
+  needing no config is just `platform: {name: wsl2}`. A lima site says where `limactl` runs:
+  `placement: {mode: local}` on this machine, or `placement: {mode: ssh, host: user@host}` over SSH.
+- The `lima-local` and `wsl2` sites ship built in, `lima-local` on `placement: {mode: local}` and
+  `wsl2` on no config at all. Like every site they register on every host and report not-ready where
+  this host lacks what they need (wsl2 is Windows-only; a local Lima site needs `limactl`); a
+  not-ready site still lists and describes with its reason, and using it is an error. Their names
+  are reserved. A site named after a platform must declare that platform.
 - Consumers name sites: `agw vm create --site`, `defaults.site` in config.toml, and each VM row's
   `site`. Templates deliberately carry no site: placement is per-host, never template state.
 - Site config secrets ride the standard secret machinery: a platform that needs a credential names
@@ -241,11 +248,21 @@ spec:
   out (a Proxmox site's API token is the `proxmox-token` secret unless `token_secret` says
   otherwise). Those secrets are auto-declared and resolved through the backend chain like any other,
   and `agw resource describe-kind vm-platform/<name>` shows each platform's secret fields with their
-  default names. Azure is the one with a choice to make: it authenticates with ambient credentials
-  (`az login`, `AZURE_*` env vars, managed identity, browser fallback) unless a `service_principal`
-  table inside the platform table declares an explicit one. A site with a service principal uses
-  that identity and only that one, so a rejected or expired client secret fails the command rather
-  than falling back to ambient credentials.
+  default names.
+- **Azure and AWS sites say how they authenticate, in a tagged `auth` table that defaults to
+  ambient.** `auth: {mode: ambient}` is the declared default, so omitting the table means it: the
+  host's own credential chain (for Azure, `az login` / `AZURE_*` / managed identity / browser
+  fallback; for AWS, environment, shared config, instance profile, SSO), which is what each wrapped
+  SDK does when told nothing. `auth: {mode: service-principal, ...}` and
+  `auth: {mode: access-key, ...}` name an explicit identity. An explicit identity is used and only
+  it, so a rejected or expired credential fails the command rather than falling back to the ambient
+  chain. The same shape reads back out: an `ambient` site declares no secret and shows no secret
+  edge, a credential arm declares exactly the one secret it names, and `agw doctor`'s site row shows
+  the resolved mode (`platform azure-vm (auth: ambient)`) whether it was written or defaulted.
+  Lima's `placement` works the same way, defaulting to `{mode: local}`. Proxmox has no mode selector
+  at all: it has one authentication shape, so it keeps its required token fields, which is the
+  pattern (a default where the underlying tool has an ambient notion, required fields where it does
+  not).
 - The cloud and datacenter platforms ship as opt-in system plugins, so a site that names one is
   not-ready with an "enable plugin `<name>`" hint, and refused at use, until you list that plugin in
   `[plugins] system`. The `azure-dev` example above is not-ready until you set

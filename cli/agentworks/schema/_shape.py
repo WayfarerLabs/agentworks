@@ -72,13 +72,16 @@ class FieldShape:
 
     annotation: object
     """What an operator may WRITE here, as an annotation: reference
-    markers stripped out at every depth, and every model declaring a
-    scalar shorthand widened to the union it accepts (``EnvEntry`` reads
-    ``str | EnvEntry``). Optionality is preserved: ``str | None`` stays
+    markers stripped out at every depth, every model declaring a scalar
+    shorthand widened to the union it accepts (``EnvEntry`` reads
+    ``str | EnvEntry``), and an owner-templated reference widened to
+    accept ``null``. Optionality is preserved: ``str | None`` stays
     ``str | None``. See :func:`accepted_annotation`."""
 
     optional: bool
-    """Whether ``None`` is an accepted value."""
+    """Whether ``None`` is an accepted value. True for an owner-templated
+    reference, which reads an explicit ``null`` as the omission it
+    resolves; :attr:`annotation` says the same thing."""
 
     marker: RefMarker | None
     """The marker on the field itself: the field names one Resource."""
@@ -120,8 +123,11 @@ class FieldShape:
     may be, empty unless the elements are a discriminated union of models.
 
     A collection of tagged blocks is not a shape the framework ships
-    today (all four discriminated unions are top-level capability
-    configs), and it is one any capability or plugin author can write.
+    today, and it is one any capability or plugin author can write. (It
+    was once true that every discriminated union here was a top-level
+    capability config. The auth and placement unions on azure, aws, and
+    lima are nested unions whose arms are plain models, so what is left
+    unshipped is the COLLECTION of them, not the nesting.)
     Left unclassified, its elements read as an undiscriminated union,
     which no walker expands: a secret named inside such an element would
     be absent from the dependency graph with nothing reported."""
@@ -312,8 +318,11 @@ def shape_of(field: FieldInfo) -> FieldShape:
             union_model = _sole_model(union_members)
 
     return FieldShape(
-        annotation=accepted_annotation(field.annotation),
-        optional=optional,
+        annotation=accepted_annotation(field.annotation, marker),
+        # An owner-templated field accepts ``None`` whatever its
+        # annotation says, so the flag and the annotation are widened by
+        # the one answer rather than each deciding for itself.
+        optional=optional or (marker is not None and marker.default_template is not None),
         marker=marker,
         collection=collection,
         item_marker=item_marker,
@@ -369,11 +378,11 @@ def is_model(annotation: object) -> TypeGuard[type[BaseModel]]:
 def accepts_table(annotation: object) -> bool:
     """Whether a raw TABLE could satisfy ``annotation``.
 
-    Reference extraction asks this of an undiscriminated union's members,
-    because being a table is the only thing that selects such a union's
-    block from a raw blob: no tag names it. The answer is a fact only
-    while the block is the ONE member a table could be, so the extractor
-    asks after the others (see ``extract._union_block``).
+    :func:`table_addresses_block` asks this of an undiscriminated union's
+    members, because being a table is the only thing that selects such a
+    union's block from a raw blob: no tag names it. The answer is a fact
+    only while the block is the ONE member a table could be, so it is
+    asked of the others.
 
     Recognized by spelling, not by trying a value against it: a model, any
     mapping type (``dict``, ``Mapping``, a ``TypedDict``, which is a
@@ -388,6 +397,29 @@ def accepts_table(annotation: object) -> bool:
         return True
     origin = get_origin(annotation) or annotation
     return isinstance(origin, type) and issubclass(origin, Mapping)
+
+
+def table_addresses_block(model: type[BaseModel], members: tuple[object, ...]) -> bool:
+    """Whether a raw table names ``model`` among an undiscriminated
+    union's ``members`` before validation.
+
+    Nothing tags such a union, so the value's own shape is the only
+    address a raw blob offers: a table IS the block, but only while the
+    block is the sole member a table could satisfy
+    (:func:`accepts_table`). A union offering a bare table beside the
+    model (``dict[str, str] | Creds``) addresses no arm pre-validation,
+    since pydantic settles that one by trying the arms and preferring
+    whichever fits, and naming the block would invent an edge for a value
+    that validates as the table.
+
+    One function because two callers must agree on it or the exact defect
+    it decides comes back between them: reference extraction walks the
+    block only when this is true, and registration conformance counts the
+    block walker-reachable only when extraction would walk it, so a
+    marker inside a block extraction refuses to walk is refused at
+    registration instead of silently never extracted.
+    """
+    return not any(member is not model and accepts_table(member) for member in members)
 
 
 def model_fields_of(model_cls: type[BaseModel]) -> dict[str, FieldInfo] | None:
@@ -508,6 +540,32 @@ def markers_in(annotation: object) -> tuple[RefMarker, ...]:
     return tuple(found)
 
 
+def models_in(annotation: object) -> tuple[type[BaseModel], ...]:
+    """Every model class written anywhere inside ``annotation``, at any
+    depth, deduplicated in first-appearance order.
+
+    :func:`markers_in`'s counterpart one level up: where that reports the
+    markers an annotation carries, this reports the models it offers,
+    which is the set VALIDATION can construct a value of from the field.
+    :func:`~agentworks.schema.reference_marker_error` subtracts the
+    models a walker reaches from this answer, and what remains is the
+    set a document can fill while no walker ever reads it.
+
+    The walk stops AT a model rather than descending into its fields,
+    for the reason :func:`markers_in` stops there: a model's own contents
+    are judged when that model is judged. It is finite for the same
+    reason: a recursive model is reached as a model, not as a tree of
+    annotations.
+    """
+    base, _metadata = split_annotated(annotation)
+    if _is_model(base):
+        return (base,)
+    found: dict[type[BaseModel], None] = {}
+    for arg in get_args(base):
+        found.update(dict.fromkeys(models_in(arg)))
+    return tuple(found)
+
+
 def strip_markers(annotation: object) -> object:
     """``annotation`` with every reference marker removed, at any depth.
 
@@ -524,27 +582,46 @@ def strip_markers(annotation: object) -> object:
     return stripped
 
 
-def accepted_annotation(annotation: object) -> object:
-    """``annotation`` as an operator may WRITE it: markers stripped, and
-    every model declaring a scalar shorthand widened to the union it
-    accepts (``dict[str, EnvEntry]`` reads ``dict[str, str | EnvEntry]``).
+def accepted_annotation(annotation: object, marker: RefMarker | None = None) -> object:
+    """``annotation`` as an operator may WRITE it: markers stripped, every
+    model declaring a scalar shorthand widened to the union it accepts
+    (``dict[str, EnvEntry]`` reads ``dict[str, str | EnvEntry]``), and an
+    owner-templated reference widened to accept ``null``.
 
-    The widening is what keeps the two derivations of a model saying the
-    same thing. A shorthand is a before-validator, which is invisible to
-    an annotation and to ``model_json_schema`` alike; emitted schema
-    learns it from
+    Both widenings are the same correction, and it is what keeps the two
+    derivations of a model saying the same thing. Each is a
+    before-validator, which is invisible to an annotation and to
+    ``model_json_schema`` alike; emitted schema learns it from
     :meth:`~agentworks.schema.AgwModel.__get_pydantic_json_schema__` and
-    every human surface learns it here, from the same declaration. Left
-    out, ``describe-kind`` renders a bare "table" for a field whose
-    emitted schema offers ``{anyOf: [string, object]}``, and an operator
-    who trusts the surface the resources guide calls the authority
-    rewrites every plaintext env value into a table for no reason.
+    every human surface learns it here, from the same declaration.
+
+    Left out, each has the same consequence, and both have shipped:
+    ``describe-kind`` rendered a bare "table" for a field whose emitted
+    schema offers ``{anyOf: [string, object]}``, so an operator who
+    trusted the surface the resources guide calls the authority rewrote
+    every plaintext env value into a table for no reason; and it rendered
+    a bare "string" for a secret-naming field whose emitted schema offers
+    ``{anyOf: [string, null]}`` and whose loader reads ``token: null`` as
+    the instruction to use the owner template. The parity guard
+    (``tests/manifests/test_accepted_type_parity.py``) is what holds this
+    function to the emitted side; ``null`` used to be subtracted there,
+    which is precisely how the second one hid.
 
     The MODEL is not replaced, only the annotation naming it: a walker
     still expands the block through ``nested_model`` or ``item_model``,
-    because a shorthand adds a spelling rather than removing one.
+    because a shorthand adds a spelling rather than removing one. The
+    same goes for ``null``: an operator who writes it gets the templated
+    name, so the field still names a Resource and still has a type.
+
+    ``marker`` is the field's OWN reference marker, which is where the
+    template lives; a collection's element marker cannot carry one
+    (:func:`~agentworks.schema.reference_marker_error` refuses it at
+    registration), so there is no depth for this widening to reach.
     """
-    return _widened(strip_markers(annotation))
+    widened = _widened(strip_markers(annotation))
+    if marker is None or marker.default_template is None:
+        return widened
+    return Union[widened, None]  # noqa: UP007
 
 
 def element_annotation(annotation: object) -> object | None:
@@ -706,8 +783,12 @@ def _tags_of(arm: type[BaseModel], discriminator: str) -> tuple[str, ...]:
     the old name silently unaddressable.
 
     Non-string tags are out of scope, and that is a boundary rather than
-    an oversight: every discriminator in this framework is a capability
-    or kind NAME. A model tagged otherwise contributes no arms here.
+    an oversight. The justification used to be that every discriminator
+    here is a capability or kind NAME; that stopped being true when the
+    platform auth and placement unions arrived tagged by ``mode``. The
+    boundary stands on its own terms instead: a tag is an identifier the
+    OPERATOR writes in a document, so it is a string, and a model tagged
+    otherwise contributes no arms here.
     """
     fields = model_fields_of(arm)
     if fields is None or discriminator not in fields:

@@ -59,6 +59,7 @@ _AZURE_SITE = ManifestDoc(
             "subscription_id": "sub-123",
             "resource_group": "rg-agw",
             "region": "westus2",
+            "auth": {"mode": "ambient"},
         }
     },
 )

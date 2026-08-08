@@ -22,6 +22,7 @@ import pytest
 import yaml
 from pydantic import Discriminator, Field
 
+from agentworks.capabilities.config import registered_implementations
 from agentworks.errors import ValidationError
 from agentworks.manifests.field_tree import FieldEntry, field_tree, worth_showing
 from agentworks.manifests.reference import SchemaReference, reference_for
@@ -120,9 +121,17 @@ def _entries_by_name(reference: SchemaReference) -> dict[str, FieldEntry]:
 
 
 def _walk(entries: tuple[FieldEntry, ...]) -> Iterator[FieldEntry]:
+    """Every entry in the tree, arms included.
+
+    A union's fields hang off its ARMS rather than off the union, so a
+    walk that followed ``children`` alone would stop at every union and
+    quietly stop asserting anything about what is under one.
+    """
     for entry in entries:
         yield entry
         yield from _walk(entry.children)
+        for alternative in entry.alternatives:
+            yield from _walk(alternative.fields)
 
 
 # --- what a value is -------------------------------------------------------
@@ -285,7 +294,7 @@ def test_the_rendered_arm_is_the_first_registered_one() -> None:
 
     assert entry.rendered == "lima"
     assert [alt.name for alt in entry.alternatives] == ["lima", "proxmox"]
-    assert {child.name for child in entry.children} == {"name", "vm_host"}
+    assert {child.name for child in entry.contents} == {"name", "vm_host"}
 
 
 # "a union that is not a capability offers no pointer" stood here and was
@@ -317,6 +326,88 @@ def test_an_alternative_gets_an_address_only_when_the_address_exists() -> None:
     assert all(alt.target == f"vm-platform/{alt.name}" for alt in platform.alternatives)
 
 
+def _description_of(impl: type) -> object:
+    """A seated implementation's one-liner. ``registered_implementations``
+    is typed as plain classes, the declaration being a capability-side
+    ClassVar, so it is read the way the renderer reads it."""
+    return getattr(impl, "description", None)
+
+
+class DirectDisk(AgwModel):
+    """A disk attached directly, and the FIRST arm, so the collision below
+    is not also the one arm ``_shows_fields`` expands unconditionally."""
+
+    kind: Literal["direct"]
+    size_gib: int
+
+
+class LimaDisk(AgwModel):
+    """A disk provisioned through a Lima volume.
+
+    Tagged ``lima``, which is a name the vm-platform registry really
+    carries: that is the whole point, and it is what the ``group``/``leaf``
+    fixture above cannot say.
+    """
+
+    kind: Literal["lima"]
+    volume: str
+
+
+class Disked(AgwModel):
+    """A kind's spec model with an unrelated tagged block inside it."""
+
+    disk: Annotated[DirectDisk | LimaDisk, Discriminator("kind")]
+
+
+def test_an_arm_that_merely_shares_a_seated_name_is_not_that_implementation() -> None:
+    """The tag is not the identity, and reading it as one loses an
+    operator's fields.
+
+    ``group``/``leaf`` above proves the registry is consulted; it cannot
+    prove WHAT is asked of it, because neither name is in any registry, so
+    a lookup on the name alone passes it just as happily. This drives the
+    case that collides for real: a disk arm tagged ``lima``, under a spec
+    collected for ``vm-platform``, where ``lima`` is seated.
+
+    Answering on the name gave that arm ``vm-platform/lima`` (an address
+    that describes a VM platform, not a disk), described it with Lima's
+    one-liner, and then, because the address supposedly documents it,
+    ``_shows_fields`` DROPPED ``volume`` (its own required field) from the
+    reference and the sample alike. All three are asserted, since each is
+    separately wrong.
+    """
+    seated = registered_implementations("vm-platform")
+    assert "lima" in seated, "the collision has to be a real one"
+
+    (disk,) = field_tree(Disked, "vm-platform")
+    arms = {alt.name: alt for alt in disk.alternatives}
+
+    assert set(arms) == {"direct", "lima"}
+    assert arms["lima"].target is None
+    assert arms["lima"].summary != _description_of(seated["lima"])
+    assert arms["lima"].summary is not None
+    assert arms["lima"].summary.startswith("A disk provisioned through a Lima volume.")
+    assert [field.name for field in arms["lima"].fields] == ["kind", "volume"]
+
+
+def test_the_arm_that_IS_a_seated_implementation_still_gets_its_address() -> None:
+    """The other half of the same rule, and the one an over-tight identity
+    check would break: a capability's own union is exactly the models the
+    registry offers, so every arm of it is addressable and described by the
+    implementation rather than by its config model's docstring.
+
+    Asserted over the LIVE registry, so it fails if the union and the
+    registry ever stop being built from one read.
+    """
+    platform = _entries_by_name(reference_for("vm-site"))["platform"]
+    implementations = registered_implementations("vm-platform")
+
+    assert set(implementations) == {alt.name for alt in platform.alternatives}
+    for alt in platform.alternatives:
+        assert alt.target == f"vm-platform/{alt.name}"
+        assert alt.summary == _description_of(implementations[alt.name])
+
+
 class SelfReachingArm(AgwModel):
     """A union arm reachable from itself, which a plugin's config model
     may be: a group whose members are groups."""
@@ -342,15 +433,18 @@ def test_a_union_arm_reachable_from_itself_stops_rather_than_recurring() -> None
     guide's field reference all died on the same model.
 
     One level is expanded and the second is not, and ``rendered`` says so
-    rather than claiming an arm whose fields are absent.
+    rather than claiming an arm whose fields are absent. The arm still
+    says WHY it has none, which is the third way an alternative is
+    readable: its fields are the ones one level up.
     """
     entry = _entries_by_name(_reference(SelfReaching))["group"]
 
     assert entry.rendered == "group"
-    inner = {child.name: child for child in entry.children}["member"]
+    inner = {child.name: child for child in entry.contents}["member"]
     assert [alt.name for alt in inner.alternatives] == ["group"]
-    assert inner.children == ()
+    assert inner.contents == ()
     assert inner.rendered is None
+    assert inner.alternatives[0].recurring
 
 
 # --- a collection whose ELEMENTS are a union -------------------------------
@@ -420,7 +514,7 @@ def test_a_table_of_tagged_blocks_hangs_its_element_under_a_placeholder_key() ->
 
     assert element.name == MAPPING_KEY
     assert element.rendered == "lima"
-    assert {child.name for child in element.children} == {"name", "vm_host"}
+    assert {child.name for child in element.contents} == {"name", "vm_host"}
 
 
 def test_the_tree_offers_every_element_arm_the_stream_does() -> None:
@@ -459,21 +553,25 @@ def test_a_tagged_collection_arm_reachable_from_itself_stops_rather_than_recurri
     ``sample``, and the guide's field reference down together.
     """
     (element,) = _entries_by_name(_reference(Nodes))["nodes"].children
-    inner = {child.name: child for child in element.children}["members"]
+    inner = {child.name: child for child in element.contents}["members"]
     (deeper,) = inner.children
 
     assert element.rendered == "group"
     assert [alt.name for alt in deeper.alternatives] == ["group", "leaf"]
-    assert deeper.children == ()
-    assert deeper.rendered is None, "nothing was expanded here, and the record says so"
+    # ``group`` is the block already open above, so it is not reopened;
+    # ``leaf`` is not, so it is expanded where it stands.
+    assert deeper.alternatives[0].recurring
+    assert deeper.alternatives[0].fields == ()
+    assert {child.name for child in deeper.alternatives[1].fields} == {"name", "value"}
+    assert deeper.rendered == "leaf", "the arm that WAS expanded is the one a document would write"
 
 
 def test_an_unexpanded_arm_does_not_name_what_is_shown() -> None:
-    """``rendered`` is None there, and "Shown here: None." is Python
-    talking to an operator."""
-    flowed = " ".join(_spec_lines(Nodes))
+    """``rendered`` is None where the ONLY arm is the block already open
+    above, and "Shown here: None." is Python talking to an operator."""
+    flowed = " ".join(_spec_lines(SelfReaching))
 
-    assert "One of: group, leaf." in flowed
+    assert "One of: group." in flowed
     assert "Shown here: None" not in flowed
 
 
@@ -528,7 +626,7 @@ def test_a_root_model_wrapper_contributes_no_path_segment() -> None:
     entry = _entries_by_name(_reference(WrappedSite))["platform"]
 
     assert entry.rendered == "lima"
-    assert {child.name for child in entry.children} == {"name", "vm_host"}
+    assert {child.name for child in entry.contents} == {"name", "vm_host"}
     assert "root" not in {found.name for found in _walk((entry,))}
 
 
@@ -547,7 +645,30 @@ def test_an_implementation_documents_the_model_it_declares() -> None:
     reference = reference_for("vm-platform/lima")
 
     assert reference.implementation == "lima"
-    assert {entry.name for entry in reference.spec} == {"name", "vm_host"}
+    assert {entry.name for entry in reference.spec} == {"name", "placement"}
+
+
+def test_a_nested_tagged_union_expands_every_arm_because_none_is_addressable() -> None:
+    """lima's ``placement`` is the framework's first discriminated union
+    that is NOT a capability-config union, so this pins that the shared
+    field-tree machinery expands it with no special casing.
+
+    ``target`` is None on both, unlike a capability arm's: there is no
+    ``describe-kind`` address for one arm of an ordinary union, and
+    inventing one would print a command that fails. That is exactly why
+    BOTH arms carry their fields here: an arm with no address and no
+    fields is a word an operator cannot act on, and ``ssh`` was one, with
+    its required ``host`` documented nowhere any CLI form could reach."""
+    (placement,) = [e for e in reference_for("vm-platform/lima").spec if e.name == "placement"]
+
+    assert [alt.name for alt in placement.alternatives] == ["local", "ssh"]
+    assert all(alt.target is None for alt in placement.alternatives)
+    assert placement.rendered == "local"
+    assert [field.name for field in placement.alternatives[0].fields] == ["mode"]
+    assert [field.name for field in placement.alternatives[1].fields] == ["mode", "host"]
+    # The arm summaries come from the arm MODELS' docstrings (a capability
+    # union reads its impls' one-liners instead), so they are real prose.
+    assert placement.alternatives[1].summary == "Run limactl on another host over SSH."
 
 
 def test_a_root_model_config_is_described_as_a_value() -> None:

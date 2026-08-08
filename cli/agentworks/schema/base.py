@@ -35,7 +35,14 @@ from weakref import WeakKeyDictionary
 from pydantic import BaseModel, ConfigDict, Field, RootModel, model_validator
 
 from agentworks.errors import StateError
-from agentworks.schema._shape import marker_of, markers_in, model_fields_of, shape_of
+from agentworks.schema._shape import (
+    marker_of,
+    markers_in,
+    model_fields_of,
+    models_in,
+    shape_of,
+    table_addresses_block,
+)
 from agentworks.schema.markers import REF_SCHEMA_KEY, RefOwner
 from agentworks.schema.shorthand import ScalarShorthand, shorthand_field_error
 
@@ -463,13 +470,32 @@ def reference_marker_error(model_cls: type[BaseModel]) -> str | None:
     doubling as a set of silent failures: whatever it does not classify is
     loud here instead.
 
-    Recursive over the same shapes validation reaches, since a nested
-    block, a collection's element model, and a union arm each fill and
-    extract on their own. Every model a walker can descend into is
-    descended into here, which is both kinds of union arm and the single
-    block an untagged scalar-or-block union offers, at the field and at
-    one element alike. A model that cannot be built reports nothing: it
-    has no fields to judge, and its own check
+    A marker fact no consumer reads is refused the same way, which today
+    means one: a default template on a COLLECTION's element marker. The
+    fill above renders a template into the field it defaults, an omitted
+    collection has no element to write into, and extraction renders no
+    default per element for the same reason, so the authored template
+    would be prose nothing executes.
+
+    The rule behind all of the refusals is one invariant, and it is what
+    this function enforces: **every model pydantic can select is a model
+    some walker reaches, or no reference marker hides inside it.** The
+    check is recursive over the models the walkers descend into (both
+    kinds of union arm and the single addressable block of an untagged
+    scalar-or-block union, at the field and at one element alike), and it
+    is CLOSED over the models validation can construct that no walker
+    reaches: an arm of a two-model union nothing tags, a block a table
+    member shadows out of pre-validation addressability, an arm behind a
+    non-string tag, a model under a shape the classifier does not
+    recognize. Each of those validates happily while extraction, by sound
+    refusal, never walks it, so a marker anywhere inside one is the same
+    silent gating bypass one shape over, and the whole model is refused
+    unless it is marker-free at every depth. Stated as a subtraction
+    (models validation offers minus models the walkers reach,
+    marker-free remainder required) rather than as a list of known bad
+    shapes, so the next walker gap an author can spell is refused here
+    without anyone having to predict it. A model that cannot be built
+    reports nothing: it has no fields to judge, and its own check
     (:func:`~agentworks.schema.model_is_complete`) already refuses it.
     """
     return _marker_error(model_cls, ())
@@ -513,8 +539,26 @@ def _marker_error(model_cls: type[BaseModel], visiting: tuple[type[BaseModel], .
                 f"the field's own value or on one element of a list, a set, or a table, so spell "
                 f"the field as one of those (a nested collection needs a model for the inner one)"
             )
-        for reachable in _reachable_models(shape):
-            reason = _marker_error(reachable, visiting)
+        if shape.item_marker is not None and shape.item_marker.default_template is not None:
+            return (
+                f"{model_cls.__name__}.{name} declares a default template on a collection's "
+                f"element marker, which nothing renders: an omitted collection has no element to "
+                f"default and a present element is named by the operator, so drop the template or "
+                f"move the marker onto a scalar field that holds one name"
+            )
+        reachable = _reachable_models(shape)
+        for stranded in models_in(field.annotation):
+            if stranded not in reachable and _hides_marker(stranded, ()):
+                return (
+                    f"{model_cls.__name__}.{name} lets validation select {stranded.__name__}, "
+                    f"which no walker reaches, and a reference marker hides inside "
+                    f"{stranded.__name__}, so a Resource a document names there would never "
+                    f"become a graph edge; make the model addressable from a raw value (a tagged "
+                    f"union arm with string tags, the one table-shaped member of its union, or a "
+                    f"directly nested block), or remove the marker"
+                )
+        for model in reachable:
+            reason = _marker_error(model, visiting)
             if reason is not None:
                 return reason
     return None
@@ -539,19 +583,72 @@ def _has_unplaceable_marker(field: FieldInfo, shape: FieldShape) -> bool:
 
 
 def _reachable_models(shape: FieldShape) -> tuple[type[BaseModel], ...]:
-    """Every model a walker can descend into from one field.
+    """Every model a WALKER can descend into from one field.
 
     Both kinds of union arm and both untagged scalar-or-block blocks are
     here beside the plain nested block and a collection's element model,
     because reference extraction reaches all six, and a marker this check
     does not visit is one an author ships.
+
+    An untagged union's block counts only when extraction can actually
+    address it (:func:`~agentworks.schema._shape.table_addresses_block`,
+    the same predicate extraction asks): a block shadowed by a table
+    member validates fine and is walked by nothing, which is exactly what
+    the stranded-model subtraction in :func:`_marker_error` exists to
+    refuse when a marker hides inside one.
     """
     models = (
         shape.nested_model,
         shape.item_model,
-        shape.union_model,
-        shape.item_union_model,
+        _addressable_block(shape.union_model, shape.union_members),
+        _addressable_block(shape.item_union_model, shape.item_union_members),
         *(arm.model for arm in shape.arms),
         *(arm.model for arm in shape.item_arms),
     )
     return tuple(model for model in models if model is not None)
+
+
+def _addressable_block(model: type[BaseModel] | None, members: tuple[object, ...]) -> type[BaseModel] | None:
+    """``model`` when a raw table can be attributed to it, else ``None``."""
+    if model is None or not table_addresses_block(model, members):
+        return None
+    return model
+
+
+def _hides_marker(model_cls: type[BaseModel], visiting: tuple[type[BaseModel], ...]) -> bool:
+    """Whether a reference marker is written anywhere inside ``model_cls``
+    or a model reachable from it, in any position, placed or not.
+
+    The question asked of a model VALIDATION can construct and no walker
+    reads. Such a model is fine to accept and worthless to mark, since no
+    marker inside it can ever feed the graph, so any marker at any depth
+    makes the whole model refusable where none at all leaves it alone.
+    Both marker carriers are read, because pydantic keeps both: the
+    field's own metadata (where an outermost ``Annotated`` marker is
+    lifted) and the annotation tree (everywhere else).
+
+    ``visiting`` is this walk's OWN path, and the sole caller deliberately
+    starts it at ``()`` rather than handing down the path
+    :func:`_marker_error` is carrying. That difference is load-bearing:
+    the question here is about one stranded model's contents, not about
+    where the outer walk happened to reach it from. Threading the outer
+    path in would make this return ``False`` for any stranded model
+    already on it, silently skipping the very check the subtraction
+    exists to perform. Do not "tidy" the call to match the recursion.
+
+    A model that cannot be built hides nothing this can see; its own
+    check (:func:`~agentworks.schema.model_is_complete`) already refuses
+    it.
+    """
+    if model_cls in visiting:
+        return False
+    fields = model_fields_of(model_cls)
+    if fields is None:
+        return False
+    visiting = (*visiting, model_cls)
+    for field in fields.values():
+        if marker_of(field) is not None or markers_in(field.annotation):
+            return True
+        if any(_hides_marker(child, visiting) for child in models_in(field.annotation)):
+            return True
+    return False

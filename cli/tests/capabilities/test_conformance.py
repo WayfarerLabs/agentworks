@@ -20,7 +20,7 @@ So this module calls ``conformance_error`` the way the self-test does.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Annotated, Literal
 
 import pytest
@@ -287,6 +287,191 @@ def test_a_marker_no_walker_could_ever_read_is_refused() -> None:
 
     # The half that makes the refusal necessary rather than merely tidy.
     assert extract_references(NestedCollection, {"tokens": {"k": ["named"]}}, OWNER) == ()
+
+
+# -- Validation must not accept what no walker reads -------------------------
+#
+# The invariant ``reference_marker_error`` enforces: every model pydantic
+# can select is a model some walker reaches, or no reference marker hides
+# inside it. The cases below CONSTRUCT violating shapes rather than only
+# pinning the ones already found, and each first proves its bypass is real
+# (the blob validates carrying a secret name; extraction produces no edge
+# for it), so a case that stops violating the premise fails loudly instead
+# of testing nothing.
+
+
+class _MarkedArm(AgwModel):
+    """A block naming a secret, hidden below each stranded position."""
+
+    secret: Annotated[str, SecretRef(usage="the hidden secret")]
+
+
+class _UnmarkedArm(AgwModel):
+    """The other arm, marking nothing."""
+
+    other: str
+
+
+class _HoldsMarkedArm(AgwModel):
+    """A marker-free surface whose nested block is marked, so the hiding
+    is transitive rather than one level down."""
+
+    inner: _MarkedArm
+
+
+HIDDEN = "hidden-secret"
+
+
+def _carries(value: object, name: str) -> bool:
+    """Whether ``name`` appears anywhere in a dumped validated value."""
+    if isinstance(value, str):
+        return value == name
+    if isinstance(value, Mapping):
+        return any(_carries(item, name) for item in value.values())
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return any(_carries(item, name) for item in value)
+    return False
+
+
+class _TwoModelUnion(AgwModel):
+    cred: _MarkedArm | _UnmarkedArm
+
+
+class _TwoModelUnionElement(AgwModel):
+    creds: dict[str, _MarkedArm | _UnmarkedArm] = Field(default_factory=dict)
+
+
+class _TableShadowedBlock(AgwModel):
+    mapping: dict[str, int] | _MarkedArm | None = None
+
+
+class _TableShadowedElement(AgwModel):
+    mappings: dict[str, dict[str, int] | _MarkedArm] = Field(default_factory=dict)
+
+
+class _NestedCollectionOfModels(AgwModel):
+    rows: dict[str, list[_MarkedArm]] = Field(default_factory=dict)
+
+
+class _FixedTupleMember(AgwModel):
+    pair: tuple[str, _MarkedArm] | None = None
+
+
+class _TransitivelyHidden(AgwModel):
+    thing: _HoldsMarkedArm | _UnmarkedArm | None = None
+
+
+@pytest.mark.parametrize(
+    ("config_model", "blob"),
+    [
+        pytest.param(_TwoModelUnion, {"cred": {"secret": HIDDEN}}, id="an arm of a two-model untagged union"),
+        pytest.param(
+            _TwoModelUnionElement,
+            {"creds": {"k": {"secret": HIDDEN}}},
+            id="the same union held by a collection's elements",
+        ),
+        pytest.param(
+            _TableShadowedBlock,
+            {"mapping": {"secret": HIDDEN}},
+            id="a sole model arm a table member shadows",
+        ),
+        pytest.param(
+            _TableShadowedElement,
+            {"mappings": {"k": {"secret": HIDDEN}}},
+            id="the shadowed arm one element down",
+        ),
+        pytest.param(
+            _NestedCollectionOfModels,
+            {"rows": {"k": [{"secret": HIDDEN}]}},
+            id="a model below a nested collection",
+        ),
+        pytest.param(_FixedTupleMember, {"pair": ("x", {"secret": HIDDEN})}, id="a fixed-length tuple member"),
+        pytest.param(
+            _TransitivelyHidden,
+            {"thing": {"inner": {"secret": HIDDEN}}},
+            id="a marker two models below the stranded arm",
+        ),
+    ],
+)
+def test_a_marker_validation_accepts_and_no_walker_reads_is_refused(
+    config_model: type[AgwModel], blob: dict[str, object]
+) -> None:
+    """The gating-bypass class, closed as one rule rather than per shape.
+
+    Each shape strands a model: pydantic selects it happily, and no
+    walker descends into it, so a secret the operator names inside one is
+    never gated, never resolved, and never reported while the document
+    looks correct throughout. The dependency graph is built from the
+    extracted edges BEFORE validation, which is what makes the miss a
+    bypass rather than a cosmetic gap. The rule is a subtraction (models
+    validation offers minus models the walkers reach, marker-free
+    remainder required), so the next stranded position an author can
+    spell is refused without being listed here first.
+    """
+    validated = config_model.model_validate(blob, context=validation_context(OWNER))
+    assert _carries(validated.model_dump(), HIDDEN), "premise: the secret name must survive validation"
+
+    extracted = {ref.name for ref in extract_references(config_model, blob, OWNER)}
+    assert HIDDEN not in extracted, "premise gone: extraction reaches this shape now, so move it to the walked set"
+
+    assert reference_marker_error(config_model) is not None
+
+
+def test_the_fixture_unions_no_walker_selects_an_arm_of_are_refused_too() -> None:
+    """The two walker fixtures built on unaddressable unions are the same
+    class: a marker hides behind a union no document can select an arm of
+    (no discriminator at all, and a non-string tag). Extraction's suites
+    pin that both stay total and edgeless; this pins that neither could
+    ever register."""
+    from tests.schema._fixture_models import NumericallyTaggedSite, UndiscriminatedSite
+
+    assert reference_marker_error(UndiscriminatedSite) is not None
+    assert reference_marker_error(NumericallyTaggedSite) is not None
+
+
+def test_a_stranded_model_with_nothing_marked_inside_is_left_alone() -> None:
+    """The refusal is about the MARKER, not the shape: a two-model
+    untagged union that hides nothing references nothing, so there is no
+    edge to lose and no reason an author cannot write one (pydantic
+    disambiguates it at validation just fine)."""
+
+    class _AnotherUnmarked(AgwModel):
+        flag: bool = False
+
+    class HarmlessUnion(AgwModel):
+        name: Literal["fixture-platform"]
+        cred: _UnmarkedArm | _AnotherUnmarked | None = None
+
+    assert reference_marker_error(HarmlessUnion) is None
+    assert conformance_error(VM_PLATFORM, _impl(HarmlessUnion)) is None
+
+
+def test_a_default_template_on_an_element_marker_is_refused() -> None:
+    """``fields.py`` and ``_shape.py`` have stated this refusal as fact in
+    prose; this is the enforcement. Nothing renders such a template: the
+    fill writes a rendered name into the field the template defaults, an
+    omitted collection has no element to write into, and extraction
+    renders no per-element default for the same reason, so the authored
+    promise would be read by nobody. The premises are asserted so the
+    refusal cannot outlive its reason.
+    """
+
+    class TemplatedElements(AgwModel):
+        name: Literal["fixture-platform"]
+        tokens: list[Annotated[str, SecretRef(usage="a token", default_template="tok-{owner_name}")]] = Field(
+            default_factory=list
+        )
+
+    validated = TemplatedElements.model_validate({"name": "fixture-platform"}, context=validation_context(OWNER))
+    assert validated.tokens == [], "premise: the fill writes nothing for an omitted collection"
+    assert extract_references(TemplatedElements, {"name": "fixture-platform"}, OWNER) == (), (
+        "premise: extraction renders no per-element default"
+    )
+
+    reason = reference_marker_error(TemplatedElements)
+    assert reason is not None
+    assert "default template" in reason
+    assert conformance_error(VM_PLATFORM, _impl(TemplatedElements)) is not None
 
 
 def test_an_unmarked_shape_the_classifier_does_not_recognize_is_left_alone() -> None:
