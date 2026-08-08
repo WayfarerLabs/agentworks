@@ -97,8 +97,8 @@ Design consequences:
 
 - The new 1Password source config owns its optional account selector.
 - The permanent 1Password mapping model is an `op://` reference.
-- The current `{account, reference}` mapping is accepted only by the release-scoped compatibility
-  path and receives an exact rewrite warning.
+- The current `{account, reference}` mapping hard-errors with the exact declared-source rewrite; no
+  release-scoped parser survives into runtime resolution.
 - Resolution continues to use explicit argv and `--no-newline`.
 
 Source: [1Password CLI `read`](https://www.1password.dev/cli/reference/commands/read)

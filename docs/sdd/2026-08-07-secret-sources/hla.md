@@ -194,48 +194,62 @@ read already permitted at HEAD, generalized from one backend-specific tuple rath
 the resource. No client is constructed and no secret is resolved during graph construction,
 validation, schema generation, describe, or guide rendering.
 
-## Compatibility runway
+## Breaking migration
 
-### Resolution order
+### Reference resolution
 
-Every old name is resolved source-first:
+Every configured name resolves only as a source:
 
-1. A declared or synthesized source wins, with no warning.
-2. If no source exists but an exact backend name exists and its source config can default, a
-   release-scoped compatibility source is synthesized and the owning carrier records a warning.
-3. Otherwise the name is an unknown source and hard-errors with the available source names.
+1. A declared or synthesized source resolves normally.
+2. Otherwise the name is an unknown source and hard-errors with the available source names.
+3. If the unknown name exactly matches a backend, the error identifies the direct-backend migration
+   and gives the source declaration plus settings or mapping rewrite.
 
 This makes `env-var` and `prompt` native source references from day one. It also prevents an
-operator-declared source named like a backend from being silently bypassed by compatibility logic.
+operator-declared source named like a backend from being bypassed by a second lookup branch.
 
-The compatibility source is a real row for the request, with an origin that identifies the legacy
-reference and is visible in doctor and describe. It is not persisted. Multiple references to the
-same backend share one compatibility source in that request.
-
-### Carriers
-
-- Settings-side legacy entries append to the existing `Config.deprecation_issues` carrier.
-- `ManifestSet` gains its own `deprecation_issues` carrier with source locations.
-- Request registry loading emits manifest warnings once through the existing request-scoped gate,
-  honoring `--no-deprecations`.
-- Doctor ignores ambient suppression and reports both carriers as health facts with exact
-  remediations.
-
-The manifest loader records candidates. Compatibility normalization runs after settings, manifests,
-backend registrations, and source declarations are all known, so it can distinguish a real
-same-named source from a direct backend reference without load-order guesses.
+No compatibility source, warning carrier, or legacy normalization branch is added. Existing generic
+config deprecation machinery remains available to other efforts but gains no Secret Sources
+producer.
 
 ### OnePassword rewrite
 
-During the warning release, a direct `onepassword` reference may retain its current
-`{account, reference}` value through a release-scoped legacy parser. The warning gives the exact
-rewrite: declare a named onepassword source with `account` in its backend block, change the chain
-and mapping key to that source, and leave the mapping value as the `op://` reference. New reference
-and sample surfaces teach only the source form.
+The old direct form:
 
-Proposed release mapping: the first release containing this wave warns, expected to be 0.14.x, and
-0.15.0 rejects. If the wave misses 0.14, the relative rule remains first shipped release warns, next
-feature release rejects. The operator must confirm the numbered mapping before the plan is locked.
+```toml
+[secret_config]
+backends = ["onepassword", "prompt"]
+```
+
+```yaml
+backend_mappings:
+  onepassword:
+    account: team
+    reference: op://vault/item/field
+```
+
+becomes a declared source, with the shared account selector on that source:
+
+```yaml
+kind: secret-source
+metadata:
+  name: team-op
+spec:
+  backend:
+    name: onepassword
+    account: team
+---
+kind: secret
+metadata:
+  name: example
+spec:
+  backend_mappings:
+    team-op: op://vault/item/field
+```
+
+and `[secret_config].backends` names `team-op`. The old `{account, reference}` value receives the
+same hard error and exact rewrite rather than a release-scoped parser. New reference and sample
+surfaces teach only the source form.
 
 ## Bounded client lifecycle
 
@@ -296,8 +310,8 @@ The caller-owned `InteractionBroker` is the only interface permitted to render a
 cannot infer interactivity from TTY state or gain ambient access to prompt metadata.
 
 Inspection remains side-effect-free. Describe uses pure attemptability and identifier previews and
-does not open clients. Doctor reports folded readiness, source provenance, compatibility warnings,
-and non-probing resolvability. Verification is the explicit surface for an actual read.
+does not open clients. Doctor reports folded readiness, source provenance, and non-probing
+resolvability. Verification is the explicit surface for an actual read.
 
 ## Typed resolution outcomes
 
@@ -339,7 +353,7 @@ The implementation updates in the same phases that make each claim true:
 - `cli/agentworks/sample-config.toml` and its tests;
 - the secrets and capability READMEs, with the backend author contract promoted under
   `capabilities/secret_backend/README.md`;
-- `docs/guides/resources.md` and the 0.14 upgrade guide;
+- `docs/guides/resources.md` and the 0.14 upgrade guide, including the exact onepassword rewrite;
 - ADR 0016's graduated-instance wording and ADR 0023's descriptor field inventory;
 - CLI completion snapshots if the command tree changes for `secret verify`;
 - guide topic prose through the universal topic contract once that contract is present at HEAD.
@@ -361,7 +375,7 @@ No permanent artifact points readers back to this SDD.
   boundaries; every client has deterministic cleanup.
 - Inspection and schema surfaces invoke no backend or client code.
 - Mapping validation and reference extraction select the same backend model through the source.
-- Compatibility always resolves source-first and always emits provenance.
+- Reference resolution has one source-only branch; migration errors never create runtime rows.
 
 ## Rejected alternatives
 
@@ -386,7 +400,7 @@ No permanent artifact points readers back to this SDD.
 | ----------- | -------------------------------------------------------------------------------------------- |
 | R1          | Declarable `secret-source` with one tagged backend block and validated per-source config     |
 | R2          | True app-published env-var/prompt rows, override policy, and rendered provenance             |
-| R3          | Source-first compatibility normalization plus settings and manifest warning carriers         |
+| R3          | Immediate source-only resolution with exact settings and manifest migration errors           |
 | R4          | Typed outcomes, explicit interaction policy, external deadlines, and bounded clients         |
 | R5          | Class registry, lazy source-bound construction, and removal of singleton branches            |
 | R6          | Registration-time forbidden secret-reference markers and ordered active-source orchestration |
@@ -403,5 +417,5 @@ No permanent artifact points readers back to this SDD.
    applies but does not copy it.
 4. Synthesized sources are true registry rows.
 5. The descriptor gains explicit primary-config and mapping-config contracts.
-6. The proposed release runway is 0.14.x warning, 0.15.0 rejection, subject to operator
-   confirmation.
+6. Direct backend references break in 0.14 with precise errors and guide content; no compatibility
+   normalizer is built.
