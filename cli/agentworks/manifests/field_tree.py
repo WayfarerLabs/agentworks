@@ -45,6 +45,24 @@ _PLACEHOLDER_KEY = "<key>"
 
 
 @dataclass(frozen=True, kw_only=True)
+class _Implementation:
+    """One seated implementation of a capability kind, as the arm-matching
+    in :func:`_alternative` needs it.
+
+    Private and derived: :func:`_implementations` reads it off the
+    registry per tree, and nothing outside this module sees it.
+    """
+
+    model: type[BaseModel]
+    """The config model it offers, which is the arm its kind's own union
+    carries. Comparing an arm against THIS is what separates the
+    implementation from a union elsewhere that merely reused its name."""
+
+    summary: str | None
+    """Its one-line description, or ``None`` when it declares none."""
+
+
+@dataclass(frozen=True, kw_only=True)
 class Alternative:
     """One of the several things that could go where one thing goes: an
     implementation of a capability kind, or an arm of any other tagged
@@ -476,19 +494,27 @@ def _alternative(
     *,
     first: bool,
     kind: str | None,
-    implementations: dict[str, str | None],
+    implementations: dict[str, _Implementation],
     expanding: tuple[type[BaseModel], ...],
 ) -> Alternative:
     """One arm, with whichever of the three ways of being readable it
     has. See :class:`Alternative`."""
-    target = f"{kind}/{arm.tag}" if arm.tag in implementations else None
+    impl = implementations.get(arm.tag)
+    if impl is not None and impl.model is not arm.doc.model:
+        # A tag COLLISION, not an implementation: some other union in this
+        # tree happens to have an arm spelled like a seated one. See
+        # :func:`_implementations` for why identity is the question.
+        impl = None
+    target = f"{kind}/{arm.tag}" if impl is not None else None
     recurring = arm.doc.model in expanding
     return Alternative(
         name=arm.tag,
         # The IMPLEMENTATION's one-liner where the arm is one (what lima
         # IS), falling back to the arm model's own docstring (what its
-        # config is) for a union that is not a capability.
-        summary=implementations.get(arm.tag) or arm.doc.description,
+        # config is) for a union that is not a capability. Off the same
+        # identity as the address, so a colliding tag is not described as
+        # the platform it merely shares a name with either.
+        summary=(impl.summary if impl is not None else None) or arm.doc.description,
         target=target,
         fields=() if recurring or not _shows_fields(target, first=first) else _tree(arm.doc.model, kind, expanding),
         recurring=recurring,
@@ -520,28 +546,38 @@ def _shows_fields(target: str | None, *, first: bool) -> bool:
     return first or target is None
 
 
-def _implementations(capability_kind: str | None) -> dict[str, str | None]:
-    """Every implementation of ``capability_kind`` this host has, mapped to
-    its one-line description.
+def _implementations(capability_kind: str | None) -> dict[str, _Implementation]:
+    """Every implementation of ``capability_kind`` this host has, by the
+    name that selects it.
 
-    MEMBERSHIP is as load-bearing as the description, which is why an
-    implementation with no description is still a key here: an arm gets
-    the address that documents it only when that address exists. A
-    capability kind's own union has an implementation behind every arm,
-    but it is not the only union in the tree an implementation's config is
-    collected under, and any other one (a list of disks, each saying which
-    kind of disk it is) would otherwise be handed
-    ``agw resource describe-kind vm-platform/local``, a command that
-    fails.
+    Carries the offered MODEL as well as the description, because the
+    question an arm asks of this map is not "is there something with my
+    name" but "am I it". ``capability_kind`` is threaded through the whole
+    tree, and a kind's spec is collected under the capability it hosts,
+    arms and nested unions included. Answering on the name alone hands an
+    unrelated arm spelled ``lima`` the address ``vm-platform/lima``, which
+    describes a VM platform rather than that arm, and (when the arm is not
+    the first) makes :func:`_shows_fields` DROP its real fields on the
+    grounds that the address already documents them. Both then say
+    something false about a block an operator has to write.
+
+    An implementation's config model is the arm its own union carries
+    (``capabilities/config.py`` builds that union from exactly this read),
+    so identity is not a heuristic for "is this it": it is the fact
+    itself. A description that is missing or empty is still an entry,
+    because membership remains half the answer.
     """
     if capability_kind is None:
         return {}
-    from agentworks.capabilities.config import registered_implementations
+    from agentworks.capabilities.config import offered_model, registered_implementations
 
-    implementations: dict[str, str | None] = {}
+    implementations: dict[str, _Implementation] = {}
     for name, impl in registered_implementations(capability_kind).items():
         description = getattr(impl, "description", None)
-        implementations[name] = description if isinstance(description, str) and description else None
+        implementations[name] = _Implementation(
+            model=offered_model(impl),
+            summary=description if isinstance(description, str) and description else None,
+        )
     return implementations
 
 

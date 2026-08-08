@@ -22,6 +22,7 @@ import pytest
 import yaml
 from pydantic import Discriminator, Field
 
+from agentworks.capabilities.config import registered_implementations
 from agentworks.errors import ValidationError
 from agentworks.manifests.field_tree import FieldEntry, field_tree, worth_showing
 from agentworks.manifests.reference import SchemaReference, reference_for
@@ -323,6 +324,88 @@ def test_an_alternative_gets_an_address_only_when_the_address_exists() -> None:
     platform = _entries_by_name(reference_for("vm-site"))["platform"]
     assert platform.alternatives
     assert all(alt.target == f"vm-platform/{alt.name}" for alt in platform.alternatives)
+
+
+def _description_of(impl: type) -> object:
+    """A seated implementation's one-liner. ``registered_implementations``
+    is typed as plain classes, the declaration being a capability-side
+    ClassVar, so it is read the way the renderer reads it."""
+    return getattr(impl, "description", None)
+
+
+class DirectDisk(AgwModel):
+    """A disk attached directly, and the FIRST arm, so the collision below
+    is not also the one arm ``_shows_fields`` expands unconditionally."""
+
+    kind: Literal["direct"]
+    size_gib: int
+
+
+class LimaDisk(AgwModel):
+    """A disk provisioned through a Lima volume.
+
+    Tagged ``lima``, which is a name the vm-platform registry really
+    carries: that is the whole point, and it is what the ``group``/``leaf``
+    fixture above cannot say.
+    """
+
+    kind: Literal["lima"]
+    volume: str
+
+
+class Disked(AgwModel):
+    """A kind's spec model with an unrelated tagged block inside it."""
+
+    disk: Annotated[DirectDisk | LimaDisk, Discriminator("kind")]
+
+
+def test_an_arm_that_merely_shares_a_seated_name_is_not_that_implementation() -> None:
+    """The tag is not the identity, and reading it as one loses an
+    operator's fields.
+
+    ``group``/``leaf`` above proves the registry is consulted; it cannot
+    prove WHAT is asked of it, because neither name is in any registry, so
+    a lookup on the name alone passes it just as happily. This drives the
+    case that collides for real: a disk arm tagged ``lima``, under a spec
+    collected for ``vm-platform``, where ``lima`` is seated.
+
+    Answering on the name gave that arm ``vm-platform/lima`` (an address
+    that describes a VM platform, not a disk), described it with Lima's
+    one-liner, and then, because the address supposedly documents it,
+    ``_shows_fields`` DROPPED ``volume`` (its own required field) from the
+    reference and the sample alike. All three are asserted, since each is
+    separately wrong.
+    """
+    seated = registered_implementations("vm-platform")
+    assert "lima" in seated, "the collision has to be a real one"
+
+    (disk,) = field_tree(Disked, "vm-platform")
+    arms = {alt.name: alt for alt in disk.alternatives}
+
+    assert set(arms) == {"direct", "lima"}
+    assert arms["lima"].target is None
+    assert arms["lima"].summary != _description_of(seated["lima"])
+    assert arms["lima"].summary is not None
+    assert arms["lima"].summary.startswith("A disk provisioned through a Lima volume.")
+    assert [field.name for field in arms["lima"].fields] == ["kind", "volume"]
+
+
+def test_the_arm_that_IS_a_seated_implementation_still_gets_its_address() -> None:
+    """The other half of the same rule, and the one an over-tight identity
+    check would break: a capability's own union is exactly the models the
+    registry offers, so every arm of it is addressable and described by the
+    implementation rather than by its config model's docstring.
+
+    Asserted over the LIVE registry, so it fails if the union and the
+    registry ever stop being built from one read.
+    """
+    platform = _entries_by_name(reference_for("vm-site"))["platform"]
+    implementations = registered_implementations("vm-platform")
+
+    assert set(implementations) == {alt.name for alt in platform.alternatives}
+    for alt in platform.alternatives:
+        assert alt.target == f"vm-platform/{alt.name}"
+        assert alt.summary == _description_of(implementations[alt.name])
 
 
 class SelfReachingArm(AgwModel):
