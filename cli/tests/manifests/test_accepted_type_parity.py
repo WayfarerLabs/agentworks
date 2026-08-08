@@ -13,8 +13,10 @@ something the loader takes short.
 
 This module is the structural stop. It reads what pydantic emits for a
 model and what :attr:`~agentworks.schema.FieldDoc.annotation` says an
-operator may write, and fails when the first offers a type the second
-does not, at every depth a collection reaches.
+operator may write, and fails when either offers a type the other does
+not, at every depth a collection reaches. The two directions are two
+different lies (the stream under-documenting what loads, and the stream
+offering a spelling the schema rejects), so each is its own test.
 
 **Nothing here derives its expectation from the walker under test.** The
 schema side is pydantic's own ``model_json_schema``; the annotation side
@@ -154,9 +156,18 @@ def _element_nodes(node: dict[str, Any], defs: dict[str, Any], keyword: str) -> 
             yield found
 
 
-def _disagreement(annotation: object, node: dict[str, Any], defs: dict[str, Any], where: str) -> str | None:
-    """Where the emitted schema offers something the annotation does not,
-    at this location or inside the collection it holds.
+def _disagreement(
+    annotation: object,
+    node: dict[str, Any],
+    defs: dict[str, Any],
+    where: str,
+    *,
+    reverse: bool = False,
+) -> str | None:
+    """Where one derivation offers a type the other does not, at this
+    location or inside the collection it holds: the emitted schema beyond
+    the annotation normally, the annotation beyond the schema under
+    ``reverse``.
 
     Recurses into a collection's elements rather than into a nested
     model's fields: a model is visited in its own right (every model the
@@ -164,17 +175,18 @@ def _disagreement(annotation: object, node: dict[str, Any], defs: dict[str, Any]
     only inside the annotation that holds it, which is where the shipped
     defect was.
     """
-    extra = _schema_types(node, defs) - _annotation_types(annotation)
+    schema_types = _schema_types(node, defs)
+    stream_types = _annotation_types(annotation)
+    extra = stream_types - schema_types if reverse else schema_types - stream_types
     if extra:
-        return (
-            f"{where} accepts {sorted(extra)} in emitted schema and not in the field stream; "
-            f"the stream says {annotation!r}"
-        )
+        offerer = "the field stream" if reverse else "emitted schema"
+        refuser = "emitted schema" if reverse else "the field stream"
+        return f"{where} accepts {sorted(extra)} in {offerer} and not in {refuser}; the stream says {annotation!r}"
     inner, keyword = _element_of(annotation)
     if inner is None:
         return None
     for element in _element_nodes(node, defs, keyword):
-        found = _disagreement(inner, element, defs, f"{where}[]")
+        found = _disagreement(inner, element, defs, f"{where}[]", reverse=reverse)
         if found is not None:
             return found
     return None
@@ -272,9 +284,10 @@ def test_the_field_stream_accepts_every_type_the_emitted_schema_does() -> None:
     assert not drifted, "\n".join(drifted)
 
 
-def _disagreements_of(model: type[BaseModel]) -> Iterator[str]:
-    """Every field of ``model`` whose emitted schema offers a type the
-    field stream does not, at the depth this model owns."""
+def _disagreements_of(model: type[BaseModel], *, reverse: bool = False) -> Iterator[str]:
+    """Every field of ``model`` where one derivation offers a type the
+    other does not, at the depth this model owns; ``reverse`` picks the
+    direction (see :func:`_disagreement`)."""
     schema = model.model_json_schema()
     defs = schema.get("$defs", {})
     properties = _dereferenced(schema, defs).get("properties", {})
@@ -290,9 +303,30 @@ def _disagreements_of(model: type[BaseModel]) -> Iterator[str]:
             node = schema if doc.path == ("root",) else None
         if node is None:
             continue
-        reason = _disagreement(doc.annotation, node, defs, f"{model.__qualname__}.{'.'.join(doc.path)}")
+        where = f"{model.__qualname__}.{'.'.join(doc.path)}"
+        reason = _disagreement(doc.annotation, node, defs, where, reverse=reverse)
         if reason is not None:
             yield reason
+
+
+def test_the_emitted_schema_accepts_every_type_the_field_stream_offers() -> None:
+    """The reverse direction, same subjects, same walk.
+
+    A type the stream offers and the schema refuses is ``describe-kind``
+    lying PERMISSIVELY: the surface the resources guide calls the
+    authority tells an operator a spelling the loader's own schema
+    rejects, and they find out from a red underline or a load failure
+    after writing it. No shipped or fixture model disagrees this way
+    today, so this is insurance at the price of one loop, kept because
+    the forward guard alone would let the two derivations drift apart in
+    exactly one direction.
+    """
+    drifted = [
+        reason
+        for model in _subjects()
+        for reason in _disagreements_of(model, reverse=True)  # noqa: PD011  (not a pandas frame)
+    ]
+    assert not drifted, "\n".join(drifted)
 
 
 def test_the_shipped_surface_is_actually_being_walked() -> None:

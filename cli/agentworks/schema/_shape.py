@@ -378,11 +378,11 @@ def is_model(annotation: object) -> TypeGuard[type[BaseModel]]:
 def accepts_table(annotation: object) -> bool:
     """Whether a raw TABLE could satisfy ``annotation``.
 
-    Reference extraction asks this of an undiscriminated union's members,
-    because being a table is the only thing that selects such a union's
-    block from a raw blob: no tag names it. The answer is a fact only
-    while the block is the ONE member a table could be, so the extractor
-    asks after the others (see ``extract._union_block``).
+    :func:`table_addresses_block` asks this of an undiscriminated union's
+    members, because being a table is the only thing that selects such a
+    union's block from a raw blob: no tag names it. The answer is a fact
+    only while the block is the ONE member a table could be, so it is
+    asked of the others.
 
     Recognized by spelling, not by trying a value against it: a model, any
     mapping type (``dict``, ``Mapping``, a ``TypedDict``, which is a
@@ -397,6 +397,29 @@ def accepts_table(annotation: object) -> bool:
         return True
     origin = get_origin(annotation) or annotation
     return isinstance(origin, type) and issubclass(origin, Mapping)
+
+
+def table_addresses_block(model: type[BaseModel], members: tuple[object, ...]) -> bool:
+    """Whether a raw table names ``model`` among an undiscriminated
+    union's ``members`` before validation.
+
+    Nothing tags such a union, so the value's own shape is the only
+    address a raw blob offers: a table IS the block, but only while the
+    block is the sole member a table could satisfy
+    (:func:`accepts_table`). A union offering a bare table beside the
+    model (``dict[str, str] | Creds``) addresses no arm pre-validation,
+    since pydantic settles that one by trying the arms and preferring
+    whichever fits, and naming the block would invent an edge for a value
+    that validates as the table.
+
+    One function because two callers must agree on it or the exact defect
+    it decides comes back between them: reference extraction walks the
+    block only when this is true, and registration conformance counts the
+    block walker-reachable only when extraction would walk it, so a
+    marker inside a block extraction refuses to walk is refused at
+    registration instead of silently never extracted.
+    """
+    return not any(member is not model and accepts_table(member) for member in members)
 
 
 def model_fields_of(model_cls: type[BaseModel]) -> dict[str, FieldInfo] | None:
@@ -514,6 +537,32 @@ def markers_in(annotation: object) -> tuple[RefMarker, ...]:
         return tuple(found)
     for arg in get_args(base):
         found.extend(markers_in(arg))
+    return tuple(found)
+
+
+def models_in(annotation: object) -> tuple[type[BaseModel], ...]:
+    """Every model class written anywhere inside ``annotation``, at any
+    depth, deduplicated in first-appearance order.
+
+    :func:`markers_in`'s counterpart one level up: where that reports the
+    markers an annotation carries, this reports the models it offers,
+    which is the set VALIDATION can construct a value of from the field.
+    :func:`~agentworks.schema.reference_marker_error` subtracts the
+    models a walker reaches from this answer, and what remains is the
+    set a document can fill while no walker ever reads it.
+
+    The walk stops AT a model rather than descending into its fields,
+    for the reason :func:`markers_in` stops there: a model's own contents
+    are judged when that model is judged. It is finite for the same
+    reason: a recursive model is reached as a model, not as a tree of
+    annotations.
+    """
+    base, _metadata = split_annotated(annotation)
+    if _is_model(base):
+        return (base,)
+    found: dict[type[BaseModel], None] = {}
+    for arg in get_args(base):
+        found.update(dict.fromkeys(models_in(arg)))
     return tuple(found)
 
 

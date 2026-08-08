@@ -32,7 +32,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, RootModel
 
-from agentworks.schema._shape import Collection, accepts_table, model_fields_of, shape_of
+from agentworks.schema._shape import Collection, model_fields_of, shape_of, table_addresses_block
 from agentworks.schema.reference import ConfigReference
 from agentworks.traversal import iter_descendants
 
@@ -270,13 +270,16 @@ def _union_block(model: type[BaseModel], members: tuple[object, ...], value: obj
 
     "A table is the block" is a fact rather than a guess only while the
     block is the one member a table could satisfy, which is what
-    :func:`~agentworks.schema._shape.accepts_table` is asked. A union
-    offering a bare table beside the model (``dict[str, str] | Creds``)
-    addresses no arm before validation, since pydantic settles that one by
-    trying the arms and preferring whichever fits; naming the block there
-    would invent an edge for a value that validates as the table. That is
-    the refusal the classifier already makes for a union holding two
-    models, one member further out.
+    :func:`~agentworks.schema._shape.table_addresses_block` decides. A
+    union offering a bare table beside the model (``dict[str, str] |
+    Creds``) addresses no arm before validation, since pydantic settles
+    that one by trying the arms and preferring whichever fits; naming the
+    block there would invent an edge for a value that validates as the
+    table. That is the refusal the classifier already makes for a union
+    holding two models, one member further out. The predicate is shared
+    with registration conformance, which refuses a marker inside a block
+    this refusal leaves unwalked; the sound refusal here and the loud one
+    there are two halves of one rule.
 
     A scalar contributes nothing here rather than being walked as a block,
     and the check is explicit rather than left to
@@ -287,7 +290,7 @@ def _union_block(model: type[BaseModel], members: tuple[object, ...], value: obj
     """
     if not isinstance(value, Mapping):
         return
-    if any(member is not model and accepts_table(member) for member in members):
+    if not table_addresses_block(model, members):
         return
     yield _Block(model=model, blob=value)
 

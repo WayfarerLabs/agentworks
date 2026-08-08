@@ -131,7 +131,12 @@ class RenamedArm(AgwModel):
 
 
 class NumericallyTaggedArm(AgwModel):
-    """An arm whose tag is not a string: unaddressable here by design."""
+    """An arm whose tag is not a string: unaddressable here by design.
+
+    Fine on its own (its marker sits on its own scalar field); it is the
+    union HOLDING it that no walker can select an arm of, which is why
+    :class:`NumericallyTaggedSite` is refused at registration.
+    """
 
     version: Literal[1]
     token_secret: Annotated[str, SecretRef(usage="an unreachable secret")] | None = None
@@ -182,7 +187,13 @@ class OneArmSite(AgwModel):
 
 
 class UndiscriminatedSite(AgwModel):
-    """A union with no discriminator at all: no arm is addressable."""
+    """A union with no discriminator at all: no arm is addressable.
+
+    :class:`ProxmoxArm` hides a marker, so ``reference_marker_error``
+    refuses this shape at registration; it stays here because extraction
+    is total over models nothing could register, and what the walkers do
+    with an unaddressable union is pinned against it.
+    """
 
     platform: LimaArm | ProxmoxArm | None = None
 
@@ -196,12 +207,15 @@ class RenamedArmSite(AgwModel):
 class TaggedCollectionSite(AgwModel):
     """Collections whose ELEMENTS are a discriminated union of models.
 
-    Not a shape the framework ships (all four discriminated unions are
-    top-level capability configs), and one any capability or plugin author
-    can write. Left unclassified, its elements read as an undiscriminated
-    union, which no walker expands: a secret named inside one would be
-    absent from the dependency graph with nothing reported, and every
-    human surface would render the field as an opaque list of tables.
+    Not a shape the framework ships, and one any capability or plugin
+    author can write. (It was once true that every discriminated union
+    shipped was a top-level capability config; the auth and placement
+    unions on azure, aws, and lima are nested unions now, so what stays
+    unshipped is the COLLECTION of tagged blocks, not the nesting.) Left
+    unclassified, its elements read as an undiscriminated union, which no
+    walker expands: a secret named inside one would be absent from the
+    dependency graph with nothing reported, and every human surface would
+    render the field as an opaque list of tables.
     """
 
     platforms: list[Annotated[LimaArm | ProxmoxArm, Discriminator("name")]] = Field(default_factory=list)
@@ -314,7 +328,13 @@ class AbstractCollectionLike(AgwModel):
 
 
 class NumericallyTaggedSite(AgwModel):
-    """A union tagged by something other than a name."""
+    """A union tagged by something other than a name.
+
+    No arm is addressable from a document, and one arm hides a marker,
+    so ``reference_marker_error`` refuses the model at registration; the
+    walkers stay total over it regardless, which is what the totality
+    suite pins.
+    """
 
     thing: Annotated[NumericallyTaggedArm | OtherNumericallyTaggedArm, Discriminator("version")] | None = None
 
@@ -560,6 +580,9 @@ ALL_FIXTURES = (
     TemplateLike,
     LimaArm,
     ProxmoxArm,
+    RenamedArm,
+    NumericallyTaggedArm,
+    OtherNumericallyTaggedArm,
     SiteLike,
     FieldDiscriminatedSite,
     OptionalUnionSite,
