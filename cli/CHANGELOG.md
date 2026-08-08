@@ -1,5 +1,190 @@
 # Changelog
 
+## [0.14.0](https://github.com/WayfarerLabs/agentworks/compare/v0.13.0...v0.14.0) (2026-08-08)
+
+
+### ⚠ BREAKING CHANGES
+
+* **vm-platform:** every azure-vm, aws-ec2, and hand-declared lima vm-site must be rewritten; there is deliberately no omission alias. `vm_host` is renamed to `host` inside lima's ssh arm. Each retired spelling is refused by name with its exact rewrite rendered from the operator's own document (`capabilities/retired_shapes.py`, release-scoped like the sibling-shape refusal in `manifests/decode.py`), including the absent case, which says a line is being added rather than that something went missing.
+* **config:** settings that name resources are references, checked once
+* delete `agw resource migrate`, both halves
+* **migrate:** refuse a non-table capability config instead of dropping it
+* **manifests:** `agw resource sample` output is rendered rather than bundled. Its interface is unchanged (kind selection, --all, --write's append-only behavior, the one-leading-# uncomment rule), but the text differs: one capability implementation is rendered where a curated sample showed four, and optional fields arrive commented rather than filled in.
+* **resources:** the sweep's tail, and session-template env joins its siblings
+* **vms:** an empty tailscale_auth_key is a mistake, not a way to unset it
+* **capabilities:** capability config declares its own empties
+* **vm-platform:** the provisioning request arrives fully resolved
+* **capabilities:** the host rows carry the tagged capability table
+* **resources:** vm-template and agent-template become their own spec
+* **resources:** the declared-resource rows become frozen models
+* **manifests:** manifests naming a capability with the legacy sibling shape (`platform` plus `platform_config`, `provider` plus `provider_config`) no longer load. Run `agw resource migrate --all` to rewrite them, or fold each pair into one tagged table by hand.
+* **secrets:** `backend_mappings` values are validated against a model, so their messages change shape and gain the mapping key.
+* **vms:** three operator-visible changes, all deliberate and each pinned by a test that says so. Proxmox's `template_vmid: "9000"` no longer loads (the shipped validator did `int(str(...))`), and `verify_ssl: "no"` is now an error rather than silently meaning TRUE. And an explicit `secret: null` flips on ALL THREE credential-bearing platforms, not azure alone as the plan states: azure's `service_principal.secret`, aws's `credentials.access_key_secret`, and proxmox's `token_secret` each used to raise with a message telling the operator to omit the key, and each now resolves to the well-known default name, which is what git-credential's token already did.
+* **capabilities:** a session template's `harness_integration_config` is now validated closed-world against a model, so its messages change shape (owner-framed, with the valid field list, and an index on a bad list element).
+* **capabilities:** a git-credential `provider_config` is now validated closed-world against a model, so its messages change shape (owner-framed, with the valid field list) and two inputs change verdict: `repos: []` is accepted where it was rejected (an empty list and an absent field mean the same thing to every consumer, pinned by a test that says so), and the bespoke "the field is 'repos'" hint for the singular misspelling becomes the generic unknown-field error, whose field list names `repos`.
+* **cli:** Agentworks 0.14 removes phase-1 TOML resource declarations; on 0.13.0, run agw resource migrate --all to replace them with YAML manifests. It also removes agw session restart (use agw session resume), restart_command (use resume_command), the session-template harness and harness_config selectors (use the tagged harness_integration shape), [defaults].platform (use site), [user] (use [operator]), [paths].code_workspaces (use vscode_workspaces), agw vm shell --provisioner (use --platform), the legacy agw vm console (use the top-level agw console family), and the dead UserConfig, output.phase(), and env_compat.py Python surfaces. code_workspaces and --provisioner never emitted deprecation warnings. Before upgrading, resolve every 0.13.0 deprecation warning and run its migration tooling; 0.14 rejects retired inputs and does not migrate them.
+* **cli:** agw vm console has been removed. Use the top-level agw console command family for named consoles.
+* **cli:** [paths].code_workspaces and agw vm shell --provisioner are removed without a warning runway; use [paths].vscode_workspaces and --platform. [defaults].platform and [user] are also removed; use [defaults].site and [operator].
+* **cli:** remove session compatibility surfaces
+
+### Features
+
+* **capabilities:** add the core-driven capability config path ([d8e79a7](https://github.com/WayfarerLabs/agentworks/commit/d8e79a724db77675090a52b3c42bbca152dc7a04))
+* **capabilities:** add the facet vocabulary and the shared model vocabulary ([b875840](https://github.com/WayfarerLabs/agentworks/commit/b87584012f2df6ba7e1440ac33fccd014f16f9db))
+* **capabilities:** capability config declares its own empties ([47ef9f6](https://github.com/WayfarerLabs/agentworks/commit/47ef9f6b925d657b9903b08d6ca5e69458256d92))
+* **capabilities:** flip git-credential providers to declared config ([c6a5dc1](https://github.com/WayfarerLabs/agentworks/commit/c6a5dc184aabbb1619cd75180a96fba5c77a3c54))
+* **capabilities:** flip harness integrations to declared config ([ea8a02c](https://github.com/WayfarerLabs/agentworks/commit/ea8a02c3292f83e08a46473c401557f998212c34))
+* **capabilities:** give each capability kind a config-model contract ([806e987](https://github.com/WayfarerLabs/agentworks/commit/806e98737ee8afb2861c1940b05e4a800f819b09))
+* **capabilities:** introduce the capability-kind descriptor table ([7b8d69c](https://github.com/WayfarerLabs/agentworks/commit/7b8d69c49d121064d49d8772dd2948507f9a7054))
+* **capabilities:** rescind schema slots; key config schemas by consuming resource kind ([8b41598](https://github.com/WayfarerLabs/agentworks/commit/8b41598215da903e227045e562328666baa22ad8))
+* **capabilities:** the host rows carry the tagged capability table ([83ab980](https://github.com/WayfarerLabs/agentworks/commit/83ab980908afd26d7ef2a1969513da3f9d4eb1e0))
+* **cli:** complete 0.14 compatibility removal ([88fe4c8](https://github.com/WayfarerLabs/agentworks/commit/88fe4c85f51b6863b7aaf5f0a67a79f179f8292f))
+* **cli:** remove legacy VM console ([6566ce0](https://github.com/WayfarerLabs/agentworks/commit/6566ce0d056f38e80c8a3b5f62d30c764f04b450))
+* **cli:** remove older compatibility surfaces ([ee1cdd3](https://github.com/WayfarerLabs/agentworks/commit/ee1cdd3f0d8d1c05b7ef966fb05becff34dd8d89))
+* **cli:** remove session compatibility surfaces ([6d44a12](https://github.com/WayfarerLabs/agentworks/commit/6d44a12ce598a44e83b1cb1dc628bd0054acdc40))
+* **config:** point at the SSH key the next command is about to need ([7b131fa](https://github.com/WayfarerLabs/agentworks/commit/7b131fa58bdbd7ffacee130c281529d417e3af75))
+* **config:** settings that name resources are references, checked once ([b1bf0d6](https://github.com/WayfarerLabs/agentworks/commit/b1bf0d6e8654cb50c81a994d6934dbaf2e1c070b))
+* declarative-schema phase 2 - the declarative schema model ([5c0b6e1](https://github.com/WayfarerLabs/agentworks/commit/5c0b6e187c537a645d95ee940311291deff6edea))
+* delete `agw resource migrate`, both halves ([1b50d2a](https://github.com/WayfarerLabs/agentworks/commit/1b50d2a648a9cb8b365fb4b5fc95632f200cf158))
+* **env:** the env table becomes one declared type, and workspace-template moves ([59f79a0](https://github.com/WayfarerLabs/agentworks/commit/59f79a0801244476766ff3f6844e1f41c8948d0f))
+* **manifests:** a JSON Schema per kind, and one for any document ([0d4a998](https://github.com/WayfarerLabs/agentworks/commit/0d4a9987dd14367ec2b44270f15ac67f9110db0a))
+* **manifests:** decode reads the kind's model, starting with the four leaf kinds ([de6aaea](https://github.com/WayfarerLabs/agentworks/commit/de6aaea46add08c1ad4c62903472dc1417b6b8b9))
+* **manifests:** metadata.expires, and the last of the interim forks ([ea0228f](https://github.com/WayfarerLabs/agentworks/commit/ea0228fbf9e19b79c3044914d01e0907b9331a8d))
+* **manifests:** reject the legacy sibling capability shape ([5d64d64](https://github.com/WayfarerLabs/agentworks/commit/5d64d643ecbc5812e965c804a21a262f9a69f5f7))
+* **manifests:** samples render live, and describe-kind answers the same question ([36e5dd3](https://github.com/WayfarerLabs/agentworks/commit/36e5dd30f896191d4e7b7b38eccaa57cc0124970))
+* **manifests:** the metadata block gets hover text, and keeps it ([399a4af](https://github.com/WayfarerLabs/agentworks/commit/399a4afa60459f318ad85f284f887da7762e8ba6))
+* **manifests:** the renderer's foundation, and the plugins the schema forgot ([37c8028](https://github.com/WayfarerLabs/agentworks/commit/37c80281e23dcc5a1f9a3d4950a5de0d50460bbd))
+* **manifests:** written manifests carry the editor association ([23046f7](https://github.com/WayfarerLabs/agentworks/commit/23046f7b4e440fc8921599bae6dee3ce5f68ef25))
+* **migrate:** upgrade manifests off the retired capability shape ([644e10a](https://github.com/WayfarerLabs/agentworks/commit/644e10a79bf8f63e0bd81ed2a1e0092bab8044a6))
+* **plugins:** enforce capability-contract conformance at registration ([2d36664](https://github.com/WayfarerLabs/agentworks/commit/2d3666435abc8e8aa0d0f8edfe1616560781321d))
+* **resources:** admin-template and named-console-template become their own spec ([f59c4c6](https://github.com/WayfarerLabs/agentworks/commit/f59c4c64dc6f4bc7f1a9563b888c61c8266d1940))
+* **resources:** agw resource schema prints and writes the schema set ([844e2b9](https://github.com/WayfarerLabs/agentworks/commit/844e2b95f62327a1d25477593e1c53f0bb62b6a9))
+* **resources:** derive an inheriting template's edges from its effective declaration ([1840b66](https://github.com/WayfarerLabs/agentworks/commit/1840b667f9b62161ae9b8286321b56fbd4b189ff))
+* **resources:** stop crossing the inheritance edge in runtime-need traversal ([9b09545](https://github.com/WayfarerLabs/agentworks/commit/9b09545c5478987b89ece85ac0a0e8d790eb484a))
+* **resources:** the declared-resource rows become frozen models ([c70e5a7](https://github.com/WayfarerLabs/agentworks/commit/c70e5a7a6f264c560a9a5a26411d8a1494b54cf9))
+* **resources:** type the inheritance edge by relationship, not by target ([f85b63f](https://github.com/WayfarerLabs/agentworks/commit/f85b63feb69554a335a2c569df066d894b9de44b))
+* **resources:** vm-template and agent-template become their own spec ([9349ddb](https://github.com/WayfarerLabs/agentworks/commit/9349ddbd1526f82d102d621e8c2ab71a6d887040))
+* **schema:** add the field-reference stream and its type rendering ([36d0972](https://github.com/WayfarerLabs/agentworks/commit/36d09729b94979ad250bb25cccebfea8c72365ac))
+* **schema:** add the reference field markers and their schema encoding ([290fa5c](https://github.com/WayfarerLabs/agentworks/commit/290fa5cecfe4e59b7bdd2c993e3f838d2ea1389b))
+* **schema:** add the shared strict, frozen, closed-world model bases ([8962efd](https://github.com/WayfarerLabs/agentworks/commit/8962efd9891e8143c5b264299f57459da1d8f66c))
+* **schema:** add the total reference extractor and the owner templates ([f2ad294](https://github.com/WayfarerLabs/agentworks/commit/f2ad294db0cb5589177e695a41727e82c3d0d384))
+* **schema:** describe a tagged collection's arms in the field stream ([0469a43](https://github.com/WayfarerLabs/agentworks/commit/0469a43ee8c29ae8f4ceffc653a862a81fc90775))
+* **schema:** lay the foundation the kind spec models stand on ([6dc3d50](https://github.com/WayfarerLabs/agentworks/commit/6dc3d50ddd87f71994b8534d1121fd126747b808))
+* **schema:** the error bridge, framing the batch it renders (step 2.2) ([5926847](https://github.com/WayfarerLabs/agentworks/commit/5926847822432809acf042ec107553cfd3ab1f19))
+* **secrets:** flip secret backends to declared config and retire the invoked contract ([b4ad702](https://github.com/WayfarerLabs/agentworks/commit/b4ad702ad6d8dff571be5c6f9f5e2144cf585308))
+* **secrets:** the secret kind becomes its own spec, and the naming rule moves to a leaf ([bdae4a5](https://github.com/WayfarerLabs/agentworks/commit/bdae4a5f4b6b39b999f9884166a3c7c2f0016024))
+* **sessions:** validate the effective session-template config at finalize ([1612c25](https://github.com/WayfarerLabs/agentworks/commit/1612c25d8db52c5d36b00a2f4fc141915a1330af))
+* **vm-platform:** authentication and placement are declared, not inferred ([f6b4463](https://github.com/WayfarerLabs/agentworks/commit/f6b446319670e0bb133baee128bc1680f344a14c))
+* **vm-platform:** the mode unions default to the mode omission selected ([48629aa](https://github.com/WayfarerLabs/agentworks/commit/48629aa947871146c0d99d338bc79210e34b78de))
+* **vm-platform:** the provisioning request arrives fully resolved ([02fb457](https://github.com/WayfarerLabs/agentworks/commit/02fb457f92dc905da567e893a3061085fdcd0cfb))
+* **vms:** flip VM platforms to declared config ([e467797](https://github.com/WayfarerLabs/agentworks/commit/e4677973f3b91b7db8f25a024a183ef1a8e6d3f1))
+
+
+### Bug Fixes
+
+* **apt:** apt-package's `apt` list is optional, as it has always been ([c99ec6e](https://github.com/WayfarerLabs/agentworks/commit/c99ec6e447b10e8cc7a7e59f40a1cd76222d2622))
+* **capabilities:** a rejected capability config says where to see the shape ([1cfbdc1](https://github.com/WayfarerLabs/agentworks/commit/1cfbdc16b76446ec612d0b4fd834686a514be00e))
+* **capabilities:** close four review findings from the descriptor work ([3e25739](https://github.com/WayfarerLabs/agentworks/commit/3e25739753882687d5f4a27474e4cf018a24aa4e))
+* **capabilities:** close the conformance gaps in the contract check ([98e8083](https://github.com/WayfarerLabs/agentworks/commit/98e8083177b6ff69e984a213a9afa6a890e0200d))
+* **capabilities:** key the config-union cache on its arms, not the registry mapping ([dc759b3](https://github.com/WayfarerLabs/agentworks/commit/dc759b392409a1e9f75452d2896e6ab39714d949))
+* **cli:** address deprecation removal review ([766f0be](https://github.com/WayfarerLabs/agentworks/commit/766f0be420d1e79a5b8d024d4b3b02e5670e2648))
+* **config:** drop twelve __all__ entries whose symbols moved, and guard the class ([69d09ab](https://github.com/WayfarerLabs/agentworks/commit/69d09ab7edf54bb84bc7088b14bab7f5ccf72ba2))
+* **manifests:** a sample append restamps a modeline that stopped being true ([197ff0e](https://github.com/WayfarerLabs/agentworks/commit/197ff0eb1acc88eff327ca1a5ae44400f75480f8))
+* **manifests:** an alternative gets an address only when the address exists ([c3ace8a](https://github.com/WayfarerLabs/agentworks/commit/c3ace8a48ce4d7cec51c57eb422b7ec1841f1048))
+* **manifests:** close the three gaps the upgrade guide was compensating for ([7ca0ee8](https://github.com/WayfarerLabs/agentworks/commit/7ca0ee878455f7a36dfbb61b6d4307fe3caffef1))
+* **manifests:** drop the migrate hint from the mixed-shape error ([1845953](https://github.com/WayfarerLabs/agentworks/commit/1845953f196e2b4471ac382703aff3233bc142b1))
+* **manifests:** every manifest error frames its path the same way ([1134d37](https://github.com/WayfarerLabs/agentworks/commit/1134d370c70463027710121b67275bf90f5b6247))
+* **manifests:** let the sample hint name the kind it is about ([fee2528](https://github.com/WayfarerLabs/agentworks/commit/fee2528918f2443f089f898172f0c6591cbf40f2))
+* **manifests:** refuse `sample --write` into a path the loader never reads ([867d00d](https://github.com/WayfarerLabs/agentworks/commit/867d00d00d761afe771039a55f23051ae2175d85))
+* **manifests:** restore the fold steer, and answer a framework field honestly ([034f811](https://github.com/WayfarerLabs/agentworks/commit/034f811bf0f5c5ec21c0dc34d86d78947e9a3509))
+* **manifests:** sample --write replaces a manifest atomically ([181bc28](https://github.com/WayfarerLabs/agentworks/commit/181bc283bb23c210fb36cc87d9e2f3332a139802))
+* **manifests:** separate an appended sample from what is already in the file ([6570955](https://github.com/WayfarerLabs/agentworks/commit/6570955da85ee1b6475af7365ef355190f3cb7c5))
+* **manifests:** stop naming a separator that was not written ([76b721e](https://github.com/WayfarerLabs/agentworks/commit/76b721e212c351ddee36228fb79325eda86147ea))
+* **manifests:** the capability-blob advisory no longer depends on import order ([cf616b9](https://github.com/WayfarerLabs/agentworks/commit/cf616b936ff0ef5f53566eed3da43cde24db7b99))
+* **manifests:** the emitted schema stops rejecting config that loads ([61d349d](https://github.com/WayfarerLabs/agentworks/commit/61d349df6962ae519a8dce8ec93548f8e6eecd6b))
+* **manifests:** the summaries stop enumerating, and six review findings ([adbdf02](https://github.com/WayfarerLabs/agentworks/commit/adbdf02c681414939be2bda15ea7996846bbd1ed))
+* **manifests:** widen emitted integers to the spellings YAML 1.1 reads ([f2a3036](https://github.com/WayfarerLabs/agentworks/commit/f2a303681959dad3341dd43d767a98fea11e4518))
+* **migrate:** an explicit null survives the rewrite ([b2116d0](https://github.com/WayfarerLabs/agentworks/commit/b2116d0bc6c4494edfbb683f57021676232bf8de))
+* **migrate:** fold an empty capability config instead of refusing it ([9d073e0](https://github.com/WayfarerLabs/agentworks/commit/9d073e057ee859102b28f73bcc0e2aa869f72f5e))
+* **migrate:** frame all three pre-write checks in TOML vocabulary ([8a42030](https://github.com/WayfarerLabs/agentworks/commit/8a42030204daa3aa7b48ab86365ece9f99e9037f))
+* **migrate:** hold the dry run to the real run's verdict, and explain the order ([eb62e3b](https://github.com/WayfarerLabs/agentworks/commit/eb62e3b19e294b9cf8b502521a9341cfbd976d25))
+* **migrate:** read the upgrade's pre-side with the loader's parser ([18d94d2](https://github.com/WayfarerLabs/agentworks/commit/18d94d2a0bc1ee33e629803b309fdef46ca15767))
+* **migrate:** refuse a non-table capability config instead of dropping it ([8d84ed3](https://github.com/WayfarerLabs/agentworks/commit/8d84ed33b85801934e2f0fcdc98a0370ce6752f6))
+* **migrate:** say the migration preserved meaning, not that nothing changed ([68c51de](https://github.com/WayfarerLabs/agentworks/commit/68c51de4a925cb3e1a0ce56e89074d127e37c88b))
+* **migrate:** the same stale modeline, on the surface that writes live documents ([a88b3cd](https://github.com/WayfarerLabs/agentworks/commit/a88b3cdcee28a0b133e55596bb874af2cc66eec8))
+* **mise:** validate provisioning inputs early ([5c4a244](https://github.com/WayfarerLabs/agentworks/commit/5c4a244d0612b44134233714507a61742dfad4ec))
+* null is the absent arm, and an arm tag is not an identity ([3bd6f44](https://github.com/WayfarerLabs/agentworks/commit/3bd6f4434fe027059bf0f4adad78d1d6dc6a59d8))
+* one spelling for every host path an operator reads ([1db4a4b](https://github.com/WayfarerLabs/agentworks/commit/1db4a4bf2062295c37fe2c586486d5d45110c2c5))
+* **plugins:** a plugin re-declaring a built-in collides, and is named ([6e9165d](https://github.com/WayfarerLabs/agentworks/commit/6e9165d5538e47ddd1860d2a9574f08e06a978d0))
+* repoint remediation at the operator's own rewrite ([ec91b84](https://github.com/WayfarerLabs/agentworks/commit/ec91b84984d6738634113547ca49757e94801e83))
+* **resources:** attribute an inherited edge to the row that declared it ([269dfa0](https://github.com/WayfarerLabs/agentworks/commit/269dfa0ab01dc3e5f38e8f4482926b0aeb303809))
+* **resources:** narrow the recipe gate to what the recipe is actually made of ([6a68286](https://github.com/WayfarerLabs/agentworks/commit/6a68286f327a1fec21ab79d6662bb03daa6b052e))
+* **resources:** the sweep's tail, and session-template env joins its siblings ([59cec1a](https://github.com/WayfarerLabs/agentworks/commit/59cec1adc9e229973bc8ba288b234b60d84bed13))
+* **resources:** validate capability config regardless of readiness ([42ebccc](https://github.com/WayfarerLabs/agentworks/commit/42ebccc735dd42ac888601bb0d9a84bc8ffdab17))
+* **schema:** a constrained string shape reads as the rule, not as pydantic ([a99d19d](https://github.com/WayfarerLabs/agentworks/commit/a99d19d38228f5c0bd4d5936ffb5369c917b323b))
+* **schema:** a raising serializer must not escape the extraction walk ([79cb3de](https://github.com/WayfarerLabs/agentworks/commit/79cb3dec3c2346ed95c6d2289e33d331108e557d))
+* **schema:** close the pattern message, and the red gate a99d19d3 left ([9b7f245](https://github.com/WayfarerLabs/agentworks/commit/9b7f2459bd596cd99769014436d4cd7eee923d60))
+* **schema:** close three silent-edge holes in reference extraction ([98549ca](https://github.com/WayfarerLabs/agentworks/commit/98549ca17a5d58003c614c43af573a29f8b23c12))
+* **schema:** extract the reference a union's model arm carries ([7803dcf](https://github.com/WayfarerLabs/agentworks/commit/7803dcf940438680d77f57aa694e37171e776a4e))
+* **schema:** extraction reads an absent field's declared default as if written ([83207f5](https://github.com/WayfarerLabs/agentworks/commit/83207f54ab91f2fc1893326a9a853a6f32dfc269))
+* **schema:** find field metadata in every spelling pydantic accepts ([81625ef](https://github.com/WayfarerLabs/agentworks/commit/81625ef821193f814282a7a5fe048618c89e73d6))
+* **schema:** four silent wrong answers in emission and field reporting ([6737a00](https://github.com/WayfarerLabs/agentworks/commit/6737a00f800a62eb59cc50a9a38b37fe313a38c7))
+* **schema:** name the key to delete, and warn on every boolean that used to invert ([ac88eea](https://github.com/WayfarerLabs/agentworks/commit/ac88eeab8e3124bdc53799dd2f5eb21c9bfe32d1))
+* **schema:** read a collapsed one-arm discriminated union as the union it is ([5cd4c88](https://github.com/WayfarerLabs/agentworks/commit/5cd4c88262aa1a2fde914c6252a912facdb471cf))
+* **schema:** refuse a marker validation accepts and no walker reads ([3f74b58](https://github.com/WayfarerLabs/agentworks/commit/3f74b580d59bd13346632a9cc00277f734ada65a))
+* **schema:** stop a rebuild failure escaping the total extractor ([4212ef9](https://github.com/WayfarerLabs/agentworks/commit/4212ef9cdf9144290f7fa794ddb751ccc999787b))
+* **schema:** stop flagging the YAML booleans the loader accepts ([1794946](https://github.com/WayfarerLabs/agentworks/commit/1794946a90de86a6b8023ee1b1864bd7911a79ee))
+* **schema:** the arm that matched answers for a failed union ([e82203d](https://github.com/WayfarerLabs/agentworks/commit/e82203df1c6bcb63ea31b7c05adc3acbafae1acf))
+* **schema:** the field stream names every arm the emitted schema does ([1c1c3f7](https://github.com/WayfarerLabs/agentworks/commit/1c1c3f7e1cda917f3a9d0a35d6e4c6b99d6683a5))
+* **schema:** the key marker is dropped only as the last segment ([972ba42](https://github.com/WayfarerLabs/agentworks/commit/972ba429077e6dbab90398f46133f97046f7c694))
+* **schema:** the non-string tag guard stated a rule the arms already carry ([afe623d](https://github.com/WayfarerLabs/agentworks/commit/afe623d41a9ded77f03068ff73477f197cdb8a39))
+* **schema:** walk collections of models and of names in both walkers ([53bfe7c](https://github.com/WayfarerLabs/agentworks/commit/53bfe7c0e29eeaa77b6b0a643e0918c950317e1e))
+* **secrets:** a declared secret's description must not be empty ([457c817](https://github.com/WayfarerLabs/agentworks/commit/457c817c88d465d77bd1f0ffa623f483ce9a21ef))
+* **secrets:** revert the description constraint to the field, keep it at decode ([c65da2c](https://github.com/WayfarerLabs/agentworks/commit/c65da2c1c492b09a962bd0f57ae0af4fae205596))
+* **secrets:** validate a mapping whether or not its backend is enabled ([db845c7](https://github.com/WayfarerLabs/agentworks/commit/db845c7c9155c87f2c74f8486fe94221b207f164))
+* **templates:** a parent that declares nothing no longer overwrites one that did ([7f18485](https://github.com/WayfarerLabs/agentworks/commit/7f18485ba465cbceb28e6dacaef8b67f072a1fce))
+* **vms:** an empty tailscale_auth_key is a mistake, not a way to unset it ([694e29a](https://github.com/WayfarerLabs/agentworks/commit/694e29a7104b825570394246337169ef8a6802b9))
+
+
+### Documentation
+
+* **capabilities:** bring the guides back in sync with the declared contract ([bd2d72f](https://github.com/WayfarerLabs/agentworks/commit/bd2d72f5c4749e69e8915a189c33253130be285d))
+* **capabilities:** correct the accessor rationale to what is actually true ([1a4cd06](https://github.com/WayfarerLabs/agentworks/commit/1a4cd063e9592506626e19eda9be35823a638ebb))
+* **capabilities:** finish the stale-docstring sweep, and pin what it exposed ([23c52bc](https://github.com/WayfarerLabs/agentworks/commit/23c52bca12dfea8b4f71bbd9fa656be27228c16e))
+* **capabilities:** give the shape-not-concept modeling rule a permanent home ([08404fb](https://github.com/WayfarerLabs/agentworks/commit/08404fb65229dae3cb88f68ae8ecc5fa3f2a6040))
+* **capabilities:** note the union cache's no-eviction on the cache itself ([1b2b6f3](https://github.com/WayfarerLabs/agentworks/commit/1b2b6f31b9c1ad542a8f7dd41b975693ebe01379))
+* **capabilities:** the descriptor and the declared-config contract get permanent homes ([a49c70a](https://github.com/WayfarerLabs/agentworks/commit/a49c70a122bb3c7def8d3b3596e5c0d0e43e3d24))
+* **capabilities:** the discriminator key follows the field's grammar ([a484fd8](https://github.com/WayfarerLabs/agentworks/commit/a484fd8063a259bc0bfcacb7f98f3b41788a21c2))
+* **capabilities:** the last item on the LLDs' promotion list ([eee3822](https://github.com/WayfarerLabs/agentworks/commit/eee3822860529379330f8f267761a249eeaf89b1))
+* **cli:** describe the migrator's manifest-upgrade half in the README ([84fc4ba](https://github.com/WayfarerLabs/agentworks/commit/84fc4bae1dd77d1704faf686a685eef70ca1f190))
+* **config:** say in the code that _warn_unexpected_keys outlives the kind decoders ([eadf101](https://github.com/WayfarerLabs/agentworks/commit/eadf1014c19fd279c6bf1dedd36714781eb44adc))
+* correct the ADR's validation timing, and answer the three open questions ([001257c](https://github.com/WayfarerLabs/agentworks/commit/001257cd62c30e05a83b456489fe10c564ec79a9))
+* fix two stale pointers and a call-site count wrong in both artifacts ([669508f](https://github.com/WayfarerLabs/agentworks/commit/669508f14d4505471c3b8df7fa70415d41407a14))
+* **guides:** split the 0.14 upgrade material out of the resources guide ([08b14c6](https://github.com/WayfarerLabs/agentworks/commit/08b14c6694e189a0c4ba830b7e17bd5a28559582))
+* **guides:** the guides point at the rendered surfaces instead of restating them ([e266405](https://github.com/WayfarerLabs/agentworks/commit/e266405bac856bedfc8c84fd16409264d3d90bfc))
+* **manifests:** correct decode's stale unknown-platform comment ([19ab1b5](https://github.com/WayfarerLabs/agentworks/commit/19ab1b5355d87cb7576dd78cc2816d0b75507919))
+* **manifests:** say what this loader actually does with a bare `no` ([72d6338](https://github.com/WayfarerLabs/agentworks/commit/72d6338a79c6cf53cb704e60032871aba34bbefe))
+* **manifests:** state the name character rule as the convention it is ([a6ecc22](https://github.com/WayfarerLabs/agentworks/commit/a6ecc22028039992333cbaa5ae8445062c90ccf9))
+* **migrate:** retire the last claims that planning is pure ([4462f02](https://github.com/WayfarerLabs/agentworks/commit/4462f02ed793952b0ea8092bda1c72b532dee7bc))
+* permanent code stops pointing at the SDD that produced it ([6561dbe](https://github.com/WayfarerLabs/agentworks/commit/6561dbe361d494895a2547001192544f41f83afe))
+* **resources:** correct the prose the swap outdated ([4873b45](https://github.com/WayfarerLabs/agentworks/commit/4873b4541a9d74ce9f27f3a9453a6c96215dc0f5))
+* **schema:** correct two docstrings the effective-blob split outdated ([d64536f](https://github.com/WayfarerLabs/agentworks/commit/d64536f0544d4e571bcb618fbebd7071220d9941))
+* **schema:** record that the pure error renderer has no production caller ([73d9b39](https://github.com/WayfarerLabs/agentworks/commit/73d9b39852a2d18317d8cf283b0ccd6cefa77f87))
+* **schema:** the inventory contradicted itself about D8 ([60524a8](https://github.com/WayfarerLabs/agentworks/commit/60524a85fc2c4cd66869c04a3718462a96746773))
+* **schema:** the tagged-collection fixture no longer claims it is unclassified ([e5064f0](https://github.com/WayfarerLabs/agentworks/commit/e5064f0f44fd8b296d3eb596f5ea19ec10ed25d1))
+* **schema:** two invariant claims the auth change made false ([0dd3b6d](https://github.com/WayfarerLabs/agentworks/commit/0dd3b6dc1f17a2e9dcda483588b8298c2cc38244))
+* **schema:** write down what derives from the model, and what compares each pair ([265c60a](https://github.com/WayfarerLabs/agentworks/commit/265c60a711038508df236596cad6f0b0f5403cda))
+* **sdd:** close completed compatibility efforts ([1d167e8](https://github.com/WayfarerLabs/agentworks/commit/1d167e808ac6ed9dfe0f1d4c14e79d1471ed28d0))
+* **sdd:** fold the step 2.3 implementation record into its LLD ([30d5b0b](https://github.com/WayfarerLabs/agentworks/commit/30d5b0b729dbf94a8a17d113f906e0a7539a47f8))
+* **sdd:** record step 2.3b, including where the design met contact ([1d990dc](https://github.com/WayfarerLabs/agentworks/commit/1d990dc6a2fe2a2acc5d219ae9dd9f212686152b))
+* **sdd:** record where the 2.5 design met contact ([942d6ba](https://github.com/WayfarerLabs/agentworks/commit/942d6ba37e6f4b43c3bf59b28e9c284d7e9950b7))
+* stop documenting a command that no longer exists ([3822136](https://github.com/WayfarerLabs/agentworks/commit/3822136ded548f678b377c1cd268204a1bac0e95))
+* the deprecation channel is kept deliberately, not pending retirement ([158abc6](https://github.com/WayfarerLabs/agentworks/commit/158abc66e9479128471e929eea905ba909d8e2f5))
+* the limit is pydantic's derivation, not JSON Schema ([b0678f3](https://github.com/WayfarerLabs/agentworks/commit/b0678f3174ce88ee28ef0a89524467b0fb72e1e6))
+* the package and cli READMEs stop hand-keeping rosters ([dba81bb](https://github.com/WayfarerLabs/agentworks/commit/dba81bb215f2bb5a4c48e7247629a83c2cf1e087))
+* the three places still showing the retired TOML secret spelling ([8d2518e](https://github.com/WayfarerLabs/agentworks/commit/8d2518eb5462fdeaddcec5ad67f0d09f2599a614))
+* the two remaining pointers that predate the config-free reference ([52ea1c6](https://github.com/WayfarerLabs/agentworks/commit/52ea1c67a173dcd78bb19c744b79e830a0917dd9))
+
 ## [0.13.0](https://github.com/WayfarerLabs/agentworks/compare/v0.12.0...v0.13.0) (2026-08-04)
 
 
