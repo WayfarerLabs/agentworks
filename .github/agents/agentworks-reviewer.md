@@ -424,6 +424,25 @@ Look for:
   README, sample config, generator-script headers, or doctor health-check messages.
 - ADRs or SDDs that have been superseded but not marked as such.
 
+#### Guide contribution drift and safety
+
+Changes to a resource kind, capability implementation, plugin, or documented operator workflow must
+update the corresponding colocated `agw guide` contribution. Review the implementation and its guide
+teaching together rather than accepting either in isolation.
+
+Look for:
+
+- Missing topics, or teaching, relationships, examples, and agent contracts that describe behavior
+  which the implementation no longer has.
+- Hand-stated dynamic facts that can drift from the finalized registry, readiness graph, or stored
+  instance rows instead of using the guide's safe projection.
+- Content or rendering that resolves or exposes secrets, inspects the workstation, connects to a VM,
+  performs remote work, mutates state, or treats rendering as operator consent.
+- Suggested operations that cross a consent boundary without an inert scoped action record, an
+  expected result, and a useful refusal alternative.
+- Guide changes without catalog, rendering, and safety-boundary coverage appropriate to the changed
+  contribution.
+
 ### 12. Pattern consistency
 
 If similar work has been done elsewhere, the new code should follow that pattern unless there is a

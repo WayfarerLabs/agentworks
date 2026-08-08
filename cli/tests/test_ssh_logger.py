@@ -14,10 +14,11 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentworks.ssh import SSHLogger
+from agentworks.ssh import SSHLogger, SSHResult
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from typing import Any
 
 
 @pytest.fixture
@@ -55,8 +56,56 @@ def test_close_without_exception_omits_traceback_block(logger: SSHLogger) -> Non
     assert "# Finished:" in text
 
 
-def test_write_sink_sanitizes_regardless_of_caller_discipline(
+def test_path_retargeting_moves_subsequent_records(
     logger: SSHLogger,
+    tmp_path: Path,
+) -> None:
+    """Backup logging changes the public path after construction; the active
+    handler must follow it without copying prior records."""
+    original_path = logger.path
+    retargeted = tmp_path / "backup" / "backup.log"
+    logger.path = retargeted
+
+    logger.output("backup payload")
+    assert logger._active_handler is None
+    logger.close()
+
+    assert "backup payload" not in original_path.read_text()
+    assert "backup payload" in retargeted.read_text()
+    assert "# Finished:" in retargeted.read_text()
+
+
+def test_write_error_propagates_and_closes_handler(
+    logger: SSHLogger,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The logging adapter must not swallow filesystem failures, and its
+    transient descriptor must close on the exceptional path."""
+    from agentworks import ssh
+
+    captured: list[tuple[Any, Any]] = []
+
+    def failing_emit(handler: object, record: object) -> None:
+        captured.append((handler, handler.stream))  # type: ignore[attr-defined]
+        try:
+            raise OSError("disk full")
+        except OSError:
+            handler.handleError(record)  # type: ignore[attr-defined]
+
+    monkeypatch.setattr(ssh._PropagatingFileHandler, "emit", failing_emit)
+
+    with pytest.raises(OSError, match="disk full"):
+        logger.output("payload")
+
+    assert logger._active_handler is None
+    [(handler, stream)] = captured
+    assert handler.stream is None
+    assert stream.closed is True
+
+
+def test_write_sink_sanitizes_every_persistent_surface(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The sink is the single sanitizing choke point: a registered
     redaction never reaches the file even when a caller hands raw,
@@ -64,50 +113,91 @@ def test_write_sink_sanitizes_regardless_of_caller_discipline(
     itself (no public method pre-sanitizes; correctness must not
     depend on caller discipline)."""
     secret = "tskey-auth-supersecret-12345"
-    logger.add_redaction(secret)
+    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
+    logger = SSHLogger("vm1", "test-op", redactions=(secret,))
 
     logger.step(f"joining with {secret}")
     logger.output(f"raw output {secret}")
     logger.warning(f"warn {secret}")
     logger.log_error(f"error {secret}")
     logger.log_timeout(f"tailscale up --auth-key {secret}", 1, 2)
-    from agentworks.ssh import SSHResult
-
     logger.log_command(
         f"tailscale up --auth-key {secret}",
         SSHResult(returncode=1, stdout=f"out {secret}", stderr=f"err {secret}"),
     )
     logger._write(f"caller bypassed every public surface: {secret}\n")
-    logger.close()  # the footer re-writes recorded warnings
+    logger.close()
 
     text = logger.path.read_text()
     assert secret not in text
     assert text.count("[REDACTED]") >= 8
 
 
-def test_close_footer_redacts_recorded_warnings(logger: SSHLogger) -> None:
-    """The footer's warning recap is written at close time, after the
-    live WARNING line; a secret inside a recorded warning must be
-    redacted there too (this leaked before sanitization moved into the
-    sink)."""
+def test_warning_text_is_sanitized_before_durable_logging(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Durable warnings retain their diagnosis without leaking known secrets."""
     secret = "ghp-supersecret-token"
-    logger.add_redaction(secret)
-    logger.warning(f"credential rejected: {secret}")
+    warning = f"credential rejected: {secret}"
+    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
+    logger = SSHLogger("vm1", "test-op", redactions=(secret,))
+    logger.warning(warning)
+
+    initial_text = logger.path.read_text()
+    assert warning not in initial_text
+    assert secret not in initial_text
+    assert "WARNING: credential rejected: [REDACTED]" in initial_text
+    assert logger.warnings == [warning]
+
+    logger.close()
+
+    text = logger.path.read_text()
+    assert warning not in text
+    assert secret not in text
+    assert "WARNING: credential rejected: [REDACTED]" in text
+    assert "# Warnings: 1" in text
+    assert logger.warnings == [warning]
+
+
+def test_redactions_cannot_be_registered_after_writes(logger: SSHLogger) -> None:
+    """Incremental logs persist their header during construction, so accepting
+    later redactions would make the no-cleartext guarantee timing-dependent."""
+    assert not hasattr(logger, "add_redaction")
+
+
+def test_shell_quoted_secret_is_redacted_from_command(logger: SSHLogger) -> None:
+    """Shell quoting rewrites embedded single quotes, so the transformed
+    representation must be registered alongside the raw secret."""
+    import shlex
+
+    secret = "password-with-'quote"
+    logger = SSHLogger("vm1", "test-op", redactions=(secret,))
+    quoted = shlex.quote(secret)
+
+    logger.log_command(
+        f"example --password {quoted}",
+        SSHResult(returncode=1, stdout="", stderr=""),
+    )
     logger.close()
 
     text = logger.path.read_text()
     assert secret not in text
-    # Once on the live WARNING line, once in the footer recap.
-    assert text.count("[REDACTED]") == 2
+    assert quoted not in text
+    assert "example --password [REDACTED]" in text
 
 
-def test_close_redacts_secrets_from_traceback(logger: SSHLogger) -> None:
-    """Secrets registered via ``add_redaction`` must not leak into the
-    appended traceback (the operator's Tailscale auth key or git PAT
+def test_close_redacts_secrets_from_traceback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Secrets supplied at construction must not leak into the appended
+    traceback (the operator's Tailscale auth key or git PAT
     might appear in a ``str(exc)`` payload, which would otherwise hit
     the per-op log as plaintext)."""
     secret = "tskey-auth-supersecret-12345"
-    logger.add_redaction(secret)
+    monkeypatch.setattr("agentworks.ssh.LOG_DIR", tmp_path)
+    logger = SSHLogger("vm1", "test-op", redactions=(secret,))
     try:
         raise RuntimeError(f"tailscale up failed with key={secret}")
     except RuntimeError:

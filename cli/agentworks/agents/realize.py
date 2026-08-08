@@ -79,13 +79,10 @@ def realize_agent(
     from agentworks.ssh import SSHLogger
 
     linux_user = derive_linux_user(name)
-    ssh_logger = SSHLogger(vm.name, "agent-create")
-    # Delivered secret values register on the scope's logger up front
-    # (the bootstrap_vm / reinit_vm pattern): the materials write only
-    # ever logs paths and byte counts, so this is defense in depth
-    # against any future command or traceback embedding a token.
-    for token in git_tokens.values():
-        ssh_logger.add_redaction(token)
+    # Supply every delivered token when the logger is constructed. A logger's
+    # redaction set is immutable because adding a secret after the first
+    # incremental write cannot protect bytes already persisted.
+    ssh_logger = SSHLogger(vm.name, "agent-create", redactions=tuple(git_tokens.values()))
 
     def _safe_rollback() -> None:
         # Best-effort: rollback failures must not mask the original KI or
