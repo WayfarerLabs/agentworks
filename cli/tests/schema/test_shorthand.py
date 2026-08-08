@@ -223,6 +223,50 @@ def test_one_union_scalar_declaration_aligns_every_derivation() -> None:
     assert union_scalar_shorthand_error(Holder) is None
 
 
+def test_a_collection_union_documents_only_its_selected_scalar_arm() -> None:
+    """Element recursion must not widen every tagged arm independently.
+
+    Both arms accept a scalar when validated alone, but the union-level
+    declaration selects only the string arm. Validation, emitted schema,
+    and field documentation must expose exactly that scalar type while
+    retaining both tagged table arms.
+    """
+
+    class StringArm(AgwModel):
+        scalar_shorthand: ClassVar = ScalarShorthand(annotation=str, field="value")
+
+        mode: Literal["string"]
+        value: str
+
+    class IntegerArm(AgwModel):
+        scalar_shorthand: ClassVar = ScalarShorthand(annotation=int, field="value")
+
+        mode: Literal["integer"]
+        value: int
+
+    Element = Annotated[
+        StringArm | IntegerArm,
+        UnionScalarShorthand(discriminator="mode", arm=StringArm),
+    ]
+
+    class Holder(AgwModel):
+        values: list[Element] = Field(default_factory=list)
+
+    assert Holder.model_validate({"values": ["short"]}).values == [StringArm(mode="string", value="short")]
+    assert Holder.model_validate({"values": [{"mode": "integer", "value": 7}]}).values == [
+        IntegerArm(mode="integer", value=7)
+    ]
+    with pytest.raises(ValueError, match="valid dictionary"):
+        Holder.model_validate({"values": [7]})
+
+    schema_items = Holder.model_json_schema()["properties"]["values"]["items"]
+    assert [arm.get("type") for arm in schema_items["anyOf"] if "type" in arm] == ["string"]
+
+    (values,) = [doc for doc in iter_field_docs(Holder) if doc.path == ("values",)]
+    assert render_type(values.annotation) == "list of string or table"
+    assert union_scalar_shorthand_error(Holder) is None
+
+
 def test_union_scalar_conformance_refuses_ambiguous_and_mismatched_declarations() -> None:
     class Stored(AgwModel):
         scalar_shorthand: ClassVar = ScalarShorthand(annotation=str, field="secret")

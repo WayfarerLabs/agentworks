@@ -1069,7 +1069,22 @@ def _widened(annotation: object, expanding_roots: tuple[type[BaseModel], ...]) -
     markers are already stripped."""
     base, metadata = split_annotated(annotation)
     widened: object
-    if _is_model(base) and issubclass(base, RootModel) and base not in expanding_roots:
+    discriminator = _element_discriminator(metadata) if _is_union(base) else None
+    if discriminator is not None:
+        # A tagged union nested inside a collection keeps its dispatch
+        # metadata on the element's Annotated wrapper. Treat it exactly
+        # like a field-level tagged union: only the explicitly selected
+        # arm contributes a scalar spelling. Recursing through each arm
+        # here would infer every arm model's standalone shorthand even
+        # though validation chooses an arm before running that shorthand.
+        widened = _accepted_annotation(
+            base,
+            None,
+            expanding_roots,
+            discriminator=discriminator,
+            union_scalar_shorthand=_sole_union_scalar_shorthand(metadata),
+        )
+    elif _is_model(base) and issubclass(base, RootModel) and base not in expanding_roots:
         fields = model_fields_of(base)
         root = fields.get("root") if fields is not None else None
         widened = base
