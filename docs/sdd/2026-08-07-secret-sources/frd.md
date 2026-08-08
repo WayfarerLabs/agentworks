@@ -96,6 +96,24 @@ declarable instance kind, the secret-backend analog of vm-site").
   resolution-failure are distinguishable by category in `agw secret verify` output and in the
   operation-boundary errors.
 
+## Named future consumer: token minting (decide the fork in the HLA)
+
+Credential minting (creating a token on demand via API, e.g. a GitHub App installation token) is
+planned near-term (operator, 2026-08-08) and this wave's HLA decides where it models:
+
+- **As a secret source** (the roadmap lead's lean): a `github-app`-style source mints on resolve;
+  `git-credential` config is unchanged forever (its `token` field keeps naming a secret), expiry and
+  re-mint ride the bounded-lifetime client and typed-outcome machinery this wave builds, and
+  per-token scoping rides the per-secret mapping. No breaking change at any point.
+- **As a git-credential variant**: a discriminated union on the credential config per the
+  variant-modeling contract (the required field sets differ, so the shape test passes). If this
+  model wins, the one-arm restructure of `git-credential` MUST land before the 0.14.0 cut (riding
+  the cushioned release, defaulting to the stored arm per the omission-history rule) so that minting
+  later arrives as a purely additive arm rather than a post-release break.
+
+The HLA records the choice and its rationale; if the variant model is chosen, the restructure is
+raised to the roadmap lead immediately so the 0.14 window is not lost.
+
 ## Open questions for the effort lead
 
 - The backend construction point (registration-time factory versus first-use) and the source-client
