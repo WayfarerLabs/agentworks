@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Annotated, ClassVar
 
 import pytest
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field
 
 from agentworks.schema import (
     MAPPING_KEY,
@@ -128,3 +128,15 @@ def test_an_unaddressable_marker_is_still_refused() -> None:
         source: Annotated[First | Second, StructuralUnion()]
 
     assert reference_marker_error(Overlapping) is not None
+
+
+def test_a_marker_free_validation_alias_is_still_loud() -> None:
+    class Aliased(AgwModel):
+        value: str = Field(validation_alias=AliasChoices("value", "text"))
+
+    class WithAlias(AgwModel):
+        source: Annotated[Aliased | SecretArm, StructuralUnion()]
+
+    reason = structural_union_error(WithAlias)
+    assert reason is not None
+    assert "Aliased.value declares validation alias" in reason

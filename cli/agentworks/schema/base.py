@@ -40,6 +40,7 @@ from agentworks.schema._shape import (
     markers_in,
     model_fields_of,
     models_in,
+    scalar_shorthand_of,
     shape_of,
     structurally_addressable_arms,
     table_addresses_block,
@@ -464,6 +465,20 @@ def _marker_error(model_cls: type[BaseModel], visiting: tuple[type[BaseModel], .
                 f"element that {item_held}, where nothing can honor it; a marker names one "
                 f"Resource, so move it onto the value that names one"
             )
+        structural_groups = (
+            ("field", shape.structural_arms),
+            ("collection element", shape.item_structural_arms),
+        )
+        for level, arms in structural_groups:
+            for arm in arms:
+                if scalar_shorthand_of(arm) is not None and _hides_marker(arm, ()):
+                    return (
+                        f"{model_cls.__name__}.{name} lets a scalar shorthand select "
+                        f"marker-bearing structural arm {arm.__name__} at the {level}, but "
+                        "reference extraction selects structural arms only from table keys, so "
+                        "the scalar's Resource would never become a graph edge; remove the "
+                        "shorthand or every reference marker from that arm"
+                    )
         if _has_unplaceable_marker(field, shape):
             return (
                 f"{model_cls.__name__}.{name} carries a reference marker in a position this layer "

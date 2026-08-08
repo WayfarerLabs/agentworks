@@ -52,9 +52,12 @@ A pair that should agree and has no comparator is a hole whether or not it curre
   assertion is a premise check, so the test fails loudly rather than vacuously if D4 ever grows to
   reach the shape.
 - **D7 against D1 and D2** also guards structural unions. `StructuralUnion` emits `oneOf`, so an
-  open or overlapping arm declaration would let ordinary union validation accept a table the schema
-  rejects. `structural_union_error` refuses that declaration at registration even when its arms
-  carry no reference markers; the shipped-surface sweep and marker-reachability tests cover both
+  open or overlapping arm declaration, or an arm with validation aliases, would let ordinary union
+  validation accept a value whose raw keys the selector or schema reads differently.
+  `structural_union_error` refuses that declaration at registration even when its arms carry no
+  reference markers. Scalar shorthands remain valid for marker-free arms, while marker conformance
+  refuses a shorthand-bearing arm with references because raw graph traversal selects structural
+  arms only from table keys. The shipped-surface sweep and marker-reachability tests cover both
   halves.
 - **D2 against D1** is guarded by
   `tests/manifests/test_emit.py::test_emitted_schemas_accept_every_document_the_full_load_path_accepts`,

@@ -478,6 +478,16 @@ def _structural_members_error(location: str, members: tuple[object, ...]) -> str
     for arm in arms:
         if _closed_shape_of(arm) is None:
             return f"{location} has open arm {arm.__name__}; every structural arm must be a closed mapping model"
+        fields = model_fields_of(arm)
+        if fields is None:
+            continue
+        for name, field in fields.items():
+            if field.validation_alias is not None:
+                return (
+                    f"{location} arm {arm.__name__}.{name} declares validation alias "
+                    f"{field.validation_alias!r}; structural arms must use their field names "
+                    "because shape selection reads the operator's raw keys"
+                )
     for index, left in enumerate(arms):
         for right in arms[index + 1 :]:
             if _table_shapes_overlap(left, right):

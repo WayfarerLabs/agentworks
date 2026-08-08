@@ -7,6 +7,13 @@ its required and allowed keys. It also emits the alternatives as ``oneOf``:
 the shapes are mutually exclusive by declaration, and ``anyOf`` would hide
 that operator-facing fact from editors.
 
+An arm may retain a marker-free scalar shorthand, as the plaintext env arm
+does. Walkers select structural arms from raw TABLE keys, not from scalar
+types, so registration refuses a shorthand-bearing arm that contains a
+reference marker. Registration also refuses validation aliases: raw-key
+selection and the emitted schema must name the same keys without a second
+alias vocabulary.
+
 The metadata is intentionally content-free. Required and allowed keys remain
 facts of the arm models, so changing an arm changes validation, traversal,
 and emitted schema without updating a parallel selector table.

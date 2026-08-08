@@ -21,7 +21,7 @@ So this module calls ``conformance_error`` the way the self-test does.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Annotated, Literal
+from typing import Annotated, ClassVar, Literal
 
 import pytest
 from pydantic import Discriminator, Field
@@ -32,6 +32,7 @@ from agentworks.manifests.spec_model import metadata_model, spec_model
 from agentworks.schema import (
     AgwModel,
     RefOwner,
+    ScalarShorthand,
     SecretRef,
     StructuralUnion,
     extract_references,
@@ -123,6 +124,30 @@ class _MarkedStructuralItems(AgwModel):
 
     name: Literal["fixture-platform"]
     sources: list[Annotated[_MARKER_FREE_SOURCE, SecretRef(usage="a source")]]
+
+
+class _AliasedSecretArm(AgwModel):
+    """A marker-bearing arm whose accepted key differs from its field name."""
+
+    secret_value: Annotated[str, SecretRef(usage="the aliased secret")] = Field(alias="secret")
+
+
+class _AliasedStructuralHolder(AgwModel):
+    name: Literal["fixture-platform"]
+    source: Annotated[_MarkerFreePlainArm | _AliasedSecretArm, StructuralUnion()]
+
+
+class _ScalarSecretArm(AgwModel):
+    """A secret arm whose shorthand validation folds a bare name."""
+
+    scalar_shorthand: ClassVar = ScalarShorthand(annotation=str, field="secret")
+
+    secret: Annotated[str, SecretRef(usage="the shorthand secret")]
+
+
+class _ScalarSecretHolder(AgwModel):
+    name: Literal["fixture-platform"]
+    source: Annotated[_MarkerFreePlainArm | _ScalarSecretArm, StructuralUnion()]
 
 
 # -- The name rule, which only the self-test path reaches --------------------
@@ -319,6 +344,28 @@ def test_a_marker_on_a_structural_union_holder_is_refused_at_registration(
     reason = conformance_error(VM_PLATFORM, _impl(config_model))
     assert reason is not None
     assert "selects a structural union arm" in reason
+
+
+def test_an_aliased_structural_arm_is_refused_before_marker_placement() -> None:
+    blob = {"name": "fixture-platform", "source": {"secret": "secret-name"}}
+    _AliasedStructuralHolder.model_validate(blob)
+    assert extract_references(_AliasedStructuralHolder, blob) == ()
+
+    reason = conformance_error(VM_PLATFORM, _impl(_AliasedStructuralHolder))
+    assert reason is not None
+    assert "invalid structural union" in reason
+    assert "_AliasedSecretArm.secret_value declares validation alias" in reason
+
+
+def test_a_marker_bearing_scalar_structural_arm_is_refused() -> None:
+    blob = {"name": "fixture-platform", "source": "secret-name"}
+    _ScalarSecretHolder.model_validate(blob)
+    assert extract_references(_ScalarSecretHolder, blob) == ()
+
+    reason = conformance_error(VM_PLATFORM, _impl(_ScalarSecretHolder))
+    assert reason is not None
+    assert "scalar shorthand" in reason
+    assert "marker-bearing structural arm _ScalarSecretArm" in reason
 
 
 #: The two blocks of a kind document, by the function that builds each.
