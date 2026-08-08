@@ -1,7 +1,7 @@
 # Child SDDs
 
 - Status: Active ledger
-- Last updated: 2026-08-07
+- Last updated: 2026-08-08
 
 This is the roadmap's tracking document, the analog of an ordinary SDD's `plan.md`. Completed
 checkboxes are immutable records, per the standard rule. The roadmap SDD locks when every entry here
@@ -71,8 +71,10 @@ is locked.
 - [x] Merge order ruled (operator, 2026-08-07, confirming the effort's D7): wave 2 merges first,
       #428 rebases once, re-homing its probe-suppression mechanism onto the descriptor-derived
       dispatch as anticipated by its phase 4
-- [ ] Phase 1 merged (after wave 2 lands, the heading-forgery decision is recorded per the
-      re-review, and the rebase clears re-check)
+- [x] Phase 1 merged (PR #428, 2026-08-08): the post-wave-2 rebase carried all reviewed commits
+      byte-identical, and the round-3 projection-growth follow-up was re-reviewed by execution with
+      both new structural pins mutation-verified; the `guide-contributions` always-on rule is now in
+      effect
 - [ ] Remaining phases (machine-readable output, bootstraps, wave 2 adoption, closeout) per the
       effort's per-phase PR plan
 - [ ] Locked
@@ -81,7 +83,9 @@ is locked.
 
 - [x] Seeded (FRD, PR #443, 2026-08-07; unblocked by wave 2's landing, carries the map-keyed
       descriptor amendment as R8)
-- [ ] FRD merged to `main`
+- [x] FRD merged to `main` (PR #443, 2026-08-08; ownership transferred to the effort lead, whose
+      design review converged the same day on PR #453, the conventional-prefix successor of PR #452,
+      recording the operator's 0.14 hard-break ruling for direct backend references)
 - [ ] Picked up by an effort lead (HLA, plan)
 - [ ] Implementation complete (two-level model, synthesized sources, resolution API, singleton
       exception removed, map-keyed hosting, relocation)
