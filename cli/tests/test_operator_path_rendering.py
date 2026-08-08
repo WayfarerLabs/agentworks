@@ -9,7 +9,7 @@ family, where ``agw doctor`` printed an absolute config path two lines
 above a home-relative manifest path while the whole suite stayed green.
 
 **Why the suite could not see it.** ``tmp_path`` is never under ``$HOME``,
-so ``format_file_path`` hits its no-common-prefix fallback and returns the
+so ``format_host_path`` hits its no-common-prefix fallback and returns the
 absolute path: the correct rendering and a hand-rolled ``f"{path}"`` are
 byte-identical, and an assertion written against either passes for both.
 Every test here therefore puts the whole config tree UNDERNEATH a patched
@@ -55,7 +55,7 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     """A populated ``$HOME`` with the config tree inside it.
 
     ``HOME`` is set as well as ``Path.home`` patched, and the two are not
-    redundant: ``Path.home()`` is what ``format_file_path`` consults,
+    redundant: ``Path.home()`` is what ``format_host_path`` consults,
     while ``Path.expanduser()`` (which turns the ``~/.ssh/id_ed25519`` an
     operator writes in config.toml into a real path) reads the
     environment. Patching only one leaves half the flow pointed at the

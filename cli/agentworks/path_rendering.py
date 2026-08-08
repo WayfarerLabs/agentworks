@@ -1,7 +1,7 @@
 """How a host path is spelled to an operator: the one repo-wide rule.
 
 Every string a human reads that names a file on the machine they are
-sitting at goes through :func:`format_file_path`, so the rendering is a
+sitting at goes through :func:`format_host_path`, so the rendering is a
 property of the operator surface as a whole rather than a decision each
 message makes for itself. ``tests/test_operator_path_rendering.py`` is
 the guard over that invariant.
@@ -23,7 +23,7 @@ from __future__ import annotations
 from pathlib import Path
 
 
-def format_file_path(file: Path) -> str:
+def format_host_path(file: Path) -> str:
     """Render a file path operator-friendly: ``~/path`` when under
     ``$HOME``, else the bare absolute path. Relative paths render as-is.
 

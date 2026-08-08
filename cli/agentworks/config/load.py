@@ -22,7 +22,7 @@ from agentworks.config.loaders_secrets import _load_plugins, _load_secret_config
 from agentworks.config.loaders_sessions import _load_session_config
 from agentworks.config.models import Config, _SectionLineMap
 from agentworks.errors import ConfigError
-from agentworks.path_rendering import format_file_path
+from agentworks.path_rendering import format_host_path
 from agentworks.source_location import scan_section_lines
 
 if TYPE_CHECKING:
@@ -230,7 +230,7 @@ def load_config(
 
     config_path = path or CONFIG_PATH
     if not config_path.exists():
-        print(f"Configuration file not found: {format_file_path(config_path)}", file=sys.stderr)
+        print(f"Configuration file not found: {format_host_path(config_path)}", file=sys.stderr)
         print("Run `agw config init` to create one from the commented sample.", file=sys.stderr)
         raise SystemExit(1)
 
@@ -238,7 +238,7 @@ def load_config(
     try:
         data = tomllib.loads(raw_text)
     except tomllib.TOMLDecodeError as e:
-        print(f"Error: invalid config file {format_file_path(config_path)}: {e}", file=sys.stderr)
+        print(f"Error: invalid config file {format_host_path(config_path)}: {e}", file=sys.stderr)
         raise SystemExit(1) from None
 
     # Pre-scan the raw text for section-header line numbers so we can attach

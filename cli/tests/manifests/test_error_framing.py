@@ -11,7 +11,7 @@ they existed, each with tests passing.
 
 Those tests passed because they framed the path the same way the code
 did, and because a `tmp_path` fixture is never under `$HOME`: with no
-home to be relative to, ``format_file_path`` falls back to the absolute
+home to be relative to, ``format_host_path`` falls back to the absolute
 path and the correct and incorrect renderings are byte-identical. The
 defect was only visible to an operator, whose resources directory IS
 under their home. So every test in this module puts the resources

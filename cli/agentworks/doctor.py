@@ -14,7 +14,7 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from agentworks.path_rendering import format_file_path
+from agentworks.path_rendering import format_host_path
 
 if TYPE_CHECKING:
     from agentworks.config import Config
@@ -471,10 +471,10 @@ def _check_config() -> tuple[HealthGroup, Config | None, Registry | None]:
     # is framed by `located()`, which is shared with every non-doctor
     # surface that reports the same error, so it is not doctor's to change.
     if not CONFIG_PATH.exists():
-        g.fail("Config file", f"not found: {format_file_path(CONFIG_PATH)}. Run 'agw config init' to create one.")
+        g.fail("Config file", f"not found: {format_host_path(CONFIG_PATH)}. Run 'agw config init' to create one.")
         return g, None, None
 
-    g.ok("Config file", format_file_path(CONFIG_PATH))
+    g.ok("Config file", format_host_path(CONFIG_PATH))
 
     config_load_failed = False
     try:
@@ -598,13 +598,13 @@ def _check_ssh_key(g: HealthGroup, path: object, label: str) -> None:
         g.fail(f"SSH {label} key", "invalid path")
         return
     if not path.exists():
-        g.fail(f"SSH {label} key", f"not found: {format_file_path(path)}")
+        g.fail(f"SSH {label} key", f"not found: {format_host_path(path)}")
         return
     if not os.access(path, os.R_OK):
-        g.fail(f"SSH {label} key", f"not readable: {format_file_path(path)}")
+        g.fail(f"SSH {label} key", f"not readable: {format_host_path(path)}")
         return
 
-    g.ok(f"SSH {label} key", format_file_path(path))
+    g.ok(f"SSH {label} key", format_host_path(path))
 
     # Check permissions on private key. Skipped on Windows: st_mode there is
     # synthesized from the read-only attribute (typically reports 0o666) and
@@ -774,7 +774,7 @@ def _report_db_contents(g: HealthGroup, db: object) -> None:
         if not LOG_DIR.exists():
             return ""
         logs = sorted(LOG_DIR.glob(f"{vm_name}-*.log"), reverse=True)
-        return f" Log: {format_file_path(logs[0])}" if logs else ""
+        return f" Log: {format_host_path(logs[0])}" if logs else ""
 
     for vm in vms:
         if vm.init_status == InitStatus.FAILED.value:

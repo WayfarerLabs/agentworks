@@ -18,7 +18,7 @@ from agentworks.cli._helpers import get_db
 # Module-level because three commands in this file render a host path and
 # `path_rendering` is a leaf module (pathlib only), so hoisting it costs
 # no startup time.
-from agentworks.path_rendering import format_file_path
+from agentworks.path_rendering import format_host_path
 
 # Module-level so the sample-kind Choice below can be built at decoration
 # time. This is intentional and adds no startup cost over the pre-fix
@@ -309,7 +309,7 @@ def resource_edit(
         found = locate_document(resources_dir, kind, name)
         if found.location is None:
             if found.unreadable:
-                files = ", ".join(format_file_path(p) for p in found.unreadable)
+                files = ", ".join(format_host_path(p) for p in found.unreadable)
                 exc.hint = (
                     f"{exc.hint + ' ' if exc.hint else ''}Also: {files} "
                     f"failed to parse and could not be searched; edit "
@@ -377,7 +377,7 @@ def resource_sample(
     resources_dir = config.source_path.parent / RESOURCES_DIRNAME
     path, outcome = write_sample(resources_dir, write, kind, all_kinds=all_kinds)
     verb = "Appended sample to" if outcome == "appended" else "Wrote sample to"
-    output.info(f"{verb} {format_file_path(path)}")
+    output.info(f"{verb} {format_host_path(path)}")
     output.info("Uncomment the document lines (delete one leading '#') to activate.")
     # Each arm names something that IS in the file. A blank file that was
     # already there ("filled") gets neither a separator nor a modeline, so
@@ -465,4 +465,4 @@ def resource_schema(
     config = load_config(resources=False)
     schema_dir = config.source_path.parent / RESOURCES_DIRNAME / SCHEMA_DIRNAME
     written = write_schema_set(schema_dir)
-    output.info(f"Wrote {len(written)} schemas to {format_file_path(schema_dir)}")
+    output.info(f"Wrote {len(written)} schemas to {format_host_path(schema_dir)}")

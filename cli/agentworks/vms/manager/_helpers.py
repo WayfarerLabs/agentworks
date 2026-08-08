@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, NamedTuple
 from agentworks import output
 from agentworks.db import SYSTEM_SLUG_KEY
 from agentworks.errors import NotFoundError, ValidationError
+from agentworks.path_rendering import format_host_path
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -190,13 +191,12 @@ def _resolve_system_slug(db: Database) -> str | None:
 
 def _init_log_hint(vm_name: str) -> str:
     """Return a log hint suffix like ' See log: <path>' or empty string."""
-    from agentworks.path_rendering import format_file_path
     from agentworks.ssh import LOG_DIR
 
     if not LOG_DIR.exists():
         return ""
     logs = sorted(LOG_DIR.glob(f"{vm_name}-*.log"), reverse=True)
-    return f" See log: {format_file_path(logs[0])}" if logs else ""
+    return f" See log: {format_host_path(logs[0])}" if logs else ""
 
 
 def _guard_failed_vm(vm: VMRow, *, allow_failed_init: bool = False) -> None:

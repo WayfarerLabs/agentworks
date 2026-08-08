@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.errors import BackupError, NotFoundError, StateError
-from agentworks.path_rendering import format_file_path
+from agentworks.path_rendering import format_host_path
 from agentworks.vms.manager import gated_vm_boundary
 
 if TYPE_CHECKING:
@@ -86,7 +86,7 @@ def backup_vm(
         # _archive_workspaces had a try/except, so other failure paths left
         # the DB without an event and the log without its trailing summary.
         try:
-            with output.section(f"Backing up VM '{vm_name}' to {format_file_path(backup_dir)}"):
+            with output.section(f"Backing up VM '{vm_name}' to {format_host_path(backup_dir)}"):
                 # Snapshot all DB data in a single transaction for consistency
                 output.info("Reading database (consistent snapshot)...")
                 _vm, agents, workspaces, sessions, events, grants_by_agent = db.snapshot_vm_backup_data(vm_name)
@@ -176,7 +176,7 @@ def backup_vm(
                 _write_json(backup_dir / "manifest.json", manifest)
 
             db.insert_vm_event(vm_name, "backup_completed", detail=str(backup_dir))
-            output.result(f"Backup complete: {format_file_path(backup_dir)}")
+            output.result(f"Backup complete: {format_host_path(backup_dir)}")
             return backup_dir
         except Exception:
             db.insert_vm_event(vm_name, "backup_failed")
@@ -251,7 +251,7 @@ def _archive_workspaces(
         # (was detail(indent=2)).
         with output.section():
             output.detail(f"Remote archive: {archive}")
-            output.detail(f"Local archive:  {format_file_path(local_archive)}")
+            output.detail(f"Local archive:  {format_host_path(local_archive)}")
 
         # Write paths file via scp to avoid shell escaping issues.
         paths_file = f"{tmp_dir}/paths.txt"
@@ -418,7 +418,7 @@ def _transfer_with_progress(
             stderr = (proc.stderr.read() or b"").decode("utf-8", errors="replace").strip()
             raise SSHError(f"scp failed: {stderr}")
 
-        output.detail(f"Saved: {format_file_path(local_path)} ({_fmt_size(local_path.stat().st_size)})")
+        output.detail(f"Saved: {format_host_path(local_path)} ({_fmt_size(local_path.stat().st_size)})")
 
     except (KeyboardInterrupt, Exception):
         proc.terminate()

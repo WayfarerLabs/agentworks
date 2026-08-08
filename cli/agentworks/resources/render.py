@@ -6,7 +6,7 @@ same ``Origin`` shape; defining the renderer next to ``Origin`` keeps the
 layer correct.
 
 The host paths these renderers embed are spelled by
-``agentworks.path_rendering.format_file_path``, the repo-wide rule, which
+``agentworks.path_rendering.format_host_path``, the repo-wide rule, which
 lives in its own top-level leaf so the schema error bridge can render a
 path the same way without importing this package: importing anything
 under ``agentworks.resources`` runs that package's ``__init__``, which
@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from agentworks.path_rendering import format_file_path
+from agentworks.path_rendering import format_host_path
 
 if TYPE_CHECKING:
     from agentworks.origin import Origin
@@ -57,7 +57,7 @@ def format_origin_line(origin: Origin | None) -> str:
         return "unknown"
     if origin.variant == "operator-declared":
         if origin.file is not None and origin.line:
-            return f"operator-declared ({format_file_path(origin.file)}:{origin.line})"
+            return f"operator-declared ({format_host_path(origin.file)}:{origin.line})"
         return "operator-declared"
     if origin.variant == "auto-declared":
         source = origin.source

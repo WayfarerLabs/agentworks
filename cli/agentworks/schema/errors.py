@@ -56,7 +56,7 @@ from typing import TYPE_CHECKING, Final
 from pydantic import RootModel
 
 from agentworks.errors import ConfigError
-from agentworks.path_rendering import format_file_path
+from agentworks.path_rendering import format_host_path
 from agentworks.schema._shape import Collection, is_hidden, is_model, model_fields_of, shape_of
 from agentworks.source_location import SYNTHESIZED_PATH
 
@@ -388,7 +388,7 @@ def location_text(location: SourceLocation | None) -> str | None:
     """
     if location is None or location.file == SYNTHESIZED_PATH:
         return None
-    where = format_file_path(location.file)
+    where = format_host_path(location.file)
     return f"{where}:{location.line}" if location.line else where
 
 

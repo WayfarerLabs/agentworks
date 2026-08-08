@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.errors import AgentworksError, ExternalError
-from agentworks.path_rendering import format_file_path
+from agentworks.path_rendering import format_host_path
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -115,7 +115,7 @@ def realize_workspace(
             workspace_path = create_vm_workspace(vm, config, name, template, logger=ssh_logger)
 
             vscode_path = generate_vscode_workspace(vm, config, name, workspace_path)
-            output.detail(f"VS Code workspace: {format_file_path(vscode_path)}")
+            output.detail(f"VS Code workspace: {format_host_path(vscode_path)}")
 
             db.insert_workspace(
                 name,

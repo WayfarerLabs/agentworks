@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from agentworks.errors import ConnectivityError
+from agentworks.path_rendering import format_host_path
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -126,9 +127,7 @@ class SSHLogger:
         them stayed absolute would recreate the mixed rendering one level
         down.
         """
-        from agentworks.path_rendering import format_file_path
-
-        return format_file_path(self.path)
+        return format_host_path(self.path)
 
     def add_redaction(self, secret: str) -> None:
         """Register a secret to be redacted from all output."""

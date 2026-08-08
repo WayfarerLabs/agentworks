@@ -8,7 +8,7 @@ import typer
 from agentworks.cli._app import _seed_debug_from_pre_callback, debug_enabled
 from agentworks.cli._errors import echo_hint, record_unhandled_error
 from agentworks.cli._typer_output import TyperHandler
-from agentworks.path_rendering import format_file_path
+from agentworks.path_rendering import format_host_path
 
 
 def main() -> None:
@@ -76,7 +76,7 @@ def main() -> None:
         log_path = record_unhandled_error(e)
         if log_path is not None:
             typer.echo(
-                f"(full traceback written to {format_file_path(log_path)}; "
+                f"(full traceback written to {format_host_path(log_path)}; "
                 "rerun with --debug or AGW_DEBUG=1 to print on stderr)",
                 err=True,
             )
@@ -158,7 +158,7 @@ def main() -> None:
         error(f"{type(e).__name__}: {e}")
         if log_path is not None:
             typer.echo(
-                f"(full traceback written to {format_file_path(log_path)}; "
+                f"(full traceback written to {format_host_path(log_path)}; "
                 "rerun with --debug or AGW_DEBUG=1 to print on stderr)",
                 err=True,
             )

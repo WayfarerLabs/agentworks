@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from agentworks.errors import ExternalError
-from agentworks.path_rendering import format_file_path
+from agentworks.path_rendering import format_host_path
 
 if TYPE_CHECKING:
     from agentworks.ssh import SSHLogger
@@ -163,7 +163,7 @@ def _fetch_local(
     """Copy a local file to the target."""
     local_path = Path(source.path).expanduser()
     if not local_path.exists():
-        raise SourceRefError(f"local source file does not exist: {format_file_path(local_path)}")
+        raise SourceRefError(f"local source file does not exist: {format_host_path(local_path)}")
 
     target.copy_to(local_path, dest)
     if logger:
@@ -250,9 +250,9 @@ def _fetch_local_dir(
     """Copy a local directory to the target."""
     local_path = Path(source.path).expanduser()
     if not local_path.exists():
-        raise SourceRefError(f"local source directory does not exist: {format_file_path(local_path)}")
+        raise SourceRefError(f"local source directory does not exist: {format_host_path(local_path)}")
     if not local_path.is_dir():
-        raise SourceRefError(f"local source is not a directory: {format_file_path(local_path)}")
+        raise SourceRefError(f"local source is not a directory: {format_host_path(local_path)}")
 
     # Check if destination exists and warn
     if target.run(f"test -d {shlex.quote(dest)}", check=False).ok:

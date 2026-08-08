@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from agentworks.path_rendering import format_file_path
+from agentworks.path_rendering import format_host_path
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -60,7 +60,7 @@ def _migrate_vm_sites(conn: sqlite3.Connection, context: MigrationContext) -> No
     # file to inspect/fix (PRAGMA reports the actual attached file, so
     # this stays honest for non-default paths, e.g. in tests). Spelled
     # home-relative like every other host path an operator reads.
-    db_file = format_file_path(Path(conn.execute("PRAGMA database_list").fetchone()[2]))
+    db_file = format_host_path(Path(conn.execute("PRAGMA database_list").fetchone()[2]))
 
     # Validate BEFORE the first DDL statement. Pre-v27 schemas only
     # ever stored the four legacy platform names, and the vm-sites
