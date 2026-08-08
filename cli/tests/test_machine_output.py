@@ -15,8 +15,10 @@ from agentworks.machine_output import (
     MachineOutputCommand,
     OutputFormat,
     encode_json_envelope,
+    project_instance_reference,
     project_instance_references,
     project_origin,
+    project_reference,
     project_references,
     write_json_envelope,
 )
@@ -291,6 +293,40 @@ def test_reference_projections_preserve_graph_order_duplicates_and_nullable_decl
     ]
 
 
+@pytest.mark.parametrize(
+    ("reference", "message"),
+    [
+        (
+            ReferenceEntry(source=(), usage="a secret"),
+            "reference sources require a two-string identity",
+        ),
+        (
+            ReferenceEntry(source=("secret", cast(str, 7)), usage="a secret"),
+            "reference sources require a two-string identity",
+        ),
+        (
+            ReferenceEntry(source=("template", "base"), usage=cast(str, 7)),
+            "reference usage must be a string",
+        ),
+        (
+            ReferenceEntry(source=("template", "base"), usage="a secret", declared_by=()),
+            "reference declarers require a two-string identity",
+        ),
+        (
+            ReferenceEntry(
+                source=("template", "base"),
+                usage="a secret",
+                declared_by=("template", cast(str, 7)),
+            ),
+            "reference declarers require a two-string identity",
+        ),
+    ],
+)
+def test_reference_projection_rejects_malformed_records(reference: ReferenceEntry, message: str) -> None:
+    with pytest.raises(AssertionError, match=message):
+        project_reference(reference)
+
+
 def test_instance_reference_projections_preserve_order_and_duplicates() -> None:
     references = (
         InstanceRef(instance_kind="vm", instance_name="alpha"),
@@ -308,3 +344,15 @@ def test_instance_reference_projections_preserve_order_and_duplicates() -> None:
         ["kind", "name"],
         ["kind", "name"],
     ]
+
+
+@pytest.mark.parametrize(
+    "reference",
+    [
+        InstanceRef(instance_kind=cast(str, 7), instance_name="alpha"),
+        InstanceRef(instance_kind="vm", instance_name=cast(str, 7)),
+    ],
+)
+def test_instance_reference_projection_rejects_malformed_records(reference: InstanceRef) -> None:
+    with pytest.raises(AssertionError, match="instance references require string kind and name"):
+        project_instance_reference(reference)

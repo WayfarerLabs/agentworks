@@ -153,9 +153,24 @@ def project_origin(origin: Origin | None) -> JsonObject | None:
 
 def project_reference(reference: ReferenceEntry) -> JsonObject:
     """Project one inbound graph entry without display-derived declarer data."""
+    if not (
+        isinstance(reference.source, tuple)
+        and len(reference.source) == 2
+        and all(isinstance(part, str) for part in reference.source)
+    ):
+        raise AssertionError("reference sources require a two-string identity")
+    if not isinstance(reference.usage, str):
+        raise AssertionError("reference usage must be a string")
+
     declared_by_kind: str | None = None
     declared_by_name: str | None = None
     if reference.declared_by is not None:
+        if not (
+            isinstance(reference.declared_by, tuple)
+            and len(reference.declared_by) == 2
+            and all(isinstance(part, str) for part in reference.declared_by)
+        ):
+            raise AssertionError("reference declarers require a two-string identity")
         declared_by_kind, declared_by_name = reference.declared_by
 
     return {
@@ -174,6 +189,8 @@ def project_references(references: Sequence[ReferenceEntry]) -> list[JsonObject]
 
 def project_instance_reference(reference: InstanceRef) -> JsonObject:
     """Project one current instance reference without grouping it for display."""
+    if not isinstance(reference.instance_kind, str) or not isinstance(reference.instance_name, str):
+        raise AssertionError("instance references require string kind and name")
     return {"kind": reference.instance_kind, "name": reference.instance_name}
 
 
