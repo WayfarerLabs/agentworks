@@ -14,8 +14,9 @@ from pydantic import Field
 from agentworks.capabilities.git_credential.base import (
     GitCredentialProvider,
     HelperEntry,
-    TokenSourcedConfig,
+    TokenAcquiringConfig,
 )
+from agentworks.capabilities.retired_shapes import RetiredNullTokenShape
 from agentworks.topics import TopicProse
 
 AzDOOrg = Annotated[str, Field(pattern=r"^[A-Za-z0-9._-]+$")]
@@ -24,7 +25,7 @@ interpolated into the generated credential helper and into the store
 URL, so anything outside this charset would corrupt them."""
 
 
-class AzDOConfig(TokenSourcedConfig):
+class AzDOConfig(TokenAcquiringConfig):
     """Scope for an Azure DevOps personal access token."""
 
     name: Literal["azdo"]
@@ -37,7 +38,8 @@ class AzDOConfig(TokenSourcedConfig):
 class AzDOCredentialProvider(GitCredentialProvider):
     """Configures git credentials for Azure DevOps via a personal access token."""
 
-    contract_version: ClassVar[int] = 1
+    contract_version: ClassVar[int] = 2
+    retired_shape: ClassVar[RetiredNullTokenShape | None] = RetiredNullTokenShape()
     name: ClassVar[str] = "azdo"
     description: ClassVar[str] = "Azure DevOps personal access token"
     config_model: ClassVar[type[AzDOConfig]] = AzDOConfig

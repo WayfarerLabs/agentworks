@@ -456,19 +456,40 @@ def test_the_shapes_the_envelope_tolerates_are_not_schema_errors() -> None:
         assert _errors(schema, _a_document("admin-template", {}, expires=spelling)) == [], spelling
 
 
-def test_a_field_the_fill_resolves_is_neither_required_nor_non_nullable() -> None:
-    """An unscoped github credential writes nothing but the tag, because
-    the boundary fill renders the marker's owner template into the
-    token, and writing ``token: null`` says the same thing out loud.
-    Both load, so both have to validate.
+def test_git_token_acquisition_is_a_defaulted_one_arm_discriminated_union() -> None:
+    """An unscoped github credential writes nothing but the provider tag.
+
+    Token acquisition remains a real tagged union with one stored arm;
+    omission defaults to that historical behavior, and a bare secret name
+    remains the stored arm's shorthand. Explicit ``token: null`` is the
+    one retired spelling and therefore is not offered by emitted schema.
 
     ``AgwModel`` owns the correction; this is the end-to-end proof that it
     survives the splice into a hosting kind's document.
     """
     schema = document_schema("git-credential")
-    assert "token" not in schema["$defs"]["GitHubConfig"]["required"]
+    token = schema["$defs"]["GitHubConfig"]["properties"]["token"]
+    assert token["default"] == {"mode": "stored"}
+    assert token["anyOf"][0] == {"type": "string"}
+    tagged = token["anyOf"][1]
+    assert tagged["discriminator"] == {
+        "propertyName": "mode",
+        "mapping": {"stored": "#/$defs/StoredToken"},
+    }
+    assert tagged["oneOf"] == [{"$ref": "#/$defs/StoredToken"}]
     assert _errors(schema, _a_document("git-credential", {"provider": {"name": "github"}})) == []
-    assert _errors(schema, _a_document("git-credential", {"provider": {"name": "github", "token": None}})) == []
+    assert _errors(schema, _a_document("git-credential", {"provider": {"name": "github", "token": "custom"}})) == []
+    assert (
+        _errors(
+            schema,
+            _a_document(
+                "git-credential",
+                {"provider": {"name": "github", "token": {"mode": "stored", "secret": "custom"}}},
+            ),
+        )
+        == []
+    )
+    assert _errors(schema, _a_document("git-credential", {"provider": {"name": "github", "token": None}}))
 
 
 def test_the_splice_keeps_an_optional_blocks_null_arm() -> None:
@@ -919,25 +940,22 @@ def test_reference_markers_reach_emitted_schema() -> None:
     """
     schema = document_schema("git-credential")
     marked = [
-        extension
-        for definition in schema["$defs"].values()
-        for prop in definition.get("properties", {}).values()
-        if (extension := ref_extension(prop)) is not None
+        extension for definition in schema["$defs"].values() if (extension := ref_extension(definition)) is not None
     ]
     assert marked, "no x-agw-ref survived into the git-credential schema"
     assert all(set(extension) == {"kind", "usage", "default_template", "relationship"} for extension in marked)
 
 
-def test_the_shipped_token_field_states_its_reference_on_the_property() -> None:
+def test_the_stored_token_arm_states_its_reference_on_the_property() -> None:
     """The burial that ``_ref_at_top_level`` exists to undo, asserted
     against a REAL shipped field rather than a fixture model.
 
-    ``token`` is the field worth pinning: it is optional and templated, so
+    ``secret`` is the field worth pinning: it is optional and templated, so
     pydantic emits it as ``anyOf: [string, null]`` with the marker inside
     the string branch, and the lift hoists it onto the property. The
     fixture-model pins cover both burial shapes, but a fixture cannot
     drift out from under the shipped models. This reddens if a real
-    provider's ``token`` stops answering "does this field name a secret?"
+    stored arm's ``secret`` stops answering "does this field name a secret?"
     at the property, which is where an editor hover and every consumer
     look.
 
@@ -947,16 +965,12 @@ def test_the_shipped_token_field_states_its_reference_on_the_property() -> None:
     and no branch kept a copy (lifted, not duplicated, so there stays
     exactly one place to read it).
     """
-    tokens = [
-        (name, definition["properties"]["token"])
-        for name, definition in document_schema("git-credential")["$defs"].items()
-        if "token" in definition.get("properties", {})
-    ]
-    assert tokens, "no provider config in the git-credential schema declares a token"
-    for name, prop in tokens:
-        assert "anyOf" in prop, (name, prop)
-        assert prop.get(REF_SCHEMA_KEY, {}).get("kind") == "secret", (name, prop)
-        assert all(REF_SCHEMA_KEY not in branch for branch in prop["anyOf"]), (name, prop)
+    stored = document_schema("git-credential")["$defs"]["StoredToken"]
+    table = next(branch for branch in stored["anyOf"] if branch.get("type") == "object")
+    prop = table["properties"]["secret"]
+    assert "anyOf" in prop
+    assert prop.get(REF_SCHEMA_KEY, {}).get("kind") == "secret"
+    assert all(REF_SCHEMA_KEY not in branch for branch in prop["anyOf"])
 
 
 # -- Writing, and the modeline ---------------------------------------------

@@ -60,8 +60,15 @@ from weakref import WeakKeyDictionary
 
 from pydantic import BaseModel, RootModel
 
-from agentworks.schema._shape import Collection, model_fields_of, shape_of, table_addresses_block
+from agentworks.schema._shape import (
+    Collection,
+    addressed_arm_model,
+    model_fields_of,
+    shape_of,
+    table_addresses_block,
+)
 from agentworks.schema.reference import ConfigReference
+from agentworks.schema.shorthand import scalar_shorthand_of
 from agentworks.traversal import iter_descendants
 
 if TYPE_CHECKING:
@@ -71,6 +78,7 @@ if TYPE_CHECKING:
 
     from agentworks.schema._shape import FieldShape, UnionArmType
     from agentworks.schema.markers import RefMarker
+    from agentworks.schema.shorthand import UnionScalarShorthand
 
 
 @dataclass(frozen=True)
@@ -177,7 +185,7 @@ def _below(node: _Node) -> Iterator[_Node]:
         elif shape.nested_model is not None:
             yield _Block(model=shape.nested_model, blob=value)
         elif shape.arms and shape.discriminator is not None:
-            yield from _arm_block(shape.arms, shape.discriminator, value)
+            yield from _arm_block(shape.arms, shape.discriminator, shape.union_scalar_shorthand, value)
         elif shape.union_model is not None:
             yield from _union_block(shape.union_model, shape.union_members, value)
 
@@ -243,7 +251,12 @@ def _collection_nodes(shape: FieldShape, value: object) -> Iterator[_Node]:
         elif shape.item_model is not None:
             yield _Block(model=shape.item_model, blob=element)
         elif shape.item_arms and shape.item_discriminator is not None:
-            yield from _arm_block(shape.item_arms, shape.item_discriminator, element)
+            yield from _arm_block(
+                shape.item_arms,
+                shape.item_discriminator,
+                shape.item_union_scalar_shorthand,
+                element,
+            )
         elif shape.item_union_model is not None:
             yield from _union_block(shape.item_union_model, shape.item_union_members, element)
 
@@ -262,29 +275,32 @@ def _elements_of(collection: Collection | None, value: object) -> tuple[object, 
     return ()
 
 
-def _arm_block(arms: tuple[UnionArmType, ...], discriminator: str, value: object) -> Iterator[_Block]:
-    """The arm the RAW tag names, as a block to descend into.
+def _arm_block(
+    arms: tuple[UnionArmType, ...],
+    discriminator: str,
+    union_shorthand: UnionScalarShorthand | None,
+    value: object,
+) -> Iterator[_Block]:
+    """The arm the raw value names, as a block to descend into.
 
-    An absent, unrecognized, or non-string tag contributes nothing; the
-    arm is selected from the blob and the union type alone, never from a
-    registry, which is what keeps this walk a pure function of the model.
+    A table names its arm by tag. A scalar names the unique arm that
+    declares it as shorthand, and is folded through that same declaration
+    before the block walk reads its fields. An absent, unrecognized, or
+    ambiguous value contributes nothing. Selection comes from the blob and
+    the union type alone, never from a registry, which keeps this walk a
+    pure function of the model.
 
-    The match below is the whole check, and deliberately: every
-    ``arm.tag`` is a string, because
+    Every ``arm.tag`` is a string, because
     :func:`~agentworks.schema._shape._tags_of` keeps only string tags when
     it classifies the union. So a tag an operator wrote as anything else
-    simply matches no arm, and screening for its type here would be the
-    same rule stated twice, in the one place it cannot be true and the
-    match false. That rule belongs where it is: on the MODEL, computed
-    once, saying which arms a document can address by name at all.
+    simply matches no arm. Scalar eligibility likewise belongs on the
+    model as its ``ScalarShorthand`` declaration.
     """
-    if not isinstance(value, Mapping):
-        return
-    tag = value.get(discriminator)
-    for arm in arms:
-        if arm.tag == tag:
-            yield _Block(model=arm.model, blob=value)
-            return
+    model = addressed_arm_model(arms, discriminator, union_shorthand, value)
+    if model is not None:
+        shorthand = scalar_shorthand_of(model)
+        blob = value if shorthand is None else shorthand.folded(value)
+        yield _Block(model=model, blob=blob)
 
 
 def _union_block(model: type[BaseModel], members: tuple[object, ...], value: object) -> Iterator[_Block]:

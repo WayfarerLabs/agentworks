@@ -183,9 +183,9 @@ def _with_marker_corrections(
     declared field and knows nothing about the fill:
 
     - not required, or an editor red-underlines the very omission the
-      mechanism exists to resolve (``provider: {name: github}`` with no
-      ``token``, which is what every unscoped credential writes);
-    - nullable, or it red-underlines ``token: null``, which is that same
+      mechanism exists to resolve (the stored git-token arm with no
+      ``secret`` key);
+    - nullable, or it red-underlines ``secret: null``, which is that same
       instruction spelled out, and which loads today.
 
     **Every marked field carries its ``x-agw-ref`` on the property

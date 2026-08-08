@@ -10,10 +10,10 @@ compare the answers, rather than pinning three copies of an expectation.
 
 from __future__ import annotations
 
-from typing import Annotated, ClassVar
+from typing import Annotated, ClassVar, Literal
 
 import pytest
-from pydantic import Field
+from pydantic import Discriminator, Field
 
 from agentworks.errors import StateError
 from agentworks.schema import (
@@ -22,9 +22,12 @@ from agentworks.schema import (
     RefOwner,
     ScalarShorthand,
     SecretRef,
+    UnionScalarShorthand,
+    extract_references,
     filled_defaults,
     iter_field_docs,
     render_type,
+    union_scalar_shorthand_error,
 )
 
 from ._fixture_models import ShorthandHolder, ShorthandLike, ShorthandTemplatedLike
@@ -168,3 +171,83 @@ def test_the_declaration_is_the_only_place_the_spelling_is_written() -> None:
 
     rendered = {doc.path: render_type(doc.annotation) for doc in iter_field_docs(Holder)}
     assert rendered[("entries",)] == "table of table"
+
+
+def test_an_arm_shorthand_alone_does_not_dispatch_a_tagged_union() -> None:
+    """Pydantic selects a tag before the arm validator can fold a scalar.
+
+    The walkers and human surface must not infer a choice validation does
+    not make, and conformance must reject the plugin model before seating.
+    """
+
+    class Stored(AgwModel):
+        scalar_shorthand: ClassVar = ScalarShorthand(annotation=str, field="secret")
+
+        mode: Literal["stored"]
+        secret: Annotated[str, SecretRef(usage="a token")]
+
+    class Holder(AgwModel):
+        token: Annotated[Stored, Discriminator("mode")]
+
+    with pytest.raises(ValueError, match="valid dictionary"):
+        Holder.model_validate({"token": "named"})
+    assert filled_defaults(Holder, {"token": "named"}, OWNER) == {"token": "named"}
+    assert extract_references(Holder, {"token": "named"}) == ()
+    (token,) = [doc for doc in iter_field_docs(Holder) if doc.path == ("token",)]
+    assert render_type(token.annotation) == "table"
+    assert "declares no UnionScalarShorthand" in (union_scalar_shorthand_error(Holder) or "")
+
+
+def test_one_union_scalar_declaration_aligns_every_derivation() -> None:
+    """The union declaration selects an arm while deriving its scalar
+    type and fold field from that arm's model-level shorthand."""
+
+    class Stored(AgwModel):
+        scalar_shorthand: ClassVar = ScalarShorthand(annotation=str, field="secret")
+
+        mode: Literal["stored"]
+        secret: Annotated[str, SecretRef(usage="a token")]
+
+    class Holder(AgwModel):
+        token: Annotated[
+            Stored,
+            UnionScalarShorthand(discriminator="mode", arm=Stored),
+        ]
+
+    assert Holder.model_validate({"token": "named"}).token == Stored(mode="stored", secret="named")
+    assert filled_defaults(Holder, {"token": "named"}, OWNER) == {"token": "named"}
+    assert [(ref.kind, ref.name) for ref in extract_references(Holder, {"token": "named"})] == [("secret", "named")]
+    (token,) = [doc for doc in iter_field_docs(Holder) if doc.path == ("token",)]
+    assert render_type(token.annotation) == "string or table"
+    assert Holder.model_json_schema()["properties"]["token"]["anyOf"][0] == {"type": "string"}
+    assert union_scalar_shorthand_error(Holder) is None
+
+
+def test_union_scalar_conformance_refuses_ambiguous_and_mismatched_declarations() -> None:
+    class Stored(AgwModel):
+        scalar_shorthand: ClassVar = ScalarShorthand(annotation=str, field="secret")
+
+        mode: Literal["stored"]
+        secret: str
+
+    class Other(AgwModel):
+        scalar_shorthand: ClassVar = ScalarShorthand(annotation=str, field="secret")
+
+        mode: Literal["other"]
+        secret: str
+
+    class Ambiguous(AgwModel):
+        token: Annotated[
+            Stored,
+            UnionScalarShorthand(discriminator="mode", arm=Stored),
+            UnionScalarShorthand(discriminator="mode", arm=Stored),
+        ]
+
+    class Mismatched(AgwModel):
+        token: Annotated[
+            Stored,
+            UnionScalarShorthand(discriminator="mode", arm=Other),
+        ]
+
+    assert "declares 2 union scalar shorthands" in (union_scalar_shorthand_error(Ambiguous) or "")
+    assert "occurs 0 times" in (union_scalar_shorthand_error(Mismatched) or "")

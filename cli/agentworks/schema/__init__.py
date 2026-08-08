@@ -8,6 +8,8 @@ hand-validated lives here:
 - :class:`ScalarShorthand`, the model-level declaration that a table may
   also be written as one bare scalar, from which validation, emitted
   schema, and the field-reference stream all derive.
+- :class:`UnionScalarShorthand`, the explicit field-level declaration
+  that a discriminated union dispatches a scalar spelling to one arm.
 - :class:`SecretRef` / :class:`ResourceRef`, the ``Annotated`` markers
   that say what a field means about another Resource, and their
   ``x-agw-ref`` JSON Schema encoding. :func:`reference_marker_error` is
@@ -49,7 +51,12 @@ sit at top level for.
 
 from __future__ import annotations
 
-from agentworks.schema._shape import element_annotation, marker_of, model_is_complete
+from agentworks.schema._shape import (
+    element_annotation,
+    marker_of,
+    model_is_complete,
+    union_scalar_shorthand_error,
+)
 from agentworks.schema.base import (
     AgwModel,
     AgwRootModel,
@@ -84,7 +91,7 @@ from agentworks.schema.markers import (
     ResourceRef,
     SecretRef,
 )
-from agentworks.schema.shorthand import ScalarShorthand
+from agentworks.schema.shorthand import ScalarShorthand, UnionScalarShorthand
 
 __all__ = [
     "MAPPING_KEY",
@@ -104,6 +111,7 @@ __all__ = [
     "ResourceRef",
     "ScalarShorthand",
     "SecretRef",
+    "UnionScalarShorthand",
     "UnionArm",
     "config_error_from",
     "element_annotation",
@@ -117,4 +125,5 @@ __all__ = [
     "model_is_complete",
     "reference_marker_error",
     "render_type",
+    "union_scalar_shorthand_error",
 ]

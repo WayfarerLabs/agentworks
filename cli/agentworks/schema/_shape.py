@@ -27,7 +27,11 @@ from pydantic.fields import FieldInfo
 from pydantic.json_schema import SkipJsonSchema
 
 from agentworks.schema.markers import RefMarker
-from agentworks.schema.shorthand import scalar_shorthand_of
+from agentworks.schema.shorthand import (
+    UnionScalarShorthand,
+    scalar_shorthand_of,
+    union_scalar_resolution,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -107,6 +111,9 @@ class FieldShape:
     """The union's arms, in declaration order; empty unless the field is
     a discriminated union of models."""
 
+    union_scalar_shorthand: UnionScalarShorthand | None
+    """The explicit scalar-to-arm dispatch for this union, if declared."""
+
     item_discriminator: str | None
     """:attr:`discriminator` one level down: the tag field a COLLECTION's
     elements are dispatched on (``list[Annotated[A | B,
@@ -131,6 +138,9 @@ class FieldShape:
     Left unclassified, its elements read as an undiscriminated union,
     which no walker expands: a secret named inside such an element would
     be absent from the dependency graph with nothing reported."""
+
+    item_union_scalar_shorthand: UnionScalarShorthand | None
+    """:attr:`union_scalar_shorthand` for one collection element."""
 
     union_members: tuple[object, ...]
     """The members of an UNDISCRIMINATED union, in declaration order, as
@@ -274,8 +284,10 @@ def shape_of(field: FieldInfo) -> FieldShape:
     nested_model: type[BaseModel] | None = None
     discriminator: str | None = None
     arms: tuple[UnionArmType, ...] = ()
+    union_scalar_shorthand: UnionScalarShorthand | None = None
     item_discriminator: str | None = None
     item_arms: tuple[UnionArmType, ...] = ()
+    item_union_scalar_shorthand: UnionScalarShorthand | None = None
     union_members: tuple[object, ...] = ()
     union_model: type[BaseModel] | None = None
     item_union_members: tuple[object, ...] = ()
@@ -296,6 +308,7 @@ def shape_of(field: FieldInfo) -> FieldShape:
             item_discriminator = _element_discriminator(element_meta)
             if item_discriminator is not None:
                 item_arms = _arms_of(element, item_discriminator)
+                item_union_scalar_shorthand = _sole_union_scalar_shorthand(element_meta)
             else:
                 item_union_members = tuple(split_annotated(arg)[0] for arg in get_args(element))
                 item_union_model = _sole_model(item_union_members)
@@ -311,6 +324,7 @@ def shape_of(field: FieldInfo) -> FieldShape:
             # operator never wrote. Live the moment a capability kind has
             # a single registered implementation.
             arms = _arms_of(inner, discriminator)
+            union_scalar_shorthand = _sole_union_scalar_shorthand(spine_metadata(field))
         elif _is_model(inner):
             nested_model = inner
         else:
@@ -318,7 +332,12 @@ def shape_of(field: FieldInfo) -> FieldShape:
             union_model = _sole_model(union_members)
 
     return FieldShape(
-        annotation=accepted_annotation(field.annotation, marker),
+        annotation=accepted_annotation(
+            field.annotation,
+            marker,
+            discriminator=discriminator,
+            union_scalar_shorthand=union_scalar_shorthand,
+        ),
         # An owner-templated field accepts ``None`` whatever its
         # annotation says, so the flag and the annotation are widened by
         # the one answer rather than each deciding for itself.
@@ -330,8 +349,10 @@ def shape_of(field: FieldInfo) -> FieldShape:
         nested_model=nested_model,
         discriminator=discriminator,
         arms=arms,
+        union_scalar_shorthand=union_scalar_shorthand,
         item_discriminator=item_discriminator,
         item_arms=item_arms,
+        item_union_scalar_shorthand=item_union_scalar_shorthand,
         union_members=union_members,
         union_model=union_model,
         item_union_members=item_union_members,
@@ -367,6 +388,95 @@ def model_is_complete(model_cls: type[BaseModel]) -> bool:
     nothing" branch unreachable in practice.
     """
     return model_fields_of(model_cls) is not None
+
+
+def union_scalar_shorthand_error(model_cls: type[BaseModel]) -> str | None:
+    """Why a tagged-union scalar dispatch is inconsistent, or ``None``.
+
+    An arm model may accept a scalar on its own, but tag dispatch happens
+    before arm validation. Every discriminated union exposing such an arm
+    must therefore opt into scalar dispatch explicitly. This recursive
+    check is registration conformance's guarantee that validation and the
+    two raw walkers never infer different choices.
+    """
+    return _union_scalar_error(model_cls, ())
+
+
+def _union_scalar_error(
+    model_cls: type[BaseModel],
+    visiting: tuple[type[BaseModel], ...],
+) -> str | None:
+    if model_cls in visiting:
+        return None
+    fields = model_fields_of(model_cls)
+    if fields is None:
+        return None
+    visiting = (*visiting, model_cls)
+    for name, field in fields.items():
+        shape = shape_of(field)
+        reason = _one_union_scalar_error(
+            f"{model_cls.__name__}.{name}",
+            field.annotation,
+            shape.discriminator,
+            shape.arms,
+            spine_metadata(field),
+        )
+        if reason is not None:
+            return reason
+        element = element_annotation(field.annotation)
+        if element is not None:
+            reason = _one_union_scalar_error(
+                f"{model_cls.__name__}.{name}'s element",
+                element,
+                shape.item_discriminator,
+                shape.item_arms,
+                element_metadata(field),
+            )
+            if reason is not None:
+                return reason
+        for child in models_in(field.annotation):
+            reason = _union_scalar_error(child, visiting)
+            if reason is not None:
+                return reason
+    return None
+
+
+def _one_union_scalar_error(
+    field_name: str,
+    annotation: object,
+    discriminator: str | None,
+    arms: tuple[UnionArmType, ...],
+    metadata: list[object],
+) -> str | None:
+    declarations = [item for item in metadata if isinstance(item, UnionScalarShorthand)]
+    if len(declarations) > 1:
+        return f"{field_name} declares {len(declarations)} union scalar shorthands; exactly one can select a scalar arm"
+    arm_shorthands = [arm.model.__name__ for arm in arms if scalar_shorthand_of(arm.model) is not None]
+    if not declarations:
+        if discriminator is not None and arm_shorthands:
+            return (
+                f"{field_name} has scalar shorthand on tagged arm(s) {', '.join(arm_shorthands)} "
+                "but declares no UnionScalarShorthand to select one before tag dispatch"
+            )
+        return None
+    declaration = declarations[0]
+    if discriminator is None:
+        return f"{field_name} declares UnionScalarShorthand but is not a discriminated union"
+    if declaration.discriminator != discriminator:
+        return (
+            f"{field_name} dispatches tables by {discriminator!r} but its UnionScalarShorthand "
+            f"declares {declaration.discriminator!r}"
+        )
+    reason = union_scalar_resolution(annotation, declaration)
+    if isinstance(reason, str):
+        return f"{field_name} has an invalid UnionScalarShorthand: {reason}"
+    _shorthand, tag = reason
+    if not any(arm.model is declaration.arm and arm.tag == tag for arm in arms):
+        return (
+            f"{field_name} selects {declaration.arm.__name__} as scalar shorthand, but tag {tag!r} "
+            "does not address that arm"
+        )
+    return None
 
 
 def is_model(annotation: object) -> TypeGuard[type[BaseModel]]:
@@ -420,6 +530,35 @@ def table_addresses_block(model: type[BaseModel], members: tuple[object, ...]) -
     registration instead of silently never extracted.
     """
     return not any(member is not model and accepts_table(member) for member in members)
+
+
+def addressed_arm_model(
+    arms: tuple[UnionArmType, ...],
+    discriminator: str,
+    shorthand: UnionScalarShorthand | None,
+    value: object,
+) -> type[BaseModel] | None:
+    """The discriminated-union arm a raw value addresses, or ``None``.
+
+    A table addresses the arm named by its tag. A bare scalar addresses an
+    arm only when the UNION explicitly declares that dispatch. An arm's
+    own :class:`~agentworks.schema.ScalarShorthand` is not enough because
+    pydantic must choose a tag before it validates an arm.
+
+    Kept here, beside the other raw-shape addressing rule, because the two
+    walkers must agree on which arm a document selected. A disagreement
+    would validate a secret reference that the dependency graph omitted.
+    """
+    if isinstance(value, Mapping):
+        tag = value.get(discriminator)
+        return next((arm.model for arm in arms if arm.tag == tag), None)
+    if shorthand is None:
+        return None
+    matches = [arm.model for arm in arms if arm.model is shorthand.arm]
+    scalar = scalar_shorthand_of(shorthand.arm)
+    if len(matches) != 1 or scalar is None:
+        return None
+    return shorthand.arm if type(value) is scalar.annotation else None
 
 
 def model_fields_of(model_cls: type[BaseModel]) -> dict[str, FieldInfo] | None:
@@ -582,7 +721,13 @@ def strip_markers(annotation: object) -> object:
     return stripped
 
 
-def accepted_annotation(annotation: object, marker: RefMarker | None = None) -> object:
+def accepted_annotation(
+    annotation: object,
+    marker: RefMarker | None = None,
+    *,
+    discriminator: str | None = None,
+    union_scalar_shorthand: UnionScalarShorthand | None = None,
+) -> object:
     """``annotation`` as an operator may WRITE it: markers stripped, every
     model declaring a scalar shorthand widened to the union it accepts
     (``dict[str, EnvEntry]`` reads ``dict[str, str | EnvEntry]``), and an
@@ -601,7 +746,7 @@ def accepted_annotation(annotation: object, marker: RefMarker | None = None) -> 
     trusted the surface the resources guide calls the authority rewrote
     every plaintext env value into a table for no reason; and it rendered
     a bare "string" for a secret-naming field whose emitted schema offers
-    ``{anyOf: [string, null]}`` and whose loader reads ``token: null`` as
+    ``{anyOf: [string, null]}`` and whose loader reads ``secret: null`` as
     the instruction to use the owner template. The parity guard
     (``tests/manifests/test_accepted_type_parity.py``) is what holds this
     function to the emitted side; ``null`` used to be subtracted there,
@@ -618,7 +763,19 @@ def accepted_annotation(annotation: object, marker: RefMarker | None = None) -> 
     (:func:`~agentworks.schema.reference_marker_error` refuses it at
     registration), so there is no depth for this widening to reach.
     """
-    widened = _widened(strip_markers(annotation))
+    stripped = strip_markers(annotation)
+    if discriminator is None:
+        widened = _widened(stripped)
+    else:
+        # A tagged union chooses its arm before an arm model validates.
+        # Therefore an arm's own scalar shorthand does not widen the
+        # union. Only the union-level dispatch declaration does.
+        widened = stripped
+        if union_scalar_shorthand is not None:
+            resolved = union_scalar_resolution(stripped, union_scalar_shorthand)
+            if not isinstance(resolved, str):
+                shorthand, _tag = resolved
+                widened = Union[shorthand.annotation, stripped]  # noqa: UP007
     if marker is None or marker.default_template is None:
         return widened
     return Union[widened, None]  # noqa: UP007
@@ -733,6 +890,8 @@ def _discriminator_of(field: FieldInfo) -> str | None:
     if isinstance(field.discriminator, str):
         return field.discriminator
     for candidate in (field.discriminator, *spine_metadata(field)):
+        if isinstance(candidate, UnionScalarShorthand):
+            return candidate.discriminator
         if isinstance(candidate, Discriminator) and isinstance(candidate.discriminator, str):
             return candidate.discriminator
     return None
@@ -750,11 +909,19 @@ def _element_discriminator(metadata: list[object]) -> str | None:
     unclassified union rather than an error.
     """
     for item in metadata:
+        if isinstance(item, UnionScalarShorthand):
+            return item.discriminator
         if isinstance(item, Discriminator) and isinstance(item.discriminator, str):
             return item.discriminator
         if isinstance(item, FieldInfo) and isinstance(item.discriminator, str):
             return item.discriminator
     return None
+
+
+def _sole_union_scalar_shorthand(metadata: list[object]) -> UnionScalarShorthand | None:
+    """The one scalar dispatch declaration in ``metadata``, if unique."""
+    declarations = [item for item in metadata if isinstance(item, UnionScalarShorthand)]
+    return declarations[0] if len(declarations) == 1 else None
 
 
 def _arms_of(annotation: object, discriminator: str) -> tuple[UnionArmType, ...]:

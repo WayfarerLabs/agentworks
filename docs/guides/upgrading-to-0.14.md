@@ -536,6 +536,52 @@ carries its own `name` key, two keys claim to select the capability and which on
 decide. If it holds something that is not a table, there are no keys to fold and printing the tag
 alone would discard what you wrote. Both errors say so and name the field.
 
+### Git credential token acquisition is tagged now
+
+A git credential's `provider.token` now says how the token is obtained, as a tagged union. This
+release implements one arm, stored-secret acquisition:
+
+```yaml
+provider:
+  name: github
+  token: { mode: stored, secret: gh-pat }
+```
+
+The one-arm shape is deliberate. A future token-minting mechanism joins it as another arm instead of
+forcing another restructure, but no minted arm exists in this release. Its future scopes,
+repositories, permissions, and other creation parameters remain credential configuration; they do
+not become secret mappings.
+
+Two old spellings remain unchanged. Omitting `token` still selects stored acquisition and defaults
+the secret name to `git-token-<credential name>`. A scalar `token: gh-pat` remains shorthand for the
+stored arm shown above. Only an explicit `token: null` crosses the break. It used to request the
+default secret name, but the acquisition union itself is not nullable. The error prints the exact
+equivalent replacement:
+
+```console
+$ agw resource list
+Configuration error: ~/.config/agentworks/resources/git-credentials.yaml:1:
+git-credential/github: 'token: null' is a retired spelling. It selected the stored token's default
+secret name, exactly as omitting 'token' did; replace the null line with the explicit choice: token:
+{mode: stored}
+  Hint: Replace the null spelling as shown above; `agw resource describe-kind
+  git-credential-provider/<name>` documents the token field. See "Git credential token acquisition
+  is tagged now" in docs/guides/upgrading-to-0.14.md.
+```
+
+Replacing the null line with `token: {mode: stored}` preserves the old default-secret behavior. You
+may instead delete the line, which selects the same declared default.
+
+Plugin authors must migrate git credential providers as one contract change. The
+`git-credential-provider` contract is now version 2, and registration rejects a provider still
+declaring version 1 before it is seated. Replace the exported `TokenSourcedConfig` base with
+`TokenAcquiringConfig`, keep provider-specific scope, permissions, and future minting parameters on
+that provider config model, change reads of the stored secret name from `self.config.token` to
+`self.config.token.secret`, and then declare `contract_version = 2`. The old `TokenSourcedConfig`
+export remains temporarily so an unmigrated version 1 plugin imports far enough for registration to
+report the unsupported contract version. It is not a valid version 2 base: registration also rejects
+a provider that claims version 2 while retaining that old scalar/null field shape.
+
 ### Authentication and placement are one tagged field now
 
 Three platforms used to let the PRESENCE of an optional block choose a mechanism: an `azure-vm`
@@ -806,10 +852,14 @@ above: the FIELDS keep their spellings, but they now sit in an `auth` arm rather
 `service_principal` or `credentials` block. So do that rewrite first, then read this against the
 file you end up with. Proxmox is where it was.
 
-The rule itself is general: every field that names a secret and has a default reads absent and
-`null` alike. These three are called out because they are the ones whose behavior CHANGED. A git
-credential's `token` (default `git-token-<name>`) follows the same rule but always did, so there is
-nothing to look for there.
+The rule itself is general for a field that directly names a secret and has a default: absent and
+`null` mean the same thing. These three are called out because they are the ones whose behavior
+CHANGED. A git credential now has an outer token-acquisition union, so `token: null` is retired as
+described in
+["Git credential token acquisition is tagged now"](#git-credential-token-acquisition-is-tagged-now).
+The stored arm's inner secret field still follows the general rule:
+`token: { mode: stored, secret: null }` means the default `git-token-<name>` secret, as does
+omitting `secret` from that stored arm.
 
 **If one of those lines is still in your file, you are the person this affects.** Nothing warns you,
 because to the loader an explicit `null` is now simply the ordinary way of taking the default, and

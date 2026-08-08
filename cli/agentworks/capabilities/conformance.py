@@ -24,7 +24,11 @@ import inspect
 from typing import TYPE_CHECKING, Literal, get_args, get_origin
 
 from agentworks.errors import StateError
-from agentworks.schema import model_is_complete, reference_marker_error
+from agentworks.schema import (
+    model_is_complete,
+    reference_marker_error,
+    union_scalar_shorthand_error,
+)
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
@@ -53,8 +57,8 @@ def conformance_error(descriptor: CapabilityKindDescriptor, impl: type) -> str |
         or _attributes_error(descriptor, impl)
         or _constructibility_error(impl)
         or _operations_error(descriptor, impl)
-        or _config_model_error(descriptor, impl)
         or _version_error(descriptor, impl)
+        or _config_model_error(descriptor, impl)
     )
 
 
@@ -168,7 +172,7 @@ def _operations_error(descriptor: CapabilityKindDescriptor, impl: type) -> str |
 
 
 def _config_model_error(descriptor: CapabilityKindDescriptor, impl: type) -> str | None:
-    """Check 5: the config model the impl declares satisfies its kind's
+    """Check 6: the config model the impl declares satisfies its kind's
     model contract.
 
     Read off ``config_model`` directly rather than through
@@ -208,6 +212,9 @@ def _config_model_error(descriptor: CapabilityKindDescriptor, impl: type) -> str
         # author is the only one who can move it, so it is refused here
         # rather than worked around at the three sites that read it.
         return f"its config_model declares a reference marker nothing can honor: {placement}"
+    shorthand = union_scalar_shorthand_error(model)
+    if shorthand is not None:
+        return f"its config_model declares an inconsistent union scalar shorthand: {shorthand}"
     return _config_tag_error(descriptor, impl, model)
 
 
@@ -241,7 +248,7 @@ def _literal_values(annotation: object) -> tuple[object, ...]:
 
 
 def _version_error(descriptor: CapabilityKindDescriptor, impl: type) -> str | None:
-    """Check 6: the impl declares a contract version this build supports.
+    """Check 5: the impl declares a contract version this build supports.
 
     Trivially satisfied while there is one version, which is the point: the
     declaration and the comparison both exist before the first incompatible

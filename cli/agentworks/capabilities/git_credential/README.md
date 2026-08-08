@@ -34,22 +34,21 @@ Two providers ship today, one per supported host. This list can change, so
 `agw resource describe-kind git-credential-provider` is the definitive set on any given install, and
 `agw resource describe-kind git-credential-provider/<name>` the definitive config for one.
 
-- **`github`** (built in) sources a GitHub PAT for `github.com`. It can optionally be scoped to a
-  set of repositories (`repos`) or to a single owner (`owner`), so several credentials can serve the
-  same host and each repository draws the one meant for it. Its token secret is named by the `token`
-  field.
+- **`github`** (built in) sources a GitHub PAT for `github.com`. It can optionally be scoped to
+  exact repositories (`repos`), every repository under one `owner`, or the union of both, so several
+  credentials can serve the same host and each repository draws the one meant for it.
 - **`azdo`** (via the `azure` system plugin) sources an Azure DevOps PAT scoped to one Azure DevOps
   organization (a required `org`). It becomes available when that plugin is enabled.
 
 Whichever provider a credential names, an operator can rely on two guarantees:
 
-- **A live token is never pasted into config.** Today's providers source their token from a named
-  secret: a credential's `token` field points at the _name_ of a secret that holds the token, and
-  the secret backend supplies the value at provisioning time. A future extension may allow a
-  provider to mint a token through the host's API instead, drawing on a named bootstrap secret where
-  it needs credentials to do so. In either model, the interface never asks for a live token in
-  plaintext config, and the same credential definition travels between operators who store their
-  tokens differently.
+- **A live token is never pasted into config.** Today's providers use the `stored` arm of a
+  credential's `token` acquisition field. Its `secret` key points at the _name_ of a secret that
+  holds the token, and the secret backend supplies the value at provisioning time. The field
+  defaults to that arm, and a bare secret name is its scalar shorthand. A future `minted` arm may
+  create a token through the host's API instead. It is not implemented today, and its scopes,
+  repositories, permissions, and other creation parameters will remain credential configuration,
+  never secret mapping content.
 - **A bad token is caught early.** At provisioning time Agentworks verifies the token against its
   host before writing anything, so an expired, revoked, or mistyped token surfaces as a clear,
   actionable error up front rather than as a confusing git failure partway through setup. (The check
@@ -110,9 +109,9 @@ declares its config, probes its host, and returns strings.
 
 Two providers ship today and are the working references throughout this guide:
 
-- **`github`** (`github.py`): the core built-in. Sources a GitHub PAT and, optionally, carries a
-  fine-grained-PAT scope (`repos` or `owner`) so multiple credentials can serve the same host,
-  selected per repository (issue #166). The reference for the scoped case.
+- **`github`** (`github.py`): the core built-in. Sources a GitHub PAT and, optionally, carries
+  fine-grained-PAT scopes (`repos`, `owner`, or both as their union) so multiple credentials can
+  serve the same host, selected per repository (issue #166). The reference for the scoped case.
 - **`azdo`** (`agentworks/plugins/azure/azdo.py`): the Azure DevOps provider, shipped in the opt-in
   `azure` system plugin. Sources an Azure DevOps PAT scoped to one required `org`, which doubles as
   both the store username and the owner scope. The reference for a plugin-shipped provider and for a
@@ -232,31 +231,62 @@ missing any of them, naming the plugin:
   with no fields beyond its tag, which is closed-world by construction.
 - `name` / `description`: the registry row's identity.
 
-#### The Token-Secret Edge: A Marker, Not a Method
+The current git-credential-provider contract is version 2. Version 2 changes the provider config
+API, so a version 1 plugin fails during registration with the supported-version error before its
+class can be selected or constructed. To migrate, replace the exported `TokenSourcedConfig` base
+with `TokenAcquiringConfig`, keep provider-specific minting and scope fields on that config model,
+read the stored secret name as `self.config.token.secret` rather than `self.config.token`, and set
+the implementation's `contract_version = 2`. The old `TokenSourcedConfig` export remains only as a
+release-scoped compatibility surface: it lets a version 1 plugin import far enough for registration
+to print the contract-version migration instead of failing during module import. The version 2
+descriptor rejects that old base, so it is not a valid v2 config API.
 
-The token-sourcing providers share one base model, `TokenSourcedConfig`, whose single field carries
-the whole derivation:
+#### Token Acquisition: One Stored Arm Today
+
+The providers share `TokenAcquiringConfig`. Its `token` field is a real discriminated union even
+with one arm:
 
 ```python
-class TokenSourcedConfig(AgwModel):
-    token: Annotated[NonEmptyStr, SecretRef(usage="the auth token", default_template="git-token-{owner_name}")]
+class StoredToken(AgwModel):
+    mode: Literal["stored"]
+    secret: Annotated[
+        NonEmptyStr,
+        SecretRef(usage="the auth token", default_template="git-token-{owner_name}"),
+    ]
+
+TokenAcquisition = Annotated[
+    StoredToken,
+    UnionScalarShorthand(discriminator="mode", arm=StoredToken),
+]
+
+class TokenAcquiringConfig(AgwModel):
+    token: TokenAcquisition = Field(default={"mode": "stored"})
 ```
 
-The marker says what the field MEANS, and the core does the rest: extraction reads it off the model
-(total, never raising; a malformed `token` makes the edge's identity underivable, so the edge is
-omitted rather than raised), validation fills the owner template when the field is absent, and
-emitted schema carries the same facts. Declaring that edge is what puts the token secret into the
-credential node's `secret_refs`, which is what gets it into the boundary resolve and therefore
-delivered to `ctx.secret` at runup. A future MINTING provider sources no token, so it extends
-`AgwModel` directly, declares whatever bootstrap secrets it needs, and mints in an op.
+`StoredToken` declares `ScalarShorthand(annotation=str, field="secret")`, while the union's
+`UnionScalarShorthand` explicitly selects that arm before tag dispatch. Together they derive
+`token: my-secret` as the short spelling of `token: {mode: stored, secret: my-secret}` without
+guessing that any arm shorthand selects itself. Omission defaults to stored because omission
+historically sourced the `git-token-<credential name>` secret. No future arm may replace that
+default: a new acquisition mechanism must be selected explicitly. The tag stays `mode`, despite the
+noun-shaped field, because stored versus minted selects an acquisition mechanism; `type` would
+misname storage as a token kind, while `source` would blur credential-domain acquisition with secret
+sourcing.
+
+The `SecretRef` marker lives inside the stored arm, where the reference really exists. The core
+derives validation, default filling, total extraction, emitted schema, samples, and field
+documentation from that declaration. Omitted, scalar, and full-table spellings therefore contribute
+the same secret edge. Minting is deliberately absent. When it arrives it grows the union additively,
+and any minting parameters remain provider configuration rather than moving into secret mappings.
 
 #### Config: One Declared Model per Provider
 
-Each provider extends `TokenSourcedConfig` with its own `name` tag and its provider-shaped fields:
+Each provider extends `TokenAcquiringConfig` with its own `name` tag and its provider-shaped fields:
 
-- `github` (`GitHubConfig`): `repos` and `owner` are mutually exclusive (a fine-grained PAT is
-  scoped to one or the other), enforced by a model validator; both are pattern-constrained to the
-  GitHub name charset, because they are interpolated verbatim into gitconfig headers and store URLs.
+- `github` (`GitHubConfig`): `repos` contributes exact repository scopes and `owner` contributes all
+  repositories under one owner. When both are present the effective scope is their union. Both are
+  pattern-constrained to the GitHub name charset because they are interpolated verbatim into
+  gitconfig headers and store URLs.
 - `azdo` (`AzDOConfig`): `org` is REQUIRED and pattern-constrained for the same reason.
 
 The model stays limited to shape and vocabulary. Host-owned choice sets remain the host's
@@ -280,11 +310,12 @@ def runup(self, ctx: RunContext) -> None:
     self._verify_token(ctx.secret(self.secret_name))
 ```
 
-`secret_name` is the token secret the credential sources from: a plain read of `self.config.token`,
-which the model layer already resolved to `git-token-<name>` when the field was absent. A provider
-implements exactly one slot, `_verify_token(token)`, and drives it through the shared `_probe_pat`
-helper. `_probe_pat` does the whole HTTP dance and the failure classification, so a provider only
-supplies the URL, the auth headers, the reject-status set, and a host label:
+`secret_name` is the token secret the credential sources from: a plain read of
+`self.config.token.secret`, which the model layer already resolved to `git-token-<name>` when the
+field was absent. A provider implements exactly one slot, `_verify_token(token)`, and drives it
+through the shared `_probe_pat` helper. `_probe_pat` does the whole HTTP dance and the failure
+classification, so a provider only supplies the URL, the auth headers, the reject-status set, and a
+host label:
 
 - A single authenticated GET via `_http_probe` (which returns HTTP error statuses rather than
   raising them; only network-level failures raise `OSError`).
@@ -352,15 +383,16 @@ are the contract:
 | Host                  | `github.com`                                          | `dev.azure.com`                                            |
 | Probe endpoint        | `GET /user` on `api.github.com`, Bearer header        | `GET /<org>/_apis/connectionData`, Basic `:<token>` header |
 | Reject statuses       | `401`                                                 | `401`, `203` (AzDO's sign-in-page answer for a bad PAT)    |
-| Config vocabulary     | scoped by repo XOR owner                              | scoped by a required organization                          |
+| Config vocabulary     | exact repos plus optional owner scope                 | scoped by a required organization                          |
 | Store username        | resource name (scoped) or `x-access-token` (unscoped) | the `org`                                                  |
 | `helper_entry` scope  | `repos` / `owner` from config                         | the `org` doubles as the owner scope                       |
 | Success enrichment    | announces `login` and (fine-grained) expiry           | announces success only                                     |
 | `review_remote` flags | any embedded username                                 | only a username that is not the org                        |
 
-The shared shape underneath: one base config model carrying the marked `token` field, both driving
-`_verify_token` through `_probe_pat`, both returning `credential_lines` and a `HelperEntry`. A third
-provider should look the same from the outside and differ only in these host-policy rows.
+The shared shape underneath: one base config model carrying a `token` acquisition union whose stored
+arm carries the marked `secret` field, both driving `_verify_token` through `_probe_pat`, both
+returning `credential_lines` and a `HelperEntry`. A third provider should look the same from the
+outside and differ only in these host-policy rows.
 
 ### Best Practices
 
@@ -369,9 +401,9 @@ Grounded in the two shipped providers.
 #### Source Secrets by Name, Never by Value
 
 A provider names its token secret and reads the value only through the context; it never holds a
-token. The config's `token` field carries a NAME (defaulting to `git-token-<name>`), the edge comes
-from the field's `SecretRef` marker, and the value is delivered to `runup` and the materials op
-through the framework's resolve pass. This is the same discipline the cloud platforms follow for
+token. The stored arm's `secret` field carries a NAME (defaulting to `git-token-<name>`), the edge
+comes from that field's `SecretRef` marker, and the value is delivered to `runup` and the materials
+op through the framework's resolve pass. This is the same discipline the cloud platforms follow for
 their API credentials (see the credentials section of `vm_platform/README.md`): nothing ever invites
 an operator to paste a live credential into a plaintext config file.
 
@@ -438,8 +470,8 @@ templates:
 - [`../README.md`](../README.md): the capability lifecycle contract and prerequisite for this guide.
 - [`vm_platform/README.md`](../vm_platform/README.md): the sibling deep-dive; its credentials
   section is the reference for the secret-by-name discipline shared here.
-- `base.py`: the `GitCredentialProvider` ABC, `TokenSourcedConfig` (the shared config model carrying
-  the marked `token` field), `HelperEntry`, and the shared probes (`_probe_pat`, `_http_probe`).
+- `base.py`: the `GitCredentialProvider` ABC, `TokenAcquiringConfig` and its stored-token arm,
+  `HelperEntry`, and the shared probes (`_probe_pat`, `_http_probe`).
 - `github.py`: the `github` provider (the scoped, fine-grained-PAT reference).
 - `agentworks/plugins/azure/azdo.py`: the `azdo` provider (the plugin-shipped reference).
 - `kinds.py`, `__init__.py`: the `git-credential` / `git-credential-provider` kinds, the kind's

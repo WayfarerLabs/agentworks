@@ -18,12 +18,13 @@ import pytest
 
 from agentworks.bootstrap import build_registry
 from agentworks.capabilities.config import capability_config_references, validate_capability_config
+from agentworks.capabilities.descriptor import descriptor_for
 from agentworks.capabilities.git_credential.github import GitHubCredentialProvider
 from agentworks.config import load_config
 from agentworks.errors import ConfigError
 from agentworks.git_credentials import CredentialMaterials, build_credential_materials
 from agentworks.plugins.azure.azdo import AzDOCredentialProvider
-from agentworks.schema import RefOwner
+from agentworks.schema import RefOwner, iter_field_docs
 from agentworks.vms.initializer import resolve_git_credential_providers
 
 if TYPE_CHECKING:
@@ -96,6 +97,7 @@ def _refs(blob: dict[str, object], owner_name: str = "t", name: str = "github") 
         {},
         {"repos": ["acme/widgets"]},
         {"owner": "acme"},
+        {"repos": ["acme/widgets"], "owner": "acme"},
         # A deliberate loosening, recorded rather than hidden: the shipped
         # validator rejected ``repos: []`` and the model does not, because
         # an empty list and an absent field mean the same thing to every
@@ -118,8 +120,36 @@ def test_token_override_in_provider_config() -> None:
     assert _refs({"token": "my-secret"}, owner_name="gh") == [("secret", "my-secret")]
 
 
+def test_every_stored_token_spelling_extracts_the_same_secret_edge() -> None:
+    """Omitted, scalar shorthand, and the full stored arm all reach the
+    graph through the model's SecretRef declaration."""
+    assert _refs({}, owner_name="gh") == [("secret", "git-token-gh")]
+    assert _refs({"token": "my-secret"}, owner_name="gh") == [("secret", "my-secret")]
+    assert _refs({"token": {"mode": "stored", "secret": "my-secret"}}, owner_name="gh") == [("secret", "my-secret")]
+
+
+def test_token_acquisition_stays_a_one_arm_union_defaulting_only_to_stored() -> None:
+    """The ambition ceiling and omission-history rule as model facts.
+
+    A future minted mechanism grows this arm set additively, but it may
+    not become the default for declarations that omit ``token``.
+    """
+    from agentworks.capabilities.git_credential.github import GitHubConfig
+
+    token = next(doc for doc in iter_field_docs(GitHubConfig) if doc.path == ("token",))
+    assert [arm.tag for arm in token.union_arms] == ["stored"]
+    assert token.default == {"mode": "stored"}
+    assert not token.required
+
+
+def test_shipped_providers_use_the_version_2_token_acquisition_contract() -> None:
+    assert descriptor_for("git-credential-provider").contract_version == 2
+    assert GitHubCredentialProvider.contract_version == 2
+    assert AzDOCredentialProvider.contract_version == 2
+
+
 def test_empty_token_rejected_by_validation() -> None:
-    with pytest.raises(ConfigError, match="token: must not be empty"):
+    with pytest.raises(ConfigError, match="token.secret: must not be empty"):
         _validate({"token": ""}, owner_name="gh")
 
 
@@ -150,7 +180,6 @@ def test_extraction_total_on_malformed_config() -> None:
 @pytest.mark.parametrize(
     ("blob", "match"),
     [
-        ({"repos": ["acme/widgets"], "owner": "acme"}, "mutually exclusive"),
         ({"repos": ["no-slash"]}, "must match `"),
         ({"owner": "acme/"}, "must match `"),
         # The quantifier, not the charset. See the note above.
@@ -247,6 +276,39 @@ def test_multi_repo_list_selects_each(tmp_path: Path) -> None:
             f"protocol=https\nhost=github.com\npath={repo}.git\n",
         )
         assert "password=tokR" in out, repo
+
+
+def test_one_credential_combines_exact_repos_with_its_owner_scope(tmp_path: Path) -> None:
+    """``repos`` plus ``owner`` is the union of both scope sets.
+
+    The existing helper already composes the two fields: exact-repository
+    matches are checked first, then the owner covers every other repo under
+    it. The provider should pass both through rather than rejecting the
+    composition at validation.
+    """
+    combined = _gh(config_name="acme-bot", repos=["other/widgets"], owner="acme")
+    entry = combined.helper_entry()
+    assert entry.repos == ("other/widgets",)
+    assert entry.owner == "acme"
+
+    providers = {"acme-bot": combined, "gh": _gh(config_name="gh")}
+    materials = build_credential_materials(providers, {"acme-bot": "tokC", "gh": "tokF"})
+    home = _write_home(tmp_path, materials)
+    for path in ("other/widgets.git", "acme/undeclared.git"):
+        out, _err = _run_helper(
+            materials.helper_script,
+            home,
+            "get",
+            f"protocol=https\nhost=github.com\npath={path}\n",
+        )
+        assert "password=tokC" in out, path
+    out, _err = _run_helper(
+        materials.helper_script,
+        home,
+        "get",
+        "protocol=https\nhost=github.com\npath=other/elsewhere.git\n",
+    )
+    assert "password=tokF" in out
 
 
 def test_azdo_org_routes_by_first_segment(tmp_path: Path) -> None:
