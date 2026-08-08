@@ -323,7 +323,8 @@ def test_each_declaration_matches_the_live_union_it_rewrites_to() -> None:
             f"'{shape.absent_mode}' arm the declaration names as what omission meant"
         )
         for mode in (shape.present_mode, shape.absent_mode):
-            assert mode in arms, f"{name}: mode '{mode}' selects no arm of '{shape.union_field}' (live: {sorted(arms)})"
+            ordered_arms = sorted(arms, key=lambda tag: "" if tag is None else tag)
+            assert mode in arms, f"{name}: mode '{mode}' selects no arm of '{shape.union_field}' (live: {ordered_arms})"
         if shape.scalar_field is not None:
             arm_model = arms[shape.present_mode]
             assert shape.scalar_field in arm_model.model_fields, (

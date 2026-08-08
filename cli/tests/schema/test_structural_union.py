@@ -86,7 +86,10 @@ def test_schema_and_field_docs_expose_the_same_alternatives() -> None:
 
     docs = {doc.path: doc for doc in iter_field_docs(Holder)}
     element = docs[("sources",)]
-    assert [arm.doc.model for arm in element.item_union_arms] == [PlainArm, SecretArm]
+    documented_models = [arm.doc.model for arm in element.item_union_arms]
+    assert len(documented_models) == 2
+    assert documented_models[0] is PlainArm
+    assert documented_models[1] is SecretArm
     assert ("sources", MAPPING_KEY, "value") not in docs
 
 
@@ -132,7 +135,9 @@ def test_an_unaddressable_marker_is_still_refused() -> None:
 
 def test_a_marker_free_validation_alias_is_still_loud() -> None:
     class Aliased(AgwModel):
-        value: str = Field(validation_alias=AliasChoices("value", "text"))
+        value: str = Field(  # type: ignore[pydantic-alias]
+            validation_alias=AliasChoices("value", "text")
+        )
 
     class WithAlias(AgwModel):
         source: Annotated[Aliased | SecretArm, StructuralUnion()]

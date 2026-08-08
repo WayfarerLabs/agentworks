@@ -728,7 +728,8 @@ def _arm_disagreements(model_cls: type[AgwModel]) -> Iterator[str]:
             ("one element", _tags_offered(_element_schema(field), emitted), {arm.tag for arm in doc.item_union_arms}),
         ):
             if offered != streamed:
-                yield (f"{where}: {depth} dispatches on {sorted(offered)} and the stream offers {sorted(streamed)}")
+                ordered_streamed = sorted(streamed, key=lambda tag: "" if tag is None else tag)
+                yield (f"{where}: {depth} dispatches on {sorted(offered)} and the stream offers {ordered_streamed}")
 
 
 def _peeled_schema(schema: dict[str, object]) -> dict[str, object]:

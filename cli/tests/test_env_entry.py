@@ -29,12 +29,12 @@ def test_a_bare_string_is_the_plaintext_form() -> None:
 
 def test_neither_value_nor_secret_raises() -> None:
     with pytest.raises(ValueError, match=r"(?s)PlaintextEnvEntry\.value.*SecretEnvEntry\.secret"):
-        EnvEntry()
+        EnvEntry()  # type: ignore[call-overload]
 
 
 def test_both_value_and_secret_raises() -> None:
     with pytest.raises(ValueError, match=r"(?s)PlaintextEnvEntry\.secret.*SecretEnvEntry\.value"):
-        EnvEntry(value="literal", secret="some-name")
+        EnvEntry(value="literal", secret="some-name")  # type: ignore[call-overload]
 
 
 def test_entry_is_frozen() -> None:
@@ -50,7 +50,7 @@ def test_an_unknown_key_is_refused() -> None:
     ``extra="forbid"`` a leftover ``key=`` is loud rather than silently
     accepted."""
     with pytest.raises(ValidationError):
-        EnvEntry(key="EDITOR", value="vim")  # type: ignore[call-arg]
+        EnvEntry(key="EDITOR", value="vim")  # type: ignore[call-overload]
 
 
 def test_all_spellings_are_exposed_by_a_structural_one_of() -> None:
