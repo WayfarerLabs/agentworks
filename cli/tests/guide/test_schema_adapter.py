@@ -22,8 +22,14 @@ from agentworks.guide import (
 )
 from agentworks.guide.catalog import _build_guide_catalog
 from agentworks.guide.render import render_topic
-from agentworks.guide.service import _dynamic_names, _dynamic_topic, _EmptyInventory, render_guide
-from agentworks.manifests.reference import reference_for
+from agentworks.guide.service import (
+    _build_schema_catalog,
+    _dynamic_names,
+    _dynamic_topic,
+    _EmptyInventory,
+    render_guide,
+)
+from agentworks.manifests.reference import describable_targets, reference_for
 from agentworks.manifests.yaml_value import render_value
 
 
@@ -32,11 +38,98 @@ def _broken_config() -> object:
 
 
 def test_config_free_names_include_every_schema_target_without_a_registry() -> None:
-    names = _dynamic_names(None)
+    schema = _build_schema_catalog(strict=True)
+    names = _dynamic_names(None, schema)
 
+    assert schema.issues == ()
+    assert schema.names() == describable_targets()
     assert "vm-template" in names
     assert "vm-platform" in names
     assert "vm-platform/wsl2" in names
+
+
+def _reject_vm_template_title(monkeypatch: pytest.MonkeyPatch) -> None:
+    def invalid_reference(target: str):
+        reference = reference_for(target)
+        if target == "vm-template":
+            return replace(reference, title="Untrusted ${SCHEMA_PAYLOAD}")
+        return reference
+
+    monkeypatch.setattr("agentworks.guide.service.reference_for", invalid_reference)
+
+
+def test_strict_schema_catalog_rejects_one_invalid_target_with_scoped_diagnostics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _reject_vm_template_title(monkeypatch)
+
+    with pytest.raises(GuideContributionError) as raised:
+        _build_schema_catalog(strict=True)
+
+    assert raised.value.source == "schema:vm-template"
+    assert raised.value.topic == "vm-template"
+    assert raised.value.field_path == "title"
+    assert "SCHEMA_PAYLOAD" not in str(raised.value)
+
+
+def test_runtime_isolates_invalid_schema_target_in_explicit_multi_topic_render(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _reject_vm_template_title(monkeypatch)
+
+    response = render_guide(
+        ("vm-template", "agent-template"),
+        GuideMode.AGENT,
+        load_config_fn=lambda: object(),  # type: ignore[arg-type,return-value]
+        load_registry_fn=lambda _config: None,  # type: ignore[arg-type,return-value]
+    )
+
+    assert response.exit_code == 1
+    assert "# vm-template\n\nThis guide topic is unavailable." in response.markdown
+    assert "Reference target: `agent-template`" in response.markdown
+    assert "schema:vm-template" in response.markdown
+    assert "title contains an expression delimiter" in response.markdown
+    assert "SCHEMA_PAYLOAD" not in response.markdown
+
+
+def test_runtime_index_retains_other_topics_when_one_schema_target_is_invalid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _reject_vm_template_title(monkeypatch)
+
+    response = render_guide(
+        (),
+        GuideMode.AGENT,
+        load_config_fn=lambda: object(),  # type: ignore[arg-type,return-value]
+        load_registry_fn=lambda _config: None,  # type: ignore[arg-type,return-value]
+    )
+
+    assert response.exit_code == 1
+    assert "agent-template" in response.names
+    assert "vm-template" not in response.names
+    assert "`agent-template`" in response.markdown
+    assert "schema:vm-template" in response.markdown
+    assert "SCHEMA_PAYLOAD" not in response.markdown
+
+
+def test_name_discovery_omits_invalid_schema_target_without_echoing_its_content(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _reject_vm_template_title(monkeypatch)
+
+    response = render_guide(
+        (),
+        GuideMode.AGENT,
+        names_only=True,
+        load_config_fn=lambda: object(),  # type: ignore[arg-type,return-value]
+        load_registry_fn=lambda _config: None,  # type: ignore[arg-type,return-value]
+    )
+
+    assert response.exit_code == 0
+    assert "agent-template" in response.names
+    assert "vm-template" not in response.names
+    assert "SCHEMA_PAYLOAD" not in response.markdown
+    assert "Guide content unavailable" not in response.markdown
 
 
 def test_schema_reference_prose_maps_once_and_preserves_authored_markdown() -> None:

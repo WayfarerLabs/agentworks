@@ -5,4 +5,4 @@ not provide a migrator or a frozen copy of an older schema.
 Work from the installed model. A bare kind topic, such as `agw guide vm-template`, includes its live
 sample and field reference. A capability implementation topic, such as `agw guide vm-platform/lima`,
 describes that implementation's tagged configuration. Keep an untouched backup and the expected
-resource names until the normal inventory and doctor both prove the cutover.
+resource identities until the normal inventory and doctor both prove the cutover.

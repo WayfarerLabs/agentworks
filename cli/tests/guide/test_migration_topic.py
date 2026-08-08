@@ -35,7 +35,7 @@ def test_migration_actions_pin_order_consent_operations_and_no_execution_authori
         ("validate-manifest-set", ConsentBoundary.EXAMINE_WORKSTATION),
         ("review-null-secret-fields", ConsentBoundary.READ_CONFIGURED_STATE),
         ("remove-retired-sections", ConsentBoundary.MUTATE_AGENTWORKS),
-        ("compare-operator-inventory", ConsentBoundary.READ_CONFIGURED_STATE),
+        ("compare-operator-inventory", ConsentBoundary.EXAMINE_WORKSTATION),
         ("finish-doctor", ConsentBoundary.EXAMINE_WORKSTATION),
     ]
     assert action_block.actions[0].command is None
@@ -111,6 +111,7 @@ def test_migration_actions_make_inventory_backups_and_verification_distinct() ->
     assert "EXPECTED_IDENTITIES remains byte-for-byte unchanged" in edit.expected_state
 
     comparison = by_id["compare-operator-inventory"]
+    assert comparison.consent is ConsentBoundary.EXAMINE_WORKSTATION
     assert [item.name for item in comparison.required_inputs] == ["EXPECTED_IDENTITIES"]
     assert comparison.command == ("agw", "resource", "list", "--origin", "operator")
 

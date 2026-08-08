@@ -81,6 +81,7 @@ empty declarations during the final TOML cutover, and activate desired backends 
 After every new manifest has passed its per-manifest doctor loop, remove all retired resource
 sections from `config.toml` in one edit. Run `agw resource list --origin operator` and compare the
 result with the caller-owned expected identities by `kind/name`, operator-declared origin variant,
-and intended manifest file path, ignoring source line. Any missing, extra, or wrongly originated
-resource returns to the untouched backups for investigation. Finish only when a final `agw doctor`
-reports zero failures.
+and intended manifest file path, ignoring source line. This normal inventory command may probe host
+readiness, so run it only with consent to examine the workstation. Any missing, extra, or wrongly
+originated resource returns to the untouched backups for investigation. Finish only when a final
+`agw doctor` reports zero failures.

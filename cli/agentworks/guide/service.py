@@ -10,9 +10,10 @@ from typing import TYPE_CHECKING, cast
 
 from agentworks.errors import AgentworksError, ConfigError, StateError, ValidationError
 from agentworks.guide.assessment import OnboardingSnapshot
-from agentworks.guide.catalog import GuideCatalog, _build_guide_catalog
+from agentworks.guide.catalog import GuideCatalog, GuideCatalogIssue, _build_guide_catalog
 from agentworks.guide.contract import (
     BlockId,
+    GuideContributionError,
     ImplementationAnchor,
     InstanceList,
     KindAnchor,
@@ -103,51 +104,56 @@ def build_authored_catalog(*, strict_trusted_taxonomy: bool = False) -> GuideCat
     )
 
 
+def _schema_topic(slug: str) -> TopicContribution:
+    """Map one authoritative schema reference through contribution validation."""
+    reference = reference_for(slug)
+    schema_anchor: dict[str, str]
+    blocks: list[dict[str, object]] = []
+    if reference.overview is not None:
+        blocks.append({"type": "overview", "id": "overview", "markdown": reference.overview})
+    if reference.category == "declarable":
+        schema_anchor = {"type": "kind", "kind": reference.kind}
+        blocks.extend(
+            (
+                {"type": "instance-list", "id": "inventory"},
+                {"type": "field-reference", "id": "fields"},
+                {"type": "sample", "id": "sample"},
+            )
+        )
+    elif reference.implementation is None:
+        schema_anchor = {"type": "kind", "kind": reference.kind}
+        blocks.extend(
+            (
+                {"type": "field-reference", "id": "fields"},
+                {"type": "instance-list", "id": "inventory"},
+            )
+        )
+    else:
+        schema_anchor = {"type": "implementation", "kind": reference.kind, "name": reference.implementation}
+        blocks.extend(
+            (
+                {"type": "state", "id": "state"},
+                {"type": "relationships", "id": "relationships"},
+                {"type": "instance-list", "id": "instances"},
+                {"type": "field-reference", "id": "fields"},
+            )
+        )
+    return parse_topic_contribution(
+        {
+            "topic": slug,
+            "title": reference.title or reference.target,
+            "summary": reference.summary or f"Schema reference for {reference.target}.",
+            "anchor": schema_anchor,
+            "blocks": blocks,
+            "related_topics": (),
+        },
+        f"schema:{slug}",
+    )
+
+
 def _dynamic_topic(registry: Registry | None, slug: str) -> TopicContribution:
     if slug in describable_targets():
-        reference = reference_for(slug)
-        schema_anchor: dict[str, str]
-        blocks: list[dict[str, object]] = []
-        if reference.overview is not None:
-            blocks.append({"type": "overview", "id": "overview", "markdown": reference.overview})
-        if reference.category == "declarable":
-            schema_anchor = {"type": "kind", "kind": reference.kind}
-            blocks.extend(
-                (
-                    {"type": "instance-list", "id": "inventory"},
-                    {"type": "field-reference", "id": "fields"},
-                    {"type": "sample", "id": "sample"},
-                )
-            )
-        elif reference.implementation is None:
-            schema_anchor = {"type": "kind", "kind": reference.kind}
-            blocks.extend(
-                (
-                    {"type": "field-reference", "id": "fields"},
-                    {"type": "instance-list", "id": "inventory"},
-                )
-            )
-        else:
-            schema_anchor = {"type": "implementation", "kind": reference.kind, "name": reference.implementation}
-            blocks.extend(
-                (
-                    {"type": "state", "id": "state"},
-                    {"type": "relationships", "id": "relationships"},
-                    {"type": "instance-list", "id": "instances"},
-                    {"type": "field-reference", "id": "fields"},
-                )
-            )
-        return parse_topic_contribution(
-            {
-                "topic": slug,
-                "title": reference.title or reference.target,
-                "summary": reference.summary or f"Schema reference for {reference.target}.",
-                "anchor": schema_anchor,
-                "blocks": blocks,
-                "related_topics": (),
-            },
-            f"schema:{slug}",
-        )
+        return _schema_topic(slug)
     if "/" not in slug:
         handler = KIND_REGISTRY[slug]
         return TopicContribution(
@@ -182,13 +188,30 @@ def _dynamic_topic(registry: Registry | None, slug: str) -> TopicContribution:
     )
 
 
-def _dynamic_names(registry: Registry | None) -> tuple[str, ...]:
-    candidates = set(describable_targets())
+def _build_schema_catalog(*, strict: bool = False) -> GuideCatalog:
+    """Build config-free schema topics, isolating one invalid target at a time."""
+    topics: list[TopicContribution] = []
+    issues: list[GuideCatalogIssue] = []
+    for target in describable_targets():
+        try:
+            topics.append(_schema_topic(target))
+        except GuideContributionError as error:
+            if strict:
+                raise
+            issues.append(GuideCatalogIssue(error))
+    return GuideCatalog(tuple(topics), tuple(issues))
+
+
+def _dynamic_names(registry: Registry | None, schema: GuideCatalog | None = None) -> tuple[str, ...]:
+    schema = schema or _build_schema_catalog()
+    schema_targets = frozenset(describable_targets())
+    candidates = set(schema.names())
     if registry is not None:
         candidates.update(
             f"{kind}/{name}"
             for kind in sorted(KIND_REGISTRY)
             for name, _resource in sorted(registry.iter_kind_items(kind))
+            if f"{kind}/{name}" not in schema_targets
         )
     return tuple(sorted(name for name in candidates if is_valid_topic_slug(name)))
 
@@ -249,6 +272,7 @@ def render_guide(
 ) -> GuideResponse:
     """Build and render one atomic guide request with fail-soft live facts."""
     authored = build_authored_catalog()
+    schema = _build_schema_catalog()
     requested = _normalize_requested(requested)
     if verification_evidence != ():
         if names_only:
@@ -277,7 +301,7 @@ def render_guide(
         system_error = error
 
     authored_names = frozenset(authored.names())
-    dynamic_names = _dynamic_names(registry)
+    dynamic_names = _dynamic_names(registry, schema)
     dynamic_only_names = tuple(name for name in dynamic_names if name not in authored_names)
     all_names = tuple(sorted(authored_names | frozenset(dynamic_only_names)))
     if names_only:
@@ -285,10 +309,19 @@ def render_guide(
 
     validated_slots: list[tuple[str, TopicContribution | str | None]] = []
     if requested:
-        rejected_topics = frozenset(issue.error.topic for issue in authored.issues if issue.error.topic is not None)
+        schema_names = frozenset(schema.names())
+        rejected_topics = frozenset(
+            issue.error.topic for issue in (*authored.issues, *schema.issues) if issue.error.topic is not None
+        )
         for slug in requested:
             if slug in authored_names:
                 validated_slots.append((slug, authored.lookup(slug)))
+                continue
+            if slug in schema_names:
+                validated_slots.append((slug, schema.lookup(slug)))
+                continue
+            if slug in rejected_topics:
+                validated_slots.append((slug, None))
                 continue
             kind = slug.split("/", 1)[0]
             if registry is not None:
@@ -299,9 +332,6 @@ def render_guide(
                     handler is not None and handler.category == "declarable" and slug.count("/") == 1
                 )
             if not valid_dynamic:
-                if slug in rejected_topics:
-                    validated_slots.append((slug, None))
-                    continue
                 raise _unknown(slug, all_names)
             validated_slots.append((slug, slug))
 
@@ -312,11 +342,18 @@ def render_guide(
     selected_topics = tuple(topic for _slug, topic in requested_slots if topic is not None)
 
     visible_issues = authored.issues
+    visible_schema_issues = schema.issues
     if requested:
-        visible_issues = tuple(issue for issue in authored.issues if issue.error.topic in requested)
-    runtime_issues: list[str] = []
+        visible_issues = tuple(issue for issue in visible_issues if issue.error.topic in requested)
+        visible_schema_issues = tuple(issue for issue in visible_schema_issues if issue.error.topic in requested)
+    runtime_issues = [str(issue.error) for issue in visible_schema_issues]
     if not requested_slots:
-        index_topics = tuple((*authored.topics, *(_dynamic_topic(registry, name) for name in dynamic_only_names)))
+        schema_dynamic_topics = tuple(topic for topic in schema.topics if topic.topic not in authored_names)
+        schema_dynamic_names = frozenset(str(topic.topic) for topic in schema_dynamic_topics)
+        runtime_dynamic_topics = tuple(
+            _dynamic_topic(registry, name) for name in dynamic_only_names if name not in schema_dynamic_names
+        )
+        index_topics = tuple((*authored.topics, *schema_dynamic_topics, *runtime_dynamic_topics))
         markdown = render_index(index_topics, mode)
     else:
         from agentworks.db import DatabaseDriverError
