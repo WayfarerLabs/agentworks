@@ -33,10 +33,12 @@ from agentworks.schema import (
     AgwModel,
     RefOwner,
     SecretRef,
+    StructuralUnion,
     extract_references,
     filled_defaults,
     model_is_complete,
     reference_marker_error,
+    structural_union_error,
 )
 from tests.plugins._fixtures import ConformingSecretBackend, ConformingVMPlatform
 
@@ -233,6 +235,34 @@ def test_every_marker_a_shipped_model_declares_sits_where_it_can_be_honored() ->
 
     faults = [f"{kind} {block}: {reason}" for kind, block, model in blocks if (reason := reference_marker_error(model))]
     assert not faults, "\n".join(faults)
+
+
+def test_every_structural_union_on_the_shipped_surface_is_a_true_one_of() -> None:
+    """The emitted ``oneOf`` must not reject a value ordinary union
+    validation accepts, including for marker-free arms."""
+    from agentworks.manifests.spec_model import declarable_kinds
+
+    blocks = [(kind, block, builder(kind)) for kind in declarable_kinds() for block, builder in _DOCUMENT_BLOCKS]
+    faults = [f"{kind} {block}: {reason}" for kind, block, model in blocks if (reason := structural_union_error(model))]
+    assert not faults, "\n".join(faults)
+
+
+def test_overlapping_structural_arms_are_refused_at_registration_without_markers() -> None:
+    class First(AgwModel):
+        value: str
+
+    class Second(AgwModel):
+        value: str
+        note: str | None = None
+
+    class Overlapping(AgwModel):
+        name: Literal["fixture-platform"]
+        source: Annotated[First | Second, StructuralUnion()]
+
+    reason = conformance_error(VM_PLATFORM, _impl(Overlapping))
+    assert reason is not None
+    assert "invalid structural union" in reason
+    assert "overlapping arms First and Second" in reason
 
 
 #: The two blocks of a kind document, by the function that builds each.

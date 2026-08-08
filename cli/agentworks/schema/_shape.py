@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Annotated, Final, TypeGuard, Union, get_args, get_origin
 
-from pydantic import BaseModel, Discriminator
+from pydantic import BaseModel, Discriminator, RootModel
 from pydantic.errors import PydanticSchemaGenerationError, PydanticUndefinedAnnotation
 from pydantic.fields import FieldInfo
 from pydantic.json_schema import SkipJsonSchema
@@ -32,6 +32,7 @@ from agentworks.schema.shorthand import (
     scalar_shorthand_of,
     union_scalar_resolution,
 )
+from agentworks.schema.structural import StructuralUnion
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -70,8 +71,8 @@ class FieldShape:
     A field is exactly one of: a marked scalar (``marker``), a collection
     of marked scalars or of models (``collection``, with ``item_marker``
     or ``item_model``), a nested block (``nested_model``), a
-    discriminated union (``arms``), or an ordinary scalar, which both
-    walkers treat as carrying no references.
+    tagged or structural model union (``arms`` / ``structural_arms``), or
+    an ordinary scalar, which both walkers treat as carrying no references.
     """
 
     annotation: object
@@ -199,6 +200,17 @@ class FieldShape:
     two derivations, one level down, and a reference marked inside such an
     element would be missing from the dependency graph."""
 
+    structural_arms: tuple[type[BaseModel], ...]
+    """The closed model arms of an explicitly structural untagged union.
+
+    Unlike :attr:`arms`, no operator-written tag selects one. A raw table
+    addresses an arm only when :func:`structural_arm_for` finds exactly one
+    arm whose required and allowed keys match it.
+    """
+
+    item_structural_arms: tuple[type[BaseModel], ...]
+    """:attr:`structural_arms` one collection-element level down."""
+
     @property
     def block(self) -> type[BaseModel] | None:
         """The model whose fields the field-documentation stream expands
@@ -292,6 +304,8 @@ def shape_of(field: FieldInfo) -> FieldShape:
     union_model: type[BaseModel] | None = None
     item_union_members: tuple[object, ...] = ()
     item_union_model: type[BaseModel] | None = None
+    structural_arms: tuple[type[BaseModel], ...] = ()
+    item_structural_arms: tuple[type[BaseModel], ...] = ()
 
     found = _collection_element(inner)
     if found is not None:
@@ -309,6 +323,9 @@ def shape_of(field: FieldInfo) -> FieldShape:
             if item_discriminator is not None:
                 item_arms = _arms_of(element, item_discriminator)
                 item_union_scalar_shorthand = _sole_union_scalar_shorthand(element_meta)
+            elif _has_structural_union(element_meta):
+                item_union_members = tuple(split_annotated(arg)[0] for arg in get_args(element))
+                item_structural_arms = _closed_model_arms(item_union_members)
             else:
                 item_union_members = tuple(split_annotated(arg)[0] for arg in get_args(element))
                 item_union_model = _sole_model(item_union_members)
@@ -327,6 +344,9 @@ def shape_of(field: FieldInfo) -> FieldShape:
             union_scalar_shorthand = _sole_union_scalar_shorthand(spine_metadata(field))
         elif _is_model(inner):
             nested_model = inner
+        elif _field_has_structural_union(field):
+            union_members = tuple(split_annotated(arg)[0] for arg in get_args(inner))
+            structural_arms = _closed_model_arms(union_members)
         else:
             union_members = tuple(split_annotated(arg)[0] for arg in get_args(inner))
             union_model = _sole_model(union_members)
@@ -357,7 +377,225 @@ def shape_of(field: FieldInfo) -> FieldShape:
         union_model=union_model,
         item_union_members=item_union_members,
         item_union_model=item_union_model,
+        structural_arms=structural_arms,
+        item_structural_arms=item_structural_arms,
     )
+
+
+@dataclass(frozen=True)
+class _ClosedShape:
+    """The key language one closed mapping-shaped model accepts."""
+
+    required: frozenset[str]
+    allowed: frozenset[str]
+
+
+def structural_arm_for(arms: tuple[type[BaseModel], ...], value: object) -> type[BaseModel] | None:
+    """The one structural arm ``value`` addresses, or ``None``.
+
+    Values do not participate. A wrong scalar inside an otherwise unique
+    arm still addresses that arm, then extraction omits the malformed edge
+    and validation reports the scalar error. Unknown keys, missing required
+    keys, and a key set accepted by several arms address nothing.
+    """
+    if not isinstance(value, Mapping) or not all(isinstance(key, str) for key in value):
+        return None
+    keys = frozenset(value)
+    matched = [arm for arm in arms if (shape := _closed_shape_of(arm)) is not None and _matches(shape, keys)]
+    return matched[0] if len(matched) == 1 else None
+
+
+def structurally_addressable_arms(arms: tuple[type[BaseModel], ...]) -> tuple[type[BaseModel], ...]:
+    """Every arm for which at least one unique accepted key set exists.
+
+    Registration conformance uses this as the static counterpart of
+    :func:`structural_arm_for`: a marker may live only in an arm the raw
+    walker can select for some document validation accepts.
+    """
+    return tuple(arm for arm in arms if _arm_is_addressable(arm, arms))
+
+
+def structural_union_error(model_cls: type[BaseModel]) -> str | None:
+    """Why a structural union under ``model_cls`` cannot mean ``oneOf``.
+
+    Pydantic validates an untagged union by trying its members, while the
+    emitted contract says exactly one arm may match. Registration calls
+    this guard so an open, malformed, or overlapping declaration is loud
+    even when every arm is marker-free.
+    """
+    return _structural_union_error(model_cls, ())
+
+
+def _structural_union_error(
+    model_cls: type[BaseModel],
+    visiting: tuple[type[BaseModel], ...],
+) -> str | None:
+    if model_cls in visiting:
+        return None
+    fields = model_fields_of(model_cls)
+    if fields is None:
+        return None
+    visiting = (*visiting, model_cls)
+    for name, field in fields.items():
+        own, elements = _structural_declarations(field)
+        declarations = (
+            (f"{model_cls.__name__}.{name}", own),
+            (f"{model_cls.__name__}.{name} elements", elements),
+        )
+        for location, members in declarations:
+            if members is None:
+                continue
+            reason = _structural_members_error(location, members)
+            if reason is not None:
+                return reason
+        for nested in models_in(field.annotation):
+            reason = _structural_union_error(nested, visiting)
+            if reason is not None:
+                return reason
+    return None
+
+
+def _structural_declarations(field: FieldInfo) -> tuple[tuple[object, ...] | None, tuple[object, ...] | None]:
+    """Structural-union member declarations on a field and its elements."""
+    inner, _optional = unwrap_optional(field.annotation)
+    inner, _own_metadata = split_annotated(inner)
+    own = tuple(split_annotated(arg)[0] for arg in get_args(inner)) if _field_has_structural_union(field) else None
+    found = _collection_element(inner)
+    if found is None:
+        return own, None
+    _collection, element = found
+    element, element_metadata = split_annotated(element)
+    elements = (
+        tuple(split_annotated(arg)[0] for arg in get_args(element)) if _has_structural_union(element_metadata) else None
+    )
+    return own, elements
+
+
+def _structural_members_error(location: str, members: tuple[object, ...]) -> str | None:
+    if len(members) < 2 or any(not _is_model(member) for member in members):
+        return f"{location} marks a structural union, but its members are not two or more model arms"
+    arms = tuple(member for member in members if _is_model(member))
+    for arm in arms:
+        if _closed_shape_of(arm) is None:
+            return f"{location} has open arm {arm.__name__}; every structural arm must be a closed mapping model"
+    for index, left in enumerate(arms):
+        for right in arms[index + 1 :]:
+            if _table_shapes_overlap(left, right):
+                return (
+                    f"{location} has overlapping arms {left.__name__} and {right.__name__}; "
+                    "their required and allowed keys must make every table match at most one"
+                )
+            if _scalar_shorthands_overlap(left, right):
+                return (
+                    f"{location} has overlapping scalar shorthands on {left.__name__} and "
+                    f"{right.__name__}; one scalar must match at most one arm"
+                )
+    return None
+
+
+def _table_shapes_overlap(left: type[BaseModel], right: type[BaseModel]) -> bool:
+    left_shape = _closed_shape_of(left)
+    right_shape = _closed_shape_of(right)
+    if left_shape is None or right_shape is None:
+        return False
+    return left_shape.required | right_shape.required <= left_shape.allowed & right_shape.allowed
+
+
+def _scalar_shorthands_overlap(left: type[BaseModel], right: type[BaseModel]) -> bool:
+    left_shorthand = scalar_shorthand_of(left)
+    right_shorthand = scalar_shorthand_of(right)
+    if left_shorthand is None or right_shorthand is None:
+        return False
+    annotations = {left_shorthand.annotation, right_shorthand.annotation}
+    return len(annotations) == 1 or annotations == {int, float}
+
+
+def _field_has_structural_union(field: FieldInfo) -> bool:
+    """Whether metadata on the field's own union declares the shape."""
+    _base, annotation_metadata = split_annotated(field.annotation)
+    return _has_structural_union([*field.metadata, *annotation_metadata])
+
+
+def _has_structural_union(metadata: list[object]) -> bool:
+    return any(isinstance(item, StructuralUnion) for item in metadata)
+
+
+def _closed_model_arms(members: tuple[object, ...]) -> tuple[type[BaseModel], ...]:
+    """All members as closed models, or no arms for a malformed declaration."""
+    models = tuple(member for member in members if _is_model(member))
+    if len(models) != len(members) or len(models) < 2:
+        return ()
+    return models if all(_closed_shape_of(model) is not None for model in models) else ()
+
+
+def _closed_shape_of(model: type[BaseModel]) -> _ClosedShape | None:
+    """The required and allowed field names of one closed model arm."""
+    if issubclass(model, RootModel) or model.model_config.get("extra") != "forbid":
+        return None
+    fields = model_fields_of(model)
+    if fields is None:
+        return None
+    required = frozenset(
+        name
+        for name, field in fields.items()
+        if field.is_required()
+        and not ((marker := marker_of(field)) is not None and marker.default_template is not None)
+    )
+    return _ClosedShape(required=required, allowed=frozenset(fields))
+
+
+def _matches(shape: _ClosedShape, keys: frozenset[str]) -> bool:
+    return shape.required <= keys <= shape.allowed
+
+
+def _arm_is_addressable(arm: type[BaseModel], arms: tuple[type[BaseModel], ...]) -> bool:
+    """Whether the arm's accepted key language has a unique member."""
+    shape = _closed_shape_of(arm)
+    if shape is None:
+        return False
+    competitors = tuple(other for other in arms if other is not arm and _closed_shape_of(other) is not None)
+    clauses: list[tuple[tuple[str, bool], ...]] = []
+    for other in competitors:
+        other_shape = _closed_shape_of(other)
+        if other_shape is None:
+            continue
+        if other_shape.required - shape.allowed or shape.required - other_shape.allowed:
+            continue
+        choices = tuple(
+            [(key, False) for key in other_shape.required - shape.required]
+            + [(key, True) for key in shape.allowed - other_shape.allowed]
+        )
+        if not choices:
+            return False
+        clauses.append(choices)
+    return _clauses_are_satisfiable(clauses, set(shape.required), set())
+
+
+def _clauses_are_satisfiable(
+    clauses: list[tuple[tuple[str, bool], ...]],
+    included: set[str],
+    excluded: set[str],
+) -> bool:
+    """Small monotone SAT solver for structural-arm addressability."""
+    remaining: list[tuple[tuple[str, bool], ...]] = []
+    for clause in clauses:
+        if any((key in included) if present else (key in excluded) for key, present in clause):
+            continue
+        available = tuple(
+            (key, present) for key, present in clause if (key not in excluded if present else key not in included)
+        )
+        if not available:
+            return False
+        remaining.append(available)
+    if not remaining:
+        return True
+    choice = min(remaining, key=len)
+    for key, present in choice:
+        next_included = included | {key} if present else included
+        next_excluded = excluded if present else excluded | {key}
+        if _clauses_are_satisfiable(remaining, next_included, next_excluded):
+            return True
+    return False
 
 
 def is_hidden(field: FieldInfo) -> bool:
@@ -763,9 +1001,27 @@ def accepted_annotation(
     (:func:`~agentworks.schema.reference_marker_error` refuses it at
     registration), so there is no depth for this widening to reach.
     """
+    return _accepted_annotation(
+        annotation,
+        marker,
+        (),
+        discriminator=discriminator,
+        union_scalar_shorthand=union_scalar_shorthand,
+    )
+
+
+def _accepted_annotation(
+    annotation: object,
+    marker: RefMarker | None,
+    expanding_roots: tuple[type[BaseModel], ...],
+    *,
+    discriminator: str | None = None,
+    union_scalar_shorthand: UnionScalarShorthand | None = None,
+) -> object:
+    """Implementation of :func:`accepted_annotation` with a root guard."""
     stripped = strip_markers(annotation)
     if discriminator is None:
-        widened = _widened(stripped)
+        widened = _widened(stripped, expanding_roots)
     else:
         # A tagged union chooses its arm before an arm model validates.
         # Therefore an arm's own scalar shorthand does not widen the
@@ -798,17 +1054,29 @@ def element_annotation(annotation: object) -> object | None:
     return None if found is None else found[1]
 
 
-def _widened(annotation: object) -> object:
+def _widened(annotation: object, expanding_roots: tuple[type[BaseModel], ...]) -> object:
     """:func:`accepted_annotation`'s recursion, over an annotation whose
     markers are already stripped."""
     base, metadata = split_annotated(annotation)
-    shorthand = scalar_shorthand_of(base)
-    if shorthand is not None:
+    widened: object
+    if _is_model(base) and issubclass(base, RootModel) and base not in expanding_roots:
+        fields = model_fields_of(base)
+        root = fields.get("root") if fields is not None else None
+        widened = base
+        if root is not None:
+            widened = _accepted_annotation(
+                root.annotation,
+                marker_of(root),
+                (*expanding_roots, base),
+                discriminator=_discriminator_of(root),
+                union_scalar_shorthand=_sole_union_scalar_shorthand(spine_metadata(root)),
+            )
+    elif (shorthand := scalar_shorthand_of(base)) is not None:
         # The shorthand first, so the rendered type leads with the form
         # nearly every operator writes.
-        widened: object = Union[shorthand.annotation, base]  # noqa: UP007
+        widened = Union[shorthand.annotation, base]  # noqa: UP007
     else:
-        widened = _rebuilt_arguments(base, _widened)
+        widened = _rebuilt_arguments(base, lambda arg: _widened(arg, expanding_roots))
     if metadata:
         return Annotated[(widened, *metadata)]
     return widened

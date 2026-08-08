@@ -1,0 +1,40 @@
+"""The declaration that an untagged model union is selected by table shape.
+
+``StructuralUnion`` is metadata on an ``Annotated`` union. Validation stays
+Pydantic's ordinary untagged-union validation; the declaration tells the
+schema walkers that a raw table may address one of the closed model arms by
+its required and allowed keys. It also emits the alternatives as ``oneOf``:
+the shapes are mutually exclusive by declaration, and ``anyOf`` would hide
+that operator-facing fact from editors.
+
+The metadata is intentionally content-free. Required and allowed keys remain
+facts of the arm models, so changing an arm changes validation, traversal,
+and emitted schema without updating a parallel selector table.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pydantic import GetJsonSchemaHandler
+    from pydantic.json_schema import JsonSchemaValue
+    from pydantic_core import CoreSchema
+
+
+@dataclass(frozen=True)
+class StructuralUnion:
+    """Mark an untagged union of closed models as shape-addressable."""
+
+    def __get_pydantic_json_schema__(
+        self,
+        core_schema: CoreSchema,
+        handler: GetJsonSchemaHandler,
+    ) -> JsonSchemaValue:
+        """Render Pydantic's untagged alternatives as a plain ``oneOf``."""
+        schema = handler(core_schema)
+        alternatives = schema.pop("anyOf", None)
+        if alternatives is not None:
+            schema["oneOf"] = alternatives
+        return schema

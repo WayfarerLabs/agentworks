@@ -50,7 +50,7 @@ here as ``PydanticValidationError`` and this module produces
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import cache
 from typing import TYPE_CHECKING, Final
 
@@ -58,7 +58,14 @@ from pydantic import RootModel
 
 from agentworks.errors import ConfigError
 from agentworks.path_rendering import format_host_path
-from agentworks.schema._shape import Collection, is_hidden, is_model, model_fields_of, shape_of
+from agentworks.schema._shape import (
+    Collection,
+    is_hidden,
+    is_model,
+    model_fields_of,
+    shape_of,
+    structural_arm_for,
+)
 from agentworks.source_location import SYNTHESIZED_PATH
 
 if TYPE_CHECKING:
@@ -213,6 +220,15 @@ class _Problem:
     inner union would leave the outer union's own arm noise in a group
     by itself, with nothing in it to reveal the arm noise as noise."""
 
+    structural_arms: tuple[type[BaseModel], ...] = ()
+    """The structural union this problem belongs to, when it does."""
+
+    union_member: type[BaseModel] | None = None
+    """The model arm whose validation produced this problem."""
+
+    union_input: object = None
+    """The raw value all member reports of this union share."""
+
     def render(self) -> str:
         text = f"{self.path}: {self.message}" if self.path else self.message
         return f"{text} (inherited from {self.inherited_from})" if self.inherited_from else text
@@ -240,6 +256,9 @@ def _problem(
         inherited_from=_inherited_from(address.path, owner, provenance),
         alternatives=_alternatives(detail) if address.at_union else (),
         union_path=address.union_path,
+        structural_arms=address.structural_arms,
+        union_member=address.union_member,
+        union_input=detail.get("input"),
     )
 
 
@@ -278,11 +297,81 @@ def _collapsed(problems: list[_Problem]) -> list[_Problem]:
     outer union's. Its arm noise is still dropped when an outer member
     got further, which is the case that matters.
     """
+    problems = _collapsed_structural(problems)
     entered = {
         problem.union_path for problem in problems if problem.union_path is not None and not problem.alternatives
     }
     answered = [problem for problem in problems if not problem.alternatives or problem.union_path not in entered]
     return _merged_alternatives(answered)
+
+
+def _collapsed_structural(problems: list[_Problem]) -> list[_Problem]:
+    """A structural union's member reports as one model-derived answer."""
+    groups: dict[tuple[str, tuple[type[BaseModel], ...]], list[_Problem]] = {}
+    for problem in problems:
+        if problem.union_path is not None and problem.structural_arms:
+            groups.setdefault((problem.union_path, problem.structural_arms), []).append(problem)
+    if not groups:
+        return problems
+    collapsed: list[_Problem] = []
+    emitted: set[tuple[str, tuple[type[BaseModel], ...]]] = set()
+    for problem in problems:
+        if problem.union_path is None or not problem.structural_arms:
+            collapsed.append(problem)
+            continue
+        key = (problem.union_path, problem.structural_arms)
+        if key in emitted:
+            continue
+        emitted.add(key)
+        group = groups[key]
+        raw = next((item.union_input for item in group if isinstance(item.union_input, Mapping)), problem.union_input)
+        problem = replace(problem, union_input=raw)
+        if not isinstance(problem.union_input, Mapping):
+            inferred = {
+                item.path.rsplit(".", 1)[-1]
+                for item in group
+                if item.message.startswith("unknown field; expected one of:")
+            }
+            allowed = {name for arm in problem.structural_arms for name in arm.model_fields}
+            if inferred and inferred <= allowed and len(inferred) == len(group):
+                collapsed.extend(_structural_shape_problems(replace(problem, union_input=dict.fromkeys(inferred))))
+                continue
+            collapsed.extend(group)
+            continue
+        selected = structural_arm_for(problem.structural_arms, problem.union_input)
+        if selected is not None:
+            collapsed.extend(item for item in group if item.union_member is selected)
+            continue
+        collapsed.extend(_structural_shape_problems(problem))
+    return collapsed
+
+
+def _structural_shape_problems(problem: _Problem) -> list[_Problem]:
+    """Useful errors for a table whose keys identify no structural arm."""
+    fields = {name for arm in problem.structural_arms for name in arm.model_fields}
+    value = problem.union_input
+    keys = set(value) if isinstance(value, Mapping) and all(isinstance(key, str) for key in value) else set()
+    unknown = sorted(keys - fields)
+    if unknown:
+        expected = ", ".join(sorted(fields))
+        return [
+            _Problem(
+                path=".".join(filter(None, (problem.union_path, name))),
+                message=f"unknown field; expected one of: {expected}",
+                inherited_from=problem.inherited_from,
+            )
+            for name in unknown
+        ]
+    alternatives = []
+    for arm in problem.structural_arms:
+        required = []
+        for name, field in arm.model_fields.items():
+            marker = shape_of(field).marker
+            if field.is_required() and not (marker is not None and marker.default_template is not None):
+                required.append(name)
+        alternatives.append(" + ".join(required) or "no required fields")
+    message = "must match exactly one table shape; required fields by alternative: " + " or ".join(alternatives)
+    return [_Problem(path=problem.union_path or "", message=message, inherited_from=problem.inherited_from)]
 
 
 def _merged_alternatives(problems: list[_Problem]) -> list[_Problem]:
@@ -728,6 +817,8 @@ class _AtUnion:
 
     members: tuple[object, ...]
 
+    structural_arms: tuple[type[BaseModel], ...] = ()
+
 
 @dataclass(frozen=True)
 class _AtElement:
@@ -748,6 +839,9 @@ class _AtElement:
     item_discriminator: str | None = None
     """:attr:`_AtTag.discriminator` one level down: the tag field an
     ELEMENT is dispatched on."""
+
+    item_structural_arms: tuple[type[BaseModel], ...] = ()
+    """Structural union arms one collection-element level down."""
 
     mapping: bool = False
     """Whether the elements are addressed by an operator-written KEY.
@@ -803,6 +897,9 @@ class _Address:
     discriminator: str | None = None
     """The tag field of that union (``mode``), or ``None``."""
 
+    structural_arms: tuple[type[BaseModel], ...] = ()
+    union_member: type[BaseModel] | None = None
+
 
 def _resolve_path(model_cls: type[BaseModel], loc: tuple[int | str, ...]) -> _Address:
     """``loc`` as the address the operator can act on.
@@ -817,6 +914,8 @@ def _resolve_path(model_cls: type[BaseModel], loc: tuple[int | str, ...]) -> _Ad
     container: type[BaseModel] | None = None
     at_union = False
     union_path: str | None = None
+    structural_arms: tuple[type[BaseModel], ...] = ()
+    union_member: type[BaseModel] | None = None
     after_mapping_key = False
     last = len(loc) - 1
     for index, segment in enumerate(loc):
@@ -829,12 +928,16 @@ def _resolve_path(model_cls: type[BaseModel], loc: tuple[int | str, ...]) -> _Ad
             continue
         container = cursor.model if isinstance(cursor, _AtModel) else None
         at_union = isinstance(cursor, _AtUnion)
-        if at_union and union_path is None:
+        if isinstance(cursor, _AtUnion) and union_path is None:
             # The segment about to be consumed is a member LABEL, so the
             # path built so far is the union's own address, whether this
             # error stops here or continues inside the member. First one
             # wins: see ``_Problem.union_path`` for why outermost.
             union_path = ".".join(parts)
+            structural_arms = cursor.structural_arms
+        if isinstance(cursor, _AtUnion) and isinstance(segment, str) and union_member is None:
+            candidate = next((m for m in cursor.members if getattr(m, "__name__", None) == segment), None)
+            union_member = candidate if is_model(candidate) else None
         after_mapping_key = isinstance(cursor, _AtElement) and cursor.mapping
         keep, cursor = _advance(cursor, segment)
         if not keep:
@@ -854,6 +957,8 @@ def _resolve_path(model_cls: type[BaseModel], loc: tuple[int | str, ...]) -> _Ad
         # walk on the arms they name.
         arms=cursor.arms if isinstance(cursor, _AtTag) else (),
         discriminator=cursor.discriminator if isinstance(cursor, _AtTag) else None,
+        structural_arms=structural_arms,
+        union_member=union_member,
     )
 
 
@@ -890,13 +995,16 @@ def _advance(cursor: _Cursor, segment: int | str) -> tuple[bool, _Cursor]:
         # The walk continues inside a member it can name, which is what
         # keeps that member's field list available.
         member = next((m for m in cursor.members if getattr(m, "__name__", None) == segment), None)
-        return False, _AtModel(member) if is_model(member) else None
+        return False, _initial_cursor(member) if is_model(member) else None
     if isinstance(cursor, _AtElement):
         if cursor.item_model is not None:
-            return True, _AtModel(cursor.item_model)
+            return True, _initial_cursor(cursor.item_model)
         if cursor.item_arms:
             return True, _AtTag(cursor.item_arms, cursor.item_discriminator)
-        return True, _AtUnion(cursor.item_union_members) if cursor.item_union_members else None
+        return (
+            True,
+            _AtUnion(cursor.item_union_members, cursor.item_structural_arms) if cursor.item_union_members else None,
+        )
     if isinstance(cursor, _AtModel) and isinstance(segment, str):
         fields = model_fields_of(cursor.model)
         field = fields.get(segment) if fields is not None else None
@@ -907,19 +1015,20 @@ def _advance(cursor: _Cursor, segment: int | str) -> tuple[bool, _Cursor]:
 def _cursor_for(shape: FieldShape) -> _Cursor:
     """Where a walk stands once it has entered a field of this shape."""
     if shape.nested_model is not None:
-        return _AtModel(shape.nested_model)
+        return _initial_cursor(shape.nested_model)
     if shape.collection is not None:
         return _AtElement(
             shape.item_model,
             item_union_members=shape.item_union_members,
             item_arms=shape.item_arms,
             item_discriminator=shape.item_discriminator,
+            item_structural_arms=shape.item_structural_arms,
             mapping=shape.collection is Collection.MAPPING,
         )
     if shape.arms:
         return _AtTag(shape.arms, shape.discriminator)
     if shape.union_members:
-        return _AtUnion(shape.union_members)
+        return _AtUnion(shape.union_members, shape.structural_arms)
     return None
 
 

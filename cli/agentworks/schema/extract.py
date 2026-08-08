@@ -65,6 +65,7 @@ from agentworks.schema._shape import (
     addressed_arm_model,
     model_fields_of,
     shape_of,
+    structural_arm_for,
     table_addresses_block,
 )
 from agentworks.schema.reference import ConfigReference
@@ -186,6 +187,8 @@ def _below(node: _Node) -> Iterator[_Node]:
             yield _Block(model=shape.nested_model, blob=value)
         elif shape.arms and shape.discriminator is not None:
             yield from _arm_block(shape.arms, shape.discriminator, shape.union_scalar_shorthand, value)
+        elif shape.structural_arms:
+            yield from _structural_block(shape.structural_arms, value)
         elif shape.union_model is not None:
             yield from _union_block(shape.union_model, shape.union_members, value)
 
@@ -257,6 +260,8 @@ def _collection_nodes(shape: FieldShape, value: object) -> Iterator[_Node]:
                 shape.item_union_scalar_shorthand,
                 element,
             )
+        elif shape.item_structural_arms:
+            yield from _structural_block(shape.item_structural_arms, element)
         elif shape.item_union_model is not None:
             yield from _union_block(shape.item_union_model, shape.item_union_members, element)
 
@@ -301,6 +306,13 @@ def _arm_block(
         shorthand = scalar_shorthand_of(model)
         blob = value if shorthand is None else shorthand.folded(value)
         yield _Block(model=model, blob=blob)
+
+
+def _structural_block(arms: tuple[type[BaseModel], ...], value: object) -> Iterator[_Block]:
+    """The one closed arm a raw table's required and allowed keys select."""
+    arm = structural_arm_for(arms, value)
+    if arm is not None:
+        yield _Block(model=arm, blob=value)
 
 
 def _union_block(model: type[BaseModel], members: tuple[object, ...], value: object) -> Iterator[_Block]:

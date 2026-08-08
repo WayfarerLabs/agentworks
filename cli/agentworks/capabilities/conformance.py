@@ -27,6 +27,7 @@ from agentworks.errors import StateError
 from agentworks.schema import (
     model_is_complete,
     reference_marker_error,
+    structural_union_error,
     union_scalar_shorthand_error,
 )
 
@@ -204,6 +205,9 @@ def _config_model_error(descriptor: CapabilityKindDescriptor, impl: type) -> str
             f"its config_model {model.__name__} cannot be built (an unresolved annotation?), "
             f"so nothing could validate or extract references against it"
         )
+    union_shape = structural_union_error(model)
+    if union_shape is not None:
+        return f"its config_model declares an invalid structural union: {union_shape}"
     placement = reference_marker_error(model)
     if placement is not None:
         # A misplaced marker is the silent kind: the model builds, the

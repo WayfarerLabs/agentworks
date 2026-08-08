@@ -2,7 +2,8 @@
 
 One authored source: the pydantic model graph. `AgwModel` and `AgwRootModel` subclasses, their
 `RefMarker` annotations, their `scalar_shorthand` declarations, their docstrings, and their `Field`
-metadata. Every other statement about a resource's shape in this codebase is DERIVED from that
+metadata, including an explicit `StructuralUnion` where closed arms are selected by required and
+allowed keys. Every other statement about a resource's shape in this codebase is DERIVED from that
 graph, and none of them is allowed to be authored a second time.
 [ADR 0023](../../../docs/adrs/0023-declared-schemas-and-the-kind-descriptor.md) records the
 decision; [`../capabilities/README.md`](../capabilities/README.md) tells a capability author how to
@@ -17,20 +18,20 @@ consumer; it is adding N new pairs that have to agree.
 
 Each of these walks the model graph itself, so each can be wrong on its own.
 
-|     | Derivation                                              | Where                                                                                                                                          | What it walks with                                                                        |
-| --- | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| D1  | Loader validation                                       | `manifests/decode.py`, `manifests/envelope.py`, `capabilities/config.py`                                                                       | pydantic, plus the shorthand-fold before-validator in `base.py`, over the D5-filled blob  |
-| D2  | Emitted JSON Schema                                     | `manifests/emit.py`, `AgwModel.__get_pydantic_json_schema__`, `RefMarker.__get_pydantic_json_schema__`, `_ManifestJsonSchema`                  | `model_json_schema` plus three correction layers                                          |
-| D3  | Field-documentation stream                              | `fields.py::iter_field_docs`                                                                                                                   | the classifier (`_shape.py::shape_of`, `accepted_annotation`)                             |
-| D4  | Reference extraction, which builds the dependency graph | `extract.py::extract_references`                                                                                                               | the same classifier, over RAW blobs, before validation                                    |
-| D5  | Owner-template default fill                             | `fill.py::filled_defaults`, run at the boundaries (decode, the capability config core)                                                         | the same classifier, rewriting the raw blob BEFORE D1 and D4 read it                      |
-| D6  | The error bridge                                        | `errors.py::_resolve_path`                                                                                                                     | re-walks the model beside pydantic's `loc`                                                |
-| D7  | Registration conformance                                | `base.py::reference_marker_error`, `_shape.py::model_is_complete`, `shorthand.py::shorthand_field_error`, run by `capabilities/conformance.py` | the guard derivation: its job is making the other walkers' blind spots loud               |
-| D8  | Readiness probes over raw config                        | `capabilities/vm_platform/lima.py::not_ready` and kin                                                                                          | a hand-rolled read, deliberately non-constructing                                         |
-| D9  | Retired-shape advice                                    | `capabilities/retired_shapes.py`, decode's sibling-shape refusal                                                                               | hand-authored knowledge of BOTH the old shape and the live model                          |
-| D10 | Guides and READMEs                                      | `docs/guides/`, capability `prose` ClassVars                                                                                                   | prose restating model facts, including pasted console output                              |
-| D11 | The envelope's own document validation                  | `manifests/envelope.py`                                                                                                                        | kept deliberately beside D2's `_document_model`; the shared fact is the top-level key set |
-| D12 | The YAML 1.1 spelling tables                            | `emit.py::YAML_11_ONLY_BOOLEANS` and `_INTEGERS`                                                                                               | pyyaml's own resolver, restating what D1's parser accepts                                 |
+|     | Derivation                                              | Where                                                                                                                                | What it walks with                                                                        |
+| --- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------- |
+| D1  | Loader validation                                       | `manifests/decode.py`, `manifests/envelope.py`, `capabilities/config.py`                                                             | pydantic, plus scalar shorthand folding, over the D5-filled blob                          |
+| D2  | Emitted JSON Schema                                     | `manifests/emit.py`, model and marker schema hooks, `_ManifestJsonSchema`                                                            | `model_json_schema` plus marker, shorthand, structural-union, and YAML corrections        |
+| D3  | Field-documentation stream                              | `fields.py::iter_field_docs`                                                                                                         | the classifier (`_shape.py::shape_of`, `accepted_annotation`)                             |
+| D4  | Reference extraction, which builds the dependency graph | `extract.py::extract_references`                                                                                                     | the same classifier, over RAW blobs, before validation                                    |
+| D5  | Owner-template default fill                             | `fill.py::filled_defaults`, run at the boundaries (decode, the capability config core)                                               | the same classifier, rewriting the raw blob BEFORE D1 and D4 read it                      |
+| D6  | The error bridge                                        | `errors.py::_resolve_path`                                                                                                           | re-walks the model beside pydantic's `loc`                                                |
+| D7  | Registration conformance                                | `base.py::reference_marker_error`, `_shape.py::model_is_complete` and `structural_union_error`, run by `capabilities/conformance.py` | the guard derivation: its job is making the other walkers' blind spots loud               |
+| D8  | Readiness probes over raw config                        | `capabilities/vm_platform/lima.py::not_ready` and kin                                                                                | a hand-rolled read, deliberately non-constructing                                         |
+| D9  | Retired-shape advice                                    | `capabilities/retired_shapes.py`, decode's sibling-shape refusal                                                                     | hand-authored knowledge of BOTH the old shape and the live model                          |
+| D10 | Guides and READMEs                                      | `docs/guides/`, capability `prose` ClassVars                                                                                         | prose restating model facts, including pasted console output                              |
+| D11 | The envelope's own document validation                  | `manifests/envelope.py`                                                                                                              | kept deliberately beside D2's `_document_model`; the shared fact is the top-level key set |
+| D12 | The YAML 1.1 spelling tables                            | `emit.py::YAML_11_ONLY_BOOLEANS` and `_INTEGERS`                                                                                     | pyyaml's own resolver, restating what D1's parser accepts                                 |
 
 **Dependent derivations** consume D3 rather than the models, so they cannot drift from it
 separately: the field tree (`manifests/field_tree.py`) and, through it, `describe-kind`, the
@@ -50,6 +51,11 @@ A pair that should agree and has no comparator is a hole whether or not it curre
   it validates a blob, asserts D4 finds no edge in it, and asserts D7 refuses the model. The middle
   assertion is a premise check, so the test fails loudly rather than vacuously if D4 ever grows to
   reach the shape.
+- **D7 against D1 and D2** also guards structural unions. `StructuralUnion` emits `oneOf`, so an
+  open or overlapping arm declaration would let ordinary union validation accept a table the schema
+  rejects. `structural_union_error` refuses that declaration at registration even when its arms
+  carry no reference markers; the shipped-surface sweep and marker-reachability tests cover both
+  halves.
 - **D2 against D1** is guarded by
   `tests/manifests/test_emit.py::test_emitted_schemas_accept_every_document_the_full_load_path_accepts`,
   which runs every uncommented sample through the FULL load path (registry build included, since

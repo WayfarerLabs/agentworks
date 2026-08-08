@@ -41,6 +41,7 @@ from agentworks.schema._shape import (
     model_fields_of,
     models_in,
     shape_of,
+    structurally_addressable_arms,
     table_addresses_block,
 )
 from agentworks.schema.markers import REF_SCHEMA_KEY
@@ -518,6 +519,8 @@ def _reachable_models(shape: FieldShape) -> tuple[type[BaseModel], ...]:
         _addressable_block(shape.item_union_model, shape.item_union_members),
         *(arm.model for arm in shape.arms),
         *(arm.model for arm in shape.item_arms),
+        *structurally_addressable_arms(shape.structural_arms),
+        *structurally_addressable_arms(shape.item_structural_arms),
     )
     return tuple(model for model in models if model is not None)
 

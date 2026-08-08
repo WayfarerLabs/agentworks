@@ -25,6 +25,8 @@ hand-validated lives here:
 - :func:`iter_field_docs`, the ordered field-reference stream every human
   presentation of a model derives from, and :func:`render_type` beside
   it for the presenters that want our type rendering.
+- :class:`StructuralUnion`, the declaration that an untagged union of
+  closed model arms is addressed by each arm's required and allowed keys.
 - :func:`config_error_from`, the bridge from a pydantic
   ``ValidationError`` to the owner-framed, located text an operator
   reads.
@@ -55,6 +57,7 @@ from agentworks.schema._shape import (
     element_annotation,
     marker_of,
     model_is_complete,
+    structural_union_error,
     union_scalar_shorthand_error,
 )
 from agentworks.schema.base import (
@@ -92,6 +95,7 @@ from agentworks.schema.markers import (
     SecretRef,
 )
 from agentworks.schema.shorthand import ScalarShorthand, UnionScalarShorthand
+from agentworks.schema.structural import StructuralUnion
 
 __all__ = [
     "MAPPING_KEY",
@@ -111,6 +115,7 @@ __all__ = [
     "ResourceRef",
     "ScalarShorthand",
     "SecretRef",
+    "StructuralUnion",
     "UnionScalarShorthand",
     "UnionArm",
     "config_error_from",
@@ -125,5 +130,6 @@ __all__ = [
     "model_is_complete",
     "reference_marker_error",
     "render_type",
+    "structural_union_error",
     "union_scalar_shorthand_error",
 ]
