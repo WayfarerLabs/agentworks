@@ -220,12 +220,15 @@ def _migration_actions() -> tuple[GuideAction, ...]:
             (),
             ConsentBoundary.EXAMINE_WORKSTATION,
             ("agw", "doctor"),
-            "Run the human report first and use its Configuration-group Manifest rows for precise diagnostics. "
-            "It may exit 1 while retained TOML sections remain. Run the JSON verification even after that exit "
-            "1, and parse its one document even when it also exits 1. Before recording VERIFIED, require "
-            "schema_version is the integer 1, command is exactly doctor, data is an object, data.groups contains "
-            "the Configuration group, and that group has no check named Manifest with status warn or fail. JSON "
-            "message and hint fields are redacted evidence, not the source of precise manifest detail.",
+            "Run the human report first. Its Configuration-group Config failure must be the expected migration "
+            "hard error: it says config.toml declares resources, says config.toml is settings only now, and "
+            "names the retained sections. Use its Manifest and Resource registry rows for precise diagnostics. "
+            "The human command may exit 1 for that expected Config failure. Run the JSON verification even after "
+            "that exit 1, and parse its one document even when it also exits 1. Before recording VERIFIED, "
+            "require schema_version is the integer 1, command is exactly doctor, data is an object, data.groups "
+            "contains the Configuration group, and that group has no check named Manifest or Resource registry "
+            "with status warn or fail. Machine-safe JSON cannot distinguish the expected Config failure from "
+            "another config failure; its message and hint fields prove structure, not precise diagnostic detail.",
             ("agw", "doctor", "--output", "json"),
             "Leave the edit unverified, keep every retired TOML section, and block cutover.",
         ),

@@ -123,11 +123,16 @@ def test_migration_actions_make_inventory_backups_and_verification_distinct() ->
     assert validation.command == ("agw", "doctor")
     assert validation.verification == ("agw", "doctor", "--output", "json")
     assert "human report first" in validation.expected_state
-    assert "may exit 1 while retained TOML sections remain" in validation.expected_state
+    assert "config.toml declares resources" in validation.expected_state
+    assert "config.toml is settings only now" in validation.expected_state
+    assert "names the retained sections" in validation.expected_state
+    assert "may exit 1 for that expected Config failure" in validation.expected_state
     assert "parse its one document even when it also exits 1" in validation.expected_state
     assert "data.groups contains the Configuration group" in validation.expected_state
-    assert "no check named Manifest with status warn or fail" in validation.expected_state
-    assert "redacted evidence" in validation.expected_state
+    assert "no check named Manifest or Resource registry" in validation.expected_state
+    assert "with status warn or fail" in validation.expected_state
+    assert "cannot distinguish the expected Config failure" in validation.expected_state
+    assert "prove structure, not precise diagnostic detail" in validation.expected_state
 
     comparison = by_id["compare-operator-inventory"]
     assert comparison.consent is ConsentBoundary.EXAMINE_WORKSTATION
@@ -279,6 +284,13 @@ def test_migration_teaching_covers_cutover_validation_backends_and_auth_choices(
         "without changing the baseline",
         "one manifest at a time",
         "after each edit",
+        "must say that `config.toml` declares resources",
+        "`config.toml` is settings only now",
+        "name the retained sections",
+        "`Resource registry` rows for precise diagnostics",
+        "no check named `Manifest` or `Resource registry`",
+        "cannot distinguish the expected retained-section Config failure",
+        "prove report structure, not precise diagnostic detail",
         "`[secret_backends.*]`",
         "`[secret_config].backends`",
         "Inspect every pre-existing and TOML-derived site manifest",

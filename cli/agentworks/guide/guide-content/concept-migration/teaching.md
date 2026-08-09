@@ -57,16 +57,19 @@ Write one manifest at a time at its pre-recorded intended path while leaving eve
 section in place. The edit must consume its existing expected identity without changing the
 baseline. Use the manifest kind's sample and field reference. When the manifest contains tagged
 capability configuration, use that implementation's separate `kind/name` field reference. Run
-`agw doctor` after each edit and use its human `Configuration` group and `Manifest` rows for precise
-diagnostics. The command may exit `1` while the retained TOML sections continue to produce their
-expected configuration failure. Even after that exit, run `agw doctor --output json`; parse its one
-JSON document even when the verification also exits `1`. Require `schema_version` to be the integer
-`1`, `command` to equal `doctor`, `data` to be an object, `data.groups` to contain the
-`Configuration` group, and that group to contain no `Manifest` check with status `warn` or `fail`
-before recording the action as verified. JSON `message` and `hint` are intentionally redacted, so
-never treat them as replacements for the human report's manifest detail. Fix closed-world fields,
-strict types, non-nullable nulls, and retired sibling capability shapes from that precise human
-error and the live field reference.
+`agw doctor` after each edit. Its human `Configuration` group's `Config` failure must be the
+expected migration hard error: it must say that `config.toml` declares resources, say that
+`config.toml` is settings only now, and name the retained sections. Use the human `Manifest` and
+`Resource registry` rows for precise diagnostics. The command may exit `1` for that expected
+retained-section failure. Even after that exit, run `agw doctor --output json`; parse its one JSON
+document even when the verification also exits `1`. Require `schema_version` to be the integer `1`,
+`command` to equal `doctor`, `data` to be an object, `data.groups` to contain the `Configuration`
+group, and that group to contain no check named `Manifest` or `Resource registry` with status `warn`
+or `fail` before recording the action as verified. Machine-safe JSON cannot distinguish the expected
+retained-section Config failure from another Config failure; its redacted `message` and `hint`
+fields prove report structure, not precise diagnostic detail. Fix closed-world fields, strict types,
+non-nullable nulls, retired sibling capability shapes, and reference or cycle failures from the
+precise human rows and the live field reference.
 
 The `edit-one-manifest` mutation applies to both pre-existing manifests and manifests derived from
 retired TOML. If validation reports a written legacy `service_principal`, `credentials`, or
