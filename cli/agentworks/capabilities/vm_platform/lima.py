@@ -7,6 +7,7 @@ import contextlib
 import json
 import re
 import shlex
+import sys
 import textwrap
 
 # Imported at RUNTIME, not just for typing: not_ready reads an unvalidated
@@ -374,7 +375,7 @@ class LimaPlatform(VMPlatform):
         # that was never made.
         try:
             if self.is_remote:
-                self._create_remote(instance_name, rendered)
+                self._create_remote(instance_name, rendered, log_vm_name=request.vm_name)
             else:
                 self._create_local(instance_name, rendered)
 
@@ -535,6 +536,8 @@ class LimaPlatform(VMPlatform):
         self,
         instance_name: str,
         lima_yaml: str,
+        *,
+        log_vm_name: str,
     ) -> None:
         """Create and start a Lima VM on the site's placement host.
 
@@ -561,7 +564,10 @@ class LimaPlatform(VMPlatform):
             from agentworks.remote_exec import run_detached
             from agentworks.ssh import SSHLogger
 
-            ssh_logger = SSHLogger(instance_name, "vm-provision")
+            # SSH log ownership follows the DB VM identity used by normal VM
+            # deletion, while Lima commands continue to use the slug-prefixed
+            # provider instance identity.
+            ssh_logger = SSHLogger(log_vm_name, "vm-provision")
             host_target = self._host_transport(logger=ssh_logger)
             lima_cmd = (
                 f"limactl create --name {instance_name} --tty=false {remote_template} && limactl start {instance_name}"
@@ -595,8 +601,18 @@ class LimaPlatform(VMPlatform):
                         f"Sanitized output is in SSH log: {ssh_logger.display_path}"
                     )
             finally:
-                with contextlib.suppress(OSError):
+                # Close exactly once. A close-time OSError is non-fatal, and
+                # a second Ctrl-C cannot replace an active run_detached error
+                # or the operator's first Ctrl-C. A standalone close
+                # interrupt remains visible.
+                active_failure = sys.exc_info()[1]
+                try:
                     ssh_logger.close()
+                except OSError:
+                    pass
+                except KeyboardInterrupt:
+                    if active_failure is None:
+                        raise
         finally:
             with contextlib.suppress(SSHError, OSError):
                 self._remove_remote_template_dir(target, remote_template_dir)

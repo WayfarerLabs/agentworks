@@ -6,6 +6,7 @@ from __future__ import annotations
 import sys
 import time
 import urllib.parse
+import uuid
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal
 
 from pydantic import Field
@@ -31,6 +32,17 @@ if TYPE_CHECKING:
 
     from agentworks.capabilities.base import RunContext
     from agentworks.db import VMRow
+
+
+def _warn_bootstrap_file_residue() -> None:
+    """Warn about guest residue without replacing active control flow."""
+    try:  # noqa: SIM105 - warning failures must not replace the active provisioning failure
+        output.warn(
+            "could not verify removal of the Proxmox bootstrap staging file; "
+            "primary failure unchanged; plaintext may remain"
+        )
+    except (Exception, KeyboardInterrupt, SystemExit, GeneratorExit):
+        pass
 
 
 class ProxmoxConfig(AgwModel):
@@ -465,18 +477,53 @@ class ProxmoxPlatform(VMPlatform):
         """
         from agentworks.capabilities.vm_platform.bootstrap_script import parse_bootstrap_output
 
-        # Write script to VM via guest agent file-write
-        self._api(ctx).guest_agent_file_write(node, vmid, "/tmp/agentworks-bootstrap.sh", script)
+        script_path = f"/tmp/agentworks-bootstrap-{uuid.uuid4().hex}.sh"
+        api = self._api(ctx)
+        try:
+            prepared = api.guest_agent_exec_wait(
+                node,
+                vmid,
+                "/usr/bin/install",
+                ["-m", "600", "/dev/null", script_path],
+            )
+            if prepared is None or prepared.get("exitcode", -1) != 0:
+                raise ProvisioningError("could not create the private Proxmox bootstrap staging file")
+            try:
+                api.guest_agent_file_write(node, vmid, script_path, script)
+            except ProxmoxAPIError:
+                raise ProxmoxAPIError("Proxmox guest-agent bootstrap file write failed") from None
 
-        # Run bootstrap (long-running: installs packages, joins tailscale)
-        # bash is invoked explicitly so the script doesn't need +x
-        result = self._api(ctx).guest_agent_exec_wait(
-            node,
-            vmid,
-            "/bin/bash",
-            ["/tmp/agentworks-bootstrap.sh"],
-            timeout=600,
-        )
+            # Bash is invoked explicitly so the private script does not need
+            # an executable bit. The path, never its content, is guest argv.
+            result = api.guest_agent_exec_wait(
+                node,
+                vmid,
+                "/bin/bash",
+                [script_path],
+                timeout=600,
+            )
+        finally:
+            active_failure = sys.exc_info()[1]
+            try:
+                removed = api.guest_agent_exec_wait(
+                    node,
+                    vmid,
+                    "/bin/sh",
+                    [
+                        "-c",
+                        'rm -f -- "$1" && test ! -e "$1"',
+                        "agentworks-bootstrap-cleanup",
+                        script_path,
+                    ],
+                )
+                if removed is None or removed.get("exitcode", -1) != 0:
+                    raise ProxmoxAPIError("Proxmox guest-agent bootstrap staging file removal failed")
+            except (ProxmoxAPIError, KeyboardInterrupt, SystemExit, GeneratorExit) as cleanup_failure:
+                if active_failure is None:
+                    if not isinstance(cleanup_failure, ProxmoxAPIError):
+                        raise
+                    raise ProxmoxAPIError("could not verify removal of the Proxmox bootstrap staging file") from None
+                _warn_bootstrap_file_residue()
 
         if result is None:
             output.warn("bootstrap timed out")
@@ -489,8 +536,6 @@ class ProxmoxPlatform(VMPlatform):
         if parsed.ok:
             return parsed.tailscale_ip
 
-        stderr = result.get("err-data", "")
-        if stderr:
-            output.warn(f"Bootstrap stderr: {stderr[:500]}")
+        output.warn(f"Bootstrap failed (exit {exit_code})")
 
         return None

@@ -36,6 +36,7 @@ if TYPE_CHECKING:
 
 
 _REMOTE_TEMPLATE_DIR = "/tmp/agentworks-lima-template.A1b2C3d4E5"
+_PROVIDER_YAML = "arch: default\nmounts: []\n"
 
 
 def _assert_secret_absent_from_exception_graph(
@@ -128,7 +129,6 @@ def _forbid_persistent_tempfiles(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_local_create_streams_template_without_persistent_file(monkeypatch: pytest.MonkeyPatch) -> None:
-    secret = "stdin-swordfish"
     calls: list[tuple[str, dict[str, object]]] = []
     _forbid_persistent_tempfiles(monkeypatch)
 
@@ -138,13 +138,12 @@ def test_local_create_streams_template_without_persistent_file(monkeypatch: pyte
 
     monkeypatch.setattr(LimaPlatform, "_run_lima", _fake_run)
 
-    LimaPlatform("lima", {})._create_local("myvm", f"embedded: {secret}")
+    LimaPlatform("lima", {})._create_local("myvm", _PROVIDER_YAML)
 
     assert calls == [
-        ("limactl create --name myvm --tty=false -", {"input_text": f"embedded: {secret}"}),
+        ("limactl create --name myvm --tty=false -", {"input_text": _PROVIDER_YAML}),
         ("limactl start myvm", {}),
     ]
-    assert secret not in calls[0][0]
 
 
 @pytest.mark.parametrize(
@@ -156,72 +155,76 @@ def test_local_create_streams_template_without_persistent_file(monkeypatch: pyte
     ],
     ids=("write", "flush", "pre-close"),
 )
-def test_local_stdin_io_failure_refuses_start_without_secret_diagnostic(
+def test_local_stdin_io_failure_refuses_start_without_persistent_file(
     monkeypatch: pytest.MonkeyPatch,
     failure: OSError,
 ) -> None:
-    secret = "stdin-swordfish"
     commands: list[list[str]] = []
 
     def _fail_stdin(command: list[str], **kwargs: object) -> SimpleNamespace:
         commands.append(command)
-        assert kwargs["input"] == f"embedded: {secret}"
+        assert kwargs["input"] == _PROVIDER_YAML
         raise failure
 
     monkeypatch.setattr("subprocess.run", _fail_stdin)
 
     with pytest.raises(OSError) as caught:
-        LimaPlatform("lima", {})._create_local("myvm", f"embedded: {secret}")
+        LimaPlatform("lima", {})._create_local("myvm", _PROVIDER_YAML)
 
     assert caught.value is failure
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
     assert commands == [["limactl", "create", "--name", "myvm", "--tty=false", "-"]]
-    assert secret not in repr(caught.value)
-    assert secret not in repr(commands)
 
 
-def test_local_lima_failure_omits_secret_bearing_stderr(monkeypatch: pytest.MonkeyPatch) -> None:
-    secret = "stdin-swordfish"
+def test_local_lima_sensitive_stdin_failure_omits_reflected_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    actual_auth_key = "tskey-local-stdin-sentinel"
 
-    monkeypatch.setattr(
-        "subprocess.run",
-        lambda *args, **kwargs: SimpleNamespace(
+    def _reflect_stdin(*args: object, **kwargs: object) -> SimpleNamespace:
+        del args
+        assert kwargs["input"] == actual_auth_key
+        return SimpleNamespace(
             returncode=1,
-            stdout="",
-            stderr=f"invalid template line: embedded: {secret}",
-        ),
-    )
+            stdout=f"reflected {actual_auth_key}",
+            stderr=f"rejected {actual_auth_key}",
+        )
+
+    monkeypatch.setattr("subprocess.run", _reflect_stdin)
 
     with pytest.raises(SSHError) as caught:
-        LimaPlatform("lima", {})._create_local("myvm", f"embedded: {secret}")
+        LimaPlatform("lima", {})._run_lima(
+            "limactl shell myvm cat",
+            input_text=actual_auth_key,
+        )
 
-    assert str(caught.value) == ("limactl stdin command failed (exit 1): limactl create --name myvm --tty=false -")
-    _assert_secret_absent_from_exception_graph(caught.value, secret)
+    assert str(caught.value) == "limactl stdin command failed (exit 1): limactl shell myvm cat"
+    _assert_secret_absent_from_exception_graph(caught.value, actual_auth_key)
 
 
 def test_remote_lima_failure_omits_sensitive_input_and_raw_results(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    secret = "remote-lima-result-swordfish"
-    monkeypatch.setattr(
-        "agentworks.ssh.subprocess.run",
-        lambda *args, **kwargs: subprocess.CompletedProcess(
+    actual_auth_key = "tskey-remote-stdin-sentinel"
+
+    def _reflect_stdin(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        assert kwargs["input"] == actual_auth_key
+        return subprocess.CompletedProcess(
             args[0],
             1,
-            stdout=f"reflected {secret}",
-            stderr=f"rejected {secret}",
-        ),
-    )
+            stdout=f"reflected {actual_auth_key}",
+            stderr=f"rejected {actual_auth_key}",
+        )
+
+    monkeypatch.setattr("agentworks.ssh.subprocess.run", _reflect_stdin)
 
     with pytest.raises(SSHError) as caught:
         LimaPlatform("lima", {"placement": {"mode": "ssh", "host": "user@host"}})._run_lima(
             "limactl shell myvm cat",
-            input_text=secret,
+            input_text=actual_auth_key,
         )
 
     assert str(caught.value) == "SSH stdin command failed (exit 1): limactl shell myvm cat"
-    _assert_secret_absent_from_exception_graph(caught.value, secret)
+    _assert_secret_absent_from_exception_graph(caught.value, actual_auth_key)
 
 
 def test_failure_mid_create_cleans_up_and_reraises(
