@@ -57,12 +57,16 @@ Write one manifest at a time at its pre-recorded intended path while leaving eve
 section in place. The edit must consume its existing expected identity without changing the
 baseline. Use the manifest kind's sample and field reference. When the manifest contains tagged
 capability configuration, use that implementation's separate `kind/name` field reference. Run
-`agw doctor --output json` after each edit. Parse exactly one JSON document, require
-`schema_version` to be the integer `1`, `command` to equal `doctor`, and `data` to be an object
-before recording the action as verified. Its degraded configuration path validates the growing
-manifest set while continuing to report the retired-section failure. Fix closed-world fields, strict
-types, non-nullable nulls, and retired sibling capability shapes from that precise error and the
-live field reference.
+`agw doctor` after each edit and use its human `Configuration` group and `Manifest` rows for precise
+diagnostics. The command may exit `1` while the retained TOML sections continue to produce their
+expected configuration failure. Even after that exit, run `agw doctor --output json`; parse its one
+JSON document even when the verification also exits `1`. Require `schema_version` to be the integer
+`1`, `command` to equal `doctor`, `data` to be an object, `data.groups` to contain the
+`Configuration` group, and that group to contain no `Manifest` check with status `warn` or `fail`
+before recording the action as verified. JSON `message` and `hint` are intentionally redacted, so
+never treat them as replacements for the human report's manifest detail. Fix closed-world fields,
+strict types, non-nullable nulls, and retired sibling capability shapes from that precise human
+error and the live field reference.
 
 The `edit-one-manifest` mutation applies to both pre-existing manifests and manifests derived from
 retired TOML. If validation reports a written legacy `service_principal`, `credentials`, or
@@ -116,4 +120,5 @@ path, ignoring source line. This normal inventory command may probe host readine
 with consent to examine the workstation. Any missing, extra, or wrongly originated resource returns
 to the untouched backups for investigation. Finish only when a final `agw doctor --output json`
 reports zero failures. Parse its one JSON document and apply the same integer version, exact
-`doctor` command, and object-data checks before recording completion.
+`doctor` command, and object-data checks. Require `data.counts.fail` to equal `0` and the command to
+exit `0` before recording completion.

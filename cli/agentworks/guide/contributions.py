@@ -219,11 +219,14 @@ def _migration_actions() -> tuple[GuideAction, ...]:
             "One manifest has been added or changed while all retired TOML sections remain in place.",
             (),
             ConsentBoundary.EXAMINE_WORKSTATION,
+            ("agw", "doctor"),
+            "Run the human report first and use its Configuration-group Manifest rows for precise diagnostics. "
+            "It may exit 1 while retained TOML sections remain. Run the JSON verification even after that exit "
+            "1, and parse its one document even when it also exits 1. Before recording VERIFIED, require "
+            "schema_version is the integer 1, command is exactly doctor, data is an object, data.groups contains "
+            "the Configuration group, and that group has no check named Manifest with status warn or fail. JSON "
+            "message and hint fields are redacted evidence, not the source of precise manifest detail.",
             ("agw", "doctor", "--output", "json"),
-            "Before recording VERIFIED, parse exactly one JSON document and require schema_version is the "
-            "integer 1, command is exactly doctor, and data is an object. Doctor gives precise feedback for "
-            "the growing manifest set even while the retired-section config error remains.",
-            None,
             "Leave the edit unverified, keep every retired TOML section, and block cutover.",
         ),
         GuideAction(
@@ -293,8 +296,8 @@ def _migration_actions() -> tuple[GuideAction, ...]:
             ConsentBoundary.EXAMINE_WORKSTATION,
             ("agw", "doctor", "--output", "json"),
             "Before recording VERIFIED, parse exactly one JSON document and require schema_version is the "
-            "integer 1, command is exactly doctor, and data is an object. Doctor reports zero failures for the "
-            "migrated installation.",
+            "integer 1, command is exactly doctor, data is an object, data.counts.fail equals 0, and the command "
+            "exits 0. Doctor then reports zero failures for the migrated installation.",
             None,
             "Leave host readiness unverified and do not declare the migration complete.",
         ),

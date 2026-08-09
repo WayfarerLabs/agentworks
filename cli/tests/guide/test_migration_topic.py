@@ -42,7 +42,8 @@ def test_migration_actions_pin_order_consent_operations_and_no_execution_authori
     ]
     assert action_block.actions[0].command is None
     assert action_block.actions[0].manual_steps is not None
-    assert action_block.actions[5].command == ("agw", "doctor", "--output", "json")
+    assert action_block.actions[5].command == ("agw", "doctor")
+    assert action_block.actions[5].verification == ("agw", "doctor", "--output", "json")
     assert action_block.actions[8].command == (
         "agw",
         "resource",
@@ -118,6 +119,16 @@ def test_migration_actions_make_inventory_backups_and_verification_distinct() ->
     assert "Never add, remove, or change a baseline entry" in edit.manual_steps
     assert "EXPECTED_IDENTITIES remains byte-for-byte unchanged" in edit.expected_state
 
+    validation = by_id["validate-manifest-set"]
+    assert validation.command == ("agw", "doctor")
+    assert validation.verification == ("agw", "doctor", "--output", "json")
+    assert "human report first" in validation.expected_state
+    assert "may exit 1 while retained TOML sections remain" in validation.expected_state
+    assert "parse its one document even when it also exits 1" in validation.expected_state
+    assert "data.groups contains the Configuration group" in validation.expected_state
+    assert "no check named Manifest with status warn or fail" in validation.expected_state
+    assert "redacted evidence" in validation.expected_state
+
     comparison = by_id["compare-operator-inventory"]
     assert comparison.consent is ConsentBoundary.EXAMINE_WORKSTATION
     assert [item.name for item in comparison.required_inputs] == ["EXPECTED_IDENTITIES"]
@@ -130,6 +141,11 @@ def test_migration_actions_make_inventory_backups_and_verification_distinct() ->
         "--output",
         "json",
     )
+
+    finish = by_id["finish-doctor"]
+    assert finish.command == ("agw", "doctor", "--output", "json")
+    assert "data.counts.fail equals 0" in finish.expected_state
+    assert "command exits 0" in finish.expected_state
 
 
 def test_only_inventory_can_author_an_expected_manifest_path() -> None:

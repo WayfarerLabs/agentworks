@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from textwrap import dedent
 from typing import cast
 
 import pytest
@@ -65,10 +66,10 @@ def _parse_exact_v1(result: Result, expected_command: str, *, exit_code: int = 0
     return document
 
 
-def _assert_action_requires_exact_v1(action: GuideAction, command: str) -> None:
-    assert action.command is not None
-    assert action.command[-2:] == ("--output", "json")
-    assert "Before recording VERIFIED, parse exactly one JSON document" in action.expected_state
+def _assert_action_requires_exact_v1(action: GuideAction, operation: tuple[str, ...], command: str) -> None:
+    assert operation[-2:] == ("--output", "json")
+    assert "Before recording VERIFIED" in action.expected_state
+    assert "one JSON document" in action.expected_state or "one document" in action.expected_state
     assert "schema_version is the integer 1" in action.expected_state
     assert f"command is exactly {command}" in action.expected_state
     assert "data is an object" in action.expected_state
@@ -83,18 +84,28 @@ def test_every_covered_guide_action_requests_and_requires_exact_json_v1() -> Non
         for action in block.actions
     )
     covered = tuple(
-        (action, command) for action in actions if (command := _covered_command(action.command)) is not None
+        (action, field, operation, command)
+        for action in actions
+        for field, operation in (("command", action.command), ("verification", action.verification))
+        if (command := _covered_command(operation)) is not None
     )
 
-    assert [str(action.id) for action, _command in covered] == [
-        "run-doctor",
-        "validate-manifest-set",
-        "compare-operator-inventory",
-        "finish-doctor",
+    assert [(str(action.id), field, command) for action, field, _operation, command in covered] == [
+        ("run-doctor", "command", "doctor"),
+        ("validate-manifest-set", "command", "doctor"),
+        ("validate-manifest-set", "verification", "doctor"),
+        ("compare-operator-inventory", "command", "resource.list"),
+        ("finish-doctor", "command", "doctor"),
     ]
 
-    for action, command in covered:
-        _assert_action_requires_exact_v1(action, command)
+    validation = _migration_actions()["validate-manifest-set"]
+    assert validation.command == ("agw", "doctor")
+    assert validation.verification == ("agw", "doctor", "--output", "json")
+    for action, field, operation, command in covered:
+        if str(action.id) == "validate-manifest-set" and field == "command":
+            continue
+        assert operation is not None
+        _assert_action_requires_exact_v1(action, operation, command)
 
 
 def test_guide_resource_inventory_action_emits_parseable_resource_list_v1(
@@ -162,3 +173,91 @@ def test_guide_doctor_actions_emit_one_parseable_report_without_sensitive_diagno
     assert sensitive not in result.stdout
     data = cast("dict[str, object]", document["data"])
     assert data["counts"] == {"ok": 0, "info": 0, "warn": 0, "fail": 1}
+
+
+def test_validate_manifest_action_keeps_human_detail_and_verifies_redacted_json(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks import config, doctor
+
+    public_key = tmp_path / "id.pub"
+    private_key = tmp_path / "id"
+    public_key.write_text("ssh-ed25519 AAAA...")
+    private_key.write_text("-----BEGIN OPENSSH PRIVATE KEY-----")
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        dedent(f"""\
+        [operator]
+        ssh_public_key = "{public_key.as_posix()}"
+        ssh_private_key = "{private_key.as_posix()}"
+
+        [vm_templates.default]
+
+        [admin.config]
+        shell = "zsh"
+        """)
+    )
+    sensitive = "sensitive-invalid-manifest-marker"
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    (resources / f"{sensitive}.yaml").write_text("apiVersion: [\n")
+    monkeypatch.setattr(config, "CONFIG_PATH", config_path)
+
+    def config_checks(
+        *,
+        completion_version: str | None = None,
+        machine_safe_config_load: bool = False,
+    ) -> HealthReport:
+        del completion_version
+        group, _config, _registry = doctor._check_config(raise_errors=machine_safe_config_load)
+        return HealthReport(groups=[group])
+
+    monkeypatch.setattr(doctor, "run_checks", config_checks)
+    action = _migration_actions()["validate-manifest-set"]
+    assert action.command is not None
+    assert action.verification is not None
+
+    human = CliRunner().invoke(app, list(action.command[1:]))
+    machine = CliRunner().invoke(app, list(action.verification[1:]))
+
+    assert human.exit_code == 1
+    assert human.stderr == ""
+    assert "[FAIL] Config:" in human.stdout
+    assert "[FAIL] Manifest:" in human.stdout
+    assert sensitive in human.stdout
+    document = _parse_exact_v1(machine, "doctor", exit_code=1)
+    assert machine.stderr == ""
+    assert sensitive not in machine.stdout
+    data = cast("dict[str, object]", document["data"])
+    groups = cast("list[dict[str, object]]", data["groups"])
+    configuration = next(group for group in groups if group["name"] == "Configuration")
+    checks = cast("list[dict[str, object]]", configuration["checks"])
+    manifest = next(check for check in checks if check["name"] == "Manifest")
+    assert manifest == {
+        "name": "Manifest",
+        "status": "fail",
+        "message": "resource manifests did not load",
+        "hint": None,
+    }
+    assert cast("dict[str, int]", data["counts"])["fail"] == 2
+
+
+def test_finish_doctor_requires_zero_failures_and_exit_zero(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agentworks import doctor
+
+    report = HealthReport()
+    group = HealthGroup("Configuration")
+    group.ok("Config is valid")
+    report.groups.append(group)
+    monkeypatch.setattr(doctor, "run_checks", lambda **_kwargs: report)
+    action = _migration_actions()["finish-doctor"]
+    assert action.command is not None
+
+    result = CliRunner().invoke(app, list(action.command[1:]))
+
+    document = _parse_exact_v1(result, "doctor", exit_code=0)
+    data = cast("dict[str, object]", document["data"])
+    assert cast("dict[str, int]", data["counts"])["fail"] == 0
+    assert "data.counts.fail equals 0" in action.expected_state
+    assert "command exits 0" in action.expected_state
