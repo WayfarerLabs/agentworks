@@ -66,6 +66,35 @@ enabled. Disable the browser cache for request-log checks.
 Repeat the full checklist in current Chromium and Firefox. Repeat the responsive rows on a touch
 browser. Safari or another WebKit browser is required before public launch.
 
+## Interim shell execution record
+
+- Date: 2026-08-09
+- Source: `1798ca9a9669588fe72eef2cbfbf80a0faac7226`
+- Browser and version: Chromium 151.0.7922.71, headless DevTools Protocol 1.3
+- Operating system: Debian GNU/Linux 12, Linux 6.1.0-51-arm64
+- Viewport and zoom: 320 by 640 narrow, 800 by 320 emulated-touch landscape, 1600 by 1000 wide, and
+  320 by 900 reflow equivalent to a 1280-pixel viewport at 400 percent
+- Motion preference: no preference, reduced before load, and reduced changed during flight and
+  deployment
+- Tester: isolated `agentworks-tester` acceptance using Chromium DevTools Protocol
+- Outcome: PARTIAL PASS, 113 of 113 measured assertions passed with no product defect; the current
+  Chromium rows are complete, while cross-engine, spoken screen-reader, and physical touch/motion
+  acceptance remain pending
+- Clean context: DOM ready in 4.7 milliseconds and load in 8.9 milliseconds; the tester identified
+  the product, interim onboarding status, repository, package, rationale, and security choices from
+  rendered copy with no intervention
+- Cleanup: the localhost server and Chromium process were stopped, their ports were closed, all
+  temporary artifacts were removed, and the repository remained clean
+
+The run covered cue timing and replay boundaries; modified and repeated keys; every input teardown;
+safe, failed, deployed, reduced-motion, restart, and exit paths; actual tab lifecycle; accessibility
+tree and live-region contracts; no-JavaScript recovery; shared-shell focus and layout; request and
+storage audits; and all listed Chromium viewport shapes. Headless Chromium has no browser-UI zoom
+control, so the 400-percent case used the standard 1280 divided by 4 equals 320 CSS-pixel reflow
+equivalent. Chromium's accessibility tree passed, but it is not evidence of spoken announcement
+quality. Emulated touch geometry, events, and timing passed, but it is not a physical-device feel
+review.
+
 ## Static recovery and initial presentation
 
 - [x] With JavaScript disabled, the page shows one 404 heading, explanatory text, a working
@@ -73,7 +102,7 @@ browser. Safari or another WebKit browser is required before public launch.
       operations center.
 - [x] With JavaScript disabled, no start target or control instructions are exposed visually or to
       the accessibility tree. The document has header, main, and footer landmarks in that order.
-- [ ] With JavaScript enabled and normal motion, each reload gives one subtle three-pulse plume cue
+- [x] With JavaScript enabled and normal motion, each reload gives one subtle three-pulse plume cue
       lasting 2.4 seconds. It does not replay after Escape, restart, focus changes, or tab hiding.
 - [x] With reduced motion enabled before reload, the cue does not run and settled short plumes
       remain visible.
@@ -92,17 +121,17 @@ browser. Safari or another WebKit browser is required before public launch.
 - [x] Pressing unmodified Space on the document body or scene starts, immediately commands thrust,
       and does not scroll. Holding that same physical Space key continues thrust after focus moves;
       releasing it ends thrust.
-- [ ] Modified Space, repeated preflight Space, and Space targeted at the home link or another
+- [x] Modified Space, repeated preflight Space, and Space targeted at the home link or another
       interactive or editable element retain ordinary browser behavior and do not start.
 - [x] During flight, Space and Up provide equal thrust. Left and H increase the right plume and turn
       left. Right and L increase the left plume and turn right. Holding both aliases and releasing
       only one leaves the other active.
-- [ ] Active control keys suppress browser scrolling only while the game shell is active. Shift does
+- [x] Active control keys suppress browser scrolling only while the game shell is active. Shift does
       not change flight mappings. Control, Alt, and Meta combinations retain browser behavior.
-- [ ] Escape on the active shell exits, cuts thrust, hides controls, restores settled preflight, and
+- [x] Escape on the active shell exits, cuts thrust, hides controls, restores settled preflight, and
       focuses the start button without scrolling. Escape on the home link or outside the shell keeps
       browser behavior.
-- [ ] After success or failure, R restarts with fresh fuel, a dark operations center, a closed bay,
+- [x] After success or failure, R restarts with fresh fuel, a dark operations center, a closed bay,
       no agent, and shell focus. R has no mission effect in other states.
 - [ ] During play the scene SVG and all decorative descendants are silent to a screen reader. The
       shell is announced as `Lunar deployment game`, controls are described once, and status changes
@@ -112,13 +141,13 @@ browser. Safari or another WebKit browser is required before public launch.
 
 - [x] The first deliberate lander tap starts without thrust. Scrolling, text selection, zoom, and
       links outside an active game remain normal.
-- [ ] During flight, primary pointer down captures that pointer and immediately commands equal
+- [x] During flight, primary pointer down captures that pointer and immediately commands equal
       thrust. A second pointer and non-primary mouse buttons are ignored.
 - [x] Holding sustains thrust. Horizontal drag right lengthens the left plume and turns right; drag
       left lengthens the right plume and turns left. Vertical travel does not affect commands.
 - [x] A tap released within 180 milliseconds and 10 CSS pixels produces at least a 140-millisecond
       equal-thrust pulse. Another down is ignored until that pulse ends.
-- [ ] Pointer up, cancellation, lost capture, window blur, shell focus loss, tab hiding, contact,
+- [x] Pointer up, cancellation, lost capture, window blur, shell focus loss, tab hiding, contact,
       failure, Escape, restart, and a simulated frame stall all release capture and leave no stuck
       thrust. Repeat each teardown once to confirm it is harmless when already clear.
 
@@ -126,10 +155,10 @@ browser. Safari or another WebKit browser is required before public launch.
 
 - [x] An upright, slow touchdown with both feet inside the marked zone freezes safely and announces
       `Touchdown confirmed. Deploying agent.`
-- [ ] A fast, tilted, rotating, one-foot-outside, surface-short, operations-center, or out-of-bounds
+- [x] A fast, tilted, rotating, one-foot-outside, surface-short, operations-center, or out-of-bounds
       contact enters the restrained failure state. Nothing flashes, shakes, explodes, moves the
       page, changes the home link, or emits sound.
-- [ ] Failure announces exactly `Landing unsuccessful. Press R to restart or Escape to exit.` and
+- [x] Failure announces exactly `Landing unsuccessful. Press R to restart or Escape to exit.` and
       accepts both recovery paths.
 - [x] After safe touchdown at normal motion, the G bay opens, the terminal-shaped agent descends,
       crosses the surface, and enters the west operations-center door.
@@ -140,14 +169,14 @@ browser. Safari or another WebKit browser is required before public launch.
 - [x] With reduced motion enabled before touchdown, safe contact immediately shows the fully powered
       operations center and final status with no bay, agent route, sequential power, or departure
       motion. Physics remains playable.
-- [ ] Turning reduced motion on during the post-touchdown sequence immediately completes the same
+- [x] Turning reduced motion on during the post-touchdown sequence immediately completes the same
       powered success result. Changing it during flight does not alter physics.
-- [ ] Restart, Escape, and reload each clear powered state. No mission state survives a new run or
+- [x] Restart, Escape, and reload each clear powered state. No mission state survives a new run or
       reload.
 
 ## Lifecycle and request audit
 
-- [ ] Hiding the tab pauses every visible CSS animation, cancels flight frames, releases pointer
+- [x] Hiding the tab pauses every visible CSS animation, cancels flight frames, releases pointer
       capture, and clears held input. Returning to the tab does not jump or simulate hidden time;
       the first visible frame only resets timing.
 - [x] Losing shell focus clears input without pausing or changing mission state. Returning focus
@@ -175,9 +204,9 @@ browser. Safari or another WebKit browser is required before public launch.
       and wide desktop, home, security, and 404 have no page overflow, clipped text or navigation,
       overlap, or fixed-height content loss. Record browser versions, viewport, date, and result
       before public release.
-- [ ] With JavaScript disabled, home and security retain all content and links, while 404 retains
+- [x] With JavaScript disabled, home and security retain all content and links, while 404 retains
       its message, named scene, and home link. No surface depends on terminal familiarity.
-- [ ] Keyboard-only traversal reaches the visible skip link, linked brand, navigation, content
+- [x] Keyboard-only traversal reaches the visible skip link, linked brand, navigation, content
       links, 404 home link, and lander start control in source order with a visible focus outline.
 - [ ] A screen reader reports each page title, header, main, footer, one `h1`, nested section
       headings, named navigation, sourced links, and 404 status/focus behavior. Initial game
@@ -185,6 +214,6 @@ browser. Safari or another WebKit browser is required before public launch.
 - [ ] With reduced motion enabled, home and security remain motion-free and the 404 follows the
       existing no-cue, direct-success contract. Human touch checks confirm page scroll outside the
       active scene and tap, hold, and drag behavior inside it.
-- [ ] In a clean context, a visitor identifies what Agentworks is, sees that guided onboarding is
+- [x] In a clean context, a visitor identifies what Agentworks is, sees that guided onboarding is
       not yet published, and can choose the repository, PyPI package, rationale, or security path
       without explanation. Record timing and any intervention.

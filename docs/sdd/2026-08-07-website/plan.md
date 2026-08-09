@@ -82,6 +82,11 @@ Operator evidence:
   disclosure to the onboarding effort as a single new message file. The onboarding owner now has the
   requirement on `main`; its implementation remains a prerequisite only for the later bootstrap
   integration, not the independent interim shell.
+- 2026-08-09: isolated Chromium 151 acceptance at interim-shell head `1798ca9a` passed 113 of 113
+  measured assertions across the shared shell, game, responsive layouts, reduced motion,
+  accessibility-tree contracts, lifecycle, requests, storage, and clean-context comprehension with
+  no product defect. Firefox, WebKit, spoken screen-reader quality, and physical touch/motion remain
+  explicit pre-release checks because those surfaces are unavailable locally.
 - 2026-08-09: as a narrow expansion from the original one-page scope, the operator adds a visually
   secondary `We take security seriously.` path to a dedicated security deep dive; the home page
   stays concise and non-preachy. The operator also requires the eventual onboarding disclosure to

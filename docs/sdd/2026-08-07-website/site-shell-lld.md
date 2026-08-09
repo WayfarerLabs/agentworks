@@ -3,7 +3,7 @@
 <!-- cspell:ignore autolinks blockquotes canonicalization keypath keypaths -->
 <!-- cspell:ignore navs nonblank scroller TUI -->
 
-- Status: Approved for implementation; Phase 4 in progress
+- Status: Implemented and review-approved; release acceptance in progress
 - Date: 2026-08-09
 - FRD: `frd.md`, specifically R10, R11, and R13
 - HLA: `hla.md`, specifically D1-D5, D8, and D10

@@ -231,8 +231,9 @@ Pages permissions. Before the implementation PR merges, the operator enables Git
 repository's Pages source and restricts the `github-pages` environment to the default branch. The
 publishing workflow then runs only after a push to `main` and has two jobs:
 
-1. **Build:** check out the repository, run the website contract tests and builder, verify the
-   artifact, configure Pages metadata, and upload exactly the generated directory.
+1. **Build:** check out the repository, run the website contract tests, configure Pages metadata,
+   run the builder with the normalized Pages base, verify the artifact, and upload exactly the
+   generated directory.
 2. **Deploy:** on `main` only, deploy the uploaded artifact to the `github-pages` environment with
    the minimum `pages: write` and `id-token: write` permissions.
 
