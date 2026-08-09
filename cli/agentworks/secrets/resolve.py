@@ -54,6 +54,7 @@ class ActiveSource:
     backend_class: type[SecretBackend]
     config: AgwModel
     readiness: Readiness
+    disabled_backend_plugin: str | None = None
 
     def __post_init__(self) -> None:
         if self.source.backend.name != self.backend_class.name:
@@ -208,7 +209,7 @@ _BATCH_TOKEN = object()
 class _Evidence:
     refused: list[tuple[str, str | None]]
     soft_missed: list[tuple[str, str | None]]
-    not_ready: list[tuple[str, str | None]]
+    not_ready: list[tuple[str, str | None, str | None]]
 
     @classmethod
     def empty(cls) -> _Evidence:
@@ -276,7 +277,9 @@ class _SourceContextDriver(AbstractContextManager[SecretSourceClient]):
         return False
 
 
-class _OutputInteractionBroker:
+class OutputInteractionBroker:
+    """CLI-owned prompt broker exposing only named secret requests."""
+
     __slots__ = ("_prompts",)
 
     def __init__(self, secrets: Sequence[SecretDecl]) -> None:
@@ -290,7 +293,7 @@ class _OutputInteractionBroker:
         return output.prompt_secret(f"Secret '{name}': {description}", hint=hint)
 
     def __repr__(self) -> str:
-        return f"_OutputInteractionBroker(prompts={len(self._prompts)})"
+        return f"OutputInteractionBroker(prompts={len(self._prompts)})"
 
 
 def active_sources(config: Config, registry: Registry) -> tuple[ActiveSource, ...]:
@@ -331,6 +334,15 @@ def active_sources(config: Config, registry: Registry) -> tuple[ActiveSource, ..
             raise StateError(f"secret-source/{name} is not a SecretSourceDecl")
         if registry.graph.enablement_of("secret-source", name) is Enablement.disabled:
             continue
+        disabled_backend_plugin: str | None = None
+        if registry.graph.enablement_of("secret-backend", source.backend.name) is Enablement.disabled:
+            backend_row = registry.lookup("secret-backend", source.backend.name)
+            origin = getattr(backend_row, "origin", None)
+            if getattr(origin, "variant", None) == "system-plugin":
+                plugin = getattr(origin, "plugin", None)
+                if type(plugin) is not str:
+                    raise StateError(f"secret-backend/{source.backend.name} has invalid plugin attribution")
+                disabled_backend_plugin = plugin
         validated = validate_capability_config(
             kind="secret-backend",
             config=source.backend.tagged,
@@ -345,6 +357,7 @@ def active_sources(config: Config, registry: Registry) -> tuple[ActiveSource, ..
                 backend_class=backend_class,
                 config=validated,
                 readiness=registry.graph.readiness_of("secret-source", name),
+                disabled_backend_plugin=disabled_backend_plugin,
             )
         )
     return tuple(active)
@@ -400,15 +413,17 @@ def _outcome(
     *,
     source: str | None = None,
     identifier: str | None = None,
+    remediation_target: str | None = None,
 ) -> ResolutionOutcome:
-    category, remediation, _source_required, _identifier_allowed = OUTCOME_RULES[detail]
+    rule = OUTCOME_RULES[detail]
     return ResolutionOutcome(
         name=name,
-        category=category,
+        category=rule.category,
         detail=detail,
-        remediation=remediation,
+        remediation=rule.remediation,
         source=source,
         identifier=identifier,
+        remediation_target=remediation_target,
     )
 
 
@@ -420,8 +435,19 @@ def _collapse(name: str, evidence: _Evidence, *, sources_empty: bool) -> Resolut
         source, identifier = evidence.soft_missed[0]
         return _outcome(name, ResolutionDetail.SOFT_MISS, source=source, identifier=identifier)
     if evidence.not_ready:
-        source, identifier = evidence.not_ready[0]
-        return _outcome(name, ResolutionDetail.SOURCE_NOT_READY, source=source, identifier=identifier)
+        source, identifier, disabled_backend_plugin = evidence.not_ready[0]
+        detail = (
+            ResolutionDetail.SOURCE_BACKEND_PLUGIN_DISABLED
+            if disabled_backend_plugin is not None
+            else ResolutionDetail.SOURCE_NOT_READY
+        )
+        return _outcome(
+            name,
+            detail,
+            source=source,
+            identifier=identifier,
+            remediation_target=disabled_backend_plugin,
+        )
     return _outcome(
         name,
         ResolutionDetail.NO_ACTIVE_SOURCE if sources_empty else ResolutionDetail.NO_ATTEMPTABLE_SOURCE,
@@ -558,8 +584,10 @@ def resolve_batch(
             if not projected:
                 continue
             if not source.readiness.is_ready:
+                if not source.readiness.reason:
+                    raise StateError(f"secret-source/{source.name} has invalid readiness") from None
                 for request, identifier in projected:
-                    evidence[request.name].not_ready.append((source.name, identifier))
+                    evidence[request.name].not_ready.append((source.name, identifier, source.disabled_backend_plugin))
                 continue
             if source.interactive and policy.interaction is InteractionPolicy.REFUSE:
                 for request, identifier in projected:
@@ -774,7 +802,7 @@ def resolve_partial_for_reveal(
 ) -> PartialResolution:
     """Resolve independent values for the explicit env reveal surface."""
     interaction = validate_interaction_policy(interaction)
-    broker = _OutputInteractionBroker(secrets) if interaction is InteractionPolicy.ALLOW else None
+    broker = OutputInteractionBroker(secrets) if interaction is InteractionPolicy.ALLOW else None
     projected: dict[str, str] = {}
     result = PartialResolution(values={}, outcomes=())
     batch = resolve_batch(

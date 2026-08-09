@@ -210,15 +210,15 @@ def resolve_for_command(
         return {}
     from agentworks.secrets.resolve import (
         CompletionPolicy,
+        OutputInteractionBroker,
         ResolutionPolicy,
-        _OutputInteractionBroker,
         active_sources,
         resolve_batch,
     )
 
     projected: dict[str, str] = {}
     result: dict[str, str] = {}
-    broker = _OutputInteractionBroker(decls) if interaction is InteractionPolicy.ALLOW else None
+    broker = OutputInteractionBroker(decls) if interaction is InteractionPolicy.ALLOW else None
     batch = resolve_batch(
         decls,
         active_sources(config, registry),

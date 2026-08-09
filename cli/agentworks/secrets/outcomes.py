@@ -33,6 +33,7 @@ class ResolutionDetail(StrEnum):
     NO_ACTIVE_SOURCE = "no-active-source"
     NO_ATTEMPTABLE_SOURCE = "no-attemptable-source"
     SOURCE_NOT_READY = "source-not-ready"
+    SOURCE_BACKEND_PLUGIN_DISABLED = "source-backend-plugin-disabled"
     SOFT_MISS = "soft-miss"
     INTERACTION_REFUSED = "interaction-refused"
     BATCH_DOOMED = "batch-doomed-before-interaction"
@@ -50,6 +51,7 @@ class ResolutionRemediation(StrEnum):
     NONE = "none"
     CONFIGURE_SOURCE = "configure-source"
     ENABLE_SOURCE = "enable-source"
+    ENABLE_PLUGIN = "enable-plugin"
     ALLOW_INTERACTION = "allow-interaction"
     RESOLVE_BLOCKING_SECRETS = "resolve-blocking-secrets"
     CHECK_MAPPING = "check-mapping"
@@ -61,94 +63,72 @@ class ResolutionRemediation(StrEnum):
     REPORT_BACKEND = "report-backend"
 
 
-OUTCOME_RULES: dict[
-    ResolutionDetail,
-    tuple[ResolutionCategory, ResolutionRemediation, bool, bool],
-] = {
-    ResolutionDetail.RESOLVED: (ResolutionCategory.RESOLVED, ResolutionRemediation.NONE, True, True),
+@dataclass(frozen=True, slots=True)
+class OutcomeRule:
+    category: ResolutionCategory
+    remediation: ResolutionRemediation
+    source_required: bool
+    identifier_allowed: bool
+    remediation_target_required: bool = False
+
+
+OUTCOME_RULES: dict[ResolutionDetail, OutcomeRule] = {
+    ResolutionDetail.RESOLVED: OutcomeRule(ResolutionCategory.RESOLVED, ResolutionRemediation.NONE, True, True),
     ResolutionDetail.NO_ACTIVE_SOURCE: (
-        ResolutionCategory.UNAVAILABLE,
-        ResolutionRemediation.CONFIGURE_SOURCE,
-        False,
-        False,
+        OutcomeRule(ResolutionCategory.UNAVAILABLE, ResolutionRemediation.CONFIGURE_SOURCE, False, False)
     ),
     ResolutionDetail.NO_ATTEMPTABLE_SOURCE: (
-        ResolutionCategory.UNAVAILABLE,
-        ResolutionRemediation.CONFIGURE_SOURCE,
-        False,
-        False,
+        OutcomeRule(ResolutionCategory.UNAVAILABLE, ResolutionRemediation.CONFIGURE_SOURCE, False, False)
     ),
     ResolutionDetail.SOURCE_NOT_READY: (
-        ResolutionCategory.UNAVAILABLE,
-        ResolutionRemediation.ENABLE_SOURCE,
-        True,
-        True,
+        OutcomeRule(ResolutionCategory.UNAVAILABLE, ResolutionRemediation.ENABLE_SOURCE, True, True)
+    ),
+    ResolutionDetail.SOURCE_BACKEND_PLUGIN_DISABLED: (
+        OutcomeRule(
+            ResolutionCategory.UNAVAILABLE,
+            ResolutionRemediation.ENABLE_PLUGIN,
+            True,
+            True,
+            remediation_target_required=True,
+        )
     ),
     ResolutionDetail.SOFT_MISS: (
-        ResolutionCategory.UNAVAILABLE,
-        ResolutionRemediation.CONFIGURE_SOURCE,
-        True,
-        True,
+        OutcomeRule(ResolutionCategory.UNAVAILABLE, ResolutionRemediation.CONFIGURE_SOURCE, True, True)
     ),
     ResolutionDetail.INTERACTION_REFUSED: (
-        ResolutionCategory.REFUSED_INTERACTION,
-        ResolutionRemediation.ALLOW_INTERACTION,
-        True,
-        True,
+        OutcomeRule(ResolutionCategory.REFUSED_INTERACTION, ResolutionRemediation.ALLOW_INTERACTION, True, True)
     ),
     ResolutionDetail.BATCH_DOOMED: (
-        ResolutionCategory.UNAVAILABLE,
-        ResolutionRemediation.RESOLVE_BLOCKING_SECRETS,
-        False,
-        False,
+        OutcomeRule(ResolutionCategory.UNAVAILABLE, ResolutionRemediation.RESOLVE_BLOCKING_SECRETS, False, False)
     ),
     ResolutionDetail.DEADLINE_EXCEEDED: (
-        ResolutionCategory.TIMEOUT,
-        ResolutionRemediation.INCREASE_TIMEOUT,
-        True,
-        True,
+        OutcomeRule(ResolutionCategory.TIMEOUT, ResolutionRemediation.INCREASE_TIMEOUT, True, True)
     ),
     ResolutionDetail.HARD_MAPPING: (
-        ResolutionCategory.RESOLUTION_FAILURE,
-        ResolutionRemediation.CHECK_MAPPING,
-        True,
-        True,
+        OutcomeRule(ResolutionCategory.RESOLUTION_FAILURE, ResolutionRemediation.CHECK_MAPPING, True, True)
     ),
     ResolutionDetail.AUTHENTICATION: (
-        ResolutionCategory.RESOLUTION_FAILURE,
-        ResolutionRemediation.SIGN_IN,
-        True,
-        True,
+        OutcomeRule(ResolutionCategory.RESOLUTION_FAILURE, ResolutionRemediation.SIGN_IN, True, True)
     ),
     ResolutionDetail.CONNECTIVITY: (
-        ResolutionCategory.RESOLUTION_FAILURE,
-        ResolutionRemediation.CHECK_CONNECTIVITY,
-        True,
-        True,
+        OutcomeRule(ResolutionCategory.RESOLUTION_FAILURE, ResolutionRemediation.CHECK_CONNECTIVITY, True, True)
     ),
     ResolutionDetail.EXTERNAL: (
-        ResolutionCategory.RESOLUTION_FAILURE,
-        ResolutionRemediation.RETRY,
-        True,
-        True,
+        OutcomeRule(ResolutionCategory.RESOLUTION_FAILURE, ResolutionRemediation.RETRY, True, True)
     ),
     ResolutionDetail.MALFORMED_VALUE: (
-        ResolutionCategory.RESOLUTION_FAILURE,
-        ResolutionRemediation.REMOVE_CONTROL_CHARACTERS,
-        True,
-        True,
+        OutcomeRule(
+            ResolutionCategory.RESOLUTION_FAILURE,
+            ResolutionRemediation.REMOVE_CONTROL_CHARACTERS,
+            True,
+            True,
+        )
     ),
     ResolutionDetail.BACKEND_PROTOCOL: (
-        ResolutionCategory.RESOLUTION_FAILURE,
-        ResolutionRemediation.REPORT_BACKEND,
-        True,
-        False,
+        OutcomeRule(ResolutionCategory.RESOLUTION_FAILURE, ResolutionRemediation.REPORT_BACKEND, True, False)
     ),
     ResolutionDetail.UNEXPECTED: (
-        ResolutionCategory.RESOLUTION_FAILURE,
-        ResolutionRemediation.REPORT_BACKEND,
-        True,
-        True,
+        OutcomeRule(ResolutionCategory.RESOLUTION_FAILURE, ResolutionRemediation.REPORT_BACKEND, True, True)
     ),
 }
 
@@ -171,15 +151,24 @@ class ResolutionOutcome:
     remediation: ResolutionRemediation
     source: str | None = None
     identifier: str | None = None
+    remediation_target: str | None = None
 
     def __post_init__(self) -> None:
-        category, remediation, source_required, identifier_allowed = OUTCOME_RULES[self.detail]
-        if self.category is not category or self.remediation is not remediation:
+        rule = OUTCOME_RULES[self.detail]
+        if self.category is not rule.category or self.remediation is not rule.remediation:
             raise ValueError("invalid resolution outcome category or remediation")
-        if (self.source is not None) is not source_required:
+        if (self.source is not None) is not rule.source_required:
             raise ValueError("invalid resolution outcome source")
-        if not identifier_allowed and self.identifier is not None:
+        if not rule.identifier_allowed and self.identifier is not None:
             raise ValueError("invalid resolution outcome identifier")
+        if (self.remediation_target is not None) is not rule.remediation_target_required:
+            raise ValueError("invalid resolution outcome remediation target presence")
+        if rule.remediation_target_required and (
+            not isinstance(self.remediation_target, str)
+            or not self.remediation_target
+            or "/" in self.remediation_target
+        ):
+            raise ValueError("enable-plugin remediation target must be non-empty and '/'-free")
         if not _safe_diagnostic_text(self.name):
             raise ValueError("invalid resolution outcome name")
         if self.source is not None and not _safe_diagnostic_text(self.source):
@@ -188,12 +177,35 @@ class ResolutionOutcome:
             raise ValueError("invalid resolution outcome identifier")
 
 
+def _escape_plugin_target(target: str) -> str:
+    escaped: list[str] = []
+    for char in target:
+        codepoint = ord(char)
+        if char.isascii() and (char.isalnum() or char in "._-"):
+            escaped.append(char)
+        elif codepoint <= 0xFF:
+            escaped.append(f"\\x{codepoint:02x}")
+        elif codepoint <= 0xFFFF:
+            escaped.append(f"\\u{codepoint:04x}")
+        else:
+            escaped.append(f"\\U{codepoint:08x}")
+    return "".join(escaped)
+
+
+def format_remediation(outcome: ResolutionOutcome) -> str:
+    """Render one bounded remediation without provider-supplied text."""
+    if outcome.remediation is ResolutionRemediation.ENABLE_PLUGIN:
+        assert outcome.remediation_target is not None
+        return f"enable plugin `{_escape_plugin_target(outcome.remediation_target)}`"
+    return outcome.remediation.value
+
+
 def format_outcome(outcome: ResolutionOutcome) -> str:
     """Render the stable value-free diagnostic fields for one outcome."""
     return (
         f"{outcome.category.value}/{outcome.detail.value}; "
         f"source={outcome.source or 'none'}; identifier={outcome.identifier or 'none'}; "
-        f"remediation={outcome.remediation.value}"
+        f"remediation={format_remediation(outcome)}"
     )
 
 

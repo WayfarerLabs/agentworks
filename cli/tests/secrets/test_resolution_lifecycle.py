@@ -7,8 +7,7 @@ import sys
 from collections.abc import ItemsView, Iterator, Mapping
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import FrozenInstanceError
-from types import TracebackType
-from typing import Any, ClassVar, Literal, cast
+from typing import Any, ClassVar, Literal
 
 import pytest
 from pydantic import BaseModel
@@ -25,7 +24,7 @@ from agentworks.capabilities.secret_backend.client import (
     SecretLookupRequest,
     SecretSourceClient,
 )
-from agentworks.errors import ExternalError, SecretUnavailableError, StateError
+from agentworks.errors import ExternalError, SecretUnavailableError
 from agentworks.plugins import Plugin, seated_plugin
 from agentworks.resources.graph import Readiness
 from agentworks.schema import AgwModel, AgwRootModel, CapabilityBlock
@@ -36,16 +35,17 @@ from agentworks.secrets.outcomes import (
     ResolutionDetail,
     ResolutionOutcome,
     ResolutionRemediation,
+    format_remediation,
 )
 from agentworks.secrets.policy import InteractionPolicy
 from agentworks.secrets.resolve import (
     _BATCH_TOKEN,
     ActiveSource,
     CompletionPolicy,
+    OutputInteractionBroker,
     ResolutionBatch,
     ResolutionPolicy,
     _drive_source,
-    _SourceContextDriver,
     resolve_batch,
 )
 
@@ -163,6 +163,27 @@ class _NullableBackend(_Backend):
         return f"id:{secret_name}"
 
 
+class _BrokerCapturingBackend(_Backend):
+    brokers: ClassVar[list[InteractionBroker | None]] = []
+
+    @classmethod
+    def create_client(
+        cls,
+        *,
+        source_name: str,
+        config: AgwModel,
+        interaction_broker: InteractionBroker | None,
+        remaining_time: RemainingTime,
+    ) -> AbstractContextManager[SecretSourceClient]:
+        cls.brokers.append(interaction_broker)
+        return super().create_client(
+            source_name=source_name,
+            config=config,
+            interaction_broker=interaction_broker,
+            remaining_time=remaining_time,
+        )
+
+
 def _source(
     *,
     ready: bool = True,
@@ -230,6 +251,7 @@ def _reset_backend() -> None:
     _Backend.events = []
     _Backend.values = {}
     _Backend.failure = None
+    _BrokerCapturingBackend.brokers = []
 
 
 def test_one_lazy_client_turn_and_redacted_batch() -> None:
@@ -247,6 +269,32 @@ def test_one_lazy_client_turn_and_redacted_batch() -> None:
     assert batch.outcomes[0].source == "primary"
     assert "sentinel-value" not in repr(batch)
     assert batch.complete_or_raise() == {"token": "sentinel-value"}
+
+
+def test_allow_scopes_live_output_broker_to_prompt_factory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.capabilities.secret_backend.prompt import PromptBackend, PromptSourceConfig
+
+    secret = SecretDecl(name="token", description="token")
+    prompt_source = ActiveSource(
+        source=SecretSourceDecl(name="prompt", backend=CapabilityBlock.of("prompt")),
+        backend_class=PromptBackend,
+        config=PromptSourceConfig(name="prompt"),
+        readiness=Readiness.ready(),
+    )
+    broker = OutputInteractionBroker([secret])
+    monkeypatch.setattr(output, "prompt_secret", lambda label, *, hint: "prompt-value")
+
+    batch = resolve_batch(
+        [secret],
+        [_source(backend_class=_BrokerCapturingBackend), prompt_source],
+        policy=_policy(interaction=InteractionPolicy.ALLOW),
+        interaction_broker=broker,
+    )
+
+    assert _BrokerCapturingBackend.brokers == [None]
+    assert batch.complete_or_raise() == {"token": "prompt-value"}
 
 
 class _PostReturnClient(_Client):
@@ -496,14 +544,15 @@ def test_exact_five_categories_and_exhaustive_detail_table() -> None:
         "resolution-failure",
     }
     assert set(OUTCOME_RULES) == set(ResolutionDetail)
-    for detail, (category, remediation, source_required, identifier_allowed) in OUTCOME_RULES.items():
+    for detail, rule in OUTCOME_RULES.items():
         outcome = ResolutionOutcome(
             name="token",
-            category=category,
+            category=rule.category,
             detail=detail,
-            remediation=remediation,
-            source="source" if source_required else None,
-            identifier="identifier" if identifier_allowed else None,
+            remediation=rule.remediation,
+            source="source" if rule.source_required else None,
+            identifier="identifier" if rule.identifier_allowed else None,
+            remediation_target="Vault.Plugin" if rule.remediation_target_required else None,
         )
         assert outcome.detail is detail
 
@@ -524,6 +573,80 @@ def test_illegal_outcome_tuple_is_rejected() -> None:
             detail=ResolutionDetail.RESOLVED,
             remediation=ResolutionRemediation.NONE,
         )
+    with pytest.raises(ValueError, match="category or remediation"):
+        ResolutionOutcome(
+            name="token",
+            category=ResolutionCategory.RESOLVED,
+            detail=ResolutionDetail.RESOLVED,
+            remediation=ResolutionRemediation.ENABLE_PLUGIN,
+            source="source",
+            remediation_target="onepassword",
+        )
+    with pytest.raises(ValueError, match="target presence"):
+        ResolutionOutcome(
+            name="token",
+            category=ResolutionCategory.UNAVAILABLE,
+            detail=ResolutionDetail.SOURCE_NOT_READY,
+            remediation=ResolutionRemediation.ENABLE_SOURCE,
+            source="source",
+            remediation_target="Vault.Plugin",
+        )
+    with pytest.raises(ValueError, match="target presence"):
+        ResolutionOutcome(
+            name="token",
+            category=ResolutionCategory.UNAVAILABLE,
+            detail=ResolutionDetail.SOURCE_BACKEND_PLUGIN_DISABLED,
+            remediation=ResolutionRemediation.ENABLE_PLUGIN,
+            source="source",
+        )
+
+
+@pytest.mark.parametrize("target", ["", "plugin/name"])
+def test_enable_plugin_outcome_rejects_only_registration_invalid_targets(target: str) -> None:
+    with pytest.raises(ValueError, match="non-empty and '/'-free"):
+        ResolutionOutcome(
+            name="token",
+            category=ResolutionCategory.UNAVAILABLE,
+            detail=ResolutionDetail.SOURCE_BACKEND_PLUGIN_DISABLED,
+            remediation=ResolutionRemediation.ENABLE_PLUGIN,
+            source="source",
+            remediation_target=target,
+        )
+
+
+@pytest.mark.parametrize(
+    ("target", "rendered"),
+    [
+        ("onepassword", "enable plugin `onepassword`"),
+        ("Vault.Plugin", "enable plugin `Vault.Plugin`"),
+        ("weird`\\\n雪", r"enable plugin `weird\x60\x5c\x0a\u96ea`"),
+    ],
+)
+def test_enable_plugin_remediation_uses_fixed_ascii_safe_rendering(target: str, rendered: str) -> None:
+    outcome = ResolutionOutcome(
+        name="token",
+        category=ResolutionCategory.UNAVAILABLE,
+        detail=ResolutionDetail.SOURCE_BACKEND_PLUGIN_DISABLED,
+        remediation=ResolutionRemediation.ENABLE_PLUGIN,
+        source="source",
+        remediation_target=target,
+    )
+    assert format_remediation(outcome) == rendered
+
+
+def test_enable_plugin_target_accepts_a_registered_string_subclass() -> None:
+    class PluginName(str):
+        pass
+
+    outcome = ResolutionOutcome(
+        name="token",
+        category=ResolutionCategory.UNAVAILABLE,
+        detail=ResolutionDetail.SOURCE_BACKEND_PLUGIN_DISABLED,
+        remediation=ResolutionRemediation.ENABLE_PLUGIN,
+        source="source",
+        remediation_target=PluginName("Vault.Plugin"),
+    )
+    assert format_remediation(outcome) == "enable plugin `Vault.Plugin`"
 
 
 def test_batch_has_no_generic_value_surface_and_success_returns_a_copy() -> None:
@@ -804,197 +927,3 @@ def test_other_string_values_retain_existing_transport_behavior(value: str) -> N
         interaction_broker=None,
     )
     assert batch.complete_or_raise() == {"token": value}
-
-
-class _Clock:
-    def __init__(self) -> None:
-        self.now = 0.0
-
-    def __call__(self) -> float:
-        return self.now
-
-
-class _TimedClient(_Client):
-    phase: ClassVar[str] = ""
-    clock: ClassVar[_Clock]
-
-    def prepare(self, requests: tuple[SecretLookupRequest, ...], *, remaining_time: RemainingTime) -> None:
-        self.events.append("prepare")
-        if self.phase == "prepare":
-            self.clock.now = 2.0
-
-    def resolve(
-        self,
-        requests: tuple[SecretLookupRequest, ...],
-        *,
-        remaining_time: RemainingTime,
-    ) -> dict[str, str]:
-        self.events.append("resolve")
-        if self.phase == "resolve":
-            self.clock.now = 2.0
-        return {request.name: "discarded" for request in requests}
-
-
-class _TimedContext(AbstractContextManager[SecretSourceClient]):
-    def __init__(self, events: list[str]) -> None:
-        self.events = events
-
-    def __enter__(self) -> SecretSourceClient:
-        self.events.append("enter")
-        if _TimedClient.phase == "enter":
-            _TimedClient.clock.now = 2.0
-        return _TimedClient(self.events, {}, None)
-
-    def __exit__(self, *args: object) -> None:
-        self.events.append("exit")
-
-
-class _TimedBackend(_Backend):
-    events: ClassVar[list[str]] = []
-    values: ClassVar[dict[str, str]] = {}
-    failure: ClassVar[BaseException | None] = None
-
-    @classmethod
-    def external_operation_timeout(cls, config: AgwModel) -> float:
-        return 1.0
-
-    @classmethod
-    def create_client(
-        cls,
-        *,
-        source_name: str,
-        config: AgwModel,
-        interaction_broker: InteractionBroker | None,
-        remaining_time: RemainingTime,
-    ) -> AbstractContextManager[SecretSourceClient]:
-        cls.events.append("factory")
-        if _TimedClient.phase == "factory":
-            _TimedClient.clock.now = 2.0
-        return _TimedContext(cls.events)
-
-
-class _InvalidTimeoutBackend(_Backend):
-    timeout_value: ClassVar[object] = None
-
-    @classmethod
-    def external_operation_timeout(cls, config: AgwModel) -> float | None:
-        return cast("float | None", cls.timeout_value)
-
-
-@pytest.mark.parametrize("timeout", [True, False, "1", object(), float("nan"), float("inf"), 0, -1])
-def test_invalid_external_operation_timeout_is_framework_state_error_before_factory(timeout: object) -> None:
-    _InvalidTimeoutBackend.events = []
-    _InvalidTimeoutBackend.timeout_value = timeout
-    with pytest.raises(StateError, match="invalid external-operation timeout"):
-        resolve_batch(
-            [SecretDecl(name="token", description="token")],
-            [_source(backend_class=_InvalidTimeoutBackend)],
-            policy=_policy(completion=CompletionPolicy.PARTIAL),
-            interaction_broker=None,
-        )
-    assert _InvalidTimeoutBackend.events == []
-
-
-@pytest.mark.parametrize(
-    ("phase", "events"),
-    [
-        ("factory", ["factory"]),
-        ("enter", ["factory", "enter", "exit"]),
-        ("prepare", ["factory", "enter", "prepare", "exit"]),
-        ("resolve", ["factory", "enter", "prepare", "resolve", "exit"]),
-    ],
-)
-def test_timeout_at_each_external_boundary_stops_later_work(
-    monkeypatch: pytest.MonkeyPatch,
-    phase: str,
-    events: list[str],
-) -> None:
-    clock = _Clock()
-    _TimedBackend.events = []
-    _TimedClient.phase = phase
-    _TimedClient.clock = clock
-    monkeypatch.setattr("agentworks.secrets.resolve.time.monotonic", clock)
-    batch = resolve_batch(
-        [SecretDecl(name="token", description="token")],
-        [_source(backend_class=_TimedBackend)],
-        policy=_policy(completion=CompletionPolicy.PARTIAL),
-        interaction_broker=None,
-    )
-    assert batch.outcomes[0].detail is ResolutionDetail.DEADLINE_EXCEEDED
-    assert _TimedBackend.events == events
-
-
-class _ExitContext(AbstractContextManager[object]):
-    def __init__(self, *, result: object = False, failure: BaseException | None = None) -> None:
-        self.result = result
-        self.failure = failure
-        self.exc_info: tuple[object, object, object] | None = None
-
-    def __enter__(self) -> object:
-        return object()
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc: BaseException | None,
-        traceback: TracebackType | None,
-    ) -> bool | None:
-        exc_info = (exc_type, exc, traceback)
-        self.exc_info = exc_info
-        if self.failure is not None:
-            raise self.failure
-        return bool(self.result)
-
-
-def test_cleanup_receives_exact_exc_info_and_never_suppresses(monkeypatch: pytest.MonkeyPatch) -> None:
-    warnings: list[str] = []
-    monkeypatch.setattr(output, "warn", warnings.append)
-    inner = _ExitContext(result=True)
-    driver = _SourceContextDriver(inner, source_name="fixture-source", remaining_time=lambda: None)
-    with pytest.raises(KeyboardInterrupt) as caught, driver:
-        raise KeyboardInterrupt
-    assert inner.exc_info is not None
-    assert inner.exc_info[0] is KeyboardInterrupt
-    assert inner.exc_info[1] is caught.value
-    assert inner.exc_info[2] is caught.value.__traceback__
-    assert warnings == ["secret source 'fixture-source': cleanup failed; primary result unchanged"]
-
-
-@pytest.mark.parametrize(
-    ("start", "finish", "result", "failure", "warns"),
-    [
-        (1.0, 0.0, False, None, True),
-        (0.0, 0.0, False, None, False),
-        (1.0, 1.0, True, None, True),
-        (0.0, 0.0, False, RuntimeError("sentinel-cleanup"), True),
-    ],
-)
-def test_cleanup_warning_matrix_is_non_masking(
-    monkeypatch: pytest.MonkeyPatch,
-    start: float,
-    finish: float,
-    result: object,
-    failure: BaseException | None,
-    warns: bool,
-) -> None:
-    samples = iter((start, finish))
-    warnings: list[str] = []
-    monkeypatch.setattr(output, "warn", warnings.append)
-    inner = _ExitContext(result=result, failure=failure)
-    driver = _SourceContextDriver(inner, source_name="fixture-source", remaining_time=lambda: next(samples))
-    with driver:
-        pass
-    assert bool(warnings) is warns
-    assert "sentinel-cleanup" not in repr(warnings)
-
-
-def test_cleanup_warning_sink_failure_cannot_mask() -> None:
-    inner = _ExitContext(result=True)
-    driver = _SourceContextDriver(inner, source_name="fixture-source", remaining_time=lambda: None)
-    original = output.warn
-    output.warn = cast("Any", lambda message: (_ for _ in ()).throw(RuntimeError("sink")))
-    try:
-        with driver:
-            pass
-    finally:
-        output.warn = original

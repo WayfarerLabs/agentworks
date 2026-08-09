@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from agentworks.errors import NotFoundError, ValidationError
 from agentworks.naming import MAX_SECRET_NAME_LENGTH, validate_name
+from agentworks.secrets.outcomes import format_remediation
 from agentworks.secrets.policy import InteractionPolicy, validate_interaction_policy
 
 if TYPE_CHECKING:
@@ -35,7 +36,7 @@ def render_verification(outcomes: tuple[ResolutionOutcome, ...]) -> None:
             outcome.source or "-",
             outcome.identifier or "-",
             outcome.detail.value,
-            outcome.remediation.value,
+            format_remediation(outcome),
         ]
         for outcome in outcomes
     ]
@@ -91,13 +92,13 @@ def verify_secrets(
 
     from agentworks.secrets.resolve import (
         CompletionPolicy,
+        OutputInteractionBroker,
         ResolutionPolicy,
-        _OutputInteractionBroker,
         active_sources,
         resolve_batch,
     )
 
-    broker = _OutputInteractionBroker(declarations) if interaction is InteractionPolicy.ALLOW else None
+    broker = OutputInteractionBroker(declarations) if interaction is InteractionPolicy.ALLOW else None
     batch = resolve_batch(
         declarations,
         active_sources(config, registry),

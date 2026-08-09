@@ -66,13 +66,18 @@ account to the source; the optional source timeout is new and defaults to 30 sec
 
 Resolution opens one lazy client for each source it actually attempts. The factory is resource-free;
 the context enters, prepares one batch, resolves once, and closes before the next source begins.
-OnePassword owns a positive external-operation timeout and applies the shrinking remaining budget to
-each `op read`. Env-var and prompt perform no non-human blocking I/O and declare no timeout.
+`agentworks.secrets.resolve.OutputInteractionBroker` is the module-owned public CLI broker; the
+source orchestrator passes it only to the prompt backend and passes `None` to every other backend
+factory. OnePassword owns a positive external-operation timeout and applies the shrinking remaining
+budget to each `op read`. Env-var and prompt perform no non-human blocking I/O and declare no
+timeout.
 
 Results use five value-free categories: `resolved`, `unavailable`, `refused-interaction`, `timeout`,
-and `resolution-failure`. Resolved values live only in a private operation batch and the existing
-operation cache. Outcomes, identifiers, errors, warnings, logs, and render inputs never contain a
-value. NUL, carriage return, and newline are rejected before a value can become resolved.
+and `resolution-failure`. A not-ready outcome retains only bounded remediation metadata; a disabled
+system-plugin backend is attributed by plugin name and rendered with a fixed enablement action.
+Resolved values live only in a private operation batch and the existing operation cache. Outcomes,
+identifiers, errors, warnings, logs, and render inputs never contain a value. NUL, carriage return,
+and newline are rejected before a value can become resolved.
 
 Complete command resolution checks for doomed secrets before every allowed interactive turn, so it
 does not prompt or trigger biometric authentication when another requested secret is already known

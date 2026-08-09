@@ -172,8 +172,8 @@ class Resolver:
         from agentworks.secrets.policy import InteractionPolicy
         from agentworks.secrets.resolve import (
             CompletionPolicy,
+            OutputInteractionBroker,
             ResolutionPolicy,
-            _OutputInteractionBroker,
             active_sources,
             resolve_batch,
         )
@@ -203,7 +203,7 @@ class Resolver:
         projected: dict[str, str] = {}
         candidate: dict[str, str] = {}
         published = False
-        broker = _OutputInteractionBroker(missing) if interaction is InteractionPolicy.ALLOW else None
+        broker = OutputInteractionBroker(missing) if interaction is InteractionPolicy.ALLOW else None
         batch = resolve_batch(
             missing,
             active_sources(self._config, self._registry),
@@ -243,15 +243,15 @@ class Resolver:
         from agentworks.secrets.policy import InteractionPolicy
         from agentworks.secrets.resolve import (
             CompletionPolicy,
+            OutputInteractionBroker,
             ResolutionPolicy,
-            _OutputInteractionBroker,
             active_sources,
             resolve_batch,
         )
 
         projected: dict[str, str] = {}
         seeded = False
-        broker = _OutputInteractionBroker([decl]) if interaction is InteractionPolicy.ALLOW else None
+        broker = OutputInteractionBroker([decl]) if interaction is InteractionPolicy.ALLOW else None
         batch = resolve_batch(
             [decl],
             active_sources(self._config, self._registry),
@@ -283,15 +283,15 @@ class Resolver:
         from agentworks.secrets.policy import InteractionPolicy
         from agentworks.secrets.resolve import (
             CompletionPolicy,
+            OutputInteractionBroker,
             ResolutionPolicy,
-            _OutputInteractionBroker,
             active_sources,
             resolve_batch,
         )
 
         projected: dict[str, str] = {}
         transfer: dict[str, str] = {}
-        broker = _OutputInteractionBroker([decl]) if interaction is InteractionPolicy.ALLOW else None
+        broker = OutputInteractionBroker([decl]) if interaction is InteractionPolicy.ALLOW else None
         batch = resolve_batch(
             [decl],
             active_sources(self._config, self._registry),

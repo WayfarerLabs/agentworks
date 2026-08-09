@@ -86,6 +86,8 @@ class SecretSourceDecl(DeclaredResource):
 
         dependency = deps.get(("secret-backend", self.backend.name))
         if dependency is None:
+            # A dangling backend edge hard-fails finalize elsewhere. Keep this
+            # readiness hook total for partial graph projections until then.
             return Readiness.ready()
         if dependency.enablement is Enablement.disabled:
             tail = dependency.disabled_reason or "enable its unit"
@@ -94,6 +96,8 @@ class SecretSourceDecl(DeclaredResource):
             return dependency.readiness
         impl = dependency.impl
         if impl is None:
+            # A dangling backend edge hard-fails finalize elsewhere. Keep this
+            # readiness hook total for partial graph projections until then.
             return Readiness.ready()
         if not isinstance(impl, type) or not issubclass(impl, SecretBackend):
             raise StateError(

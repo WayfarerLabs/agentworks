@@ -332,7 +332,7 @@ class OnePasswordBackend(SecretBackend):
 
     Mapping-required: ``would_attempt`` is True only for a secret that
     carries a mapping for the configured source name; unmapped secrets
-    soft-skip (fall through to the next backend). There is no
+    soft-skip (fall through to the next source). There is no
     derive-from-name convention: 1Password addressing is
     vault/item/field, which cannot be inferred from a bare secret name.
 

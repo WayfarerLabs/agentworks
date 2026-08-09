@@ -44,7 +44,7 @@ class _SecretBackendKind:
         title="Secret backends",
         overview="""
         A secret-backend is provider code for resolving secret values. The active
-        resolution chain determines precedence, and the first backend with a value wins.
+        source chain determines precedence, and the first source with a value wins.
         Each implementation declares its source config and per-secret mapping models.
         """,
     )

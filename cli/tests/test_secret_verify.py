@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import re
 import subprocess
+from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 from typing import ClassVar
 
@@ -11,6 +13,7 @@ import pytest
 from typer.testing import CliRunner
 
 from agentworks import output
+from agentworks.bootstrap import build_registry
 from agentworks.capabilities.secret_backend.client import (
     SecretClientFailure,
     SecretClientFailureKind,
@@ -19,6 +22,7 @@ from agentworks.capabilities.secret_backend.client import (
 )
 from agentworks.capabilities.secret_backend.prompt import PromptBackend, PromptSourceConfig
 from agentworks.cli import app
+from agentworks.config import load_config
 from agentworks.errors import NotFoundError, StateError, UserAbort, ValidationError
 from agentworks.plugins import SYSTEM_PLUGINS
 from agentworks.plugins.onepassword.backend import (
@@ -33,10 +37,13 @@ from agentworks.secrets.outcomes import (
     ResolutionDetail,
     ResolutionOutcome,
     ResolutionRemediation,
+    complete_resolution_error,
+    format_outcome,
 )
 from agentworks.secrets.policy import InteractionPolicy
 from agentworks.secrets.resolve import ActiveSource
 from agentworks.secrets.verification import render_verification, verify_secrets
+from tests.conftest import ManifestDoc, write_cfg
 from tests.secrets.test_resolution_lifecycle import _Backend, _source
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
@@ -243,9 +250,11 @@ def test_verify_disabled_sources_collapse_to_no_active_source(monkeypatch: pytes
 
 
 def test_verify_not_ready_source_never_constructs_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    sentinel = "PRINTABLE-READINESS-SENTINEL"
+    source = replace(_source(ready=False), readiness=Readiness.blocked(sentinel))
     monkeypatch.setattr(
         "agentworks.secrets.resolve.active_sources",
-        lambda config, registry: [_source(ready=False)],
+        lambda config, registry: [source],
     )
     (outcome,) = verify_secrets(
         SimpleNamespace(),  # type: ignore[arg-type]
@@ -254,7 +263,83 @@ def test_verify_not_ready_source_never_constructs_client(monkeypatch: pytest.Mon
         interaction=InteractionPolicy.REFUSE,
     )
     assert outcome.detail is ResolutionDetail.SOURCE_NOT_READY
+    assert outcome.remediation is ResolutionRemediation.ENABLE_SOURCE
+    assert outcome.remediation_target is None
+    rendered: list[str] = []
+    monkeypatch.setattr(output, "info", rendered.append)
+    render_verification((outcome,))
+    assert sentinel not in repr(outcome)
+    assert sentinel not in format_outcome(outcome)
+    assert sentinel not in str(complete_resolution_error((outcome,)))
+    assert sentinel not in "\n".join(rendered)
     assert _Backend.events == []
+
+
+def test_verify_disabled_plugin_source_discards_printable_readiness_reason(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sentinel = "PRINTABLE-PLUGIN-READINESS-SENTINEL"
+    source = replace(
+        _source(ready=False),
+        readiness=Readiness.blocked(sentinel),
+        disabled_backend_plugin="Vault.Plugin",
+    )
+    monkeypatch.setattr("agentworks.secrets.resolve.active_sources", lambda config, registry: [source])
+
+    (outcome,) = verify_secrets(
+        SimpleNamespace(),  # type: ignore[arg-type]
+        _registry("token"),  # type: ignore[arg-type]
+        ["token"],
+        interaction=InteractionPolicy.REFUSE,
+    )
+
+    assert outcome.detail is ResolutionDetail.SOURCE_BACKEND_PLUGIN_DISABLED
+    assert outcome.remediation is ResolutionRemediation.ENABLE_PLUGIN
+    assert outcome.remediation_target == "Vault.Plugin"
+    assert format_outcome(outcome).endswith("remediation=enable plugin `Vault.Plugin`")
+    assert sentinel not in repr(outcome)
+    assert sentinel not in str(complete_resolution_error((outcome,)))
+
+
+def test_verify_declared_source_retains_disabled_backend_plugin_remediation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = write_cfg(
+        tmp_path,
+        ManifestDoc(
+            "secret-source",
+            "work-op",
+            {"backend": {"name": "onepassword"}},
+        ),
+        ManifestDoc(
+            "secret",
+            "token",
+            {"backend_mappings": {"work-op": "op://Work/item/password"}},
+            description="token",
+        ),
+        settings='[secret_config]\nbackends = ["work-op"]\n',
+    )
+    config = load_config(config_path, warn_issues=False)
+    registry = build_registry(config)
+    (outcome,) = verify_secrets(
+        config,
+        registry,
+        ["token"],
+        interaction=InteractionPolicy.REFUSE,
+    )
+    assert outcome.detail is ResolutionDetail.SOURCE_BACKEND_PLUGIN_DISABLED
+    assert outcome.remediation is ResolutionRemediation.ENABLE_PLUGIN
+    assert outcome.remediation_target == "onepassword"
+    assert format_outcome(outcome).endswith("remediation=enable plugin `onepassword`")
+    monkeypatch.setattr("agentworks.config.load_config", lambda: config)
+    monkeypatch.setattr("agentworks.bootstrap.load_request_registry", lambda candidate: registry)
+
+    result = CliRunner().invoke(app, ["secret", "verify", "token"])
+
+    assert result.exit_code == 1
+    assert "source-backend-plugin-disabled" in result.stdout
+    assert _plain(result.stdout).count("enable plugin `onepassword`") == 1
 
 
 def test_verify_refuses_interactive_source_without_construction(monkeypatch: pytest.MonkeyPatch) -> None:
